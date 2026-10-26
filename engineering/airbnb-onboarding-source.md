@@ -137,11 +137,12 @@ trusted binding resolution, verified request-log token redaction at proxy/applic
 layers, and source review/application wiring. URL scrubbing cannot remove tokens
 from the initial incoming request logs. Do not enable this flag remotely yet.
 
-Focused browser check: start the isolated marketplace frontend with the callback
-flag, then run `E2E_AIRBNB_IMPORT_CALLBACK=1 E2E_MARKETPLACE_BASE_URL=<local-origin>
-npx playwright test tests/e2e/marketplace-web/airbnb-import-return.spec.ts
---project=marketplace-web-chromium`. The suite is opt-in because normal builds keep
-the callback disabled.
+Focused browser check: start Booking Admin with the callback flag, then run
+`E2E_AIRBNB_IMPORT_CALLBACK=1 E2E_BOOKING_ADMIN_BASE_URL=<local-origin>
+npx playwright test tests/e2e/booking-admin/airbnb-import-return.spec.ts
+--project=booking-admin-chromium`. The suite is opt-in because normal builds keep
+the callback disabled. (The Marketplace copy of this spec went with the Marketplace
+app, VAY-2270.)
 
 ## Application receipt prerequisite
 
@@ -300,11 +301,12 @@ PMS rooms reuse the same connection page through `crossAppReauthenticationUrl`,
 carrying the resolved canonical property into `/setup/airbnb-connect/[propertyId]`.
 The link opens a separate tab and instructs the owner to refresh the room list
 after importing. Its public build flag `NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED` defaults
-to false. Marketplace callback/API flags remain independent. The link requires a
-UUID property and an HTTPS Marketplace origin; authorization remains enforced by
-the destination APIs. Browser coverage verifies scoped sign-in navigation with a
-mock sign-in page, not a real cross-app authentication exchange.
+to false. Booking Admin's callback flag and the API flag remain independent. The
+link requires a UUID property and an HTTPS Booking Admin origin; authorization
+remains enforced by the destination APIs. Browser coverage verifies scoped sign-in
+navigation with a mock sign-in page, not a real cross-app authentication exchange.
 
 The PMS Docker build accepts `NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED` with a default of
-`false`. An explicitly configured Marketplace origin is required; missing or empty
-configuration hides the entry. The local PMS flag was restored to false after testing.
+`false`. An explicitly configured Booking Admin origin (`NEXT_PUBLIC_BOOKING_ADMIN_URL`)
+is required; missing or empty configuration hides the entry. The local PMS flag was
+restored to false after testing.

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import { getQuoteGuestDisclosure } from "./quoteGuestDisclosure";
+import { resetServerClock } from "@/lib/serverClock";
 import { parsePublicQuoteGuestDisclosure } from "@vayada/domain-booking/replacement-pricing";
 const quote = {
   quoteId: "11111111-1111-4111-8111-111111111111",
@@ -30,6 +31,7 @@ const raw = {
   },
 };
 beforeEach(() => {
+  resetServerClock();
   vi.useFakeTimers();
   vi.setSystemTime(new Date(raw.checkedAt));
 });
@@ -69,12 +71,23 @@ it("rejects cross-quote, changed expiry, malformed identities/timezone/policies 
   ])
     expect(parsePublicQuoteGuestDisclosure({ ...raw, ...patch }, quote)).toBeNull();
 });
-it("fails at exact expiry and rejects a future checkedAt", async () => {
+it("fails at exact expiry on the server's clock", async () => {
   fetchResult(raw);
+  await expect(getQuoteGuestDisclosure("hotel", quote)).resolves.toEqual(raw);
+  // The older check time can't pull the server clock back: at expiry the answer is refused.
   vi.setSystemTime(new Date(quote.expiresAt));
   await expect(getQuoteGuestDisclosure("hotel", quote)).rejects.toThrow("could not be verified");
-  vi.setSystemTime(new Date(quote.issuedAt));
-  await expect(getQuoteGuestDisclosure("hotel", quote)).rejects.toThrow("could not be verified");
+});
+it.each([
+  ["1 s behind", -1000],
+  ["2 min behind", -120_000],
+  ["1 s ahead", 1000],
+  ["2 min ahead", 120_000],
+  ["6 min ahead", 360_000],
+])("accepts a valid answer when the device clock is %s (VAY-2134)", async (_label, skew) => {
+  fetchResult(raw);
+  vi.setSystemTime(Date.parse(raw.checkedAt) + skew);
+  await expect(getQuoteGuestDisclosure("hotel", quote)).resolves.toEqual(raw);
 });
 it("rejects a superseded response even if transport ignores abort", async () => {
   const controller = new AbortController();

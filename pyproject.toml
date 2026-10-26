@@ -1,7 +1,7 @@
 # Root tool config for Python apps.
 # Each app under apps/*-api uses its own requirements.txt and pytest setup;
 # this file holds shared Ruff lint/format config so the same rules apply
-# across marketplace-api, booking-api, and pms-api.
+# across booking-api and pms-api.
 
 [tool.ruff]
 target-version = "py311"

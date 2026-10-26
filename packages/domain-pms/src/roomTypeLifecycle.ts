@@ -54,9 +54,23 @@ export type PmsRoomTypeRetirementBlocker = {
     | "active_reservations"
     | "active_physical_units"
     | "future_inventory"
-    | "active_publication";
+    | "active_publication"
+    // What still stops a Delete that does the cleanup (VAY-2132):
+    | "channel_mapping"
+    | "last_room_type"
+    | "calendar_not_current"
+    | "protected_inventory"
+    | "unavailable_units";
   readonly affectedCount: number;
   readonly action: string;
+};
+
+/** What a Delete that does the cleanup changes besides retiring the room type (VAY-2132). */
+export type PmsRoomTypeDeleteCleanup = {
+  readonly physicalUnits: number;
+  readonly futureNights: number;
+  readonly roomBlocks: number;
+  readonly linkedGroups: number;
 };
 
 export type PmsRoomTypeRetirementImpact = {
@@ -66,4 +80,6 @@ export type PmsRoomTypeRetirementImpact = {
   readonly version: string;
   readonly canRetire: boolean;
   readonly blockers: readonly PmsRoomTypeRetirementBlocker[];
+  /** Present when Delete does the cleanup for this property: before a Delete what it would do, after it what it did. */
+  readonly cleanup?: PmsRoomTypeDeleteCleanup;
 };

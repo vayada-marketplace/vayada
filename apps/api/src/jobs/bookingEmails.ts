@@ -1,6 +1,16 @@
+import { pricingCurrencyScale } from "@vayada/domain-pms";
 import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
+import type { MapPin } from "../domains/bookingLocationMap.js";
+import {
+  BOOKED_ROOM_PLACES_SQL,
+  PROPERTY_PLACE_SQL,
+  stayPlaces,
+  type StayPropertyLocation,
+} from "../domains/stayPlaces.js";
+
+export type { StayPropertyLocation } from "../domains/stayPlaces.js";
 
 export const BOOKING_EMAIL_QUEUE = "platform.email";
 const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
@@ -15,6 +25,14 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   host_new_booking: "email.booking-host-new-booking",
   host_request_updated: "email.booking-host-request-updated",
   host_review_required: "email.booking-host-review-required",
+  host_request_expired: "email.booking-host-request-expired",
+  host_payment_pending: "email.booking-host-payment-pending",
+  host_payment_expired: "email.booking-host-payment-expired",
+  payment_reminder: "email.booking-payment-reminder",
+  // VAY-2360: extras a booked guest asks for, and the hotel's answer.
+  host_extras_requested: "email.booking-host-extras-requested",
+  extras_accepted: "email.booking-extras-accepted",
+  extras_declined: "email.booking-extras-declined",
 } as const;
 
 export type BookingLifecycleEmailKind = keyof typeof BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND;
@@ -39,6 +57,12 @@ export type BookingLifecycleTransition = {
 
 export type BookingLifecycleEmailInput = {
   guestMessage?: string;
+  /** VAY-2360: the extras of a guest's request, priced for the stay, in minor units. */
+  extras?: {
+    items: ReadonlyArray<{ name: string; amountMinor: string }>;
+    totalMinor: string;
+    currency: string;
+  };
   resendKey?: string;
   kind: BookingLifecycleEmailKind;
   occurredAt: string;
@@ -57,6 +81,8 @@ export type BookingLifecycleEmailInput = {
     guestEmail: string | null;
     guestName?: string | null;
     propertyName?: string | null;
+    /** The hotel's IANA time zone, for deadlines; UTC when unknown. */
+    propertyTimeZone?: string | null;
     checkIn: string | Date;
     checkOut: string | Date;
     totalAmount?: string | number | null;
@@ -70,6 +96,10 @@ export type BookingLifecycleEmailInput = {
     children?: number;
     specialRequests?: string | null;
     bookingMetadata?: unknown;
+    /** The property's address, arrival directions and pin, for "Where you'll stay" (VAY-2322). */
+    propertyLocation?: StayPropertyLocation | null;
+    /** The booked room types with their saved locations, in booking order. */
+    bookedRooms?: Array<{ name: string; attributes: unknown }> | null;
   };
 };
 
@@ -137,7 +167,7 @@ export async function enqueueBookingLifecycleEmailJob(
     requiresBankTransferInstructions:
       recipientRole === "guest" &&
       input.booking.paymentMethod === "bank_transfer" &&
-      ["request_received", "reserved_pending_payment"].includes(input.kind),
+      ["request_received", "reserved_pending_payment", "payment_reminder"].includes(input.kind),
     recipientRole,
     notificationType: input.kind,
     transition,
@@ -289,6 +319,7 @@ type BookingNotificationSnapshot = QueryResultRow & {
   guestName: string | null;
   hostEmail: string | null;
   propertyName: string;
+  propertyTimeZone: string | null;
   checkIn: string;
   checkOut: string;
   totalAmount: string;
@@ -303,6 +334,8 @@ type BookingNotificationSnapshot = QueryResultRow & {
   children: number;
   specialRequests: string | null;
   addons: string | null;
+  propertyLocation: StayPropertyLocation | null;
+  bookedRooms: Array<{ name: string; attributes: unknown }>;
 };
 
 export async function loadBookingNotificationSnapshot(
@@ -318,6 +351,8 @@ export async function loadBookingNotificationSnapshot(
        NULLIF(trim(concat_ws(' ', guest.first_name, guest.last_name)), '') AS "guestName",
        host_contact.value AS "hostEmail",
        property.display_name AS "propertyName",
+       location.timezone AS "propertyTimeZone",
+       location.place AS "propertyLocation",
        booking.check_in::text AS "checkIn",
        booking.check_out::text AS "checkOut",
        booking.total_amount::text AS "totalAmount",
@@ -325,15 +360,42 @@ export async function loadBookingNotificationSnapshot(
        booking.currency,
        COALESCE(booking.booking_metadata ->> 'paymentMethod', booking.expected_payment_method) AS "paymentMethod",
        booking.booking_metadata AS "bookingMetadata",
-       booking.booking_metadata #>> '{selectedOffer,roomName}' AS accommodation,
+       -- VAY-2320: a pricing booking names its booked rooms ("2 × Deluxe + Garden Room").
+       COALESCE(booking.booking_metadata #>> '{selectedOffer,roomName}', (
+         SELECT string_agg(
+                  CASE WHEN booked.count > 1 THEN booked.count || ' × ' ELSE '' END || booked.name,
+                  ' + ' ORDER BY booked.first_position)
+         FROM (
+           SELECT room_type.name, count(*) AS count, min(selection.position) AS first_position
+           FROM jsonb_array_elements(
+             CASE WHEN jsonb_typeof(booking.booking_metadata->'pricingSelections') = 'array'
+               THEN booking.booking_metadata->'pricingSelections' ELSE '[]'::jsonb END
+           ) WITH ORDINALITY AS selection(value, position)
+           JOIN pms.room_types room_type
+             ON room_type.id::text = selection.value->>'roomTypeId'
+            AND room_type.property_id = booking.property_id
+           GROUP BY room_type.id, room_type.name
+         ) booked
+       )) AS accommodation,
        booking.lifecycle_status AS status, booking.adults, booking.children, booking.room_count AS "roomCount",
        guest.special_requests AS "specialRequests",
        (SELECT string_agg(item.addon_name || ' × ' || item.quantity, ', ' ORDER BY item.created_at)
         FROM booking.booking_addon_selection_items item
         JOIN booking.active_booking_addon_selections current_selection ON current_selection.id = item.selection_id
-        WHERE item.guest_booking_id = booking.id AND item.property_id = booking.property_id) AS addons
+        WHERE item.guest_booking_id = booking.id AND item.property_id = booking.property_id) AS addons,
+       -- VAY-2322: the booked room types and their places, for "Where you'll stay": the PMS's rooms (a room
+       -- can move to another type; a canceled one is gone), else the booked pricing rooms, else the booked
+       -- offer's room lines, else its room.
+       ${BOOKED_ROOM_PLACES_SQL} AS "bookedRooms"
      FROM booking.guest_bookings booking
      JOIN hotel_catalog.properties property ON property.id = booking.property_id
+     LEFT JOIN LATERAL (
+       SELECT location.timezone,
+              ${PROPERTY_PLACE_SQL} AS place
+       FROM hotel_catalog.property_locations location
+       WHERE location.property_id = booking.property_id
+       LIMIT 1
+     ) location ON TRUE
      LEFT JOIN LATERAL (
        SELECT booking_guest.first_name, booking_guest.last_name, booking_guest.email, booking_guest.special_requests
        FROM booking.booking_guests booking_guest
@@ -465,6 +527,79 @@ function emailCopy(input: BookingLifecycleEmailInput) {
   const { booking } = input;
   const name = booking.guestName?.trim() || "there";
   const property = booking.propertyName || "our property";
+  const extras = input.extras;
+  if (extras && input.kind === "host_extras_requested")
+    return {
+      template: "booking_host_extras_requested",
+      subject: `Extras requested - ${booking.bookingReference}`,
+      text: [
+        `${booking.guestName?.trim() || "Your guest"} asks for extras for their stay at ${property}, ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}:`,
+        extrasList(extras),
+        `To charge at check-in: ${minorMoney(extras.totalMinor, extras.currency)}`,
+        "Accept or decline them on the booking in your PMS. Accepting doesn't change the booking's total: charge them at check-in.",
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  if (extras && input.kind === "extras_accepted")
+    return {
+      template: "booking_extras_accepted",
+      subject: `Your extras are confirmed - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We've confirmed your extras for your stay at ${property}:`,
+        extrasList(extras),
+        `You pay ${minorMoney(extras.totalMinor, extras.currency)} at the hotel. Nothing has been charged.`,
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  if (extras && input.kind === "extras_declined")
+    return {
+      template: "booking_extras_declined",
+      subject: `About your extras - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We can't offer these extras for your stay at ${property}: ${extras.items.map((item) => item.name).join(", ")}. Nothing has been charged.`,
+        ...(input.guestMessage ? [`Message from us:\n${input.guestMessage}`] : []),
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  if (input.kind === "reserved_pending_payment" && manualPricingPayment(booking)) {
+    // Booking-page bank transfer or PayPal (VAY-2139); the bank details are added when sent.
+    const paypal = booking.paymentMethod === "paypal";
+    const paypalEmail = paypal
+      ? text(record(record(booking.bookingMetadata)["paymentInstructions"])["paypalEmail"])
+      : null;
+    return {
+      template: "booking_reserved_pending_payment",
+      subject: `Your room is reserved pending payment - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We've reserved your room at ${property} while we wait for your ${paypal ? "PayPal payment" : "bank transfer"}.`,
+        `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
+        ...(paypalEmail ? [`Please send it by PayPal to ${paypalEmail}.`] : []),
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
+        `Please add your booking reference to the payment: ${booking.bookingReference}`,
+        "The hotel confirms your booking once your payment has arrived. If we don't receive it by the deadline, the booking expires and the room is released.",
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "payment_reminder") {
+    // VAY-2348: one reminder a day before a booking-page bank transfer's deadline; the bank
+    // details are added when sent.
+    return {
+      template: "booking_payment_reminder",
+      subject: `Reminder: your bank transfer is due - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `Your room at ${property} is still reserved, but we haven't received your bank transfer yet.`,
+        `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
+        `Please add your booking reference to the payment: ${booking.bookingReference}`,
+        "Please make sure it reaches the hotel before the deadline: bank transfers can take a few days. If it doesn't arrive by then, the booking is released.",
+        `If your transfer might arrive late, please contact ${property}.`,
+      ].join("\n\n"),
+    };
+  }
   if (input.kind === "reserved_pending_payment") {
     return {
       template: "booking_reserved_pending_payment",
@@ -473,7 +608,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Hi ${name},`,
         `We've reserved your room at ${property} while we wait for your bank transfer.`,
         `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
-        `Payment deadline: ${input.paymentDeadlineAt ?? "as soon as possible"}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -485,7 +620,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `We've received your booking request for ${property}.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         "We'll review it and let you know as soon as possible.",
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -498,8 +633,9 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `We've accepted your booking request for ${property}.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
+        ...whereYoullStay(booking),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -511,8 +647,9 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `We've updated your booking at ${property}.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
+        ...whereYoullStay(booking),
         ...(input.guestMessage ? [`Message from us:\n${input.guestMessage}`] : []),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -539,7 +676,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Hi ${name},`,
         `We've canceled your booking at ${property}.`,
         ...(message ? [`Message from us:\n${message}`] : []),
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -551,6 +688,12 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `Your booking for ${property} has expired.`,
+        ...(manualPricingPayment(booking)
+          ? [
+              "We didn't receive your payment by the deadline, so the room is no longer held.",
+              `If you've already sent the money, please contact ${property}.`,
+            ]
+          : []),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -561,8 +704,50 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       subject: `Booking request updated - ${booking.bookingReference}`,
       text: [
         `${name} updated their pending booking request.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "host_payment_pending") {
+    return {
+      template: "booking_host_payment_pending",
+      subject: `New booking waiting for payment - ${booking.bookingReference}`,
+      text: [
+        `A guest booked and will pay by ${booking.paymentMethod === "paypal" ? "PayPal" : "bank transfer"}. The rooms are held until the payment deadline.`,
+        `Guest: ${name}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
+        `Total: ${money(booking.totalAmount, booking.currency)}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
+        "When the money arrives, mark the payment as received in your PMS. If it doesn't arrive by the deadline, the booking expires and the rooms become available again.",
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "host_payment_expired") {
+    return {
+      template: "booking_host_payment_expired",
+      subject: `Booking expired without payment - ${booking.bookingReference}`,
+      text: [
+        "A booking expired because its payment didn't arrive by the deadline. The rooms are available again.",
+        `Guest: ${name}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
+        `Total: ${money(booking.totalAmount, booking.currency)}`,
+        "If the guest's payment arrives after all, refund it or make a new booking for them.",
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "host_request_expired") {
+    return {
+      template: "booking_host_request_expired",
+      subject: `Booking request expired - ${booking.bookingReference}`,
+      text: [
+        "A booking request expired before it was accepted. The rooms are available again.",
+        `Guest: ${name}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
+        `Total: ${money(booking.totalAmount, booking.currency)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -577,7 +762,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         reviewRequired ? "A new booking request requires review." : "A new booking is confirmed.",
         `Guest: ${name}`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -589,8 +774,9 @@ function emailCopy(input: BookingLifecycleEmailInput) {
     text: [
       `Hi ${name},`,
       `Your booking at ${property} is confirmed.`,
-      `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+      `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
       ...confirmationDetails(booking),
+      ...whereYoullStay(booking),
       `Booking reference: ${booking.bookingReference}`,
       "We look forward to welcoming you!",
     ].join("\n\n"),
@@ -598,10 +784,21 @@ function emailCopy(input: BookingLifecycleEmailInput) {
 }
 
 function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): string[] {
+  const total = Math.round(Number(booking.totalAmount) * 100),
+    balance = Math.round(Number(booking.balanceAmount) * 100);
+  // VAY-2205: a card deposit was paid when booking; the rest is due at the hotel.
+  const deposit = booking.paymentMethod === "card" && balance > 0 && balance < total;
   return [
     `Total: ${money(booking.totalAmount, booking.currency)}`,
-    `Balance: ${money(booking.balanceAmount, booking.currency)}`,
-    `Payment method: ${paymentMethodLabel(booking.paymentMethod)}`,
+    ...(deposit
+      ? [
+          `Paid by card: ${money((total - balance) / 100, booking.currency)}`,
+          `Due at the hotel: ${money(booking.balanceAmount, booking.currency)}`,
+        ]
+      : [`Balance: ${money(booking.balanceAmount, booking.currency)}`]),
+    // The booking page's words, in guest and hotel emails alike (VAY-2195); PMS screens keep the
+    // shared label.
+    `Payment method: ${booking.paymentMethod === "pay_at_property" ? "Pay at the hotel" : paymentMethodLabel(booking.paymentMethod)}`,
     ...(booking.adults == null
       ? []
       : [`Guests: ${booking.adults} adults, ${booking.children ?? 0} children`]),
@@ -612,17 +809,94 @@ function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): st
   ];
 }
 
+/** "Where you'll stay" (VAY-2322), for the guest once the stay is confirmed, as on the approved Paper board: the
+ * property's full address, arrival directions and a Google Maps link for its rooms, and the own address and
+ * link of rooms elsewhere, one paragraph per place. Exact even where the booking page shows only an area (D7).
+ * Nothing it can't place: a room elsewhere with nothing saved, or a property without an address or pin. */
+function whereYoullStay(booking: BookingLifecycleEmailInput["booking"]): string[] {
+  const places = stayPlaces(booking.propertyLocation ?? null, booking.bookedRooms ?? []).map(
+    (place) => {
+      if (place.kind === "property") {
+        const address = [
+          place.streetAddress,
+          place.area,
+          [place.postalCode, place.city].filter(Boolean).join(" "),
+          countryName(place.countryCode),
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return [
+          [booking.propertyName || "The property", place.rooms.join(", ")]
+            .filter(Boolean)
+            .join(" · "),
+          address,
+          ...(place.arrivalDirections ? [`Arrival directions: ${place.arrivalDirections}`] : []),
+          mapsLine(place.pin, place.streetAddress || place.city ? address : null),
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+      return [
+        place.rooms.join(", "),
+        place.address,
+        ...(place.approximate
+          ? [
+              `${place.area ? `Your booking page showed the area, ${place.area}.` : "Your booking page showed only the area."} ${place.address ? "This is the exact address." : "The link below has the exact spot."}`,
+            ]
+          : []),
+        mapsLine(place.pin, place.address),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    },
+  );
+  return places.length > 0 ? [`Where you'll stay:\n${places.join("\n\n")}`] : [];
+}
+
+/** Google Maps directions to the pin, or to the address without one (as the booking page's Directions). */
+function mapsLine(pin: MapPin | null, address: string | null): string | null {
+  const destination = pin
+    ? `${pin.latitude},${pin.longitude}`
+    : address
+      ? encodeURIComponent(address)
+      : null;
+  return destination
+    ? `Open in Google Maps: https://www.google.com/maps/dir/?api=1&destination=${destination}`
+    : null;
+}
+
+function countryName(code: string | null): string | null {
+  if (!code?.trim()) return null;
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code.trim().toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+}
+
 function notificationsForTransition(
   transition: BookingLifecycleTransition,
   booking: BookingNotificationSnapshot,
 ): Array<{ kind: BookingLifecycleEmailKind; role: BookingNotificationRecipientRole }> {
   if (transition.eventType === "guest_booking.request_updated")
     return [{ kind: "host_request_updated", role: "host" }];
+  // VAY-2348: the reminder a day before a booking-page bank transfer's deadline.
+  if (transition.eventType === "guest_booking.payment_reminder")
+    return manualPricingPayment(booking) && booking.paymentMethod === "bank_transfer"
+      ? [{ kind: "payment_reminder", role: "guest" }]
+      : [];
   if (transition.eventType === "guest_booking.created") {
     if (transition.toStatus === "confirmed") {
       return [
         { kind: "final_confirmation", role: "guest" },
         { kind: "host_new_booking", role: "host" },
+      ];
+    }
+    // Pricing-v2 bank transfer or PayPal: the guest pays the hotel, which confirms the payment.
+    if (transition.toStatus === "pending_payment" && manualPricingPayment(booking)) {
+      return [
+        { kind: "reserved_pending_payment", role: "guest" },
+        { kind: "host_payment_pending", role: "host" },
       ];
     }
     const metadata = record(booking.bookingMetadata);
@@ -686,7 +960,21 @@ function notificationsForTransition(
     (transition.eventType === "guest_booking.canceled" &&
       transition.reason === "accepted_payment_expired")
   ) {
-    return [{ kind: "booking_expired", role: "guest" }];
+    const metadata = record(booking.bookingMetadata);
+    const acceptanceMode = text(metadata["acceptanceMode"] ?? metadata["bookingAcceptanceMode"]);
+    // The payment did not arrive; tell the hotel the rooms are free again.
+    if (transition.eventType === "guest_booking.expired" && manualPricingPayment(booking))
+      return [
+        { kind: "booking_expired", role: "guest" },
+        { kind: "host_payment_expired", role: "host" },
+      ];
+    // The hotel let a request lapse; tell it the rooms are free again.
+    return transition.eventType === "guest_booking.expired" && acceptanceMode === "request"
+      ? [
+          { kind: "booking_expired", role: "guest" },
+          { kind: "host_request_expired", role: "host" },
+        ]
+      : [{ kind: "booking_expired", role: "guest" }];
   }
   if (
     transition.eventType === "guest_booking.canceled" &&
@@ -715,7 +1003,7 @@ function legacyTransition(kind: BookingLifecycleEmailKind): BookingLifecycleTran
       toStatus: "declined",
     };
   }
-  if (kind === "booking_expired") {
+  if (kind === "booking_expired" || kind === "host_request_expired") {
     return {
       eventType: "guest_booking.expired",
       fromStatus: "pending_payment",
@@ -724,6 +1012,13 @@ function legacyTransition(kind: BookingLifecycleEmailKind): BookingLifecycleTran
   }
   if (kind === "host_new_booking") {
     return { eventType: "guest_booking.created", fromStatus: null, toStatus: "confirmed" };
+  }
+  if (kind === "payment_reminder") {
+    return {
+      eventType: "guest_booking.payment_reminder",
+      fromStatus: "pending_payment",
+      toStatus: "pending_payment",
+    };
   }
   return {
     eventType: "guest_booking.payment_received",
@@ -742,6 +1037,18 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/** "- Airport transfer: 25.00 USD", one line per extra. */
+function extrasList(extras: NonNullable<BookingLifecycleEmailInput["extras"]>): string {
+  return extras.items
+    .map((item) => `- ${item.name}: ${minorMoney(item.amountMinor, extras.currency)}`)
+    .join("\n");
+}
+
+function minorMoney(minor: string, currency: string): string {
+  const scale = pricingCurrencyScale(currency) ?? 2;
+  return money(Number(minor) / 10 ** scale, currency);
+}
+
 function money(
   value: string | number | null | undefined,
   currency: string | null | undefined,
@@ -752,11 +1059,56 @@ function money(
     : `0.00 ${currency || "EUR"}`;
 }
 
-function dateOnly(value: string | Date): string {
-  return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+/** Pricing-v2 bookings paid by bank transfer or PayPal to the hotel (VAY-2139). */
+function manualPricingPayment(booking: {
+  paymentMethod?: string | null;
+  bookingMetadata?: unknown;
+}) {
+  return (
+    record(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft" &&
+    ["bank_transfer", "paypal"].includes(booking.paymentMethod ?? "")
+  );
 }
 
-function normalizeEmail(value: string | null | undefined): string | null {
+/** "Tue, 10 Nov 2026, 12:00 CET": 24-hour, in the hotel's time zone (UTC when it isn't known). */
+function deadlineText(value: string | null | undefined, timeZone?: string | null): string {
+  const at = value ? new Date(value) : null;
+  if (!at || !Number.isFinite(at.getTime())) return "as soon as possible";
+  const format = (zone: string) =>
+    new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: zone,
+      timeZoneName: "short",
+    }).format(at);
+  try {
+    return format(timeZone || "UTC");
+  } catch {
+    return format("UTC");
+  }
+}
+
+/** "Fri, 13 Nov 2026" for a stay date: the hotel's calendar day. */
+function stayDate(value: string | Date): string {
+  const day = value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+  const at = new Date(`${day}T00:00:00Z`);
+  return Number.isFinite(at.getTime())
+    ? at.toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    : day;
+}
+
+export function normalizeEmail(value: string | null | undefined): string | null {
   const email = value?.trim().toLowerCase() ?? "";
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }

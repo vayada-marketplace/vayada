@@ -3,6 +3,7 @@ import {
   type AcceptFinanceOnlineCardExecutionEvidenceCommand,
   type FinanceOnlineCardExecutionEvidenceResponse,
   type FinanceOnlineCardExecutionEvidenceResult,
+  type FinanceOnlineCardExecutionState,
   type FinancePlatformOnlineCardExecutionEvidenceRepository,
   type RevokeFinanceOnlineCardExecutionEvidenceCommand,
 } from "@vayada/domain-finance";
@@ -65,6 +66,17 @@ export function createFinanceOnlineCardExecutionEvidenceRepository(
   pool: FinanceOnlineCardEvidencePool,
 ): FinancePlatformOnlineCardExecutionEvidenceRepository {
   return {
+    async readOnlineCardExecutionState(propertyId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(propertyId))
+        return null;
+      // Read-only, outside the write transaction helper (which maps errors to write results).
+      const client = await pool.connect();
+      try {
+        return await readState(client, propertyId.toLowerCase());
+      } finally {
+        client.release();
+      }
+    },
     async acceptOnlineCardExecutionEvidence(command) {
       if (!validAcceptCommand(command)) return invalidCommand();
       return transaction(pool, (client) => accept(client, command));
@@ -213,6 +225,110 @@ async function revoke(
   await audit(client, command, evidence, response, keyHash);
   await complete(client, operation, command.propertyId, keyHash, response);
   return { ok: true, status: "revoked", response };
+}
+
+/** Read-only, for the operator's switch (VAY-2205): no locks are taken. */
+async function readState(
+  client: Client,
+  propertyId: string,
+): Promise<FinanceOnlineCardExecutionState | null> {
+  const property = await client.query(
+    `SELECT 1 FROM hotel_catalog.properties WHERE id = $1::uuid`,
+    [propertyId],
+  );
+  if (!property.rows[0]) return null;
+  // What card readiness needs from the hotel's Payment settings besides Stripe and the approval:
+  // finance.online_card_readiness reads the same columns.
+  const settings = await client.query<{
+    revision: number | string | null;
+    paymentsOn: boolean;
+    cardChosen: boolean;
+    currencyEligible: boolean;
+  }>(
+    `SELECT online_card_readiness_revision AS revision,
+            COALESCE(payments_enabled, FALSE) AS "paymentsOn",
+            COALESCE('card' = ANY(accepted_methods), FALSE) AS "cardChosen",
+            COALESCE(upper(trim(default_currency)) NOT IN ('BHD', 'JOD', 'KWD', 'OMR', 'TND'), FALSE)
+              AS "currencyEligible"
+     FROM finance.payment_settings
+     WHERE property_id = $1::uuid`,
+    [propertyId],
+  );
+  const provider = (
+    await client.query<ProviderRow>(
+      `SELECT account.id::text AS "providerAccountId",
+              account.card_capability_revision AS "cardCapabilityRevision",
+              settings.online_card_readiness_revision AS "propertyReadinessRevision",
+              account.status,
+              account.onboarding_status AS "onboardingStatus",
+              account.charges_enabled AS "chargesEnabled",
+              account.payouts_enabled AS "payoutsEnabled",
+              COALESCE(account.account_metadata ->> 'detailsSubmitted' = 'true', FALSE)
+                AS "detailsSubmitted",
+              account.account_metadata ->> 'cardPaymentsStatus' AS "cardPaymentsStatus",
+              account.capabilities @> ARRAY['card_payments']::text[] AS "cardCapabilityActive"
+       FROM finance.payment_settings settings
+       JOIN finance.payment_provider_accounts account
+         ON account.id = settings.provider_account_id
+        AND account.property_id = settings.property_id
+       WHERE settings.property_id = $1::uuid
+         AND account.account_scope = 'property'
+         AND account.provider = 'stripe'
+         AND account.provider_account_id NOT LIKE 'settings-choice:%'`,
+      [propertyId],
+    )
+  ).rows[0];
+  const evidence = provider
+    ? (
+        await client.query<{
+          evidenceId: string;
+          acceptedAt: Date | string;
+          acceptedByUserId: string | null;
+          cardCapabilityRevision: number | string;
+          propertyReadinessRevision: number | string;
+        }>(
+          `SELECT id::text AS "evidenceId", accepted_at AS "acceptedAt",
+                  accepted_by_user_id::text AS "acceptedByUserId",
+                  provider_capability_revision AS "cardCapabilityRevision",
+                  property_readiness_revision AS "propertyReadinessRevision"
+           FROM finance.online_card_execution_evidence
+           WHERE property_id = $1::uuid AND provider_account_id = $2::uuid AND revoked_at IS NULL
+           ORDER BY accepted_at DESC LIMIT 1`,
+          [propertyId, provider.providerAccountId],
+        )
+      ).rows[0]
+    : undefined;
+  return {
+    propertyId,
+    providerAccount: provider
+      ? {
+          ready: providerReady(provider),
+          cardCapabilityRevision: positiveInteger(provider.cardCapabilityRevision) ?? 0,
+        }
+      : null,
+    propertyReadinessRevision: positiveInteger(settings.rows[0]?.revision) ?? null,
+    paymentSettings: settings.rows[0]
+      ? {
+          paymentsOn: settings.rows[0].paymentsOn,
+          cardChosen: settings.rows[0].cardChosen,
+          currencyEligible: settings.rows[0].currencyEligible,
+        }
+      : null,
+    evidence: evidence
+      ? {
+          evidenceId: evidence.evidenceId,
+          acceptedAt: new Date(evidence.acceptedAt).toISOString(),
+          acceptedByUserId: evidence.acceptedByUserId,
+          // A Stripe account or Payment settings change since leaves the approval out of date.
+          current:
+            positiveInteger(evidence.cardCapabilityRevision) ===
+              positiveInteger(provider?.cardCapabilityRevision) &&
+            positiveInteger(evidence.propertyReadinessRevision) ===
+              positiveInteger(settings.rows[0]?.revision),
+        }
+      : null,
+    cardReady: await currentCardReady(client, propertyId),
+  };
 }
 
 async function lockPropertySettings(client: Client, propertyId: string): Promise<void> {
@@ -570,8 +686,8 @@ function commonCommand(
     uuid(command.commandId) &&
     uuid(command.idempotencyKey) &&
     command.audit.actor.kind === "user" &&
-    uuid(command.audit.actor.userId) &&
-    uuid(command.audit.actor.organizationId) &&
+    actorId(command.audit.actor.userId) &&
+    actorId(command.audit.actor.organizationId) &&
     trimmed(command.audit.requestId) &&
     (command.audit.correlationId === undefined || trimmed(command.audit.correlationId)) &&
     trimmed(command.audit.reason) &&
@@ -580,12 +696,21 @@ function commonCommand(
 }
 
 function commandFingerprint(command: UserEvidenceCommand): string {
+  // An approval's time and attestation hash are the server's (VAY-2205): a retried request names the
+  // same revisions and replays instead of conflicting.
+  const payload =
+    command.commandType === "finance.online_card_execution_evidence.accept"
+      ? {
+          expectedCardCapabilityRevision: command.payload.expectedCardCapabilityRevision,
+          expectedPropertyReadinessRevision: command.payload.expectedPropertyReadinessRevision,
+        }
+      : command.payload;
   return sha256(
     JSON.stringify({
       commandType: command.commandType,
       propertyId: command.propertyId,
       actorOrganizationId: command.audit.actor.organizationId,
-      payload: command.payload,
+      payload,
     }),
   );
 }
@@ -667,6 +792,14 @@ function validIsoDate(value: unknown): value is string {
     typeof value === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) &&
     !Number.isNaN(Date.parse(value))
+  );
+}
+
+/** Identity ids are any canonical UUID: Vayada Platform's seeded id is 00000000-…-0001 (VAY-2205). */
+function actorId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
   );
 }
 

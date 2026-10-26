@@ -55,12 +55,6 @@ const status: AdaptiveHotelSetupStatus = {
         ],
         allowedActions: ["manage_service"],
       },
-      {
-        track: "creator_marketplace",
-        provisioning: "not_selected",
-        components: [{ product: "marketplace", access: "absent" }],
-        allowedActions: ["add"],
-      },
     ],
   },
   propertySelection: {
@@ -91,7 +85,6 @@ const status: AdaptiveHotelSetupStatus = {
     launchReadiness: {
       operationsUse: "ready",
       directBookingPublish: "pending",
-      marketplacePublish: "not_applicable",
     },
   },
   updatedAt: "2026-07-22T10:00:00.000Z",

@@ -47,7 +47,7 @@ const registry = {
 const timeZone = parsePmsCanonicalIanaTimeZone("Europe/Berlin", registry)!;
 
 type AuthOptions = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -134,7 +134,7 @@ describe("PMS operating-calendar routes", () => {
 
   it.each([
     ["missing authentication", {}, null],
-    ["non-hotel organization", { kind: "creator_workspace" }, "valid-token"],
+    ["non-hotel organization", { kind: "platform" }, "valid-token"],
     ["missing manage permission", { permissions: ["pms.operations.read"] }, "valid-token"],
     ["missing entitlement", { entitlements: [] }, "valid-token"],
     ["missing property link", { links: [] }, "valid-token"],
@@ -304,7 +304,7 @@ describe("PMS operating-calendar routes", () => {
 
   it.each([
     ["missing authentication", {}, null],
-    ["non-hotel organization", { kind: "creator_workspace" }, "valid-token"],
+    ["non-hotel organization", { kind: "platform" }, "valid-token"],
     ["missing read permission", { permissions: ["pms.operations.manage"] }, "valid-token"],
     ["missing entitlement", { entitlements: [] }, "valid-token"],
     ["missing property link", { links: [] }, "valid-token"],

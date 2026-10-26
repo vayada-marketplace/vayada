@@ -9,6 +9,8 @@ import { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
+import { pricingPaymentWindowAllows } from "./pricingPaymentWindows.js";
+import { QuoteRoomsSoldOutError } from "./pmsInventoryReservationLifecycleRepository.js";
 
 vi.mock("./finishPricingAcceptance.js", () => ({ finishPricingAcceptance: vi.fn() }));
 vi.mock("./preparePricingAcceptance.js", () => ({ preparePricingAcceptance: vi.fn() }));
@@ -22,6 +24,11 @@ vi.mock("./pricingPmsAcceptedReservationJob.js", () => ({
   stagePmsAcceptedPricingReservationJob: vi.fn(),
 }));
 vi.mock("./storePricingAcceptance.js", () => ({ storePricingAcceptance: vi.fn() }));
+vi.mock("./pricingPaymentWindows.js", () => ({ pricingPaymentWindowAllows: vi.fn() }));
+vi.mock("./pricingManualPayment.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pricingManualPayment.js")>()),
+  readPricingManualReplay: vi.fn(async () => null),
+}));
 vi.mock("./pricingCardPayment.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./pricingCardPayment.js")>()),
   readPricingCardReplay: vi.fn(async () => null),
@@ -29,7 +36,14 @@ vi.mock("./pricingCardPayment.js", async (importOriginal) => ({
 
 const client = { query: vi.fn(), release: vi.fn() };
 const pool = { connect: vi.fn(async () => client) };
-const current = { scope: { propertyId: "property", organizationId: "organization" } };
+const current = {
+  scope: { propertyId: "property", organizationId: "organization" },
+  quote: {
+    acceptanceMode: "instant",
+    paymentMethod: "pay_at_property",
+    stay: { checkIn: "2026-11-01" },
+  },
+};
 const finance = { scope: current.scope };
 const prepared = { kind: "fresh" as const, current, finance, disclosure: {}, command: {} };
 const lifecycle = { bookingId: "booking" };
@@ -46,6 +60,7 @@ describe("pricing acceptance writer", () => {
     vi.mocked(stagePricingBookingRevenue).mockResolvedValue(revenue as never);
     vi.mocked(storePricingAcceptance).mockResolvedValue(accepted);
     vi.mocked(finishPricingAcceptance).mockResolvedValue("checked");
+    vi.mocked(pricingPaymentWindowAllows).mockResolvedValue(true);
   });
 
   it("commits only after every staged write and the final gate", async () => {
@@ -91,6 +106,54 @@ describe("pricing acceptance writer", () => {
     expect(client.release).toHaveBeenCalledOnce();
   });
 
+  it("stores a request without revenue or the PMS job and answers with the hotel's deadline", async () => {
+    vi.mocked(preparePricingAcceptance).mockResolvedValue({
+      ...prepared,
+      current: { ...current, quote: { ...current.quote, acceptanceMode: "request" } },
+    } as never);
+    vi.mocked(stagePricingBookingLifecycle).mockResolvedValue({
+      ...lifecycle,
+      hostResponseDeadlineAt: "deadline",
+    } as never);
+    await expect(writePricingAcceptance(pool as never, input, undefined, true)).resolves.toEqual({
+      kind: "requested",
+      ...accepted,
+      bookingReference: expect.stringMatching(/^VAY-[A-Z0-9]{32}$/),
+      hostResponseDeadlineAt: "deadline",
+      checkedAt: "checked",
+    });
+    expect(preparePricingAcceptance).toHaveBeenCalledWith(client, input.slug, input.command, {
+      card: false,
+      deposits: false,
+      request: true,
+    });
+    expect(storePricingAcceptance).toHaveBeenCalledWith(
+      client,
+      input.slug,
+      expect.anything(),
+      expect.anything(),
+      null,
+    );
+    expect(stagePricingBookingRevenue).not.toHaveBeenCalled();
+    expect(stagePmsAcceptedPricingReservationJob).not.toHaveBeenCalled();
+    expect(stagePricingAcceptanceNotifications).toHaveBeenCalledBefore(
+      vi.mocked(finishPricingAcceptance),
+    );
+    expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
+      "BEGIN ISOLATION LEVEL READ COMMITTED",
+      "COMMIT",
+    ]);
+  });
+
+  it("classifies a request while hotel-confirmed acceptance is off", async () => {
+    vi.mocked(preparePricingAcceptance).mockRejectedValueOnce(
+      new Error("Request acceptance unavailable"),
+    );
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
+      expect.objectContaining({ code: "request_unavailable" }),
+    );
+  });
+
   it("classifies PostgreSQL failures separately from quote conflicts", async () => {
     vi.mocked(preparePricingAcceptance).mockRejectedValueOnce(
       Object.assign(new Error("connection lost"), { code: "08006" }),
@@ -104,6 +167,40 @@ describe("pricing acceptance writer", () => {
     await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
       expect.objectContaining({ code: "conflict" }),
     );
+  });
+
+  // VAY-2348: the method's booking window closed since the quote; a new quote names why.
+  it("refuses a method whose booking window no longer allows the stay, before any write", async () => {
+    vi.mocked(pricingPaymentWindowAllows).mockResolvedValueOnce(false);
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
+      expect.objectContaining({ code: "conflict" }),
+    );
+    expect(pricingPaymentWindowAllows).toHaveBeenCalledWith(
+      client,
+      "property",
+      "pay_at_property",
+      "2026-11-01",
+    );
+    expect(stagePricingBookingDraft).not.toHaveBeenCalled();
+    expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
+      "BEGIN ISOLATION LEVEL READ COMMITTED",
+      "ROLLBACK",
+    ]);
+  });
+
+  // VAY-2320: another booking took the last room of a chosen type while the guest decided.
+  it("names the room types that sold out and rolls back", async () => {
+    vi.mocked(stagePricingBookingLifecycle).mockRejectedValueOnce(
+      new QuoteRoomsSoldOutError(["room-type-b"]),
+    );
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
+      expect.objectContaining({ code: "sold_out", roomTypeIds: ["room-type-b"] }),
+    );
+    expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
+      "BEGIN ISOLATION LEVEL READ COMMITTED",
+      "ROLLBACK",
+    ]);
+    expect(storePricingAcceptance).not.toHaveBeenCalled();
   });
 
   it("classifies pool connection failures without attempting cleanup", async () => {
@@ -151,26 +248,5 @@ describe("pricing acceptance writer", () => {
     const pending = { kind: "payment_required", bookingId: "existing" };
     vi.mocked(readPricingCardReplay).mockResolvedValueOnce(pending as never);
     await expect(writePricingAcceptance(pool as never, input)).resolves.toBe(pending);
-  });
-
-  it("passes a server-owned synthetic context only for a fresh booking", async () => {
-    await writePricingAcceptance(pool as never, input, {
-      syntheticAffiliateContextId: "trusted-fixture-context",
-    });
-    expect(stagePricingBookingDraft).toHaveBeenCalledWith(
-      client,
-      input.slug,
-      expect.objectContaining({ syntheticAffiliateContextId: "trusted-fixture-context" }),
-    );
-  });
-  it("passes a server-owned live context only for a fresh booking", async () => {
-    await writePricingAcceptance(pool as never, input, {
-      affiliateContextId: "trusted-live-context",
-    });
-    expect(stagePricingBookingDraft).toHaveBeenCalledWith(
-      client,
-      input.slug,
-      expect.objectContaining({ affiliateContextId: "trusted-live-context" }),
-    );
   });
 });

@@ -1,5 +1,5 @@
 import pg from "pg";
-import { affiliateDestinationSafetyLockKey } from "@vayada/domain-booking";
+import { bookingCustomDomainLockKey } from "@vayada/domain-booking";
 
 import { normalizePgConnectionString } from "./pgConnection.js";
 import { writeProductionCatalogContent } from "./productionCatalogContentWriter.js";
@@ -205,7 +205,7 @@ export async function runProductionCatalogTransaction(
 
     for (const propertyId of [...new Set(plan.propertyIds)].sort())
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-        affiliateDestinationSafetyLockKey(propertyId),
+        bookingCustomDomainLockKey(propertyId),
       ]);
 
     const core = await services.writeCore(client, plan.writes, plan.sourceLinks, input.sourceRunId);

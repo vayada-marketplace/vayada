@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { formatNumber } from "@/lib/utils";
 import { funnelCsv, funnelRows } from "@/lib/utils/dashboardFunnel";
-import type { ConversionFunnel } from "@/services/dashboard";
+import { TIME_RANGES, type ConversionFunnel, type TimeRange } from "@/services/dashboard";
 
 type Props = {
   funnel: ConversionFunnel | null;
@@ -12,6 +12,9 @@ type Props = {
   locale: string;
   t: (key: string) => string;
   exportFileName: string;
+  /** The page's selected range; the page tabs and this menu share it. */
+  timeRange: TimeRange;
+  onTimeRangeChange: (range: TimeRange) => void;
 };
 
 // Branch rows compare with their own eligible cohort rather than the row above.
@@ -20,8 +23,18 @@ const DROP_BASE: Record<string, string> = {
   booking_completed: "dashboard.funnel.ofEligibleSubmissions",
 };
 
-export function ConversionFunnelCard({ funnel, loading, error, locale, t, exportFileName }: Props) {
+export function ConversionFunnelCard({
+  funnel,
+  loading,
+  error,
+  locale,
+  t,
+  exportFileName,
+  timeRange,
+  onTimeRangeChange,
+}: Props) {
   const tooltipId = useId();
+  const rangeLabelId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -45,8 +58,14 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
     };
   }, [menuOpen]);
 
-  const exportCsv = () => {
+  // Closing the popover removes the focused option, so hand focus back to its button.
+  const closeMenu = () => {
     setMenuOpen(false);
+    menuButtonRef.current?.focus();
+  };
+
+  const exportCsv = () => {
+    closeMenu();
     if (!funnel) return;
     const csv = funnelCsv(
       funnelRows(funnel),
@@ -131,7 +150,46 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
             </svg>
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 min-w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+            <div className="absolute right-0 top-full z-10 mt-1 min-w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+              <p
+                id={rangeLabelId}
+                className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+              >
+                {t("dashboard.conversionFunnel.timeRange")}
+              </p>
+              <div role="group" aria-labelledby={rangeLabelId}>
+                {TIME_RANGES.map(([range, label]) => (
+                  <button
+                    key={range}
+                    type="button"
+                    aria-pressed={timeRange === range}
+                    onClick={() => {
+                      closeMenu();
+                      onTimeRangeChange(range);
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                  >
+                    {t(label)}
+                    {timeRange === range && (
+                      <svg
+                        className="w-4 h-4 text-primary-600"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m4.5 12.75 6 6 9-13.5"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="my-1 border-t border-gray-100" />
               <button
                 type="button"
                 disabled={!funnel}

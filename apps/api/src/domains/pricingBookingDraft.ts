@@ -10,6 +10,10 @@ import type { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js
 import type { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import type { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTerms.js";
 import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import {
+  pricingExpectedPaymentMethod,
+  pricingManualQuoteSupported,
+} from "./pricingManualPayment.js";
 
 type Input = {
   current: NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
@@ -18,10 +22,6 @@ type Input = {
   finance: NonNullable<Awaited<ReturnType<typeof lockFinancePricingAcceptanceTerms>>>;
   bookingId: string;
   publicReference: string;
-  /** Server-owned synthetic fixture only; never read from a guest command. */
-  syntheticAffiliateContextId?: string;
-  /** Server-derived first-party context only; never read from a guest command. */
-  affiliateContextId?: string;
 };
 const iso = (v: unknown): v is string =>
   typeof v === "string" && Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v;
@@ -89,7 +89,8 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
         (quote.acceptanceMode === "instant" || quote.acceptanceMode === "request") &&
         quote.evidence.dueNowMinor === "0" &&
         quote.evidence.dueLaterMinor === quote.evidence.totalMinor) ||
-      pricingCardQuoteSupported(quote)
+      pricingCardQuoteSupported(quote) ||
+      pricingManualQuoteSupported(quote)
     )
   )
     return fail();
@@ -114,56 +115,29 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
   const cents = numerator / unit,
     amount = `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
   const guest = parsed.guest;
-  if (input.syntheticAffiliateContextId !== undefined && input.affiliateContextId !== undefined)
-    return fail();
-  let affiliateContextId = input.syntheticAffiliateContextId ?? input.affiliateContextId;
-  const syntheticAffiliate = input.syntheticAffiliateContextId !== undefined;
-  if (affiliateContextId !== undefined) {
-    await client.query("SAVEPOINT pricing_affiliate_binding_guard");
-    await client.query("RELEASE SAVEPOINT pricing_affiliate_binding_guard");
-    if (
-      (await client.query("SHOW transaction_isolation")).rows[0]?.transaction_isolation !==
-      "read committed"
+  // VAY-2347: what the guest's one tick on the payment step agreed to, with the time it was given
+  // (the transaction's, as on the acceptance): this price's terms and the guest rules by their
+  // evidence, and the hotel's own terms & conditions as they stand now, by hash (null without).
+  const hotelTerms = (
+    await client.query(
+      "SELECT terms_and_conditions FROM hotel_catalog.property_policy_summaries WHERE property_id=$1",
+      [scope.propertyId],
     )
-      return fail();
-    const context = await client.query(
-      `SELECT id FROM booking.affiliate_click_contexts
-       WHERE id=$1 AND property_id=$2 AND synthetic=$3 FOR UPDATE`,
-      [affiliateContextId, scope.propertyId, syntheticAffiliate],
-    );
-    if (!context.rowCount) return fail();
-    // The snapshot after acquiring the lock includes admissions committed while waiting.
-    if (
-      !syntheticAffiliate &&
-      !(
-        await client.query(
-          "SELECT 1 FROM booking.affiliate_click_admissions WHERE context_id=$1 LIMIT 1",
-          [affiliateContextId],
-        )
-      ).rowCount
-    )
-      return fail();
-    // An old cookie may have passed the route lookup before waiting for this lock.
-    // Keep the booking, but do not bind a context past its unbound lifetime.
-    if (
-      !syntheticAffiliate &&
-      !(
-        await client.query(
-          `SELECT 1 FROM booking.affiliate_click_admissions
-           WHERE context_id=$1 AND admitted_at > clock_timestamp() - interval '90 days'
-           LIMIT 1`,
-          [affiliateContextId],
-        )
-      ).rowCount
-    )
-      affiliateContextId = undefined;
-  }
+  ).rows[0]?.terms_and_conditions;
+  const termsText = typeof hotelTerms === "string" ? hotelTerms.trim() : "";
+  const consent = {
+    version: "booking-consent.v1",
+    quoteEvidenceId: parsed.acceptance.quoteEvidenceId,
+    guestPolicyEvidenceId: parsed.acceptance.guestPolicyEvidenceId,
+    termsHash: termsText ? "sha256:" + createHash("sha256").update(termsText).digest("hex") : null,
+  };
   await client.query(
     `WITH draft AS (
     INSERT INTO booking.guest_bookings(id,property_id,public_reference,source_system,booking_channel,direct_booking_source,
       lifecycle_status,payment_status,expected_payment_method,check_in,check_out,adults,children,room_count,currency,
       total_amount,balance_amount,booking_metadata,billing_plan_snapshot,commission_terms_snapshot,finance_terms_captured_at)
-    VALUES($1,$2,$3,'booking','direct','booking_engine','draft','unpaid',$22,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14)
+    VALUES($1,$2,$3,'booking','direct','booking_engine','draft','unpaid',$22,$4,$5,$6,$7,$8,$9,$10,$10,
+      jsonb_set($11::jsonb,'{consent,acceptedAt}',to_jsonb(now())),$12,$13,$14)
     RETURNING id
   ) INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email,phone,country_code,arrival_time,special_requests)
     SELECT id,'booker',$15,$16,$17,$18,$19,$20,$21 FROM draft`,
@@ -185,6 +159,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
         paymentMethod: quote.paymentMethod,
         acceptanceMode: quote.acceptanceMode,
         pricingSelections: quote.stay.rooms,
+        consent,
       },
       finance.billingPlanSnapshot,
       terms,
@@ -196,36 +171,11 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.countryCode,
       guest.arrivalTime,
       guest.specialRequests,
-      // Online card bookings keep the legacy checkout default ('unknown', no at-property
-      // method); booking_metadata.paymentMethod says card.
-      quote.paymentMethod === "pay_at_property" ? "pay_at_property" : "unknown",
+      // Online card and PayPal bookings keep the legacy checkout default ('unknown': the column
+      // has no such method); booking_metadata.paymentMethod says which.
+      pricingExpectedPaymentMethod(quote.paymentMethod),
     ],
   );
-  if (affiliateContextId !== undefined && syntheticAffiliate)
-    await client.query(
-      `INSERT INTO booking.affiliate_original_booking_bindings
-         (booking_id,property_id,context_id,history_cutoff,
-          original_public_reference,original_check_in,original_check_out,original_currency,synthetic)
-       SELECT $1,$2,$3,COALESCE(MAX(history_position),0),$4,$5,$6,$7,$8
-       FROM booking.affiliate_click_admissions WHERE context_id=$3`,
-      [
-        bookingId,
-        scope.propertyId,
-        affiliateContextId,
-        publicReference,
-        quote.stay.checkIn,
-        quote.stay.checkOut,
-        quote.stay.currency,
-        syntheticAffiliate,
-      ],
-    );
-  else if (affiliateContextId !== undefined) {
-    const bound = await client.query(
-      "SELECT booking.bind_live_affiliate_original($1,$2) AS bound",
-      [bookingId, affiliateContextId],
-    );
-    if (bound.rows[0]?.bound !== true) return fail();
-  }
   await persistPricingBookingAddons(client, slug, current, bookingId);
   if (!isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)) return fail();
   return { bookingId, publicReference };

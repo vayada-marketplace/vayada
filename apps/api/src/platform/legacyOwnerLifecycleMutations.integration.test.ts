@@ -19,6 +19,7 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
   let suspendedProtectedUserId: string;
   let deletedProtectedUserId: string;
   let ordinaryUserId: string;
+  let deletedUserId: string;
   let adminConnected = false;
   let readerRoleCreated = false;
 
@@ -41,9 +42,11 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
     suspendedProtectedUserId = randomUUID();
     deletedProtectedUserId = randomUUID();
     ordinaryUserId = randomUUID();
+    deletedUserId = randomUUID();
     await admin.query(
       `INSERT INTO identity.users(id, email, status)
-       VALUES ($1, $2, 'pending'), ($3, $4, 'suspended'), ($5, $6, 'deleted'), ($7, $8, 'pending')`,
+       VALUES ($1, $2, 'pending'), ($3, $4, 'suspended'), ($5, $6, 'deleted'), ($7, $8, 'pending'),
+              ($9, $10, 'deleted')`,
       [
         protectedUserId,
         `protected-${protectedUserId}@example.test`,
@@ -53,11 +56,13 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
         `deleted-${deletedProtectedUserId}@example.test`,
         ordinaryUserId,
         `ordinary-${ordinaryUserId}@example.test`,
+        deletedUserId,
+        `deleted+${deletedUserId}@deleted.vayada.local`,
       ],
     );
     await admin.query(
       `INSERT INTO identity.external_identities(user_id, provider, provider_user_id, provider_email)
-       VALUES ($1, 'workos', $2, $3), ($4, 'workos', $5, $6)`,
+       VALUES ($1, 'workos', $2, $3), ($4, 'workos', $5, $6), ($7, 'workos', $8, NULL)`,
       [
         protectedUserId,
         `user_${protectedUserId}`,
@@ -65,6 +70,8 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
         ordinaryUserId,
         `user_${ordinaryUserId}`,
         `ordinary-${ordinaryUserId}@example.test`,
+        deletedUserId,
+        `user_${deletedUserId}`,
       ],
     );
     await admin.query(
@@ -187,6 +194,32 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
         (await admin.query("SELECT status FROM identity.users WHERE id = $1", [userId])).rows,
       ).toEqual([{ status }]);
     }
+  });
+
+  it("keeps a deleted account deleted and its blanked e-mail (VAY-2272)", async () => {
+    await expect(lifecycle.execute(statusCommand(deletedUserId, "active"))).resolves.toMatchObject({
+      status: "accepted",
+    });
+    await expect(
+      lifecycle.execute(emailCommand(deletedUserId, "revived@example.test")),
+    ).resolves.toMatchObject({ status: "accepted" });
+    expect(
+      (
+        await admin.query(
+          `SELECT users.email, users.status, external.provider_email
+           FROM identity.users users
+           JOIN identity.external_identities external ON external.user_id = users.id
+           WHERE users.id = $1`,
+          [deletedUserId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        email: `deleted+${deletedUserId}@deleted.vayada.local`,
+        status: "deleted",
+        provider_email: null,
+      },
+    ]);
   });
 
   it("allows ordinary email updates and keeps receipt columns private", async () => {

@@ -11,7 +11,7 @@ import { resolveSelectedPmsPropertyId } from "./pmsPropertyClient";
 
 // Type-only imports keep the Feature Hub UI out of the sidebar bundle.
 export function propertyModuleClient(
-  store: "module-activations" | "navigation-modules",
+  store: "module-activations" | "navigation-modules" | "booking-modules",
 ): FeatureActivationClient {
   const endpoint = (propertyId: string, moduleId?: string) => {
     const base = `/api/pms/properties/${encodeURIComponent(propertyId)}/${store}`;

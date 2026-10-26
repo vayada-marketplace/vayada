@@ -59,7 +59,7 @@ function publicHotelResponse(
 }
 
 describe("Booking Web public hotel adapter", () => {
-  it("maps the Booking header logo without changing the image fallback", () => {
+  it("maps the Booking header logo and never uses it as the hero (VAY-2247)", () => {
     const response = publicHotelResponse();
     response.hotel.branding = {
       logoUrl: "https://cdn.vayada.example/alpenrose/logo.webp",
@@ -73,7 +73,25 @@ describe("Booking Web public hotel adapter", () => {
     const hotel = toLegacyHotel(response);
 
     expect(hotel.branding?.logoUrl).toBe("https://cdn.vayada.example/alpenrose/logo.webp");
-    expect(hotel.heroImage).toBe("/vayada-logo.png");
+    expect(hotel.heroImage).toBeNull();
+  });
+
+  it("offers the published display currencies, else only the hotel currency", () => {
+    const response = publicHotelResponse();
+    expect(toLegacyHotel(response).displayCurrencies).toEqual(["EUR"]);
+
+    response.hotel.branding = {
+      displayCurrencies: ["EUR", "USD"],
+      heroImage: null,
+      heroHeading: null,
+      heroSubtext: null,
+      primaryColor: null,
+      fontPairing: null,
+    };
+    const hotel = toLegacyHotel(response);
+
+    expect(hotel.displayCurrencies).toEqual(["EUR", "USD"]);
+    expect(hotel.currency).toBe("EUR");
   });
 
   it("maps header visibility and keeps Refer a Guest behind the active module", () => {
@@ -104,6 +122,13 @@ describe("Booking Web public hotel adapter", () => {
     expect(toLegacyHotel(response).referAGuestEnabled).toBe(false);
   });
 
+  it("tells the booking pages whether guests can use promo codes (VAY-2200)", () => {
+    const response = publicHotelResponse();
+    expect(toLegacyHotel(response).promoCodesEnabled).toBe(false);
+    response.hotel.capabilities.promoCodes = true;
+    expect(toLegacyHotel(response).promoCodesEnabled).toBe(true);
+  });
+
   it("maps public contacts and uses only public city/region/country for the address", () => {
     const hotel = toLegacyHotel(
       publicHotelResponse([
@@ -127,6 +152,17 @@ describe("Booking Web public hotel adapter", () => {
       instagram: "https://instagram.com/alpenrose",
       facebook: "https://facebook.com/alpenrose",
     });
+  });
+
+  it("passes the public map pin on only when it has both coordinates (VAY-2307)", () => {
+    const response = publicHotelResponse();
+    expect(toLegacyHotel(response).mapPin).toBeUndefined();
+    response.hotel.location = { ...response.hotel.location, latitude: 47.27, longitude: 11.39 };
+    expect(toLegacyHotel(response).mapPin).toEqual({ latitude: 47.27, longitude: 11.39 });
+    response.hotel.location = { ...response.hotel.location, latitude: 47.27, longitude: null };
+    expect(toLegacyHotel(response).mapPin).toBeUndefined();
+    response.hotel.location = { ...response.hotel.location, latitude: 147.27, longitude: 11.39 };
+    expect(toLegacyHotel(response).mapPin).toBeUndefined();
   });
 
   it("keeps missing contacts empty and rejects unsafe public-link schemes", () => {
@@ -173,8 +209,10 @@ describe("Booking Web public hotel adapter", () => {
       "https://cdn.vayada.example/pool.jpg",
       "https://cdn.vayada.example/lobby.jpg",
     ]);
+    // Without a hero photo the first gallery photo leads; without any photo the pages draw a placeholder.
     response.hotel.branding = undefined;
-    expect(toLegacyHotel(response).heroImage).toBe("/vayada-logo.png");
+    expect(toLegacyHotel(response).heroImage).toBe("https://cdn.vayada.example/pool.jpg");
     expect(toLegacyHotel(publicHotelResponse()).images).toEqual([]);
+    expect(toLegacyHotel(publicHotelResponse()).heroImage).toBeNull();
   });
 });

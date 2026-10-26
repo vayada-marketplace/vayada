@@ -29,6 +29,20 @@ describe("explicit rate payment methods", () => {
       }),
     ).not.toBeNull();
   });
+  it("allows bank transfer and PayPal next to card and pay at property (VAY-2139)", () => {
+    const acceptedMethods = ["card", "pay_at_property", "bank_transfer", "paypal"];
+    expect(
+      parseBookingPricingOfferTerms({ ...terms, payment: { kind: "full", acceptedMethods } })
+        ?.payment.acceptedMethods,
+    ).toEqual(acceptedMethods);
+    for (const method of ["bank_transfer", "paypal"])
+      expect(
+        parseBookingPricingOfferTerms({
+          ...terms,
+          payment: { kind: "full", acceptedMethods: [method] },
+        }),
+      ).not.toBeNull();
+  });
   it("rejects ambiguous, unsupported and malformed permissions", () => {
     for (const acceptedMethods of [
       undefined,
@@ -39,6 +53,8 @@ describe("explicit rate payment methods", () => {
       "card",
       ["card", ,],
       ["card", "pay_at_property", "cash"],
+      ["bank_transfer", "manual_card"],
+      ["card", "pay_at_property", "bank_transfer", "paypal", "card"],
     ])
       expect(
         parseBookingPricingOfferTerms({ ...terms, payment: { kind: "full", acceptedMethods } }),

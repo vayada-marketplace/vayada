@@ -32,6 +32,50 @@ describe("replacement pricing browser workflow", () => {
     http.put.mockResolvedValue({ revision: 99 });
     await expect(api.saveDraft({ draftId, baseRevision: 0, expectedDraftRevision: 0, sources, snapshot })).rejects.toBeInstanceOf(PricingResponseError);
   });
+  it("reads the bank-transfer and PayPal methods the rate pickers may offer (VAY-2139)", async () => {
+    http.get.mockResolvedValue({ acceptanceEnabled: true, readyMethods: ["bank_transfer"] });
+    expect(await client().paymentMethods()).toEqual(["bank_transfer"]);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/payment-methods`);
+    // Acceptance off, or an API without the read: the pickers offer neither.
+    http.get.mockResolvedValue({ acceptanceEnabled: false, readyMethods: [] });
+    expect(await client().paymentMethods()).toEqual([]);
+    http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" }));
+    expect(await client().paymentMethods()).toEqual([]);
+    for (const value of [{ acceptanceEnabled: true, readyMethods: ["card"] }, { acceptanceEnabled: true },
+      { acceptanceEnabled: "yes", readyMethods: [] }, { acceptanceEnabled: true, readyMethods: ["paypal", "paypal"] }]) {
+      http.get.mockResolvedValue(value);
+      await expect(client().paymentMethods()).rejects.toThrow();
+    }
+  });
+  it("reads whether rates can take card and deposits (VAY-2205)", async () => {
+    const ready = { card: { ready: true, reason: null, charge: "on_accept" }, deposits: { ready: false } };
+    http.get.mockResolvedValue(ready);
+    expect(await client().cardReadiness()).toEqual(ready);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/card-readiness`);
+    // An API without the read offers neither.
+    http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" }));
+    expect(await client().cardReadiness()).toEqual({ card: { ready: false, reason: "switch_off", charge: "at_booking" }, deposits: { ready: false } });
+    for (const value of [{ ...ready, extra: 1 }, { ...ready, card: { ...ready.card, reason: "switch_off" } },
+      { ...ready, card: { ready: false, reason: null, charge: "at_booking" } }, { ...ready, card: { ...ready.card, charge: "later" } },
+      { card: { ready: false, reason: "unknown", charge: "at_booking" }, deposits: { ready: false } },
+      { card: { ready: false, reason: "not_approved", charge: "at_booking" }, deposits: { ready: true } }]) {
+      http.get.mockResolvedValue(value);
+      await expect(client().cardReadiness()).rejects.toThrow();
+    }
+  });
+  it("reads the rates that aren't selling, with why and how to fix it (VAY-2304)", async () => {
+    const rate = { roomTypeId: id, offerId: "nrf", reason: "card_off", fixes: ["turn_card_on", "allow_pay_at_property"] };
+    const list = (rates: unknown[], publishedRevision: number | null = 7) => ({ version: "pricing-rates-not-selling.v1", publishedRevision, rates });
+    http.get.mockResolvedValue(list([rate])); expect(await client().notSellingRates()).toEqual([rate]);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/not-selling`);
+    http.get.mockResolvedValue(list([], null)); expect(await client().notSellingRates()).toEqual([]);
+    // An API without the read lists none.
+    http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" })); expect(await client().notSellingRates()).toEqual([]);
+    for (const value of [{ ...list([]), version: "v2" }, list([], 0), list([{ ...rate, reason: "other" }]), list([{ ...rate, fixes: [] }]),
+      list([{ ...rate, fixes: ["call_us"] }]), list([{ ...rate, roomTypeId: "room" }]), list([{ ...rate, extra: 1 }])]) {
+      http.get.mockResolvedValue(value); await expect(client().notSellingRates()).rejects.toThrow();
+    }
+  });
   it("reads exact saved data and only expected missing responses become null", async () => {
     const api = client(), stored = { snapshot, sources, revision: 1, baseRevision: 0, stale: false };
     http.get.mockResolvedValue(stored); expect(await api.readDraft(draftId)).toEqual(draft);

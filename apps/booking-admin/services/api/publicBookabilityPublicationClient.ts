@@ -15,12 +15,15 @@ export type PublicBookabilityPublication = {
   missingReadiness: string[];
 };
 
-export type ActiveBookingPublicationRefresh = {
-  operationId: string;
-  propertyId: string;
-  status: "pending" | "succeeded";
-  resultContentRevisionId: string | null;
-};
+export type ActiveBookingPublicationRefresh =
+  | {
+      operationId: string;
+      propertyId: string;
+      status: "pending" | "succeeded";
+      resultContentRevisionId: string | null;
+    }
+  /** The hotel has not gone live; a save never publishes the page (VAY-2129). */
+  | { propertyId: string; status: "not_live" };
 
 export type PublicationReadinessStep = {
   id: "pms" | "payments" | "booking" | "profile";
@@ -35,7 +38,8 @@ export async function publishPublicBookabilityProfile(
   if (!normalizedHotelId) throw new Error("Booking hotel id is required.");
 
   return client.post<PublicBookabilityPublication | ActiveBookingPublicationRefresh>(
-    PUBLIC_BOOKABILITY_PUBLICATION_PATH.replace(":hotelId", encodeURIComponent(normalizedHotelId)),
+    // Design saves refresh a live booking page only; going live is the setup's own step.
+    `${PUBLIC_BOOKABILITY_PUBLICATION_PATH.replace(":hotelId", encodeURIComponent(normalizedHotelId))}?when=live`,
     undefined,
     omitHotelContext,
   );

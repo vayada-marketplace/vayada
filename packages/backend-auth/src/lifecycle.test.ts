@@ -9,7 +9,6 @@ import {
   membershipPropertyAccessModeForProvisioning,
   staffAccessPermissionKeys,
   validateStaffInviteAccess,
-  type CreateAffiliateInviteCommand,
   type CreateCustomerInviteCommand,
   type CreateIdentityRecoveryFlowCommand,
   type CreateIdentityRecoveryFlowPayload,
@@ -68,7 +67,7 @@ describe("identity lifecycle command contract", () => {
     expect(membershipPropertyAccessModeForProvisioning("hotel_group", "front_desk")).toBe(
       "assigned",
     );
-    expect(membershipPropertyAccessModeForProvisioning("creator_workspace", "creator_owner")).toBe(
+    expect(membershipPropertyAccessModeForProvisioning("platform", "platform_admin")).toBe(
       "assigned",
     );
   });
@@ -250,7 +249,6 @@ describe("identity lifecycle command contract", () => {
       "identity.staff.access.update",
       "identity.staff.status.update",
       "identity.staff.remove",
-      "identity.invite.affiliate.create",
       "identity.invite.customer.create",
       "identity.consent.cookie.upsert",
       "identity.consent.marketing.update",
@@ -274,7 +272,6 @@ describe("identity lifecycle command contract", () => {
       "identity.staff.access.updated",
       "identity.staff.status.updated",
       "identity.staff.removed",
-      "identity.invite.affiliate.created",
       "identity.invite.customer.created",
       "identity.consent.cookie.upserted",
       "identity.consent.marketing.updated",
@@ -356,39 +353,6 @@ describe("identity lifecycle command contract", () => {
     expect(invalidEmailChange.flowKind).toBe("email_change");
   });
 
-  it("models affiliate invites as organization membership and resource-link ownership", () => {
-    const command: CreateAffiliateInviteCommand = {
-      commandType: "identity.invite.affiliate.create",
-      commandId: "cmd_affiliate_invite_001",
-      idempotencyKey: "affiliate:affiliate_001:approved",
-      audit,
-      payload: {
-        email: "partner@example.com",
-        name: "Partner Example",
-        organization: {
-          organizationId: "affiliate_org_001",
-          kind: "affiliate_partner",
-          name: "Partner Example",
-        },
-        membership: {
-          roleKey: "affiliate_owner",
-          propertyAccessMode: "assigned",
-          permissionKeys: ["affiliate.payout.manage"],
-        },
-        affiliateResourceLink: {
-          organizationId: "affiliate_org_001",
-          product: "affiliate",
-          resourceType: "affiliate",
-          resourceId: "affiliate_001",
-          relationship: "owner",
-        },
-      },
-    };
-
-    expect(command.payload.membership.roleKey).toBe("affiliate_owner");
-    expect(command.payload.affiliateResourceLink.resourceType).toBe("affiliate");
-  });
-
   it("models existing-user access grants through membership, resource links, and permissions", () => {
     const command: GrantIdentityAccessCommand = {
       commandType: "identity.access.grant",
@@ -467,15 +431,15 @@ describe("identity lifecycle command contract", () => {
     const command: GrantIdentityResourceLinksCommand = {
       commandType: "identity.resource_links.grant",
       commandId: "cmd_resource_link_grant_001",
-      idempotencyKey: "marketplace:offer_001:owner",
+      idempotencyKey: "booking:booking_hotel_001:owner",
       audit,
       payload: {
         organizationId: "hotel_org_001",
         resourceLinks: [
           {
-            product: "marketplace",
-            resourceType: "marketplace_offer",
-            resourceId: "offer_001",
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: "booking_hotel_001",
             relationship: "owner",
           },
         ],
@@ -486,9 +450,9 @@ describe("identity lifecycle command contract", () => {
       organizationId: "hotel_org_001",
       resourceLinks: [
         {
-          product: "marketplace",
-          resourceType: "marketplace_offer",
-          resourceId: "offer_001",
+          product: "booking",
+          resourceType: "booking_hotel",
+          resourceId: "booking_hotel_001",
           relationship: "owner",
         },
       ],

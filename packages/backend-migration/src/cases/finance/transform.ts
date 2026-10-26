@@ -5,9 +5,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
     INSERT INTO identity.users (id, email, name, status)
     SELECT owner_user_id, owner_email, owner_name, owner_status
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT owner_user_id, owner_email, owner_name, owner_status
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -22,16 +19,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       workos_org_id,
       workos_external_id
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      organization_id,
-      organization_kind,
-      organization_name,
-      organization_slug,
-      organization_status,
-      workos_org_id,
-      workos_external_id
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -48,18 +35,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       workos_membership_id,
       workos_role_slugs
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      membership_id,
-      organization_id,
-      owner_user_id,
-      membership_status,
-      role_key,
-      'assigned',
-      'agency',
-      workos_membership_id,
-      workos_role_slugs
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -84,16 +59,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       'operator',
       'active'
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      affiliate_resource_link_id,
-      organization_id,
-      'affiliate',
-      'affiliate',
-      affiliate_resource_id,
-      'promotes',
-      'active'
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -135,19 +100,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       entitlement_starts_at,
       entitlement_metadata
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      product_entitlement_id,
-      organization_id,
-      'affiliate',
-      'affiliate-payouts',
-      'active',
-      'affiliate',
-      'affiliate',
-      affiliate_resource_id,
-      entitlement_starts_at,
-      entitlement_metadata
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -363,23 +315,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       provider_account_metadata,
       provider_sensitive_config_ref
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      provider_account_id,
-      NULL,
-      organization_id,
-      'organization',
-      provider,
-      provider_account_ref,
-      provider_account_status,
-      provider_onboarding_status,
-      charges_enabled,
-      payouts_enabled,
-      currency,
-      provider_capabilities,
-      provider_account_metadata,
-      provider_sensitive_config_ref
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -506,24 +441,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       'pms',
       payout_settings_source_id
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      payout_settings_id,
-      NULL,
-      organization_id,
-      NULL,
-      provider_account_id,
-      'organization',
-      payout_method,
-      payout_destination_country_code,
-      currency,
-      'active',
-      payout_schedule,
-      payout_preferences,
-      payout_sensitive_destination_ref,
-      'marketplace',
-      payout_settings_source_id
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -578,32 +495,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       payout_paid_at,
       payout_metadata
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      payout_id,
-      payout_settings_id,
-      NULL,
-      NULL,
-      NULL,
-      provider_account_id,
-      'organization',
-      NULL,
-      organization_id,
-      NULL,
-      'marketplace',
-      source_payout_id,
-      payout_status,
-      payout_amount,
-      payout_fee_amount,
-      payout_net_amount,
-      currency,
-      payout_period_start,
-      payout_period_end,
-      provider_payout_id,
-      payout_scheduled_at,
-      payout_paid_at,
-      payout_metadata || jsonb_build_object('affiliateId', affiliate_resource_id)
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -710,27 +601,6 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       source_entitlement_id,
       billing_entitlement_metadata
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      billing_entitlement_id,
-      organization_id,
-      NULL,
-      product_entitlement_id,
-      billing_product,
-      billing_entitlement_key,
-      billing_status,
-      plan_key,
-      seat_count,
-      billing_provider,
-      NULL,
-      NULL,
-      billing_period_start,
-      billing_period_end,
-      entitlement_starts_at,
-      'marketplace',
-      source_entitlement_id,
-      billing_entitlement_metadata
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 
   await client.query(`
@@ -785,31 +655,5 @@ export async function transformFinance(client: pg.Client): Promise<void> {
       visibility_source_freshness,
       visibility_projected_at
     FROM migration_source_finance.property_finance_flow_inputs
-    UNION ALL
-    SELECT
-      visibility_read_model_id,
-      organization_id,
-      NULL,
-      visibility_scope,
-      visibility_resource_type,
-      affiliate_resource_id,
-      required_permission_key,
-      billing_period_start,
-      billing_period_end,
-      currency,
-      visibility_gross_payment_amount,
-      visibility_net_payment_amount,
-      visibility_payout_amount,
-      visibility_commission_amount,
-      visibility_outstanding_balance_amount,
-      visibility_payment_count,
-      visibility_payout_count,
-      visibility_failed_payment_count,
-      visibility_entitlement_status,
-      visibility_status_counts,
-      visibility_entitlement_summary,
-      visibility_source_freshness,
-      visibility_projected_at
-    FROM migration_source_finance.affiliate_payout_inputs
   `);
 }

@@ -2,7 +2,7 @@ import { externalBookingChanges } from "../integrations/externalBookingChanges.j
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { readBookingAffiliateCreationEvidence } from "../domains/bookingAffiliateCreationEvidence.js";
+import { buildApp } from "../app.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
 import type { DirectBookingInventoryReservationPort } from "../platform/inventoryReservation.js";
 import {
@@ -100,106 +100,6 @@ describe.skipIf(!TEST_DATABASE_URL)(
       ]);
     });
 
-    it("reads native creation provenance from Booking-owned persistence", async () => {
-      const client = await admin.connect();
-      const bookingId = uuid(7);
-      try {
-        await client.query("BEGIN");
-        const checkout = await client.query<{ id: string }>(
-          `INSERT INTO booking.checkout_contexts
-             (property_id, quote_session_id, currency, status, expires_at)
-           VALUES ($1::uuid, $2::uuid, 'EUR', 'converted', $3::timestamptz)
-           RETURNING id::text`,
-          [propertyId, successfulQuoteId, "2027-01-02T10:00:00.000Z"],
-        );
-        await client.query(
-          `INSERT INTO booking.guest_bookings
-             (id, property_id, quote_session_id, checkout_context_id, public_reference,
-              source_system, booking_channel, direct_booking_source, lifecycle_status,
-              check_in, check_out, currency, created_at, updated_at)
-           VALUES
-             ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'VAY-1505-NATIVE',
-              'booking', 'direct', 'booking_engine', 'confirmed',
-              DATE '2027-02-01', DATE '2027-02-03', 'EUR', $5::timestamptz, $5::timestamptz)`,
-          [bookingId, propertyId, successfulQuoteId, checkout.rows[0]!.id, occurredAt],
-        );
-        await client.query(
-          `INSERT INTO booking.booking_status_events
-             (guest_booking_id, event_type, to_status, actor_type, event_payload, occurred_at)
-           VALUES
-             ($1::uuid, 'guest_booking.created', 'confirmed', 'guest',
-              jsonb_build_object('requestId', 'vay-1505-request',
-                                 'correlationId', 'vay-1505-correlation'),
-              $2::timestamptz)`,
-          [bookingId, occurredAt],
-        );
-
-        const input = { propertyId, bookingId };
-        const recorded = await readBookingAffiliateCreationEvidence(client, input, occurredAt);
-        expect(recorded).toMatchObject({
-          status: "recorded",
-          propertyId,
-          bookingId,
-          originalBookedAt: occurredAt.toISOString(),
-          source: "vayada_booking",
-          requestId: "vay-1505-request",
-          correlationId: "vay-1505-correlation",
-        });
-        await expect(
-          readBookingAffiliateCreationEvidence(
-            client,
-            { ...input, propertyId: uuid(999) },
-            occurredAt,
-          ),
-        ).resolves.toEqual({ status: "pending", reason: "scope_unavailable" });
-
-        for (const [sql, reason] of [
-          [
-            "UPDATE booking.guest_bookings SET source_system='migration', source_booking_id='import-1' WHERE id=$1",
-            "unsupported_source",
-          ],
-          [
-            "UPDATE booking.guest_bookings SET created_at=created_at+interval '1 microsecond' WHERE id=$1",
-            "conflicting_creation_evidence",
-          ],
-          [
-            "UPDATE booking.booking_status_events SET from_status='confirmed' WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
-            "conflicting_creation_evidence",
-          ],
-          [
-            "UPDATE booking.booking_status_events SET to_status='canceled' WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
-            "conflicting_creation_evidence",
-          ],
-          [
-            "DELETE FROM booking.booking_status_events WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
-            "creation_evidence_missing",
-          ],
-          [
-            "INSERT INTO booking.booking_status_events(guest_booking_id,event_type,to_status,actor_type,event_payload,occurred_at) SELECT guest_booking_id,event_type,to_status,actor_type,event_payload,occurred_at FROM booking.booking_status_events WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
-            "conflicting_creation_evidence",
-          ],
-        ] as const) {
-          await client.query("SAVEPOINT evidence_case");
-          await client.query(sql, [bookingId]);
-          await expect(
-            readBookingAffiliateCreationEvidence(client, input, occurredAt),
-          ).resolves.toMatchObject({ reason });
-          await client.query("ROLLBACK TO SAVEPOINT evidence_case");
-        }
-
-        await client.query(
-          "UPDATE booking.guest_bookings SET updated_at=updated_at+interval '1 day' WHERE id=$1",
-          [bookingId],
-        );
-        await expect(
-          readBookingAffiliateCreationEvidence(client, input, occurredAt),
-        ).resolves.toEqual(recorded);
-      } finally {
-        await client.query("ROLLBACK").catch(() => undefined);
-        client.release();
-      }
-    });
-
     it("reads the committed same-day policy after waiting for its property lock", async () => {
       await admin.query(
         `INSERT INTO booking.same_day_booking_policies
@@ -244,6 +144,46 @@ describe.skipIf(!TEST_DATABASE_URL)(
         await settings.end();
         await checkout.end();
       }
+    });
+
+    it("limits Find my booking in memory and stores nothing about the caller (VAY-2222)", async () => {
+      const auditRows = async () =>
+        (
+          await admin.query<{ all: number; lookups: number }>(
+            `SELECT count(*)::int AS all,
+               count(*) FILTER (WHERE action = 'booking.guest_lookup.attempt')::int AS lookups
+             FROM platform.product_audit_events`,
+          )
+        ).rows[0];
+      const before = await auditRows();
+      const app = buildApp({
+        logger: false,
+        // A fixed clock, so the six tries can't straddle the limit's one-minute window.
+        bookingWebPublicNow: () => occurredAt,
+        publicHotelProfileRepository: { findProfileBySlug: async () => null },
+        bookingWebCheckoutAdapter: createAdapter(checkoutPool),
+      });
+      try {
+        const statuses: number[] = [];
+        for (let attempt = 1; attempt <= 6; attempt += 1)
+          statuses.push(
+            (
+              await app.inject({
+                method: "POST",
+                url: "/api/booking-web/hotels/vay-1188-hotel/bookings/lookup",
+                remoteAddress: "198.51.100.22",
+                payload: {
+                  bookingReference: `VAY-2222-${attempt}`,
+                  guestEmail: "guest@example.test",
+                },
+              })
+            ).statusCode,
+          );
+        expect(statuses).toEqual([404, 404, 404, 404, 404, 429]);
+      } finally {
+        await app.close();
+      }
+      expect(await auditRows()).toEqual(before);
     });
 
     function createAdapter(pool: pg.Pool) {

@@ -14,11 +14,12 @@ import {
   hotelAccountInviteOrganizationExternalId,
   hotelAccountInviteTrackCorrelationId,
   parseHotelAccountInviteCreateRequest,
-  type MarketplaceAdminHotelAccountInviteCreateRequest,
-} from "./marketplaceAdmin.js";
+  storedHotelAccountInviteTracks,
+  type HotelAccountInviteCreateRequest,
+} from "./hotelAccountInviteCodes.js";
 import { enforceRoutePolicy } from "./policy.js";
 
-type HotelAccountInvitePayload = MarketplaceAdminHotelAccountInviteCreateRequest & {
+type HotelAccountInvitePayload = HotelAccountInviteCreateRequest & {
   contractVersion: typeof HOTEL_ACCOUNT_INVITE_CONTRACT_VERSION;
   handoffPath: typeof HOTEL_ACCOUNT_INVITE_HANDOFF_PATH;
 };
@@ -322,7 +323,7 @@ export function createPgHotelAccountInviteRepository(config: {
 
         if (!trackBinding && new Date(row.expiresAt) <= input.now) {
           await client.query(
-            `UPDATE marketplace.invite_codes
+            `UPDATE hotel_catalog.hotel_account_invites
              SET status = 'expired'
              WHERE id = $1::uuid
                AND status = 'pending'`,
@@ -344,7 +345,7 @@ export function createPgHotelAccountInviteRepository(config: {
           }
         }
         const redeemed = await client.query(
-          `UPDATE marketplace.invite_codes
+          `UPDATE hotel_catalog.hotel_account_invites
            SET status = 'redeemed',
                redeemed_by_user_id = $2::uuid,
                redeemed_at = $3::timestamptz,
@@ -506,7 +507,7 @@ function parsePayload(value: unknown): HotelAccountInvitePayload | null {
     identity: value.identity,
     organization: value.organization,
     property: value.property,
-    selectedTracks: value.selectedTracks,
+    selectedTracks: storedHotelAccountInviteTracks(value.selectedTracks),
     ...(Object.hasOwn(value, "preparedData") ? { preparedData: value.preparedData } : {}),
   });
   if (typeof parsed === "string") return null;
@@ -641,4 +642,4 @@ const INVITE_SELECT = `SELECT
   invite.redeemed_by_user_id::text AS "redeemedByUserId",
   invite.payload -> 'redemption' ->> 'organizationId' AS "redemptionOrganizationId",
   invite.expires_at AS "expiresAt"
-FROM marketplace.invite_codes invite`;
+FROM hotel_catalog.hotel_account_invites invite`;

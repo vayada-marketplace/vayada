@@ -10,8 +10,7 @@
 This contract defines the target-system boundary for property teams to triage,
 coordinate, and reply to guest conversations with optional human-reviewed
 assistance. It is implemented in `apps/api`, consumed by `apps/pms-web`, and
-owned by the PMS Operations module. Marketplace creator chat remains a separate
-product and data model.
+owned by the PMS Operations module.
 
 The normative examples are in
 `engineering/fixtures/native-guest-inbox/cases.json`.
@@ -37,8 +36,8 @@ Included:
 
 Excluded:
 
-- Marketplace chat, WhatsApp, SMS, social, web chat, phone, voice, cross-property
-  queues, advanced routing, SLA tooling, analytics, and automations;
+- WhatsApp, SMS, social, web chat, phone, voice, cross-property queues, advanced
+  routing, SLA tooling, analytics, and automations;
 - autonomous AI sending or actions;
 - per-user unread state and silent fallback between delivery channels;
 - any Inbox runtime implementation in this contract ticket.
@@ -683,7 +682,7 @@ The pause does not claim that an earlier request was never delivered.
 Reads, mark-read, local triage/follow-up/assignment/notes, empty direct-thread
 creation, attachment access, quick replies and human-reviewed assistance remain
 available under their normal policies. Inbound intake/receipts, unrelated
-Booking emails, other PMS jobs and Marketplace chat are not disabled.
+Booking emails and other PMS jobs are not disabled.
 
 SIGTERM/SIGINT invoke graceful API close. Shutdown stops the Inbox worker in
 `preClose`, before pools close.

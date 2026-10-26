@@ -4,6 +4,8 @@ import { parsePricingConfiguration, type PricingConfiguration } from "@vayada/do
 import { useTranslation } from "@/lib/i18n";
 import { errorText, PricingError } from "./pricingAmounts";
 import { StayRuleFields, stayRuleInput, stayRules, type RuleInput } from "./StayRuleFields";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 type Offer = PricingConfiguration["offers"][number];
 
 export function changeStayDate(room: PricingConfiguration, offerId: string, date: string, input: RuleInput | null): PricingConfiguration {
@@ -31,20 +33,20 @@ export function PricingStayDates({ room, offer, label, disabled, onChange, onPen
     try { onChange(changeStayDate(room, offer.id, day, input)); if (input) cancel(); else setError(""); }
     catch (cause) { setError(errorText(cause, t, "pricing.stayDates.changeFailed")); }
   };
-  return <details className="sm:col-span-2 text-sm"><summary className="cursor-pointer">{t("pricing.stayDates.title", { label })}</summary>
-    <p className="mt-2 text-gray-600">{t("pricing.stayDates.description")}</p>
-    <ul className="my-3 space-y-2">{offer.restrictions.dates.map(({ date: day, rules }) => <li key={day} className="flex flex-wrap items-center gap-3">
+  return <PricingSection title={t("pricing.stayDates.section")} label={t("pricing.stayDates.title", { label })} keepOpen={!!entry}>
+    <p className={ui.help}>{t("pricing.stayDates.description")}</p>
+    <ul className="space-y-1.5">{offer.restrictions.dates.map(({ date: day, rules }) => <li key={day} className={ui.entry}>
       <span>{t("pricing.stay.summary", { when: day, min: rules.minArrivalNights, max: rules.maxStayNights ?? t("pricing.stay.unlimited"), arrivals: t(rules.closedToArrival ? "pricing.stay.closed" : "pricing.stay.open"), departures: t(rules.closedToDeparture ? "pricing.stay.closed" : "pricing.stay.open"), sales: t(rules.stopSell ? "pricing.stay.stopped" : "pricing.stay.open") })}</span>
-      <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled} aria-label={t("pricing.stayDates.clearLabel", { date: day, label })} onClick={() => apply(day, null)}>{t("pricing.stayDates.clear")}</button>
+      <button type="button" className={ui.secondaryButton} disabled={disabled} aria-label={t("pricing.stayDates.clearLabel", { date: day, label })} onClick={() => apply(day, null)}>{t("pricing.stayDates.clear")}</button>
     </li>)}</ul>
-    {!entry ? <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => { if (disabled) return; setEntry(stayRuleInput(defaults)); setError(""); onPending(true); }}>{t("pricing.stayDates.add")}</button> : <>
+    {!entry ? <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={() => { if (disabled) return; setEntry(stayRuleInput(defaults)); setError(""); onPending(true); }}>{t("pricing.stayDates.add")}</button> : <>
       <p className="my-3">{t("pricing.stayDates.startingValues")}</p>
-      <label>{t("pricing.dateLabel")}<input aria-label={t("pricing.stayDates.dateInputLabel", { label })} className="mt-1 block w-40 rounded border px-3 py-2" value={date} disabled={disabled} onChange={(event) => { setDate(event.target.value); setError(""); }} /></label>
+      <label className={ui.fieldLabel}>{t("pricing.dateLabel")}<input aria-label={t("pricing.stayDates.dateInputLabel", { label })} className={`mt-1.5 block w-40 ${ui.field}`} value={date} disabled={disabled} onChange={(event) => { setDate(event.target.value); setError(""); }} /></label>
       <StayRuleFields entry={entry} label={t("pricing.stayDates.ruleLabel", { label })} disabled={disabled} onChange={(next) => { setEntry(next); setError(""); }} />
-      <div className="mt-3 flex gap-3"><button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => apply(date, entry)}>{t("pricing.stayDates.apply")}</button>
-        <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={cancel}>{t("pricing.stayDates.cancel")}</button></div>
+      <div className="flex flex-wrap gap-2"><button type="button" className={ui.secondaryButton} disabled={disabled} onClick={() => apply(date, entry)}>{t("pricing.stayDates.apply")}</button>
+        <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={cancel}>{t("pricing.stayDates.cancel")}</button></div>
       <p className="mt-2">{t("pricing.applyOrCancelEntry")}</p>
     </>}
-    {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
-  </details>;
+    {error && <p role="alert" className={ui.errorText}>{error}</p>}
+  </PricingSection>;
 }

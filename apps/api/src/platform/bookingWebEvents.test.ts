@@ -11,54 +11,42 @@ vi.mock("pg", () => ({
   },
 }));
 
-describe("affiliate click occurrence persistence", () => {
+describe("Booking Web funnel event persistence", () => {
   beforeEach(() => query.mockClear());
   const event = {
-    slug: "hotel",
-    referralCode: "A",
-    sessionId: "session",
-    requestId: "request",
-    occurredAt: new Date("2026-09-09T12:00:00Z"),
-    metadata: {},
+    propertyId: "11111111-1111-4111-8111-111111111111",
+    hotelSlug: "hotel",
+    eventType: "step_viewed",
+    eventId: "22222222-2222-4222-8222-222222222222",
+    sessionId: "33333333-3333-4333-8333-333333333333",
+    occurredAt: new Date("2026-10-15T12:00:00Z"),
+    userAgent: "Mozilla/5.0 Safari/605.1.15",
+    metadata: { funnelVersion: 1, funnelSequence: 2, step: "extras" },
   };
 
-  it("retains A → B → A while retrying the final click uses the same event and audit identity", async () => {
+  it("stores the event in its own table with no slug, request id or visitor traces (VAY-2212)", async () => {
     const sink = createPgBookingWebEventSink({ connectionString: "unused" });
-    for (const [referralCode, clickId, requestId] of [
-      ["A", "click-1", "request-1"],
-      ["B", "click-2", "request-2"],
-      ["A", "click-3", "request-3"],
-      ["A", "click-3", "retry-request"],
-    ]) {
-      await sink.recordAffiliateClick({ ...event, referralCode, clickId, requestId });
-    }
-    const values = query.mock.calls.map(([, values]) => values as unknown[]);
-    expect(new Set(values.map((v) => v[1])).size).toBe(3);
-    expect(values[2][1]).toBe(values[3][1]);
-    expect(query.mock.calls[0][0]).toContain("ON CONFLICT (source_system, event_key) DO NOTHING");
-    expect(query.mock.calls[0][0]).toContain("ON CONFLICT (product, audit_key) DO NOTHING");
-    const payloads = values.map((v) =>
-      v
-        .filter((x) => typeof x === "string" && x.startsWith("{"))
-        .map((x) => JSON.parse(x as string))
-        .find((x) => x.clickId),
-    );
-    expect(payloads.map((p) => [p.referralCode, p.clickId, p.sessionId])).toEqual([
-      ["A", "click-1", "session"],
-      ["B", "click-2", "session"],
-      ["A", "click-3", "session"],
-      ["A", "click-3", "session"],
+    await sink.recordTelemetryEvent(event);
+    expect(query).toHaveBeenCalledOnce();
+    const [statement, values] = query.mock.calls[0]! as [string, unknown[]];
+    expect(statement).toContain("INSERT INTO distribution.booking_web_events");
+    expect(statement).toContain("ON CONFLICT (property_id, event_id) DO NOTHING");
+    expect(statement).not.toMatch(/domain_events|product_audit_events/);
+    expect(values).toEqual([
+      event.propertyId,
+      "step_viewed",
+      event.eventId,
+      event.sessionId,
+      JSON.stringify(event.metadata),
+      event.occurredAt,
     ]);
+    expect(JSON.stringify(values)).not.toMatch(/hotel"|Safari|requestId|ipAddress|userAgent/);
   });
 
-  it("does not collapse callers without a click ID or collide across hotels/referrals", async () => {
+  it("stores nothing for bot traffic (VAY-2214)", async () => {
     const sink = createPgBookingWebEventSink({ connectionString: "unused" });
-    await sink.recordAffiliateClick(event);
-    await sink.recordAffiliateClick(event);
-    await sink.recordAffiliateClick({ ...event, clickId: "same" });
-    await sink.recordAffiliateClick({ ...event, clickId: "same", slug: "another-hotel" });
-    await sink.recordAffiliateClick({ ...event, clickId: "same", referralCode: "B" });
-    expect(new Set(query.mock.calls.map(([, values]) => values[1])).size).toBe(5);
+    await sink.recordTelemetryEvent({ ...event, userAgent: "Googlebot/2.1" });
+    expect(query).not.toHaveBeenCalled();
   });
 });
 

@@ -13,20 +13,12 @@ import {
   hasAuthenticatedSession,
   hasPlatformAccessMarker,
   isAuthKitLoginEnabled,
-  isCompatibilityTokenEnabled,
   setAuthKitSession,
-  setLegacyCompatibilityToken,
   type AuthKitSessionResponse,
 } from "./sessionStore";
 
 const PLATFORM_AUTH_SURFACE = "platform-admin";
 const AUTH_BROWSER_BASE_PATH = "/auth";
-
-type CompatibilityTokenResponse = {
-  accessToken: string;
-  expiresIn: number;
-  tokenType: "Bearer";
-};
 
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${AUTH_BROWSER_BASE_PATH}${endpoint}`, {
@@ -51,29 +43,6 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
   }
 
   return body as T;
-}
-
-async function attachMarketplaceCompatibilityToken(
-  csrfToken = getAuthCsrfToken(),
-  expectedGeneration?: number,
-): Promise<void> {
-  if (!csrfToken) return;
-
-  try {
-    const response = await authFetch<CompatibilityTokenResponse>(
-      "/compat/marketplace-admin-token",
-      {
-        method: "POST",
-        headers: { "x-vayada-csrf": csrfToken },
-      },
-    );
-    setLegacyCompatibilityToken(response.accessToken, response.expiresIn, expectedGeneration);
-  } catch (error) {
-    if (error instanceof ApiErrorResponse && error.status === 404) {
-      return;
-    }
-    throw error;
-  }
 }
 
 export const authService = {
@@ -102,11 +71,7 @@ export const authService = {
             signal,
           });
 
-    const committedGeneration = setAuthKitSession(response, expectedGeneration);
-    if (committedGeneration === null) return null;
-    if (isCompatibilityTokenEnabled()) {
-      await attachMarketplaceCompatibilityToken(response.csrfToken, committedGeneration);
-    }
+    if (setAuthKitSession(response, expectedGeneration) === null) return null;
     return response;
   },
 
@@ -136,10 +101,7 @@ export const authService = {
         ...(organizationId ? { organizationId } : {}),
       }),
     });
-    const committedGeneration = setAuthKitSession(response);
-    if (committedGeneration !== null && isCompatibilityTokenEnabled()) {
-      await attachMarketplaceCompatibilityToken(response.csrfToken, committedGeneration);
-    }
+    setAuthKitSession(response);
     return {
       id: response.user.id,
       email: response.user.email,

@@ -119,6 +119,11 @@ test("prepares, finalizes, and exports operational folios without invoice claims
   );
 
   await page.goto("/financials");
+  // Financials opens on its Dashboard tab; folios live in their own tab.
+  await page
+    .getByRole("tablist", { name: "Financials sections" })
+    .getByRole("tab", { name: "Folios" })
+    .click();
   await expect(page.getByRole("heading", { name: "Folios" })).toBeVisible();
   expect(
     (await new AxeBuilder({ page }).include('[data-testid="folios-workspace"]').analyze())

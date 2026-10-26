@@ -46,6 +46,15 @@ export function pendingEditFixture(capacity = 2) {
     async capturePaymentIntent() {
       throw new Error("Editing must never capture funds");
     },
+    async createRefund() {
+      throw new Error("Editing must never refund");
+    },
+    async listRefunds() {
+      throw new Error("Editing must never refund");
+    },
+    async retrieveRefund() {
+      throw new Error("Editing must never refund");
+    },
     async cancelPaymentIntent(id) {
       const intent = intents.get(id)!;
       intent.status = "canceled";

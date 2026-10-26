@@ -1,4 +1,5 @@
 import {
+  QuoteRoomsSoldOutError,
   reservePmsQuoteInventory,
   reservePmsInventoryInTransaction,
 } from "./pmsInventoryReservationLifecycleRepository.js";
@@ -30,7 +31,6 @@ import {
   createPgPmsInventoryMaterializationRepository,
   type PmsInventoryMaterializationRepository,
 } from "./pmsInventoryMaterializationRepository.js";
-import { PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS } from "./pmsInventoryPublicOfferProjection.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
@@ -54,7 +54,7 @@ type Fixture = Readonly<{
   configuration: PmsOperatingCalendarConfigurationSnapshot;
   calendarState: { stale: boolean };
   capacityState: { revision: number; count: number };
-  profileState: { available: boolean; revision: number };
+  profileState: { available: boolean; revision: number; timeZone: string | null };
   authorizationState: { allowed: boolean };
   authorize: ReturnType<typeof vi.fn>;
   materialization: PmsInventoryMaterializationRepository;
@@ -132,6 +132,45 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
       await expect(
         reservePmsQuoteInventory(client, { ...input, rooms: input.rooms.slice(0, 1) }, fresh),
       ).rejects.toThrow("Quote inventory is unavailable");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await pool.end();
+    }
+  });
+
+  // VAY-2320: the guest is told which room another booking took, and nothing is held.
+  it("names the room type another quote took the last rooms of", async () => {
+    const f = await currentFixture();
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL }),
+      client = await pool.connect();
+    const stay = { ...f, checkIn: "2026-08-04", checkOut: "2026-08-06" };
+    try {
+      await client.query("BEGIN");
+      await reservePmsQuoteInventory(
+        client,
+        {
+          ...stay,
+          quoteId: randomUUID(),
+          rooms: [{ roomTypeId: f.roomTypeId }, { roomTypeId: f.roomTypeId }],
+        },
+        async () => {},
+      );
+      await client.query("COMMIT");
+      const before = await sideEffectCounts(admin, f.propertyId);
+      await client.query("BEGIN");
+      const late = await reservePmsQuoteInventory(
+        client,
+        { ...stay, quoteId: randomUUID(), rooms: [{ roomTypeId: f.roomTypeId }] },
+        async () => {},
+      ).catch((error: unknown) => error);
+      expect(late).toBeInstanceOf(QuoteRoomsSoldOutError);
+      expect(late).toMatchObject({
+        message: "Quote inventory is unavailable",
+        roomTypeIds: [f.roomTypeId],
+      });
+      await client.query("COMMIT");
+      expect(await sideEffectCounts(admin, f.propertyId)).toEqual(before);
     } finally {
       await client.query("ROLLBACK");
       client.release();
@@ -283,10 +322,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
                 })),
               }
             : command;
+      // Only the time zone of the hotel profile matters to the calendar (VAY-2150).
       if (reason === "profile")
-        await admin.query("UPDATE hotel_catalog.properties SET profile_revision=2 WHERE id=$1", [
-          f.propertyId,
-        ]);
+        await admin.query(
+          "UPDATE hotel_catalog.property_locations SET timezone='Asia/Kolkata' WHERE property_id=$1",
+          [f.propertyId],
+        );
       if (reason === "rate gate")
         await admin.query(
           "UPDATE pms.inventory_days SET rate_gate_open=false,inventory_revision=inventory_revision+1,generated_pricing_source_fingerprint=repeat('b',64) WHERE property_id=$1",
@@ -329,7 +370,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
   );
 
   it.each([false, true])(
-    "amends and cancels a handed-off direct PMS stay (linked=%s) without retaining historical capacity",
+    "refuses to move and then cancels a handed-off old-format direct PMS stay (linked=%s) without retaining capacity",
     async (linked) => {
       const f = await createFixture(admin, closeables, { capacity: 1, startingLimit: 1, linked });
       if (linked) {
@@ -357,17 +398,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
       );
       const port = createTargetPmsInventoryReservationPort();
       const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
-      let failAfterAmendment = true;
       const actions = createBookingHostActions({
         pool,
         inventory: withPmsHostDateCredit(port),
-        guards: {
-          ...targetBookingHostActionGuards,
-          async completeDateEdit(client, input) {
-            await targetBookingHostActionGuards.completeDateEdit(client, input);
-            if (failAfterAmendment) throw new Error("Simulated post-amendment failure");
-          },
-        },
+        guards: targetBookingHostActionGuards,
         now: () => ACCEPTED_AT,
       });
       closeables.push(actions);
@@ -443,81 +477,36 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
         ).rows[0].lifecycle_state,
       ).toBe("handed_off");
       const scope = { propertyId: f.propertyId, bookingId, actorUserId: f.actorUserId };
-      const preview = await actions.preview(scope, {
-        action: "edit_dates",
-        reason: "Guest request",
-        checkIn: "2026-09-13",
-        checkOut: "2026-09-15",
+      // The checkout that priced bookings made before pricing v2 is retired, so their dates can't
+      // be repriced: the change is refused with a reason and nothing moves (VAY-2110). Pricing-v2
+      // date moves are covered in pricingInventoryAdoption.postgres.test.ts.
+      await expect(
+        actions.preview(scope, {
+          action: "edit_dates",
+          reason: "Guest request",
+          checkIn: "2026-09-13",
+          checkOut: "2026-09-15",
+        }),
+      ).rejects.toMatchObject({
+        code: "inventory_unavailable",
+        message: "The dates of this booking can't be changed online. Cancel and rebook it instead.",
       });
-      expect(preview.impact.cancellationPolicy).toMatchObject({
-        previousDeadline: "2026-09-05",
-        newDeadline: "2026-09-06",
-      });
-      await expect(actions.apply(scope, preview.previewId, "host-edit")).rejects.toThrow(
-        "Simulated post-amendment failure",
-      );
       expect(
         (
           await admin.query(
-            `SELECT check_in::text,room_id::text FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
+            `SELECT check_in::text,room_id::text,assignment_status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
             [bookingId],
           )
         ).rows[0],
-      ).toEqual({ check_in: "2026-09-12", room_id: roomId });
+      ).toEqual({ check_in: "2026-09-12", room_id: roomId, assignment_status: "pending" });
       expect(
         (
           await admin.query(
-            `SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1 AND payload->>'triggerRefId'=$2`,
-            [f.propertyId, preview.previewId],
+            `SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 ORDER BY stay_date`,
+            [f.propertyId, f.roomTypeId],
           )
-        ).rows[0].count,
-      ).toBe(0);
-      failAfterAmendment = false;
-      await actions.apply(scope, preview.previewId, "host-edit");
-      const effects = await admin.query(
-        `SELECT destination,payload->'dateRange' AS range FROM platform.outbox_events WHERE property_id=$1 AND payload->>'triggerRefId'=$2`,
-        [f.propertyId, preview.previewId],
-      );
-      for (const destination of [
-        "pms.channel-manager",
-        "distribution.public-bookability",
-        "pms.calendar-projection",
-      ]) {
-        expect(effects.rows).toContainEqual({
-          destination,
-          range: { from: "2026-09-12", to: "2026-09-13" },
-        });
-      }
-      if (linked)
-        expect((await linkedState(admin, f.propertyId, f.linkedRoomTypeId!)).available).toEqual([
-          1, 0, 0, 1,
-        ]);
-
-      const days = await admin.query(
-        `SELECT stay_date::text,assigned_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 ORDER BY stay_date`,
-        [f.propertyId, f.roomTypeId],
-      );
-      expect(days.rows.map((row) => row.assigned_count)).toEqual([0, 1, 1, 0]);
-      expect(
-        (
-          await admin.query(
-            `SELECT count(*)::int AS count FROM pms.active_inventory_reservation_receipts WHERE property_id=$1`,
-            [f.propertyId],
-          )
-        ).rows[0].count,
-      ).toBe(1);
-      expect(
-        (
-          await admin.query(
-            `SELECT check_in::text,check_out::text,assignment_status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
-            [bookingId],
-          )
-        ).rows[0],
-      ).toMatchObject({
-        check_in: "2026-09-13",
-        check_out: "2026-09-15",
-        assignment_status: "pending",
-      });
+        ).rows.map((row) => row.assigned_count),
+      ).toEqual([1, 1, 0, 0]);
       const cancellation = await actions.preview(scope, {
         action: "cancel",
         reason: "Host unavailable",
@@ -539,6 +528,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
           )
         ).rows[0].assignment_status,
       ).toBe("canceled");
+      if (linked)
+        expect((await linkedState(admin, f.propertyId, f.linkedRoomTypeId!)).available).toEqual([
+          1, 1, 1, 1,
+        ]);
     },
   );
 
@@ -790,70 +783,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
       outbox: 2,
       receipts: 1,
     });
-  });
-
-  it("projects positive preserved inventory as zero while its rate gate is closed", async () => {
-    const fixture = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
-    await materialize(fixture, "2026-08-04", "2026-08-04");
-    await admin.query(
-      `INSERT INTO hotel_catalog.property_locations (property_id,timezone)
-       VALUES ($1::uuid,'Europe/Berlin')`,
-      [fixture.propertyId],
-    );
-    await admin.query(
-      `INSERT INTO pms.property_pricing_settings (property_id,currency)
-       VALUES ($1::uuid,'EUR')`,
-      [fixture.propertyId],
-    );
-    await admin.query(
-      `INSERT INTO pms.rate_plans (
-         id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency,active,
-         cancellation_policy_snapshot,pricing_contract_version,flexible_rate_plan_revision,
-         source_room_facts_revision,source_pricing_currency_revision
-       ) VALUES ($1::uuid,$2::uuid,$3::uuid,'flexible','Flexible','flexible',100,'EUR',TRUE,
-         '{"type":"free_until_days_before_arrival","freeCancellationDeadlineDays":1,
-           "afterDeadlinePenalty":"full_booking_amount","noShowPenalty":"full_booking_amount"}'::jsonb,
-         'pms-pricing.v1',1,1,1)`,
-      [randomUUID(), fixture.propertyId, fixture.roomTypeId],
-    );
-    await admin.query(
-      `INSERT INTO hotel_catalog.property_public_profile_read_model (
-         property_id,public_id,display_name,canonical_slug,default_locale,
-         supported_locales,profile_status
-       ) VALUES ($1::uuid,$2,'Rate-gated Hotel',$2,'en',ARRAY['en'],'complete')`,
-      [fixture.propertyId, `rate-gated-${fixture.propertyId}`],
-    );
-    await admin.query(
-      `INSERT INTO distribution.public_hotel_bookability_profiles (
-         property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,
-         default_currency,supported_currencies,profile_status,freshness_status,
-         public_setup_completeness
-       ) VALUES ($1::uuid,$2,$2,'https://booking.example.test/'||$2,
-         'https://booking.example.test','Europe/Berlin','EUR',ARRAY['EUR'],'public','fresh',
-         '{"status":"ready"}'::jsonb)`,
-      [fixture.propertyId, `rate-gated-${fixture.propertyId}`],
-    );
-    await admin.query(
-      `UPDATE pms.inventory_days
-       SET inventory_revision=inventory_revision+1,
-           generated_pricing_source_fingerprint=$3,
-           rate_gate_open=FALSE
-       WHERE property_id=$1::uuid AND room_type_id=$2::uuid`,
-      [fixture.propertyId, fixture.roomTypeId, "b".repeat(64)],
-    );
-
-    await admin.query(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS, [
-      fixture.propertyId,
-      ACCEPTED_AT.toISOString(),
-    ]);
-    expect(
-      await admin.query(
-        `SELECT available_rooms AS available, sellable_publicly AS sellable,
-                availability_status AS status
-         FROM distribution.public_room_offer_snapshots WHERE property_id=$1::uuid`,
-        [fixture.propertyId],
-      ),
-    ).toMatchObject({ rows: [{ available: 0, sellable: false, status: "closed" }] });
   });
 
   it("advances canonical revisions and consumes each public booking release once", async () => {
@@ -1685,7 +1614,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
 
     const staleProfile = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
     await materialize(staleProfile, "2026-08-04", "2026-08-04");
-    staleProfile.profileState.revision = 2;
+    // Only a new time zone makes the hotel profile stale for the calendar (VAY-2150).
+    staleProfile.profileState.timeZone = "Asia/Kolkata";
     await expect(
       staleProfile.reservation.reserveInventory(
         await reserveCommand(admin, staleProfile, "stale-profile", 1, "2026-08-04"),
@@ -2128,7 +2058,7 @@ async function createFixture(
 
   const calendarState = { stale: false };
   const capacityState = { revision: 1, count: options.capacity };
-  const profileState = { available: true, revision: 1 };
+  const profileState = { available: true, revision: 1, timeZone: null as string | null };
   const authorizationState = { allowed: true };
   const operatingCalendar: PmsOperatingCalendarReadPort = {
     async getCurrentOperatingCalendarConfiguration(requestedPropertyId) {
@@ -2166,7 +2096,7 @@ async function createFixture(
   const propertyProfileEvidence: PmsOperatingCalendarPropertyProfileEvidencePort = {
     ownerDomain: "hotel_catalog",
     registryVersion: "test.v1",
-    isCanonicalIanaTimeZone: (value) => value === "Europe/Berlin",
+    isCanonicalIanaTimeZone: (value) => value === "Europe/Berlin" || value === "Asia/Kolkata",
     async runWithPropertyProfileEvidence(_input, guarded) {
       const source = {
         ownerDomain: "hotel_catalog" as const,
@@ -2178,7 +2108,11 @@ async function createFixture(
         profileState.available
           ? {
               status: "available",
-              evidence: { source, timeZone: configuration.sourceInputs.propertyTimeZone },
+              evidence: {
+                source,
+                timeZone: (profileState.timeZone ??
+                  configuration.sourceInputs.propertyTimeZone) as never,
+              },
             }
           : { status: "timezone_missing", source },
       );

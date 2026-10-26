@@ -190,10 +190,13 @@ jobs:
 
       - name: Pull the BuildKit image with retries
         run: |
-          # ECR Public throttles anonymous pulls ("Rate exceeded") when the matrix jobs start together.
-          # Buildx falls back to this local copy when its own pull is throttled.
+          # Our public GHCR copy of moby/buildkit (vayada-platform "Mirror CI images", VAY-2258):
+          # anonymous ECR Public and Docker Hub pulls fail with "toomanyrequests" on shared runners.
+          # It and the Dockerfile base images are pinned to the upstream digest, so a republished
+          # mirror tag cannot change what we build; bump the digests by hand after a mirror refresh.
+          # Retried here because a registry can still throttle; setup-buildx below pulls it once more.
           for attempt in 1 2 3 4 5 6; do
-            docker pull --quiet public.ecr.aws/vend/moby/buildkit:buildx-stable-1 >/dev/null && exit 0
+            docker pull --quiet ghcr.io/vayada-marketplace/ci-buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea >/dev/null && exit 0
             echo "BuildKit pull failed (attempt ${attempt}); retrying" >&2
             sleep $((attempt * 10))
           done
@@ -202,8 +205,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
-          # Docker Hub rate-limits anonymous pulls of the BuildKit image.
-          driver-opts: image=public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+          # The GHCR copy pulled above; Docker Hub and ECR Public rate-limit the BuildKit image.
+          driver-opts: image=ghcr.io/vayada-marketplace/ci-buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
       - name: Build and push immutable service image
         env:
@@ -240,7 +243,6 @@ jobs:
                 --build-arg "NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${NEXT_API_URL}"
                 --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
                 --build-arg NEXT_PUBLIC_BOOKING_ADMIN_URL=https://next-booking-admin.vayada.com
-                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
                 --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
                 --build-arg NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED=true
                 --build-arg NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false
@@ -265,21 +267,8 @@ jobs:
                 --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
                 --build-arg "NEXT_PUBLIC_PMS_URL=${NEXT_API_URL}"
                 --build-arg NEXT_PUBLIC_PMS_FRONTEND_URL=https://next-pms.vayada.com
-                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
                 --build-arg 'NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com'
-              )
-              ;;
-            next-marketplace-frontend)
-              build_args+=(
-                --build-arg "NEXT_PUBLIC_API_URL=${NEXT_API_URL}"
-                --build-arg "NEXT_PUBLIC_AUTH_API_URL=${NEXT_API_URL}"
-                --build-arg "NEXT_PUBLIC_VAYADA_API_URL=${NEXT_API_URL}"
-                --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
-                --build-arg "NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${NEXT_API_URL}"
-                --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
-                --build-arg NEXT_PUBLIC_PMS_URL=https://next-pms.vayada.com
-                --build-arg NEXT_PUBLIC_BOOKING_ADMIN_URL=https://next-booking-admin.vayada.com
-                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
+                --build-arg NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED=true
               )
               ;;
             next-marketplace-admin)
@@ -295,11 +284,12 @@ jobs:
                 --build-arg "NEXT_PUBLIC_PMS_URL=${NEXT_API_URL}"
                 --build-arg "NEXT_PUBLIC_PMS_API_URL=${NEXT_API_URL}"
                 --build-arg 'NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com'
+                --build-arg NEXT_PUBLIC_PMS_FRONTEND_URL=https://next-pms.vayada.com
               )
               ;;
             *) echo "::error::Unknown managed service $SERVICE"; exit 1 ;;
           esac
-          # Base images come from ECR Public, which throttles anonymous pulls. Retry only on that error.
+          # Base images come from our GHCR mirror (VAY-2258). Retry only if a registry throttles anyway.
           for attempt in 1 2 3; do
             if docker buildx build \
               --platform linux/amd64 \
@@ -371,7 +361,7 @@ jobs:
           path: release-work/images
           merge-multiple: true
 
-      - name: Assemble complete six-service manifest
+      - name: Assemble complete five-service manifest
         run: |
           set -euo pipefail
           mkdir -p release-work/images release-work/candidate

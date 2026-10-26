@@ -1,7 +1,7 @@
 "use client";
 import { useTranslation } from "@/lib/i18n";
 
-import { COLOR_PRESETS } from "@/lib/constants/branding";
+import { COLOR_PRESETS, isTooLightBrandColor } from "@/lib/constants/branding";
 
 interface ColorsTabProps {
   primaryColor: string;
@@ -11,6 +11,7 @@ interface ColorsTabProps {
 
 export default function ColorsTab({ primaryColor, setPrimaryColor, applyPreset }: ColorsTabProps) {
   const { t } = useTranslation();
+  const tooLight = isTooLightBrandColor(primaryColor);
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <h2 className="text-[13px] font-semibold text-gray-900">{t("designStudio.colors.title")}</h2>
@@ -40,11 +41,18 @@ export default function ColorsTab({ primaryColor, setPrimaryColor, applyPreset }
             <input
               type="text"
               aria-label={t("admin.primaryBrandColor")}
+              aria-invalid={tooLight}
+              aria-describedby={tooLight ? "primary-color-too-light" : undefined}
               value={primaryColor}
               onChange={(e) => setPrimaryColor(e.target.value)}
               className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
           </div>
+          {tooLight && (
+            <p id="primary-color-too-light" className="mt-1.5 text-[11px] text-amber-700">
+              {t("designStudio.colors.tooLight")}
+            </p>
+          )}
         </div>
 
         <div>

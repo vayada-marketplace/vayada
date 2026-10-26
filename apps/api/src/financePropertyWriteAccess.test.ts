@@ -247,7 +247,7 @@ const denials: Array<[string, (s: State) => void, number?]> = [
   ],
   ["inactive membership", (s) => (s.context.membership.status = "inactive"), 401],
   ["inactive organization", (s) => (s.context.selectedOrganization.status = "suspended"), 401],
-  ["wrong organization kind", (s) => (s.context.selectedOrganization.kind = "creator_workspace")],
+  ["wrong organization kind", (s) => (s.context.selectedOrganization.kind = "platform")],
   [
     "all without canonical link",
     (s) => {

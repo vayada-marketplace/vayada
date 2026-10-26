@@ -22,7 +22,7 @@ The scope is:
 
 - payment settings and cancellation policy used by PMS Web and Booking checkout;
 - invoices, manual payments, payment ledger reads, and CSV export;
-- property and affiliate payouts;
+- property payouts;
 - Stripe Connect and Xendit onboarding;
 - payment, payout, and provider-account reconciliation views;
 - the F1a bridge between PMS checkout-charge `mark-paid` and Finance settlement;
@@ -51,29 +51,24 @@ they are documented here and covered by fixtures.
 | Public checkout payment capability projection                                                                                                   | Finance source, Booking/distribution facade                | Public responses may expose enabled methods and policy summaries only. No provider account IDs, bank details, or secrets. |
 | PMS checkout charge operational state                                                                                                           | PMS operations (`domain-pms`)                              | PMS owns create/waive/mark-paid operational status, not settlement or provider effects.                                   |
 | Guest booking lifecycle and guest PII                                                                                                           | Booking/checkout (`domain-booking`)                        | Finance links to `guestBookingId`; Booking owns booking status and guest PII validation/retention.                        |
-| Affiliate identity, referral code, public registration, attribution                                                                             | Marketplace/affiliate                                      | Per VAY-768 and VAY-774, Booking Web affiliate routes are facades. Finance owns Stripe/Xendit payout onboarding only.     |
-| Affiliate payout accounts, payout ledger, payout dispatch                                                                                       | Finance with marketplace/affiliate resource links          | Marketplace/affiliate supplies affiliate identity/resource ownership. Finance owns provider account and settlement state. |
 | Provider webhook receipts, jobs, retries, dead letters, audit                                                                                   | `backend-events` and `backend-audit` with Finance handlers | Follows `jobs-events-contract.md` and `channex-webhook-cutover-plan.md`.                                                  |
 
-Finance routes must not open legacy Booking, PMS, or Marketplace database pools
-as normal runtime integration. Temporary compatibility adapters may map target
-`propertyId`, `organizationId`, or `affiliateId` to legacy IDs during a slice,
-but route contracts use canonical target IDs and do not expose legacy table
-names.
+Finance routes must not open legacy Booking or PMS database pools as normal
+runtime integration. Temporary compatibility adapters may map target
+`propertyId` or `organizationId` to legacy IDs during a slice, but route
+contracts use canonical target IDs and do not expose legacy table names.
 
 ## Authorization
 
 All protected routes must use `enforceRoutePolicy` at the route boundary.
 
-| Route family                  | Permission                 | Entitlement                                                                   | Resource link                                                         | Allowed relationships                  |
-| ----------------------------- | -------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------- |
-| Property finance reads        | `pms.finance.read`         | active `pms:property-management` or active direct-booking finance entitlement | `pms_property` or canonical `property` with `resourceId = propertyId` | `owner`, `operator`, `finance_manager` |
-| Property finance writes       | `pms.finance.manage`       | active finance-capable property entitlement                                   | `pms_property` or canonical `property` with `resourceId = propertyId` | `owner`, `finance_manager`             |
-| Property onboarding           | `pms.finance.manage`       | active finance-capable property entitlement                                   | `pms_property` or canonical `property` with `resourceId = propertyId` | `owner`, `finance_manager`             |
-| Affiliate payout reads/writes | `affiliate.payout.manage`  | active affiliate entitlement                                                  | `affiliate` with `resourceId = affiliateId`                           | `owner`, `finance_manager`             |
-| Platform finance reads        | `platform.finance.read`    | active platform entitlement                                                   | platform organization scope                                           | `platform_admin`, `finance_manager`    |
-| Platform finance writes       | `platform.finance.manage`  | active `platform:finance-admin` entitlement                                   | `platform:platform:vayada`                                            | `platform_admin`, `finance_manager`    |
-| Marketplace finance reads     | `marketplace.finance.read` | active marketplace entitlement                                                | marketplace organization scope                                        | `owner`, `finance_manager`             |
+| Route family            | Permission                | Entitlement                                                                   | Resource link                                                         | Allowed relationships                  |
+| ----------------------- | ------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------- |
+| Property finance reads  | `pms.finance.read`        | active `pms:property-management` or active direct-booking finance entitlement | `pms_property` or canonical `property` with `resourceId = propertyId` | `owner`, `operator`, `finance_manager` |
+| Property finance writes | `pms.finance.manage`      | active finance-capable property entitlement                                   | `pms_property` or canonical `property` with `resourceId = propertyId` | `owner`, `finance_manager`             |
+| Property onboarding     | `pms.finance.manage`      | active finance-capable property entitlement                                   | `pms_property` or canonical `property` with `resourceId = propertyId` | `owner`, `finance_manager`             |
+| Platform finance reads  | `platform.finance.read`   | active platform entitlement                                                   | platform organization scope                                           | `platform_admin`, `finance_manager`    |
+| Platform finance writes | `platform.finance.manage` | active `platform:finance-admin` entitlement                                   | `platform:platform:vayada`                                            | `platform_admin`, `finance_manager`    |
 
 Public Booking Web payment capability routes are not admin finance routes. They
 must use public hotel/profile resolution, expose only public-safe payment
@@ -106,30 +101,23 @@ Canonical target routes live under `/api/finance`. Existing PMS Web and Booking
 Web adapters may expose compatibility paths while frontends migrate, but those
 facades must call the Finance-owned route/service contract.
 
-| Surface                           | Method      | Canonical path                                                                              | Compatibility facade                                                                               |
-| --------------------------------- | ----------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Payment settings                  | `GET/PATCH` | `/api/finance/properties/:propertyId/payment-settings`                                      | `/api/pms/properties/:propertyId/payment-settings`, public Booking Web capability read             |
-| Cancellation policy               | `GET/PATCH` | `/api/finance/properties/:propertyId/cancellation-policy`                                   | bundled in legacy PMS payment-settings response during migration                                   |
-| Financial summary                 | `GET`       | `/api/finance/properties/:propertyId/summary`                                               | `/api/pms/properties/:propertyId/financials/summary`                                               |
-| Invoices list                     | `GET`       | `/api/finance/properties/:propertyId/invoices`                                              | `/api/pms/properties/:propertyId/financials/invoices`                                              |
-| Invoice CSV export                | `GET`       | `/api/finance/properties/:propertyId/invoices/export.csv`                                   | PMS financials export facade                                                                       |
-| Invoice detail                    | `GET`       | `/api/finance/properties/:propertyId/invoices/:invoiceId`                                   | legacy booking-id lookup facade                                                                    |
-| Manual payment record             | `POST`      | `/api/finance/properties/:propertyId/invoices/:invoiceId/payments`                          | PMS record-payment modal facade                                                                    |
-| Payment ledger                    | `GET`       | `/api/finance/properties/:propertyId/payments`                                              | `/api/pms/properties/:propertyId/financials/payments`                                              |
-| Payouts                           | `GET`       | `/api/finance/properties/:propertyId/payouts`                                               | legacy `/admin/payouts` facade                                                                     |
-| Affiliate payouts                 | `GET`       | `/api/finance/affiliates/:affiliateId/payouts`                                              | affiliate-dashboard payout ledger                                                                  |
-| Platform affiliate payout list    | `GET`       | `/api/finance/platform/affiliate-payouts`                                                   | Platform Admin only; no legacy client                                                              |
-| Platform affiliate payout detail  | `GET`       | `/api/finance/platform/affiliate-payouts/:affiliateId`                                      | Platform Admin only; requires `currency`                                                           |
-| Platform affiliate mark paid      | `POST`      | `/api/finance/platform/affiliate-payouts/:affiliateId/mark-paid`                            | Platform Admin only; target Finance command                                                        |
-| Stripe Connect property account   | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/stripe`                              | legacy `/admin/stripe/connect-account` facade                                                      |
-| Stripe Connect onboarding link    | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/:providerAccountId/onboarding-link`  | legacy GET facade may call this command                                                            |
-| Stripe post-return reconciliation | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/stripe/reconcile`                    | target-only repair command; production callback ownership remains with legacy until VAY-947        |
-| Xendit bank validation            | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/xendit/bank-validation`              | legacy `/admin/xendit/validate-bank-account` facade                                                |
-| Xendit payout reconciliation      | `POST`      | `/api/finance/properties/:propertyId/reconciliation/xendit-payouts`                         | legacy manual reconcile facade                                                                     |
-| Reconciliation views              | `GET`       | `/api/finance/properties/:propertyId/reconciliation/*`                                      | none required before F1 reads                                                                      |
-| Affiliate payout provider account | `POST`      | `/api/finance/affiliates/:affiliateId/provider-accounts/stripe`                             | Booking Web public affiliate facade may call through finance after marketplace identity resolution |
-| Affiliate onboarding link         | `POST`      | `/api/finance/affiliates/:affiliateId/provider-accounts/:providerAccountId/onboarding-link` | Booking Web public affiliate facade returns only `onboardingUrl`                                   |
-| Affiliate payout settings         | `GET/PATCH` | `/api/finance/affiliates/:affiliateId/payout-settings`                                      | affiliate-dashboard route after AuthKit                                                            |
+| Surface                           | Method      | Canonical path                                                                             | Compatibility facade                                                                        |
+| --------------------------------- | ----------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Payment settings                  | `GET/PATCH` | `/api/finance/properties/:propertyId/payment-settings`                                     | `/api/pms/properties/:propertyId/payment-settings`, public Booking Web capability read      |
+| Cancellation policy               | `GET/PATCH` | `/api/finance/properties/:propertyId/cancellation-policy`                                  | bundled in legacy PMS payment-settings response during migration                            |
+| Financial summary                 | `GET`       | `/api/finance/properties/:propertyId/summary`                                              | `/api/pms/properties/:propertyId/financials/summary`                                        |
+| Invoices list                     | `GET`       | `/api/finance/properties/:propertyId/invoices`                                             | `/api/pms/properties/:propertyId/financials/invoices`                                       |
+| Invoice CSV export                | `GET`       | `/api/finance/properties/:propertyId/invoices/export.csv`                                  | PMS financials export facade                                                                |
+| Invoice detail                    | `GET`       | `/api/finance/properties/:propertyId/invoices/:invoiceId`                                  | legacy booking-id lookup facade                                                             |
+| Manual payment record             | `POST`      | `/api/finance/properties/:propertyId/invoices/:invoiceId/payments`                         | PMS record-payment modal facade                                                             |
+| Payment ledger                    | `GET`       | `/api/finance/properties/:propertyId/payments`                                             | `/api/pms/properties/:propertyId/financials/payments`                                       |
+| Payouts                           | `GET`       | `/api/finance/properties/:propertyId/payouts`                                              | legacy `/admin/payouts` facade                                                              |
+| Stripe Connect property account   | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/stripe`                             | legacy `/admin/stripe/connect-account` facade                                               |
+| Stripe Connect onboarding link    | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/:providerAccountId/onboarding-link` | legacy GET facade may call this command                                                     |
+| Stripe post-return reconciliation | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/stripe/reconcile`                   | target-only repair command; production callback ownership remains with legacy until VAY-947 |
+| Xendit bank validation            | `POST`      | `/api/finance/properties/:propertyId/provider-accounts/xendit/bank-validation`             | legacy `/admin/xendit/validate-bank-account` facade                                         |
+| Xendit payout reconciliation      | `POST`      | `/api/finance/properties/:propertyId/reconciliation/xendit-payouts`                        | legacy manual reconcile facade                                                              |
+| Reconciliation views              | `GET`       | `/api/finance/properties/:propertyId/reconciliation/*`                                     | none required before F1 reads                                                               |
 
 GET routes use `limit` and `offset` where list-like. `limit` defaults to `50`
 and clamps to `[1, 500]`. Sort order must be stable and documented by fixture.
@@ -355,9 +343,9 @@ generation must be a durable job.
 
 ## Payouts
 
-Property and affiliate payouts are finance-owned. Payout reads must expose
-provider status and retry/disposition state without returning destination
-account numbers or provider secrets.
+Property payouts are finance-owned. Payout reads must expose provider status
+and retry/disposition state without returning destination account numbers or
+provider secrets.
 
 <!-- prettier-ignore -->
 ```ts
@@ -395,142 +383,12 @@ Payout dispatch and polling must run through target jobs after the matching
 legacy scheduler jobs are frozen. Route handlers may enqueue a target job but
 must not send provider transfers inline.
 
-Affiliate payout settings and payout reads are finance-owned after
-Marketplace/affiliate resolves the affiliate resource. Marketplace/affiliate
-remains the identity owner for referral codes, commission terms, and affiliate
-profile fields; Finance owns provider account, destination validation, payout
-schedule, tax/payment metadata, and settlement state.
-
-```ts
-type AffiliatePayoutSettingsResponse = {
-  contractVersion: "finance-route-contracts.v1";
-  affiliateId: string;
-  marketplaceOrganizationId: string | null;
-  payoutSettings: {
-    payoutsEnabled: boolean;
-    payoutProvider: "stripe" | "manual" | "bank_transfer";
-    payoutCurrency: FinanceCurrencyCode;
-    payoutSchedule: "manual" | "monthly" | "threshold";
-    payoutThresholdAmount: FinanceDecimalAmount | null;
-    providerAccount: {
-      providerAccountId: string | null;
-      provider: "stripe" | "manual" | "bank_transfer" | null;
-      status: "setup_incomplete" | "pending" | "active" | "restricted" | "suspended" | "disabled";
-      onboardingStatus: "not_started" | "invited" | "in_review" | "completed" | "requires_action";
-      payoutsEnabled: boolean;
-    };
-    sourceFreshness: Record<string, string | number | boolean | null>;
-  };
-};
-
-type AffiliatePayoutSettingsPatch = {
-  commandId: string;
-  idempotencyKey: string;
-  payoutsEnabled?: boolean;
-  payoutProvider?: "stripe" | "manual" | "bank_transfer";
-  payoutCurrency?: FinanceCurrencyCode;
-  payoutSchedule?: "manual" | "monthly" | "threshold";
-  payoutThresholdAmount?: FinanceDecimalAmount | null;
-};
-
-type AffiliatePayoutLedgerResponse = {
-  contractVersion: "finance-route-contracts.v1";
-  affiliateId: string;
-  payouts: FinancePayout[];
-  total: number;
-  limit: number;
-  offset: number;
-  sourceFreshness: Record<string, string | number | boolean | null>;
-};
-```
-
-The integrated Marketplace creator surface resolves one active `creator_profile`
-and one active `affiliate` resource from the same `creator_workspace`. Finance
-then scopes every settings, payout-detail, and statement read to that exact
-organization and affiliate pair. The creator-facing detail contains the payout
-amounts/status plus its immutable `affiliate_earning_allocation_items`, with
-the earning currency, commission, adjustment, applied amount, property, and
-masked booking/provider references. It never promotes an unallocated eligible
-earning to paid.
-
-`GET /api/marketplace/affiliate-payouts/:payoutId/statement?currency=EUR`
-returns a UTF-8 CSV for one authorized payout. Currency is required and must
-match the payout. The export repeats no raw destination, provider account,
-provider payout, bank account, guest, or payment-evidence identifier. Empty,
-cross-organization, cross-affiliate, cross-currency, and unknown payout scopes
-return `404` so the route does not disclose their existence.
-
-Marketplace payout-setting and Stripe-onboarding commands reuse the accepted
-Finance commands and idempotency keys. The server derives organization and
-affiliate scope from the authenticated creator workspace; the browser cannot
-select either scope.
-
-Affiliate payout settings responses must not include referral-code ownership
-fields, raw bank account numbers, provider secrets, or marketplace profile PII.
-
-### Platform Admin affiliate payout evidence
-
-The Platform Admin list and detail routes expose Finance-owned payout facts
-grouped by affiliate and currency. They may include the affiliate resource ID,
-linked organization ID, effective payout method, ledger totals, payout state,
-retry state, affiliate lifecycle status, and immutable payment-evidence history.
-Lifecycle changes do not hide Finance liabilities or history. Affiliate names, contact
-details, referral codes, commission management, and raw payout destinations
-remain outside this contract.
-
-`POST /api/finance/platform/affiliate-payouts/:affiliateId/mark-paid` records an
-already-completed external manual or bank-transfer payment. The request has the
-following exact shape:
-
-```ts
-type PlatformAffiliatePayoutMarkPaidRequest = {
-  commandId: string;
-  idempotencyKey: string;
-  currency: FinanceCurrencyCode;
-  payoutIds: string[];
-  expectedAmount: FinanceDecimalAmount;
-  paymentMethod: "manual" | "bank_transfer";
-  externalReference: string;
-  evidenceReference: string;
-  paidAt: FinanceUtcDateTime;
-  note?: string | null;
-};
-```
-
-The command applies only to the exact payout IDs and aggregate amount reviewed
-in the detail response. Every row must still be `pending` or `scheduled` in the
-requested currency with no provider payout ID, and its effective payout method
-must be `manual` or `bank_transfer`. A changed row set or amount returns
-`409 stale_payout_snapshot`; `processing`, `failed`,
-provider-dispatched, paid, canceled, and reversed payouts are never overridden
-by this route. A single command cannot span currencies.
-
-The Finance transaction must lock the eligible payout rows, reserve the
-idempotency key, insert append-only evidence and payout-item snapshots, update
-the payout ledger, cancel any still-pending dispatcher jobs for the affected
-payouts, append a product audit event, and complete the idempotency record as
-one atomic unit. External references are unique within the affiliate
-organization. Evidence rows and their item snapshots are immutable; a
-correction is a new compensating Finance outcome, not an update or delete.
-
-An identical retry returns the original evidence and payout IDs without
-additional ledger, evidence, job, or audit writes. Reusing the idempotency key
-with different command evidence returns `409 idempotency_conflict`; reusing an
-external reference returns `409 duplicate_reference`. Missing evidence,
-unsupported methods, cross-affiliate/cross-currency rows, or invalid state
-transitions are rejected before mutation. The route does not initiate a
-provider payout and does not call a legacy service.
-
-Detail summary, payout rows, and history are read in one repeatable PostgreSQL
-snapshot. List consumers must page through `total`; the Platform Admin client
-loads every server page so outstanding scopes are not silently omitted.
-
 ## Stripe And Xendit Onboarding
 
 Provider account creation commands are idempotent by explicit `idempotencyKey`
 and stable owner scope. A repeated Stripe Connect request for the same property
-or affiliate returns the existing `providerAccountId` and latest valid
-`onboardingUrl`; it must not create duplicate Stripe accounts.
+returns the existing `providerAccountId` and latest valid `onboardingUrl`; it
+must not create duplicate Stripe accounts.
 
 Property Stripe Connect:
 
@@ -585,11 +443,6 @@ readiness only, never a provider account reference, secret, or raw payload.
 
 This command is target-only. It does not move the production Stripe callback
 from legacy Python; VAY-947 owns callback switching and rollback.
-
-Affiliate Stripe Connect uses the same finance provider-account contract after
-Marketplace/affiliate resolves and authorizes the affiliate resource. Booking
-Web may keep returning the compatibility shape consumed by `ReferModal`
-(`onboardingUrl`), but it may not own the affiliate identity or provider account.
 
 Xendit bank validation verifies the provider-visible account before payout
 settings are saved. Validation responses may include provider validation status
@@ -682,11 +535,11 @@ provider settlement itself.
 The F1 scheduler rows extend the freeze matrix in
 [`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md).
 
-| Legacy job id                    | Current effect                                             | Rehearsal state                                                                               | Target enablement rule                                                                                                                                  | Rollback                                                                                                                           |
-| -------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `process_property_payouts`       | Dispatches hotel Stripe/Xendit payouts.                    | Disabled unless target payout dispatcher is observe-only and cannot send provider transfers.  | Enable target dispatch only after legacy job is off for the affected property scope and reconciliation views show no active legacy transfer window.     | Stop target dispatcher, reconcile provider transfer IDs, re-enable legacy only for payouts with no successful target transfer.     |
-| `process_affiliate_payouts`      | Dispatches affiliate payouts and notifications monthly.    | Disabled unless rehearsal is outside the monthly window and Finance owner accepts no-op risk. | Enable target affiliate payout dispatcher after affiliate payout ledger, notification audit, and marketplace/affiliate resource links are target-owned. | Stop target dispatcher, reconcile transfer IDs and notification audit, re-enable legacy only for the next approved monthly window. |
-| `poll_xendit_processing_payouts` | Polls Xendit processing payouts and marks success/failure. | Disabled when target Xendit webhook/reconciliation owns payout status.                        | Enable target payout reconciliation before target payout dispatch. No dual polling.                                                                     | Stop target reconciliation, return target webhook mode to observe-only, then re-enable legacy polling if required.                 |
+| Legacy job id                    | Current effect                                                         | Rehearsal state                                                                              | Target enablement rule                                                                                                                              | Rollback                                                                                                                       |
+| -------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `process_property_payouts`       | Dispatches hotel Stripe/Xendit payouts.                                | Disabled unless target payout dispatcher is observe-only and cannot send provider transfers. | Enable target dispatch only after legacy job is off for the affected property scope and reconciliation views show no active legacy transfer window. | Stop target dispatcher, reconcile provider transfer IDs, re-enable legacy only for payouts with no successful target transfer. |
+| `process_affiliate_payouts`      | Stopped: on the legacy scheduler blocklist since vayada-platform #579. | Stays off.                                                                                   | None: the affiliate program is gone (VAY-2272).                                                                                                     | None.                                                                                                                          |
+| `poll_xendit_processing_payouts` | Polls Xendit processing payouts and marks success/failure.             | Disabled when target Xendit webhook/reconciliation owns payout status.                       | Enable target payout reconciliation before target payout dispatch. No dual polling.                                                                 | Stop target reconciliation, return target webhook mode to observe-only, then re-enable legacy polling if required.             |
 
 Manual legacy route `POST /admin/xendit/reconcile-payouts` follows the same
 disposition as `poll_xendit_processing_payouts`: it is disabled, proxied to
@@ -701,7 +554,7 @@ while target reconciliation can mutate the same payouts.
 | `authorization`  | `403`          | `missing_permission`, `missing_entitlement`, `inactive_entitlement`, `missing_resource_access`                                                        |
 | `validation`     | `400`          | `invalid_query`, `invalid_body`, `invalid_currency`, `invalid_payment_method`, `invalid_provider`, `invalid_date_range`, `provider_validation_failed` |
 | `conflict`       | `409`          | `version_conflict`, `idempotency_conflict`, `provider_account_exists`, `finance_bridge_required`, `payout_already_dispatched`                         |
-| `not_found`      | `404`          | `payment_settings_not_found`, `invoice_not_found`, `payment_not_found`, `payout_not_found`, `provider_account_not_found`, `affiliate_not_found`       |
+| `not_found`      | `404`          | `payment_settings_not_found`, `invoice_not_found`, `payment_not_found`, `payout_not_found`, `provider_account_not_found`                              |
 | `read_model`     | `500`          | `read_model_unavailable`, `finance_visibility_unavailable`                                                                                            |
 | `provider`       | `502`          | `provider_unavailable`, `provider_rejected`, `provider_timeout`                                                                                       |
 | `side_effect`    | `202` or `500` | `side_effect_queued`, `side_effect_failed`                                                                                                            |
@@ -742,8 +595,8 @@ The fixture set must cover:
 - public-safe payment capability projection;
 - invoice list/detail, payment ledger, manual record-payment command, and CSV
   export disposition;
-- property and affiliate payout reads without sensitive destination fields;
-- Stripe property and affiliate onboarding idempotency;
+- property payout reads without sensitive destination fields;
+- Stripe property onboarding idempotency;
 - Stripe property post-return reconciliation, readiness gain/loss, and exact
   replay without provider identifiers;
 - Xendit bank validation and payout reconciliation job enqueue;
@@ -782,17 +635,16 @@ than accepting a browser-supplied address.
 
 ## Reads-Before-Writes Slice Order
 
-| Slice | Scope                                                                                                        | Rehearsal gate |
-| ----- | ------------------------------------------------------------------------------------------------------------ | -------------- |
-| F1a   | PMS checkout-charge settlement bridge or explicit mark-paid freeze rule                                      | Yes            |
-| F1b   | Payment settings and cancellation policy reads, public-safe payment capability projection, denial matrix     | Yes            |
-| F1c   | Invoice list/detail, financial summary, payment ledger reads, CSV export disposition                         | Yes            |
-| F1d   | Manual payment record command with idempotency, audit, and Booking/PMS projection jobs                       | Yes            |
-| F1e   | Property payout reads and reconciliation views before any target provider dispatch                           | Yes            |
-| F1f   | Stripe Connect property and affiliate onboarding commands with idempotency and compensation                  | Yes            |
-| F1g   | Xendit bank validation and payout reconciliation jobs; legacy polling/manual reconcile freeze                | Yes            |
-| F1h   | Target property payout dispatcher after reconciliation and legacy scheduler freeze                           | Yes            |
-| F1i   | Target affiliate payout dispatcher after marketplace/affiliate identity and payout settings are target-owned | Yes            |
+| Slice | Scope                                                                                                    | Rehearsal gate |
+| ----- | -------------------------------------------------------------------------------------------------------- | -------------- |
+| F1a   | PMS checkout-charge settlement bridge or explicit mark-paid freeze rule                                  | Yes            |
+| F1b   | Payment settings and cancellation policy reads, public-safe payment capability projection, denial matrix | Yes            |
+| F1c   | Invoice list/detail, financial summary, payment ledger reads, CSV export disposition                     | Yes            |
+| F1d   | Manual payment record command with idempotency, audit, and Booking/PMS projection jobs                   | Yes            |
+| F1e   | Property payout reads and reconciliation views before any target provider dispatch                       | Yes            |
+| F1f   | Stripe Connect property onboarding commands with idempotency and compensation                            | Yes            |
+| F1g   | Xendit bank validation and payout reconciliation jobs; legacy polling/manual reconcile freeze            | Yes            |
+| F1h   | Target property payout dispatcher after reconciliation and legacy scheduler freeze                       | Yes            |
 
 Reads must land before writes for each surface. Provider dispatch follows
 reconciliation, not the other way around. Staging rehearsal cannot start while
@@ -821,18 +673,15 @@ Ready to create after this contract is accepted:
 5. **Implement finance payout reads and reconciliation views**
    - Scope: property payout read model, payment/payout/provider-account
      reconciliation views, dead-letter/job visibility.
-6. **Implement Stripe Connect onboarding commands for properties and affiliates**
+6. **Implement Stripe Connect onboarding commands for properties**
    - Scope: idempotent provider account creation, onboarding links,
-     compensation for provider-success/DB-write failure, VAY-774 facade shape.
+     compensation for provider-success/DB-write failure.
 7. **Implement Xendit bank validation and target payout reconciliation jobs**
    - Scope: bank validation, payout status reconciliation, legacy manual
      reconcile and polling freeze, provider replay fixtures.
 8. **Implement target property payout dispatcher**
    - Scope: dispatch after reconciliation readiness, no dual legacy scheduler,
      provider attempt audit, rollback rules.
-9. **Implement target affiliate payout dispatcher and payout settings**
-   - Scope: affiliate payout settings, monthly batch dispatcher,
-     marketplace/affiliate resource boundary, notification audit.
 
 Each ticket must keep its PR narrow, link this contract, and state whether it is
 a staging rehearsal gate.

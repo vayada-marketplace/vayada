@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Booking } from "@/services/bookings";
 import {
   addPropertyDays,
+  canSeeDashboardFinance,
   formatPropertyDate,
   getArrivalsToday,
   getDashboardOccupancy,
@@ -133,5 +134,24 @@ describe("dashboard occupancy", () => {
       sellableUnits: 0,
       percentage: null,
     });
+  });
+});
+
+describe("canSeeDashboardFinance", () => {
+  it.each([
+    ["owner", ["pms.dashboard.read", "pms.dashboard.finance.read", "pms.finance.read"], true],
+    [
+      "front desk",
+      ["pms.dashboard.read", "pms.dashboard.operations.read", "pms.reservation.read"],
+      false,
+    ],
+    ["housekeeping", ["pms.dashboard.read", "pms.calendar.read", "pms.room_status.read"], false],
+    [
+      "reservation manager",
+      ["pms.dashboard.read", "pms.reservation.read", "pms.finance.read"],
+      false,
+    ],
+  ])("%s", (_role, permissions, expected) => {
+    expect(canSeeDashboardFinance(permissions)).toBe(expected);
   });
 });

@@ -816,8 +816,13 @@ export const PROJECT_PUBLIC_BOOKABILITY_PROFILE = `
   ),
   refreshed_offers AS (
     UPDATE distribution.public_room_offer_snapshots offer
-    SET payment_options = CASE
-          WHEN lower(COALESCE(offer.rate_summary ->> 'rateType', '')) = 'non_refundable'
+    SET payment_options = candidate.payment_options,
+        updated_at = now()
+    FROM (
+      SELECT
+        current_offer.id,
+        CASE
+          WHEN lower(COALESCE(current_offer.rate_summary ->> 'rateType', '')) = 'non_refundable'
             THEN CASE
               WHEN cardinality(readiness.missing_readiness) = 0
                 AND 'card' = ANY(readiness.public_payment_methods)
@@ -827,10 +832,13 @@ export const PROJECT_PUBLIC_BOOKABILITY_PROFILE = `
           WHEN cardinality(readiness.missing_readiness) = 0
             THEN readiness.public_payment_methods
           ELSE ARRAY[]::text[]
-        END,
-        updated_at = now()
-    FROM readiness
-    WHERE offer.property_id = readiness.property_id
+        END AS payment_options
+      FROM distribution.public_room_offer_snapshots current_offer
+      JOIN readiness ON readiness.property_id = current_offer.property_id
+    ) candidate
+    WHERE offer.id = candidate.id
+      -- A hotel has a row per room, offer and night: leave unchanged rows alone.
+      AND offer.payment_options IS DISTINCT FROM candidate.payment_options
     RETURNING offer.id
   )
   SELECT * FROM upserted

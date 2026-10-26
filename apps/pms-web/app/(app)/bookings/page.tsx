@@ -8,6 +8,11 @@ import { useTranslation } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { normalizeChannelKey } from "@/lib/constants/statusStyles";
 import { getBalanceStatus } from "@/lib/bookingBalanceStatus";
+import {
+  AWAITING_PAYMENT_BADGE_CLASS,
+  formatPaymentDeadline,
+  useHotelTimeZone,
+} from "@/lib/awaitingPayment";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "border-yellow-200 text-yellow-700 bg-yellow-50",
@@ -19,6 +24,8 @@ const STATUS_STYLES: Record<string, string> = {
   declined: "border-rose-300 text-rose-700 bg-rose-50",
   expired: "border-gray-200 text-gray-500 bg-gray-50",
   no_show: "border-orange-200 text-orange-700 bg-orange-50",
+  // VAY-2348: a booking-page bank transfer waiting for the guest's money (rooms held).
+  awaiting_payment: AWAITING_PAYMENT_BADGE_CLASS,
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
@@ -30,7 +37,13 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   declined: "bookings.statusDeclined",
   expired: "bookings.statusExpired",
   no_show: "bookings.statusNoShow",
+  awaiting_payment: "bookings.statusAwaitingPayment",
 };
+
+/** The status a reservation shows: "Awaiting payment" while the hotel waits for the transfer. */
+function displayStatus(b: Booking): string {
+  return b.awaitingPaymentConfirmation ? "awaiting_payment" : b.status;
+}
 
 const BALANCE_STYLES: Record<string, string> = {
   paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -69,6 +82,13 @@ function getGuestCount(b: Booking): number {
 
 export default function ReservationsPage() {
   const { locale, t } = useTranslation();
+  const hotelTimeZone = useHotelTimeZone();
+  const payBy = (b: Booking) =>
+    b.awaitingPaymentConfirmation && b.hostResponseDeadline
+      ? t("bookings.payBy", {
+          date: formatPaymentDeadline(b.hostResponseDeadline, locale, hotelTimeZone),
+        })
+      : null;
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -278,11 +298,18 @@ export default function ReservationsPage() {
                       </p>
                     </div>
                     <span
-                      className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STATUS_STYLES[b.status] || STATUS_STYLES["pending"]}`}
+                      className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STATUS_STYLES[displayStatus(b)] || STATUS_STYLES["pending"]}`}
                     >
-                      {STATUS_LABEL_KEYS[b.status] ? t(STATUS_LABEL_KEYS[b.status]) : b.status}
+                      {STATUS_LABEL_KEYS[displayStatus(b)]
+                        ? t(STATUS_LABEL_KEYS[displayStatus(b)])
+                        : b.status}
                     </span>
                   </div>
+                  {payBy(b) && (
+                    <p className="-mt-1 mb-2 text-[11px] font-semibold text-amber-700">
+                      {payBy(b)}
+                    </p>
+                  )}
 
                   {/* Room + stay period */}
                   <div className="space-y-1 text-[12px] text-gray-600 border-t border-gray-100 pt-2.5">
@@ -482,10 +509,17 @@ export default function ReservationsPage() {
                       {/* Status */}
                       <td className="px-4 py-4">
                         <span
-                          className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold border ${STATUS_STYLES[b.status] || STATUS_STYLES["pending"]}`}
+                          className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold border ${STATUS_STYLES[displayStatus(b)] || STATUS_STYLES["pending"]}`}
                         >
-                          {STATUS_LABEL_KEYS[b.status] ? t(STATUS_LABEL_KEYS[b.status]) : b.status}
+                          {STATUS_LABEL_KEYS[displayStatus(b)]
+                            ? t(STATUS_LABEL_KEYS[displayStatus(b)])
+                            : b.status}
                         </span>
+                        {payBy(b) && (
+                          <p className="mt-1 text-[11px] font-semibold text-amber-700 whitespace-nowrap">
+                            {payBy(b)}
+                          </p>
+                        )}
                       </td>
 
                       {/* Room */}

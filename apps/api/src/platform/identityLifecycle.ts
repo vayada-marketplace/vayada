@@ -292,27 +292,33 @@ async function updateIdentityUserEmail(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const user = await client.query(
-      "SELECT id FROM identity.users WHERE id = $1 FOR UPDATE",
-      [command.payload.userId],
-    );
-    // A missing row is a no-op: never update a user committed after this lookup.
+    const user = await client.query("SELECT id FROM identity.users WHERE id = $1 FOR UPDATE", [
+      command.payload.userId,
+    ]);
+    // A missing row is a no-op: never update a user committed after this lookup. A deleted
+    // account keeps its blanked details (VAY-2272).
     if (user.rows.length > 0) {
       await assertNotBootstrapProtectedUser(client, command.payload.userId);
-      await client.query(
+      const updated = await client.query(
         `UPDATE identity.users
          SET email = $2, updated_at = now()
-         WHERE id = $1`,
+         WHERE id = $1 AND status <> 'deleted'`,
         [command.payload.userId, command.payload.email],
       );
-      await client.query(
-        `UPDATE identity.external_identities
-         SET provider_email = $2,
-             provider_email_verified = COALESCE($3, provider_email_verified),
-             updated_at = now()
-         WHERE user_id = $1`,
-        [command.payload.userId, command.payload.email, command.payload.providerEmailVerified ?? null],
-      );
+      if (updated.rowCount !== 0) {
+        await client.query(
+          `UPDATE identity.external_identities
+           SET provider_email = $2,
+               provider_email_verified = COALESCE($3, provider_email_verified),
+               updated_at = now()
+           WHERE user_id = $1`,
+          [
+            command.payload.userId,
+            command.payload.email,
+            command.payload.providerEmailVerified ?? null,
+          ],
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -331,18 +337,18 @@ async function updateIdentityUserStatus(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const user = await client.query(
-      "SELECT id FROM identity.users WHERE id = $1 FOR UPDATE",
-      [command.payload.userId],
-    );
+    const user = await client.query("SELECT id FROM identity.users WHERE id = $1 FOR UPDATE", [
+      command.payload.userId,
+    ]);
     if (user.rows.length > 0) {
       if (command.payload.status !== "suspended" && command.payload.status !== "deleted") {
         await assertNotBootstrapProtectedUser(client, command.payload.userId);
       }
+      // Deleted is final: Vayada Admin cannot bring a closed account back (VAY-2272).
       await client.query(
         `UPDATE identity.users
          SET status = $2, updated_at = now()
-         WHERE id = $1`,
+         WHERE id = $1 AND status <> 'deleted'`,
         [command.payload.userId, command.payload.status],
       );
     }

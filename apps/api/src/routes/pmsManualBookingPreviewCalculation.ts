@@ -49,6 +49,8 @@ export type ManualBookingPreviewCommand = {
   addOns: ManualBookingAddonSelection[];
   /** Create only: the revision the client's preview showed. */
   expectedPricingRevision?: number;
+  /** Create only: the booker plus the named additional guests. */
+  guestCount?: number;
 };
 /** The active pricing-v2 publication; amounts are minor units of its currency's own scale. */
 export type ManualBookingPricingPublication = Readonly<{
@@ -103,6 +105,7 @@ export async function calculateManualBookingPreview(
   const addons = addonContext.addonItems;
   let currency = pricingCurrency;
   let grand = 0n;
+  const placesByNight = new Map<string, number>();
   const stays = pricedStays.map((stay, index) => {
     const room = rooms.items.find((item) => item.roomId === stay.roomId);
     if (!room || available[index] === null) fail(404, "room_not_found", "roomId", stay.position);
@@ -118,6 +121,8 @@ export async function calculateManualBookingPreview(
       stay.adults + stay.children > totalLimit
     )
       fail(422, "occupancy_exceeded", "stays", stay.position);
+    for (const date of stay.dates)
+      placesByNight.set(date, (placesByNight.get(date) ?? 0) + totalLimit);
     // Room types from the legacy rate flow still carry the property currency.
     currency ??= roomType.baseRate.currency;
     if (!currency) fail(409, "pricing_not_published", "stays", stay.position);
@@ -149,6 +154,12 @@ export async function calculateManualBookingPreview(
       appliedTotal: money(appliedTotal, currency),
     };
   });
+  // Everyone named on the booking fits on its busiest night (VAY-2365/2366).
+  if (
+    command.guestCount !== undefined &&
+    command.guestCount > Math.max(0, ...placesByNight.values())
+  )
+    fail(422, "guests_over_capacity", "additionalGuests");
   const propertyCurrency = currency!;
   const addOns = command.addOns.map((selection) => {
     const addon = addons.find((item) => item.addonItemId === selection.addonId);

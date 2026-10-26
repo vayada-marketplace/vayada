@@ -9,6 +9,11 @@ this document grants, deploys or decommissions anything. Predecessors:
 [profile-edit writer](historical/hotel-setup-profile-edit-writer.md),
 [automatic provisioning](historical/hotel-setup-automatic-provisioning.md)._
 
+> **Note (VAY-2272, 2026-10-20):** `apps/marketplace-web` is deleted (VAY-2271), and the
+> `marketplace` schema and the `marketplace.profile.manage` permission are gone from the new
+> database (migrations 0499 and 0501). The Marketplace callers, tables and permission below
+> describe the state when this plan was written.
+
 ## Decision in one paragraph
 
 After VAY-2054 the login `vayada_next_api_runtime` (`TARGET_DATABASE_URL`) has

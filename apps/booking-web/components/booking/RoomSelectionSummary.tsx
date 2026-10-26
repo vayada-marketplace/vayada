@@ -2,25 +2,30 @@
 import { useLocale, useTranslations } from "next-intl";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import type { SelectedRoomLine } from "@/lib/types";
+import { hotelCountryName } from "@/lib/checkoutTerms";
+import { formatStayDate } from "@/lib/utils";
 
 export default function RoomSelectionSummary({
   lines,
   currency,
   checkIn,
-  timezone,
+  country,
   beforeDiscounts = false,
 }: {
   lines: SelectedRoomLine[];
   currency: string;
   checkIn: string;
-  timezone?: string;
+  /** The hotel's country: the deadline is in local hotel time (VAY-2347). */
+  country?: string;
   beforeDiscounts?: boolean;
 }) {
   const t = useTranslations("roomSelection");
   const tc = useTranslations("common");
   const th = useTranslations("home");
   const locale = useLocale();
-  const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
+  const { formatPrice } = useCurrency();
+  const countryName = hotelCountryName(country, locale);
+  const hotelTime = countryName ? t("hotelTimeIn", { country: countryName }) : t("hotelTime");
   return (
     <ul className="space-y-4" data-testid="room-selection-lines">
       {lines.map((line) => {
@@ -40,13 +45,13 @@ export default function RoomSelectionSummary({
           Number.isInteger(days) &&
           Number(days) >= 0 &&
           Number(days) <= 365 &&
-          Number.isFinite(Date.parse(checkIn))
+          Number.isFinite(Date.parse(`${checkIn}T00:00:00Z`))
         ) {
-          const date = new Intl.DateTimeFormat(locale, {
-            dateStyle: "medium",
-            timeZone: "UTC",
-          }).format(new Date(Date.parse(`${checkIn}T00:00:00Z`) - Number(days) * 86_400_000));
-          cancellation = t("freeUntil", { date, timezone: timezone ?? "UTC" });
+          const until = new Date(Date.parse(`${checkIn}T00:00:00Z`) - Number(days) * 86_400_000);
+          cancellation = t("freeUntil", {
+            date: formatStayDate(until.toISOString().slice(0, 10), locale),
+            timezone: hotelTime,
+          });
         }
         const tiers =
           policy.flexibleCancellationType === "partial_refund"
@@ -79,9 +84,7 @@ export default function RoomSelectionSummary({
                 {line.roomCount} × {line.roomName}
               </span>
               {Number.isFinite(amount) && (
-                <span className="whitespace-nowrap">
-                  {formatPrice(convertAndRound(amount, currency), selectedCurrency)}
-                </span>
+                <span className="whitespace-nowrap">{formatPrice(amount, currency)}</span>
               )}
             </div>
             {typeof line.rateSummary.name === "string" && (

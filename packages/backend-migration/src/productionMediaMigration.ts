@@ -390,12 +390,6 @@ async function registerImported(
         JSON.stringify({
           migrationRunId: sourceRunId,
           migrationTicket: "VAY-1055",
-          ...(reference.purpose === "marketplace.collaboration_chat.attachment"
-            ? {
-                migrationCase: "media-url-migration",
-                retentionPolicy: "chat-message-created-at-plus-2-years",
-              }
-            : {}),
           sourceField: reference.sourceField,
           sourceReferenceSha256: reference.sourceReferenceSha256,
           sortOrder: reference.sortOrder,

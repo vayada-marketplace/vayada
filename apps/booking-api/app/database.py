@@ -59,11 +59,6 @@ class AuthDatabase(BaseDatabase):
     _url = settings.AUTH_DATABASE_URL
 
 
-class MarketplaceDatabase(BaseDatabase):
-    _pool: asyncpg.Pool | None = None
-    _url = settings.MARKETPLACE_DATABASE_URL
-
-
 class PmsDatabase(BaseDatabase):
     _pool: asyncpg.Pool | None = None
     _url = settings.PMS_DATABASE_URL

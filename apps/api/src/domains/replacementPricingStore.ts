@@ -37,6 +37,8 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      // Reads give up on a lock after 5 s instead of waiting forever (VAY-2247 incident, 2026-10-21).
+      if (access === "read") await client.query("SET LOCAL lock_timeout = '5s'");
       await lockPmsInventoryMutationScope(client, scope.propertyId);
       const sources = await guard.lock(client, scope, access);
       if (!sources) return fail("denied");
@@ -54,9 +56,11 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
     await client.query(`INSERT INTO platform.product_audit_events
       (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,domain_event_id)
       VALUES($1,'pms',$2,now(),'property',$3::uuid,'user',$4,'pms','pricing_revision',$3::text,$5)`, [key, operation, scope.propertyId, scope.actorUserId, event]);
+    // New prices also refresh the public offer days (VAY-2123).
     if (publish) await client.query(`INSERT INTO platform.outbox_events
       (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
-      VALUES($1,$2,'pricing.v2',$3,'property',$4::uuid,'pms','pricing_revision',$4::text,$5)`,
+      VALUES($1,$2,'pricing.v2',$3,'property',$4::uuid,'pms','pricing_revision',$4::text,$5),
+        ($1,$2,'distribution.inventory-projection','pms.inventory.projection_refresh_requested','property',$4::uuid,'pms','pricing_revision',$4::text,$5)`,
     [event, key, operation, scope.propertyId, JSON.stringify({ revision })]);
   }
   return {

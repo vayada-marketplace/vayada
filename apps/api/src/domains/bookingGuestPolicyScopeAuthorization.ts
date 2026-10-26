@@ -4,6 +4,8 @@ import {
 } from "@vayada/domain-booking";
 import type { QueryResult, QueryResultRow } from "pg";
 
+import { lockMemberPermissions } from "./memberPermissions.js";
+
 export type BookingGuestPolicyScopeAuthorizationPool = {
   query<Row extends QueryResultRow = QueryResultRow>(
     config: Readonly<{ text: string; values: unknown[]; query_timeout: number }>,
@@ -49,7 +51,6 @@ export function createPgBookingGuestPolicyScopeAuthorizationPort(options: {
             input.organizationId.toLowerCase(),
             input.propertyId.toLowerCase(),
             input.actorUserId.toLowerCase(),
-            input.permission,
             input.entitlement.product,
             input.entitlement.key,
             input.resource.product,
@@ -59,7 +60,26 @@ export function createPgBookingGuestPolicyScopeAuthorizationPort(options: {
           ],
           query_timeout: AUTHORIZATION_TIMEOUT_MS,
         });
-        return result.rows.length === 1 && result.rows[0]?.authorized === true;
+        if (result.rows.length !== 1 || result.rows[0]?.authorized !== true) return false;
+        const permissions = await lockMemberPermissions(
+          {
+            query: <Row extends QueryResultRow = QueryResultRow>(
+              text: string,
+              values: readonly unknown[] = [],
+            ) =>
+              options.pool.query<Row>({
+                text,
+                values: [...values],
+                query_timeout: AUTHORIZATION_TIMEOUT_MS,
+              }),
+          },
+          {
+            organizationId: input.organizationId.toLowerCase(),
+            actorUserId: input.actorUserId.toLowerCase(),
+          },
+          { readOnly: true },
+        );
+        return permissions?.includes(input.permission) === true;
       } catch {
         return false;
       }
@@ -81,35 +101,31 @@ const AUTHORIZATION_SQL = `
     ON membership.organization_id = organization.id
    AND membership.user_id = actor.id
    AND membership.status = 'active'
-  JOIN identity.role_permission_grants permission_grant
-    ON permission_grant.organization_kind = organization.kind
-   AND permission_grant.role_key = membership.role_key
-   AND permission_grant.permission_key = $4
   WHERE property.id = $2::uuid
     AND EXISTS (
       SELECT 1
       FROM identity.organization_resource_links resource
       WHERE resource.organization_id = organization.id
-        AND resource.product = $7
-        AND resource.resource_type = $8
+        AND resource.product = $6
+        AND resource.resource_type = $7
         AND resource.resource_id = property.id::text
-        AND resource.relationship = ANY($9::text[])
+        AND resource.relationship = ANY($8::text[])
         AND resource.status = 'active'
     )
     AND EXISTS (
       SELECT 1
       FROM identity.product_entitlements entitlement
       WHERE entitlement.organization_id = organization.id
-        AND entitlement.product = $5
-        AND entitlement.entitlement_key = $6
+        AND entitlement.product = $4
+        AND entitlement.entitlement_key = $5
         AND entitlement.status = 'active'
-        AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= $10::timestamptz)
-        AND (entitlement.expires_at IS NULL OR entitlement.expires_at > $10::timestamptz)
+        AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= $9::timestamptz)
+        AND (entitlement.expires_at IS NULL OR entitlement.expires_at > $9::timestamptz)
         AND (
           entitlement.resource_product IS NULL
           OR (
-            entitlement.resource_product = $7
-            AND entitlement.resource_type = $8
+            entitlement.resource_product = $6
+            AND entitlement.resource_type = $7
             AND entitlement.resource_id = property.id::text
           )
         )
@@ -118,16 +134,16 @@ const AUTHORIZATION_SQL = `
       SELECT 1
       FROM identity.product_entitlements entitlement
       WHERE entitlement.organization_id = organization.id
-        AND entitlement.product = $5
-        AND entitlement.entitlement_key = $6
+        AND entitlement.product = $4
+        AND entitlement.entitlement_key = $5
         AND entitlement.status = 'suspended'
-        AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= $10::timestamptz)
-        AND (entitlement.expires_at IS NULL OR entitlement.expires_at > $10::timestamptz)
+        AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= $9::timestamptz)
+        AND (entitlement.expires_at IS NULL OR entitlement.expires_at > $9::timestamptz)
         AND (
           entitlement.resource_product IS NULL
           OR (
-            entitlement.resource_product = $7
-            AND entitlement.resource_type = $8
+            entitlement.resource_product = $6
+            AND entitlement.resource_type = $7
             AND entitlement.resource_id = property.id::text
           )
         )

@@ -38,15 +38,6 @@ export type IdentityEntitlementPlan = {
 
 const BASE_ENTITLEMENTS: Record<string, { product: string; entitlementKey: string }> = {
   "booking:booking_hotel": { product: "booking", entitlementKey: "booking-engine" },
-  "marketplace:hotel_profile": {
-    product: "marketplace",
-    entitlementKey: "marketplace-hotel-profile",
-  },
-  "marketplace:creator_profile": {
-    product: "marketplace",
-    entitlementKey: "marketplace-creator-profile",
-  },
-  "affiliate:affiliate": { product: "affiliate", entitlementKey: "affiliate-payouts" },
 };
 
 export function planIdentityEntitlements(

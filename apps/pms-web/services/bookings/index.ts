@@ -66,10 +66,26 @@ export type BookingCancellationOutcome = {
   retainedMinor: string;
 };
 
+/** The refund back to the guest's card after a paid card stay was cancelled (VAY-2205). */
+export type BookingCardRefund = {
+  status: "pending" | "succeeded" | "failed";
+  /** Two-decimal amount in `currency`. */
+  amount: string;
+  currency: string;
+  requestedBy: "guest" | "host";
+  /** Stripe's reason when the refund failed, e.g. "expired_or_canceled_card". */
+  failureReason: string | null;
+  createdAt: string;
+  settledAt: string | null;
+  /** What the guest paid by card (two decimals), when the API says. */
+  paidAmount?: string | null;
+};
+
 export interface Booking {
   mealDescription?: string | null;
   /** Recorded when the guest's cancellation applied the booked terms. */
   cancellationOutcome?: BookingCancellationOutcome | null;
+  cardRefund?: BookingCardRefund | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -136,6 +152,8 @@ export interface Booking {
   checkedInAt: string | null;
   checkedOutAt: string | null;
   hostResponseDeadline: string | null;
+  /** The guest pays the hotel directly; "mark paid" confirms the booking, there is no accept step. */
+  awaitingPaymentConfirmation: boolean;
   platformFeeAmount: number | null;
   affiliateCommissionAmount: number | null;
   propertyPayoutAmount: number | null;
@@ -383,6 +401,7 @@ type PmsOperationalReservation = {
   checkin: { completedAt: string | null; pendingFlags: string[] };
   checkout: { completedAt: string | null; pendingFlags: string[] };
   cancellationOutcome?: BookingCancellationOutcome | null;
+  cardRefund?: BookingCardRefund;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: Array<{
@@ -410,6 +429,8 @@ type PmsOperationalReservation = {
     };
   };
   hostResponseDeadlineAt?: string | null;
+  /** Bank transfer or PayPal from the booking page: the hotel confirms the payment (VAY-2139). */
+  awaitingHotelPaymentConfirmation?: boolean;
 };
 
 type PmsOperationsListResponse<T> = {
@@ -770,14 +791,14 @@ export const bookingsService = {
     return { charges: response.items.map((charge) => toCheckoutCharge(charge, id)) };
   },
 
-  addCheckoutCharge: async (id: string, label: string, amount: number) => {
+  addCheckoutCharge: async (id: string, label: string, amount: number, currency: string) => {
     const response = await pmsOperationsClient.post<PmsCheckoutChargeCommandResponse>(
       await reservationEndpoint(id, "/checkout-charges"),
       {
         ...commandMetadata("pms.checkout-charge.create"),
         label,
         amountDecimal: amount.toFixed(2),
-        currency: "EUR",
+        currency,
       },
       pmsOperationsRequestOptions,
     );
@@ -1079,6 +1100,13 @@ export const bookingsService = {
       { previewId, idempotencyKey },
       pmsOperationsRequestOptions,
     ),
+  /** Asks Stripe again for a failed card refund, same amount (VAY-2205). */
+  retryCardRefund: async (id: string, idempotencyKey: string) =>
+    pmsOperationsClient.post<{ status: "succeeded" | "pending" | "failed" | "busy" }>(
+      await reservationEndpoint(id, "/host-actions/card-refund-retry"),
+      { idempotencyKey },
+      pmsOperationsRequestOptions,
+    ),
 
   cancelWithReason: async (id: string, reason: string, guestMessage?: string) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(
@@ -1160,9 +1188,16 @@ const pmsOperationsBookingsReadService = {
   },
 };
 
+// The status tabs use the display statuses from toBookingStatus; the API filters on stored ones.
+const STORED_RESERVATION_STATUSES: Record<string, string> = {
+  pending: "pending_payment",
+  cancelled: "canceled",
+};
+
 function buildPmsReservationsQuery(params?: BookingListParams): string {
   const query = new URLSearchParams();
-  appendQueryParam(query, "status", params?.status);
+  const status = params?.status;
+  appendQueryParam(query, "status", status && (STORED_RESERVATION_STATUSES[status] ?? status));
   appendQueryParam(query, "search", params?.search);
   appendQueryParam(query, "limit", params?.limit);
   appendQueryParam(query, "offset", params?.offset);
@@ -1256,6 +1291,30 @@ function toBookingStays(
       });
 }
 
+/** VAY-2320: a booking with rooms of several types names each type with its count
+ * ("1 × Deluxe Double + 2 × Garden Double"), in room order; null for one type. Rooms an OTA
+ * change removed stay above the booking's room count and aren't counted. */
+function assignedRoomSummary(
+  reservation: PmsOperationalReservation,
+  roomTypesById: Map<string, PmsOperationsRoomType>,
+): string | null {
+  const counts = new Map<string, number>();
+  for (const assignment of reservation.assignments)
+    if (reservation.roomCount == null || assignment.position <= reservation.roomCount)
+      counts.set(assignment.roomTypeId, (counts.get(assignment.roomTypeId) ?? 0) + 1);
+  if (counts.size < 2) return null;
+  return Array.from(counts)
+    .map(([roomTypeId, count]) => `${count} × ${roomTypesById.get(roomTypeId)?.name || "—"}`)
+    .join(" + ");
+}
+
+/** VAY-2320: one assigned room's own room type name; the booking's name when it isn't known. */
+export function assignedRoomName(booking: Booking, room: { position: number }): string {
+  return (
+    booking.stays.find((stay) => stay.position === room.position)?.roomName || booking.roomName
+  );
+}
+
 function toBooking(
   reservation: PmsOperationalReservation,
   roomTypesById: Map<string, PmsOperationsRoomType>,
@@ -1307,9 +1366,12 @@ function toBooking(
     bookingReference: reservation.bookingReference,
     roomTypeId,
     mealDescription: reservation.mealDescription,
-    roomName: reservation.roomLines?.length
-      ? reservation.roomLines.map((line) => `${line.roomCount} × ${line.roomName}`).join(" + ")
-      : roomType?.name || reservation.bookedOffer?.roomName || "",
+    // The PMS rooms' types once it has them (a room can move to another type), as the stays.
+    roomName:
+      assignedRoomSummary(reservation, roomTypesById) ||
+      (!reservation.assignments.length && reservation.roomLines?.length
+        ? reservation.roomLines.map((line) => `${line.roomCount} × ${line.roomName}`).join(" + ")
+        : roomType?.name || reservation.bookedOffer?.roomName || ""),
     roomMaxOccupancy: maxOccupancy(roomType),
     totalRoomCapacity,
     guestFirstName,
@@ -1364,7 +1426,9 @@ function toBooking(
     checkedInAt: reservation.checkin.completedAt,
     checkedOutAt: reservation.checkout.completedAt,
     hostResponseDeadline: reservation.hostResponseDeadlineAt ?? null,
+    awaitingPaymentConfirmation: reservation.awaitingHotelPaymentConfirmation === true,
     cancellationOutcome: reservation.cancellationOutcome ?? null,
+    cardRefund: reservation.cardRefund ?? null,
     platformFeeAmount: null,
     affiliateCommissionAmount: null,
     propertyPayoutAmount: null,
@@ -1513,7 +1577,9 @@ export type HostBookingActionPreview = {
     newTotalAmount: string;
     currency: string;
     inventory: "release" | "replace";
-    payment: "no_payment_received" | "authorization_void";
+    payment: "no_payment_received" | "authorization_void" | "card_refund";
+    /** A paid card stay's cancel (VAY-2205): paid and refunded to the card, in minor units. */
+    cardRefund?: { paidMinor: string; refundMinor: string; currency: string };
     cancellationOutcome?: BookingCancellationOutcome;
     cancellationPolicy: {
       type: "non_refundable" | "flexible" | "mixed_room";

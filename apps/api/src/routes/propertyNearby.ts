@@ -38,9 +38,7 @@ export async function registerPropertyNearbyRoutes(
     const access = await resolveEffectivePropertyAccess(context, options.propertyAccessRepository);
     if (
       !access?.propertyIds.includes(propertyId) ||
-      (write &&
-        !hasPermission(context, "booking.settings.manage") &&
-        !hasPermission(context, "marketplace.profile.manage"))
+      (write && !hasPermission(context, "booking.settings.manage"))
     ) {
       throw Object.assign(new Error("Missing property publication access"), { statusCode: 403 });
     }
@@ -137,8 +135,8 @@ export async function registerPropertyNearbyRoutes(
       result,
     );
     if (!state) return reply.code(403).send({ code: "missing_property_resource_link" });
-    if (state.profileRevision !== claim.profileRevision || state.status === "stale")
-      return reply.code(409).send({ code: "revision_conflict" });
+    // An unrelated profile save during the lookup keeps the result (same pin, VAY-2104).
+    if (state.status === "stale") return reply.code(409).send({ code: "revision_conflict" });
     const status =
       state.status === "ready" || state.status === "empty" || state.status === "location_required"
         ? 200

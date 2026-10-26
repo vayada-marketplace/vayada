@@ -10,6 +10,9 @@ export type IdentitySourceRow = {
 
 export type TargetIdentityUserStatus = "active" | "pending" | "suspended" | "deleted";
 export type LegacyIdentityUserType = "admin" | "hotel" | "creator" | "affiliate";
+// VAY-2272: creators and affiliates used only retired products (the Marketplace and the affiliate
+// program), so the import does not migrate them.
+export type MigratedIdentityUserType = Extract<LegacyIdentityUserType, "admin" | "hotel">;
 
 export type IdentityMigrationBlocker = {
   code: string;
@@ -34,7 +37,7 @@ export type PlannedIdentityUser = {
   name: string | null;
   sourceStatus: string;
   status: TargetIdentityUserStatus;
-  type: LegacyIdentityUserType;
+  type: MigratedIdentityUserType;
   emailVerified: boolean;
   isSuperadmin: boolean;
   disposition:
@@ -52,14 +55,26 @@ export type PlannedIdentityUser = {
   marketingConsentAt: string | null;
 };
 
+type ParsedIdentityUser = Omit<PlannedIdentityUser, "type"> & { type: LegacyIdentityUserType };
+
 export type IdentityDispositionPlan = {
   users: PlannedIdentityUser[];
+  retiredUserIds: string[];
   workosIdentities: ExistingWorkosIdentity[];
   blockers: IdentityMigrationBlocker[];
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USER_TYPES = new Set<LegacyIdentityUserType>(["admin", "hotel", "creator", "affiliate"]);
+// The auth rows that belong to a user, by the column that names the user.
+const USER_REFERENCES: Record<string, string> = {
+  users: "id",
+  cookie_consent: "user_id",
+  consent_history: "user_id",
+  gdpr_requests: "user_id",
+  login_audit_log: "user_id",
+};
+const CLOSED_GDPR_STATUSES = new Set(["completed", "cancelled", "expired"]);
 
 export function mapProductionLegacyUserStatus(status: string): TargetIdentityUserStatus | null {
   return (
@@ -80,12 +95,12 @@ export function planIdentityUserDisposition(
   existingWorkosIdentities: ExistingWorkosIdentity[] = [],
 ): IdentityDispositionPlan {
   const blockers: IdentityMigrationBlocker[] = [];
-  const users: PlannedIdentityUser[] = [];
+  const parsed: ParsedIdentityUser[] = [];
   for (const row of sourceRows.filter(
     (item) => item.sourceDatabase === "auth" && item.sourceTable === "users",
   )) {
     try {
-      users.push(parseUser(row));
+      parsed.push(parseUser(row));
     } catch (error) {
       addBlocker(
         blockers,
@@ -97,7 +112,15 @@ export function planIdentityUserDisposition(
     }
   }
 
-  addSourceDuplicateIdBlockers(users, blockers);
+  addSourceDuplicateIdBlockers(parsed, blockers);
+  // A superadmin keeps platform access whatever their legacy type.
+  const users = parsed.flatMap((user): PlannedIdentityUser[] =>
+    isMigratedUser(user) ? [user] : user.isSuperadmin ? [{ ...user, type: "admin" }] : [],
+  );
+  const retiredUserIds = parsed
+    .filter((user) => !isMigratedUser(user) && !user.isSuperadmin)
+    .map((user) => user.id)
+    .sort();
   resolveDuplicateEmails(users, blockers);
   const sourceIds = new Set(users.map((user) => user.id));
   const currentById = new Map(existingUsers.map((user) => [user.id, user]));
@@ -144,6 +167,7 @@ export function planIdentityUserDisposition(
   const workosIdentities = validateWorkosLinks(existingWorkosIdentities, sourceIds, blockers);
   return {
     users: [...users].sort((left, right) => left.id.localeCompare(right.id)),
+    retiredUserIds,
     workosIdentities,
     blockers: blockers.sort((left, right) =>
       `${left.code}:${left.source}:${left.sourceId}`.localeCompare(
@@ -153,7 +177,67 @@ export function planIdentityUserDisposition(
   };
 }
 
-function parseUser(row: IdentitySourceRow): PlannedIdentityUser {
+export function withoutRetiredUserRows(
+  rows: IdentitySourceRow[],
+  retiredUserIds: Iterable<string>,
+): {
+  rows: IdentitySourceRow[];
+  retiredUserRows: Record<string, number>;
+  blockers: IdentityMigrationBlocker[];
+} {
+  const retired = new Set(retiredUserIds);
+  const emails = { retired: new Set<string>(), migrated: new Set<string>() };
+  for (const row of rows) {
+    const { id, email } = row.data;
+    if (row.sourceDatabase !== "auth" || row.sourceTable !== "users") continue;
+    if (typeof id !== "string" || typeof email !== "string") continue;
+    emails[retired.has(id.toLowerCase()) ? "retired" : "migrated"].add(email.trim().toLowerCase());
+  }
+  const retiredUserRows: Record<string, number> = {};
+  const blockers: IdentityMigrationBlocker[] = [];
+  const count = (table: string) => (retiredUserRows[table] = (retiredUserRows[table] ?? 0) + 1);
+  const kept = rows.flatMap((row): IdentitySourceRow[] => {
+    if (row.sourceDatabase !== "auth") return [row];
+    const field = USER_REFERENCES[row.sourceTable];
+    const userId = field ? row.data[field] : undefined;
+    if (typeof userId === "string" && retired.has(userId.toLowerCase())) {
+      // Cookie consents stay, so they are counted apart from the rows left out.
+      count(row.sourceTable === "cookie_consent" ? "cookie_consent_unlinked" : row.sourceTable);
+      // Like 0500 (decision 7): an open GDPR request is finished in the legacy system first.
+      if (
+        row.sourceTable === "gdpr_requests" &&
+        !CLOSED_GDPR_STATUSES.has(String(row.data["status"]))
+      )
+        addBlocker(
+          blockers,
+          "RETIRED_USER_OPEN_GDPR_REQUEST",
+          "auth.gdpr_requests",
+          sourceId(row),
+          "A creator or affiliate who is not migrated has an open GDPR request",
+        );
+      // The visitor's newest cookie choice must still win, so the row stays without its user.
+      if (row.sourceTable === "cookie_consent")
+        return [{ ...row, data: { ...row.data, user_id: null } }];
+      return [];
+    }
+    // A failed login names its account by email only.
+    const email =
+      row.sourceTable === "login_audit_log" && userId == null ? row.data["email"] : null;
+    const normalized = typeof email === "string" ? email.trim().toLowerCase() : null;
+    if (normalized && emails.retired.has(normalized) && !emails.migrated.has(normalized)) {
+      count(row.sourceTable);
+      return [];
+    }
+    return [row];
+  });
+  return { rows: kept, retiredUserRows, blockers };
+}
+
+function isMigratedUser(user: ParsedIdentityUser): user is PlannedIdentityUser {
+  return user.type === "admin" || user.type === "hotel";
+}
+
+function parseUser(row: IdentitySourceRow): ParsedIdentityUser {
   const sourceStatus = text(row.data["status"], "status");
   const status = mapProductionLegacyUserStatus(sourceStatus);
   if (!status) throw new Error("status is unsupported");
@@ -181,7 +265,7 @@ function parseUser(row: IdentitySourceRow): PlannedIdentityUser {
 }
 
 function addSourceDuplicateIdBlockers(
-  users: PlannedIdentityUser[],
+  users: Array<{ id: string }>,
   blockers: IdentityMigrationBlocker[],
 ): void {
   const counts = new Map<string, number>();

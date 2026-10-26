@@ -43,7 +43,82 @@ it("withholds malformed, foreign and unavailable published content", async () =>
   h.query.mockResolvedValue({ rows: [], rowCount: 0 });
   expect(await h.repository.getPublishedUrl(profile.hotel.propertyId, "old-revision")).toBeNull();
 });
-function content(value: typeof profile) {
+type ContentInput = Parameters<typeof buildBookingPublicContent>[0];
+
+it("withholds a bank-transfer or PayPal page while the hotel can't be paid that way (VAY-2139)", async () => {
+  const manualProfile = structuredClone(profile);
+  manualProfile.hotel.capabilities.onlinePayment = false;
+  manualProfile.hotel.capabilities.payAtProperty = false;
+  const publicContent = content(manualProfile, {
+    rates: [
+      {
+        ratePlanId: `pricing-offer.v2:${"b".repeat(64)}`,
+        currency: "EUR",
+        pricing: {
+          kind: "quote_required",
+          publicationRevision: 7,
+          termsRevision: "11111111-1111-4111-8111-111111111111",
+        },
+        mealPlan: "room_only",
+      },
+    ],
+    finance: { onlinePayment: false, payAtProperty: false, readyPaymentMethods: ["paypal"] },
+  });
+  let paypalEmail = "pay@hotel.example";
+  const query = vi.fn(async (text: string) =>
+    text.includes("FROM finance.payment_settings settings")
+      ? {
+          rows: [
+            { accepted_methods: ["paypal"], paypal_email: paypalEmail, bank_destination: false },
+          ],
+        }
+      : { rows: [{ publicContent }], rowCount: 1 },
+  );
+  const pool = {
+    connect: async () => ({ query, release: vi.fn() }),
+    end: async () => {},
+  } as unknown as DistributionBookingPublicationPool;
+  const repository = createPgDistributionBookingPublicationProjection({
+    connectionString: "postgresql://unused",
+    pool,
+    manualPayments: true,
+  });
+  const published = () => repository.getPublishedUrl(manualProfile.hotel.propertyId, "revision");
+  expect(await published()).toBe(new URL(manualProfile.hotel.canonicalUrl).toString());
+  paypalEmail = "";
+  expect(await published()).toBeNull();
+});
+
+it("keeps a page that also takes card or pay at property up without a Finance read (VAY-2139)", async () => {
+  const publicContent = content(profile, {
+    finance: { readyPaymentMethods: ["card", "pay_at_property", "paypal"] },
+  });
+  const query = vi.fn(async (text: string) =>
+    text.includes("FROM finance.payment_settings settings")
+      ? { rows: [{ accepted_methods: ["card"], paypal_email: "", bank_destination: false }] }
+      : { rows: [{ publicContent }], rowCount: 1 },
+  );
+  const pool = {
+    connect: async () => ({ query, release: vi.fn() }),
+    end: async () => {},
+  } as unknown as DistributionBookingPublicationPool;
+  const repository = createPgDistributionBookingPublicationProjection({
+    connectionString: "postgresql://unused",
+    pool,
+    manualPayments: true,
+  });
+  expect(await repository.getPublishedUrl(profile.hotel.propertyId, "revision")).toBe(
+    new URL(profile.hotel.canonicalUrl).toString(),
+  );
+  expect(query.mock.calls.some(([text]) => text.includes("finance.payment_settings"))).toBe(false);
+});
+function content(
+  value: typeof profile,
+  payment: {
+    rates?: ContentInput["rooms"][number]["rates"];
+    finance?: Partial<ContentInput["finance"]>;
+  } = {},
+) {
   const result = buildBookingPublicContent({
     sourceManifestHash: `sha256:${"1".repeat(64)}`,
     readinessHash: `sha256:${"2".repeat(64)}`,
@@ -62,7 +137,7 @@ function content(value: typeof profile) {
         size: null,
         images: [{ url: "https://cdn.example/room.jpg" }],
         amenities: ["wifi"],
-        rates: [
+        rates: payment.rates ?? [
           {
             ratePlanId: "rate-1",
             currency: "EUR",
@@ -92,6 +167,7 @@ function content(value: typeof profile) {
       onlinePayment: true,
       payAtProperty: true,
       readyPaymentMethods: ["card", "pay_at_property"],
+      ...payment.finance,
     },
   });
   if (!result) throw new Error("Expected valid Booking public content fixture");

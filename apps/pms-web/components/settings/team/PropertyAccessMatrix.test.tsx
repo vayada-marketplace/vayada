@@ -17,6 +17,7 @@ it("shows the active account administrator with access to every property", () =>
         },
       ]}
       members={[]}
+      roleLabel={() => "Front desk"}
       properties={[
         { id: "one", name: "One" },
         { id: "two", name: "Two" },
@@ -25,9 +26,37 @@ it("shows the active account administrator with access to every property", () =>
   );
   const row = view.root.findAllByType("tbody")[0]!.findAllByType("tr")[0]!;
   expect(row.findAllByType("span")[0]!.children.join("")).toBe("Account owner");
-  expect(row.findAllByType("td").map((cell) => cell.children.join(""))).toEqual([
-    "Assigned",
-    "Assigned",
-  ]);
+  const label = (cell: (typeof row.children)[number]) =>
+    typeof cell === "string" ? cell : cell.findByProps({ className: "sr-only" }).children.join("");
+  expect(row.findAllByType("td").map(label)).toEqual(["Assigned", "Assigned"]);
+  view.unmount();
+});
+
+it("ticks every property for a member with access to all properties", () => {
+  const view = create(
+    <PropertyAccessMatrix
+      members={[
+        {
+          id: "manager",
+          name: "Manager",
+          email: "manager@example.test",
+          roleKey: "hotel_custom",
+          propertyAccessMode: "all",
+          propertyIds: [],
+          status: "active",
+          lastActiveAt: null,
+        },
+      ]}
+      roleLabel={() => "Operations lead"}
+      properties={[
+        { id: "one", name: "One" },
+        { id: "two", name: "Two" },
+      ]}
+    />,
+  );
+  const row = view.root.findAllByType("tbody")[0]!.findAllByType("tr")[0]!;
+  expect(
+    row.findAllByType("td").map((cell) => cell.findByProps({ className: "sr-only" }).children),
+  ).toEqual([["Assigned"], ["Assigned"]]);
   view.unmount();
 });

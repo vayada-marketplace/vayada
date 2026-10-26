@@ -14,10 +14,6 @@ const VALID_VALUES = {
   "profile.hero_image": MEDIA_ID,
   "profile.gallery_images": [MEDIA_ID],
   "profile.amenities": ["wifi"],
-  "marketplace.preferences.compensation_types": ["free_stay"],
-  "marketplace.preferences.content_platforms": ["instagram"],
-  "marketplace.preferences.content_types": ["short_form_video"],
-  "marketplace.preferences.availability": { mode: "selected_months", months: [6, 7] },
   "booking.primary_color": "#4F46E5",
   "booking.font_pairing": "high-end-serif",
   "room.name": { room_1: "Deluxe Double Room" },
@@ -100,7 +96,6 @@ describe("property setup draft field validation", () => {
   );
 
   it.each([
-    ["marketplace.preferences.availability", { mode: "selected_months", months: [] }],
     ["room.name", { "room:1": null }],
     ["room.beds", { "room:1": [{ type: null }] }],
     ["rate.base_nightly_rate", { "room:1": "1234567890123.45" }],
@@ -118,8 +113,6 @@ describe("property setup draft field validation", () => {
     ["profile.short_description", "x".repeat(2_001)],
     ["profile.gallery_images", ["https://signed.example/hotel.jpg"]],
     ["profile.amenities", ["wifi", "wifi"]],
-    ["marketplace.preferences.compensation_types", ["room_and_board"]],
-    ["marketplace.preferences.availability", { mode: "year_round", months: [1] }],
     ["booking.font_pairing", "comic-sans"],
     ["room.beds", { room_1: [{ type: "king", quantity: 1, provider_secret: "secret" }] }],
     ["room.size", { room_1: 28.5 }],

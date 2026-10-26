@@ -10,9 +10,12 @@ const POLICY_DIGEST = "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938
 // Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
 // (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
 // 0474, so it stays a safe rollback target when 0474 ships in a later release.
+// The third value is the catalog after 0489 drops the restriction ARI triggers (VAY-2208, PG16
+// and PG17); it ships one release before 0489 for the same reason.
 const CATALOG_DIGESTS = new Set([
   "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
   "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
+  "2d185251ef0a8949b140fe14469c65f5122b7df055f712ffe64e590f64e24ef2",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",

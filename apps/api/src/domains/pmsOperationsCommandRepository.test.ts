@@ -702,6 +702,15 @@ describe("target PMS operations command repository", () => {
         expect(idempotencyKey).toContain(`pms-booking-capture:${propertyId}:${guestBookingId}:`);
         return requestCardIntent("succeeded");
       },
+      async createRefund() {
+        throw new Error("not used");
+      },
+      async listRefunds() {
+        throw new Error("not used");
+      },
+      async retrieveRefund() {
+        throw new Error("not used");
+      },
       async cancelPaymentIntent() {
         throw new Error("not used");
       },
@@ -989,6 +998,9 @@ describe("target PMS operations command repository", () => {
       createPaymentIntent: vi.fn(),
       retrievePaymentIntent: vi.fn(),
       capturePaymentIntent: vi.fn(),
+      createRefund: vi.fn(),
+      listRefunds: vi.fn(),
+      retrieveRefund: vi.fn(),
       cancelPaymentIntent: vi.fn(),
     };
     const { client, repository } = createRepository((text) => {
@@ -1135,9 +1147,19 @@ describe("target PMS operations command repository", () => {
       acceptanceMode: "legacy",
       automaticallyAccepted: false,
     },
+    // VAY-2373 (D2): staff record how they took it at the desk; Finance gets that method.
+    {
+      method: "pay_at_property",
+      lifecycleStatus: "confirmed",
+      acceptanceMode: "instant",
+      automaticallyAccepted: true,
+      settlementMethod: "cash",
+    },
   ] as const)(
     "records commission-aware $method settlement in $acceptanceMode mode",
-    async ({ method, lifecycleStatus, acceptanceMode, automaticallyAccepted }) => {
+    async (row) => {
+      const { method, lifecycleStatus, acceptanceMode, automaticallyAccepted } = row;
+      const settlementMethod = "settlementMethod" in row ? row.settlementMethod : undefined;
       const { client, repository } = createRepository((text, values) => {
         if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
         if (text.includes("FROM platform.idempotency_keys")) return ok();
@@ -1276,6 +1298,7 @@ describe("target PMS operations command repository", () => {
         baseBookingLifecycleCommand({
           commandId: "cmd-booking-paid-001",
           idempotencyKey: "pms-booking-paid-001",
+          ...(settlementMethod ? { settlementMethod } : {}),
         }),
       );
 
@@ -1286,8 +1309,12 @@ describe("target PMS operations command repository", () => {
       expect(mutation.values[4]).toBe("property_user");
       expect(mutation.values[8]).toBe(automaticallyAccepted);
       expect(mutation.text).toContain("automatic_acceptance_event");
+      expect(JSON.parse(mutation.values[6] as string)).toMatchObject({
+        paymentMethod: method,
+        settlementMethod: settlementMethod ?? null,
+      });
       const financePayment = requiredCall(client, "INSERT INTO finance.payments");
-      expect(financePayment.values).toContain(method);
+      expect(financePayment.values).toContain(settlementMethod ?? method);
       expect(financePayment.values).toContain("600.00");
       expect(financePayment.values).toContain("30.00");
       expect(financePayment.values).toContain("570.00");
@@ -1873,11 +1900,6 @@ describe("target PMS operations command repository", () => {
     expect(result.reservation.assignments).toEqual(
       expect.arrayContaining([expect.objectContaining({ assignmentStatus: "checked_out" })]),
     );
-    expect(
-      client.calls.some(({ text }) =>
-        text.includes("FROM booking.affiliate_original_booking_bindings"),
-      ),
-    ).toBe(false);
 
     const checkoutInsert = requiredCall(client, "INSERT INTO pms.booking_checkout_records");
     expect(JSON.parse(String(checkoutInsert.values[5]))).toEqual([
@@ -1992,13 +2014,6 @@ describe("target PMS operations command repository", () => {
     const final = await repository.executeCheckOutCommand(finalCommand);
 
     expect([first.ok, final.ok]).toEqual([true, true]);
-    const affiliateEvidence = client.calls.filter(({ text }) =>
-      text.includes("FROM booking.affiliate_original_booking_bindings"),
-    );
-    expect(affiliateEvidence).toHaveLength(2);
-    expect(
-      affiliateEvidence.map(({ values }) => JSON.parse(String(values[11])).stayItemId),
-    ).toEqual([assignmentOneId, assignmentTwoId]);
     expect(
       client.calls.filter(({ text }) =>
         text.includes("INSERT INTO booking.addon_revenue_evidence"),

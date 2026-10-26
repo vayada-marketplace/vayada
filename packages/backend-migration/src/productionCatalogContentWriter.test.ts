@@ -27,7 +27,14 @@ describe("production catalog content writer", () => {
     const policies = fixture.find("property_policy_summaries");
     expect(policies).toContain("property_owner_revisions");
     expect(policies).not.toMatch(/cancellation_terms_url\s*=|deposit_policy_summary\s*=/);
-    expect(fixture.sql.every((sql) => sql.includes("updated_at < EXCLUDED.updated_at"))).toBe(true);
+    // Policies accept an equal timestamp so a re-run can backfill arrival windows (VAY-1283);
+    // the owner-revision guard above still protects owner edits. Everything else stays strict.
+    expect(policies).toContain("updated_at <= EXCLUDED.updated_at");
+    expect(
+      fixture.sql
+        .filter((sql) => sql !== policies)
+        .every((sql) => sql.includes("updated_at < EXCLUDED.updated_at")),
+    ).toBe(true);
   });
 });
 

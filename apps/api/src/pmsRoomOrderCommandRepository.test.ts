@@ -72,11 +72,55 @@ describe("target PMS room order command repository", () => {
     expect(target.auditCount()).toBe(0);
     expect(target.commands()).toEqual(["BEGIN", "ROLLBACK"]);
   });
+
+  it("moves each room type to its first room's slot and keeps room types without rooms in place", async () => {
+    const [a1, a2, b1, c1] = [1, 2, 3, 4].map((n) => `f6855100-0000-0000-0000-00000000010${n}`) as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    const [typeA, typeEmpty, typeB, typeC] = [1, 2, 3, 4].map(
+      (n) => `f6855000-0000-0000-0000-00000000010${n}`,
+    ) as [string, string, string, string];
+    const target = roomOrderPool({
+      rooms: [
+        [a1, typeA],
+        [a2, typeA],
+        [b1, typeB],
+        [c1, typeC],
+      ],
+      roomTypeIds: [typeA, typeEmpty, typeB, typeC],
+    });
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://room-order-test",
+      pool: target.pool,
+      readRepository: {} as PmsOperationsReadRepository,
+    });
+
+    await expect(
+      repository.reorderRooms!(
+        reorderCommand([c1, a1, a2, b1], pmsRoomOrderVersion([a1, a2, b1, c1])),
+      ),
+    ).resolves.toMatchObject({ ok: true, orderedRoomIds: [c1, a1, a2, b1] });
+    expect(target.roomTypeOrder()).toEqual([typeC, typeEmpty, typeA, typeB]);
+    expect(target.auditPayload()).toMatchObject({
+      previousRoomTypeIds: [typeA, typeEmpty, typeB, typeC],
+      orderedRoomTypeIds: [typeC, typeEmpty, typeA, typeB],
+    });
+  });
 });
 
-function roomOrderPool() {
+function roomOrderPool(
+  fixture: { rooms: Array<[string, string]>; roomTypeIds: string[] } = {
+    rooms: roomIds.map((roomId) => [roomId, roomTypeId]),
+    roomTypeIds: [roomTypeId],
+  },
+) {
   const calls: Array<{ text: string; values?: readonly unknown[] }> = [];
-  let orderedRoomIds = [...roomIds];
+  const roomTypeOf = new Map(fixture.rooms);
+  let orderedRoomIds = fixture.rooms.map(([roomId]) => roomId);
+  let roomTypeOrder = [...fixture.roomTypeIds];
   let requestFingerprintHash = "";
   let idempotencyMetadata: Record<string, unknown> | null = null;
   let reserved = false;
@@ -111,11 +155,24 @@ function roomOrderPool() {
         return rows<T>([]);
       }
       if (text.includes("SELECT DISTINCT room_type_id")) {
-        return rows<T>([{ roomTypeId } as unknown as T]);
+        return rows<T>(
+          [...new Set(roomTypeOf.values())].map((id) => ({ roomTypeId: id }) as unknown as T),
+        );
+      }
+      if (text.includes("FROM pms.room_types")) {
+        return rows<T>(roomTypeOrder.map((id) => ({ roomTypeId: id }) as unknown as T));
+      }
+      if (text.includes("UPDATE pms.room_types")) {
+        roomTypeOrder = [...(values?.[1] as string[])];
+        return rows<T>([]);
       }
       if (text.includes("pg_advisory_xact_lock")) return rows<T>([]);
       if (text.includes("ORDER BY sort_order ASC, room_number ASC, id ASC FOR UPDATE")) {
-        return rows<T>(orderedRoomIds.map((roomId) => ({ roomId }) as unknown as T));
+        return rows<T>(
+          orderedRoomIds.map(
+            (roomId) => ({ roomId, roomTypeId: roomTypeOf.get(roomId) }) as unknown as T,
+          ),
+        );
       }
       if (text.includes("WITH desired AS")) {
         orderedRoomIds = [...(values?.[1] as string[])];
@@ -129,6 +186,7 @@ function roomOrderPool() {
   return {
     pool: { connect: async () => client, end: async () => {} } satisfies PmsOperationsCommandPool,
     order: () => orderedRoomIds,
+    roomTypeOrder: () => roomTypeOrder,
     updateCount: () => calls.filter(({ text }) => text.includes("WITH desired AS")).length,
     auditCount: () =>
       calls.filter(({ text }) => text.includes("INSERT INTO platform.product_audit_events")).length,

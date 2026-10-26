@@ -160,7 +160,7 @@ it("handles missing, stale and denied published reads without exposing controls"
         .props.onClick(),
     );
     expect(view.root.findAllByType("select")).toHaveLength(0);
-    expect(JSON.stringify(view.toJSON())).toContain("Open pricing");
+    expect(JSON.stringify(view.toJSON())).toContain("Open Rooms & Rates");
   }
   read.mockRejectedValue(new ApiErrorResponse(403, { code: "forbidden" }));
   await act(async () => view.root.findByType("button").props.onClick());

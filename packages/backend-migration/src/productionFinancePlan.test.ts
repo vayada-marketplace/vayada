@@ -360,26 +360,6 @@ describe("production Finance plan", () => {
     expect(plan.dispositions.map((row) => row.reasonCode)).toContain("INVALID_FINANCE_SOURCE_ROW");
   });
 
-  it("reports malformed affiliate user identities as source blockers", () => {
-    const rows = sourceRows();
-    rows.push(
-      source("pms", "affiliates", {
-        id: "a1000000-0000-4000-8000-000000000001",
-        user_id: "not-a-uuid",
-        stripe_connect_account_id: null,
-      }),
-    );
-
-    const plan = buildProductionFinancePlan({
-      sourceRunId: RUN,
-      completedAt: "2026-08-30T00:00:00.000Z",
-      rows,
-      target: target(),
-    });
-
-    expect(plan.dispositions.map((row) => row.reasonCode)).toContain("INVALID_FINANCE_SOURCE_ROW");
-  });
-
   it("never infers a Stripe payment account from current settings", () => {
     const rows = sourceRows();
     delete rows.find((row) => row.sourceTable === "payments")!.data["stripe_account_id"];
@@ -459,7 +439,7 @@ describe("production Finance plan", () => {
   it("keeps an omitted payout with missing ownership in the raw money ledger", () => {
     const rows = sourceRows();
     const payout = rows.find((row) => row.sourceTable === "payouts")!;
-    payout.data["recipient_type"] = "affiliate";
+    payout.data["recipient_type"] = "partner";
     payout.data["recipient_id"] = "a2000000-0000-4000-8000-000000000099";
 
     const plan = buildProductionFinancePlan({
@@ -483,6 +463,40 @@ describe("production Finance plan", () => {
     );
   });
 
+  it("omits retired affiliate payouts but keeps them in the raw money ledger (VAY-2272)", () => {
+    const rows = sourceRows();
+    const payout = rows.find((row) => row.sourceTable === "payouts")!;
+    payout.data["recipient_type"] = "affiliate";
+    payout.data["recipient_id"] = "a2000000-0000-4000-8000-000000000099";
+    payout.data["status"] = "completed";
+
+    const plan = buildProductionFinancePlan({
+      sourceRunId: RUN,
+      completedAt: "2026-08-30T00:00:00.000Z",
+      rows,
+      target: target(),
+    });
+
+    expect(plan.blockers).toEqual([]);
+    expect(plan.records.some((row) => row.targetTable === "payouts")).toBe(false);
+    expect(plan.dispositions).toContainEqual(
+      expect.objectContaining({
+        sourceTable: "payouts",
+        sourceField: "*",
+        reasonCode: "RETIRED_AFFILIATE_PROGRAM",
+        disposition: "omitted_row",
+      }),
+    );
+    expect(Object.keys(plan.parity.sourcePayoutAmountsByCurrencyStatusOwner)[0]).toMatch(
+      /^EUR:unbound:paid:owner_[0-9a-f]{16}$/,
+    );
+    expect(Object.values(plan.parity.sourcePayoutAmountsByCurrencyStatusOwner)).toEqual(["100.00"]);
+    expect(plan.parity.omittedPayoutAmountsByCurrencyStatusOwner).toEqual(
+      plan.parity.sourcePayoutAmountsByCurrencyStatusOwner,
+    );
+    expect(plan.parity.targetPayoutAmountsByCurrencyStatusOwner).toEqual({});
+  });
+
   it("blocks when an omitted economic amount cannot enter the raw ledger", () => {
     const rows = sourceRows().filter((row) => row.sourceTable !== "payouts");
     const payment = rows.find((row) => row.sourceTable === "payments")!;
@@ -498,170 +512,6 @@ describe("production Finance plan", () => {
 
     expect(plan.blockers.map((row) => row.code)).toContain(
       "FINANCE_SOURCE_MONETARY_VALUE_UNREADABLE",
-    );
-  });
-
-  it("keeps sensitive affiliate payout settings inactive until target re-entry", () => {
-    const affiliateId = "a2000000-0000-4000-8000-000000000001";
-    const affiliateUserId = "a3000000-0000-4000-8000-000000000001";
-    const rows = sourceRows().filter((row) => row.sourceTable !== "payouts");
-    rows.push(
-      source("pms", "affiliates", {
-        id: affiliateId,
-        user_id: affiliateUserId,
-        hotel_id: HOTEL,
-        stripe_connect_account_id: "acct_affiliate",
-        stripe_connect_onboarded: true,
-        created_at: AT,
-        updated_at: AT,
-      }),
-      source("pms", "affiliate_payout_settings", {
-        user_id: affiliateUserId,
-        payment_method: "stripe",
-        bank_country: "DE",
-        bank_iban: "sensitive-destination",
-        created_at: AT,
-        updated_at: AT,
-      }),
-    );
-    const state = target();
-    state.resourceLinks.push({
-      organizationId: OTHER_ORGANIZATION,
-      product: "affiliate",
-      resourceType: "affiliate",
-      resourceId: affiliateId,
-      relationship: "owner",
-      status: "active",
-    });
-
-    const plan = buildProductionFinancePlan({
-      sourceRunId: RUN,
-      completedAt: "2026-08-30T00:00:00.000Z",
-      rows,
-      target: state,
-    });
-
-    expect(plan.blockers).toEqual([]);
-    expect(plan.records.find((row) => row.targetTable === "payout_settings")!.row).toMatchObject({
-      status: "setup_incomplete",
-      sensitiveDestinationRef: null,
-      payoutPreferences: { destinationRequiresReentry: true },
-    });
-    expect(JSON.stringify(plan)).not.toContain("sensitive-destination");
-  });
-
-  it("does not bind an affiliate payout setting to a quarantined provider account", () => {
-    const affiliateId = "a2000000-0000-4000-8000-000000000002";
-    const affiliateUserId = "a3000000-0000-4000-8000-000000000002";
-    const rows = sourceRows().filter((row) => row.sourceTable !== "payouts");
-    rows.push(
-      source("pms", "affiliates", {
-        id: affiliateId,
-        user_id: affiliateUserId,
-        hotel_id: HOTEL,
-        stripe_connect_account_id: "acct_invalid_affiliate",
-        stripe_connect_onboarded: "not-a-boolean",
-        created_at: AT,
-        updated_at: AT,
-      }),
-      source("pms", "affiliate_payout_settings", {
-        user_id: affiliateUserId,
-        payment_method: "stripe",
-        bank_country: "DE",
-        created_at: AT,
-        updated_at: AT,
-      }),
-    );
-    const state = target();
-    state.resourceLinks.push({
-      organizationId: OTHER_ORGANIZATION,
-      product: "affiliate",
-      resourceType: "affiliate",
-      resourceId: affiliateId,
-      relationship: "owner",
-      status: "active",
-    });
-
-    const plan = buildProductionFinancePlan({
-      sourceRunId: RUN,
-      completedAt: "2026-08-30T00:00:00.000Z",
-      rows,
-      target: state,
-    });
-    const affiliateSetting = plan.records.find(
-      (row) =>
-        row.targetTable === "payout_settings" && row.row["organizationId"] === OTHER_ORGANIZATION,
-    )!;
-
-    expect(plan.blockers).toEqual([]);
-    expect(affiliateSetting.row).toMatchObject({
-      organizationProviderAccountId: null,
-      status: "setup_incomplete",
-    });
-    expect(plan.dispositions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          sourceTable: "affiliates",
-          reasonCode: "INVALID_FINANCE_SOURCE_ROW",
-          disposition: "omitted_row",
-        }),
-        expect.objectContaining({
-          sourceTable: "affiliate_payout_settings",
-          reasonCode: "FINANCE_PARENT_RECORD_QUARANTINED",
-        }),
-      ]),
-    );
-  });
-
-  it("quarantines an affiliate payout method outside the target enum", () => {
-    const affiliateId = "a2000000-0000-4000-8000-000000000003";
-    const affiliateUserId = "a3000000-0000-4000-8000-000000000003";
-    const rows = sourceRows().filter((row) => row.sourceTable !== "payouts");
-    rows.push(
-      source("pms", "affiliates", {
-        id: affiliateId,
-        user_id: affiliateUserId,
-        hotel_id: HOTEL,
-        stripe_connect_account_id: null,
-      }),
-      source("pms", "affiliate_payout_settings", {
-        user_id: affiliateUserId,
-        payment_method: "crypto",
-        bank_country: "DE",
-        created_at: AT,
-        updated_at: AT,
-      }),
-    );
-    const state = target();
-    state.resourceLinks.push({
-      organizationId: OTHER_ORGANIZATION,
-      product: "affiliate",
-      resourceType: "affiliate",
-      resourceId: affiliateId,
-      relationship: "owner",
-      status: "active",
-    });
-
-    const plan = buildProductionFinancePlan({
-      sourceRunId: RUN,
-      completedAt: "2026-08-30T00:00:00.000Z",
-      rows,
-      target: state,
-    });
-
-    expect(
-      plan.records.some(
-        (row) =>
-          row.targetTable === "payout_settings" && row.row["organizationId"] === OTHER_ORGANIZATION,
-      ),
-    ).toBe(false);
-    expect(plan.dispositions).toContainEqual(
-      expect.objectContaining({
-        sourceTable: "affiliate_payout_settings",
-        sourceField: "*",
-        reasonCode: "INVALID_FINANCE_SOURCE_ROW",
-        disposition: "omitted_row",
-      }),
     );
   });
 
@@ -928,27 +778,12 @@ describe("production Finance plan", () => {
       property_payout_amount: "100.00",
       affiliate_id: affiliateId,
     });
-    rows.push(
-      source("pms", "affiliates", {
-        id: affiliateId,
-        stripe_connect_account_id: null,
-      }),
-    );
-    const state = target();
-    state.resourceLinks.push({
-      organizationId: OTHER_ORGANIZATION,
-      product: "affiliate",
-      resourceType: "affiliate",
-      resourceId: affiliateId,
-      relationship: "owner",
-      status: "active",
-    });
 
     const plan = buildProductionFinancePlan({
       sourceRunId: RUN,
       completedAt: "2026-08-30T00:00:00.000Z",
       rows,
-      target: state,
+      target: target(),
     });
 
     expect(plan.blockers).toEqual([]);
@@ -961,10 +796,60 @@ describe("production Finance plan", () => {
     expect(plan.dispositions).toContainEqual(
       expect.objectContaining({
         sourceField: "affiliate_commission_amount",
-        reasonCode: "BOOKING_FINANCE_ALLOCATION_EVIDENCE_REQUIRED",
-        disposition: "unbound_history",
+        reasonCode: "RETIRED_AFFILIATE_PROGRAM",
+        disposition: "omitted_field",
       }),
     );
+  });
+
+  it("reconciles a booking that paid the hotel and a retired affiliate (VAY-2272)", () => {
+    const affiliateId = "a2000000-0000-4000-8000-000000000005";
+    const rows = sourceRows();
+    Object.assign(rows.find((row) => row.sourceTable === "bookings")!.data, {
+      total_amount: "110.00",
+      platform_fee_amount: "0.00",
+      affiliate_commission_amount: "10.00",
+      property_payout_amount: "100.00",
+      affiliate_id: affiliateId,
+    });
+    const hotelPayout = rows.find((row) => row.sourceTable === "payouts")!;
+    rows.push(
+      source("pms", "payouts", {
+        ...hotelPayout.data,
+        id: "70000000-0000-4000-8000-000000000002",
+        recipient_type: "affiliate",
+        recipient_id: affiliateId,
+        amount: "10.00",
+      }),
+    );
+
+    const plan = buildProductionFinancePlan({
+      sourceRunId: RUN,
+      completedAt: "2026-08-30T00:00:00.000Z",
+      rows,
+      target: target(),
+    });
+
+    expect(plan.blockers).toEqual([]);
+    expect(plan.records.filter((row) => row.targetTable === "payouts")).toHaveLength(1);
+    expect(plan.dispositions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceTable: "payouts",
+          sourceField: "*",
+          reasonCode: "RETIRED_AFFILIATE_PROGRAM",
+          disposition: "omitted_row",
+        }),
+        expect.objectContaining({
+          sourceTable: "bookings",
+          sourceField: "affiliate_commission_amount",
+          reasonCode: "RETIRED_AFFILIATE_PROGRAM",
+          disposition: "omitted_field",
+        }),
+      ]),
+    );
+    expect(Object.values(plan.parity.targetPayoutAllocationsByBookingOwner)).toEqual(["100.00"]);
+    expect(Object.values(plan.parity.omittedPayoutAllocationsByBookingOwner)).toEqual(["10.00"]);
   });
 
   it("blocks commission pricing while a legacy fixed subscription is active", () => {
