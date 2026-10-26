@@ -23,12 +23,12 @@ import BookingStaySummary, {
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
+import { expectedGuestCount, guestRegistered } from "@/lib/guestRegistration";
 
 type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
 
 const primaryActionClass =
   "rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60";
-const LEGACY_BOOKING_WRITES_AVAILABLE = false;
 
 type GuestRegistrationDraft = Pick<
   BookingAdditionalGuestPayload,
@@ -46,12 +46,8 @@ function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
 }
 
-function totalGuests(b: Booking) {
-  return Math.max(1, b.numberOfGuests ?? b.adults + b.children);
-}
-
 function expectedAdditionalGuests(b: Booking) {
-  return Math.max(0, totalGuests(b) - 1);
+  return Math.max(0, expectedGuestCount(b) - 1);
 }
 
 function totalRoomCapacity(b: Booking) {
@@ -92,7 +88,7 @@ function guestsLabel(
     parts.push(t(b.adults === 1 ? "checkIn.adult" : "checkIn.adults", { count: b.adults }));
   if (b.children > 0)
     parts.push(t(b.children === 1 ? "checkIn.child" : "checkIn.children", { count: b.children }));
-  const count = totalGuests(b);
+  const count = expectedGuestCount(b);
   return parts.join(", ") || t(count === 1 ? "checkIn.guest" : "checkIn.guests", { count });
 }
 
@@ -100,6 +96,25 @@ function isPaid(b: Booking) {
   if (b.amountStatus === "unverified") return false;
   if (b.depositRequired) return b.balanceAmount <= 0;
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
+}
+
+type MarkPaidOffer = "transfer" | "atProperty" | "cardRest";
+
+/** The payment the hotel can record at the desk; the same cases the booking page offers. */
+function markPaidOffer(b: Booking): MarkPaidOffer | null {
+  if (b.amountStatus === "unverified") return null;
+  // VAY-2205: a card deposit leaves the rest to pay at the hotel, also once the guest is in: check-in
+  // moves the room assignments, the booking itself stays confirmed.
+  if (
+    b.paymentMethod === "card" &&
+    b.paymentStatus === "partially_paid" &&
+    ["confirmed", "checked_in", "in_house", "checked_out"].includes(b.status)
+  )
+    return "cardRest";
+  if (b.status !== "confirmed" || b.paymentStatus !== "unpaid") return null;
+  if (b.paymentMethod === "bank_transfer") return "transfer";
+  if (b.paymentMethod === "pay_at_property") return "atProperty";
+  return null;
 }
 
 function normalizeGuests(booking: Booking, guests: BookingAdditionalGuest[]): GuestDraft[] {
@@ -125,10 +140,6 @@ function bookerDraftFromBooking(booking: Booking): GuestRegistrationDraft {
     dateOfBirth: booking.guestDateOfBirth || null,
     passportNumber: booking.guestPassportNumber || "",
   };
-}
-
-function guestComplete(g: GuestRegistrationDraft) {
-  return Boolean(g.firstName && g.lastName);
 }
 
 function guestHasData(g: GuestRegistrationDraft) {
@@ -176,6 +187,7 @@ export default function CheckInPage() {
   const [savingGuest, setSavingGuest] = useState<string | null>(null);
   const [removingGuest, setRemovingGuest] = useState<string | null>(null);
   const [confirmRemoveIndex, setConfirmRemoveIndex] = useState<number | null>(null);
+  const [confirmMarkPaid, setConfirmMarkPaid] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
@@ -218,8 +230,9 @@ export default function CheckInPage() {
     [pendingChecklistSteps],
   );
   const completedGuests =
-    guests.filter(guestComplete).length + (booker && guestComplete(booker) ? 1 : 0);
+    guests.filter(guestRegistered).length + (booker && guestRegistered(booker) ? 1 : 0);
   const ota = channelIsOta(booking?.channel);
+  const paymentOffer = booking ? markPaidOffer(booking) : null;
   const maxGuests = booking ? totalRoomCapacity(booking) : 1;
   const remainingGuestSlots = booking ? Math.max(0, maxGuests - (guests.length + 1)) : 0;
   const overCapacityBy = booking ? Math.max(0, guests.length + 1 - maxGuests) : 0;
@@ -314,31 +327,29 @@ export default function CheckInPage() {
     }
   };
 
-  const saveBooker = async () => {
-    if (!booking || !booker) return;
+  // The booker's name, email and phone come from the booking; only the nationality can be
+  // corrected here, the same correction the booking page makes.
+  const saveBookerNationality = async () => {
+    if (!booking || !booker?.nationality) return;
     setSavingGuest("booker");
     setError("");
     try {
-      const updated = await bookingsService.update(booking.id, {
-        guestFirstName: booker.firstName || "",
-        guestLastName: booker.lastName || "",
-        guestEmail: booker.email || "",
-        guestPhone: booker.phone || "",
-        guestCountry: booker.nationality || "",
-        guestGender: booker.gender || "",
-        guestDateOfBirth: booker.dateOfBirth || null,
-        guestPassportNumber: booker.passportNumber || "",
-      });
+      const correction = await bookingsService.correctPrimaryGuestNationality(
+        booking.id,
+        booker.nationality,
+      );
+      const updated = { ...booking, ...correction };
       setBooking(updated);
       setBooker(bookerDraftFromBooking(updated));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("checkIn.saveBookerError"));
+      setError(localizedErrorText(err, t("bookings.detail.failedToSaveNationality"), t));
     } finally {
       setSavingGuest(null);
     }
   };
 
   const markPaid = async () => {
+    setConfirmMarkPaid(false);
     if (!booking || actionLoading) return;
     setActionLoading("markPaid");
     setError("");
@@ -523,12 +534,44 @@ export default function CheckInPage() {
             onCancel={() => setConfirmRemoveIndex(null)}
           />
         )}
+        {confirmMarkPaid && paymentOffer && (
+          <ConfirmDialog
+            title={t("common.confirm")}
+            message={
+              paymentOffer === "cardRest"
+                ? t("bookings.detail.confirmRestPaid", {
+                    amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+                  })
+                : t("bookings.detail.confirmPaymentReceived", {
+                    method:
+                      paymentOffer === "transfer"
+                        ? t("bookings.detail.bankTransferLower")
+                        : t("bookings.detail.payAtHotelPaymentLower"),
+                  })
+            }
+            confirmLabel={t("bookings.detail.markAsPaid")}
+            cancelLabel={t("common.cancel")}
+            onConfirm={() => void markPaid()}
+            onCancel={() => setConfirmMarkPaid(false)}
+          />
+        )}
 
-        {completedGuests < totalGuests(booking) && (
+        {booking.specialRequests.trim() && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+              {t("dashboard.specialRequest")}
+            </h2>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-amber-950">
+              {booking.specialRequests}
+            </p>
+          </section>
+        )}
+
+        {completedGuests < expectedGuestCount(booking) && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
             {t("checkIn.missingRegistration", {
-              missing: totalGuests(booking) - completedGuests,
-              total: totalGuests(booking),
+              missing: expectedGuestCount(booking) - completedGuests,
+              total: expectedGuestCount(booking),
             })}
           </div>
         )}
@@ -587,17 +630,18 @@ export default function CheckInPage() {
                   title={guestName(booking) || t("checkIn.booker")}
                   badge={t("checkIn.bookerBadge")}
                   guest={booker}
-                  complete={guestComplete(booker)}
+                  complete={guestRegistered(booker)}
                   ota={ota}
                   onChange={updateBooker}
-                  onSave={saveBooker}
+                  onSave={saveBookerNationality}
                   saving={savingGuest === "booker"}
-                  saveLabel={t("checkIn.saveBooker")}
-                  readOnly
+                  saveDisabled={!booker.nationality || booker.nationality === booking.guestCountry}
+                  saveLabel={t("bookings.detail.saveNationality")}
+                  bookerContact
                 />
 
                 {guests.map((guest, index) => {
-                  const complete = guestComplete(guest);
+                  const complete = guestRegistered(guest);
                   return (
                     <GuestRegistrationCard
                       key={guest.id || `new-${index}`}
@@ -653,20 +697,26 @@ export default function CheckInPage() {
                 >
                   {bookingSettlementLabel(booking, t)}
                 </p>
-                {booking.amountStatus !== "unverified" &&
-                  (!booking.depositRequired || booking.balanceAmount > 0) && (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={markPaid}
-                        disabled={!LEGACY_BOOKING_WRITES_AVAILABLE || actionLoading !== null}
-                        title={t("checkIn.paymentChangesUnavailable")}
-                        className="cursor-not-allowed rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-400"
-                      >
-                        {t("checkIn.markPaidUnavailable")}
-                      </button>
-                    </div>
-                  )}
+                {paymentOffer && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmMarkPaid(true)}
+                      disabled={actionLoading !== null}
+                      className={primaryActionClass}
+                    >
+                      {actionLoading === "markPaid"
+                        ? t("common.saving")
+                        : paymentOffer === "cardRest"
+                          ? t("bookings.detail.markRestPaid", {
+                              amount: formatCurrency(booking.balanceAmount, booking.currency, 2),
+                            })
+                          : paymentOffer === "transfer"
+                            ? t("bookings.detail.markBankTransferReceived")
+                            : t("bookings.detail.markPayAtHotelReceived")}
+                    </button>
+                  </div>
+                )}
               </div>
             </Card>
 
@@ -778,7 +828,8 @@ function GuestRegistrationCard({
   onRemove,
   removing,
   saveLabel,
-  readOnly = false,
+  saveDisabled = false,
+  bookerContact = false,
 }: {
   title: string;
   badge?: string;
@@ -791,10 +842,13 @@ function GuestRegistrationCard({
   onRemove?: () => void;
   removing?: boolean;
   saveLabel?: string;
-  readOnly?: boolean;
+  saveDisabled?: boolean;
+  /** The booker: name, email and phone come from the booking; only the nationality is editable. */
+  bookerContact?: boolean;
 }) {
   const { t } = useTranslation();
-  const contactLocked = (value: string | null | undefined) => readOnly || (ota && Boolean(value));
+  const contactLocked = (value: string | null | undefined) =>
+    bookerContact || (ota && Boolean(value));
 
   return (
     <div
@@ -864,8 +918,10 @@ function GuestRegistrationCard({
         <NationalitySelect
           value={guest.nationality || ""}
           disabled={
-            readOnly ||
-            (ota && Boolean(guest.nationality) && Boolean(nationalityLabel(guest.nationality)))
+            !bookerContact &&
+            ota &&
+            Boolean(guest.nationality) &&
+            Boolean(nationalityLabel(guest.nationality))
           }
           onChange={(v) => onChange({ nationality: v })}
         />
@@ -873,18 +929,17 @@ function GuestRegistrationCard({
       <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
         {t("checkIn.unsupportedGuestFields")}
       </p>
-      {readOnly ? (
-        <p className="mt-3 text-xs text-gray-500">{t("checkIn.bookerEditingUnavailable")}</p>
-      ) : (
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          className={`${primaryActionClass} mt-3`}
-        >
-          {saving ? t("common.saving") : (saveLabel ?? t("checkIn.saveGuest"))}
-        </button>
+      {bookerContact && (
+        <p className="mt-3 text-xs text-gray-500">{t("checkIn.bookerContactFromBooking")}</p>
       )}
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving || saveDisabled}
+        className={`${primaryActionClass} mt-3`}
+      >
+        {saving ? t("common.saving") : (saveLabel ?? t("checkIn.saveGuest"))}
+      </button>
     </div>
   );
 }

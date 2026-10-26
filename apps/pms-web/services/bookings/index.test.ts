@@ -101,6 +101,12 @@ describe("PMS target booking projection", () => {
     );
   });
 
+  it("labels what a part-paid booking still owes, not its total", () => {
+    // A card deposit paid €72 of €240 when booking (VAY-2205); €168 is left (VAY-2373).
+    // prettier-ignore
+    expect(bookingSettlementLabel({ amountStatus: "recorded", balanceAmount: 168, currency: "EUR", depositRequired: false, paymentStatus: "partially_paid", totalAmount: 240 })).toBe("€168 outstanding");
+  });
+
   it("shows unverified instead of applied nightly prices in stay summaries", () => {
     const view = create(
       createElement(BookingStaySummary, {
@@ -234,6 +240,19 @@ describe("PMS target booking projection", () => {
     expect(mocks.post).toHaveBeenCalledWith(
       "/api/pms/properties/property-1/reservations/booking-1/check-out",
       expect.objectContaining({ fulfilledAddonSelectionIds: ["selection-1"] }),
+      expect.anything(),
+    );
+  });
+
+  it("records a desk charge in the booking's currency, not always EUR", async () => {
+    // prettier-ignore
+    mocks.post.mockResolvedValue({ charge: { chargeId: "charge-1", label: "Minibar", amount: { amountDecimal: "1500.00", currency: "LKR" }, originalAmount: { amountDecimal: "1500.00", currency: "LKR" }, status: "pending", createdAt: "2026-10-26T10:00:00Z", settledAt: null, waivedAt: null } });
+
+    await bookingsService.addCheckoutCharge("booking-1", "Minibar", 1500, "LKR");
+
+    expect(mocks.post).toHaveBeenCalledWith(
+      "/api/pms/properties/property-1/reservations/booking-1/checkout-charges",
+      expect.objectContaining({ label: "Minibar", amountDecimal: "1500.00", currency: "LKR" }),
       expect.anything(),
     );
   });

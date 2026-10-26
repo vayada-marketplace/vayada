@@ -765,5 +765,7 @@
   "calendar.awaitingPayment": "wacht op betaling",
   "calendar.awaitingPaymentHeld": "De kamers blijven tot dan vastgehouden en worden automatisch vrijgegeven als de betaling niet als ontvangen wordt gemarkeerd.",
   "calendar.paymentDeadlinePassed": "De betaaltermijn is verstreken, dus de betaling kan niet meer als ontvangen worden gemarkeerd. De boeking wordt automatisch vrijgegeven.",
-  "calendar.openBooking": "Boeking openen"
+  "calendar.openBooking": "Boeking openen",
+  "dashboard.guestsRegistered": "{registered} van {total} gasten geregistreerd",
+  "checkIn.bookerContactFromBooking": "Naam, e-mail en telefoon komen uit de boeking."
 }

@@ -765,5 +765,7 @@
   "calendar.awaitingPayment": "paiement en attente",
   "calendar.awaitingPaymentHeld": "Les chambres sont bloquées jusque-là et libérées automatiquement si le paiement n'est pas marqué comme reçu.",
   "calendar.paymentDeadlinePassed": "Le délai de paiement est dépassé : le paiement ne peut plus être marqué comme reçu. La réservation est libérée automatiquement.",
-  "calendar.openBooking": "Ouvrir la réservation"
+  "calendar.openBooking": "Ouvrir la réservation",
+  "dashboard.guestsRegistered": "{registered} voyageurs enregistrés sur {total}",
+  "checkIn.bookerContactFromBooking": "Le nom, l'e-mail et le téléphone proviennent de la réservation."
 }
