@@ -876,5 +876,10 @@
   "settings.checkIn.checkTypes.amount": "Jumlah",
   "settings.checkIn.checkRequired": "Wajib",
   "settings.checkIn.removeCheck": "Hapus {label}",
-  "settings.checkIn.addCheck": "Tambah pemeriksaan"
+  "settings.checkIn.addCheck": "Tambah pemeriksaan",
+  "calendar.targetManualBooking.roomCapacity": "Maks. tamu: {count}",
+  "calendar.targetManualBooking.guestTally": "Tamu: {count} dari {capacity}",
+  "calendar.targetManualBooking.capacityReached": "Kapasitas maksimum kamar yang dipilih sudah tercapai. Tambahkan kamar lain untuk menambah tamu.",
+  "calendar.targetManualBooking.guestsOverCapacity": "{count} tamu melebihi {capacity} yang diizinkan kamar yang dipilih. Hapus satu tamu atau tambahkan kamar.",
+  "calendar.targetManualBooking.guestsOverCapacityServer": "Kamar yang dipilih tidak cukup untuk semua tamu yang tercantum. Hapus satu tamu atau tambahkan kamar."
 }
