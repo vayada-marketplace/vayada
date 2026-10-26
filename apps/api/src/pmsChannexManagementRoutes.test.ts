@@ -462,21 +462,34 @@ describe("PMS Channex management command routes", () => {
     expect(harness.enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("queues ARI and provisioning only for owned hotels in the claimed scope, never inventory rules", async () => {
+  it("queues ARI only for owned hotels in the claimed scope, never provisioning, inventory rules or ARI recovery", async () => {
     const owned = await testApp({}, mutating, undefined, false, false, propertyId, false, undefined, [
       propertyId,
     ]);
     app = owned.app;
-    for (const operationType of ["sync_ari", "provision"] as const) {
-      const accepted = await app.inject({
-        method: "POST",
-        url: `/properties/${propertyId}/channex/commands`,
-        headers: { authorization: "Bearer valid" },
-        payload: { commandId: `c-${operationType}`, idempotencyKey: `k-${operationType}`, operationType },
-      });
-      expect(accepted.statusCode).toBe(202);
-    }
-    expect(owned.enqueue).toHaveBeenCalledTimes(2);
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/commands`,
+      headers: { authorization: "Bearer valid" },
+      payload: { commandId: "c-sync", idempotencyKey: "k-sync", operationType: "sync_ari" },
+    });
+    expect(accepted.statusCode).toBe(202);
+    const plain = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/commands`,
+      headers: { authorization: "Bearer valid" },
+      payload: { commandId: "c-prov", idempotencyKey: "k-prov", operationType: "provision" },
+    });
+    expect(plain.statusCode).toBe(409);
+    expect(owned.enqueue).toHaveBeenCalledTimes(1);
+    const recovery = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/alerts/${operationId}/recover`,
+      headers: { authorization: "Bearer valid" },
+      payload: { round: 0 },
+    });
+    expect(recovery.statusCode).toBe(409);
+    expect(owned.recoverAlert).not.toHaveBeenCalled();
     const rules = await app.inject({
       method: "PUT",
       url: `/properties/${propertyId}/channex/inventory-rules`,
