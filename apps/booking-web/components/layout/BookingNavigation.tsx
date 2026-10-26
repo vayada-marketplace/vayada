@@ -221,9 +221,10 @@ function Dropdown({
 }
 
 // --- Main Navigation ---
-export default function BookingNavigation() {
+/** Sits over a hero photo by default; `solid` puts it on its own white bar (the booking page). */
+export default function BookingNavigation({ solid = false }: { solid?: boolean }) {
   const { hotel } = useHotel();
-  const { selectedCurrency, setSelectedCurrency } = useCurrency();
+  const { selectedCurrency, setSelectedCurrency, availableCurrencies } = useCurrency();
   const t = useTranslations("nav");
   const locale = useLocale();
   const router = useRouter();
@@ -249,8 +250,7 @@ export default function BookingNavigation() {
       .toUpperCase() || "EN";
 
   const currencyItems = useMemo(() => {
-    const codes = Array.from(new Set([hotel.currency, ...(hotel.supportedCurrencies || [])]));
-    return codes
+    return availableCurrencies
       .map((code: string) => ({
         value: code,
         label: CURRENCY_LABELS[code] || code,
@@ -260,7 +260,7 @@ export default function BookingNavigation() {
         const nameB = b.label.split(" ").slice(1).join(" ") || b.label;
         return nameA.localeCompare(nameB);
       });
-  }, [hotel.currency, hotel.supportedCurrencies]);
+  }, [availableCurrencies]);
 
   const closeAll = () => {
     setContactOpen(false);
@@ -268,13 +268,23 @@ export default function BookingNavigation() {
     setCurrOpen(false);
   };
 
+  const outlineTone = solid
+    ? "text-gray-700 border-gray-300 hover:bg-gray-50 focus-visible:ring-primary-500"
+    : "text-white border-white/60 hover:bg-white/10 focus-visible:ring-white/80";
+
   const handleLanguageChange = (newLocale: string) => {
     router.replace(pathname, { locale: newLocale as "en" | "de" | "fr" | "es" | "id" | "nl" });
   };
 
   return (
     <>
-      <nav className="absolute top-0 left-0 right-0 z-50">
+      <nav
+        className={
+          solid
+            ? "relative z-50 border-b border-gray-200 bg-white"
+            : "absolute top-0 left-0 right-0 z-50"
+        }
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="relative flex items-center justify-between h-16">
             {/* The existing mobile text fallback stays hidden; an uploaded logo gets
@@ -282,9 +292,10 @@ export default function BookingNavigation() {
             <Link
               href="/"
               aria-label={hotel.name}
-              className={`${logoUrl ? "flex" : "hidden"} min-w-0 flex-1 items-center overflow-hidden pr-2 md:flex md:flex-none`}
+              className={`${logoUrl || solid ? "flex" : "hidden"} min-w-0 flex-1 items-center overflow-hidden pr-2 md:flex md:flex-none`}
             >
-              {logoUrl ? (
+              {/* Uploaded logos are made for the dark hero; the solid white bar shows the name. */}
+              {logoUrl && !solid ? (
                 // Dynamic CDN logos retain their intrinsic aspect ratio and must not
                 // reserve a fixed next/image box that could displace mobile controls.
                 // eslint-disable-next-line @next/next/no-img-element
@@ -297,7 +308,15 @@ export default function BookingNavigation() {
                   className="max-h-8 max-w-full object-contain object-left md:max-h-10 md:max-w-[300px]"
                 />
               ) : (
-                <span className="text-lg font-semibold text-white">{hotel.name}</span>
+                <span
+                  className={
+                    solid
+                      ? "truncate font-heading text-xl font-semibold text-primary-700"
+                      : "text-lg font-semibold text-white"
+                  }
+                >
+                  {hotel.name}
+                </span>
               )}
             </Link>
 
@@ -326,7 +345,7 @@ export default function BookingNavigation() {
                       closeAll();
                       setLangOpen(!langOpen);
                     }}
-                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white border-2 border-white/60 rounded-full hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+                    className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold border-2 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent ${outlineTone}`}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
@@ -364,7 +383,7 @@ export default function BookingNavigation() {
                       closeAll();
                       setCurrOpen(!currOpen);
                     }}
-                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white border-2 border-white/60 rounded-full hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+                    className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold border-2 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent ${outlineTone}`}
                   >
                     {selectedCurrency}
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -399,7 +418,7 @@ export default function BookingNavigation() {
                       closeAll();
                       setContactOpen(!contactOpen);
                     }}
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-600 text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                    className={`flex h-7 w-7 items-center justify-center rounded-full bg-primary-600 text-white focus:outline-none focus-visible:ring-2 ${solid ? "focus-visible:ring-primary-500 focus-visible:ring-offset-2" : "focus-visible:ring-white/80"}`}
                   >
                     <svg
                       className="h-3.5 w-3.5"
@@ -424,7 +443,7 @@ export default function BookingNavigation() {
                       closeAll();
                       setLangOpen(!langOpen);
                     }}
-                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-white/90"
+                    className={`flex items-center gap-1 px-2 py-1.5 text-xs font-medium ${solid ? "text-gray-700" : "text-white/90"}`}
                   >
                     <svg
                       className="w-3.5 h-3.5"
@@ -457,7 +476,7 @@ export default function BookingNavigation() {
                       closeAll();
                       setCurrOpen(!currOpen);
                     }}
-                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-white/90"
+                    className={`flex items-center gap-1 px-2 py-1.5 text-xs font-medium ${solid ? "text-gray-700" : "text-white/90"}`}
                   >
                     {selectedCurrency}
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

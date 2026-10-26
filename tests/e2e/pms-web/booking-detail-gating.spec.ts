@@ -52,7 +52,7 @@ test("hydrates the selected property on direct booking navigation without a relo
     (route) => route.fulfill({ json: { items: [] } }),
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
     (route) => route.fulfill({ json: null }),
   );
 
@@ -116,7 +116,7 @@ test("shows the exact connected-account payment breakdown to the host", async ({
     (route) => route.fulfill({ json: { items: [] } }),
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
     (route) => route.fulfill({ json: null }),
   );
 
@@ -124,7 +124,7 @@ test("shows the exact connected-account payment breakdown to the host", async ({
 
   await expect(page.getByText("Gross amount")).toBeVisible();
   await expect(page.getByText("Stripe fee")).toBeVisible();
-  await expect(page.getByText("Vayada commission")).toBeVisible();
+  await expect(page.getByText("vayada commission", { exact: true })).toBeVisible();
   await expect(page.getByText("Net payout")).toBeVisible();
   await expect(page.getByText("€91.80")).toBeVisible();
   await expect(page.getByText(/Stripe processing fees may not be returned/i)).toBeVisible();
@@ -133,7 +133,7 @@ test("shows the exact connected-account payment breakdown to the host", async ({
   netPayout = "96.80";
   await page.reload();
   await expect(page.getByText("Gross amount")).toBeVisible();
-  await expect(page.getByText("Vayada commission")).toHaveCount(0);
+  await expect(page.getByText("vayada commission", { exact: true })).toHaveCount(0);
   await expect(page.getByText("€96.80")).toBeVisible();
   await assertHealthy();
 });
@@ -300,7 +300,7 @@ test("gates legacy booking writes while keeping supported hotel actions active",
     },
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request**`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request**`,
     (route) => {
       if (route.request().url().endsWith("/accept")) {
         approvals += 1;
@@ -313,9 +313,8 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
 
   await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /modify booking.*not available yet/i }),
-  ).toBeDisabled();
+  // Only manual stays keep the (disabled) legacy modify button; direct stays use host actions.
+  await expect(page.getByRole("button", { name: /modify booking/i })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /edit booker.*not available yet/i }),
   ).toBeDisabled();
@@ -334,7 +333,10 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await expect(page.getByText("Netherlands", { exact: true })).toBeVisible();
   await expect(nationalityError).toHaveCount(0);
   await expect(page.getByText("Needs review")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Cancellation unavailable" })).toBeDisabled();
+  // Like modify, the legacy cancel button is manual-only (VAY-1279); direct stays use host actions.
+  await expect(page.getByRole("button", { name: "Cancel Booking", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit stay dates" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel booking", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Check in guest" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add note" })).toBeEnabled();
   await expect(page.getByText("Guest prefers a quiet room.")).toBeVisible();
@@ -487,11 +489,11 @@ test("keeps check-in guest CRUD active without presenting unsupported identity f
   await expect(page.getByLabel("First name").nth(1)).toBeDisabled();
   await expect(page.getByLabel("Nationality").nth(1)).toHaveValue("United States");
   await expect(page.getByLabel("Nationality").nth(1)).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Save booker" })).toHaveCount(0);
+  // The booker's contact comes from the booking; only the nationality is correctable.
+  await expect(page.getByRole("button", { name: "Save nationality" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save guest" })).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: /mark as paid.*not available yet/i }),
-  ).toBeDisabled();
+  // An OTA stay has no hotel-collected payment to record here.
+  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
 
   await page.getByLabel("Phone").nth(1).fill("+1 555 0100");
   await page.getByRole("button", { name: "Save guest" }).click();

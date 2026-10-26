@@ -13,7 +13,12 @@ const context: RequestContext = {
     status: "active",
     providerIdentity: { provider: "workos", providerUserId: "workos-1" },
   },
-  selectedOrganization: { organizationId: "org-1", kind: "hotel_group", status: "active" },
+  selectedOrganization: {
+    organizationId: "org-1",
+    name: "Casa Ana",
+    kind: "hotel_group",
+    status: "active",
+  },
   membership: {
     membershipId: "member-1",
     status: "active",
@@ -86,6 +91,7 @@ describe("authenticated support", () => {
         message: "Please help",
         userId: "user-1",
         organizationId: "org-1",
+        organizationName: "Casa Ana",
       });
     },
   );

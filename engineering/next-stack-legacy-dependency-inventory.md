@@ -17,6 +17,14 @@ This complements:
 > and lifecycle jobs likewise compose only target adapters.
 > Historical entries below describe the earlier VAY-880 state.
 
+> **Note (VAY-2272, 2026-10-20):** the Marketplace, the affiliate program and the creator accounts
+> are gone: `next-marketplace` (`apps/marketplace-web`), `next-affiliate`
+> (`apps/affiliate-dashboard`), the old Python Marketplace API and their `apps/api` routes are
+> deleted (only the hotel invite routes keep their `/api/marketplace/...` paths), and migrations 0496-0502 drop their data from the new database.
+> Their entries are removed below; their history is in the
+> [marketplace route migration inventory](marketplace-route-migration-inventory.md) and
+> [affiliate portal source retirement](affiliate-portal-retirement.md).
+
 ## Scope
 
 Audited next-stack surfaces:
@@ -26,8 +34,6 @@ Audited next-stack surfaces:
 - `next-booking-admin` (`apps/booking-admin`)
 - `next-booking` (`apps/booking-web`)
 - `next-admin` (`apps/vayada-admin`)
-- `next-marketplace` (`apps/marketplace-web`)
-- `next-affiliate` (`apps/affiliate-dashboard`)
 
 Out of scope for this inventory: changing customer-facing normal production
 routes, deleting compatibility code, or migrating callers. This document records
@@ -68,15 +74,10 @@ The next-stack debt falls into four groups:
 
 2. **`next-api`: auth compatibility bridge**
    - **Old thing:** `/auth/compat/*-token` routes mint short-lived legacy JWTs
-     for platform admin, Booking Admin, PMS Web, and Affiliate Dashboard
-     (`apps/api/src/routes/authSession.ts` lines 393-570), backed by
-     `AUTH_LEGACY_MARKETPLACE_JWT_SECRET`, `AUTH_LEGACY_BOOKING_JWT_SECRET`,
-     `AUTH_LEGACY_PMS_JWT_SECRET`, and
-     `AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET` (`apps/api/src/config.ts` lines
-     241-250).
-   - **Current consumer:** `vayada-admin`, `booking-admin`, `pms-web`, and
-     `affiliate-dashboard`. Marketplace Web's compatibility-token request has
-     been removed.
+     for Booking Admin and PMS Web (`apps/api/src/routes/authSession.ts`),
+     backed by `AUTH_LEGACY_BOOKING_JWT_SECRET` and `AUTH_LEGACY_PMS_JWT_SECRET`
+     (`apps/api/src/config.ts`).
+   - **Current consumer:** `booking-admin` and `pms-web`.
    - **Target replacement:** AuthKit session plus typed
      `RequestContext`/route-policy authorization; no legacy JWT secret per
      migrated surface.
@@ -84,7 +85,7 @@ The next-stack debt falls into four groups:
    - **Deletion blocker / proof needed:** each frontend proves normal flows use
      AuthKit/RequestContext tokens directly and no migrated request calls
      `/auth/compat/*`.
-   - **Follow-up:** VAY-878, VAY-883, VAY-886, WorkOS surface cutover tickets.
+   - **Follow-up:** VAY-878, VAY-883, WorkOS surface cutover tickets.
 
 3. **Cross-surface scope: `X-Hotel-Id`**
    - **Old thing:** `X-Hotel-Id` as routing scope
@@ -102,7 +103,7 @@ The next-stack debt falls into four groups:
      migrated calls no longer send `X-Hotel-Id` as the trust boundary.
    - **Follow-up:** VAY-878, VAY-883, VAY-885, VAY-881.
 
-4. **`next-pms`: direct PMS and marketplace legacy clients**
+4. **`next-pms`: direct PMS legacy clients**
    - **Old thing:** direct PMS API client fallback
      `NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost"` and handoff
      fallback `https://pms-api.vayada.com`
@@ -112,22 +113,17 @@ The next-stack debt falls into four groups:
      room-types, module activations, Channex, bookings, calendar, settings,
      payment/Stripe, and room blocks (`apps/pms-web/services/financials/index.ts`
      lines 116-143; `apps/pms-web/services/messaging/index.ts` lines 59-114;
-     `apps/pms-web/services/rooms/index.ts` lines 367-417). Image upload can
-     still fall back to the legacy marketplace API
-     `NEXT_PUBLIC_MARKETPLACE_API_URL || "https://api.vayada.com"` with
-     `X-Hotel-Id` (`apps/pms-web/services/upload/index.ts` lines 6-7 and 105).
+     `apps/pms-web/services/rooms/index.ts` lines 367-417).
    - **Current consumer:** PMS Web setup, settings, calendar, bookings, channel
-     manager, rooms, financials, messaging, media upload, and handoff.
+     manager, rooms, financials, messaging, and handoff.
    - **Target replacement:** typed PMS operations routes for rooms/calendar/
      messaging/operational reservations; finance contracts for invoices,
-     payments, payouts, payment settings, and Stripe/Xendit; platform media
-     upload contracts for images; Channex target
+     payments, payouts, payment settings, and Stripe/Xendit; Channex target
      intake/cutover contracts for channel connectivity.
    - **Owner domain:** PMS operations / finance / platform media / channel
      connectivity.
-   - **Deletion blocker / proof needed:** PMS Web smoke records no old PMS host,
-     no legacy marketplace upload host, no `/admin/*` helper routes for migrated
-     surfaces, and no `X-Hotel-Id` upload scope.
+   - **Deletion blocker / proof needed:** PMS Web smoke records no old PMS host
+     and no `/admin/*` helper routes for migrated surfaces.
    - **Follow-up:** VAY-878 for next-stack PMS helper migration; VAY-770 and
      implementation slices VAY-775-VAY-784 for PMS operations; VAY-795 and
      VAY-810-VAY-815 for finance; VAY-806 and VAY-820-VAY-827 for platform
@@ -184,27 +180,24 @@ The next-stack debt falls into four groups:
    - **Old thing:** Booking Admin has its own direct PMS service client
      `NEXT_PUBLIC_PMS_URL || "https://api.pms.localhost"`
      (`apps/booking-admin/services/api/pmsClient.ts` lines 1-8). It backs
-     affiliate admin routes, module activations, setup PMS registration/room
-     creation, payment settings, Stripe onboarding, and room-type lookups
-     (`apps/booking-admin/services/affiliates/index.ts` lines 47-72;
-     `apps/booking-admin/services/api/moduleActivationClient.ts` lines 34-45;
+     module activations, setup PMS registration/room creation, payment
+     settings, Stripe onboarding, and room-type lookups
+     (`apps/booking-admin/services/api/moduleActivationClient.ts` lines 34-45;
      `apps/booking-admin/app/setup/page.tsx` lines 392-480;
      `apps/booking-admin/app/(app)/settings/page.tsx` lines 279-299 and
      495-496).
-   - **Current consumer:** Booking Admin affiliate management, feature modules,
-     setup wizard, settings payment/Stripe sections, and room lookup helpers.
+   - **Current consumer:** Booking Admin feature modules, setup wizard,
+     settings payment/Stripe sections, and room lookup helpers.
    - **Target replacement:** typed Booking Admin/settings contracts for modules
      and setup state, typed PMS operations contracts for rooms and PMS setup,
-     affiliate/marketplace contracts for affiliate administration, and finance
-     contracts for payment/Stripe behavior.
-   - **Owner domain:** Booking / PMS operations / affiliate / finance.
+     and finance contracts for payment/Stripe behavior.
+   - **Owner domain:** Booking / PMS operations / finance.
    - **Deletion blocker / proof needed:** Booking Admin smoke records no
      `NEXT_PUBLIC_PMS_URL` old-host fallback and no PMS `/admin/*` calls for
-     migrated Booking Admin surfaces; affiliate/payment gaps are linked to their
-     domain owner tickets.
-   - **Follow-up:** VAY-883 for Booking Admin helper migration, VAY-770/VAY-795
-     for PMS/finance contracts, and VAY-886/A1 affiliate follow-ups for
-     affiliate-owned target routes.
+     migrated Booking Admin surfaces; payment gaps are linked to their domain
+     owner tickets.
+   - **Follow-up:** VAY-883 for Booking Admin helper migration and
+     VAY-770/VAY-795 for PMS/finance contracts.
 
 9. **Retired: `next-booking-admin` Ask Intelligence scope header**
    - **Old thing:** Ask client sends `X-Hotel-Id` while also sending
@@ -240,99 +233,43 @@ The next-stack debt falls into four groups:
       (`apps/api/src/routes/bookingWebPublic.ts` lines 1305-1457 and
       2368-2423).
     - **Current consumer:** Booking Web checkout, promo validation,
-      custom-domain resolution, guest lifecycle, affiliate public routes.
+      custom-domain resolution, and guest lifecycle.
     - **Target replacement:** Booking checkout command handlers, target public
-      bookability/domain projections, target affiliate/finance ownership.
-    - **Owner domain:** Booking / PMS handoff / finance / affiliate.
+      bookability/domain projections, and target finance ownership.
+    - **Owner domain:** Booking / PMS handoff / finance.
     - **Deletion blocker / proof needed:** parity passes with
       `PMS_PUBLIC_API_URL` and `BOOKING_PUBLIC_API_URL` absent.
-    - **Follow-up:** VAY-760 follow-ups: VAY-764, VAY-767, VAY-768, VAY-771.
+    - **Follow-up:** VAY-760 follow-ups: VAY-764, VAY-767, VAY-771.
 
 12. **`next-admin`: direct legacy service clients**
     - **Old thing:** Platform Admin still has direct old service clients:
-      `NEXT_PUBLIC_PMS_API_URL || "https://pms-api.vayada.com"`,
-      `NEXT_PUBLIC_BOOKING_API_URL || "https://booking-api.vayada.com"`, and
-      marketplace fallback `https://api.vayada.com`
+      `NEXT_PUBLIC_PMS_API_URL || "https://pms-api.vayada.com"` and
+      `NEXT_PUBLIC_BOOKING_API_URL || "https://booking-api.vayada.com"`
       (`apps/vayada-admin/services/api/pmsClient.ts` lines 1-5;
-      `apps/vayada-admin/services/api/bookingClient.ts` lines 1-8;
-      `apps/vayada-admin/services/api/marketplace.ts` lines 1-7).
-    - **Current consumer:** Platform Admin KPI/property actions, Booking
-      settings admin, affiliate payouts, marketplace reads/writes.
+      `apps/vayada-admin/services/api/bookingClient.ts` lines 1-8).
+    - **Current consumer:** Platform Admin KPI/property actions and Booking
+      settings admin.
     - **Target replacement:** typed `next-api` platform-admin, booking-admin,
-      finance, and marketplace-admin clients.
-    - **Owner domain:** platform / booking / finance / marketplace.
+      and finance clients.
+    - **Owner domain:** platform / booking / finance.
     - **Deletion blocker / proof needed:** browser smoke proves `next-admin` no
       longer calls old service hostnames for migrated surfaces.
     - **Follow-up:** VAY-885.
 
 13. **`next-admin`: old admin route shapes**
     - **Old thing:** Platform Admin still calls Booking `/admin/superadmin/*`,
-      `/admin/settings/*`, `/admin/addons`, `/admin/promo-codes`, PMS
-      `/super-admin/affiliate-payouts`, and legacy marketplace profile writes
-      (`apps/vayada-admin/services/booking/settingsService.ts` lines 112-188;
-      `apps/vayada-admin/services/api/affiliatePayouts.ts` lines 90-101;
-      `apps/vayada-admin/services/api/users.ts` lines 86-169).
-    - **Current consumer:** Platform Admin hotel/user/profile/finance
-      administration.
-    - **Target replacement:** platform admin contracts, marketplace admin
-      profile/listing contracts, finance payout contracts, explicit platform
+      `/admin/settings/*`, `/admin/addons`, and `/admin/promo-codes`
+      (`apps/vayada-admin/services/booking/settingsService.ts` lines 112-188).
+    - **Current consumer:** Platform Admin hotel and finance administration.
+    - **Target replacement:** platform admin contracts and explicit platform
       permissions.
-    - **Owner domain:** platform / marketplace / finance.
+    - **Owner domain:** platform / finance.
     - **Deletion blocker / proof needed:** migrated admin flows no longer use
       `/admin/*` or `/super-admin/*`; any missing target contract is linked to
       an owner.
-    - **Follow-up:** VAY-885, VAY-795, marketplace admin vertical tickets.
+    - **Follow-up:** VAY-885, VAY-795.
 
-14. **`next-api`: marketplace admin superadmin fallback**
-    - **Old thing:** Marketplace admin routes include opt-in
-      `users.is_superadmin` fallback during platform org migration
-      (`apps/api/src/routes/marketplaceAdmin.ts` lines 11-31 and 635-654).
-    - **Current consumer:** Platform/marketplace admin collaboration and
-      hotel-listing management.
-    - **Target replacement:** platform organization membership and permissions
-      only.
-    - **Owner domain:** WorkOS / marketplace admin.
-    - **Deletion blocker / proof needed:**
-      `MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED` is off in migrated
-      envs and tests cover the denial matrix.
-    - **Follow-up:** VAY-882; marketplace admin vertical tickets.
-
-15. **`next-affiliate`: PMS-owned dashboard API**
-    - **Old thing:** Affiliate Dashboard API defaults to
-      `https://api.pms.localhost`, types mirror the PMS backend, and auth mints
-      `/auth/compat/affiliate-dashboard-token`
-      (`apps/affiliate-dashboard/services/api/client.ts` lines 1-13;
-      `apps/affiliate-dashboard/services/auth/index.ts` lines 15-60;
-      `apps/affiliate-dashboard/services/auth/storage.ts` lines 94-99).
-    - **Current consumer:** affiliate dashboard, properties, earnings, activity,
-      payouts, payout settings, bank validation.
-    - **Target replacement:** target affiliate/marketplace reads plus finance
-      payout/provider contracts, authorized by AuthKit/RequestContext.
-    - **Owner domain:** affiliate / finance / WorkOS.
-    - **Deletion blocker / proof needed:** `next-affiliate` smoke records no PMS
-      host, PMS-shaped `/affiliate/*` legacy calls, or compat-token dependency
-      for migrated routes.
-    - **Follow-up:** VAY-886.
-
-16. **`next-marketplace`: product URL configuration**
-    - **Old thing:** Marketplace Web accepted legacy token/user URL fragments
-      during cross-app handoff and requested a Marketplace compatibility token;
-      PMS app-switcher links defaulted to production PMS.
-    - **Current consumer:** Product navigation only. Marketplace Web now
-      authenticates cross-app handoffs through its AuthKit session and accepts
-      only organization/property hints. Hotel/creator CRUD, collaboration/trip
-      fallbacks, and the Marketplace compatibility-token request have been
-      removed. The newsletter UI, routes, scheduler, and sender are retired;
-      historical preference rows remain target migration data.
-    - **Target replacement:** Configured product URLs.
-    - **Owner domain:** marketplace / WorkOS.
-    - **Deletion blocker / proof needed:** Product navigation URLs are config,
-      not runtime API dependencies. No legacy Marketplace auth rollback remains.
-    - **Follow-up:** existing marketplace vertical tickets from
-      VAY-737/VAY-803/VAY-801; VAY-1029 tracks a future Marketplace engagement
-      feature rather than restoration of the removed newsletter.
-
-17. **Smoke/proof layer: broad admin mocks**
+14. **Smoke/proof layer: broad admin mocks**
     - **Old thing:** shared Booking Admin mocks still fulfill broad
       `**/admin/**`, while focused tests assert only selected migrated routes
       (`tests/e2e/support/bookingAdminMocks.ts` lines 123-161).
@@ -355,14 +292,13 @@ The next-stack debt falls into four groups:
 - VAY-883: migrate Booking Admin off helper facades/fake data.
 - VAY-884: delete Booking Admin helper shims after VAY-883.
 - VAY-885: migrate Platform Admin off direct legacy service clients.
-- VAY-886: move Affiliate Dashboard to target affiliate/finance routes.
 - VAY-887 is superseded by Ask Intelligence retirement; VAY-1091 owns future
   hotel employee agent scope and authorization design.
 - VAY-770, VAY-795, VAY-806, and VAY-772: owner tracks for PMS operations,
   finance, platform media/import, and Channex/webhook route families surfaced by
   PMS Web.
-- VAY-760 follow-ups: Booking Web public profile/domain/bookability/checkout and
-  affiliate public route runtime dependency removal.
+- VAY-760 follow-ups: Booking Web public profile/domain/bookability/checkout
+  runtime dependency removal.
 
 ## Cutover validation notes
 
@@ -378,21 +314,17 @@ env vars, boots the route app, and serves these migrated public route groups:
 - `/api/ai/hotels/*`
 - `/api/booking-web/hosts/*`
 - `/api/booking-web/hotels/*`
-- `/api/marketplace/listings`
-- `/api/marketplace/creators`
 
 It fails with a `VAY-882 legacy runtime HTTP client called` error if those
 covered routes try to call a legacy service client.
 
 Remaining legacy-runtime env requirements outside the covered route groups:
 
-| Env requirement                        | Remaining surface / retirement condition                           | Owner ticket             | Forbidden by `test:legacy-free` |
-| -------------------------------------- | ------------------------------------------------------------------ | ------------------------ | ------------------------------- |
-| Removed: `BOOKING_DATABASE_URL`        | Legacy profile/settings adapters removed                           | VAY-760, VAY-883         | Yes                             |
-| `BOOKING_PUBLIC_API_URL`               | Public domain/promo and Booking Admin helper fallbacks removed     | VAY-760, VAY-883         | Yes                             |
-| `PMS_API_URL`                          | PMS guest-form sync and Booking Admin/PMS helper fallbacks removed | VAY-878, VAY-883         | Yes                             |
-| `PMS_PUBLIC_API_URL`                   | Public checkout/status/lookup proxy fallbacks removed              | VAY-760 follow-up tracks | Yes                             |
-| `AUTH_LEGACY_MARKETPLACE_JWT_SECRET`   | Platform Admin no longer needs the marketplace-admin JWT handoff   | VAY-885                  | No                              |
-| `AUTH_LEGACY_BOOKING_JWT_SECRET`       | Booking Admin no longer needs legacy Booking JWT handoff           | VAY-883, then VAY-884    | No                              |
-| `AUTH_LEGACY_PMS_JWT_SECRET`           | PMS Web no longer needs legacy PMS JWT handoff                     | VAY-878, then VAY-879    | No                              |
-| `AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET` | Affiliate Dashboard moves to target affiliate/finance routes       | VAY-886                  | No                              |
+| Env requirement                  | Remaining surface / retirement condition                           | Owner ticket             | Forbidden by `test:legacy-free` |
+| -------------------------------- | ------------------------------------------------------------------ | ------------------------ | ------------------------------- |
+| Removed: `BOOKING_DATABASE_URL`  | Legacy profile/settings adapters removed                           | VAY-760, VAY-883         | Yes                             |
+| `BOOKING_PUBLIC_API_URL`         | Public domain/promo and Booking Admin helper fallbacks removed     | VAY-760, VAY-883         | Yes                             |
+| `PMS_API_URL`                    | PMS guest-form sync and Booking Admin/PMS helper fallbacks removed | VAY-878, VAY-883         | Yes                             |
+| `PMS_PUBLIC_API_URL`             | Public checkout/status/lookup proxy fallbacks removed              | VAY-760 follow-up tracks | Yes                             |
+| `AUTH_LEGACY_BOOKING_JWT_SECRET` | Booking Admin no longer needs legacy Booking JWT handoff           | VAY-883, then VAY-884    | No                              |
+| `AUTH_LEGACY_PMS_JWT_SECRET`     | PMS Web no longer needs legacy PMS JWT handoff                     | VAY-878, then VAY-879    | No                              |

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { requestContextFixtureCases } from "./requestContext.fixtures.js";
 
-const requiredScopes = ["hotel", "creator", "affiliate", "platform"] as const;
+const requiredScopes = ["hotel", "platform"] as const;
 
 describe("RequestContext contract fixtures", () => {
   it("covers allowed and denied cases for each required scope", () => {

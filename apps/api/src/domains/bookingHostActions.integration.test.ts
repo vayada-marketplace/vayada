@@ -177,62 +177,15 @@ describe.skipIf(!url)("host actions PostgreSQL consistency", () => {
       reason: "Guest called",
     });
   }
-  it("applies the previewed dates and price with replacement inventory, revenue evidence, and email", async () => {
-    const p = await datePreview();
-    expect(p.impact).toMatchObject({
-      totalAmount: "100.00",
-      newTotalAmount: "120.00",
-      inventory: "replace",
-    });
-    await actions.apply(scope, p.previewId, "edit");
-    const evidence = await pool.query(
-      `SELECT stay_date::text,sum(occupied_room_nights)::int AS occupied,sum(gross_room_amount)::text AS amount
-       FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 GROUP BY stay_date ORDER BY stay_date`,
-      [scope.bookingId],
-    );
-    expect(evidence.rows).toEqual([
-      { stay_date: "2026-09-12", occupied: 0, amount: "0.0000" },
-      { stay_date: "2026-09-14", occupied: 1, amount: "120.0000" },
-    ]);
-    const row = (
-      await pool.query(
-        `SELECT check_in::text,check_out::text,total_amount::text,booking_metadata FROM booking.guest_bookings WHERE id=$1`,
-        [scope.bookingId],
-      )
-    ).rows[0];
-    expect(row).toMatchObject({
-      check_in: "2026-09-14",
-      check_out: "2026-09-15",
-      total_amount: "120.00",
-      booking_metadata: { selectedOffer: { publicPolicy: { refundable: true } } },
-    });
-    expect(
-      (
-        await pool.query(
-          `SELECT job_type FROM platform.jobs WHERE resource_id=$1 ORDER BY job_type`,
-          [scope.bookingId],
-        )
-      ).rows,
-    ).toEqual([{ job_type: "email.booking-updated" }, { job_type: "pms.reservation.update" }]);
-  });
-  it("requires a new preview after repricing and rolls replacement-inventory failure back", async () => {
-    const p = await datePreview();
-    await pool.query(
-      `UPDATE distribution.public_room_offer_snapshots SET base_price_amount=130 WHERE property_id=$1`,
-      [scope.propertyId],
-    );
-    await expect(actions.apply(scope, p.previewId, "price")).rejects.toMatchObject({
-      code: "stale_preview",
-    });
-    await pool.query(
-      `UPDATE distribution.public_room_offer_snapshots SET base_price_amount=120 WHERE property_id=$1`,
-      [scope.propertyId],
-    );
-    failReserve = true;
-    await expect(actions.apply(scope, p.previewId, "sold-out")).rejects.toMatchObject({
+  // The checkout that priced bookings made before pricing v2 is retired (VAY-1546), so their
+  // date changes are refused with a reason instead of failing with 503 (VAY-2110). Pricing-v2
+  // date changes are covered in pricingInventoryAdoption.postgres.test.ts.
+  it("refuses an old-format date change with a clear reason and writes nothing", async () => {
+    await expect(datePreview()).rejects.toMatchObject({
       code: "inventory_unavailable",
+      message: "The dates of this booking can't be changed online. Cancel and rebook it instead.",
     });
-    expect(await count("booking.booking_notes_public", "guest_booking_id", scope.bookingId)).toBe(
+    expect(await count("booking.host_action_previews", "guest_booking_id", scope.bookingId)).toBe(
       0,
     );
     expect(
@@ -243,7 +196,6 @@ describe.skipIf(!url)("host actions PostgreSQL consistency", () => {
       ).rows[0].check_in,
     ).toBe("2026-09-12");
   });
-
   it("commits cancellation, evidence, private audit, and jobs once and replays after expiry", async () => {
     const p = await preview();
     const results = await Promise.all([

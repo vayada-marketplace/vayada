@@ -23,7 +23,8 @@ import {
 import { parsePreparedHotelImport } from "@vayada/domain-hotels";
 
 type InviteView = "list" | "create";
-type SetupRoute = "marketplace" | "operations" | "combined";
+// Invites set up Hotel Operations only; the API reads older Marketplace invites the same way.
+type SetupRoute = "operations";
 
 const SETUP_ROUTE_OPTIONS: Array<{
   id: SetupRoute;
@@ -33,25 +34,11 @@ const SETUP_ROUTE_OPTIONS: Array<{
   selectedTracks: HotelSetupTrack[];
 }> = [
   {
-    id: "marketplace",
-    label: "Creator Marketplace",
-    description: "For hotels that only want creator collaborations.",
-    steps: "Hotel details → Marketplace setup",
-    selectedTracks: ["creator_marketplace"],
-  },
-  {
     id: "operations",
     label: "Hotel Operations",
     description: "For hotels using Booking Engine and PMS.",
     steps: "Hotel details → Booking and PMS setup",
     selectedTracks: ["hotel_operations"],
-  },
-  {
-    id: "combined",
-    label: "Marketplace + Hotel Operations",
-    description: "For hotels using the complete Vayada product suite.",
-    steps: "Hotel details → Combined setup",
-    selectedTracks: ["hotel_operations", "creator_marketplace"],
   },
 ];
 
@@ -65,7 +52,7 @@ export default function InviteCodesPage() {
   const [inviteeEmail, setInviteeEmail] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [propertyName, setPropertyName] = useState("");
-  const [setupRoute, setSetupRoute] = useState<SetupRoute>("marketplace");
+  const [setupRoute, setSetupRoute] = useState<SetupRoute>("operations");
   const [prepareData, setPrepareData] = useState(false);
   const [preparedData, setPreparedData] = useState(emptyPreparedData);
   const [saving, setSaving] = useState(false);
@@ -112,11 +99,7 @@ export default function InviteCodesPage() {
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selectedRoute = SETUP_ROUTE_OPTIONS.find((option) => option.id === setupRoute)!;
-    if (
-      prepareData &&
-      (!parsePreparedHotelImport(preparedData) ||
-        (preparedData.rooms.length > 0 && setupRoute === "marketplace"))
-    ) {
+    if (prepareData && !parsePreparedHotelImport(preparedData)) {
       setCreateError(
         "Check the prepared details. Each room needs a name and Hotel Operations access.",
       );
@@ -147,7 +130,7 @@ export default function InviteCodesPage() {
     setInviteeEmail("");
     setOrganizationName("");
     setPropertyName("");
-    setSetupRoute("marketplace");
+    setSetupRoute("operations");
     setPrepareData(false);
     setPreparedData(emptyPreparedData());
     setCreateError("");
@@ -309,11 +292,7 @@ export default function InviteCodesPage() {
               </label>
               {prepareData && (
                 <div className="mt-4">
-                  <PreparedHotelEditor
-                    value={preparedData}
-                    onChange={setPreparedData}
-                    allowRooms={setupRoute !== "marketplace"}
-                  />
+                  <PreparedHotelEditor value={preparedData} onChange={setPreparedData} allowRooms />
                 </div>
               )}
             </section>
@@ -510,8 +489,9 @@ function InviteCreated({ invite, onDone }: { invite: InviteCode; onDone: () => v
         </div>
         <h1 className="text-xl font-bold text-gray-900">Hotel invite created</h1>
         <p className="mt-2 text-sm text-gray-500">
-          Share this code with {invite.identity?.email}. They enter it on the Marketplace invitation
-          page, then continue through the {formatSetupRoute(invite.selectedTracks)} route.
+          Share this code with {invite.identity?.email}. They enter it on the Booking Admin
+          invitation page, then continue through the {formatSetupRoute(invite.selectedTracks)}{" "}
+          route.
         </p>
         <div className="my-6 rounded-xl border border-gray-200 bg-gray-50 p-5">
           <p className="break-all font-mono text-xl font-bold tracking-wider text-gray-900 sm:text-2xl">
@@ -561,10 +541,5 @@ function StatusBadge({ status }: { status: InviteCode["status"] }) {
 }
 
 function formatSetupRoute(selectedTracks: readonly HotelSetupTrack[]): string {
-  const hasMarketplace = selectedTracks.includes("creator_marketplace");
-  const hasOperations = selectedTracks.includes("hotel_operations");
-  if (hasMarketplace && hasOperations) return "Marketplace + Hotel Operations";
-  if (hasMarketplace) return "Creator Marketplace";
-  if (hasOperations) return "Hotel Operations";
-  return "Legacy invite";
+  return selectedTracks.includes("hotel_operations") ? "Hotel Operations" : "Legacy invite";
 }

@@ -16,6 +16,7 @@ import {
   parsePmsRecurringPricingBookingEvidence,
   type PmsMandatoryChargeConfirmationReadPort,
   type PmsOperatingCalendarCanonicalTimeZoneRegistry,
+  type PmsOperatingCalendarPropertyProfileEvidenceResult,
   type PmsOperatingCalendarReadPort,
   type PmsPricingReadPort,
   type PmsRecurringPricingReadPort,
@@ -40,6 +41,13 @@ export type PropertySetupPmsStateOptions = Readonly<{
   mandatoryCharges: PmsMandatoryChargeConfirmationReadPort;
   operatingCalendar: Pick<PmsOperatingCalendarReadPort, "getCurrentOperatingCalendarConfiguration">;
   calendarRegistry: PmsOperatingCalendarCanonicalTimeZoneRegistry;
+  /** The property's time zone: the only Hotel Catalog input the calendar uses (VAY-2150). */
+  propertyTimeZone: {
+    getPropertyProfileEvidence(
+      propertyId: string,
+    ): Promise<PmsOperatingCalendarPropertyProfileEvidenceResult>;
+  };
+  /** Only for converting calendar drafts saved before VAY-2198. */
   catalogLocation: HotelCatalogLocationCurrentOwnerEvidencePort;
 }>;
 
@@ -68,13 +76,18 @@ export function createPropertySetupPmsStateProvider(
               first.pricingRevision,
               first.pricingManifest,
             ),
-            fact(
-              request,
-              "calendar",
-              first.calendarState,
-              first.calendarRevision,
-              first.calendarManifest,
-            ),
+            Object.freeze({
+              ...fact(
+                request,
+                "calendar",
+                first.calendarState,
+                first.calendarRevision,
+                first.calendarManifest,
+              ),
+              ...(first.legacyCalendarManifest
+                ? { legacyBaseRevisions: first.legacyCalendarManifest }
+                : {}),
+            }),
           ]),
         };
       } catch {
@@ -158,6 +171,7 @@ async function readSnapshot(
     rawInventory,
     rawCatalogLocation,
     publishedRoomIds,
+    timeZone,
   ] = await Promise.all([
     options.owner.getRoomOwnerSnapshot({
       organizationId: request.organizationId,
@@ -179,6 +193,7 @@ async function readSnapshot(
       propertyId: request.propertyId,
     }),
     options.publishedPricing.listPublishedOfferRoomTypeIds(request.propertyId),
+    options.propertyTimeZone.getPropertyProfileEvidence(request.propertyId),
   ]);
   const rooms =
     rawRooms.organizationId === request.organizationId &&
@@ -207,6 +222,8 @@ async function readSnapshot(
     (rawCalendar !== null && !calendar) ||
     !catalogLocation ||
     catalogLocation.outcome !== "available" ||
+    (timeZone.status === "available" ? timeZone.evidence.source : timeZone.source).entityId !==
+      request.propertyId ||
     (pricing !== null && pricing.propertyId !== request.propertyId) ||
     (recurring !== null && recurring.propertyId !== request.propertyId) ||
     (calendar !== null && calendar.configuration.propertyId !== request.propertyId) ||
@@ -266,12 +283,30 @@ async function readSnapshot(
     ]),
   });
   const calendarRevision = calendar?.configuration.calendarRevision ?? 0;
+  // A calendar draft depends on what the calendar uses: the time zone, the operating rooms and
+  // their units (VAY-2198). Room details and other address edits leave it current.
   const calendarManifest = Object.freeze({
     "pms.operating_calendar": `calendar:${calendarRevision}`,
     "pms.inventory": `inventory:${rawInventory?.materializedRevision ?? 0}`,
-    "pms.room_types": roomsManifest["pms.room_types"],
-    "hotel_catalog.location": catalogLocation.evidence.baseRevision,
+    "pms.room_units": roomsManifest["pms.room_units"],
+    "hotel_catalog.time_zone": timeZoneRevision(timeZone),
   });
+  // Drafts saved before VAY-2198 never recorded units. A saved calendar whose units are still
+  // current proves no units changed since a draft that names its revision (units revisions only
+  // grow). Without a saved calendar that can't be told, as before VAY-2198.
+  const unitsChangedSinceCalendar =
+    calendar?.sourceStatus === "stale" &&
+    calendar.sourceConflicts.some(
+      ({ code }) => code === "room_units_revision_conflict" || code === "room_capacity_unavailable",
+    );
+  const legacyCalendarManifest = unitsChangedSinceCalendar
+    ? null
+    : Object.freeze({
+        "pms.operating_calendar": calendarManifest["pms.operating_calendar"],
+        "pms.inventory": calendarManifest["pms.inventory"],
+        "pms.room_types": roomsManifest["pms.room_types"],
+        "hotel_catalog.location": catalogLocation.evidence.baseRevision,
+      });
   const activeRoomIds = rooms.rooms.map(({ roomTypeId }) => roomTypeId);
   // With a pricing-v2 publication, every operating room needs at least one published offer;
   // otherwise (legacy data) a flexible plan.
@@ -328,6 +363,7 @@ async function readSnapshot(
         : ("not_started" as const),
     calendarRevision: collectionRevision("calendar-state", Object.entries(calendarManifest)),
     calendarManifest,
+    legacyCalendarManifest,
   };
   return Object.freeze({ ...snapshot, identity: digest(JSON.stringify(snapshot)) });
 }
@@ -406,6 +442,11 @@ function ratePlansRevision(pricing: ReturnType<typeof parsePmsPricingSourceSnaps
       plan.sourceRoomFactsRevision,
     ]),
   );
+}
+
+function timeZoneRevision(evidence: PmsOperatingCalendarPropertyProfileEvidenceResult): string {
+  if (evidence.status === "available") return `time-zone:${digest(evidence.evidence.timeZone)}`;
+  return evidence.status === "timezone_missing" ? "time-zone:missing" : "time-zone:invalid";
 }
 
 function roomTypesRevision(rooms: PropertySetupPmsRoomOwnerSnapshot["rooms"]): string {

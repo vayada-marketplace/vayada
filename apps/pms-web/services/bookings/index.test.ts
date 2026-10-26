@@ -22,7 +22,7 @@ vi.mock("../api/unsupported", () => ({
   unsupportedPmsNextStackFeature: vi.fn(),
 }));
 
-import { bookingsService, HIDDEN_GUEST_CONTACT } from ".";
+import { assignedRoomName, bookingsService, HIDDEN_GUEST_CONTACT } from ".";
 import { calendarService } from "../calendar";
 import { createElement } from "react";
 import { create } from "react-test-renderer";
@@ -101,6 +101,12 @@ describe("PMS target booking projection", () => {
     );
   });
 
+  it("labels what a part-paid booking still owes, not its total", () => {
+    // A card deposit paid €72 of €240 when booking (VAY-2205); €168 is left (VAY-2373).
+    // prettier-ignore
+    expect(bookingSettlementLabel({ amountStatus: "recorded", balanceAmount: 168, currency: "EUR", depositRequired: false, paymentStatus: "partially_paid", totalAmount: 240 })).toBe("€168 outstanding");
+  });
+
   it("shows unverified instead of applied nightly prices in stay summaries", () => {
     const view = create(
       createElement(BookingStaySummary, {
@@ -168,6 +174,13 @@ describe("PMS target booking projection", () => {
       { position: 2, roomName: "Twin", adults: 2, children: 0, ratePlanName: "Non-refundable" },
     ]);
     expect(result.assignedRooms).toEqual([]);
+    // VAY-2320: once the PMS has the rooms, their types name the booking, as they name the stays.
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...mixed, roomCount: 2, assignments }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("1 × Suite + 1 × Studio");
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...mixed, roomCount: 2, assignments: [assignments[0], { ...assignments[1], roomTypeId: "type-1" }] }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("Suite");
   });
 
   it("uses the booked offer and authoritative booking amounts when no PMS assignment exists", async () => {
@@ -227,6 +240,19 @@ describe("PMS target booking projection", () => {
     expect(mocks.post).toHaveBeenCalledWith(
       "/api/pms/properties/property-1/reservations/booking-1/check-out",
       expect.objectContaining({ fulfilledAddonSelectionIds: ["selection-1"] }),
+      expect.anything(),
+    );
+  });
+
+  it("records a desk charge in the booking's currency, not always EUR", async () => {
+    // prettier-ignore
+    mocks.post.mockResolvedValue({ charge: { chargeId: "charge-1", label: "Minibar", amount: { amountDecimal: "1500.00", currency: "LKR" }, originalAmount: { amountDecimal: "1500.00", currency: "LKR" }, status: "pending", createdAt: "2026-10-26T10:00:00Z", settledAt: null, waivedAt: null } });
+
+    await bookingsService.addCheckoutCharge("booking-1", "Minibar", 1500, "LKR");
+
+    expect(mocks.post).toHaveBeenCalledWith(
+      "/api/pms/properties/property-1/reservations/booking-1/checkout-charges",
+      expect.objectContaining({ label: "Minibar", amountDecimal: "1500.00", currency: "LKR" }),
       expect.anything(),
     );
   });
@@ -592,6 +618,17 @@ describe("PMS target booking projection", () => {
     // prettier-ignore
     mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(heterogeneousReservation));
     const complete = (await bookingsService.list()).bookings[0]!;
+    // VAY-2320: the booking is named by all its rooms, not the first room's type, and each room
+    // by its own type.
+    expect(complete.roomName).toBe("1 × Suite + 1 × Studio");
+    expect(complete.assignedRooms.map((room) => assignedRoomName(complete, room))).toEqual([
+      "Suite",
+      "Studio",
+    ]);
+    // A room an OTA change removed stays above the room count and isn't counted.
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage({ ...heterogeneousReservation, roomCount: 1, assignments: [assignments[0], { ...assignments[1], assignmentStatus: "released" }] }));
+    expect((await bookingsService.list()).bookings[0]!.roomName).toBe("Suite");
     expect(complete.expectedPaymentMethod).toBe("cash");
     // prettier-ignore
     expect(complete.stays).toMatchObject([{ position: 0, roomName: "Suite", ratePlanName: "Plan 1", checkIn: "2026-09-10", adults: 1, nightly: [{ appliedAmount: 100 }] }, { position: 1, roomName: "Studio", ratePlanName: "Plan 2", checkIn: "2026-09-12", adults: 2, nightly: [{ appliedAmount: 180 }] }]);
@@ -601,6 +638,42 @@ describe("PMS target booking projection", () => {
     mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(partialReservation));
     // prettier-ignore
     expect((await bookingsService.list()).bookings[0]!.stays[1]).toMatchObject({ checkIn: null, checkOut: null, adults: null, children: null, nightly: [] });
+  });
+  it("marks booking-page bank transfers and PayPal as waiting for the hotel's payment confirmation", async () => {
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types")
+        ? { items: [] }
+        : reservationPage({
+            ...reservation,
+            status: "pending_payment",
+            payment: { method: "bank_transfer", expectedMethod: "bank_transfer", status: "unpaid" },
+            awaitingHotelPaymentConfirmation: true,
+          }),
+    );
+    expect((await bookingsService.list()).bookings[0]).toMatchObject({
+      status: "pending",
+      paymentMethod: "bank_transfer",
+      awaitingPaymentConfirmation: true,
+    });
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types") ? { items: [] } : reservationPage(reservation),
+    );
+    expect((await bookingsService.list()).bookings[0]?.awaitingPaymentConfirmation).toBe(false);
+  });
+  it("filters the Pending and Cancelled tabs by the stored lifecycle statuses", async () => {
+    for (const [tab, stored] of [
+      ["pending", "pending_payment"],
+      ["cancelled", "canceled"],
+      ["confirmed", "confirmed"],
+      ["checked_in", "checked_in"],
+    ]) {
+      mocks.get.mockClear();
+      await bookingsService.list({ status: tab, limit: 50, offset: 0 });
+      expect(mocks.get).toHaveBeenCalledWith(
+        `/api/pms/properties/property-1/reservations?status=${stored}&limit=50&offset=0`,
+        expect.anything(),
+      );
+    }
   });
   it("surfaces target read errors", async () => {
     mocks.get.mockRejectedValue(new Error("read model unavailable"));

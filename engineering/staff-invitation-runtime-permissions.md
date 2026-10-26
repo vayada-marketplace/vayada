@@ -14,7 +14,7 @@ provider- or queue-scoped database boundary; ordinary table grants are not
 enough, because those tables also hold non-identity work. It must not own
 tables or functions, create schemas or temporary tables, inherit a more
 powerful role, write migration/evidence/legacy-owner receipt tables, or write
-booking, PMS, marketplace, or finance product data. The general API role must
+booking, PMS, or finance product data. The general API role must
 remain unable to insert or update organization memberships, users, provider
 identities, or staff invitations.
 

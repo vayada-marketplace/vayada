@@ -18,7 +18,7 @@ type Auth = {
   kind?: RequestContext["selectedOrganization"]["kind"];
 };
 it.each(
-  ["preview", "apply"].flatMap((endpoint) =>
+  ["preview", "apply", "card-refund-retry"].flatMap((endpoint) =>
     [
       "missing",
       "invalid",
@@ -53,6 +53,7 @@ it.each(
     actions: {
       preview: requestEmail as never,
       apply: requestEmail as never,
+      retryCardRefund: requestEmail as never,
       close: async () => {},
       findAction: async () => "cancel",
     },
@@ -71,7 +72,9 @@ it.each(
     payload:
       endpoint === "preview"
         ? { action: "cancel", reason: "Internal reason" }
-        : { previewId: propertyId, idempotencyKey: "key" },
+        : endpoint === "apply"
+          ? { previewId: propertyId, idempotencyKey: "key" }
+          : { idempotencyKey: "key" },
   });
   expect(response.statusCode).toBe(
     mode === "allowed" ? 200 : ["missing", "invalid"].includes(mode) ? 401 : 403,

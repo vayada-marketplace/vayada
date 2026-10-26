@@ -8,6 +8,8 @@ import type { preparePricingAcceptance } from "./preparePricingAcceptance.js";
 import type { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import type { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import { isManualPricingPaymentMethod } from "@vayada/domain-booking";
+import { pricingManualQuoteSupported } from "./pricingManualPayment.js";
 
 type Prepared = Extract<Awaited<ReturnType<typeof preparePricingAcceptance>>, { kind: "fresh" }>;
 /** After draft/lifecycle/revenue staging, using their unchanged results on the
@@ -16,7 +18,9 @@ type Prepared = Extract<Awaited<ReturnType<typeof preparePricingAcceptance>>, { 
  * run finishPricingAcceptance after ALL blocking work, or roll back everything.
  * Completed command replay belongs before all fresh preparation and mutation.
  * A card acceptance is stored while its booking is `pending_payment`, without revenue;
- * revenue, notifications and the PMS job follow the confirmed Stripe payment. */
+ * revenue, notifications and the PMS job follow the confirmed Stripe payment.
+ * A request is stored while `pending_payment` with its host deadline, without revenue;
+ * revenue and the PMS job follow the hotel's acceptance. */
 export async function storePricingAcceptance(
   client: PoolClient,
   slug: unknown,
@@ -31,22 +35,33 @@ export async function storePricingAcceptance(
   const scope = await lockPublicPricingAuthority(client, slug);
   const quote = current.quote;
   const card = quote.paymentMethod === "card";
-  const expectedStatus = card ? "pending_payment" : "confirmed";
+  // Bank transfer and PayPal: like card, revenue and the PMS job follow the payment (VAY-2139).
+  const manual = isManualPricingPaymentMethod(quote.paymentMethod);
+  const request = quote.acceptanceMode === "request";
+  const expectedStatus = card || manual || request ? "pending_payment" : "confirmed";
   if (
     !scope ||
     !isDeepStrictEqual(scope, current.scope) ||
     !isDeepStrictEqual(scope, finance.scope) ||
     prepared.kind !== "fresh" ||
     !isDeepStrictEqual(quote, disclosure.quote) ||
-    quote.acceptanceMode !== "instant" ||
-    (card ? !pricingCardQuoteSupported(quote) : quote.paymentMethod !== "pay_at_property") ||
-    lifecycle.lifecycleStatus !== expectedStatus ||
-    lifecycle.hostResponseDeadlineAt !== null ||
     (card
+      ? !pricingCardQuoteSupported(quote)
+      : manual
+        ? !pricingManualQuoteSupported(quote)
+        : quote.paymentMethod !== "pay_at_property" ||
+          (quote.acceptanceMode !== "instant" && !request)) ||
+    lifecycle.lifecycleStatus !== expectedStatus ||
+    (request && !card && !manual
+      ? typeof lifecycle.hostResponseDeadlineAt !== "string"
+      : lifecycle.hostResponseDeadlineAt !== null) ||
+    (card || manual
       ? revenue !== null || typeof lifecycle.paymentDeadlineAt !== "string"
-      : !revenue ||
-        revenue.bookingId !== lifecycle.bookingId ||
-        revenue.roomNights !== quote.rooms.reduce((n, r) => n + r.nights.length, 0))
+      : request
+        ? revenue !== null || lifecycle.paymentDeadlineAt !== null
+        : !revenue ||
+          revenue.bookingId !== lifecycle.bookingId ||
+          revenue.roomNights !== quote.rooms.reduce((n, r) => n + r.nights.length, 0))
   )
     return fail();
   const booking = (

@@ -1,0 +1,88 @@
+name: Release train
+
+# The release train on GitHub (VAY-2311), instead of the coordinator's laptop scripts: hold the
+# merge queue, settle main, precheck the settled sha (PR Checks reuse), wait for its coordinated
+# publication, close the hold, then hand the release to vayada-platform's "Release train deploy"
+# workflow, which admits the API image, deploys and verifies. See scripts/release-train/train.mjs.
+# A dry run (the default) changes nothing here and sends the platform a dry-run event.
+
+on:
+  workflow_dispatch:
+    inputs:
+      summary:
+        description: One line for the release (admission commit and summaries)
+        required: true
+        type: string
+      sha:
+        description: Optional full sha to release; it must be where main settles (default main)
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: Change nothing; report what a release would do
+        required: true
+        type: boolean
+        default: true
+      admission:
+        description: "API image admission on the platform: push (commit to main after the list tests; Flamur 2026-10-23) or pr (a person merges the admission PR)"
+        required: true
+        type: choice
+        options: [push, pr]
+        default: push
+      keep_hold:
+        description: Keep the merge queue hold open after publish (close it by hand after the deploy)
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One train at a time; a second one waits instead of cancelling a release in flight.
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Hold, settle, precheck, publish, hand off
+    # A real release runs only from main; any branch may dry-run.
+    if: github.ref == 'refs/heads/main' || inputs.dry_run
+    runs-on: ubuntu-latest
+    # Above the train step's own limit, so the cleanup below still runs after it.
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+      checks: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+
+      # Worst case: settle 90 min, precheck 2 x 75 min plus dispatch and rerun, publication 45 min.
+      - name: Run the release train
+        timeout-minutes: 300
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM_DISPATCH_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
+          TRAIN_SUMMARY: ${{ inputs.summary }}
+          TRAIN_SHA: ${{ inputs.sha }}
+          TRAIN_DRY_RUN: ${{ inputs.dry_run }}
+          TRAIN_ADMISSION: ${{ inputs.admission }}
+          TRAIN_KEEP_HOLD: ${{ inputs.keep_hold }}
+        run: node scripts/release-train/train.mjs
+
+      # A cancelled or timed-out train never reached its own stop path; its hold would keep every
+      # merge waiting. Close this run's hold (found by its run marker), never another one.
+      - name: Close this run's hold if the train did not finish
+        if: ${{ (cancelled() || failure()) && !inputs.dry_run && !inputs.keep_hold }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-train/train.mjs cleanup

@@ -5,20 +5,34 @@ import { useRouter } from "next/navigation";
 import SharedSignupPage from "@vayada/product-onboarding/SharedSignupPage";
 import { useTranslation } from "@/lib/i18n";
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
-import { AuthStateError, authService, storePendingEmailVerification } from "@/services/auth";
+import {
+  AuthStateError,
+  authService,
+  storePendingEmailVerification,
+  type SignupRequest,
+} from "@/services/auth";
 
 export default function SignupPage() {
   const { t } = useTranslation();
   const router = useRouter();
   const [submitError, setSubmitError] = useState("");
+  // The email already has an account: say so and offer to sign in instead.
+  const [accountExists, setAccountExists] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    setSubmitError(new URLSearchParams(window.location.search).get("auth_error") ?? "");
+    const params = new URLSearchParams(window.location.search);
+    setAccountExists(params.get("auth_error_code") === "account_exists");
+    setSubmitError(params.get("auth_error") ?? "");
   }, []);
 
-  async function handleSignup(data: { email: string; password: string }) {
+  function clearError() {
     setSubmitError("");
+    setAccountExists(false);
+  }
+
+  async function handleSignup(data: SignupRequest) {
+    clearError();
     setIsSubmitting(true);
     try {
       await authService.signup(data);
@@ -37,6 +51,10 @@ export default function SignupPage() {
         router.push("/verify-email");
         return;
       }
+      if (error instanceof AuthStateError && error.state === "account_exists") {
+        setAccountExists(true);
+        return;
+      }
       setSubmitError(error instanceof Error ? error.message : t("auth.register.unexpectedError"));
     } finally {
       setIsSubmitting(false);
@@ -47,9 +65,14 @@ export default function SignupPage() {
     <SharedSignupPage
       onSubmit={handleSignup}
       isSubmitting={isSubmitting}
-      submitError={submitError}
-      onErrorClear={() => setSubmitError("")}
-      onGoogleSignup={() => authService.startGoogleSignup("/dashboard")}
+      submitError={accountExists ? t("auth.register.emailExists") : submitError}
+      submitErrorAction={
+        accountExists ? { label: t("auth.register.signIn"), href: "/login" } : undefined
+      }
+      onErrorClear={clearError}
+      onGoogleSignup={(acceptedAgreements) =>
+        authService.startGoogleSignup("/dashboard", acceptedAgreements)
+      }
     />
   );
 }

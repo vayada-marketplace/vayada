@@ -10,6 +10,13 @@ import {
 } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { createReplacementPricingCommands } from "../domains/replacementPricingCommands.js";
+import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
+import type { PricingCardReadinessReadPort } from "../domains/pricingCardReadiness.js";
+import {
+  pricingPaymentsNow,
+  pricingRateNotSelling,
+  type PricingCardState,
+} from "../domains/pricingRatePayability.js";
 import {
   PricingStorageError,
   type PricingStorageSnapshot,
@@ -18,7 +25,16 @@ import {
 import { enforceRoutePolicy } from "./policy.js";
 
 type Commands = ReturnType<typeof createReplacementPricingCommands>;
-export type ReplacementPricingRoutesOptions = { commands(context: RequestContext): Commands };
+export type ReplacementPricingRoutesOptions = {
+  commands(context: RequestContext): Commands;
+  /** Present only while bank-transfer and PayPal acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentMethodsReadPort;
+  /** Whether rates can take card and deposits on the booking page now (VAY-2205). */
+  cardReadiness?: PricingCardReadinessReadPort;
+  /** Whether the booking page takes bank transfer bookings (its bank-transfer operations are
+   * configured), as the public catalog decides (VAY-2304). */
+  bankTransfers?: boolean;
+};
 type Params = { propertyId: string; draftId?: string; roomTypeId?: string; offerId?: string };
 const uuid = (v: unknown): v is string =>
   typeof v === "string" &&
@@ -47,6 +63,12 @@ const snapshot = (v: unknown): v is PricingStorageSnapshot =>
   v.rooms.length > 0 &&
   v.rooms.every((r) => parsePricingConfiguration(r) !== null) &&
   owners(v.ownerReferences);
+/** Terms the hotel can fix: they break a payment rule (VAY-2280, VAY-2205). */
+const payloadRule = (code: string): boolean =>
+  code === "non_refundable_pay_at_property" ||
+  code === "payment_methods_required" ||
+  code === "deposits_unavailable" ||
+  code.startsWith("deposit_");
 const invalid = (): never => {
   throw new PricingStorageError("invalid");
 };
@@ -137,13 +159,77 @@ export async function registerReplacementPricingRoutes(
         } catch (error) {
           if (error instanceof PricingStorageError)
             return reply
-              .code(error.code === "invalid" ? 400 : error.code === "denied" ? 403 : 409)
+              .code(
+                error.code === "invalid" || payloadRule(error.code)
+                  ? 400
+                  : error.code === "denied"
+                    ? 403
+                    : 409,
+              )
               .send({ code: error.code, ...(error.reason ? { reason: error.reason } : {}) });
           return reply.code(503).send({ code: "pricing_unavailable" });
         }
       },
     });
   }
+  // Which of bank transfer and PayPal the rate pickers may offer: their acceptance is on and the
+  // hotel takes them with their details in place (VAY-2139).
+  route("GET", "/payment-methods", async (commands, id) => {
+    if (!(await commands.authorizeRead(id))) throw new PricingStorageError("denied");
+    return options.manualPayments
+      ? {
+          acceptanceEnabled: true,
+          readyMethods: await options.manualPayments.acceptedMethods({ propertyId: id }),
+        }
+      : { acceptanceEnabled: false, readyMethods: [] };
+  });
+  // Card and deposits for the rate screens' "Paid when booking" (VAY-2205); none without the read.
+  route("GET", "/card-readiness", async (commands, id, request) => {
+    if (!(await commands.authorizeRead(id))) throw new PricingStorageError("denied");
+    const organizationId = authorized.get(request)!.selectedOrganization.organizationId;
+    return options.cardReadiness
+      ? options.cardReadiness.read({ organizationId, propertyId: id })
+      : {
+          card: { ready: false, reason: "switch_off", charge: "at_booking" },
+          deposits: { ready: false },
+        };
+  });
+  // VAY-2304: the published rates guests can't pay now, why, and what fixes each, main fix first
+  // (pricing-rates-not-selling.v1; the PMS rate cards show it). Every other rate sells.
+  route("GET", "/not-selling", async (commands, id, request) => {
+    const organizationId = authorized.get(request)!.selectedOrganization.organizationId;
+    const published = await commands.publishedRatePayments(id);
+    const ready = options.cardReadiness
+      ? await options.cardReadiness.read({ organizationId, propertyId: id })
+      : null;
+    const manual = options.manualPayments
+      ? await options.manualPayments.acceptedMethods({ propertyId: id })
+      : [];
+    // The same switches as the public catalog: bank transfer also needs the booking page's operations.
+    const now = pricingPaymentsNow(published.methods, {
+      card: ready?.card.ready === true,
+      deposits: ready?.deposits.ready === true,
+      manual: manual.filter(
+        (method) => method !== "bank_transfer" || options.bankTransfers === true,
+      ),
+    });
+    const card: PricingCardState =
+      ready?.card.ready === true
+        ? "ready"
+        : !published.cardChosen
+          ? "not_chosen"
+          : ready?.card.reason === "not_connected"
+            ? "setup_incomplete"
+            : "off";
+    return {
+      version: "pricing-rates-not-selling.v1",
+      publishedRevision: published.publishedRevision,
+      rates: published.rates.flatMap((terms) => {
+        const why = pricingRateNotSelling(terms, { ...now, card });
+        return why ? [{ roomTypeId: terms.roomTypeId, offerId: terms.offerId, ...why }] : [];
+      }),
+    };
+  });
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) =>
     commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!),
   );
@@ -153,7 +239,7 @@ export async function registerReplacementPricingRoutes(
   route(
     "PUT",
     "/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms",
-    (commands, id, request) => {
+    async (commands, id, request) => {
       const requestId = key(request),
         body = request.body;
       if (
@@ -171,10 +257,21 @@ export async function registerReplacementPricingRoutes(
       });
       if (!parsed) return invalid();
       const { revision: _revision, ...terms } = parsed;
+      // A deposit needs the hotel's card ready and deposits switched on (VAY-2205).
+      const depositsReady =
+        terms.payment.kind === "deposit" && options.cardReadiness
+          ? (
+              await options.cardReadiness.read({
+                organizationId: authorized.get(request)!.selectedOrganization.organizationId,
+                propertyId: id,
+              })
+            ).deposits.ready
+          : false;
       return commands.stageTerms(
         id,
         { requestId, expectedRevision: body.expectedRevision, terms },
         { draftId: request.params.draftId!, baseRevision: body.baseRevision as number },
+        depositsReady,
       );
     },
   );

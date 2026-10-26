@@ -550,10 +550,15 @@ function rawEconomicDimension(
     )}`;
   const recipientType = requiredText(row.data["recipient_type"], "recipient_type").toLowerCase();
   const recipientId = uuid(row.data["recipient_id"], "recipient_id");
+  // Affiliate payouts are omitted as a retired program (VAY-2272) and reconcile under their
+  // legacy affiliate ID, which never matches a target owner.
   const owner =
     recipientType === "hotel"
       ? propertyId
-      : organizationFor(context, "affiliate", "affiliate", recipientId);
+      : recipientType === "affiliate"
+        ? `retired_affiliate:${recipientId}`
+        : null;
+  if (!owner) throw new Error(`recipient_type ${recipientType} is unsupported`);
   // Legacy payouts do not retain row-level provider-account ownership. Keep
   // their immutable provider transaction reference, but reconcile the binding
   // dimension as intentionally unbound.
@@ -663,8 +668,7 @@ function addUnboundBookingAllocationDispositions(
         disposition(context, booking, {
           sourceField: allocation.sourceField,
           sourceValue: allocation.amount,
-          reasonCode: "BOOKING_FINANCE_ALLOCATION_EVIDENCE_REQUIRED",
-          disposition: "unbound_history",
+          ...allocationOmission(allocation),
         });
       }
     } catch {
@@ -741,9 +745,8 @@ function bookingPayoutAllocations(
   );
   if (minor(affiliateAmount) > 0n) {
     const affiliateId = uuid(booking.data["affiliate_id"], "affiliate_id");
-    const organizationId = organizationFor(context, "affiliate", "affiliate", affiliateId);
     allocations.push({
-      key: `${dimension("booking", bookingId)}:organization:${dimension("owner", organizationId)}`,
+      key: `${dimension("booking", bookingId)}:retired_affiliate:${dimension("owner", affiliateId)}`,
       amount: affiliateAmount,
       sourceField: "affiliate_commission_amount",
     });
@@ -773,13 +776,28 @@ function hasAllocationDisposition(
   allocation: BookingPayoutAllocation,
 ): boolean {
   const bookingId = sourceId(booking);
+  const omission = allocationOmission(allocation);
   return context.dispositions.some(
     (row) =>
       row.sourceId === bookingId &&
       row.sourceField === allocation.sourceField &&
-      row.reasonCode === "BOOKING_FINANCE_ALLOCATION_EVIDENCE_REQUIRED" &&
-      row.disposition === "unbound_history",
+      row.reasonCode === omission.reasonCode &&
+      row.disposition === omission.disposition,
   );
+}
+
+// An affiliate commission share has no target payout any more: the affiliate program is retired
+// (VAY-2272). Property shares without a target payout still need allocation evidence.
+function allocationOmission(allocation: BookingPayoutAllocation): {
+  reasonCode: "RETIRED_AFFILIATE_PROGRAM" | "BOOKING_FINANCE_ALLOCATION_EVIDENCE_REQUIRED";
+  disposition: "omitted_field" | "unbound_history";
+} {
+  return allocation.sourceField === "affiliate_commission_amount"
+    ? { reasonCode: "RETIRED_AFFILIATE_PROGRAM", disposition: "omitted_field" }
+    : {
+        reasonCode: "BOOKING_FINANCE_ALLOCATION_EVIDENCE_REQUIRED",
+        disposition: "unbound_history",
+      };
 }
 
 function addAllocation(
@@ -990,11 +1008,7 @@ function sourceRowKey(row: IdentitySourceRow): string {
   try {
     return `${row.sourceDatabase}:${row.sourceTable}:${sourceId(
       row,
-      row.sourceTable === "affiliate_payout_settings"
-        ? "user_id"
-        : row.sourceTable === "stripe_billing_webhook_events"
-          ? "event_id"
-          : "id",
+      row.sourceTable === "stripe_billing_webhook_events" ? "event_id" : "id",
     )}`;
   } catch {
     return `${row.sourceDatabase}:${row.sourceTable}:${row.rowOrdinal}`;

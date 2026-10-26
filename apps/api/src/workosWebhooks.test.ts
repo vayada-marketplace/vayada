@@ -271,6 +271,139 @@ describe("WorkOS webhook routes", () => {
     await app.close();
   });
 
+  it.each([
+    ["organization.created", { organization_kind: "creator_workspace" }],
+    ["organization.updated", { organization_kind: "affiliate_partner" }],
+    ["organization.updated", { metadata: { organization_kind: "creator_workspace" } }],
+    ["organization.updated", { metadata: { vayada_kind: "creator_workspace" } }],
+  ])(
+    "ignores %s for a retired organization kind without touching the store (VAY-2272)",
+    async (eventName, kindFields) => {
+      const store = createMemoryStore();
+      let upserts = 0;
+      const upsertWorkosOrganization = store.upsertWorkosOrganization;
+      store.upsertWorkosOrganization = async (input) => {
+        upserts += 1;
+        return upsertWorkosOrganization(input);
+      };
+      const app = buildApp({
+        workosWebhooks: {
+          secret: "whsec_test",
+          verifier: verifierFor(
+            event("evt_retired_org", eventName, {
+              id: "org_workos_creator",
+              name: "Creator Workspace",
+              slug: "creator-workspace",
+              ...kindFields,
+            }),
+          ),
+          store,
+          processInline: true,
+        },
+      });
+
+      const response = await postWebhook(app, "evt_retired_org");
+
+      expect(response.json()).toMatchObject({ status: "ignored" });
+      expect(upserts).toBe(0);
+      expect(store.organizations.size).toBe(0);
+      await app.close();
+    },
+  );
+
+  it("creates platform organizations only from the event's own kind, never from metadata", async () => {
+    const store = createMemoryStore();
+    const app = buildApp({
+      workosWebhooks: {
+        secret: "whsec_test",
+        verifier: verifierFor(
+          event("evt_org_metadata_platform", "organization.created", {
+            id: "org_workos_metadata_platform",
+            name: "Metadata Platform",
+            slug: "metadata-platform",
+            metadata: { organization_kind: "platform" },
+          }),
+        ),
+        store,
+        processInline: true,
+      },
+    });
+
+    const response = await postWebhook(app, "evt_org_metadata_platform");
+
+    expect(response.json()).toMatchObject({ status: "accepted" });
+    expect(store.organizations.get("org_workos_metadata_platform")?.kind).toBe("hotel_group");
+    await app.close();
+  });
+
+  it("ignores user events for a deleted account (VAY-2272)", async () => {
+    const store = createMemoryStore();
+    store.upsertWorkosUser = async () => null;
+    const app = buildApp({
+      workosWebhooks: {
+        secret: "whsec_test",
+        verifier: verifierFor(event("evt_deleted_user", "user.updated", userData())),
+        store,
+        processInline: true,
+      },
+    });
+
+    const response = await postWebhook(app, "evt_deleted_user");
+
+    expect(response.json()).toMatchObject({ status: "ignored" });
+    await app.close();
+  });
+
+  it("keeps organizations without a kind hotel groups", async () => {
+    const store = createMemoryStore();
+    const app = buildApp({
+      workosWebhooks: {
+        secret: "whsec_test",
+        verifier: verifierFor(
+          event("evt_org_created", "organization.created", {
+            id: "org_workos_hotel",
+            name: "Alpenrose Hotel Group",
+            slug: "alpenrose",
+          }),
+        ),
+        store,
+        processInline: true,
+      },
+    });
+
+    const response = await postWebhook(app, "evt_org_created");
+
+    expect(response.json()).toMatchObject({ status: "accepted" });
+    expect(store.organizations.get("org_workos_hotel")?.kind).toBe("hotel_group");
+    await app.close();
+  });
+
+  it("ignores organization and membership events for an organization stored with a retired kind", async () => {
+    const store = createMemoryStore();
+    store.upsertWorkosOrganization = async () => null;
+    store.upsertWorkosMembership = async () => null;
+    const run = async (id: string, eventName: string, data: Record<string, unknown>) => {
+      const app = buildApp({
+        workosWebhooks: {
+          secret: "whsec_test",
+          verifier: verifierFor(event(id, eventName, data)),
+          store,
+          processInline: true,
+        },
+      });
+      const response = await postWebhook(app, id);
+      await app.close();
+      return response.json();
+    };
+
+    expect(
+      await run("evt_tombstone_org", "organization.updated", organizationData()),
+    ).toMatchObject({ status: "ignored" });
+    expect(
+      await run("evt_tombstone_membership", "organization_membership.updated", membershipData()),
+    ).toMatchObject({ status: "ignored" });
+  });
+
   it("dead-letters out-of-order membership events when linked user or organization is unknown", async () => {
     const store = createMemoryStore();
     const app = buildApp({
@@ -644,10 +777,9 @@ describe("WorkOS webhook routes", () => {
     ["platform admin", "platform", "admin", null, "platform_admin"],
     ["hotel admin", "hotel_group", "admin", null, "hotel_owner"],
     ["existing owner alias", "hotel_group", "admin", "owner", "owner"],
-    ["creator admin", "creator_workspace", "admin", null, "admin"],
     ["generic member", "platform", "member", null, "member"],
     ["hotel member", "hotel_group", "hotel_member", null, "hotel_custom"],
-    ["non-hotel member", "creator_workspace", "hotel_member", null, "hotel_member"],
+    ["non-hotel member", "platform", "hotel_member", null, "hotel_member"],
     ["hotel manager claim", "hotel_group", "hotel_admin", null, "hotel_admin"],
     ["invitation role", "hotel_group", "front_desk", null, "front_desk"],
     ["hotel owner", "hotel_group", "hotel_owner", null, "hotel_owner"],

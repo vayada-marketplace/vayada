@@ -55,6 +55,8 @@ const curation: NearbyCurationState = {
       note: null,
     },
   ],
+  customCategories: [],
+  categoryNames: {},
 };
 const discovery: NearbyDiscoveryState = {
   schemaVersion: 1,
@@ -71,14 +73,14 @@ describe("nearby public preview contract", () => {
     const preview = projectNearbyPreview(location, 2, curation, discovery);
     expect(preview.location).toEqual({ mode: "approximate", latitude: -1.13, longitude: 1.01 });
     expect(preview.places.map((p) => (p.source === "google" ? p.placeId : p.name))).toEqual([
+      "Our garden",
       "favorite",
       "automatic",
-      "Our garden",
     ]);
     expect(JSON.stringify(preview)).not.toMatch(
       /Private road|curationRevision|hidden|profileRevision/,
     );
-    expect(preview.places[0]).toMatchObject({ favorite: true, note: "Our favorite" });
+    expect(preview.places[1]).toMatchObject({ favorite: true, note: "Our favorite" });
   });
   it("suppresses every destination when location is private or invalid", () => {
     for (const patch of [
@@ -90,6 +92,7 @@ describe("nearby public preview contract", () => {
       expect(projectNearbyPreview({ ...location, ...patch }, 2, curation, discovery)).toEqual({
         location: null,
         places: [],
+        categories: [],
       });
   });
   it("keeps stale exclusions but pauses saved recommendations until reconfirmed", () => {
@@ -126,8 +129,52 @@ describe("nearby public preview contract", () => {
     ).toHaveLength(2);
     expect(projectNearbyPreview(location, 2, curation, null).places).toHaveLength(2);
   });
+  it("shows the host's own places in the host's order, first, and the categories guests filter by (VAY-2326)", () => {
+    const place = curation.customPlaces[0];
+    const music = "22222222-2222-4222-8222-222222222222";
+    const preview = projectNearbyPreview(
+      location,
+      2,
+      {
+        ...curation,
+        customPlaces: [
+          {
+            ...place,
+            id: "33333333-3333-4333-8333-333333333333",
+            name: "Jazz club",
+            category: music,
+          },
+          { ...place, name: "Our garden", favorite: true },
+          { ...place, id: "44444444-4444-4444-8444-444444444444", name: "Kept", hidden: true },
+          { ...place, id: "55555555-5555-4555-8555-555555555555", name: "Bus stop" },
+        ],
+        customCategories: [{ id: music, name: "Live music", color: "pink", icon: "musical-note" }],
+        categoryNames: { food: "Street food" },
+      },
+      null,
+    );
+    // A favorite from before VAY-2326 no longer jumps the host's order.
+    expect(preview.places.map((p) => (p.source === "custom" ? p.name : p.placeId))).toEqual([
+      "Jazz club",
+      "Our garden",
+      "Bus stop",
+      "favorite",
+    ]);
+    expect(preview.categories).toEqual([
+      { id: "food", name: "Street food", color: "orange", icon: "cake" },
+      { id: "nature", name: null, color: "teal", icon: "sun" },
+      { id: "activities", name: null, color: "purple", icon: "camera" },
+      { id: "transport", name: null, color: "slate", icon: "map" },
+      { id: music, name: "Live music", color: "pink", icon: "musical-note" },
+    ]);
+  });
   it("validates responses and discards provider text at the client boundary", () => {
     expect(parseNearbyCurationState(curation)).toEqual(curation);
+    // An API from before VAY-2326 sends no categories.
+    const before: Partial<NearbyCurationState> = { ...curation };
+    delete before.customCategories;
+    delete before.categoryNames;
+    expect(parseNearbyCurationState(before)).toEqual(curation);
     expect(() =>
       parseNearbyCurationState({ ...curation, savedProfileRevision: undefined }),
     ).toThrow();

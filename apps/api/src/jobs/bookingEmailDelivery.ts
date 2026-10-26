@@ -9,7 +9,10 @@ export type BookingEmailDelivery = {
     subject: string;
     text: string;
     idempotencyKey: string;
-    emailProduct?: "booking";
+    /** Resend tag `vayada_product`: the webhook acknowledges these events without Inbox matching. */
+    emailProduct?: "booking" | "platform";
+    /** VAY-2286: contact-form notifications are answered straight to the visitor. */
+    replyTo?: string;
   }): Promise<void>;
 };
 
@@ -20,6 +23,10 @@ type BookingEmailJob = {
   workerId: string;
   payload: Record<string, unknown>;
 };
+
+/** VAY-2348: a payment reminder is sent only while its booking still waits for that payment. */
+const REMINDER_DUE = `booking.lifecycle_status = 'pending_payment' AND booking.payment_status = 'unpaid'
+  AND booking.booking_metadata->>'pendingExpiresAt' IS NOT DISTINCT FROM job.payload->>'paymentDeadlineAt'`;
 
 type BookingEmailPool = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -50,8 +57,9 @@ export function createResendBookingEmailDelivery(config: {
           to: [input.to],
           subject: input.subject,
           text: input.text,
-          ...(input.emailProduct === "booking"
-            ? { tags: [{ name: "vayada_product", value: "booking" }] }
+          ...(input.replyTo ? { reply_to: input.replyTo } : {}),
+          ...(input.emailProduct
+            ? { tags: [{ name: "vayada_product", value: input.emailProduct }] }
             : {}),
         }),
       });
@@ -84,8 +92,14 @@ export async function runBookingEmailDeliveryJobs(
       );
       if (!job) break;
       const startedAt = Date.now();
+      const reminder = job.payload["notificationType"] === "payment_reminder";
       try {
         const input = emailInput(job);
+        // Paid, released or moved on since it was queued: nothing to remind about.
+        if (reminder && !(await reminderDue(pool, job.id))) {
+          if (await cancelBookingEmailJob(pool, job, startedAt)) processed += 1;
+          continue;
+        }
         if (job.payload["requiresBankTransferInstructions"] === true) {
           const instructions = await options.bankTransfers?.email({
             jobId: job.id,
@@ -96,18 +110,22 @@ export async function runBookingEmailDeliveryJobs(
           input.text += `\n\nBank transfer instructions:\n${instructions}`;
         }
         const client = await pool.connect();
+        let due = true;
         try {
           await client.query("BEGIN");
-          // Fence the money decision against imports until the external send completes.
-          const booking = await client.query<{ unverified: boolean }>(
-            `SELECT booking.booking_metadata->>'airbnbMoneyStatus'='unverified' AS unverified
+          // Fence the money decision against imports until the external send completes, and a
+          // reminder against the payment being recorded meanwhile.
+          const booking = await client.query<{ unverified: boolean; due: boolean }>(
+            `SELECT booking.booking_metadata->>'airbnbMoneyStatus'='unverified' AS unverified,
+               ${REMINDER_DUE} AS due
              FROM platform.jobs job JOIN booking.guest_bookings booking
                ON booking.id::text=job.resource_id AND booking.property_id=job.property_id
              WHERE job.id=$1::uuid FOR SHARE OF booking`,
             [job.id],
           );
           if (booking.rows[0]?.unverified) throw new Error("booking_amount_unverified");
-          await delivery.send(input);
+          due = !reminder || booking.rows[0]?.due === true;
+          if (due) await delivery.send(input);
           await client.query("COMMIT");
         } catch (error) {
           await client.query("ROLLBACK");
@@ -115,7 +133,10 @@ export async function runBookingEmailDeliveryJobs(
         } finally {
           client.release();
         }
-        if (await finishBookingEmailJob(pool, job, startedAt)) processed += 1;
+        const done = due
+          ? await finishBookingEmailJob(pool, job, startedAt)
+          : await cancelBookingEmailJob(pool, job, startedAt);
+        if (done) processed += 1;
       } catch {
         if (await failBookingEmailJob(pool, job, startedAt)) failed += 1;
       }
@@ -341,7 +362,76 @@ async function failBookingEmailJob(
   return result.rows.length > 0;
 }
 
-function deliveryAuditKey(job: BookingEmailJob, outcome: "succeeded" | "failed") {
+async function reminderDue(pool: BookingEmailPool, jobId: string): Promise<boolean> {
+  const result = await pool.query<{ due: boolean }>(
+    `SELECT ${REMINDER_DUE} AS due
+     FROM platform.jobs job JOIN booking.guest_bookings booking
+       ON booking.id::text=job.resource_id AND booking.property_id=job.property_id
+     WHERE job.id=$1::uuid`,
+    [jobId],
+  );
+  return result.rows[0]?.due === true;
+}
+
+/** A job that is no longer worth sending ends canceled, audited as skipped; nothing is retried. */
+async function cancelBookingEmailJob(
+  pool: BookingEmailPool,
+  job: BookingEmailJob,
+  startedAt: number,
+): Promise<boolean> {
+  const result = await pool.query<{ id: string }>(
+    `WITH canceled_attempt AS (
+       UPDATE platform.job_attempts
+       SET status = 'canceled', finished_at = now(), duration_ms = $3,
+           error_type = 'not_due', error_message = 'Payment reminder no longer due.'
+       WHERE job_id = $1::uuid AND attempt_number = $2
+         AND status = 'running'
+         AND worker_id = $5
+       RETURNING id
+     ), canceled_job AS (
+       UPDATE platform.jobs
+       SET status = 'canceled', finished_at = now(), locked_at = NULL, locked_by = NULL,
+           updated_at = now()
+       WHERE id = $1::uuid
+         AND status = 'running'
+         AND locked_by = $5
+         AND attempts_count = $2
+         AND EXISTS (SELECT 1 FROM canceled_attempt)
+       RETURNING *
+     )
+     INSERT INTO platform.product_audit_events (
+       audit_key, product, action, action_version, occurred_at,
+       tenant_scope, property_id, actor_type,
+       target_resource_product, target_resource_type, target_resource_id,
+       job_id, correlation_id, redacted_payload, private_payload,
+       audit_metadata, retention_class, privacy_scope
+     )
+     SELECT
+       $4, 'booking', 'booking.notification.delivery_skipped', 1, now(),
+       job.tenant_scope, job.property_id, 'system',
+       job.resource_product, job.resource_type, job.resource_id,
+       job.id, job.correlation_id,
+       jsonb_build_object('outcome', 'skipped', 'reason', 'payment_no_longer_due',
+         'attemptNumber', $2::integer),
+       '{}'::jsonb,
+       jsonb_build_object('jobType', job.job_type, 'queueName', job.queue_name),
+       'guest_pii', 'confidential'
+     FROM canceled_job job
+     CROSS JOIN canceled_attempt
+     ON CONFLICT (product, audit_key) DO NOTHING
+     RETURNING id::text AS id`,
+    [
+      job.id,
+      job.attemptsCount,
+      Date.now() - startedAt,
+      deliveryAuditKey(job, "skipped"),
+      job.workerId,
+    ],
+  );
+  return result.rows.length > 0;
+}
+
+function deliveryAuditKey(job: BookingEmailJob, outcome: "succeeded" | "failed" | "skipped") {
   return `booking.email.delivery:${job.id}:attempt:${job.attemptsCount}:${outcome}`;
 }
 

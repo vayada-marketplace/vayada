@@ -342,10 +342,24 @@ async function apply(
     if (validJob.payload.openThrough < localToday) {
       return recordApplicationResult(client, validJob, unchangedResult(validJob), input.now);
     }
-    const currentCoverageThrough = await lockCurrentCoverageThrough(
-      client,
-      validJob.payload.propertyId,
-    );
+    const currentCoverage = await lockCurrentCoverage(client, validJob.payload.propertyId);
+    const currentCoverageThrough = currentCoverage?.through ?? null;
+    if (
+      currentCoverage &&
+      currentCoverage.calendarRevision < configuration.calendarRevision &&
+      (await roomsAwaitMaterialization(
+        client,
+        configuration,
+        currentCoverage.calendarRevision,
+        localToday,
+      ))
+    ) {
+      // The scheduler gate keeps new jobs from getting here; a job queued before it (such as by
+      // the previous release) retries for about 20 minutes, then dead-letters replay-eligible.
+      throw new AwaitingMaterializationError(
+        "Calendar auto-open waits for added rooms to be materialized",
+      );
+    }
     if (
       validJob.payload.generatedCoverageThrough &&
       (!currentCoverageThrough ||
@@ -564,19 +578,46 @@ async function propertyLocalDate(client: Client, now: Date, timeZone: string): P
   return localDate;
 }
 
-async function lockCurrentCoverageThrough(
+async function lockCurrentCoverage(
   client: Client,
   propertyId: string,
-): Promise<string | null> {
+): Promise<{ through: string; calendarRevision: number } | null> {
   const row = (
-    await client.query<{ coverageThrough: string | Date }>(
-      `SELECT coverage_through AS "coverageThrough"
+    await client.query<{ coverageThrough: string | Date; calendarRevision: number | string }>(
+      `SELECT coverage_through AS "coverageThrough", calendar_revision AS "calendarRevision"
        FROM pms.inventory_materialization_coverage
        WHERE property_id=$1::uuid FOR UPDATE`,
       [propertyId],
     )
   ).rows[0];
-  return row ? databaseDate(row.coverageThrough) : null;
+  return row
+    ? {
+        through: databaseDate(row.coverageThrough),
+        calendarRevision: positive(row.calendarRevision),
+      }
+    : null;
+}
+
+/** Stored days from today on lack a room the materialized calendar did not bind. */
+async function roomsAwaitMaterialization(
+  client: Client,
+  configuration: PmsOperatingCalendarConfigurationSnapshot,
+  materializedRevision: number,
+  localToday: string,
+): Promise<boolean> {
+  const materialized = await client.query<{ roomTypeId: string; storedFromToday: boolean }>(
+    `SELECT room_type_id::text AS "roomTypeId",
+       EXISTS (SELECT 1 FROM pms.inventory_days WHERE property_id=$1::uuid AND stay_date>=$3::date)
+         AS "storedFromToday"
+     FROM pms.operating_calendar_room_bindings
+     WHERE property_id=$1::uuid AND calendar_revision=$2`,
+    [configuration.propertyId, materializedRevision, localToday],
+  );
+  const rooms = new Set(materialized.rows.map(({ roomTypeId }) => roomTypeId.toLowerCase()));
+  return (
+    materialized.rows[0]?.storedFromToday === true &&
+    configuration.sourceInputs.roomBindings.some(({ roomTypeId }) => !rooms.has(roomTypeId))
+  );
 }
 
 async function loadCurrentSource(
@@ -606,13 +647,14 @@ async function loadCurrentSource(
                    ELSE setting.rolling_months END AS "rollingMonths",
               setting.fixed_end_month AS "fixedEndMonth",
               COALESCE(setting.revision, 0) AS "settingRevision",
-              property.profile_revision AS "propertyProfileRevision",
+              calendar.property_profile_revision AS "propertyProfileRevision",
               calendar.organization_id::text AS "organizationId",
               calendar.calendar_revision AS "operatingCalendarRevision"
        FROM hotel_catalog.properties property
        LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id=property.id
        LEFT JOIN LATERAL (
-         SELECT organization_id, calendar_revision FROM pms.operating_calendar_revisions
+         SELECT organization_id, calendar_revision, property_profile_revision
+         FROM pms.operating_calendar_revisions
          WHERE property_id=property.id ORDER BY calendar_revision DESC LIMIT 1
        ) calendar ON TRUE
        WHERE property.id=$1::uuid
@@ -647,11 +689,19 @@ async function loadCurrentSource(
   ) {
     return null;
   }
+  // The calendar's own room-facts pins, like the scheduler: room detail edits don't re-run
+  // auto-open (VAY-2150).
   const rooms = await client.query<RoomRow>(
-    `SELECT id::text AS "roomTypeId", room_facts_revision AS "roomFactsRevision",
-            room_units_revision AS "roomUnitsRevision"
-     FROM pms.room_types WHERE property_id=$1::uuid AND active IS TRUE ORDER BY id FOR SHARE`,
-    [propertyId],
+    `SELECT room.id::text AS "roomTypeId",
+            COALESCE(binding.source_room_facts_revision, room.room_facts_revision)
+              AS "roomFactsRevision",
+            room.room_units_revision AS "roomUnitsRevision"
+     FROM pms.room_types room
+     LEFT JOIN pms.operating_calendar_room_bindings binding
+       ON binding.property_id=room.property_id AND binding.room_type_id=room.id
+      AND binding.calendar_revision=$2
+     WHERE room.property_id=$1::uuid AND room.active IS TRUE ORDER BY room.id FOR SHARE OF room`,
+    [propertyId, root.operatingCalendarRevision],
   );
   const unverifiedLabels = await client.query(
     `SELECT physical_room.id
@@ -1036,7 +1086,10 @@ async function fail(
     const retry = retryable && job.attemptNumber < job.maxAttempts;
     const message = errorMessage(error);
     const retryAt = new Date(
-      input.now.getTime() + Math.min(60_000, 1_000 * 2 ** (job.attemptNumber - 1)),
+      input.now.getTime() +
+        (error instanceof AwaitingMaterializationError
+          ? 5 * 60_000
+          : Math.min(60_000, 1_000 * 2 ** (job.attemptNumber - 1))),
     );
     const attempt = await client.query(
       `UPDATE platform.job_attempts SET status='failed',finished_at=$4::timestamptz,
@@ -1416,6 +1469,7 @@ function errorMessage(error: unknown) {
 }
 
 class PermanentAutoOpenError extends Error {}
+class AwaitingMaterializationError extends Error {}
 
 async function transaction<T>(pool: Pool, callback: (client: Client) => Promise<T>): Promise<T> {
   const client = await pool.connect();

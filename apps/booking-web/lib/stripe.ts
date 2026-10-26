@@ -1,4 +1,6 @@
-import { loadStripe } from "@stripe/stripe-js";
+// The pure entry loads Stripe.js only when loadStripe runs, i.e. when the card form mounts.
+// The default entry adds the script as soon as this module is imported (VAY-2216).
+import { loadStripe } from "@stripe/stripe-js/pure";
 
 const stripeInstances = new Map<string, ReturnType<typeof loadStripe>>();
 

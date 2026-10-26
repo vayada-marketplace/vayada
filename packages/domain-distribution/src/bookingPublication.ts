@@ -7,12 +7,27 @@ import {
   PUBLIC_BOOKABILITY_DATA_SOURCE_OWNERS,
   PUBLIC_BOOKABILITY_VISIBILITY,
   assertPublicBookabilityPublicSafe,
+  publicManualPaymentReady,
   type PublicBookabilityProfileProjection,
 } from "./index.js";
 import { parsePublicBookabilityProfileProjection } from "./publicBookabilityProfileParser.js";
 
 export const BOOKING_PUBLIC_CONTENT_CONTRACT_VERSION = "booking-public-content.v1" as const;
-export type BookingPublicPaymentMethod = "card" | "pay_at_property";
+
+/**
+ * A booking page needs availability prepared from today through at least 334 more days (11
+ * months, VAY-2150). Setup prepares a full year and auto-open keeps 12+ months to a month end,
+ * so this leaves a month of slack. Launch readiness asks for the same window.
+ */
+export const BOOKING_PUBLICATION_MIN_OPEN_DAYS = 334;
+/** Bank transfer and PayPal are paid to the hotel, which confirms the payment (VAY-2139). */
+export type BookingPublicPaymentMethod = "card" | "pay_at_property" | "bank_transfer" | "paypal";
+const BOOKING_PUBLIC_PAYMENT_METHODS: readonly string[] = [
+  "card",
+  "pay_at_property",
+  "bank_transfer",
+  "paypal",
+];
 type BookingPublicFinanceEvidence = Readonly<{
   defaultCurrency: string;
   supportedCurrencies: readonly string[];
@@ -83,30 +98,53 @@ export type BookingPublicContentBuild = Readonly<{
   publicContent: BookingPublicContent;
 }>;
 
-export function buildBookingPublicContent(input: {
+type BookingPublicContentInput = {
   sourceManifestHash: SourceManifestHash;
   readinessHash: ProductReadinessHash;
   profile: PublicBookabilityProfileProjection;
   rooms: readonly BookingPublicRoom[];
   calendar: BookingPublicCalendarSnapshot;
   finance: BookingPublicFinanceEvidence;
-}): BookingPublicContentBuild | null {
-  if (!validHash(input.sourceManifestHash) || !validHash(input.readinessHash)) return null;
-  const profile = parsePublicBookabilityProfileProjection(input.profile);
-  if (!profile) return null;
+};
+
+/** Which part of the content was refused, for logs (VAY-2292). */
+export type BookingPublicContentRejection =
+  | "hashes"
+  | "profile"
+  | "rooms"
+  | "calendar"
+  | "profile_state"
+  | "payments";
+
+export function buildBookingPublicContent(
+  input: BookingPublicContentInput,
+): BookingPublicContentBuild | null {
+  const result = tryBuildBookingPublicContent(input);
+  return "rejected" in result ? null : result.build;
+}
+
+export function tryBuildBookingPublicContent(
+  input: BookingPublicContentInput,
+): { build: BookingPublicContentBuild } | { rejected: BookingPublicContentRejection } {
+  if (!validHash(input.sourceManifestHash) || !validHash(input.readinessHash))
+    return { rejected: "hashes" };
   const readyMethods = [...new Set(input.finance.readyPaymentMethods)]
-    .filter((method) => method === "card" || method === "pay_at_property")
+    .filter((method) => BOOKING_PUBLIC_PAYMENT_METHODS.includes(method))
     .sort();
+  const profile = parsePublicBookabilityProfileProjection(input.profile, {
+    manualPaymentReady: publicManualPaymentReady(readyMethods),
+  });
+  if (!profile) return { rejected: "profile" };
   const rooms = sanitizeRooms(input.rooms, input.finance, readyMethods);
+  if (!rooms) return { rejected: "rooms" };
   const calendar = sanitizeCalendar(input.calendar, rooms, profile);
+  if (!calendar) return { rejected: "calendar" };
+  if (!validProfile(profile, input.finance)) return { rejected: "profile_state" };
   if (
-    !rooms ||
-    !calendar ||
-    !validProfile(profile, input.finance) ||
     readyMethods.includes("card") !== input.finance.onlinePayment ||
     readyMethods.includes("pay_at_property") !== input.finance.payAtProperty
   )
-    return null;
+    return { rejected: "payments" };
 
   const publicContent = deepFreeze({
     contractVersion: BOOKING_PUBLIC_CONTENT_CONTRACT_VERSION,
@@ -116,20 +154,30 @@ export function buildBookingPublicContent(input: {
     payments: { readyMethods },
   });
   assertPublicBookabilityPublicSafe(publicContent);
-  return deepFreeze({
-    sourceManifestHash: input.sourceManifestHash,
-    readinessHash: input.readinessHash,
-    publicContent,
-  });
+  return {
+    build: deepFreeze({
+      sourceManifestHash: input.sourceManifestHash,
+      readinessHash: input.readinessHash,
+      publicContent,
+    }),
+  };
 }
 
-/** Parses stored immutable JSON into the exact public Booking content contract. */
-export function parseBookingPublicContent(value: unknown): BookingPublicContent | null {
+/** Parses stored immutable JSON into the exact public Booking content contract. Content
+ * published with bank transfer or PayPal counts only while their acceptance is on
+ * (`manualPayments`), so turning it off takes such pages down again (VAY-2139). */
+export function parseBookingPublicContent(
+  value: unknown,
+  context: { manualPayments?: boolean } = {},
+): BookingPublicContent | null {
   try {
     if (!record(value) || !Array.isArray(value.rooms) || !record(value.calendar)) return null;
-    const profile = parsePublicBookabilityProfileProjection(value.profile);
     const payments = record(value.payments) ? value.payments.readyMethods : null;
-    if (!profile || !Array.isArray(payments)) return null;
+    if (!Array.isArray(payments)) return null;
+    const manualPaymentReady = publicManualPaymentReady(payments);
+    if (manualPaymentReady && context.manualPayments !== true) return null;
+    const profile = parsePublicBookabilityProfileProjection(value.profile, { manualPaymentReady });
+    if (!profile) return null;
     const built = buildBookingPublicContent({
       sourceManifestHash: `sha256:${"0".repeat(64)}`,
       readinessHash: `sha256:${"0".repeat(64)}`,
@@ -198,7 +246,8 @@ function sanitizeRooms(
   readyMethods: readonly string[],
 ): readonly BookingPublicRoom[] | null {
   const roomIds = new Set<string>();
-  const rooms = input.map((room) => {
+  const rooms = input.map((value) => {
+    const room = cleanRoomFacts(value);
     if (!validRoomFacts(room) || roomIds.has(room.roomTypeId)) return null;
     roomIds.add(room.roomTypeId);
     const rateIds = new Set<string>();
@@ -260,6 +309,25 @@ function sanitizeRooms(
   return rooms.length > 0 && !rooms.some((room) => !room) ? (rooms as BookingPublicRoom[]) : null;
 }
 
+/** Room details the page can't show are left off rather than failing it: a bathroom count other
+ * than whole or half numbers, a photo used twice and blank photo text (VAY-2292). Content that
+ * was already valid comes back unchanged, because reads compare stored content with a rebuild. */
+function cleanRoomFacts(room: BookingPublicRoom): BookingPublicRoom {
+  if (!record(room) || !Array.isArray(room.images)) return room;
+  const urls = new Set<unknown>();
+  return {
+    ...room,
+    bathrooms:
+      room.bathroomType === "private" && bathroomCount(room.bathrooms) ? room.bathrooms : null,
+    images: room.images.flatMap((image) => {
+      if (!image || typeof image !== "object" || urls.has(image.url)) return [];
+      urls.add(image.url);
+      const alt = typeof image.alt === "string" && !image.alt.trim() ? null : image.alt;
+      return [{ url: image.url, ...(alt === undefined ? {} : { alt }) }];
+    }),
+  };
+}
+
 function validRoomFacts(room: BookingPublicRoom): boolean {
   if (
     !record(room) ||
@@ -285,7 +353,7 @@ function validRoomFacts(room: BookingPublicRoom): boolean {
     new Set(room.beds.map(({ type }) => type)).size === room.beds.length &&
     room.beds.every(({ type, quantity }) => nonEmpty(type) && integer(quantity, 1)) &&
     (room.bedrooms === null || (Number.isInteger(room.bedrooms) && room.bedrooms >= 0)) &&
-    (room.bathrooms === null || integer(room.bathrooms, 1)) &&
+    (room.bathrooms === null || bathroomCount(room.bathrooms)) &&
     (room.bathroomType === "private" ||
       (room.bathroomType === "shared" && room.bathrooms === null)) &&
     (room.size === null ||
@@ -294,7 +362,6 @@ function validRoomFacts(room: BookingPublicRoom): boolean {
         Number.isFinite(room.size.value) &&
         room.size.value > 0 &&
         room.size.unit === "sqm")) &&
-    room.images.length > 0 &&
     new Set(room.images.map(({ url }) => url)).size === room.images.length &&
     room.images.every(
       (image) =>
@@ -347,16 +414,21 @@ function sanitizeCalendar(
   const { generatedAt } = profile;
   const roomTypeIds = [...new Set(value.roomTypeIds)].sort();
   const expectedRooms = rooms.map(({ roomTypeId }) => roomTypeId).sort();
+  // Coverage may have started before today (prepared yesterday) and may run past a year
+  // (auto-open to a month end); it must cover today and the next 11 months.
+  const coveredDays = inclusiveDays(value.coverageFrom, value.coverageThrough);
   if (
     !validInstant(generatedAt) ||
     value.currentLocalDate !== localDateAt(generatedAt, profile.hotel.timezone) ||
     !nonEmpty(value.sourceRevision) ||
     value.sourceRevision !== value.materializedRevision ||
-    value.currentLocalDate !== value.coverageFrom ||
+    coveredDays < 1 ||
+    value.coverageFrom > value.currentLocalDate ||
+    inclusiveDays(value.currentLocalDate, value.coverageThrough) <
+      BOOKING_PUBLICATION_MIN_OPEN_DAYS + 1 ||
     value.coverageThrough !== value.materializedThrough ||
-    inclusiveDays(value.coverageFrom, value.coverageThrough) !== 366 ||
-    value.expectedDayCount !== 366 * rooms.length ||
-    value.materializedDayCount !== 366 * rooms.length ||
+    value.expectedDayCount !== coveredDays * rooms.length ||
+    value.materializedDayCount !== coveredDays * rooms.length ||
     value.gapCount !== 0 ||
     JSON.stringify(roomTypeIds) !== JSON.stringify(expectedRooms) ||
     !validInstant(value.observedAt) ||
@@ -420,6 +492,9 @@ const validHttpsUrl = (value: unknown) => {
 
 const integer = (value: number, minimum: number, maximum = 100) =>
   Number.isInteger(value) && value >= minimum && value <= maximum;
+// Setup offers half bathrooms (VAY-2292).
+const bathroomCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value * 2) && value >= 0.5 && value <= 100;
 const nonEmpty = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 const record = (value: unknown): value is Record<string, unknown> =>

@@ -10,7 +10,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 type PropertyParams = { propertyId: string };
-type OperationParams = PropertyParams & { operationId: string };
 type PublicationRequestBody = {
   expectedActiveContentRevisionId: string | null;
   expectedSourceManifestHash: string;
@@ -27,6 +26,10 @@ export type BookingPublicationRoutesOptions = {
   propertyAccessRepository: PropertyAccessRepository;
   repository: BookingPublicationCommandPort & Partial<BookingPublicationReviewReadPort>;
   readinessProvider: BookingPublicationReadinessProvider;
+  /** Whether the public booking site serves setup publications (PUBLIC_HOTEL_PROFILE_SOURCE=
+   * active_publication). Until it does, guests can't open a published page, so the review says
+   * so and gives no link (VAY-2134). */
+  publicSiteServesPublications: boolean;
 };
 type AuthorizedPublicationScope = {
   context: Awaited<ReturnType<typeof enforcePropertyRoutePolicy>>;
@@ -38,7 +41,12 @@ const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export async function registerBookingPublicationRoutes(
   app: FastifyInstance,
-  { propertyAccessRepository, repository, readinessProvider }: BookingPublicationRoutesOptions,
+  {
+    propertyAccessRepository,
+    repository,
+    readinessProvider,
+    publicSiteServesPublications,
+  }: BookingPublicationRoutesOptions,
 ): Promise<void> {
   const authorizedScopes = new WeakMap<FastifyRequest, AuthorizedPublicationScope>();
   app.addHook("onClose", async () => repository.close?.());
@@ -131,9 +139,14 @@ export async function registerBookingPublicationRoutes(
           evaluatedAt: new Date().toISOString(),
         };
       }
-      return reply
-        .header("Cache-Control", "no-store")
-        .send({ contractVersion: "booking-publication-review.v1", ...review, readiness });
+      return reply.header("Cache-Control", "no-store").send({
+        contractVersion: "booking-publication-review.v1",
+        ...review,
+        ...(publicSiteServesPublications
+          ? { publicSite: "serving" }
+          : { publishedUrl: null, publicSite: "waiting_for_switch" }),
+        readiness,
+      });
     },
   );
 
@@ -181,28 +194,6 @@ export async function registerBookingPublicationRoutes(
       return reply
         .status(result.error.code === "setup_scope_unavailable" ? 404 : 409)
         .send(result.error);
-    },
-  );
-
-  app.get<{ Params: OperationParams }>(
-    "/properties/:propertyId/publications/booking/:operationId",
-    { onRequest: authorize },
-    async (request, reply) => {
-      const scope = authorizedScopes.get(request);
-      if (!scope) return forbidden(reply);
-      const operationId = request.params.operationId.toLowerCase();
-      if (!UUID_PATTERN.test(operationId)) {
-        return invalidRequest(reply, "The operation ID is invalid.");
-      }
-      const operation = await repository.getPublicationStatus({
-        organizationId: scope.context.selectedOrganization.organizationId,
-        propertyId: scope.propertyId,
-        operationId,
-        actorUserId: scope.context.actor.internalUserId,
-      });
-      return operation
-        ? reply.send(operation)
-        : reply.status(404).send({ code: "publication_operation_not_found" });
     },
   );
 }

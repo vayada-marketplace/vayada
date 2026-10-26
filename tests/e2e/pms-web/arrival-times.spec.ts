@@ -60,7 +60,9 @@ for (const initial of [false, true])
         },
       }),
     );
+    // The old Booking Engine anchor opens the Property page's arrival times (VAY-2275).
     await page.goto("/settings#booking-engine");
+    await expect(page).toHaveURL(/\/settings\/property#arrival-times$/);
     if (initial) {
       await expect(page.getByLabel("Guests can check in from")).toHaveValue("15:00");
       await page.getByLabel("Default guest language").selectOption("en");
@@ -81,6 +83,6 @@ for (const initial of [false, true])
     await expect(page.getByLabel("Check-in until (optional)")).toHaveValue("23:00");
     await expect(page.getByLabel("Guests must check out by")).toHaveValue("11:00");
     await page
-      .locator("#booking-engine")
+      .locator("#arrival-times")
       .screenshot({ path: testInfo.outputPath("arrival-times.png") });
   });

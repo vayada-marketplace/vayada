@@ -1,0 +1,265 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { ArrowRightIcon, CheckCircleIcon, KeyIcon } from "@heroicons/react/24/outline";
+import { HotelIcon } from "@vayada/product-onboarding/HotelIcon";
+
+import { useTranslation } from "@/lib/i18n";
+import {
+  captureHotelAccountInviteCode,
+  clearPendingHotelAccountInvite,
+  hotelAccountInviteEntryProduct,
+  hotelAccountInviteSetupPath,
+  hotelAccountInvitesService,
+  storeHotelAccountInviteCode,
+  type HotelAccountInviteLookup,
+  type HotelAccountInviteRedemption,
+} from "@/services/api/hotelAccountInvites";
+import { ApiErrorResponse } from "@/services/api/client";
+import { authService } from "@/services/auth";
+
+// The hotel invitation page, moved from marketplace-web (VAY-2262). Booking Admin sessions are
+// always hotel accounts, so the "wrong account type" state of the old page does not exist here.
+type InviteState =
+  | { phase: "loading" }
+  | { phase: "missing"; message?: string }
+  | { phase: "ready"; code: string; invite: HotelAccountInviteLookup; authenticated: boolean }
+  | { phase: "redeeming"; code: string; invite: HotelAccountInviteLookup }
+  | { phase: "error"; code: string; invite: HotelAccountInviteLookup; message: string };
+
+export default function HotelAccountInvitePage() {
+  const { t } = useTranslation();
+  const initialLoadStarted = useRef(false);
+  const [state, setState] = useState<InviteState>({ phase: "loading" });
+  const [manualCode, setManualCode] = useState("");
+
+  const loadInvite = useCallback(
+    async (code: string) => {
+      setState({ phase: "loading" });
+      try {
+        const invite = await hotelAccountInvitesService.lookup(code);
+        let authenticated = false;
+        try {
+          authenticated = await authService.ensureSession();
+        } catch {
+          authenticated = false;
+        }
+        setState({ phase: "ready", code, invite, authenticated });
+      } catch (error) {
+        let failure: unknown = error;
+        if (error instanceof ApiErrorResponse && error.status === 404) {
+          // A redeemed code no longer looks up; replay the redemption for the account that owns it.
+          try {
+            if (await authService.ensureSession()) {
+              const redemption = await hotelAccountInvitesService.redeem(code);
+              finishRedemption(redemption);
+              return;
+            }
+          } catch (replayError) {
+            failure = replayError;
+          }
+        }
+        // A definite answer (4xx) ends the invitation; a network or server failure keeps the
+        // stored code so the owner can simply try again.
+        const definitive =
+          failure instanceof ApiErrorResponse && failure.status >= 400 && failure.status < 500;
+        if (definitive) clearPendingHotelAccountInvite();
+        setState({
+          phase: "missing",
+          message: definitive ? t("invite.error.unavailable") : t("invite.error.lookupFailed"),
+        });
+      }
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    if (initialLoadStarted.current) return;
+    initialLoadStarted.current = true;
+    const code = captureHotelAccountInviteCode();
+    if (!code) {
+      setState({ phase: "missing" });
+      return;
+    }
+    void loadInvite(code);
+  }, [loadInvite]);
+
+  async function submitCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const code = storeHotelAccountInviteCode(manualCode);
+    if (!code) {
+      setState({ phase: "missing", message: t("invite.error.incomplete") });
+      return;
+    }
+    await loadInvite(code);
+  }
+
+  async function redeemInvite(code: string, invite: HotelAccountInviteLookup) {
+    setState({ phase: "redeeming", code, invite });
+    try {
+      await authService.completeHotelInviteOnboarding(code);
+      const redemption = await hotelAccountInvitesService.redeem(code);
+      finishRedemption(redemption);
+    } catch {
+      setState({ phase: "error", code, invite, message: t("invite.error.redeemFailed") });
+    }
+  }
+
+  if (state.phase === "loading") {
+    return (
+      <InviteShell>
+        <div className="flex min-h-64 items-center justify-center" aria-label={t("invite.loading")}>
+          <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
+        </div>
+      </InviteShell>
+    );
+  }
+
+  if (state.phase === "missing") {
+    return (
+      <InviteShell>
+        <div className="mx-auto max-w-md text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-700">
+            <KeyIcon className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <h1 className="mt-5 text-2xl font-bold text-gray-950">{t("invite.missing.title")}</h1>
+          <p className="mt-2 text-sm leading-6 text-gray-600">{t("invite.missing.description")}</p>
+          <form onSubmit={submitCode} className="mt-7 text-left">
+            <label htmlFor="hotel-invite-code" className="text-sm font-semibold text-gray-800">
+              {t("invite.missing.codeLabel")}
+            </label>
+            <input
+              id="hotel-invite-code"
+              type="text"
+              required
+              autoComplete="off"
+              spellCheck={false}
+              value={manualCode}
+              onChange={(event) => setManualCode(event.target.value)}
+              placeholder="VAY-…"
+              className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 font-mono text-sm text-gray-950 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+            />
+            {state.message ? (
+              <p role="alert" className="mt-3 text-sm text-red-700">
+                {state.message}
+              </p>
+            ) : null}
+            <button
+              type="submit"
+              className="mt-5 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
+            >
+              {t("invite.missing.submit")}
+              <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </form>
+        </div>
+      </InviteShell>
+    );
+  }
+
+  const { code, invite } = state;
+  const isRedeeming = state.phase === "redeeming";
+  const isAuthenticated = state.phase !== "ready" || state.authenticated;
+
+  return (
+    <InviteShell>
+      <div className="mx-auto max-w-lg text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary-50 text-primary-700">
+          <HotelIcon className="h-7 w-7" aria-hidden="true" />
+        </div>
+        <p className="mt-5 text-xs font-bold uppercase tracking-[0.18em] text-primary-700">
+          {t("invite.eyebrow")}
+        </p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight text-gray-950">
+          {invite.property.displayName}
+        </h1>
+        <p className="mt-2 text-sm text-gray-600">{invite.organization.displayName}</p>
+
+        <div className="mt-7 rounded-2xl border border-gray-200 bg-gray-50 p-5 text-left">
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            {t("invite.details.title")}
+          </p>
+          <dl className="mt-4 space-y-3 text-sm">
+            <InviteDetail
+              label={t("invite.details.invitedAccount")}
+              value={invite.identity.emailHint}
+            />
+            <InviteDetail
+              label={t("invite.details.setupRoute")}
+              value={
+                hotelAccountInviteEntryProduct(invite.selectedTracks) === "pms"
+                  ? t("invite.tracks.hotelOperations")
+                  : t("invite.tracks.bookingEngine")
+              }
+            />
+            <InviteDetail
+              label={t("invite.details.validUntil")}
+              value={new Date(invite.expiresAt).toLocaleDateString()}
+            />
+          </dl>
+        </div>
+
+        {state.phase === "error" ? (
+          <p
+            role="alert"
+            className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+          >
+            {state.message}
+          </p>
+        ) : null}
+
+        {!isAuthenticated ? (
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <Link
+              href="/signup"
+              className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
+            >
+              {t("invite.createAccount")}
+            </Link>
+            <Link
+              href={`/login?returnTo=${encodeURIComponent("/invite")}`}
+              className="inline-flex min-h-11 items-center justify-center rounded-xl border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
+            >
+              {t("invite.signIn")}
+            </Link>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={isRedeeming}
+            onClick={() => void redeemInvite(code, invite)}
+            className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRedeeming ? t("invite.accepting") : t("invite.accept")}
+            {!isRedeeming ? <CheckCircleIcon className="h-5 w-5" aria-hidden="true" /> : null}
+          </button>
+        )}
+      </div>
+    </InviteShell>
+  );
+}
+
+function InviteShell({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#eef2ff,_#f9fafb_52%)] px-5 py-12">
+      <section className="w-full max-w-2xl rounded-3xl border border-white/80 bg-white p-7 shadow-[0_24px_70px_-36px_rgba(15,23,42,0.45)] sm:p-10">
+        {children}
+      </section>
+    </main>
+  );
+}
+
+function InviteDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <dt className="text-gray-500">{label}</dt>
+      <dd className="text-right font-semibold text-gray-900">{value}</dd>
+    </div>
+  );
+}
+
+function finishRedemption(redemption: HotelAccountInviteRedemption): void {
+  clearPendingHotelAccountInvite();
+  window.location.assign(hotelAccountInviteSetupPath(redemption.selectedTracks));
+}

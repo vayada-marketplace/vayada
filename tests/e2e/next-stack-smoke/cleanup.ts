@@ -103,19 +103,15 @@ export async function cleanupSmokeResources(
       }
     }
     try {
-      await api.json(
-        "PATCH",
-        `/api/finance/properties/${hotel.propertyId}/payment-settings`,
-        {
-          commandId: `next-smoke:${environment.runId}:cleanup-payment`,
-          idempotencyKey: `next-smoke:${environment.runId}:cleanup-payment`,
-          paymentSettings: {
-            paymentsEnabled: true,
-            paymentProvider: "manual",
-            acceptedMethods: ["other"],
-          },
+      await api.json("PATCH", `/api/finance/properties/${hotel.propertyId}/payment-settings`, {
+        commandId: `next-smoke:${environment.runId}:cleanup-payment`,
+        idempotencyKey: `next-smoke:${environment.runId}:cleanup-payment`,
+        paymentSettings: {
+          paymentsEnabled: true,
+          paymentProvider: "manual",
+          acceptedMethods: ["other"],
         },
-      );
+      });
       if (hotel.slug && hotel.stay) {
         await waitForNoPublicOffer(request, hotel.slug, hotel.stay);
       }
@@ -151,7 +147,6 @@ export async function cleanupSmokeResources(
   for (const [role, qualifier] of [
     ["hotel", ""],
     ["hotel", "foreign-"],
-    ["creator", ""],
     ["staff", ""],
   ] as const) {
     try {
@@ -226,7 +221,7 @@ export async function cleanupSmokeResources(
       userRoles.delete(userId);
     }
   }
-  const organizations = new Map<string, { role: "hotel" | "creator"; userId: string }>();
+  const organizations = new Map<string, { role: "hotel"; userId: string }>();
   for (const [userId, role] of userRoles) {
     if (role === "staff") continue;
     try {
@@ -247,18 +242,18 @@ export async function cleanupSmokeResources(
         "GET",
         `/organizations/${encodeURIComponent(organizationId)}`,
       );
-      const expectedExternalId = `vayada-signup:marketplace-web:${owner.role}:${owner.userId}`;
+      // Hotel owners sign up in Booking Admin (VAY-2270).
+      const expectedExternalId = `vayada-signup:booking-admin:${owner.role}:${owner.userId}`;
       const metadata = organization.metadata;
-      const expectedKind = owner.role === "hotel" ? "hotel_group" : "creator_workspace";
       if (
         organization.external_id !== expectedExternalId ||
         !metadata ||
         typeof metadata !== "object" ||
         Array.isArray(metadata) ||
         (metadata as Record<string, unknown>).auth_flow !== "signup" ||
-        (metadata as Record<string, unknown>).surface !== "marketplace-web" ||
+        (metadata as Record<string, unknown>).surface !== "booking-admin" ||
         (metadata as Record<string, unknown>).signup_intent !== owner.role ||
-        (metadata as Record<string, unknown>).organization_kind !== expectedKind
+        (metadata as Record<string, unknown>).organization_kind !== "hotel_group"
       ) {
         throw new Error(
           `Refusing to delete WorkOS organization ${organizationId}: synthetic ownership could not be proven.`,

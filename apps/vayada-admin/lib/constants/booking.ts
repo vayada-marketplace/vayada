@@ -6,40 +6,33 @@ export const COLOR_PRESETS = [
   { name: "Slate", primary: "#475569", accent: "#F8FAFC" },
 ];
 
+// Rendered with the self-hosted files of @vayada/fonts/brand, as on the guest booking site.
 export const FONT_PAIRINGS = [
   {
     id: "high-end-serif",
     name: "High-end Serif",
-    fonts: "Playfair Display + Source Sans Pro",
+    fonts: "Playfair Display + Source Sans 3",
     preview: "Elegant & Timeless",
-    headingFamily: "'Playfair Display', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
   },
   {
     id: "modern-minimalist",
     name: "Modern Minimalist",
     fonts: "Inter + Inter",
     preview: "Clean & Contemporary",
-    headingFamily: "'Inter', sans-serif",
-    bodyFamily: "'Inter', sans-serif",
   },
   {
     id: "grand-classic",
     name: "Grand Classic",
-    fonts: "Lora + Source Sans Pro",
+    fonts: "Lora + Source Sans 3",
     preview: "Stately & Readable",
-    headingFamily: "'Lora', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
   },
   {
     id: "italiana-serif",
     name: "Italiana Serif",
-    fonts: "Italiana + Source Sans Pro",
+    fonts: "Italiana + Source Sans 3",
     preview: "Refined & Airy",
-    headingFamily: "'Italiana', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
   },
-];
+] as const;
 
 export const CURRENCY_OPTIONS = [
   { code: "EUR", label: "EUR - Euro" },

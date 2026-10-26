@@ -20,7 +20,7 @@ endpoint. Only the four reviewed PaymentIntent transitions, `charge.updated`,
 and `account.updated` can promote; other connected events stay observed even
 when redelivered through the platform endpoint. Account updates must agree with
 the signed envelope's connected-account ID. Deployment, enabled event selection,
-live/test separation, affiliate ownership, and signed delivery remain cutover
+live/test separation, and signed delivery remain cutover
 verification requirements; this change does not establish production readiness.
 
 | Event family             | Retained fields                                                                                                              |

@@ -1,55 +1,46 @@
+// Every preset keeps white button text readable (WCAG AA), as the booking design requires
+// (VAY-2318: Tropical Gold and Sunset Coral are darker than they were).
 export const BOOKING_PAGE_COLOR_PRESETS = [
   { name: "Ocean Blue", primary: "#0077B6" },
-  { name: "Tropical Gold", primary: "#D4A017" },
+  { name: "Tropical Gold", primary: "#A67D12" },
   { name: "Forest Green", primary: "#2D6A4F" },
-  { name: "Sunset Coral", primary: "#E76F51" },
+  { name: "Sunset Coral", primary: "#E35734" },
   { name: "Royal Purple", primary: "#7B2D8E" },
   { name: "Charcoal", primary: "#2D3436" },
 ] as const;
 
-export const BOOKING_PAGE_FONT_STYLESHEET_URL =
-  "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Cinzel:wght@400;600;700&family=Italiana&display=swap";
-
+// The Design Studio font pairings. Apps render them with the self-hosted files of
+// @vayada/fonts/brand (BRAND_FONT_PAIRINGS), the same ones the guest booking site uses.
 export const BOOKING_PAGE_FONT_PAIRINGS = [
   {
     id: "high-end-serif",
     name: "High-end Serif",
-    fonts: "Playfair Display + Source Sans Pro",
+    fonts: "Playfair Display + Source Sans 3",
     preview: "Elegant & Timeless",
-    headingFamily: "'Playfair Display', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
   },
   {
     id: "modern-minimalist",
     name: "Modern Minimalist",
     fonts: "Inter + Inter",
     preview: "Clean & Contemporary",
-    headingFamily: "'Inter', sans-serif",
-    bodyFamily: "'Inter', sans-serif",
   },
   {
     id: "grand-classic",
     name: "Grand Classic",
-    fonts: "Lora + Source Sans Pro",
+    fonts: "Lora + Source Sans 3",
     preview: "Stately & Readable",
-    headingFamily: "'Lora', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
   },
   {
     id: "imperial-serif",
     name: "Imperial Serif",
-    fonts: "Cinzel + Source Sans Pro",
+    fonts: "Cinzel + Source Sans 3",
     preview: "Monumental & Refined",
-    headingFamily: "'Cinzel', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
   },
   {
     id: "italiana-serif",
     name: "Italiana Serif",
-    fonts: "Italiana + Source Sans Pro",
+    fonts: "Italiana + Source Sans 3",
     preview: "Refined & Airy",
-    headingFamily: "'Italiana', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
   },
 ] as const;
 
@@ -59,6 +50,4 @@ export type FontPairing = {
   name: string;
   fonts: string;
   preview: string;
-  headingFamily: string;
-  bodyFamily: string;
 };

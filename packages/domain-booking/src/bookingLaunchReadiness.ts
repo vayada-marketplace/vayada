@@ -27,6 +27,15 @@ import {
   type BookingLaunchReadinessPortKey,
   type BookingLaunchReadinessProviderPort,
 } from "./bookingLaunchEvidence.js";
+import { BOOKING_LAUNCH_BLOCKER_MESSAGES } from "./bookingLaunchBlockerMessages.js";
+
+/** Why readiness could not be evaluated: IDs and codes only, for operators' logs. */
+export type BookingLaunchReadinessUnavailableEvent = Readonly<{
+  propertyId: string;
+  port: BookingLaunchReadinessPortKey | "composer";
+  code: string;
+  errorSource: ReadinessErrorSource;
+}>;
 
 export function createBookingLaunchReadinessProvider(config: {
   catalog: BookingLaunchCatalogEvidencePort;
@@ -34,6 +43,7 @@ export function createBookingLaunchReadinessProvider(config: {
   pms: BookingLaunchPmsEvidencePort;
   finance: BookingLaunchFinanceEvidencePort;
   now?: () => Date;
+  onUnavailable?: (event: BookingLaunchReadinessUnavailableEvent) => void;
 }): BookingLaunchReadinessProviderPort {
   const ports = {
     catalog: config.catalog,
@@ -42,6 +52,13 @@ export function createBookingLaunchReadinessProvider(config: {
     finance: config.finance,
   } as const;
   const now = config.now ?? (() => new Date());
+  const report = (event: BookingLaunchReadinessUnavailableEvent) => {
+    try {
+      config.onUnavailable?.(Object.freeze({ ...event }));
+    } catch {
+      // Diagnostics never change the readiness answer.
+    }
+  };
 
   return {
     async getBookingReadiness(request) {
@@ -62,29 +79,33 @@ export function createBookingLaunchReadinessProvider(config: {
         failurePropertyId = requestSnapshot.propertyId;
         const ownerRequest = () => Object.freeze({ ...requestSnapshot });
 
-        let results: readonly unknown[];
-        try {
-          results = await Promise.all([
-            ports.catalog.getBookingLaunchEvidence(ownerRequest()),
-            ports.booking.getBookingLaunchEvidence(ownerRequest()),
-            ports.pms.getBookingLaunchEvidence(ownerRequest()),
-            ports.finance.getBookingLaunchEvidence(ownerRequest()),
-          ]);
-        } catch {
-          return providerFailure(
-            failurePropertyId,
-            "system",
-            "booking_readiness_owner_unavailable",
-            now,
-          );
-        }
+        const portKeys = ["catalog", "booking", "pms", "finance"] as const;
+        // Each owner is called on its own so a thrown error is attributed to its port.
+        const results: readonly unknown[] = await Promise.all(
+          portKeys.map(async (portKey): Promise<unknown> => {
+            try {
+              return await ports[portKey].getBookingLaunchEvidence(ownerRequest());
+            } catch {
+              return {
+                outcome: "unavailable",
+                port: portKey,
+                errorSource: "system",
+                code: "owner_threw",
+              };
+            }
+          }),
+        );
 
         const evidenceByPort = new Map<BookingLaunchReadinessPortKey, BookingLaunchOwnerEvidence>();
-        for (const [index, portKey] of (
-          ["catalog", "booking", "pms", "finance"] as const
-        ).entries()) {
+        for (const [index, portKey] of portKeys.entries()) {
           const result = results[index];
           if (isBookingLaunchOwnerUnavailable(result, portKey)) {
+            report({
+              propertyId: failurePropertyId,
+              port: portKey,
+              code: result.code ?? "unspecified",
+              errorSource: result.errorSource,
+            });
             return providerFailure(
               failurePropertyId,
               result.errorSource,
@@ -93,6 +114,12 @@ export function createBookingLaunchReadinessProvider(config: {
             );
           }
           if (!isBookingLaunchOwnerEvidenceValid(result, requestSnapshot, portKey)) {
+            report({
+              propertyId: failurePropertyId,
+              port: portKey,
+              code: "evidence_invalid",
+              errorSource: "provider",
+            });
             return providerFailure(
               failurePropertyId,
               "provider",
@@ -105,6 +132,12 @@ export function createBookingLaunchReadinessProvider(config: {
 
         return await composeReadiness(failurePropertyId, evidenceByPort, now);
       } catch {
+        report({
+          propertyId: failurePropertyId,
+          port: "composer",
+          code: "composition_failed",
+          errorSource: "provider",
+        });
         return providerFailure(
           failurePropertyId,
           "provider",
@@ -257,7 +290,7 @@ function toReadinessBlocker(
 ): ReadinessBlocker {
   const base = {
     code: blocker.code,
-    message: safeMessageFor(blocker.kind),
+    message: safeMessageFor(blocker),
     product: "booking" as const,
     groupId: coordinates.groupId,
     owningStepId: coordinates.owningStepId,
@@ -286,7 +319,10 @@ function compareBlockers(left: ReadinessBlocker, right: ReadinessBlocker): numbe
   );
 }
 
-function safeMessageFor(kind: BookingLaunchOwnerBlocker["kind"]): string {
+function safeMessageFor({ code, kind }: BookingLaunchOwnerBlocker): string {
+  if (kind !== "system_error" && Object.hasOwn(BOOKING_LAUNCH_BLOCKER_MESSAGES, code)) {
+    return BOOKING_LAUNCH_BLOCKER_MESSAGES[code]!;
+  }
   switch (kind) {
     case "user_fixable":
       return "Review this setup step before publishing.";

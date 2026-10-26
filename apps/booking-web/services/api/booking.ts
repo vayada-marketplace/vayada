@@ -1,3 +1,4 @@
+import { parseBookingStay, type BookingStay } from "@/lib/bookingStay";
 import { Booking, RoomSelection, RoomSelectionSnapshot } from "@/lib/types";
 import { bookingWebPublic } from "./client";
 
@@ -110,6 +111,8 @@ export interface PaymentSettings {
   sameDayBookingCutoffTime?: string | null;
   termsText?: string;
   cancellationPolicyText?: string;
+  /** Book Direct Benefits (VAY-2072), in the hotel's order. */
+  benefits?: string[];
 }
 
 export interface BookingStatus {
@@ -129,6 +132,16 @@ export interface CancelPreview {
   currency: string;
   /** Pricing-v2 stays: what the booked terms keep, in minor units; sent back to confirm the fee. */
   bookedTermsOutcome?: { retainedMinor: string };
+  /** VAY-2320: a booking's several rooms, each with what its own terms give back and keep. */
+  rooms?: CancelPreviewRoom[];
+}
+
+export interface CancelPreviewRoom {
+  roomName: string | null;
+  rule: "non_refundable" | "free_until_deadline" | "partial_refund";
+  refundPercent: number;
+  refundAmount: number;
+  keptAmount: number;
 }
 
 export const bookingService = {
@@ -140,11 +153,17 @@ export const bookingService = {
     );
   },
 
-  async cancelPreview(slug: string, bookingId: string, guestEmail: string): Promise<CancelPreview> {
+  async cancelPreview(
+    slug: string,
+    bookingId: string,
+    guestEmail: string,
+    signal?: AbortSignal,
+  ): Promise<CancelPreview> {
     const body = { guestEmail };
     return bookingWebPublic.post(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel-preview`,
       body,
+      { signal },
     );
   },
 
@@ -168,6 +187,17 @@ export const bookingService = {
     const params = new URLSearchParams({ reference, email });
     return bookingWebPublic.get(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/status?${params}`,
+    );
+  },
+
+  /** VAY-2360: the booked cancellation terms and, once confirmed, where the guest stays. By the booking's id
+   * only. */
+  async stay(slug: string, bookingId: string, guestEmail: string): Promise<BookingStay> {
+    return parseBookingStay(
+      await bookingWebPublic.post(
+        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/stay`,
+        { guestEmail },
+      ),
     );
   },
 

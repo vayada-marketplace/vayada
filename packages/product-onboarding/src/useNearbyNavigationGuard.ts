@@ -5,8 +5,8 @@ type GuardWindow = Window & {
   __vayadaNearbyLeave?: () => boolean;
   __vayadaNearbyNavigationDone?: () => void;
 };
-const message = "You have unsaved location or place changes. Discard them and leave?";
-export function useNearbyNavigationGuard(dirty: boolean) {
+const english = "You have unsaved location or place changes. Discard them and leave?";
+export function useNearbyNavigationGuard(dirty: boolean, message = english) {
   useEffect(() => {
     if (!dirty) return;
     const target = window as GuardWindow;
@@ -75,7 +75,7 @@ export function useNearbyNavigationGuard(dirty: boolean) {
       window.removeEventListener("click", click, true);
       target.navigation?.removeEventListener("navigate", navigate);
     };
-  }, [dirty]);
+  }, [dirty, message]);
 }
 
 type Router = {

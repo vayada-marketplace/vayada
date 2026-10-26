@@ -1,10 +1,20 @@
 import { createHash } from "node:crypto";
-import { parsePublicPricingSelection, parseStoredPricingQuote } from "@vayada/domain-booking";
+import {
+  isManualPricingPaymentMethod,
+  isPricingPaymentMethod,
+  parsePublicPricingSelection,
+  parseStoredPricingQuote,
+} from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
+import { selectedAddonLeadTimesAllow } from "./addonLeadTime.js";
+import { lockPricingManualPaymentTerms } from "./pricingManualPayment.js";
+import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
+import { pricingPaymentWindowAllows } from "./pricingPaymentWindows.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { PricingStorageError } from "./replacementPricingStore.js";
+import { selectedRatesTakePaymentMethod } from "./selectedRatePaymentMethods.js";
 const fail = (code: PricingStorageError["code"]): never => {
   throw new PricingStorageError(code);
 };
@@ -44,7 +54,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
         !input.requestId.length ||
         input.requestId.length > 200 ||
         input.requestId !== input.requestId.trim() ||
-        !["card", "pay_at_property"].includes(input.paymentMethod as string)
+        !isPricingPaymentMethod(input.paymentMethod)
       )
         return fail("invalid");
       const selection = parsePublicPricingSelection(input.selection);
@@ -91,7 +101,49 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
           method,
           lifetimeSeconds,
         );
-        if (!record || record.quote.stay.propertyId !== scope.propertyId) return fail("denied");
+        if (!record) {
+          // VAY-2232: an extra needs more notice than this stay gives (the guest page may have
+          // listed it before its notice ran out).
+          if (
+            !(await selectedAddonLeadTimesAllow(
+              client,
+              scope.propertyId,
+              selection.addons.map((addon) => addon.id),
+              selection.checkIn,
+            ))
+          )
+            throw new PricingStorageError("denied", "addon_lead_time");
+          // VAY-2309: a chosen rate doesn't take this way to pay (a non-refundable rate never
+          // takes pay at the property). Other refusals stay unnamed.
+          if (!(await selectedRatesTakePaymentMethod(client, slug, selection, method)))
+            throw new PricingStorageError("denied", "payment_method_not_accepted");
+          return fail("denied");
+        }
+        if (record.quote.stay.propertyId !== scope.propertyId) return fail("denied");
+        if (isManualPricingPaymentMethod(method)) {
+          // VAY-2145: the payment deadline must fall before check-in.
+          const terms = await lockPricingManualPaymentTerms(client, scope.propertyId, method);
+          if (!terms) return fail("denied");
+          if (
+            !(await pricingManualLeadTimeAllows(
+              client,
+              scope.propertyId,
+              terms,
+              record.quote.stay.checkIn,
+            ))
+          )
+            throw new PricingStorageError("denied", "manual_payment_too_soon");
+        }
+        // VAY-2348: the hotel offers this way to pay only to guests booking within its window.
+        if (
+          !(await pricingPaymentWindowAllows(
+            client,
+            scope.propertyId,
+            method,
+            record.quote.stay.checkIn,
+          ))
+        )
+          throw new PricingStorageError("denied", "payment_method_window");
         const inserted = await client.query(
           `INSERT INTO booking.pricing_quotes(id,property_id,organization_id,request_id,request_hash,payload)
           SELECT $1,$2,$3,$4,$5,$6 WHERE $7::timestamptz > clock_timestamp() RETURNING id`,

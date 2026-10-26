@@ -17,10 +17,10 @@ import {
 } from "@heroicons/react/24/outline";
 import { Modal } from "@/components/ui/Modal";
 
-type FilterType = "all" | "hotel" | "creator" | "admin";
+type FilterType = "all" | "hotel" | "staff" | "admin";
 type FilterStatus = "all" | "pending" | "verified" | "rejected" | "suspended";
 
-const VALID_TYPES: FilterType[] = ["all", "hotel", "creator", "admin"];
+const VALID_TYPES: FilterType[] = ["all", "hotel", "staff", "admin"];
 const VALID_STATUSES: FilterStatus[] = ["all", "pending", "verified", "rejected", "suspended"];
 
 const SCROLL_STORAGE_KEY = "admin:users-list:scroll";
@@ -283,8 +283,8 @@ function DashboardContent() {
         return "bg-purple-100 text-purple-800";
       case "hotel":
         return "bg-blue-100 text-blue-800";
-      case "creator":
-        return "bg-indigo-100 text-indigo-800";
+      case "staff":
+        return "bg-teal-100 text-teal-800";
       default:
         return "bg-gray-100 text-gray-800";
     }
@@ -336,7 +336,7 @@ function DashboardContent() {
               >
                 <option value="all">All Types</option>
                 <option value="hotel">Hotels</option>
-                <option value="creator">Creators</option>
+                <option value="staff">Staff</option>
                 <option value="admin">Admins</option>
               </select>
               <select
@@ -595,14 +595,6 @@ function DashboardContent() {
                     User account: <strong>{deleteConfirmUser.name}</strong> (
                     {deleteConfirmUser.email})
                   </li>
-                  {deleteConfirmUser.type === "creator" && (
-                    <li>Creator profile and all social media platforms</li>
-                  )}
-                  {deleteConfirmUser.type === "hotel" && (
-                    <li>
-                      Hotel profile and all collaboration offers with compensation and requirements
-                    </li>
-                  )}
                   <li>All associated S3 images (profile pictures, media, thumbnails)</li>
                   <li>All related records</li>
                 </ul>

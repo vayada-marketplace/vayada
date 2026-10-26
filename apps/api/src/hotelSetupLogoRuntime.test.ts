@@ -29,7 +29,9 @@ vi.mock("pg", () => ({
 vi.mock("./platform/hotelSetupProfileWriter.js", () => ({
   lockHotelSetupOwnerAuthority: mocks.authority,
 }));
-vi.mock("./routes/marketplaceAdmin.js", () => ({ syncPropertyOfferReadModels: mocks.sync }));
+vi.mock("./platform/propertyPublicProfileProjection.js", () => ({
+  projectPropertyPublicProfile: mocks.sync,
+}));
 vi.mock("./platform/platformMediaS3.js", () => ({
   createS3PlatformMediaAdapter: () => ({ generateVariants: mocks.generate }),
 }));

@@ -3,13 +3,20 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
-import { BOOKING_PAGE_FONT_STYLESHEET_URL, BookingPagePreview } from "@vayada/product-onboarding";
+import {
+  BOOKING_DESIGN_DEFAULT_FONT_PAIRING,
+  BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR,
+  type BookingDesignFontPairing,
+  type BookingDesignRevision,
+} from "@vayada/domain-booking";
+import { BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
+import { designStudioBookingDesignClient } from "@/services/api/bookingDesignClient";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import { publishPublicBookabilityProfile } from "@/services/api/publicBookabilityPublicationClient";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
-import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
+import { COLOR_PRESETS, FONT_PAIRINGS, isTooLightBrandColor } from "@/lib/constants/branding";
 import { FeedbackAlert, SaveButton } from "@/components/ui";
 import {
   MAX_PROPERTY_GALLERY_PHOTOS,
@@ -25,12 +32,12 @@ import {
 } from "@/lib/utils/headerLogo";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { useTranslation } from "@/lib/i18n";
-import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
 import CustomDomainCard from "@/components/design-studio/CustomDomainCard";
 import MediaTab, { type PropertyGalleryImage } from "@/components/design-studio/MediaTab";
 import ColorsTab from "@/components/design-studio/ColorsTab";
 import FontsTab from "@/components/design-studio/FontsTab";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 
 type Tab = "media" | "colors" | "fonts" | "layout" | "domain";
 
@@ -62,8 +69,6 @@ export default function DesignStudioPage() {
   const [headerLogoUrl, setHeaderLogoUrl] = useState("");
   const [headerLogoMediaObjectId, setHeaderLogoMediaObjectId] = useState<string | null>(null);
   const [showContactButton, setShowContactButton] = useState(true);
-  const [showReferAGuestButton, setShowReferAGuestButton] = useState(false);
-  const [referAGuestModuleEnabled, setReferAGuestModuleEnabled] = useState<boolean | null>(null);
   const [showLanguageSelector, setShowLanguageSelector] = useState(true);
   const [showCurrencySelector, setShowCurrencySelector] = useState(true);
   const [heroHeading, setHeroHeading] = useState("");
@@ -72,7 +77,11 @@ export default function DesignStudioPage() {
   const [propertySlug, setPropertySlug] = useState("");
   const [defaultCurrency, setDefaultCurrency] = useState("EUR");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
-  const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([]);
+  // The booking page's main language: the hotel profile's, which guests always get besides
+  // Booking's languages (VAY-2292). null until the profile loads.
+  const [pageLanguage, setPageLanguage] = useState<string | null>(null);
+  // null until property settings load, so a failed read never greys out the currency toggle.
+  const [supportedCurrencies, setSupportedCurrencies] = useState<string[] | null>(null);
   // null until property settings load, so a failed read never greys out the language toggle.
   const [supportedLanguages, setSupportedLanguages] = useState<string[] | null>(null);
   const [galleryImages, setGalleryImages] = useState<PropertyGalleryImage[]>([]);
@@ -82,6 +91,10 @@ export default function DesignStudioPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const designHotelIdRef = useRef<string | null>(null);
   const propertyIdRef = useRef<string | null>(null);
+  const designRef = useRef<BookingDesignRevision | null>(null);
+  // The colour and font the page loaded or last saved; Save writes the booking design only when
+  // they change, so a logo-only Save never creates or rewrites a design (VAY-2318).
+  const savedChoicesRef = useRef<BookingDesignRevision["choices"] | null>(null);
   const profileRevisionRef = useRef<number | null>(null);
   const galleryOverflowRef = useRef<PropertyGalleryImage[]>([]);
   const galleryWriteInFlightRef = useRef(false);
@@ -163,8 +176,9 @@ export default function DesignStudioPage() {
   useEffect(() => {
     setLoadFailed(false);
     setDomainStatus(null);
-    setReferAGuestModuleEnabled(null);
     propertyIdRef.current = null;
+    designRef.current = null;
+    savedChoicesRef.current = null;
     profileRevisionRef.current = null;
     try {
       designHotelIdRef.current ??= requireSelectedBookingHotelId();
@@ -184,12 +198,6 @@ export default function DesignStudioPage() {
         const message = "admin.failedToLoadCustomDomainStatus";
         setFeedback({ type: "error", message });
       });
-    moduleActivationClient
-      .list()
-      .then(({ activeModules }) =>
-        setReferAGuestModuleEnabled(activeModules.includes("affiliates")),
-      )
-      .catch(() => setReferAGuestModuleEnabled(null));
     Promise.all([
       settingsService.getDesignSettings(hotelId),
       settingsService.getPropertySettings(hotelId).catch(() => null),
@@ -198,15 +206,16 @@ export default function DesignStudioPage() {
         return Promise.all([
           sharedHotelSetupApi.getPropertyProfile(propertyId),
           sharedHotelSetupApi.getPublicPropertyProfile(propertyId),
+          designStudioBookingDesignClient.load(propertyId, { cache: "no-store" }),
         ]);
       }),
     ])
-      .then(([settings, property, [canonicalProfile, publicProfile]]) => {
+      .then(([settings, property, [canonicalProfile, publicProfile, design]]) => {
         applyPublicGallery(publicProfile);
+        setPageLanguage(publicProfile.publicProfile.locale || null);
         setHeaderLogo(settings.header_logo || "");
         setHeaderLogoMediaObjectId(settings.header_logo_media_object_id);
         setShowContactButton(settings.show_contact_button);
-        setShowReferAGuestButton(settings.show_refer_a_guest_button);
         setShowLanguageSelector(settings.show_language_selector);
         setShowCurrencySelector(settings.show_currency_selector);
         // Guests see the canonical cover; the settings URL only covers heroes saved before it existed.
@@ -216,8 +225,22 @@ export default function DesignStudioPage() {
         if (savedHero) setHeroImage(savedHero);
         if (settings.hero_heading) setHeroHeading(settings.hero_heading);
         if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext);
-        if (settings.primary_color) setPrimaryColor(settings.primary_color);
-        if (settings.font_pairing) setSelectedFont(settings.font_pairing);
+        // Guests get the booking design's colour and font (VAY-2318); the settings row only
+        // covers hotels that have no booking design yet.
+        designRef.current = design;
+        const savedChoices = {
+          primaryColor: (
+            design?.choices.primaryColor ||
+            settings.primary_color ||
+            BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR
+          ).toUpperCase(),
+          fontPairing: (design?.choices.fontPairing ||
+            settings.font_pairing ||
+            BOOKING_DESIGN_DEFAULT_FONT_PAIRING) as BookingDesignFontPairing,
+        };
+        savedChoicesRef.current = savedChoices;
+        setPrimaryColor(savedChoices.primaryColor);
+        setSelectedFont(savedChoices.fontPairing);
         setPropertyName(property?.property_name || canonicalProfile.profile.displayName);
         if (property?.slug) setPropertySlug(property.slug);
         if (property?.default_currency) setDefaultCurrency(property.default_currency);
@@ -684,9 +707,48 @@ export default function DesignStudioPage() {
     }
   };
 
+  // The colour and font to write to the booking design, or null when they are what the page
+  // loaded or last saved.
+  const changedDesignChoices = () => {
+    const choices = {
+      primaryColor: primaryColor.trim().toUpperCase(),
+      fontPairing: selectedFont as BookingDesignFontPairing,
+    };
+    const saved = savedChoicesRef.current;
+    return saved?.primaryColor === choices.primaryColor && saved.fontPairing === choices.fontPairing
+      ? null
+      : choices;
+  };
+
+  // The booking page takes its colour and font from the booking design, which the setup design
+  // step also writes, so Save writes them there too (VAY-2318). Returns whether that worked.
+  const saveBookingDesign = async (choices: BookingDesignRevision["choices"]) => {
+    const propertyId = propertyIdRef.current;
+    if (!propertyId) return false;
+    try {
+      designRef.current = await designStudioBookingDesignClient.save(propertyId, {
+        expectedRevision: designRef.current?.revision ?? 0,
+        choices,
+      });
+      savedChoicesRef.current = choices;
+      return true;
+    } catch {
+      // Another tab or the setup step may have saved a newer design: Save again uses it.
+      designRef.current = await designStudioBookingDesignClient
+        .load(propertyId, { cache: "no-store" })
+        .catch(() => designRef.current);
+      return false;
+    }
+  };
+
   const handleSave = async () => {
     const hotelId = designHotelIdRef.current;
     if (!hotelId) return;
+    const designChoices = changedDesignChoices();
+    if (designChoices && isTooLightBrandColor(designChoices.primaryColor)) {
+      setFeedback({ type: "error", message: "designStudio.colors.tooLight" });
+      return;
+    }
     try {
       setSaving(true);
       setFeedback(null);
@@ -694,17 +756,20 @@ export default function DesignStudioPage() {
         {
           header_logo_media_object_id: headerLogoMediaObjectId,
           show_contact_button: showContactButton,
-          ...(referAGuestModuleEnabled ? { show_refer_a_guest_button: showReferAGuestButton } : {}),
           show_language_selector: showLanguageSelector,
           show_currency_selector: showCurrencySelector,
           hero_image: heroImage,
           hero_heading: heroHeading,
           hero_subtext: heroSubtext,
-          primary_color: primaryColor,
-          font_pairing: selectedFont,
+          // Unchanged, they stay as they are: a hotel still on its legacy page reads them from here.
+          ...(designChoices
+            ? { primary_color: designChoices.primaryColor, font_pairing: designChoices.fontPairing }
+            : {}),
         },
         hotelId,
       );
+      const designSaved = designChoices ? await saveBookingDesign(designChoices) : true;
+      // The other settings are saved either way, so the live page still gets them.
       try {
         await publishPublicBookabilityProfile(hotelId);
       } catch {
@@ -714,7 +779,11 @@ export default function DesignStudioPage() {
         });
         return;
       }
-      setFeedback({ type: "success", message: "designStudio.feedback.saveSuccess" });
+      setFeedback(
+        designSaved
+          ? { type: "success", message: "designStudio.feedback.saveSuccess" }
+          : { type: "error", message: "designStudio.feedback.saveError" },
+      );
     } catch {
       setFeedback({ type: "error", message: "designStudio.feedback.saveError" });
     } finally {
@@ -735,19 +804,23 @@ export default function DesignStudioPage() {
   ];
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
-  // Guests only get a language selector with two languages the booking site can render.
+  // Guests only get a language selector with two languages the booking site can render: the
+  // page's main language and Booking's, as the live page counts them (VAY-2345).
   const languageSelectorAvailable =
     supportedLanguages === null ||
     new Set(
-      [defaultLanguage, ...supportedLanguages].filter((code) =>
+      [pageLanguage ?? defaultLanguage, defaultLanguage, ...supportedLanguages].filter((code) =>
         (BOOKING_GUEST_LANGUAGE_CODES as readonly string[]).includes(code),
       ),
     ).size > 1;
+  // Guests get a currency selector once the hotel adds a display currency (charges stay in
+  // the default currency).
+  const currencySelectorAvailable =
+    supportedCurrencies === null || new Set([defaultCurrency, ...supportedCurrencies]).size > 1;
 
   if (loading) {
     return (
       <div className="p-4 md:p-6 h-full flex items-center justify-center">
-        <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -755,15 +828,10 @@ export default function DesignStudioPage() {
 
   if (loadFailed) {
     return (
-      <div className="p-4 md:p-6 h-full flex items-center justify-center">
-        <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
-        <div className="w-full max-w-md text-center">
-          <h1 className="text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
-          <FeedbackAlert
-            type="error"
-            message={t("designStudio.loadFailure")}
-            className="mt-4 text-left"
-          />
+      <PageLayout>
+        <div className="max-w-md">
+          <PageHeader title={t("designStudio.title")} />
+          <FeedbackAlert type="error" message={t("designStudio.loadFailure")} />
           <button
             type="button"
             onClick={() => {
@@ -775,33 +843,34 @@ export default function DesignStudioPage() {
             {t("dashboard.pageViewsModal.retry")}
           </button>
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="p-4 md:p-6 pb-24 lg:pb-6 lg:h-full flex flex-col">
-      <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
-      <div className="shrink-0 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{t("designStudio.subtitle")}</p>
-        </div>
-        <button
-          onClick={() => setPreviewOpen(true)}
-          className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
-        >
-          <EyeIcon className="w-4 h-4" />
-          {t("layout.header.preview")}
-        </button>
-      </div>
+    // pb-24 keeps content clear of the fixed Save bar below lg.
+    <PageLayout variant="full" className="pb-24 lg:pb-6 lg:h-full flex flex-col">
+      <PageHeader
+        className="shrink-0"
+        title={t("designStudio.title")}
+        subtitle={t("designStudio.subtitle")}
+        actions={
+          <button
+            onClick={() => setPreviewOpen(true)}
+            className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <EyeIcon className="w-4 h-4" />
+            {t("layout.header.preview")}
+          </button>
+        }
+      />
 
       {/* Feedback banner */}
       {feedback && (
         <FeedbackAlert
           type={feedback.type}
           message={t(feedback.message)}
-          className="mt-3 shrink-0"
+          className="shrink-0"
           action={
             feedback.retryHeroUpload
               ? {
@@ -862,12 +931,12 @@ export default function DesignStudioPage() {
                 uploadingLogo={uploadingLogo}
                 showContactButton={showContactButton}
                 setShowContactButton={setShowContactButton}
-                showReferAGuestButton={showReferAGuestButton}
-                setShowReferAGuestButton={setShowReferAGuestButton}
-                referAGuestModuleEnabled={referAGuestModuleEnabled}
                 showLanguageSelector={showLanguageSelector}
                 setShowLanguageSelector={setShowLanguageSelector}
                 languageSelectorAvailable={languageSelectorAvailable}
+                showCurrencySelector={showCurrencySelector}
+                setShowCurrencySelector={setShowCurrencySelector}
+                currencySelectorAvailable={currencySelectorAvailable}
                 resetContent={resetContent}
                 galleryImages={galleryImages}
                 galleryAtCapacity={
@@ -948,17 +1017,16 @@ export default function DesignStudioPage() {
             bookingUrl={bookingPreviewUrl ?? t("bookingPreview.yourBookingUrl")}
             className="flex-1 rounded-none border-0 lg:rounded-lg lg:border"
             currency={defaultCurrency}
-            defaultLanguage={defaultLanguage}
+            defaultLanguage={pageLanguage ?? defaultLanguage}
             font={currentFont}
             headerLogo={headerLogo}
             showContactButton={showContactButton}
-            showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
             showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
-            // Booking publications carry a single pricing currency, so guests never see a
-            // currency selector yet. The stored preference is kept for when that changes.
-            showCurrencySelector={false}
-            supportedLanguages={supportedLanguages ?? undefined}
-            supportedCurrencies={supportedCurrencies}
+            showCurrencySelector={showCurrencySelector && currencySelectorAvailable}
+            supportedLanguages={
+              supportedLanguages ? [defaultLanguage, ...supportedLanguages] : undefined
+            }
+            supportedCurrencies={supportedCurrencies ?? undefined}
             heroHeading={heroHeading}
             heroImage={heroImage}
             heroSubtext={heroSubtext}
@@ -995,7 +1063,7 @@ export default function DesignStudioPage() {
           {t("common.save")}
         </button>
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

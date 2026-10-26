@@ -73,6 +73,21 @@ describe("PhoneNumberInput", () => {
     expect(view.root.findByProps({ className: "truncate" }).children.join("")).toBe("🇩🇪 +49");
   });
 
+  it("keeps the select's own text hidden when Chrome autofill forces its colour", () => {
+    // VAY-2363: autofill sets `color` with !important; the text fill still hides the name, and
+    // the open list paints its options again.
+    const { view } = render("");
+    const select = view.root.findByProps({ "aria-label": "Phone country code" });
+    expect(select.props.className).toContain("[-webkit-text-fill-color:transparent]");
+    expect(
+      select
+        .findAllByType("option")
+        .every((option) =>
+          String(option.props.className).includes("[-webkit-text-fill-color:currentcolor]"),
+        ),
+    ).toBe(true);
+  });
+
   it("adopts the country of a pasted valid international number", () => {
     const { onChange, blur } = render("+62 812 3456 7890");
     blur();

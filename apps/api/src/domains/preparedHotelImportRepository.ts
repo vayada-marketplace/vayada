@@ -94,7 +94,7 @@ function sourceFromRow(row: Record<string, unknown> | undefined): PreparedImport
 
 const SOURCE_SQL = `SELECT invite.id::text AS "sourceId", invite.payload->'preparedData' AS data,
   application.property_id::text AS "propertyId", application.results
-  FROM marketplace.invite_codes invite
+  FROM hotel_catalog.hotel_account_invites invite
   JOIN identity.organizations organization ON organization.id = $1::uuid
     AND organization.kind = 'hotel_group' AND organization.status = 'active'
     AND organization.workos_external_id = 'vayada-signup:marketplace-web:hotel:invite:' || invite.id::text

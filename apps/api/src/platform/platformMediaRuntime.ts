@@ -1,13 +1,16 @@
-import type { MarketplaceCreatorProfileMediaRepository } from "../routes/marketplaceCreatorSelfService.js";
-import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
-import type { PlatformMediaRoutesOptions } from "../routes/platformMedia.js";
-import { createPgPlatformMediaCleanupStore } from "../jobs/platformMediaCleanup.js";
-import { createPgS3PropertyMediaCommandRepository } from "../domains/propertyMediaCommandRepository.js";
+import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
+import type {
+  ApprovedPublicProfileImageRepository,
+  PlatformMediaRoutesOptions,
+} from "../routes/platformMedia.js";
 import {
-  createPgS3MarketplaceOfferMediaPromotion,
-  type MarketplaceOfferMediaPromotionPort,
-} from "./marketplaceOfferMediaPromotion.js";
+  createPgPlatformMediaCleanupStore,
+  DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS,
+  type PlatformMediaCleanupRunName,
+} from "../jobs/platformMediaCleanup.js";
+import { createPgS3PropertyMediaCommandRepository } from "../domains/propertyMediaCommandRepository.js";
 import type { PlatformMediaServingConfig } from "./mediaServing.js";
+import { createCloudFrontMediaInvalidator } from "./platformMediaCdnInvalidation.js";
 import { createPgPlatformMediaRepository } from "./platformMediaRepository.js";
 import {
   createS3PlatformMediaAdapter,
@@ -22,24 +25,19 @@ export type PlatformMediaRuntimeInput = {
   pmsInboxEnabled: boolean;
   targetDatabaseUrl: string;
   platformMediaServing?: PlatformMediaServingConfig;
+  retiredPurge?: { cdnDistributionId: string };
 };
 
 export type PlatformMediaRuntimeFactories = {
   createRepository: typeof createPgPlatformMediaRepository;
   createAdapter: typeof createS3PlatformMediaAdapter;
-  createOfferMediaPromotion: typeof createPgS3MarketplaceOfferMediaPromotion;
   createCleanupStore: typeof createPgPlatformMediaCleanupStore;
   createPropertyMediaCommands: typeof createPgS3PropertyMediaCommandRepository;
+  createCdnInvalidator: typeof createCloudFrontMediaInvalidator;
 };
 
 export type PlatformMediaRuntime = {
-  profileMediaRepository: MarketplaceCreatorProfileMediaRepository;
-  offerMediaPromotion: MarketplaceOfferMediaPromotionPort;
-  collaborationAttachments: {
-    repository: ReturnType<typeof createPgPlatformMediaRepository>;
-    signer: PlatformMediaPrivateDownloadSigner;
-    serving: PlatformMediaServingConfig;
-  };
+  profileMediaRepository: ApprovedPublicProfileImageRepository;
   privateDownloads: {
     signer: PlatformMediaPrivateDownloadSigner;
     reader: PlatformMediaPrivateObjectReader;
@@ -47,6 +45,7 @@ export type PlatformMediaRuntime = {
   };
   inboundAttachments: PlatformMediaInboundAttachmentWriter;
   cleanupStore: ReturnType<typeof createPgPlatformMediaCleanupStore>;
+  cleanupRuns: readonly PlatformMediaCleanupRunName[];
   propertyMediaCommands: ReturnType<typeof createPgS3PropertyMediaCommandRepository>;
   routes: PlatformMediaRoutesOptions;
 };
@@ -54,9 +53,9 @@ export type PlatformMediaRuntime = {
 const productionFactories: PlatformMediaRuntimeFactories = {
   createRepository: createPgPlatformMediaRepository,
   createAdapter: createS3PlatformMediaAdapter,
-  createOfferMediaPromotion: createPgS3MarketplaceOfferMediaPromotion,
   createCleanupStore: createPgPlatformMediaCleanupStore,
   createPropertyMediaCommands: createPgS3PropertyMediaCommandRepository,
+  createCdnInvalidator: createCloudFrontMediaInvalidator,
 };
 
 export function composePlatformMediaRuntime(
@@ -76,18 +75,21 @@ export function composePlatformMediaRuntime(
     publicPathPrefix: input.platformMediaServing.publicPathPrefix,
     publicCacheControl: input.platformMediaServing.publicCacheControl,
   });
-  const offerMediaPromotion = factories.createOfferMediaPromotion({
-    connectionString: input.targetDatabaseUrl,
-    serving: input.platformMediaServing,
-  });
   const cleanupStore = factories.createCleanupStore({
     connectionString: input.targetDatabaseUrl,
     objectDeleter: adapter,
+    ...(input.retiredPurge
+      ? {
+          cdnInvalidator: factories.createCdnInvalidator({
+            distributionId: input.retiredPurge.cdnDistributionId,
+          }),
+        }
+      : {}),
   });
   const propertyMediaCommands = factories.createPropertyMediaCommands({
     connectionString: input.targetDatabaseUrl,
     serving: input.platformMediaServing,
-    syncReadModels: syncPropertyOfferReadModels,
+    syncReadModels: projectPropertyPublicProfile,
   });
   const enabledPurposes: PlatformMediaRoutesOptions["enabledPurposes"] = [
     "identity.user.profile_image",
@@ -95,9 +97,6 @@ export function composePlatformMediaRuntime(
     "booking.addon.image",
     "property.hero_image",
     "property.gallery_image",
-    "marketplace.creator.profile_image",
-    "marketplace.offer.media",
-    "marketplace.collaboration_chat.attachment",
     "property.logo",
     "pms.room_type.media",
     "finance.expense.receipt",
@@ -106,15 +105,12 @@ export function composePlatformMediaRuntime(
 
   return {
     profileMediaRepository: repository,
-    offerMediaPromotion,
-    collaborationAttachments: {
-      repository,
-      signer: adapter,
-      serving: input.platformMediaServing,
-    },
     privateDownloads: { signer: adapter, reader: adapter, serving: input.platformMediaServing },
     inboundAttachments: adapter,
     cleanupStore,
+    cleanupRuns: input.retiredPurge
+      ? [...DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS, "retiredMarketplacePurge"]
+      : DEFAULT_PLATFORM_MEDIA_CLEANUP_RUNS,
     propertyMediaCommands,
     routes: {
       repository,

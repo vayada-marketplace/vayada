@@ -30,7 +30,7 @@ type SnapshotRow = {
 
 export const PRODUCTION_MEDIA_SOURCE_TABLES: Record<MediaDatabase, readonly string[]> = {
   booking: ["booking_addons", "booking_hotels"],
-  marketplace: ["chat_messages", "collaborations", "creators", "hotel_listings", "hotel_profiles"],
+  marketplace: ["hotel_profiles"],
   pms: ["hotels", "message_attachments", "message_threads", "messages", "room_types"],
 };
 
