@@ -765,5 +765,12 @@
   "calendar.awaitingPayment": "ожидает оплаты",
   "calendar.awaitingPaymentHeld": "Номера удерживаются до этого срока и автоматически освобождаются, если оплата не отмечена как полученная.",
   "calendar.paymentDeadlinePassed": "Срок оплаты истёк, поэтому оплату больше нельзя отметить как полученную. Бронирование снимается автоматически.",
-  "calendar.openBooking": "Открыть бронирование"
+  "calendar.openBooking": "Открыть бронирование",
+  "dashboard.guestsRegistered": "Зарегистрировано гостей: {registered} из {total}",
+  "checkIn.bookerContactFromBooking": "Имя, электронная почта и телефон взяты из бронирования.",
+  "calendar.targetManualBooking.roomCapacity": "Макс. гостей: {count}",
+  "calendar.targetManualBooking.guestTally": "Гости: {count} из {capacity}",
+  "calendar.targetManualBooking.capacityReached": "Достигнута максимальная вместимость выбранных номеров. Добавьте ещё один номер, чтобы добавить гостей.",
+  "calendar.targetManualBooking.guestsOverCapacity": "Гостей: {count}, а выбранные номера вмещают не более {capacity}. Удалите гостя или добавьте номер.",
+  "calendar.targetManualBooking.guestsOverCapacityServer": "В выбранных номерах не хватает мест для всех указанных гостей. Удалите гостя или добавьте номер."
 }

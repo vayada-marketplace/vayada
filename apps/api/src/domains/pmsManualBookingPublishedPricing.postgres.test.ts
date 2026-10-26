@@ -166,6 +166,47 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     expect(payload.pricingOffer).toBeUndefined();
   });
 
+  it("lets everyone named fit on the busiest night and refuses one more (VAY-2365/2366)", async () => {
+    // Garden rooms have 2 places each: the booker plus one guest fit one room. Two rooms that
+    // share one night fit four, although each other night has one room. Dates no other test uses.
+    const named = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        firstName: "Guest",
+        lastName: String(index + 2),
+        email: null,
+        phoneE164: null,
+        countryCode: null,
+      }));
+    const over = { ...command(null, { checkIn: "2027-11-03" }), additionalGuests: named(2) };
+    await expect(repository().createManualBooking(over)).rejects.toMatchObject({
+      status: 422,
+      body: { code: "guests_over_capacity", field: "additionalGuests" },
+    });
+    expect(
+      (
+        await pool.query("SELECT 1 FROM booking.guest_bookings WHERE source_booking_id=$1", [
+          over.commandId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+    await expect(
+      repository().createManualBooking({
+        ...command(null, { checkIn: "2027-11-03" }),
+        additionalGuests: named(1),
+      }),
+    ).resolves.toMatchObject({ outcome: "created" });
+
+    const pair = command(null, { checkIn: "2027-11-17" });
+    const later = { checkIn: "2027-11-18", checkOut: "2027-11-20" };
+    const stays = [
+      pair.stays[0]!,
+      { ...pair.stays[0]!, ...later, position: 2, roomId: roomIds[1]! },
+    ];
+    await expect(
+      repository().createManualBooking({ ...pair, stays, additionalGuests: named(3) }),
+    ).resolves.toMatchObject({ outcome: "created" });
+  });
+
   it("keeps legacy plans while pricing-v2 has only a draft head", async () => {
     const legacyPropertyId = randomUUID(),
       legacyRoomTypeId = randomUUID(),

@@ -18317,6 +18317,26 @@ describe("vayada-api", () => {
       { commandId: "cmd-accept-001", audit: { actor: { kind: "user" } } },
       { commandId: "cmd-mark-paid-001", audit: { actor: { kind: "user" } } },
     ]);
+    expect(commandRepository.commands.at(-1)).not.toHaveProperty("settlementMethod");
+
+    // VAY-2373 (D2): at check-in staff say how they took the money; nothing is charged online.
+    const cash = await injectJson(app, {
+      method: "POST",
+      url: `${baseUrl}/mark-paid`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { commandId: "cmd-cash", idempotencyKey: "idem-cash", settlementMethod: "cash" },
+    });
+    expect(cash.statusCode).toBe(200);
+    expect(commandRepository.commands.at(-1)).toMatchObject({ settlementMethod: "cash" });
+
+    const stripeCard = await injectJson(app, {
+      method: "POST",
+      url: `${baseUrl}/mark-paid`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { commandId: "cmd-card", idempotencyKey: "idem-card", settlementMethod: "card" },
+    });
+    expect(stripeCard.statusCode).toBe(400);
+    expect(commandRepository.commands.at(-1)).toMatchObject({ commandId: "cmd-cash" });
   });
 
   it("rejects assignment-scoped PMS no-show commands", async () => {

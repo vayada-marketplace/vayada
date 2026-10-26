@@ -489,11 +489,11 @@ test("keeps check-in guest CRUD active without presenting unsupported identity f
   await expect(page.getByLabel("First name").nth(1)).toBeDisabled();
   await expect(page.getByLabel("Nationality").nth(1)).toHaveValue("United States");
   await expect(page.getByLabel("Nationality").nth(1)).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Save booker" })).toHaveCount(0);
+  // The booker's contact comes from the booking; only the nationality is correctable.
+  await expect(page.getByRole("button", { name: "Save nationality" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save guest" })).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: /mark as paid.*not available yet/i }),
-  ).toBeDisabled();
+  // An OTA stay has no hotel-collected payment to record here.
+  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
 
   await page.getByLabel("Phone").nth(1).fill("+1 555 0100");
   await page.getByRole("button", { name: "Save guest" }).click();

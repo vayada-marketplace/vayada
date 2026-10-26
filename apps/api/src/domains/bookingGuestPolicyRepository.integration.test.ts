@@ -9,10 +9,11 @@ import {
 } from "@vayada/domain-booking";
 import type { BookingPricingSourceFingerprint } from "@vayada/domain-booking";
 import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBookingGuestPolicyCurrentOwnerEvidenceAdapter } from "./bookingGuestPolicyCurrentOwnerEvidence.js";
 import { createPgBookingGuestPolicyCatalogProjectionPort } from "./bookingGuestPolicyCatalogProjection.js";
+import { createBookingGuestPolicyLivePageRefresh } from "./bookingGuestPolicyLivePageRefresh.js";
 import { createBookingGuestPolicyProjectionHandler } from "./bookingGuestPolicyProjectionHandler.js";
 import { createBookingGuestPolicyOutboxProjector } from "./bookingGuestPolicyProjectionRuntime.js";
 import {
@@ -729,6 +730,102 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
     expect(outbox.rows[0]).toEqual({ status: "published", attempts: 2 });
   });
 
+  it("refreshes a live page as the user who made it live after an applied policy (VAY-2350)", async () => {
+    await seedCatalogPolicy("14:00", "10:00");
+    const refresh = vi.fn(async () => ({ status: "succeeded" as const, operationId: "op-1" }));
+    const warn = vi.fn();
+    const projector = createBookingGuestPolicyOutboxProjector({
+      pool: projectionPool,
+      handler: createBookingGuestPolicyProjectionHandler({
+        read: repository,
+        receipts: repository,
+        catalog: createPgBookingGuestPolicyCatalogProjectionPort({ pool: projectionPool }),
+      }),
+      afterApplied: createBookingGuestPolicyLivePageRefresh({
+        pool: projectionPool,
+        refresh: refresh as never,
+        warn,
+        now: () => new Date(acceptedAt),
+      }),
+      now: () => new Date("2026-08-04T20:01:00.000Z"),
+    });
+    const applyNext = async (key: string, expectedRevision: number, checkInTime: string) => {
+      const persisted = await repository.persistGuestPolicy(
+        command(key, expectedRevision, { checkInTime }),
+      );
+      if (!persisted.ok) throw new Error(`Expected guest-policy revision ${expectedRevision + 1}`);
+      await expect(projector.runBatch({ limit: 10 })).resolves.toMatchObject({
+        processed: 1,
+        applied: 1,
+      });
+      return persisted.revision;
+    };
+    const publishedCheckIn = async () =>
+      (
+        await admin.query<{ checkInTime: string }>(
+          `SELECT to_char(check_in_time, 'HH24:MI') AS "checkInTime"
+             FROM hotel_catalog.property_policy_summaries WHERE property_id = $1::uuid`,
+          [propertyId],
+        )
+      ).rows[0]?.checkInTime;
+
+    // A page that is not live is left alone: only "Publish booking page" makes it public.
+    await applyNext("live-refresh-1", 0, "15:00");
+    expect(refresh).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+
+    // A live page is republished as the user who made it live, once per applied event.
+    await seedLivePage();
+    const applied = await applyNext("live-refresh-2", 1, "16:00");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledWith({
+      organizationId,
+      propertyId,
+      actorUserId,
+      idempotencyKey: `booking.guest_policy_projection:${applied.outboxEventId}`,
+      audit: { requestId: applied.outboxEventId, source: "booking.guest_policy_projection" },
+      onlyIfLive: true,
+    });
+    expect(warn).not.toHaveBeenCalled();
+
+    // A failed refresh is logged; the policy change itself stays applied and published.
+    refresh.mockRejectedValueOnce(
+      new Error("Booking publication refresh failed: publication_in_progress."),
+    );
+    const failed = await applyNext("live-refresh-3", 2, "17:00");
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        organizationId,
+        propertyId,
+        outboxEventId: failed.outboxEventId,
+        err: expect.any(Error),
+      }),
+      "Booking page refresh after a guest policy change failed",
+    );
+    await expect(
+      admin.query("SELECT status FROM platform.outbox_events WHERE id = $1::uuid", [
+        failed.outboxEventId,
+      ]),
+    ).resolves.toMatchObject({ rows: [{ status: "published" }] });
+    expect(await publishedCheckIn()).toBe("17:00");
+
+    // The user who made the page live lost access: logged and skipped, never run as someone else.
+    await admin.query(
+      `UPDATE identity.organization_memberships SET status = 'suspended'
+        WHERE organization_id = $1::uuid AND user_id = $2::uuid`,
+      [organizationId, actorUserId],
+    );
+    const skipped = await applyNext("live-refresh-4", 3, "18:00");
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ propertyId, outboxEventId: skipped.outboxEventId, actorUserId }),
+      expect.stringContaining("can no longer publish"),
+    );
+    expect(await publishedCheckIn()).toBe("18:00");
+  });
+
   async function counts() {
     const result = await admin.query<{
       revisions: string;
@@ -793,7 +890,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
         "DELETE FROM hotel_catalog.property_owner_revisions WHERE property_id = $1",
         [propertyId],
       );
+      await admin.query(
+        "DELETE FROM distribution.active_public_booking_revision WHERE property_id = $1",
+        [propertyId],
+      );
+      await admin.query(
+        "DELETE FROM distribution.public_booking_content_revisions WHERE property_id = $1",
+        [propertyId],
+      );
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = $1", [propertyId]);
+      await admin.query("DELETE FROM identity.product_entitlements WHERE organization_id = $1", [
+        organizationId,
+      ]);
+      await admin.query(
+        "DELETE FROM identity.organization_resource_links WHERE organization_id = $1",
+        [organizationId],
+      );
+      await admin.query(
+        "DELETE FROM identity.organization_memberships WHERE organization_id = $1",
+        [organizationId],
+      );
       await admin.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);
       await admin.query("DELETE FROM identity.users WHERE id = $1", [actorUserId]);
       await admin.query("COMMIT");
@@ -833,6 +949,63 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
        VALUES ($1::uuid, $2::time, $3::time, 'Unrelated Catalog policy',
                'booking', $4::timestamptz)`,
       [propertyId, checkInTime, checkOutTime, acceptedAt],
+    );
+  }
+
+  /** The hotel's booking page is live, made so by the owner, who may still publish it. */
+  async function seedLivePage(): Promise<void> {
+    const liveRevisionId = "b1000000-0000-4000-8000-000000000020";
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET lifecycle_status = 'active' WHERE id = $1::uuid",
+      [propertyId],
+    );
+    await admin.query(
+      // Owners keep access to every property (0104); the republish re-checks it (VAY-2335).
+      `INSERT INTO identity.organization_memberships
+         (organization_id, user_id, status, role_key, access_origin, property_access_mode)
+       VALUES ($1::uuid, $2::uuid, 'active', 'owner', 'agency', 'all')`,
+      [organizationId, actorUserId],
+    );
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links
+         (organization_id, product, resource_type, resource_id, relationship, status)
+       VALUES ($1::uuid, 'booking', 'booking_hotel', $2::uuid::text, 'owner', 'active')`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO identity.product_entitlements
+         (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
+       VALUES ($1::uuid, 'booking', 'booking-engine', 'active', 'booking', 'booking_hotel', $2::uuid::text)`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO distribution.public_booking_content_revisions (
+         id, property_id, revision_number, readiness_contract_version,
+         source_manifest, source_manifest_hash, readiness_hash,
+         readiness_product, readiness_status, public_content, built_by_user_id
+       ) VALUES (
+         $1::uuid, $2::uuid, 1, 'onboarding-product-readiness.v1', $3::jsonb, $4, $5,
+         'booking', 'ready', jsonb_build_object('profile', jsonb_build_object('hotel',
+           jsonb_build_object('slug', 'guest-policy-hotel'))), $6::uuid
+       )`,
+      [
+        liveRevisionId,
+        propertyId,
+        JSON.stringify({
+          contractVersion: "onboarding-source-manifest.v1",
+          propertyId,
+          sources: [{ owner: "hotel_catalog", entityId: propertyId, revision: "1" }],
+        }),
+        `sha256:${"1".repeat(64)}`,
+        `sha256:${"2".repeat(64)}`,
+        actorUserId,
+      ],
+    );
+    await admin.query(
+      `INSERT INTO distribution.active_public_booking_revision
+         (property_id, content_revision_id, activated_by_user_id)
+       VALUES ($1::uuid, $2::uuid, $3::uuid)`,
+      [propertyId, liveRevisionId, actorUserId],
     );
   }
 });

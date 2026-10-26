@@ -1147,9 +1147,19 @@ describe("target PMS operations command repository", () => {
       acceptanceMode: "legacy",
       automaticallyAccepted: false,
     },
+    // VAY-2373 (D2): staff record how they took it at the desk; Finance gets that method.
+    {
+      method: "pay_at_property",
+      lifecycleStatus: "confirmed",
+      acceptanceMode: "instant",
+      automaticallyAccepted: true,
+      settlementMethod: "cash",
+    },
   ] as const)(
     "records commission-aware $method settlement in $acceptanceMode mode",
-    async ({ method, lifecycleStatus, acceptanceMode, automaticallyAccepted }) => {
+    async (row) => {
+      const { method, lifecycleStatus, acceptanceMode, automaticallyAccepted } = row;
+      const settlementMethod = "settlementMethod" in row ? row.settlementMethod : undefined;
       const { client, repository } = createRepository((text, values) => {
         if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
         if (text.includes("FROM platform.idempotency_keys")) return ok();
@@ -1288,6 +1298,7 @@ describe("target PMS operations command repository", () => {
         baseBookingLifecycleCommand({
           commandId: "cmd-booking-paid-001",
           idempotencyKey: "pms-booking-paid-001",
+          ...(settlementMethod ? { settlementMethod } : {}),
         }),
       );
 
@@ -1298,8 +1309,12 @@ describe("target PMS operations command repository", () => {
       expect(mutation.values[4]).toBe("property_user");
       expect(mutation.values[8]).toBe(automaticallyAccepted);
       expect(mutation.text).toContain("automatic_acceptance_event");
+      expect(JSON.parse(mutation.values[6] as string)).toMatchObject({
+        paymentMethod: method,
+        settlementMethod: settlementMethod ?? null,
+      });
       const financePayment = requiredCall(client, "INSERT INTO finance.payments");
-      expect(financePayment.values).toContain(method);
+      expect(financePayment.values).toContain(settlementMethod ?? method);
       expect(financePayment.values).toContain("600.00");
       expect(financePayment.values).toContain("30.00");
       expect(financePayment.values).toContain("570.00");

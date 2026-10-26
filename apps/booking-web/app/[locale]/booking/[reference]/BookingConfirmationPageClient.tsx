@@ -546,9 +546,6 @@ export default function BookingConfirmationPageClient({
   const guestEmail = (booking?.guestEmail || emailParam || "").trim();
   const guestName = booking?.guestFirstName?.trim();
   const manageBookingHref = `/my-booking?reference=${encodeURIComponent(reference)}`;
-  const requestChangesHref = guestEmail
-    ? `/booking/${encodeURIComponent(reference)}/request-change`
-    : null;
   const paymentMethodLabels: Record<PaymentMethodLabelKey, string> = {
     card: t("manualCard"),
     creditCard: t("creditCard"),
@@ -870,17 +867,7 @@ export default function BookingConfirmationPageClient({
           <StepRow icon="calendar" title={t("addToCalendar")} onClick={addToCalendar} />
         )}
         {contact}
-        {isConfirmed &&
-          booking &&
-          requestChangesHref &&
-          (!changeRequest || changeRequest.status !== "pending") && (
-            <StepRow
-              icon="pencil"
-              title={t("requestChanges")}
-              hint={t("requestChangesHint")}
-              href={requestChangesHref}
-            />
-          )}
+        {/* No "Request changes": guest date changes can't be repriced online yet (VAY-2110). */}
         <StepRow
           icon="ticket"
           title={isConfirmed ? t("manageOrCancel") : t("manageBooking")}

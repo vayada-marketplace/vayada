@@ -119,6 +119,7 @@ export function createPmsManualBookingTransactionalPricingPort(
           ...(command.expectedPricingRevision !== undefined
             ? { expectedPricingRevision: command.expectedPricingRevision }
             : {}),
+          guestCount: 1 + (command.additionalGuests?.length ?? 0),
           addOns: command.addOns.map((selection) => ({
             ...selection,
             serviceUnits: [...selection.serviceUnits],
