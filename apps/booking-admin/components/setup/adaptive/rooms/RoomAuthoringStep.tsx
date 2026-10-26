@@ -275,6 +275,18 @@ export function RoomAuthoringStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftManifestMissing, propertyId, step.draft, workspaceReload, roomImportRevision]);
 
+  // Only the active room's form is rendered, so a room's name field exists one render after it
+  // becomes active. Focus it from an effect after that commit, not from an animation frame that
+  // can run before React re-renders (VAY-2367).
+  const [nameFocusRoomId, setNameFocusRoomId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!nameFocusRoomId || nameFocusRoomId !== activeRoomId) return;
+    const element = document.getElementById(`${nameFocusRoomId}-name`);
+    if (!element) return;
+    setNameFocusRoomId(null);
+    element.focus();
+  }, [nameFocusRoomId, activeRoomId]);
+
   const openedReviewEntity = useRef<string | null>(null);
   useEffect(() => {
     if (!requestedEntityId) {
@@ -288,10 +300,7 @@ export function RoomAuthoringStep({
     if (!target) return;
     openedReviewEntity.current = requestedEntityId;
     setActiveRoomId(target.draftRoomId);
-    const frame = requestAnimationFrame(() =>
-      document.getElementById(`${target.draftRoomId}-name`)?.focus(),
-    );
-    return () => cancelAnimationFrame(frame);
+    setNameFocusRoomId(target.draftRoomId);
   }, [requestedEntityId, workspaceState, rooms]);
 
   const activeRoom = rooms.find(({ draftRoomId }) => draftRoomId === activeRoomId) ?? null;
@@ -417,17 +426,13 @@ export function RoomAuthoringStep({
         setErrors({});
         setOptionalOpen(false);
         setNotice(`${saved.facts.name} was saved. Add the next room type.`);
-        requestAnimationFrame(() =>
-          document.getElementById(`${nextRoom.draftRoomId}-name`)?.focus(),
-        );
+        setNameFocusRoomId(nextRoom.draftRoomId);
       } else if (pending && roomHasInput(pending)) {
         setActiveRoomId(pending.draftRoomId);
         setErrors({});
         setOptionalOpen(false);
         setNotice(`${saved.facts.name} was saved. Complete the next room type to continue.`);
-        requestAnimationFrame(() =>
-          document.getElementById(`${pending.draftRoomId}-name`)?.focus(),
-        );
+        setNameFocusRoomId(pending.draftRoomId);
       } else {
         if (pending) {
           commitRooms(
