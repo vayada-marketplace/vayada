@@ -1181,22 +1181,30 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [propertyId],
         );
         const [transfer, breakfast, late] = [randomUUID(), randomUUID(), randomUUID()];
+        // The group transfer takes up to 4 guests: checkout refuses it for this party, and so does this.
         await db.query(
           `INSERT INTO booking.addon_definitions
              (id,property_id,name,pricing_model,price_amount,currency,metadata,public_visible)
            VALUES($1,$5,'Airport transfer','per_stay',25,'EUR','{}',true),
                  ($2,$5,'Breakfast','per_guest_night',12,'EUR','{}',true),
                  ($3,$5,'Late check-out','per_stay',10,'EUR','{"leadTimeHours":168}',true),
-                 ($4,$5,'Staff only','per_stay',1,'EUR','{}',false)`,
-          [transfer, breakfast, late, randomUUID(), propertyId],
+                 ($4,$5,'Staff only','per_stay',1,'EUR','{}',false),
+                 ($6,$5,'Group transfer','per_stay',40,'EUR','{"maxGuests":4}',true)`,
+          [transfer, breakfast, late, randomUUID(), propertyId, randomUUID()],
         );
-        const offered = (
-          (await adapter.getStay(propertyId, bookingId, guest, context("e1"))) as {
-            extras: { offered: Array<{ name: string; amountMinor: string }>; request: unknown };
-          }
-        ).extras;
+        type StayExtras = {
+          offered: Array<{ addonId: string; name: string; amountMinor: string }>;
+          request: { id: string; status: string } | null;
+          accepted: Array<{ addonId: string }>;
+        };
+        const stayExtras = async (key: string) =>
+          (
+            (await adapter.getStay(propertyId, bookingId, guest, context(key))) as {
+              extras: StayExtras;
+            }
+          ).extras;
         // 9 guests (6 adults, 3 children) for one night; nothing else in the request yet.
-        expect(offered).toEqual({
+        expect(await stayExtras("e1")).toEqual({
           offered: [
             expect.objectContaining({
               addonId: transfer,
@@ -1211,6 +1219,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             expect.objectContaining({ addonId: late, name: "Late check-out", amountMinor: "1000" }),
           ],
           request: null,
+          accepted: [],
         });
         const asked = (await adapter.requestExtras(
           propertyId,
@@ -1238,10 +1247,11 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         expect(await sentTo("email.booking-host-extras-requested")).toEqual([
           expect.objectContaining({ to: "host@example.test" }),
         ]);
-        expect(await adapter.findLatestExtrasRequest!(propertyId, bookingId)).toMatchObject({
-          id: asked.request.id,
-          status: "pending",
-        });
+        expect(await adapter.findExtrasRequests!(propertyId, bookingId)).toEqual([
+          expect.objectContaining({ id: asked.request.id, status: "pending" }),
+        ]);
+        // What's asked for isn't offered again.
+        expect((await stayExtras("e4")).offered.map((offer) => offer.addonId)).toEqual([late]);
         const decision = (key: string) => ({
           actorUserId: null as unknown as string,
           requestId: key,
@@ -1278,6 +1288,56 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             text: expect.stringContaining("You pay 133.00 EUR at the hotel"),
           }),
         ]);
+        // Accepted extras stay listed, to charge at check-in, and can't be asked for twice.
+        expect(await stayExtras("e5")).toMatchObject({
+          offered: [{ addonId: late }],
+          request: { id: asked.request.id, status: "accepted" },
+          accepted: [{ addonId: transfer }, { addonId: breakfast }],
+        });
+        await expect(
+          adapter.requestExtras(
+            propertyId,
+            bookingId,
+            { guest_email: "jane@example.test", addonIds: [transfer] },
+            context("e6"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409, code: "EXTRAS_NOT_OFFERED" });
+        // A host address that isn't an email gets no email; the request still reaches the PMS page.
+        await db.query(
+          "UPDATE hotel_catalog.property_contact_channels SET value='front desk' WHERE property_id=$1",
+          [propertyId],
+        );
+        const again = (await adapter.requestExtras(
+          propertyId,
+          bookingId,
+          { guest_email: "jane@example.test", addonIds: [late] },
+          context("e7"),
+        )) as { request: { id: string } };
+        expect(await sentTo("email.booking-host-extras-requested")).toHaveLength(1);
+        expect(await stayExtras("e8")).toMatchObject({
+          request: { id: again.request.id, status: "pending" },
+          accepted: [{ addonId: transfer }, { addonId: breakfast }],
+        });
+        expect(
+          (await adapter.findExtrasRequests!(propertyId, bookingId)).map(
+            (item) => (item as { status: string }).status,
+          ),
+        ).toEqual(["pending", "accepted"]);
+        // Once the stay is cancelled its waiting request can't be answered.
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='canceled' WHERE id=$1",
+          [bookingId],
+        );
+        await expect(
+          adapter.decideExtrasRequest!(
+            propertyId,
+            bookingId,
+            again.request.id,
+            "accept",
+            null,
+            decision("d3"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409 });
         await db.query("ROLLBACK TO SAVEPOINT extras");
         // Never by a booking reference: those are what the lookup's limit guards.
         await expect(

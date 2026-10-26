@@ -76,7 +76,7 @@ it.each(
       findLatestChangeRequest: handler,
       acceptChangeRequest: handler,
       declineChangeRequest: handler,
-      findLatestExtrasRequest: handler,
+      findExtrasRequests: handler,
       decideExtrasRequest: handler,
     },
     propertyAccessRepository: {

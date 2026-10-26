@@ -125,11 +125,12 @@ import {
   enqueueBookingLifecycleEmailJob,
   enqueueBookingTransitionNotifications,
   loadBookingNotificationSnapshot,
+  normalizeEmail,
 } from "../jobs/bookingEmails.js";
 import {
   decideExtrasRequest,
   insertExtrasRequest,
-  loadLatestExtrasRequest,
+  loadExtrasRequests,
   loadOfferedExtras,
   type ExtrasRequest,
 } from "../domains/bookingExtrasRequests.js";
@@ -424,8 +425,8 @@ export type BookingHotelChangeRequestRepository = {
     note: string | null,
     context: BookingHotelChangeDecisionContext,
   ): Promise<unknown>;
-  /** VAY-2360: the booking's latest extras request, and the hotel's answer to a pending one. */
-  findLatestExtrasRequest?(propertyId: string, bookingId: string): Promise<unknown | null>;
+  /** VAY-2360: the booking's extras requests (newest first), and the hotel's answer to a pending one. */
+  findExtrasRequests?(propertyId: string, bookingId: string): Promise<unknown[]>;
   decideExtrasRequest?(
     propertyId: string,
     bookingId: string,
@@ -2762,7 +2763,7 @@ export function createTargetBookingWebCheckoutAdapter(
           );
         // One request at a time: a second press waits for this lock and then finds the first.
         await lockTargetBookingChangeRequests(client, booking);
-        if ((await loadLatestExtrasRequest(client, ids))?.status === "pending")
+        if ((await loadExtrasRequests(client, ids)).some((item) => item.status === "pending"))
           throw createHttpError(
             409,
             "An extras request is already waiting for an answer.",
@@ -2793,9 +2794,9 @@ export function createTargetBookingWebCheckoutAdapter(
         return body;
       });
     },
-    async findLatestExtrasRequest(propertyId, bookingId) {
-      if (!BOOKING_ID.test(bookingId)) return null;
-      return loadLatestExtrasRequest(pool, { propertyId, guestBookingId: bookingId });
+    async findExtrasRequests(propertyId, bookingId) {
+      if (!BOOKING_ID.test(bookingId)) return [];
+      return loadExtrasRequests(pool, { propertyId, guestBookingId: bookingId });
     },
     async decideExtrasRequest(propertyId, bookingId, requestId, decision, note, context) {
       if (!BOOKING_ID.test(bookingId) || !BOOKING_ID.test(requestId))
@@ -2812,14 +2813,18 @@ export function createTargetBookingWebCheckoutAdapter(
           at: context.occurredAt,
         });
         if (!decided) {
-          // The same answer again gets the same request back; any other is refused.
-          const latest = await loadLatestExtrasRequest(client, ids);
-          if (latest?.id === requestId && latest.status === status) return latest;
+          // The same answer again gets the same request back; any other is refused, and so is any answer
+          // once the booking isn't confirmed (a cancelled stay's request lapses).
+          const current = (await loadExtrasRequests(client, ids)).find(
+            (item) => item.id === requestId,
+          );
+          if (!current) throw createHttpError(404, "Extras request not found.");
+          if (current.status === status) return current;
           throw createHttpError(
-            latest?.id === requestId ? 409 : 404,
-            latest?.id === requestId
-              ? "This extras request has been answered already."
-              : "Extras request not found.",
+            409,
+            current.status === "pending"
+              ? "This booking isn't confirmed any more."
+              : "This extras request has been answered already.",
           );
         }
         await enqueueExtrasEmail(
@@ -4785,8 +4790,8 @@ function stayExtrasInput(
   };
 }
 
-/** VAY-2360 part 3: the extras a confirmed pricing stay can still ask for, and its latest request; null for
- * other stays. */
+/** VAY-2360 part 3: the extras a confirmed pricing stay can still ask for, its latest request and every
+ * extra the hotel accepted; null for other stays, and when they can't be read (never blocking the page). */
 async function loadStayExtras(
   db: Pick<pg.PoolClient, "query">,
   ids: { propertyId: string; guestBookingId: string },
@@ -4798,11 +4803,22 @@ async function loadStayExtras(
     !["confirmed", "checked_in", "checked_out"].includes(status)
   )
     return null;
-  const [offered, request] = await Promise.all([
-    status === "confirmed" ? loadOfferedExtras(db, stayExtrasInput(ids, booking)) : [],
-    loadLatestExtrasRequest(db, ids),
-  ]);
-  return { offered, request };
+  try {
+    const [offered, requests] = await Promise.all([
+      status === "confirmed" ? loadOfferedExtras(db, stayExtrasInput(ids, booking)) : [],
+      loadExtrasRequests(db, ids),
+    ]);
+    return {
+      offered,
+      request: requests[0] ?? null,
+      accepted: requests
+        .filter((request) => request.status === "accepted")
+        .flatMap((request) => request.items),
+    };
+  } catch (error) {
+    console.warn("Stay extras could not be read.", error);
+    return null;
+  }
 }
 
 /** The email for an extras request: the hotel's on a new one, the guest's on the hotel's answer. Without an
@@ -4817,7 +4833,9 @@ async function enqueueExtrasEmail(
 ): Promise<void> {
   const booking = await loadBookingNotificationSnapshot(client, ids);
   const role = kind === "host_extras_requested" ? "host" : "guest";
-  const email = role === "host" ? booking?.hostEmail : booking?.guestEmail;
+  // A host address that isn't an email (contact channels aren't validated) gets no email, as on a booking
+  // transition; the PMS booking page still shows the request.
+  const email = normalizeEmail(role === "host" ? booking?.hostEmail : booking?.guestEmail);
   if (!booking || !email) return;
   await enqueueBookingLifecycleEmailJob(client, {
     kind,

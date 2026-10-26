@@ -1108,7 +1108,7 @@ function stayDate(value: string | Date): string {
     : day;
 }
 
-function normalizeEmail(value: string | null | undefined): string | null {
+export function normalizeEmail(value: string | null | undefined): string | null {
   const email = value?.trim().toLowerCase() ?? "";
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }

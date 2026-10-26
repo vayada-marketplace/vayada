@@ -47,8 +47,9 @@ export function extraAmountMinor(
 }
 
 /** The extras a confirmed stay can still ask for: the hotel's current public add-ons in the stay's currency
- * (with its booking page's add-ons switched on), that the stay hasn't booked, that fit its guests and whose
- * notice its check-in still gives. Nothing once check-in has come. */
+ * (with its booking page's add-ons switched on), that the stay hasn't booked or asked for (still waiting or
+ * accepted), that fit its guests as at checkout and whose notice its check-in still gives. Nothing once
+ * check-in has come. */
 export async function loadOfferedExtras(
   db: Db,
   input: {
@@ -72,9 +73,18 @@ export async function loadOfferedExtras(
   const [addons, booked] = await Promise.all([
     readCurrentPublicAddons(db, { propertyId: input.propertyId, currency: input.currency }),
     db.query<{ id: string }>(
-      `SELECT DISTINCT addon_definition_id::text AS id FROM booking.active_booking_addon_selections
-       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid AND addon_definition_id IS NOT NULL`,
-      [input.propertyId, input.guestBookingId],
+      `SELECT addon_definition_id::text AS id FROM booking.active_booking_addon_selections
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid AND addon_definition_id IS NOT NULL
+       UNION
+       SELECT item->>'addonId' FROM booking.booking_change_requests r
+       JOIN booking.guest_bookings b ON b.id = r.guest_booking_id
+       CROSS JOIN LATERAL jsonb_array_elements(
+         CASE WHEN jsonb_typeof(r.requested_changes->'items') = 'array'
+           THEN r.requested_changes->'items' ELSE '[]'::jsonb END
+       ) item
+       WHERE b.property_id=$1::uuid AND r.guest_booking_id=$2::uuid AND r.request_type='addon_change'
+         AND r.status IN ('pending','accepted') AND r.requested_changes->>'version'=$3`,
+      [input.propertyId, input.guestBookingId, VERSION],
     ),
   ]);
   const taken = new Set(booked.rows.map((row) => row.id));
@@ -83,11 +93,8 @@ export async function loadOfferedExtras(
       (addon) =>
         !addon.legacyLeadTime &&
         !taken.has(addon.id) &&
-        !(
-          (addon.pricingModel === "per_guest" || addon.pricingModel === "per_guest_night") &&
-          addon.maxGuests !== null &&
-          addon.maxGuests < input.guests
-        ) &&
+        // Checkout refuses any extra for more guests than its limit, whatever its pricing model.
+        !(addon.maxGuests !== null && addon.maxGuests < input.guests) &&
         (addon.leadTimeHours === null ||
           addonLeadTimeAllows({ hours: addon.leadTimeHours, checkIn: input.checkIn, ...place })),
     )
@@ -122,21 +129,21 @@ function serializeRequest(row: QueryResultRow | undefined): ExtrasRequest | null
   };
 }
 
-/** The booking's latest extras request, of any status. */
-export async function loadLatestExtrasRequest(
+/** The booking's extras requests, newest first, of any status. Each accepted one is still to charge at
+ * check-in, so none is left out. */
+export async function loadExtrasRequests(
   db: Db,
   input: { propertyId: string; guestBookingId: string },
-): Promise<ExtrasRequest | null> {
+): Promise<ExtrasRequest[]> {
   const result = await db.query(
     `SELECT ${columns("r.")}
      FROM booking.booking_change_requests r
      JOIN booking.guest_bookings b ON b.id = r.guest_booking_id
      WHERE b.property_id=$1::uuid AND r.guest_booking_id=$2::uuid AND r.request_type='addon_change'
-     ORDER BY r.created_at DESC, r.id DESC
-     LIMIT 1`,
+     ORDER BY r.created_at DESC, r.id DESC`,
     [input.propertyId, input.guestBookingId],
   );
-  return serializeRequest(result.rows[0]);
+  return result.rows.map(serializeRequest).filter((request) => request !== null);
 }
 
 /** Stores the guest's request for these extras (already checked against loadOfferedExtras). */
@@ -163,7 +170,8 @@ export async function insertExtrasRequest(
   return serializeRequest(result.rows[0])!;
 }
 
-/** The hotel's answer to a pending request; null when the booking has no such pending request. */
+/** The hotel's answer to a pending request; null when the booking has no such pending request or is no
+ * longer confirmed (a cancelled stay's request lapses). */
 export async function decideExtrasRequest(
   db: Db,
   input: {
@@ -181,7 +189,8 @@ export async function decideExtrasRequest(
      SET status=$4, decision_actor_user_id=$5::uuid, decision_note=$6, decided_at=$7, updated_at=$7
      FROM booking.guest_bookings b
      WHERE r.id=$3::uuid AND r.guest_booking_id=$2::uuid AND b.id=r.guest_booking_id
-       AND b.property_id=$1::uuid AND r.request_type='addon_change' AND r.status='pending'
+       AND b.property_id=$1::uuid AND b.lifecycle_status='confirmed'
+       AND r.request_type='addon_change' AND r.status='pending'
      RETURNING ${columns("r.")}`,
     [
       input.propertyId,

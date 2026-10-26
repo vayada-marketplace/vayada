@@ -114,13 +114,14 @@ export async function registerBookingChangeRequestRoutes(
     `${routeOptions.basePath}/:bookingId/extras-request`,
     async (request) => {
       await routeOptions.authorize(request, request.params.hotelId, "read");
-      if (!repository.findLatestExtrasRequest) throw notFound();
-      return (
-        (await repository.findLatestExtrasRequest(
+      if (!repository.findExtrasRequests) throw notFound();
+      return {
+        version: "booking-extras-requests.v1",
+        items: await repository.findExtrasRequests(
           request.params.hotelId,
           request.params.bookingId,
-        )) ?? { status: "none" }
-      );
+        ),
+      };
     },
   );
 
