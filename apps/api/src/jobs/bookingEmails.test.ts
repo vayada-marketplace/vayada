@@ -33,6 +33,47 @@ describe("booking lifecycle email jobs", () => {
     ).toEqual([]);
     expect(target.calls.some((call) => call.text.includes("INSERT"))).toBe(false);
   });
+  it("tells the hotel about a guest's extras request and the guest about the answer (VAY-2360)", async () => {
+    const extras = {
+      items: [
+        { name: "Airport transfer", amountMinor: "2500" },
+        { name: "Breakfast", amountMinor: "2400" },
+      ],
+      totalMinor: "4900",
+      currency: "USD",
+    };
+    const sent = async (
+      kind: "host_extras_requested" | "extras_accepted" | "extras_declined",
+      role: "host" | "guest",
+      guestMessage?: string,
+    ) => {
+      const target = createTargetEmailStore();
+      await enqueueBookingLifecycleEmailJob(target, {
+        ...bookingEmailInput({ kind }),
+        recipient: { role, email: role === "host" ? "host@example.test" : "guest@example.test" },
+        transition: {
+          eventType: "guest_booking.extras_request",
+          toStatus: "pending",
+          revision: "r1",
+        },
+        extras,
+        ...(guestMessage ? { guestMessage } : {}),
+      });
+      return JSON.parse(String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]));
+    };
+    const host = await sent("host_extras_requested", "host");
+    expect(host.to).toBe("host@example.test");
+    expect(host.text).toContain("- Airport transfer: 25.00 USD\n- Breakfast: 24.00 USD");
+    expect(host.text).toContain("To charge at check-in: 49.00 USD");
+    expect(host.text).toContain("Accepting doesn't change the booking's total");
+    const accepted = await sent("extras_accepted", "guest");
+    expect(accepted.subject).toContain("Your extras are confirmed");
+    expect(accepted.text).toContain("You pay 49.00 USD at the hotel. Nothing has been charged.");
+    const declined = await sent("extras_declined", "guest", "The shuttle is full that day.");
+    expect(declined.text).toContain("We can't offer these extras for your stay");
+    expect(declined.text).toContain("Airport transfer, Breakfast");
+    expect(declined.text).toContain("Message from us:\nThe shuttle is full that day.");
+  });
   it("includes every accommodation name in confirmation email content", async () => {
     const target = createTargetEmailStore();
     const input = bookingEmailInput({ kind: "final_confirmation" });
