@@ -82,10 +82,13 @@ try {
     if (!path || statSync(path).size > 256 * 1024)
       throw new Error("--manifest must be a file under 256 KB");
     const raw = readFileSync(path);
-    return {
-      manifest: JSON.parse(raw.toString("utf8")) as unknown,
-      manifestSha256: createHash("sha256").update(raw).digest("hex"),
-    };
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(raw.toString("utf8"));
+    } catch {
+      throw new ChannexHandoverRefused("manifest_invalid");
+    }
+    return { manifest, manifestSha256: createHash("sha256").update(raw).digest("hex") };
   };
   const input: ChannexHandoverInput =
     command === "activate"

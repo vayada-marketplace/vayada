@@ -102,6 +102,33 @@ describe.skipIf(!URL)("Channex attach executor (PostgreSQL)", () => {
       ["room_type_unmapped", withManifest({ ...manifest, roomTypes: [manifest.roomTypes[0]] })],
       ["room_type_unknown", withManifest({ ...manifest, unmappedRoomTypeIds: [ROOM_OFF] })],
       [
+        "room_type_unknown",
+        withManifest({
+          ...manifest,
+          roomTypes: [
+            ...manifest.roomTypes,
+            {
+              roomTypeId: ROOM_OFF,
+              externalRoomTypeId: X_RATE_A,
+              ratePlans: [rate("2108c009-0000-4000-8000-000000000000", "Off")],
+            },
+          ],
+        }),
+      ],
+      [
+        "currency_mismatch",
+        withManifest({
+          ...manifest,
+          roomTypes: [
+            manifest.roomTypes[0],
+            {
+              ...manifest.roomTypes[1],
+              ratePlans: [{ ...rate(X_RATE_B1, "Swiss"), currency: "CHF" }],
+            },
+          ],
+        }),
+      ],
+      [
         "reserved_identity",
         { ...attach, externalPropertyId: "8f4c1e47-3de1-4150-8bde-ad031a013842" },
       ],
@@ -132,6 +159,11 @@ describe.skipIf(!URL)("Channex attach executor (PostgreSQL)", () => {
         "connection_already_bound",
         `INSERT INTO pms.channel_binding_claims (property_id, provider, external_property_id, claim_state, claim_source) VALUES ($1, 'channex', 'other-external', 'active', 'enable');
          INSERT INTO pms.channel_connections (property_id, provider, connection_status, external_property_id) VALUES ($1, 'channex', 'connected', 'other-external')`,
+        [PROPERTY],
+      ],
+      [
+        "use_activate",
+        `INSERT INTO pms.channel_connections (property_id, provider, connection_status, connection_metadata) VALUES ($1, 'channex', 'disconnected', '{"channexHandover":"pending","legacyExternalPropertyId":"x"}')`,
         [PROPERTY],
       ],
       [
@@ -201,6 +233,10 @@ describe.skipIf(!URL)("Channex attach executor (PostgreSQL)", () => {
         ],
       ],
     ]);
+    // The Channex id is lowercased everywhere: a mixed-case input yields the same plan.
+    expect((await plan({ ...attach, externalPropertyId: EXTERNAL.toUpperCase() })).planSha256).toBe(
+      sealed.planSha256,
+    );
     const result = await applyChannexHandover(db, attach, sealed.planSha256);
     expect(result).toMatchObject({ replayed: false, planSha256: sealed.planSha256 });
     expect(await claims()).toEqual([{ state: "active", source: "handover", external: EXTERNAL }]);
@@ -271,6 +307,9 @@ describe.skipIf(!URL)("Channex attach executor (PostgreSQL)", () => {
       applyChannexHandover(db, { ...attach, manifestSha256: "2".repeat(64) }, sealed.planSha256),
     ).rejects.toThrow("replay_mismatch");
     await expect(plan(attach)).rejects.toThrow("connection_already_bound");
+    await expect(
+      applyChannexHandover(db, { ...attach, approvalRef: "VAY-2108 other ref" }, sealed.planSha256),
+    ).rejects.toThrow("replay_mismatch");
   });
 
   it("revokes like a handover, and a second attach reuses the retained rows", async () => {
@@ -283,6 +322,52 @@ describe.skipIf(!URL)("Channex attach executor (PostgreSQL)", () => {
       "SELECT id::text FROM pms.rate_plans WHERE property_id = $1 ORDER BY code",
       [PROPERTY],
     );
+    // The attach plan applied before the revoke is superseded by it.
+    const firstSha = (
+      await db.query<{ sha: string }>(
+        `SELECT redacted_payload->>'planSha256' AS sha FROM platform.product_audit_events
+         WHERE property_id = $1 AND action = 'pms.channex.handover.attached' ORDER BY occurred_at LIMIT 1`,
+        [PROPERTY],
+      )
+    ).rows[0]!.sha;
+    await expect(applyChannexHandover(db, attach, firstSha)).rejects.toThrow("plan_superseded");
+    // A retained CH- rate plan with another rate type, or a Channex rate plan an offer target
+    // owns, cannot be adopted.
+    await expect(
+      plan({
+        ...attach,
+        manifest: {
+          ...manifest,
+          roomTypes: [
+            {
+              ...manifest.roomTypes[0]!,
+              ratePlans: [{ ...rate(X_RATE_A, "Standard"), rateType: "non_refundable" }],
+            },
+            manifest.roomTypes[1]!,
+          ],
+        },
+      }),
+    ).rejects.toThrow("mapping_conflict");
+    const X_RATE_OFFER = "2108c004-0000-4000-8000-000000000000";
+    await db.query(
+      "INSERT INTO pms.channex_external_rate_owners VALUES ($1, $2, 'offer', gen_random_uuid(), NULL)",
+      [(await connection())!.id, X_RATE_OFFER],
+    );
+    await expect(
+      plan({
+        ...attach,
+        manifest: {
+          ...manifest,
+          roomTypes: [
+            {
+              ...manifest.roomTypes[0]!,
+              ratePlans: [rate(X_RATE_A, "Standard"), rate(X_RATE_OFFER, "Offer")],
+            },
+            manifest.roomTypes[1]!,
+          ],
+        },
+      }),
+    ).rejects.toThrow("rate_owned");
     const again = await plan(attach);
     expect(again.plan.claimId).toEqual(expect.any(String));
     expect(again.plan.connectionId).toEqual(expect.any(String));

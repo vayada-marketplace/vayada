@@ -577,6 +577,13 @@ export async function planChannexAttach(client: Client, input: AttachInput, lock
     ).rows[0] ?? null;
   if (connection && (connection.status === "connected" || connection.external !== null))
     refuse("connection_already_bound");
+  // An imported cohort row carries its own legacy id and gates (cohort, capabilities): activate.
+  if (
+    connection &&
+    ("migrationCohortRunId" in connection.metadata ||
+      "legacyExternalPropertyId" in connection.metadata)
+  )
+    refuse("use_activate");
   const claims = (
     await client.query<Claim>(
       `SELECT id::text, property_id::text AS "propertyId", external_property_id AS external,
@@ -624,6 +631,25 @@ export async function planChannexAttach(client: Client, input: AttachInput, lock
     )
   ).rows;
   const active = new Set(rooms.map((room) => room.id));
+  // Trigger 0137 refuses a rate plan in another currency at apply; refuse it when planning.
+  const configuredCurrency =
+    (
+      await client.query<{ currency: string }>(
+        `SELECT currency FROM pms.property_pricing_settings WHERE property_id = $1::uuid
+         UNION ALL
+         SELECT currency FROM (SELECT DISTINCT currency FROM pms.room_types
+           WHERE property_id = $1::uuid AND active AND currency IS NOT NULL) room
+         ORDER BY 1 LIMIT 1`,
+        [input.propertyId],
+      )
+    ).rows[0]?.currency ?? null;
+  if (
+    configuredCurrency &&
+    manifest.roomTypes.some((room) =>
+      room.ratePlans.some((rate) => rate.currency !== configuredCurrency),
+    )
+  )
+    refuse("currency_mismatch");
   const named = [
     ...manifest.roomTypes.map((room) => room.roomTypeId),
     ...manifest.unmappedRoomTypeIds,
@@ -661,12 +687,30 @@ export async function planChannexAttach(client: Client, input: AttachInput, lock
       ).rows
     : [];
   const ratePlanRows = (
-    await client.query<{ id: string; roomTypeId: string; code: string }>(
-      `SELECT id::text, room_type_id::text AS "roomTypeId", code FROM pms.rate_plans
-       WHERE property_id = $1::uuid AND code LIKE 'CH-%' ORDER BY id ${lock ? "FOR UPDATE" : ""}`,
+    await client.query<{
+      id: string;
+      roomTypeId: string;
+      code: string;
+      rateType: string;
+      currency: string;
+    }>(
+      `SELECT id::text, room_type_id::text AS "roomTypeId", code, rate_type AS "rateType", currency
+       FROM pms.rate_plans WHERE property_id = $1::uuid AND code LIKE 'CH-%'
+       ORDER BY id ${lock ? "FOR UPDATE" : ""}`,
       [input.propertyId],
     )
   ).rows;
+  // The rate-owner registry (0314) is immutable: a Channex rate plan an offer target owns, or a
+  // mapping row other than the one reused here, cannot be adopted.
+  const owners = connection
+    ? (
+        await client.query<{ external: string; kind: string; ownerId: string }>(
+          `SELECT external_rate_plan_id AS external, owner_kind AS kind, owner_id::text AS "ownerId"
+           FROM pms.channex_external_rate_owners WHERE connection_id = $1::uuid`,
+          [connection.id],
+        )
+      ).rows
+    : [];
   const roomTypes = manifest.roomTypes.map((room) => {
     const mapping = existingRooms.find((row) => row.roomTypeId === room.roomTypeId) ?? null;
     if (mapping && mapping.external !== room.externalRoomTypeId) refuse("mapping_conflict");
@@ -683,9 +727,18 @@ export async function planChannexAttach(client: Client, input: AttachInput, lock
       ratePlans: room.ratePlans.map((rate) => {
         const code = `CH-${rate.externalRatePlanId.slice(0, 8)}`;
         const plan = ratePlanRows.find((row) => row.code === code) ?? null;
-        if (plan && plan.roomTypeId !== room.roomTypeId) refuse("mapping_conflict");
+        if (
+          plan &&
+          (plan.roomTypeId !== room.roomTypeId ||
+            plan.rateType !== rate.rateType ||
+            plan.currency !== rate.currency)
+        )
+          refuse("mapping_conflict");
         const rateMapping =
           existingRates.find((row) => row.external === rate.externalRatePlanId) ?? null;
+        const owner = owners.find((row) => row.external === rate.externalRatePlanId);
+        if (owner && !(owner.kind === "legacy" && owner.ownerId === rateMapping?.id))
+          refuse("rate_owned");
         if (
           rateMapping &&
           (rateMapping.roomTypeId !== room.roomTypeId ||
