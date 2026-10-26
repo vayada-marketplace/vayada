@@ -165,8 +165,17 @@ for (const [width, height] of [
       contentType: "image/png",
     });
 
+    // Focus is in the dialog and stays there; Escape closes it and focus returns to the guest row.
+    await expect(popup).toBeFocused();
+    for (let tab = 0; tab < 4; tab += 1) await page.keyboard.press("Tab");
+    await expect(popup.locator(":focus")).toHaveCount(1);
     await page.keyboard.press("Escape");
     await expect(popup).toHaveCount(0);
+    await expect(
+      page.locator('section[aria-labelledby="arrivals-heading"]').getByRole("button", {
+        name: /Ada Lovelace/,
+      }),
+    ).toBeFocused();
     await assertHealthy();
   });
 }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { trapFocus } from "@/components/Modal";
 import { ChatBubbleOvalLeftEllipsisIcon, CheckIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type { Booking, BookingAdditionalGuest, GuestRegistration } from "@/services/bookings";
 import type { CheckinSettings } from "@/services/settings";
@@ -92,11 +93,14 @@ export function ArrivalPopup({
   const isFuture = booking.checkIn > today;
   const rooms = checkinRooms(booking);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Like the shared Modal: focus moves into the dialog, Tab stays inside, and focus goes back to
+  // the guest row on close.
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    const previous = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    return () => previous?.focus();
+  }, []);
 
   const guests = registrations
     ? registrationGuests({ booking, additionalGuests, registrations, settings })
@@ -171,10 +175,13 @@ export function ArrivalPopup({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl md:max-h-[90dvh] md:w-[680px] md:rounded-3xl"
+        tabIndex={-1}
+        onKeyDown={(event) => trapFocus(event, panelRef.current, onClose)}
+        className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl outline-none md:max-h-[90dvh] md:w-[680px] md:rounded-3xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex flex-col gap-5 overflow-y-auto px-4 pb-5 pt-3.5 md:px-7 md:pb-6 md:pt-7">
