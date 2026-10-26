@@ -11,6 +11,9 @@ export const addonPerPerson = (addon: PricingAddon) =>
   addon.pricingModel === "per_guest" || addon.pricingModel === "per_guest_night";
 export const addonPerNight = (addon: PricingAddon) =>
   addon.pricingModel === "per_night" || addon.pricingModel === "per_guest_night";
+/** VAY-2232: this check-in is closer than the add-on's notice allows; the quote refuses it too. */
+export const addonNeedsNotice = (addon: PricingAddon, checkIn: string) =>
+  addon.leadTimeHours !== null && (addon.bookableFrom === null || checkIn < addon.bookableFrom);
 
 /** Increment allocationRevision on every room/guest mutation, even identical-age reorderings. */
 export function replacementExtrasScope(

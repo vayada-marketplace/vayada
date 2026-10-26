@@ -5,3 +5,4 @@ export { FeedbackAlert } from "./FeedbackAlert";
 export { PasswordField } from "./PasswordField";
 export { SaveButton } from "./SaveButton";
 export { ConfirmDialog } from "./ConfirmDialog";
+export { PrimaryActionButton } from "./PrimaryActionButton";

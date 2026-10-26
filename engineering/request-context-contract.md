@@ -50,8 +50,8 @@ statuses, or grant resource access.
 - `membership`: the active membership, role key, WorkOS role slugs, and resolved
   Vayada permission keys.
 - `linkedResources`: product resources the selected organization can act on,
-  such as booking hotels, PMS hotels, marketplace profiles/listings, creator
-  profiles, affiliates, and payout accounts.
+  such as properties, booking hotels, PMS hotels and properties, and payout
+  accounts.
 - `entitlements`: active or suspended product/module access.
 - `locale` and `currency`: request presentation defaults for domain logic.
 - `audit`: request ID, source, timestamp, and optional correlation metadata.
@@ -85,10 +85,6 @@ not add temporary `apps/api` routes whose authorization depends on those inputs.
 The current fixture set covers allowed and denied cases for:
 
 - hotel scope: booking/PMS hotel resources through hotel-group membership;
-- creator scope: marketplace creator profile access without implicit hotel
-  listing authority;
-- affiliate scope: affiliate resource access without implicit hotel finance
-  authority;
 - platform scope: platform admin actions without implicit hotel ownership.
 
 These fixtures intentionally require both a permission and an active resource

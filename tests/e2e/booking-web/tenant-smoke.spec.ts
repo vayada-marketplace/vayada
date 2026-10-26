@@ -4,18 +4,17 @@ import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-web tenant smoke", () => {
   for (const width of [1280, 390]) {
-    test(`hides retired public enrolment while preserving referral cookies at ${width}px`, async ({
+    test(`hides retired public enrolment and keeps referrals out of cookies at ${width}px`, async ({
       page,
       context,
     }) => {
       await page.setViewportSize({ width, height: 900 });
       await mockBookingApis(page, { headerSettings: { showReferAGuestButton: true } });
-      await page.goto("/?ref=RETAINED-REFERRAL");
+      await page.goto("/");
       await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
       await expect(page.locator("nav").getByRole("button", { name: /refer/i })).toHaveCount(0);
-      expect((await context.cookies()).find((cookie) => cookie.name === "ref")?.value).toBe(
-        "RETAINED-REFERRAL",
-      );
+      // VAY-2223: no cookie before the privacy choice.
+      expect(await context.cookies()).toEqual([]);
     });
   }
 
@@ -63,6 +62,33 @@ test.describe("booking-web tenant smoke", () => {
     await assertHealthy();
   });
 
+  test("paints the published brand colour on the guest page (VAY-2318)", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBookingApis(page, { primaryColor: "#5E0000" });
+    await page.goto("/");
+    const contact = page.locator("nav").getByRole("button", { name: "Contact", exact: true });
+    // primary-600 is the colour 12% darker, as the Booking Admin preview draws it.
+    await expect(contact).toHaveCSS("background-color", "rgb(83, 0, 0)");
+    await expect(page.getByRole("button", { name: /Check Availability/i })).toHaveCSS(
+      "background-color",
+      "rgb(83, 0, 0)",
+    );
+    const reject = page.getByRole("button", { name: "Reject analytics" });
+    await reject.waitFor({ state: "visible", timeout: 4000 }).then(
+      () => reject.click(),
+      () => undefined,
+    );
+    await page.screenshot({ path: testInfo.outputPath("brand-colour-5e0000-1440.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("button", { name: /Check Availability/i })).toHaveCSS(
+      "background-color",
+      "rgb(83, 0, 0)",
+    );
+    await page.screenshot({ path: testInfo.outputPath("brand-colour-5e0000-390.png") });
+  });
+
   test("shows WhatsApp only when the hotel publishes a WhatsApp number", async ({ page }) => {
     await mockBookingApis(page, {
       publicContacts: [
@@ -98,7 +124,8 @@ test.describe("booking-web tenant smoke", () => {
     await expect(logo).toBeVisible();
     expect((await logo.boundingBox())?.height).toBeLessThanOrEqual(32);
     await expect(nav.getByTestId("mobile-contact-button")).toBeVisible();
-    await expect(nav.getByRole("button", { name: "Refer", exact: true })).toBeVisible();
+    // The Refer button was retired with public affiliate enrolment (VAY-1499).
+    await expect(nav.getByRole("button", { name: /Refer/ })).toHaveCount(0);
     await expect(nav.getByRole("button", { name: "EN", exact: true })).toBeVisible();
     await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
     expect((await nav.boundingBox())?.height).toBe(64);
@@ -132,7 +159,7 @@ test.describe("booking-web tenant smoke", () => {
         showCurrencySelector: true,
       },
       supportedLocales: ["en"],
-      supportedCurrencies: ["EUR"],
+      displayCurrencies: ["EUR"],
     });
 
     await page.goto("/");
@@ -260,9 +287,12 @@ test.describe("booking-web tenant smoke", () => {
     await expect(dateInputs).toHaveCount(2);
     await expect(dateInputs.nth(0)).toHaveValue("2026-09-12");
     await expect(dateInputs.nth(1)).toHaveValue("2026-09-15");
+    // The summary reads like the rest of the page: "Sat, 12 Sept 2026", not "2026-09-12".
+    await expect(page.getByText(/^Sat, 12 Sept? 2026 → Tue, 15 Sept? 2026$/)).toHaveCount(2);
 
     await dateInputs.nth(0).fill("2026-09-16");
     await dateInputs.nth(1).fill("2026-09-18");
+    await expect(page.getByText(/^Wed, 16 Sept? 2026 → Fri, 18 Sept? 2026$/)).toBeVisible();
 
     await expect.poll(() => previewPayload?.checkIn).toBe("2026-09-16");
     expect(previewPayload).toMatchObject({

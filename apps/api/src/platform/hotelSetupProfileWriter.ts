@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
+import type { RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import type pg from "pg";
-import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import type {
   HotelSetupPropertyProfileCommand,
   HotelSetupPropertyProfileResult,
   HotelSetupPropertyProfileUpdate,
 } from "../routes/sharedHotelSetupStatus.js";
 import {
+  activateCompleteHotel,
   propertyProfileWritePayload,
+  recomputeHotelProfileCompleteness,
   toSharedPropertyProfile,
   type SharedPropertyProfileRow,
 } from "./sharedHotelSetupStatusReadModel.js";
@@ -33,6 +36,7 @@ const PROFILE_ROW = `SELECT jsonb_build_object(
     'timezone', NULLIF(location.timezone, ''), 'latitude', location.latitude, 'longitude', location.longitude,
     'localityPublic', COALESCE(location.address_public, FALSE), 'geoPublic', COALESCE(location.geo_public, FALSE),
     'mapDisplayMode', COALESCE(location.map_display_mode, 'hidden'),
+    'area', location.area, 'arrivalDirections', location.arrival_directions,
     'contacts', COALESCE((SELECT jsonb_agg(jsonb_build_object('channelType', contact.channel_type,
         'value', contact.value, 'purpose', contact.purpose, 'isPublic', contact.is_public)
         ORDER BY contact.channel_type, contact.value, contact.created_at, contact.id)
@@ -87,7 +91,8 @@ export async function lockHotelSetupOwnerAuthority(
   return result.rows[0]?.allowed === true;
 }
 
-const PROFILE_PERMISSIONS = ["hotel_catalog.setup.manage", "marketplace.profile.manage"];
+// VAY-2270: the Marketplace profile grant is retired; setup-manage alone authorises the Owner.
+const PROFILE_PERMISSIONS = ["hotel_catalog.setup.manage"];
 
 async function profileRow(client: Client, propertyId: string) {
   const result = await client.query<{ value: SharedPropertyProfileRow }>(PROFILE_ROW, [propertyId]);
@@ -166,18 +171,20 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
     await client.query(
       `INSERT INTO hotel_catalog.property_locations (property_id, country_code, city, street_address,
          postal_code, latitude, longitude, timezone, address_public, geo_public, map_display_mode,
-         source_confidence, updated_at)
+         area, arrival_directions, source_confidence, updated_at)
        SELECT $1::uuid, NULLIF(input.country_code,'')::char(2), input.city, input.street_address,
          input.postal_code, input.latitude, input.longitude, input.timezone, input.address_public,
-         input.geo_public, COALESCE(input.map_display_mode,'hidden'), 'verified', now()
+         input.geo_public, COALESCE(input.map_display_mode,'hidden'), input.area, input.arrival_directions,
+         'verified', now()
        FROM jsonb_to_record($2::jsonb) AS input(country_code text, city text, street_address text,
          postal_code text, timezone text, latitude numeric, longitude numeric, address_public boolean,
-         geo_public boolean, map_display_mode text)
+         geo_public boolean, map_display_mode text, area text, arrival_directions text)
        ON CONFLICT (property_id) DO UPDATE SET country_code=EXCLUDED.country_code, city=EXCLUDED.city,
          street_address=EXCLUDED.street_address, postal_code=EXCLUDED.postal_code,
          latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, timezone=EXCLUDED.timezone,
          address_public=EXCLUDED.address_public, geo_public=EXCLUDED.geo_public,
-         map_display_mode=EXCLUDED.map_display_mode, source_confidence=EXCLUDED.source_confidence,
+         map_display_mode=EXCLUDED.map_display_mode, area=EXCLUDED.area,
+         arrival_directions=EXCLUDED.arrival_directions, source_confidence=EXCLUDED.source_confidence,
          updated_at=now()`,
       [scope.propertyId, payload],
     );
@@ -203,7 +210,8 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
          is_public=EXCLUDED.is_public, source_system=EXCLUDED.source_system, updated_at=now()`,
       [scope.propertyId, payload],
     );
-    await syncPropertyOfferReadModels(client, { propertyId: scope.propertyId });
+    await recomputeHotelProfileCompleteness(client, scope.propertyId);
+    await projectPropertyPublicProfile(client, { propertyId: scope.propertyId });
     const after = await profileRow(client, scope.propertyId);
     const changed = Object.keys(after)
       .filter((key) => key !== "propertyId" && key !== "profileRevision")
@@ -267,4 +275,72 @@ export function createOrdinaryHotelSetupProfileCommand(
       (context.audit.correlationId ?? context.audit.requestId).slice(0, 200),
       command,
     );
+}
+
+export type HotelSetupPropertyActivationResult = Readonly<
+  | { status: "activated" | "already_active" }
+  | { status: "incomplete"; reasons: readonly string[] }
+  | { status: "not_provisioning"; lifecycleStatus: string }
+>;
+export type HotelSetupPropertyActivation = (
+  context: RequestContext,
+  propertyId: string,
+) => Promise<HotelSetupPropertyActivationResult>;
+
+/**
+ * VAY-2247 1.5: the end of the first run makes the hotel live when its profile is complete, in one
+ * transaction with the owner's authority locked (the same login and checks as a profile save). A
+ * second call finds it live; a suspended or retired hotel never changes.
+ */
+export async function activateOrdinaryHotelSetupProperty(
+  pool: Pick<pg.Pool, "connect">,
+  scope: ProfileScope,
+): Promise<HotelSetupPropertyActivationResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+    if (!(await lockHotelSetupOwnerAuthority(client, scope, PROFILE_PERMISSIONS)))
+      throw new AuthorizationError();
+    const read = async () =>
+      (
+        await client.query<{ lifecycle: string; reasons: string[] }>(
+          `SELECT lifecycle_status AS lifecycle, completeness_reasons AS reasons
+           FROM hotel_catalog.properties WHERE id=$1::uuid FOR UPDATE`,
+          [scope.propertyId],
+        )
+      ).rows[0];
+    const before = await read();
+    if (!before) throw new AuthorizationError();
+    let result: HotelSetupPropertyActivationResult;
+    if (before.lifecycle === "active") result = { status: "already_active" };
+    else if (before.lifecycle !== "provisioning")
+      result = { status: "not_provisioning", lifecycleStatus: before.lifecycle };
+    else {
+      await activateCompleteHotel(client, scope.propertyId);
+      const after = await read();
+      result =
+        after?.lifecycle === "active"
+          ? { status: "activated" }
+          : { status: "incomplete", reasons: after?.reasons ?? [] };
+    }
+    await client.query("COMMIT");
+    return Object.freeze(result);
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Route adapter: scope and actor come only from the verified context. */
+export function createOrdinaryHotelSetupActivation(
+  pool: Pick<pg.Pool, "connect">,
+): HotelSetupPropertyActivation {
+  return (context, propertyId) =>
+    activateOrdinaryHotelSetupProperty(pool, {
+      propertyId,
+      organizationId: context.selectedOrganization.organizationId,
+      actorUserId: context.actor.internalUserId,
+    });
 }

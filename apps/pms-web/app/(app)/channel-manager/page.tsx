@@ -77,7 +77,7 @@ export default function ChannelManagerPage() {
 
   return (
     <div className="p-4 md:p-6">
-      <div className="mx-auto max-w-6xl">
+      <div className="max-w-6xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900">{t("channels.title")}</h1>

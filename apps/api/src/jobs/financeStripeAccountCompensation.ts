@@ -253,16 +253,6 @@ function parsePayload(value: unknown): CompensationPayload {
       idempotencyKey,
     };
   }
-  if (owner.ownerScope === "affiliate") {
-    const affiliateId = text(owner.affiliateId);
-    const organizationId = uuid(owner.organizationId);
-    if (!affiliateId || !organizationId) throw new Error("Invalid affiliate compensation owner");
-    return {
-      owner: { ownerScope: "affiliate", affiliateId, organizationId },
-      providerAccountRef,
-      idempotencyKey,
-    };
-  }
   throw new Error("Invalid compensation owner scope");
 }
 

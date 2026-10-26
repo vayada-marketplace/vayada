@@ -31,9 +31,9 @@ const galleryId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const summary =
   "A welcoming independent hotel with calm rooms, thoughtful service, and an easy walk to local highlights.";
 
-type Product = "marketplace" | "booking" | "pms";
+type Product = "booking" | "pms";
 type AccessOptions = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -254,7 +254,7 @@ describe("Hotel Catalog canonical Step 1 routes", () => {
 
   it.each([
     ["missing authentication", null, {}, 401],
-    ["wrong organization kind", "valid-token", { kind: "creator_workspace" }, 403],
+    ["wrong organization kind", "valid-token", { kind: "platform" }, 403],
     ["missing permission", "valid-token", { permissions: [] as PermissionKey[] }, 403],
     ["missing Catalog link", "valid-token", { links: [productLink("pms")] }, 403],
     [
@@ -277,6 +277,35 @@ describe("Hotel Catalog canonical Step 1 routes", () => {
       403,
     ],
     ["missing product resource link", "valid-token", { links: [catalogLink()] }, 403],
+    [
+      "retired Marketplace hotel profile access",
+      "valid-token",
+      {
+        entitlements: [
+          {
+            product: "marketplace",
+            key: "marketplace-hotel-profile",
+            status: "active",
+            resource: {
+              product: "marketplace",
+              resourceType: "hotel_profile",
+              resourceId: propertyId,
+            },
+          } as never,
+        ],
+        links: [
+          catalogLink(),
+          {
+            product: "marketplace",
+            resourceType: "hotel_profile",
+            resourceId: propertyId,
+            relationship: "operator",
+            status: "active",
+          } as never,
+        ],
+      },
+      403,
+    ],
     [
       "suspended product resource link",
       "valid-token",
@@ -316,21 +345,18 @@ describe("Hotel Catalog canonical Step 1 routes", () => {
     },
   );
 
-  it.each(["marketplace", "booking"] as const)(
-    "accepts complete %s product access",
-    async (product) => {
-      const repository = fakeRepository({ state: state({ assignments: desiredAssignments() }) });
-      app = testApp(repository, {
-        entitlements: [entitlement(product)],
-        links: [catalogLink(), productLink(product)],
-      });
+  it.each(["booking", "pms"] as const)("accepts complete %s product access", async (product) => {
+    const repository = fakeRepository({ state: state({ assignments: desiredAssignments() }) });
+    app = testApp(repository, {
+      entitlements: [entitlement(product)],
+      links: [catalogLink(), productLink(product)],
+    });
 
-      const response = await put(app, request());
+    const response = await put(app, request());
 
-      expect(response.statusCode).toBe(200);
-      expect(repository.prepare).toHaveBeenCalledOnce();
-    },
-  );
+    expect(response.statusCode).toBe(200);
+    expect(repository.prepare).toHaveBeenCalledOnce();
+  });
 
   it("rejects partial canonical input and a missing idempotency key", async () => {
     const repository = fakeRepository();
@@ -600,7 +626,6 @@ function productLink(
 
 function productAccess(product: Product) {
   const access = {
-    marketplace: { key: "marketplace-hotel-profile", resourceType: "hotel_profile" },
     booking: { key: "booking-engine", resourceType: "booking_hotel" },
     pms: { key: "property-management", resourceType: "pms_property" },
   } as const;

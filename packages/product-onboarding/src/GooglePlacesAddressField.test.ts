@@ -1,6 +1,24 @@
+import { createElement } from "react";
+import { create } from "react-test-renderer";
 import { describe, expect, it } from "vitest";
 
-import { addressFromGooglePlace } from "./GooglePlacesAddressField";
+import GooglePlacesAddressField, { addressFromGooglePlace } from "./GooglePlacesAddressField";
+
+describe("GooglePlacesAddressField", () => {
+  it("shows the caller's label above the Google search", () => {
+    const renderer = create(
+      createElement(GooglePlacesAddressField, {
+        addressRevision: { current: 0 },
+        apiKey: "test-key",
+        label: "Search for your address",
+        onUnavailable: () => undefined,
+        onSelect: () => undefined,
+      }),
+    );
+
+    expect(renderer.root.findByType("p").children).toEqual(["Search for your address"]);
+  });
+});
 
 describe("addressFromGooglePlace", () => {
   it("maps a Google place to the shared hotel location fields", () => {
@@ -24,6 +42,7 @@ describe("addressFromGooglePlace", () => {
       countryCode: "DE",
       latitude: 48.1373932,
       longitude: 11.5754485,
+      location: { latitude: 48.1373932, longitude: 11.5754485 },
     });
   });
 
@@ -80,6 +99,8 @@ describe("addressFromGooglePlace", () => {
       countryCode: "DE",
       latitude: null,
       longitude: null,
+      // Still where the road is, so the address map can show it (VAY-2344).
+      location: { latitude: 48.1373932, longitude: 11.5754485 },
     });
   });
 });

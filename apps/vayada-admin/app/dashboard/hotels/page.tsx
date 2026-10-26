@@ -62,12 +62,14 @@ export default function HotelsPage() {
       setLoading(true);
       setError("");
 
+      // Only hotel sign-ups that provisioning accepts and that have no hotel yet (VAY-2272).
       const marketplaceParams: {
         type: "hotel";
+        provisionable: true;
         page: number;
         page_size: number;
         search?: string;
-      } = { type: "hotel", page: 1, page_size: 100 };
+      } = { type: "hotel", provisionable: true, page: 1, page_size: 100 };
       if (searchTerm) marketplaceParams.search = searchTerm;
 
       // Fetch both sources in parallel
@@ -134,9 +136,7 @@ export default function HotelsPage() {
     const targetStatus = nextStatus(row.lifecycle_status);
     const reason = window.prompt(
       `Reason for moving "${row.name}" to ${targetStatus}:`,
-      targetStatus === "suspended"
-        ? "Platform admin safety hold"
-        : "Platform admin review complete",
+      targetStatus === "suspended" ? "Platform admin safety hold" : "Platform admin reactivation",
     );
     if (!reason?.trim()) return;
     try {
@@ -173,6 +173,10 @@ export default function HotelsPage() {
         <div className="px-6 py-4">
           <h1 className="text-xl font-bold text-gray-900">Hotels</h1>
           <p className="text-sm text-gray-500">Browse and configure hotel booking engines</p>
+          <p className="text-xs text-gray-500">
+            Hotel accounts that can&apos;t be set up yet are not listed: the account must be active
+            and belong to exactly one hotel organization that has no hotel.
+          </p>
         </div>
       </header>
 
@@ -360,17 +364,19 @@ export default function HotelsPage() {
   );
 }
 
+// A hotel in setup goes live by itself once its profile is complete; Vayada does not
+// activate it (VAY-2140). Admins can still suspend (also during setup) and reactivate.
 function nextStatus(status: PlatformPropertyLifecycleStatus): "active" | "suspended" {
-  return status === "active" || status === "retired" ? "suspended" : "active";
+  return status === "suspended" ? "active" : "suspended";
 }
 
 function transitionLabel(status: PlatformPropertyLifecycleStatus): string {
-  if (status === "active") return "Suspend";
   if (status === "retired") return "Restore to review";
-  return "Activate";
+  return status === "suspended" ? "Reactivate" : "Suspend";
 }
 
 function lifecycleLabel(status: PlatformPropertyLifecycleStatus): string {
+  if (status === "provisioning") return "Setting up";
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 

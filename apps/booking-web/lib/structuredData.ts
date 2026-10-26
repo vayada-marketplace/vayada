@@ -44,7 +44,7 @@ function buildHotelNode(input: {
     name: hotel.name,
     description: hotel.description,
     inLanguage: locale,
-    image: images,
+    image: optionalImages(images),
     starRating:
       hotel.starRating > 0
         ? {
@@ -80,7 +80,7 @@ function buildRoomNode(input: {
     url,
     name: room.name,
     description: room.description || room.shortDescription,
-    image: uniqueUrls(room.images || [], hotel.bookingBaseUrl),
+    image: optionalImages(uniqueUrls(room.images || [], hotel.bookingBaseUrl)),
     bed: room.bedType || undefined,
     floorSize:
       room.size > 0
@@ -123,9 +123,19 @@ function roomId(canonicalUrl: string, roomIdValue: string): string {
   return `${canonicalUrl}#room-${encodeURIComponent(roomIdValue)}`;
 }
 
-function uniqueUrls(values: string[], baseUrl: string): string[] {
+/** No photos yet (VAY-2247): leave `image` out rather than publishing an empty list or a stand-in logo. */
+function optionalImages(images: string[]): string[] | undefined {
+  return images.length ? images : undefined;
+}
+
+function uniqueUrls(values: Array<string | null | undefined>, baseUrl: string): string[] {
   return Array.from(
-    new Set(values.map((value) => normalizedAbsoluteUrl(value, baseUrl)).filter(Boolean)),
+    new Set(
+      values
+        .filter((value): value is string => Boolean(value))
+        .map((value) => normalizedAbsoluteUrl(value, baseUrl))
+        .filter(Boolean),
+    ),
   );
 }
 

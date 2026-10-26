@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   isNearbyPlaceId,
   type NearbyCategory,
@@ -73,6 +74,15 @@ export function nearbySearchOrigin(location: PropertyProfileLocation): NearbyOri
     };
   if (location.mapDisplayMode !== "exact") return null;
   return { latitude: location.latitude, longitude: location.longitude };
+}
+
+/**
+ * Picks and suggestions stay valid while the public search origin is unchanged, so a profile save
+ * that leaves the pin alone keeps them (VAY-2104). Stored as a hash, never as coordinates.
+ */
+export function nearbyOriginKey(origin: NearbyOrigin | null): string | null {
+  if (!origin) return null;
+  return createHash("sha256").update(`${origin.latitude},${origin.longitude}`).digest("hex");
 }
 
 /** Fixed endpoint, four bounded calls, no retries, provider text never escapes this boundary. */

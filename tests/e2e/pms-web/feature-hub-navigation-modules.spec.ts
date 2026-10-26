@@ -5,7 +5,9 @@ import {
   mockPmsWebTargetRoutes,
 } from "../support/pmsWebMocks";
 
-// VAY-2078: Inbox and Reviews are Feature Hub modules, off by default, stored apart from Financials.
+type Write = { store: string; moduleId: string; isActive: boolean };
+
+// VAY-2200: five switchable modules from three stores.
 async function setup(page: Page) {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
@@ -18,36 +20,40 @@ async function setup(page: Page) {
       },
     }),
   );
-  const active = new Set<string>();
-  const writes: Array<{ moduleId: string; isActive: boolean }> = [];
-  await page.route(
-    new RegExp(`/api/pms/properties/${PMS_WEB_PROPERTY_ID}/navigation-modules(?:/\\w+)?$`),
-    (route) => {
-      if (route.request().method() === "PATCH") {
-        const body = route.request().postDataJSON() as { moduleId: string; isActive: boolean };
-        writes.push(body);
-        if (body.isActive) active.add(body.moduleId);
-        else active.delete(body.moduleId);
+  const writes: Write[] = [];
+  const store = async (name: string, supported: string[], initial: string[]) => {
+    const active = new Set(initial);
+    await page.route(
+      new RegExp(`/api/pms/properties/${PMS_WEB_PROPERTY_ID}/${name}(?:/[\\w-]+)?$`),
+      (route) => {
+        if (route.request().method() === "PATCH") {
+          const body = route.request().postDataJSON() as { moduleId: string; isActive: boolean };
+          writes.push({ store: name, ...body });
+          if (body.isActive) active.add(body.moduleId);
+          else active.delete(body.moduleId);
+          return route.fulfill({
+            json: {
+              ...body,
+              activatedAt: null,
+              deactivatedAt: null,
+              updatedAt: "2026-10-15T00:00:00Z",
+            },
+          });
+        }
         return route.fulfill({
           json: {
-            ...body,
-            activatedAt: null,
-            deactivatedAt: null,
-            updatedAt: "2026-10-09T00:00:00Z",
+            hotelId: PMS_WEB_PROPERTY_ID,
+            canManage: true,
+            supportedModules: supported,
+            activeModules: Array.from(active),
+            activations: [],
           },
         });
-      }
-      return route.fulfill({
-        json: {
-          hotelId: PMS_WEB_PROPERTY_ID,
-          canManage: true,
-          supportedModules: ["inbox", "reviews"],
-          activeModules: Array.from(active),
-          activations: [],
-        },
-      });
-    },
-  );
+      },
+    );
+  };
+  await store("navigation-modules", ["inbox", "reviews"], []);
+  await store("booking-modules", ["add-ons", "promos"], ["add-ons"]);
   // An operator: the Owner-only Financials switch stays read-only.
   await page.route(
     new RegExp(`/api/pms/properties/${PMS_WEB_PROPERTY_ID}/module-activations$`),
@@ -65,65 +71,73 @@ async function setup(page: Page) {
   return writes;
 }
 
-test("lists Inbox and Reviews off by default and previews the sidebar as they switch", async ({
+const preview = (page: Page) =>
+  page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "Navigation", exact: true }) });
+
+test("lists every module in one grid and previews both menus as they switch", async ({
   page,
 }, testInfo) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const writes = await setup(page);
   await page.goto("/settings/feature-hub");
 
   const cards = page.locator("article");
-  for (const name of ["Inbox", "Reviews", "Financials"])
+  for (const name of ["Inbox", "Reviews", "Financials", "Add-ons", "Promos"])
     await expect(cards.getByRole("heading", { level: 2, name, exact: true })).toBeVisible();
-  await expect(page.getByText("0 Active", { exact: true })).toBeVisible();
-  await expect(page.getByText("6 items", { exact: true })).toBeVisible();
-  await expect(page.getByText("0 module items", { exact: true })).toBeVisible();
+  await expect(cards).toHaveCount(5);
+  await expect(page.getByText("/ 5 active", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "All", exact: true })).toHaveCount(0);
+  await expect(page.getByPlaceholder("Search modules...")).toHaveCount(0);
+  await expect(
+    page.getByText("Disabled modules stay hidden from the sidebar.", { exact: false }),
+  ).toBeVisible();
+  await expect(preview(page).getByText("10 items", { exact: true })).toBeVisible();
+  await expect(preview(page).getByText("1 from modules", { exact: true })).toBeVisible();
   await expect(page.getByRole("switch", { name: "Activate Financials" })).toBeDisabled();
-  await page.screenshot({ path: testInfo.outputPath("feature-hub-modules-off.png") });
+  await page.screenshot({ path: testInfo.outputPath("feature-hub-1440.png") });
 
   await page.getByRole("switch", { name: "Activate Inbox" }).click();
   await expect(page.getByRole("switch", { name: "Deactivate Inbox" })).toBeChecked();
-  await expect(page.getByText("1 Active", { exact: true })).toBeVisible();
-  await expect(page.getByText("7 items", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 module items", { exact: true })).toBeVisible();
-  const preview = page
-    .locator("section")
-    .filter({ has: page.getByRole("heading", { name: "PMS navigation" }) })
-    .getByRole("listitem");
-  await expect(preview.filter({ hasText: /^Reservations$/ })).toBeVisible();
-  const reservationsBox = await preview.filter({ hasText: /^Reservations$/ }).boundingBox();
-  const inboxBox = await preview.filter({ hasText: /^Inbox$/ }).boundingBox();
+  await expect(preview(page).getByText("2 from modules", { exact: true })).toBeVisible();
+  const items = preview(page).getByRole("listitem");
+  const reservationsBox = await items.filter({ hasText: /^Reservations$/ }).boundingBox();
+  const inboxBox = await items.filter({ hasText: /^Inbox$/ }).boundingBox();
   expect(inboxBox!.y).toBeGreaterThan(reservationsBox!.y);
 
-  await page.getByRole("switch", { name: "Activate Reviews" }).click();
-  await expect(page.getByText("2 Active", { exact: true })).toBeVisible();
-  await expect(page.getByText("2 module items", { exact: true })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("feature-hub-modules-on.png") });
+  await page.getByRole("switch", { name: "Activate Promos" }).click();
+  await expect(page.getByRole("switch", { name: "Deactivate Promos" })).toBeChecked();
+  await expect(items.filter({ hasText: /^Promos$/ })).toBeVisible();
+  await expect(preview(page).getByText("12 items", { exact: true })).toBeVisible();
+  await expect(page.getByText("Promos activated.")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("feature-hub-promos-on.png") });
 
-  await page.getByRole("switch", { name: "Deactivate Inbox" }).click();
-  await expect(page.getByText("1 Active", { exact: true })).toBeVisible();
-  await expect(preview.filter({ hasText: /^Inbox$/ })).toHaveCount(0);
+  await page.getByRole("switch", { name: "Deactivate Add-ons" }).click();
+  await expect(items.filter({ hasText: /^Add-ons$/ })).toHaveCount(0);
   expect(writes).toEqual([
-    { moduleId: "inbox", isActive: true },
-    { moduleId: "reviews", isActive: true },
-    { moduleId: "inbox", isActive: false },
+    { store: "navigation-modules", moduleId: "inbox", isActive: true },
+    { store: "booking-modules", moduleId: "promos", isActive: true },
+    { store: "booking-modules", moduleId: "add-ons", isActive: false },
   ]);
 });
 
-test("files Inbox under Operations and Reviews under Distribution", async ({ page }) => {
+test("opens a module's details on a phone and switches it there", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await setup(page);
+  const writes = await setup(page);
   await page.goto("/settings/feature-hub");
 
-  const cards = page.locator("article");
-  await page.getByRole("button", { name: "Operations", exact: true }).click();
-  await expect(cards.getByRole("heading", { level: 2, name: "Inbox", exact: true })).toBeVisible();
-  await expect(cards.getByRole("heading", { level: 2, name: "Reviews", exact: true })).toHaveCount(
-    0,
-  );
-  await page.getByRole("button", { name: "Distribution", exact: true }).click();
+  await page.getByRole("button", { name: "Promos", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Promos" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Promo codes with usage limits")).toBeVisible();
   await expect(
-    cards.getByRole("heading", { level: 2, name: "Reviews", exact: true }),
+    dialog.getByText("Last-minute discounts keep running", { exact: false }),
   ).toBeVisible();
-  await expect(cards.getByRole("heading", { level: 2, name: "Inbox", exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("feature-hub-promos-details-390.png") });
+  await dialog.getByRole("switch", { name: "Activate Promos" }).click();
+  await expect(dialog.getByRole("switch", { name: "Deactivate Promos" })).toBeChecked();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  expect(writes).toEqual([{ store: "booking-modules", moduleId: "promos", isActive: true }]);
 });

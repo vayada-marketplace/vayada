@@ -23,6 +23,10 @@ type BookingChangeDeclineBody = {
   reason?: string;
 };
 
+type BookingExtrasDecisionParams = BookingChangeRequestParams & {
+  requestId: string;
+};
+
 export async function registerBookingChangeRequestRoutes(
   app: FastifyInstance,
   repository: BookingHotelChangeRequestRepository,
@@ -104,6 +108,54 @@ export async function registerBookingChangeRequestRoutes(
       );
     },
   );
+
+  // VAY-2360 part 3: the extras a guest asked for after booking, answered on the PMS booking page.
+  app.get<{ Params: BookingChangeRequestParams }>(
+    `${routeOptions.basePath}/:bookingId/extras-request`,
+    async (request) => {
+      await routeOptions.authorize(request, request.params.hotelId, "read");
+      if (!repository.findExtrasRequests) throw notFound();
+      return {
+        version: "booking-extras-requests.v1",
+        items: await repository.findExtrasRequests(
+          request.params.hotelId,
+          request.params.bookingId,
+        ),
+      };
+    },
+  );
+
+  for (const decision of ["accept", "decline"] as const)
+    app.post<{ Params: BookingExtrasDecisionParams; Body: BookingChangeDeclineBody }>(
+      `${routeOptions.basePath}/:bookingId/extras-request/:requestId/${decision}`,
+      async (request) => {
+        const context = await routeOptions.authorize(request, request.params.hotelId, "write");
+        if (!repository.decideExtrasRequest) throw notFound();
+        const note = decision === "decline" ? optionalDecisionNote(request.body?.reason) : null;
+        return repository.decideExtrasRequest(
+          request.params.hotelId,
+          request.params.bookingId,
+          request.params.requestId,
+          decision,
+          note,
+          decisionContext(request, context.actor.internalUserId, {
+            propertyId: request.params.hotelId,
+            bookingId: request.params.bookingId,
+            changeRequestId: request.params.requestId,
+            decision,
+            note,
+          }),
+        );
+      },
+    );
+}
+
+function notFound() {
+  const error = new Error("Extras requests aren't available here.") as Error & {
+    statusCode: number;
+  };
+  error.statusCode = 404;
+  return error;
 }
 
 function enforceBookingChangePolicy(

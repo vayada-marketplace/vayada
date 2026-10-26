@@ -285,12 +285,12 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await dialCode.selectOption("DE");
   await phone.fill("089 1234567");
 
-  // Additional guests are booking-level cards; exceeding room capacity only warns.
+  // Additional guests are booking-level cards, up to the rooms' places (VAY-2365).
   await dialog.getByRole("button", { name: "+ Add guest" }).click();
-  await dialog.getByLabel("Guest 1 first name").fill("Grace");
-  await dialog.getByLabel("Guest 1 last name").fill("Hopper");
-  await dialog.getByText("Guest 1 · Grace Hopper").click();
-  await expect(dialog.getByLabel("Guest 1 first name")).toBeHidden();
+  await dialog.getByLabel("Guest 2 first name").fill("Grace");
+  await dialog.getByLabel("Guest 2 last name").fill("Hopper");
+  await dialog.getByText("Guest 2 · Grace Hopper").click();
+  await expect(dialog.getByLabel("Guest 2 first name")).toBeHidden();
   await createBooking.click();
   await expect.poll(() => createBody).not.toBeNull();
   expect(createBody).toMatchObject({

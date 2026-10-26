@@ -91,8 +91,10 @@ test("adds and removes Inbox and Reviews in the sidebar as the Feature Hub switc
   await expect(navigation.getByRole("link", { name: /Reservations/ })).toBeVisible();
   await expect(navigation.getByRole("link", { name: /Inbox/ })).toHaveCount(0);
   await expect(navigation.getByRole("link", { name: /Reviews/ })).toHaveCount(0);
-  // A hidden Inbox is not polled for its unread badge.
-  expect(unreadReads()).toBe(0);
+  // A hidden Inbox has no badge; its unread guests surface in the notice instead (VAY-2078 b).
+  await expect(
+    page.getByRole("status").filter({ hasText: "You have 3 unread guest messages." }),
+  ).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("sidebar-modules-off.png") });
 
   await page.getByRole("switch", { name: "Activate Inbox" }).click();

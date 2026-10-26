@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
+import { isManualPricingPaymentMethod } from "@vayada/domain-booking";
 import { pricingObject } from "@vayada/domain-pms";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { replayPricingAcceptance } from "./pricingAcceptanceReplay.js";
@@ -9,7 +10,8 @@ import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.j
 import { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTerms.js";
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
-import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import { pricingCardQuoteSplit, pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import { pricingManualQuoteSupported } from "./pricingManualPayment.js";
 
 /** Start only; caller owns READ COMMITTED through full acceptance or rollback.
  * Public authority takes the existing property inventory mutation lock BEFORE
@@ -21,7 +23,7 @@ export async function preparePricingAcceptance(
   client: PoolClient,
   slug: unknown,
   input: unknown,
-  options: { card?: boolean } = {},
+  options: { card?: boolean; deposits?: boolean; request?: boolean; manual?: boolean } = {},
 ) {
   const fail = (): never => {
     throw new Error("Booking acceptance unavailable");
@@ -55,19 +57,32 @@ export async function preparePricingAcceptance(
   )
     return fail();
   const command = parseBookingQuoteAcceptanceInput(input, current.quote, disclosure.policy);
+  // Bank transfer and PayPal while their acceptance is off are unavailable, not stale prices.
+  // They wait for the guest's payment in either acceptance mode, so the request switch is not needed.
+  const manual = options.manual === true && pricingManualQuoteSupported(current.quote);
+  if (command && !manual && isManualPricingPaymentMethod(current.quote.paymentMethod))
+    throw new Error("Manual payment acceptance unavailable");
   // Match the currently implemented lifecycle/revenue composition before effects.
+  const mode = current.quote.acceptanceMode;
   const payAtProperty =
-    current.quote.acceptanceMode === "instant" &&
+    (mode === "instant" || (mode === "request" && options.request === true)) &&
     current.quote.paymentMethod === "pay_at_property" &&
     current.quote.evidence.dueNowMinor === "0" &&
     current.quote.evidence.dueLaterMinor === current.quote.evidence.totalMinor;
-  const card = options.card === true && pricingCardQuoteSupported(current.quote);
-  // A card quote while online card acceptance is off is unavailable, not a stale price.
+  // A request while hotel-confirmed acceptance is off is unavailable, not a stale price.
+  if (command && mode === "request" && options.request !== true && !manual)
+    throw new Error("Request acceptance unavailable");
+  // A card quote that leaves the rest to pay at the property also needs the deposits switch (VAY-2205).
+  const card =
+    options.card === true &&
+    pricingCardQuoteSupported(current.quote) &&
+    (options.deposits === true || !pricingCardQuoteSplit(current.quote));
+  // Likewise a card quote while online card acceptance is off.
   if (command && !card && current.quote.paymentMethod === "card")
     throw new Error("Card acceptance unavailable");
   if (
     !command ||
-    !(payAtProperty || card) ||
+    !(payAtProperty || card || manual) ||
     !pricingRoomRevenueProjection(current.quote, current.calculation?.charges)
   )
     return fail();

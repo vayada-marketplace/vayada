@@ -43,8 +43,8 @@ export function PropertySection({
   return (
     <SettingsSection
       id="property-details"
-      title={t("settings.property.title")}
-      description={t("settings.property.description")}
+      title={t("settings.property.locationTitle")}
+      description={t("settings.property.locationDescription")}
     >
       <SettingsCard
         footer={

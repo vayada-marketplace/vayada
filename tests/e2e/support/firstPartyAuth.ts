@@ -2,9 +2,9 @@ import type { Page, Request, Route } from "@playwright/test";
 
 export type FirstPartyAuthSurface = {
   baseURL: string;
-  key: "marketplace" | "bookingAdmin" | "pms" | "admin";
+  key: "bookingAdmin" | "pms" | "admin";
   label: string;
-  surface: "marketplace-web" | "booking-admin" | "pms-web" | "platform-admin";
+  surface: "booking-admin" | "pms-web" | "platform-admin";
 };
 
 const startsPlainServers = process.env.CI === "true" || process.env.E2E_START_SERVERS === "1";
@@ -23,17 +23,6 @@ function authBaseURL(
 }
 
 export const firstPartyAuthSurfaces: FirstPartyAuthSurface[] = [
-  {
-    baseURL: authBaseURL(
-      "E2E_MARKETPLACE_BASE_URL",
-      "http://marketplace.localhost:3000",
-      "http://marketplace.localhost:3100",
-      "https://marketplace.localhost",
-    ),
-    key: "marketplace",
-    label: "Marketplace",
-    surface: "marketplace-web",
-  },
   {
     baseURL: authBaseURL(
       "E2E_BOOKING_ADMIN_BASE_URL",
@@ -148,12 +137,12 @@ export async function mockFirstPartyAuth(
   return records;
 }
 
-export function authSession(surface: FirstPartyAuthSurface, userType?: "creator" | "hotel") {
+export function authSession(surface: FirstPartyAuthSurface) {
   return {
     accessToken: `access-${surface.key}`,
     csrfToken: `csrf-${surface.key}`,
     organizationId: "11111111-1111-4111-8111-111111111111",
-    organizationKind: userType === "creator" ? "creator_workspace" : "hotel_group",
+    organizationKind: "hotel_group",
     resources: {
       "booking:booking_hotel": ["hotel-e2e"],
       "platform:platform_admin": ["platform-e2e"],
@@ -164,7 +153,6 @@ export function authSession(surface: FirstPartyAuthSurface, userType?: "creator"
       id: `user-${surface.key}`,
       name: "Auth Regression",
       status: "active",
-      ...(userType ? { type: userType } : {}),
     },
     workosOrganizationId: "org_workos_e2e",
   };

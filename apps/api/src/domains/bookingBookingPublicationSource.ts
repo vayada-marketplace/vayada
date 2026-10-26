@@ -32,13 +32,17 @@ type SettingsRow = QueryResultRow & {
   supportedLanguages: string[];
   headerLogoUrl: string | null;
   showContactButton: boolean;
+  /** Retired (VAY-2263): selected as FALSE so the settings source hash keeps its shape. */
   showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
+  /** Retired (VAY-2263): selected as FALSE so the settings source hash keeps its shape. */
   referAGuestModuleEnabled: boolean;
   heroSubtext: string | null;
   hasActivePromos: boolean;
   updatedAt: Date | string;
+  /** Design Studio's hero heading; selected last and hashed only when set (VAY-2318). */
+  heroHeading: string | null;
 };
 type LoadedBooking = {
   sources: BookingSource[];
@@ -71,7 +75,7 @@ export function createBookingBookingPublicationSource(config: {
     async getBookingLaunchEvidence(request) {
       try {
         const loaded = await load(pool, config.design, config.guestRules, request);
-        if (!loaded) return unavailableEvidence();
+        if (typeof loaded === "string") return unavailableEvidence("provider", loaded);
         return deepFreeze({
           outcome: "evidence",
           port: "booking",
@@ -94,7 +98,7 @@ export function createBookingBookingPublicationSource(config: {
           ],
         });
       } catch {
-        return unavailableEvidence("system");
+        return unavailableEvidence("system", "owner_read_failed");
       }
     },
     async getSnapshot(request) {
@@ -109,7 +113,8 @@ export function createBookingBookingPublicationSource(config: {
             entityType !== BOOKING_LAUNCH_DERIVED_BINDING_SOURCE_ENTITY_TYPE,
         );
         if (
-          !loaded?.content ||
+          typeof loaded === "string" ||
+          !loaded.content ||
           loaded.blockers.page.length ||
           loaded.blockers.guest.length ||
           sourceKeys(loaded.sources) !== sourceKeys(expected)
@@ -140,14 +145,15 @@ async function load(
   designPort: BookingDesignReadinessPort,
   policyPort: BookingGuestChoicePublicationReader,
   scope: { organizationId: string; propertyId: string },
-): Promise<LoadedBooking | null> {
+): Promise<LoadedBooking | string> {
   const [settingsResult, rawDesign, rawPolicy] = await Promise.all([
     pool.query<SettingsRow>(SETTINGS_SQL, [scope.organizationId, scope.propertyId]),
     designPort.getBookingDesignReadiness(scope),
     policyPort.getCurrentGuestRules(scope),
   ]);
   const settings = settingsResult.rows.length === 1 ? settingsResult.rows[0]! : null;
-  if (!settings) return null;
+  // Booking settings and their link come with the hotel; no setup step creates them.
+  if (!settings) return "booking_settings_missing";
   const design = parseBookingDesignReadinessResult(rawDesign, scope);
   const policy = rawPolicy === null ? null : parseBookingGuestPolicyChoices(rawPolicy.choices);
   if (
@@ -160,14 +166,20 @@ async function load(
       !Number.isFinite(Date.parse(rawPolicy.confirmedAt)) ||
       new Date(rawPolicy.confirmedAt).toISOString() !== rawPolicy.confirmedAt)
   )
-    return null;
-  if (!design || design.outcome === "provider_failure" || (rawPolicy !== null && !policy))
-    return null;
+    return "guest_policy_scope_invalid";
+  if (!design) return "booking_design_invalid";
+  if (design.outcome === "provider_failure") return design.error.code;
+  if (rawPolicy !== null && !policy) return "guest_policy_invalid";
 
+  // Without a hero heading the row hashes as it did before VAY-2318, so those pages stay current.
+  // JavaScript's trim, as the public profile parser checks it (SQL BTRIM strips only spaces).
+  const heroHeading = settings.heroHeading?.trim() || null;
+  const hashed: Record<string, unknown> = { ...settings };
+  if (heroHeading === null) delete hashed["heroHeading"];
   const settingsSource = source(
     "booking_settings",
     scope.propertyId,
-    `sha256:${sha256(JSON.stringify(settings))}`,
+    `sha256:${sha256(JSON.stringify(hashed))}`,
   );
   const pageSource = design.outcome === "ready" ? design.designSource : settingsSource;
   const guestSource = source(
@@ -209,11 +221,11 @@ async function load(
     branding: {
       logoUrl: settings.headerLogoUrl,
       showContactButton: settings.showContactButton,
-      showReferAGuestButton: settings.referAGuestModuleEnabled && settings.showReferAGuestButton,
+      showReferAGuestButton: false,
       showLanguageSelector: settings.showLanguageSelector,
       showCurrencySelector: settings.showCurrencySelector,
       heroImage: hero,
-      heroHeading: design.snapshot.profile.displayName,
+      heroHeading: heroHeading ?? design.snapshot.profile.displayName,
       heroSubtext: settings.heroSubtext ?? design.snapshot.profile.shortDescription,
       primaryColor: design.snapshot.appearance.primaryColor,
       fontPairing: design.snapshot.appearance.fontPairing,
@@ -229,7 +241,7 @@ async function load(
     capabilities: {
       instantBook: settings.acceptanceMode === "instant",
       promoCodes: settings.hasActivePromos,
-      referralCodes: settings.referAGuestModuleEnabled,
+      referralCodes: false,
     },
     supportedQuoteParameters: {
       minRooms: 1,
@@ -263,28 +275,17 @@ SELECT settings.acceptance_mode AS "acceptanceMode",
        settings.supported_languages AS "supportedLanguages",
        header_logo.public_cdn_url AS "headerLogoUrl",
        settings.show_contact_button AS "showContactButton",
-       settings.show_refer_a_guest_button AS "showReferAGuestButton",
+       FALSE AS "showReferAGuestButton",
        settings.show_language_selector AS "showLanguageSelector",
        settings.show_currency_selector AS "showCurrencySelector",
-       EXISTS (
-         SELECT 1
-         FROM identity.product_entitlements entitlement
-         WHERE entitlement.organization_id = $1::uuid
-           AND entitlement.product = 'pms'
-           AND entitlement.entitlement_key = 'module:affiliates'
-           AND entitlement.status = 'active'
-           AND entitlement.resource_product = 'pms'
-           AND entitlement.resource_type = 'pms_property'
-           AND entitlement.resource_id = settings.property_id::text
-           AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
-           AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
-       ) AS "referAGuestModuleEnabled",
+       FALSE AS "referAGuestModuleEnabled",
        NULLIF(BTRIM(settings.hero_subtext), '') AS "heroSubtext",
        settings.updated_at AS "updatedAt",
        EXISTS (SELECT 1 FROM booking.promo_definitions promo
          WHERE promo.property_id = settings.property_id AND promo.status = 'active'
            AND promo.is_active AND (promo.valid_from IS NULL OR promo.valid_from <= current_date)
-           AND (promo.valid_until IS NULL OR promo.valid_until >= current_date)) AS "hasActivePromos"
+           AND (promo.valid_until IS NULL OR promo.valid_until >= current_date)) AS "hasActivePromos",
+       settings.hero_heading AS "heroHeading"
 FROM booking.booking_settings settings
 LEFT JOIN LATERAL (
   SELECT variant.public_cdn_url
@@ -339,10 +340,11 @@ const ownerBlocker = (code: string): BookingLaunchOwnerBlocker => ({
   scope: "launch_configuration",
   kind: "user_fixable",
 });
-const unavailableEvidence = (errorSource: "provider" | "system" = "provider") => ({
+const unavailableEvidence = (errorSource: "provider" | "system", code: string) => ({
   outcome: "unavailable" as const,
   port: "booking" as const,
   errorSource,
+  code,
 });
 const unavailableSnapshot = () => ({ outcome: "unavailable" as const, owner: "booking" as const });
 const sourceKeys = (sources: readonly SourceEntityRevision[]) =>

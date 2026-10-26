@@ -155,9 +155,14 @@ describe("target public bookability publication", () => {
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
       "UPDATE distribution.public_room_offer_snapshots offer",
     );
-    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("SET payment_options = CASE");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
-      "offer.rate_summary ->> 'rateType', '')) = 'non_refundable'",
+      "SET payment_options = candidate.payment_options",
+    );
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
+      "AND offer.payment_options IS DISTINCT FROM candidate.payment_options",
+    );
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
+      "current_offer.rate_summary ->> 'rateType', '')) = 'non_refundable'",
     );
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("THEN ARRAY['card']::text[]");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("AS pay_at_property_ready");

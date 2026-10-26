@@ -12,9 +12,9 @@ import {
 
 import {
   BOOKING_DESIGN_FONT_PAIRINGS,
-  BOOKING_DESIGN_PRIMARY_COLORS,
   createBookingDesignButtonColors,
   createBookingDesignSourceRevision,
+  isBookingDesignPrimaryColor,
   parseBookingDesignRevision,
   type BookingDesignReadPort,
   type BookingDesignFontPairing,
@@ -104,7 +104,8 @@ export type BookingDesignRendererSnapshot = Readonly<{
   profile: Readonly<{
     displayName: string;
     contentLocale: string;
-    shortDescription: string;
+    /** VAY-2247: null when the hotel has no description yet. */
+    shortDescription: string | null;
   }>;
   cover:
     | Readonly<{ kind: "fallback"; path: typeof BOOKING_DESIGN_COVER_FALLBACK_PATH }>
@@ -499,7 +500,7 @@ function parseRendererAppearance(
       "bodyFontFamily",
       "button",
     ]) ||
-    !BOOKING_DESIGN_PRIMARY_COLORS.includes(value["primaryColor"] as BookingDesignPrimaryColor) ||
+    !isBookingDesignPrimaryColor(value["primaryColor"]) ||
     !Object.hasOwn(BOOKING_DESIGN_FONT_PAIRINGS, value["fontPairing"] as PropertyKey)
   ) {
     return null;
@@ -534,15 +535,16 @@ function parseRendererProfile(value: unknown): BookingDesignRendererSnapshot["pr
     value["displayName"].trim().length === 0 ||
     value["displayName"].trim() !== value["displayName"] ||
     !HOTEL_CATALOG_CONTENT_LOCALES.includes(value["contentLocale"] as never) ||
-    typeof value["shortDescription"] !== "string" ||
-    normalizeHotelCatalogStep1Summary(value["shortDescription"]) !== value["shortDescription"]
+    (value["shortDescription"] !== null &&
+      (typeof value["shortDescription"] !== "string" ||
+        normalizeHotelCatalogStep1Summary(value["shortDescription"]) !== value["shortDescription"]))
   ) {
     return null;
   }
   return Object.freeze({
     displayName: value["displayName"],
     contentLocale: value["contentLocale"] as string,
-    shortDescription: value["shortDescription"],
+    shortDescription: value["shortDescription"] as string | null,
   });
 }
 

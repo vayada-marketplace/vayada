@@ -1,5 +1,9 @@
 import type { Page, Route } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
+import { mockBookingModules } from "./featureHubModuleMocks";
+import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
+import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
+import { mockGoogleMaps } from "./googleMapsFake";
 
 export const PMS_WEB_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
 export const PMS_WEB_ROOM_TYPE_ID = "room_type_alpine_suite";
@@ -235,7 +239,66 @@ export async function mockPmsWebAuthenticatedSession(
   }, propertyId);
 }
 
+// Every permission key pms-web checks, as a hotel_owner holds them, so the owner sees the whole product.
+export const PMS_WEB_OWNER_PERMISSIONS = [
+  "booking.addons.manage",
+  "booking.addons.read",
+  "booking.analytics.read",
+  "booking.design.manage",
+  "booking.design.read",
+  "booking.flow.manage",
+  "booking.flow.read",
+  "booking.promos.manage",
+  "booking.promos.read",
+  "booking.settings.manage",
+  "booking.settings.read",
+  "finance.billing.manage",
+  "identity.staff.manage",
+  "pms.calendar.manage",
+  "pms.calendar.read",
+  "pms.channel_manager.read",
+  "pms.dashboard.finance.read",
+  "pms.dashboard.operations.read",
+  "pms.dashboard.read",
+  "pms.finance.manage",
+  "pms.finance.read",
+  "pms.guest_contact.read",
+  "pms.inbox.read",
+  "pms.inbox.reply",
+  "pms.operations.manage",
+  "pms.operations.read",
+  "pms.reservation.cancel",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.room_status.read",
+  "pms.rooms_rates.manage",
+  "pms.rooms_rates.read",
+  "pms.settings.manage",
+  "pms.settings.read",
+];
+
 export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
+  // The app layout refuses to render without self-access (VAY-1439), and the sidebar checks
+  // Financials access for anyone holding pms.finance.read (VAY-1138). These owner defaults are
+  // context routes, so a spec's own page.route for either wins whenever it was registered.
+  await page.context().route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "pms-owner-membership",
+        roleKey: "hotel_owner",
+        permissions: PMS_WEB_OWNER_PERMISSIONS,
+      },
+    }),
+  );
+  await page
+    .context()
+    .route("**/api/finance/properties/*/financials/access", (route) =>
+      route.fulfill({ status: 204 }),
+    );
+  // The room Location box loads Google Maps when the dev server has a key (CI's is a fake, VAY-2126): never the
+  // real script. A context route, so a spec's own mockGoogleMaps(page, ...) wins.
+  await mockGoogleMaps(page.context());
+
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({
       json: {
@@ -295,6 +358,9 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       },
     }),
   );
+  await mockSetupChecklistUnavailable(page);
+  // VAY-2246: an account that accepted its terms and DPA at sign-up, so no banner.
+  await mockHotelAccountAgreements(page);
   await page.route("**/api/hotel-setup/status**", (route) =>
     route.fulfill({
       json: createAdaptiveHotelSetupStatusMock({
@@ -440,13 +506,14 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       json: {
         hotelId: PMS_WEB_PROPERTY_ID,
         canManage: true,
-        supportedModules: ["affiliates"],
+        supportedModules: [],
         activeModules: [],
         activations: [],
       },
     }),
   );
   await mockNavigationModules(page, PMS_WEB_PROPERTY_ID);
+  await mockBookingModules(page, PMS_WEB_PROPERTY_ID);
   await page.route(
     `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/linked-inventory-groups`,
     (route) => route.fulfill({ json: { propertyId: PMS_WEB_PROPERTY_ID, items: [] } }),
@@ -457,6 +524,38 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
     route.fulfill({ json: targetList([pmsWebRoomType]) }),
   );
+  // No prices yet (the Rooms list reads the publication). A context route, so a spec's own page.route for
+  // pricing-v2 wins whatever order it was registered in.
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+      route.fulfill({ status: 404, json: { code: "not_found" } }),
+    );
+  // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/payment-methods`, (route) =>
+      route.fulfill({ json: { acceptanceEnabled: false, readyMethods: [] } }),
+    );
+  // Card isn't ready on the booking page, as in production today (VAY-2205).
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/card-readiness`, (route) =>
+      route.fulfill({
+        json: {
+          card: { ready: false, reason: "switch_off", charge: "at_booking" },
+          deposits: { ready: false },
+        },
+      }),
+    );
+  // Every published rate sells (VAY-2304: nothing in the not-selling list).
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/not-selling`, (route) =>
+      route.fulfill({
+        json: { version: "pricing-rates-not-selling.v1", publishedRevision: null, rates: [] },
+      }),
+    );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/plan-limits`, (route) =>
     route.fulfill({
       json: {

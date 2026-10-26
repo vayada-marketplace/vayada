@@ -38,6 +38,7 @@ import {
 } from "@vayada/domain-hotels";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
 import type { HotelSetupTrackCommandRepository } from "../domains/hotelSetupTrackCommandRepository.js";
 import {
   BookingContactPublicationConflictError,
@@ -46,6 +47,7 @@ import {
   type UpdateBookingPropertySettingsBody,
 } from "./bookingSettings.js";
 import { enforceRoutePolicy } from "./policy.js";
+import { livePublicPageRefresh, refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
 export type SharedHotelSetupEntryProduct = ProductEntryDecision["requestedProduct"];
 export type SharedPropertyTypeCatalog = {
@@ -140,6 +142,10 @@ type SharedHotelSetupStatusRoutesOptions = {
   profileCommand?: HotelSetupPropertyProfileUpdate;
   propertyAccessRepository?: PropertyAccessRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
+  /** Refreshes the live booking page after hotel-detail saves (VAY-2129). */
+  refreshPublicPage?: (propertyId: string) => Promise<void>;
+  /** Where the public site serves setup publications, refreshes a live page instead (VAY-2344). */
+  bookingPublicationRefresh?: BookingPublicationRefreshPort;
   now?: () => Date;
 };
 
@@ -161,7 +167,7 @@ type SharedHotelSetupTrackAccessError = {
   message: string;
 };
 
-const ENTRY_PRODUCTS: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms", "marketplace"];
+const ENTRY_PRODUCTS: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms"];
 const SHARED_PROPERTY_TYPE_VALUES = new Set<string>(
   SHARED_PROPERTY_TYPE_OPTIONS.map(({ value }) => value),
 );
@@ -182,6 +188,15 @@ export async function registerSharedHotelSetupStatusRoutes(
     now = () => new Date(),
   } = options;
   const trackUpdateAccess = new WeakMap<FastifyRequest, ReturnType<typeof enforceRoutePolicy>>();
+  refreshPublicPageAfterSaves(
+    app,
+    [
+      "PUT /properties/:propertyId/profile",
+      "PUT /properties/:propertyId/public-profile",
+      "PUT /properties/:propertyId/launch-settings",
+    ],
+    livePublicPageRefresh(options),
+  );
 
   app.addHook("onClose", async () => {
     await Promise.all([repository.close?.(), trackCommandRepository.close()]);
@@ -714,12 +729,7 @@ function ensurePublicPropertyPublicationPermission(
   context: ReturnType<typeof enforceRoutePolicy>,
   reply: FastifyReply,
 ): boolean {
-  if (
-    hasPermission(context, "marketplace.profile.manage") ||
-    hasPermission(context, "booking.settings.manage")
-  ) {
-    return true;
-  }
+  if (hasPermission(context, "booking.settings.manage")) return true;
   reply.status(403).send({
     code: "missing_permission",
     detail: "Public profile and location publication require hotel-owner access.",
@@ -956,7 +966,6 @@ export function hotelSetupPropertyProfileUpdateHandler(
     if (
       !context.actor.providerIdentity.sessionId ||
       context.membership.roleKey !== "hotel_owner" ||
-      !hasPermission(context, "marketplace.profile.manage") ||
       !context.linkedResources.some(
         (link) =>
           link.product === "hotel_catalog" &&
@@ -991,7 +1000,10 @@ export function hotelSetupPropertyProfileUpdateHandler(
         detail: "Hotel details could not be saved. Please try again.",
       });
     }
-    if (result.status === "invalid") return sendInvalidProfile(reply, result.fields);
+    if (result.status === "invalid") {
+      sendInvalidProfile(reply, result.fields);
+      return reply;
+    }
     if (result.status === "conflict")
       return reply.status(409).send({
         code: "profile_revision_conflict",
@@ -1214,7 +1226,7 @@ function parseEntryProduct(
   }
   reply.status(422).send({
     code: "invalid_entry_product",
-    detail: "entryProduct must be booking, pms, or marketplace.",
+    detail: "entryProduct must be booking or pms.",
   });
   return false;
 }
@@ -1415,6 +1427,8 @@ function parseCreatePropertyProfile(
       "localityPublic",
       "geoPublic",
       "mapDisplayMode",
+      "area",
+      "arrivalDirections",
     ],
     "location",
     errors,
@@ -1495,6 +1509,8 @@ function propertyProfileUpdate(
       "localityPublic",
       "geoPublic",
       "mapDisplayMode",
+      "area",
+      "arrivalDirections",
     ],
     "patch.location",
     errors,
@@ -1552,6 +1568,13 @@ function parseProfileLocation(
     addFieldError(errors, "location.timezone", "timezone must be an IANA timezone.");
   }
 
+  const area = optionalString(input["area"], "location.area", errors, { maxLength: 120 });
+  const arrivalDirections = optionalString(
+    input["arrivalDirections"],
+    "location.arrivalDirections",
+    errors,
+    { maxLength: 1000 },
+  );
   const latitude = optionalNumber(input["latitude"], "location.latitude", errors, {
     min: -90,
     max: 90,
@@ -1605,8 +1628,9 @@ function parseProfileLocation(
       requiredString(input["streetAddress"], "location.streetAddress", errors, {
         maxLength: 240,
       }) ?? "",
+    // Optional: many addresses have no postal code (VAY-2289).
     postalCode:
-      requiredString(input["postalCode"], "location.postalCode", errors, {
+      optionalString(input["postalCode"], "location.postalCode", errors, {
         maxLength: 32,
       }) ?? "",
     timezone: timezone ?? "",
@@ -1615,6 +1639,10 @@ function parseProfileLocation(
     localityPublic,
     geoPublic,
     mapDisplayMode,
+    // VAY-2322 F2: optional, and only when given. Left out of a patch, the stored value stays (the merge
+    // keeps it); "" clears it.
+    ...(area ? { area } : {}),
+    ...(arrivalDirections ? { arrivalDirections } : {}),
   };
 }
 
@@ -1870,22 +1898,6 @@ const SETUP_TASK_REGISTRY: readonly SetupTaskDefinition[] = [
     dependencies: [],
   },
   {
-    taskId: "public_profile",
-    track: "creator_marketplace",
-    requirementOwnerDomain: "hotel_catalog",
-    permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
-    actionableBy: "owner",
-    dependencies: ["shared_identity"],
-  },
-  {
-    taskId: "creator_offer",
-    track: "creator_marketplace",
-    requirementOwnerDomain: "marketplace",
-    permissions: ["marketplace.profile.manage"],
-    actionableBy: "owner",
-    dependencies: ["shared_identity", "public_profile"],
-  },
-  {
     taskId: "rooms_rates_availability",
     track: "hotel_operations",
     requirementOwnerDomain: "pms",
@@ -1956,7 +1968,6 @@ const ENTRY_PRODUCT_WORKSPACE_PERMISSIONS: Record<
     "pms.finance.read",
     "pms.settings.read",
   ],
-  marketplace: ["marketplace.collaboration.read"],
 };
 
 function entryDecision(input: {
@@ -1968,7 +1979,7 @@ function entryDecision(input: {
 }): ProductEntryDecision | null {
   const { context, entryProduct, propertyId, selectedTracks, tracks } = input;
   if (!entryProduct) return null;
-  const track = entryProduct === "marketplace" ? "creator_marketplace" : "hotel_operations";
+  const track = "hotel_operations";
   if (!propertyId) {
     return {
       requestedProduct: entryProduct,
@@ -2140,11 +2151,6 @@ export function buildPropertySetupPlan(input: {
       "payment",
       "direct_booking_publication",
     ]),
-    marketplacePublish: launchReadiness(tasks, selectedTracks, "creator_marketplace", [
-      "shared_identity",
-      "public_profile",
-      "creator_offer",
-    ]),
   };
 
   return {
@@ -2198,7 +2204,6 @@ function propertySetupPlanRevision(input: {
     relevantProducts.add("pms");
     relevantProducts.add("booking");
   }
-  if (selectedTrackSet.has("creator_marketplace")) relevantProducts.add("marketplace");
 
   const revisionState = {
     revisionContract: "property-setup-plan-revision.v2",
@@ -2345,7 +2350,6 @@ function launchReadiness(
 }
 
 function setupTaskProduct(taskId: SetupTaskId): SharedHotelSetupEntryProduct | null {
-  if (taskId === "public_profile" || taskId === "creator_offer") return "marketplace";
   if (taskId === "rooms_rates_availability") return "pms";
   if (
     taskId === "guest_settings_policies" ||
@@ -2366,7 +2370,6 @@ function hasProductPropertyAccess(
   const resourceType = {
     booking: "booking_hotel",
     pms: "pms_property",
-    marketplace: "hotel_profile",
   } as const;
   return context.linkedResources.some(
     (resource) =>

@@ -83,7 +83,7 @@ export async function runRoomShuffleAcceptance(args: Args): Promise<void> {
     await api.json("PATCH", `/api/pms/properties/${propertyId}/calendar-settings`, {
       autoRearrangeEnabled: true,
     });
-    await page.goto(`${NEXT_STACK_ORIGINS.pms}/settings`);
+    await page.goto(`${NEXT_STACK_ORIGINS.pms}/settings/calendar`);
     const toggle = page.getByRole("switch", { name: "Optimize room assignments" });
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     const disableResponse = page.waitForResponse(
@@ -119,7 +119,7 @@ export async function runRoomShuffleAcceptance(args: Args): Promise<void> {
   });
 
   await test.step("persist automatic room assignment on and pack a same-day turnover", async () => {
-    await page.goto(`${NEXT_STACK_ORIGINS.pms}/settings`);
+    await page.goto(`${NEXT_STACK_ORIGINS.pms}/settings/calendar`);
     const toggle = page.getByRole("switch", { name: "Optimize room assignments" });
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     const enableResponse = page.waitForResponse(

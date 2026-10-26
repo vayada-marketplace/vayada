@@ -217,6 +217,9 @@ export type PublicBookabilityBranding = {
   showReferAGuestButton?: boolean;
   showLanguageSelector?: boolean;
   showCurrencySelector?: boolean;
+  /** Display-only currencies a guest may switch to, defaultCurrency first; present only with
+   * more than one. Quotes and charges stay in the pricing currency (supportedCurrencies). */
+  displayCurrencies?: string[];
   heroImage: string | null;
   heroHeading: string | null;
   heroSubtext: string | null;
@@ -433,6 +436,8 @@ export type PublicBookabilityProducerInputs = {
     supportedCurrencies: string[];
     onlinePayment: boolean;
     payAtProperty: boolean;
+    /** Finance's ready methods; bank transfer or PayPal also make the hotel payable (VAY-2139). */
+    readyPaymentMethods?: readonly string[];
   };
   bookingWeb: {
     canonicalUrl: string;
@@ -470,6 +475,11 @@ export type PublicBookabilityQuoteProducerInputs = {
   };
 };
 
+/** Bank transfer and PayPal are paid to the hotel directly (VAY-2139). */
+export function publicManualPaymentReady(methods: readonly unknown[] | undefined): boolean {
+  return !!methods?.some((method) => method === "bank_transfer" || method === "paypal");
+}
+
 export function buildPublicBookabilityProfileProjection(
   generatedAt: string,
   inputs: PublicBookabilityProducerInputs,
@@ -482,7 +492,10 @@ export function buildPublicBookabilityProfileProjection(
     referralCodes: inputs.booking.capabilities.referralCodes,
     bookingDeepLinks: inputs.bookingWeb.bookingDeepLinks,
   };
-  const hasPublicPaymentMethod = capabilities.onlinePayment || capabilities.payAtProperty;
+  const hasPublicPaymentMethod =
+    capabilities.onlinePayment ||
+    capabilities.payAtProperty ||
+    publicManualPaymentReady(inputs.finance.readyPaymentMethods);
   const bookabilityReasonCodes: PublicBookabilityReasonCode[] = [];
 
   if (!inputs.pms.availabilityReady) {
@@ -519,7 +532,7 @@ export function buildPublicBookabilityProfileProjection(
       location: sanitizeLocation(inputs.hotelCatalog.location),
       summary: inputs.hotelCatalog.summary,
       branding: inputs.booking.branding ? { ...inputs.booking.branding } : undefined,
-      images: inputs.hotelCatalog.images.map(sanitizeImage),
+      images: sanitizeImages(inputs.hotelCatalog.images),
       amenities: copyStrings(inputs.hotelCatalog.amenities),
       publicContacts: sanitizePublicContacts(inputs.hotelCatalog.publicContacts),
       policies: sanitizePolicies(inputs.booking.policies),
@@ -754,34 +767,77 @@ function sanitizeQuoteRequest(
   };
 }
 
+/** The page's rules for a hotel's address, time zone, links and email. The parser enforces them;
+ * readiness and the cleaning below use the same ones (VAY-2292). */
+export const PUBLIC_BOOKABILITY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const PUBLIC_BOOKABILITY_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isPublicHttpsUrl(value: string, originOnly = false): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !url.hash &&
+      (!originOnly || (url.pathname === "/" && !url.search))
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isValidTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Optional details the page can't show are trimmed or left off rather than failing it (VAY-2292).
 function sanitizeLocation(location: PublicBookabilityLocation): PublicBookabilityLocation {
   return {
-    country: location.country,
-    city: location.city,
-    region: location.region ?? null,
+    country: location.country.trim().toUpperCase(),
+    city: location.city.trim(),
+    region: location.region?.trim() || null,
     latitude: location.latitude ?? null,
     longitude: location.longitude ?? null,
   };
 }
 
-function sanitizeImage(image: PublicBookabilityImage): PublicBookabilityImage {
-  return {
-    url: image.url,
-    alt: image.alt ?? null,
-  };
+function sanitizeImages(images: readonly PublicBookabilityImage[]): PublicBookabilityImage[] {
+  const urls = new Set<string>();
+  return images.flatMap((image) => {
+    if (urls.has(image.url)) return [];
+    urls.add(image.url);
+    return [{ url: image.url, alt: image.alt?.trim() || null }];
+  });
 }
 
 function sanitizePublicContacts(
   contacts: PublicBookabilityPublicContact[] | undefined,
 ): PublicBookabilityPublicContact[] {
-  return (contacts ?? [])
-    .filter(
-      (contact) =>
-        PUBLIC_BOOKABILITY_CONTACT_CHANNEL_TYPES.includes(contact.type) &&
-        typeof contact.value === "string" &&
-        contact.value.trim().length > 0,
+  const seen = new Set<string>();
+  return (contacts ?? []).flatMap((contact) => {
+    if (
+      !PUBLIC_BOOKABILITY_CONTACT_CHANNEL_TYPES.includes(contact.type) ||
+      typeof contact.value !== "string"
     )
-    .map((contact) => ({ type: contact.type, value: contact.value.trim() }));
+      return [];
+    const value = contact.value.trim();
+    const key = `${contact.type}\0${value}`;
+    if (!value || value.includes("\0") || seen.has(key) || !publicContactValue(contact.type, value))
+      return [];
+    seen.add(key);
+    return [{ type: contact.type, value }];
+  });
+}
+
+function publicContactValue(type: PublicBookabilityPublicContact["type"], value: string): boolean {
+  if (type === "email") return PUBLIC_BOOKABILITY_EMAIL_PATTERN.test(value);
+  return type === "phone" || type === "whatsapp" || isPublicHttpsUrl(value);
 }
 
 function sanitizePolicies(policies: PublicBookabilityPolicies): PublicBookabilityPolicies {

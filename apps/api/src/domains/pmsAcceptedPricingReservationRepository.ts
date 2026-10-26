@@ -9,6 +9,10 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
 import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
+import {
+  assignFirstFreeRoomUnits,
+  lockRoomTypesForUnitAssignment,
+} from "./pmsRoomUnitAssignment.js";
 import { lockCurrentPmsPricingEntitlement } from "./replacementPricingAuthorization.js";
 
 type ReceiptRow = {
@@ -59,6 +63,13 @@ export function createPgPmsAcceptedPricingReservationPort(
         const receipts = await lockReceipts(client, command);
         const byType = receiptByType(command, receipts);
         if (!byType) throw conflict();
+        // VAY-2361: unit locks before the assignment rows lock their room types, in the order
+        // the Assign button and room reorder use.
+        await lockRoomTypesForUnitAssignment(
+          client,
+          command.propertyId,
+          command.rooms.map(({ roomTypeId }) => roomTypeId),
+        );
         const existing = await lockAssignments(client, command);
         const replayed = existing.length > 0;
         if (replayed) {
@@ -125,6 +136,7 @@ export function createPgPmsAcceptedPricingReservationPort(
           },
           spans,
         );
+        await assignRoomUnits(client, command);
         await client.query("RELEASE SAVEPOINT pms_accepted_pricing_reservation");
         return {
           outcome: "adopted",
@@ -143,6 +155,26 @@ export function createPgPmsAcceptedPricingReservationPort(
       }
     },
   };
+}
+
+/** VAY-2361: the guest booked room types; give each room the first free unit, as the PMS Assign
+ * button would once inventory is settled. The booking must reach the PMS either way, so a failure
+ * here only leaves its rooms unassigned for the host, as before. */
+async function assignRoomUnits(client: PoolClient, command: PmsAcceptedPricingReservationCommand) {
+  await client.query("SAVEPOINT pms_room_unit_auto_assign");
+  try {
+    if ((await assignFirstFreeRoomUnits(client, command)).length > 0) {
+      await client.query(
+        "SET CONSTRAINTS pms.trg_pms_direct_booking_inventory_receipt_handoff IMMEDIATE",
+      );
+      await client.query(
+        "SET CONSTRAINTS pms.trg_pms_direct_booking_inventory_receipt_handoff DEFERRED",
+      );
+    }
+  } catch {
+    await client.query("ROLLBACK TO SAVEPOINT pms_room_unit_auto_assign");
+  }
+  await client.query("RELEASE SAVEPOINT pms_room_unit_auto_assign");
 }
 
 const uuid = (value: string) =>

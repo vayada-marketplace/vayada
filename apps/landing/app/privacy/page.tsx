@@ -1,5 +1,11 @@
 import { Navigation, Footer } from "@/components/layout";
 
+const H2 = "text-2xl font-bold text-primary-800 mb-4";
+const H3 = "text-xl font-semibold text-gray-900 mb-3";
+const TH = "border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900";
+const TD = "border border-gray-300 px-4 py-3";
+const LINK = "text-primary-600 hover:text-primary-700 underline";
+
 export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -9,23 +15,28 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> December 1, 2025
+              <strong>Effective Date:</strong> October 26, 2026
             </p>
           </div>
 
           <div className="prose prose-lg max-w-none space-y-8 text-gray-700">
             <p className="text-lg leading-relaxed">
-              This Privacy Policy describes how vayada ("we," "us," or "our"), a transparent
-              marketplace connecting hotels and travel creators (influencers), collects, uses,
-              processes, and shares the personal information of our users ("Hotel" or "Creator")
-              through our platform and related services (collectively, the "Services").
+              This Privacy Policy describes how vayada (&quot;we,&quot; &quot;us,&quot; or
+              &quot;our&quot;) collects, uses and shares personal data when you visit vayada.com or
+              use the vayada property management system, Booking Admin and booking engine
+              (collectively, the &quot;Services&quot;) on behalf of a hotel, villa or other
+              accommodation business (&quot;Hotel&quot;).
             </p>
             <p className="text-lg leading-relaxed">
-              By accessing or using our Services, you agree to the terms of this Privacy Policy.
+              If you are visiting or booking on a hotel&apos;s booking site that runs on vayada, see{" "}
+              <a href="#booking-guests" className={LINK}>
+                Section 9
+              </a>
+              .
             </p>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">1. Data Controller</h2>
+              <h2 className={H2}>1. Data Controller</h2>
               <p>
                 The Controller (Verantwortlicher) for data processing on our online offering, within
                 the meaning of the General Data Protection Regulation, is:
@@ -38,16 +49,21 @@ export default function PrivacyPage() {
                 <p className="mt-3">Represented by: Managing Director: Timo Christian Schreyer</p>
                 <p>
                   Contact: E-Mail:{" "}
-                  <a
-                    href="mailto:t.schreyer@vayada.com"
-                    className="text-primary-600 hover:text-primary-700 underline"
-                  >
+                  <a href="mailto:t.schreyer@vayada.com" className={LINK}>
                     t.schreyer@vayada.com
                   </a>
                 </p>
                 <p className="mt-3">
+                  For guest data on hotel booking sites and in the PMS, the Hotel is the controller
+                  and vayada is its processor; see{" "}
+                  <a href="#booking-guests" className={LINK}>
+                    Section 9
+                  </a>
+                  .
+                </p>
+                <p className="mt-3">
                   For full legal details, please refer to our{" "}
-                  <a href="/imprint" className="text-primary-600 hover:text-primary-700 underline">
+                  <a href="/imprint" className={LINK}>
                     Imprint
                   </a>
                   .
@@ -56,99 +72,86 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">
-                2. Information We Collect
-              </h2>
+              <h2 className={H2}>2. Information We Collect</h2>
               <p>
                 We collect information that identifies, relates to, describes, or is capable of
-                being associated with you ("Personal Data").
+                being associated with you (&quot;Personal Data&quot;).
               </p>
 
               <div className="mt-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  A. Information You Provide Directly
-                </h3>
+                <h3 className={H3}>A. Information You Provide Directly</h3>
                 <p className="mb-4">
-                  This information is collected when you create a profile, use our Services, or
-                  communicate with us.
+                  This information is collected when you create an account, set up a property, use
+                  the Services or communicate with us.
                 </p>
 
                 <div className="overflow-x-auto mt-6">
                   <table className="min-w-full border-collapse border border-gray-300">
                     <thead>
                       <tr className="bg-gray-100">
-                        <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">
-                          Data Category
-                        </th>
-                        <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">
-                          Examples of Data Collected
-                        </th>
-                        <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">
-                          Purpose
-                        </th>
+                        <th className={TH}>Data Category</th>
+                        <th className={TH}>Examples of Data Collected</th>
+                        <th className={TH}>Purpose and Legal Basis</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td className="border border-gray-300 px-4 py-3 font-medium">
-                          Account/Profile Data
+                        <td className={`${TD} font-medium`}>Account Data</td>
+                        <td className={TD}>
+                          Name, email address, password, phone number, profile photo, language, and
+                          the Hotel account and role you belong to.
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          Name, email address, password, company name (for Hotels), professional
-                          title, physical address, and phone number.
-                        </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To create and manage your user account and profile.
-                        </td>
-                      </tr>
-                      <tr className="bg-gray-50">
-                        <td className="border border-gray-300 px-4 py-3 font-medium">
-                          Creator Profile Data
-                        </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          Social media handles, follower count, audience demographics, niche/content
-                          categories, portfolio, content samples, and collaboration rate
-                          information.
-                        </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To showcase your profile to potential Hotel partners.
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="border border-gray-300 px-4 py-3 font-medium">
-                          Hotel Profile Data
-                        </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          Property details, unique features, location, brand guidelines, and
-                          collaboration preferences.
-                        </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To showcase the property and collaboration opportunities to Creators.
+                        <td className={TD}>
+                          To create and secure your account and let you work in your Hotel&apos;s
+                          account (Article 6(1) lit. b GDPR).
                         </td>
                       </tr>
                       <tr className="bg-gray-50">
-                        <td className="border border-gray-300 px-4 py-3 font-medium">
-                          Verification Data
+                        <td className={`${TD} font-medium`}>Property Data</td>
+                        <td className={TD}>
+                          Property name, address and map location, description and photos, contact
+                          details, rooms, rates, availability, policies, add-ons and the design of
+                          your booking site.
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          Information required to confirm the identity and legitimacy of the Hotel
-                          or Creator (may include business documents or official IDs, solely for
-                          verification purposes).
-                        </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To maintain a "Verified Community" and ensure quality and trust.
+                        <td className={TD}>
+                          To run your PMS and your booking site and to send your property to the
+                          channels you connect (Article 6(1) lit. b GDPR).
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-gray-300 px-4 py-3 font-medium">
-                          Communication Data
+                        <td className={`${TD} font-medium`}>Business and Payout Data</td>
+                        <td className={TD}>
+                          Company details, VAT number, invoice address, the plan you chose,
+                          invoices, and the Stripe account used for card payouts. Bank and identity
+                          details for payouts are collected and held by Stripe, not by vayada.
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          Messages, collaboration requests, and contact details exchanged between a
-                          Hotel and a Creator via the platform.
+                        <td className={TD}>
+                          To bill you, pay out card payments and meet tax and accounting rules
+                          (Article 6(1) lit. b and c GDPR).
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To facilitate direct connection and coordination.
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className={`${TD} font-medium`}>Guest Data</td>
+                        <td className={TD}>
+                          Bookings, guest names and contact details, stay details, payments and
+                          messages that you enter or that arrive through your booking site or
+                          connected channels, and the registration details your staff record at
+                          check-in (date of birth, identity document, gender, room and staff notes).
+                        </td>
+                        <td className={TD}>
+                          Processed on the Hotel&apos;s behalf and instructions as its processor
+                          (Article 28 GDPR); see Section 9.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className={`${TD} font-medium`}>Support and Contact Data</td>
+                        <td className={TD}>
+                          Messages you send us through the contact form, support requests from the
+                          apps, and our replies.
+                        </td>
+                        <td className={TD}>
+                          To answer you and improve the Services (Article 6(1) lit. b and f GDPR);
+                          see Section 8.
                         </td>
                       </tr>
                     </tbody>
@@ -157,9 +160,7 @@ export default function PrivacyPage() {
               </div>
 
               <div className="mt-8">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  B. Information Collected Automatically
-                </h3>
+                <h3 className={H3}>B. Information Collected Automatically</h3>
                 <p className="mb-4">
                   When you access our Services, we automatically collect certain data about your
                   device and activity.
@@ -169,52 +170,55 @@ export default function PrivacyPage() {
                   <table className="min-w-full border-collapse border border-gray-300">
                     <thead>
                       <tr className="bg-gray-100">
-                        <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">
-                          Data Category
-                        </th>
-                        <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">
-                          Examples of Data Collected
-                        </th>
-                        <th className="border border-gray-300 px-4 py-3 text-left font-semibold text-gray-900">
-                          Purpose
-                        </th>
+                        <th className={TH}>Data Category</th>
+                        <th className={TH}>Examples of Data Collected</th>
+                        <th className={TH}>Purpose and Legal Basis</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td className="border border-gray-300 px-4 py-3 font-medium">Usage Data</td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          IP address, browser type, operating system, pages viewed, time spent on
-                          pages, and referring URLs.
+                        <td className={`${TD} font-medium`}>Technical Data</td>
+                        <td className={TD}>
+                          IP address, browser type, operating system, the pages and actions you
+                          request, timestamps and error reports, recorded in our server logs.
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To improve platform functionality and troubleshoot errors.
+                        <td className={TD}>
+                          To keep the Services secure and working and to troubleshoot errors
+                          (Article 6(1) lit. f GDPR). Logs are kept for 30 days, then deleted.
                         </td>
                       </tr>
                       <tr className="bg-gray-50">
-                        <td className="border border-gray-300 px-4 py-3 font-medium">
-                          Tracking Data (Cookies)
+                        <td className={`${TD} font-medium`}>Login and Session Data</td>
+                        <td className={TD}>
+                          Session cookies and security tokens set when you sign in, including
+                          through Google sign-in, and the time and origin of your sign-ins.
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          Data collected via cookies, web beacons, and similar tracking
-                          technologies.
-                        </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To remember your preferences, provide personalized experiences, and
-                          analyze traffic.
+                        <td className={TD}>
+                          To keep you signed in and protect your account (Article 6(1) lit. b and f
+                          GDPR). These cookies are necessary and are deleted when the session ends.
                         </td>
                       </tr>
                       <tr>
-                        <td className="border border-gray-300 px-4 py-3 font-medium">
-                          Performance Data
+                        <td className={`${TD} font-medium`}>Website Analytics (vayada.com)</td>
+                        <td className={TD}>
+                          Only if you accept analytics cookies: which pages of vayada.com you view,
+                          your approximate country and the site you came from, collected through
+                          Cloudflare Web Analytics without a persistent identifier.
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          Metrics related to collaborations, such as link clicks, booking
-                          conversions, engagement rates, and other data used to "Track Real Impact."
+                        <td className={TD}>
+                          To understand how our website is used (Article 6(1) lit. a GDPR). You can
+                          change your choice at any time in the cookie settings.
                         </td>
-                        <td className="border border-gray-300 px-4 py-3">
-                          To provide measurable results to Hotels and build a reputation for
-                          Creators.
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className={`${TD} font-medium`}>Activity Records</td>
+                        <td className={TD}>
+                          Who changed what in a Hotel account, for example rate changes, booking
+                          actions and settings, with the time of the change.
+                        </td>
+                        <td className={TD}>
+                          To let Hotels trace changes, resolve disputes and prevent misuse (Article
+                          6(1) lit. f GDPR).
                         </td>
                       </tr>
                     </tbody>
@@ -224,86 +228,108 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">
-                3. How We Use Your Information
-              </h2>
+              <h2 className={H2}>3. How We Use Your Information</h2>
               <p>We use your personal data for the following purposes:</p>
               <ul className="list-disc list-inside ml-4 space-y-2 mt-4">
                 <li>
-                  <strong>To Operate the Marketplace:</strong> To provide and maintain the Services,
-                  including managing accounts and profiles, and processing user verification.
+                  <strong>To Provide the Services:</strong> To run your account, your PMS, your
+                  booking site and the hotel setup, and to let the people you invite work in your
+                  Hotel account.
                 </li>
                 <li>
-                  <strong>To Facilitate Connections:</strong> To allow Hotels to browse and filter
-                  Creators, and Creators to discover opportunities and apply for campaigns.
+                  <strong>To Take and Manage Bookings:</strong> To receive bookings from your
+                  booking site and connected channels, to process payments through the payment
+                  methods you enable, and to send booking emails to you and your guests on your
+                  behalf.
                 </li>
                 <li>
-                  <strong>For Direct Collaboration:</strong> To share contact information (name,
-                  email, etc.) between the Hotel and Creator only after a collaboration request has
-                  been mutually accepted, allowing them to coordinate directly.
+                  <strong>To Connect Your Channels:</strong> To exchange rates, availability and
+                  reservations with the channel manager, online travel agencies and Airbnb listing
+                  you choose to connect.
                 </li>
                 <li>
-                  <strong>To Measure and Report:</strong> To track and analyze collaboration
-                  performance and provide reports to both parties.
+                  <strong>To Bill You:</strong> To calculate commissions or subscriptions, issue
+                  invoices and pay out card payments through Stripe.
                 </li>
                 <li>
-                  <strong>To Communicate:</strong> To send service-related, administrative, or
-                  account-specific notifications, and, where permitted, marketing communications
-                  about vayada features.
+                  <strong>To Communicate:</strong> To send service-related, administrative or
+                  account-specific notifications and, where you have agreed, marketing
+                  communications about vayada features.
                 </li>
                 <li>
                   <strong>For Security and Compliance:</strong> To prevent fraud, enforce our Terms,
-                  comply with legal obligations, and protect the rights and safety of vayada and its
-                  users.
+                  comply with legal obligations, and protect the rights and safety of vayada, its
+                  Hotels and their guests.
                 </li>
               </ul>
             </section>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">
-                4. How We Share and Disclose Your Information
-              </h2>
+              <h2 className={H2}>4. How We Share and Disclose Your Information</h2>
               <p>We share your information in the following ways:</p>
 
               <div className="mt-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  A. Sharing Between Users (Core Service Function)
-                </h3>
+                <h3 className={H3}>A. Within Your Hotel Account</h3>
+                <p>
+                  The people you invite to your Hotel account see the property, bookings and guest
+                  data of that account according to their role. Your name and email address are
+                  visible to them as the person who made a change.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className={H3}>B. Service Providers</h3>
                 <p className="mb-3">
-                  The key function of vayada is to enable direct connection. Therefore, certain
-                  Personal Data is shared between users:
+                  We use third-party companies to provide the Services (&quot;Service
+                  Providers&quot;). They have access to Personal Data only to perform these tasks on
+                  our behalf and may not use it for any other purpose:
                 </p>
                 <ul className="list-disc list-inside ml-4 space-y-2">
                   <li>
-                    <strong>Public Profile Information:</strong> Your vayada profile information
-                    (Hotel property details or Creator portfolio/metrics) is visible to the opposing
-                    user type on the platform.
+                    <strong>Hosting:</strong> Amazon Web Services, European Union (Ireland), for the
+                    applications, databases, file storage and server logs.
                   </li>
                   <li>
-                    <strong>Contact Information:</strong> Once a Hotel and Creator have mutually
-                    accepted a collaboration request, we will share their direct contact details
-                    (Name, Email, Phone Number) to enable direct coordination.
+                    <strong>Sign-in:</strong> WorkOS, for your account login, password reset, email
+                    verification and Google sign-in.
+                  </li>
+                  <li>
+                    <strong>Payments:</strong> Stripe, for card payments on your booking site, your
+                    payout account and our own invoicing.
+                  </li>
+                  <li>
+                    <strong>Email:</strong> Resend, for the service and booking emails we send and
+                    to deliver contact form messages and support requests to our team.
+                  </li>
+                  <li>
+                    <strong>Team mailboxes:</strong> Google Workspace, where contact form messages
+                    and support requests arrive and where we keep our email correspondence with you.
+                  </li>
+                  <li>
+                    <strong>Channel connections:</strong> Channex, the channel manager behind the
+                    online travel agency and Airbnb connections you enable, which receives your
+                    rates, availability and the reservations of those channels.
+                  </li>
+                  <li>
+                    <strong>Maps: </strong>Google Maps, which loads only on the setup and settings
+                    pages where you place your property or a room on a map, and on your booking site
+                    only when a guest opens its location map. Google then receives those browser
+                    requests under Google&apos;s own privacy policy.
+                  </li>
+                  <li>
+                    <strong>Website analytics:</strong> Cloudflare Web Analytics on vayada.com, only
+                    with your consent.
                   </li>
                 </ul>
-              </div>
-
-              <div className="mt-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  B. Sharing with Service Providers
-                </h3>
-                <p>
-                  We employ third-party companies and individuals to facilitate our Services
-                  ("Service Providers"), such as cloud hosting, payment processing, data analytics,
-                  and email delivery. These providers have access to your Personal Data only to
-                  perform these tasks on our behalf and are obligated not to disclose or use it for
-                  any other purpose.
+                <p className="mt-3">
+                  Stripe, WorkOS, Resend and Google may process data in the United States; these
+                  transfers are covered by the EU–US Data Privacy Framework or the European
+                  Commission&apos;s standard contractual clauses.
                 </p>
               </div>
 
               <div className="mt-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  C. Legal and Compliance
-                </h3>
+                <h3 className={H3}>C. Legal and Compliance</h3>
                 <p>
                   We may disclose your information if required to do so by law or in the good faith
                   belief that such action is necessary to comply with a legal obligation, protect
@@ -311,16 +337,25 @@ export default function PrivacyPage() {
                   personal safety of users or the public.
                 </p>
               </div>
+
+              <p className="mt-6">
+                We do not sell Personal Data, and we do not share Hotel or guest data with other
+                Hotels.
+              </p>
             </section>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">
-                5. Your Privacy Rights and Choices
-              </h2>
+              <h2 className={H2}>5. Retention, Your Privacy Rights and Choices</h2>
               <p className="mb-4">
-                Depending on your location, you may have the following rights regarding your
-                Personal Data:
+                We keep your account and property data for as long as your Hotel account exists and
+                for 30 days after it is closed, so that you can export it. Invoices and booking
+                records that tax and commercial law require us to keep are retained for the
+                statutory periods (usually up to ten years, Article 6(1) lit. c GDPR). Server logs
+                are deleted as described above. Messages from the contact form (see Section 8) and
+                support requests from the apps are emailed to our team and deleted from our database
+                90 days after you send them.
               </p>
+              <p className="mb-4">You have the following rights regarding your Personal Data:</p>
               <ul className="list-disc list-inside ml-4 space-y-2">
                 <li>
                   <strong>Access:</strong> You have the right to request a copy of the Personal Data
@@ -335,20 +370,30 @@ export default function PrivacyPage() {
                   Personal Data, subject to certain exceptions (e.g., legal compliance).
                 </li>
                 <li>
-                  <strong>Opt-Out:</strong> You can opt-out of receiving promotional or marketing
-                  emails from us by following the unsubscribe link in those emails. You may not
-                  opt-out of service-related communications (e.g., account verification, security
-                  alerts).
+                  <strong>Restriction, portability and objection:</strong> You can ask for
+                  processing to be restricted, receive your data in a portable format, and object to
+                  processing based on legitimate interests (Article 6(1) lit. f GDPR).
+                </li>
+                <li>
+                  <strong>Withdraw consent:</strong> You can withdraw any consent at any time, for
+                  example in the cookie settings of vayada.com, without affecting processing before
+                  you withdrew it.
+                </li>
+                <li>
+                  <strong>Opt-Out:</strong> You can opt out of marketing emails with the unsubscribe
+                  link in those emails. You cannot opt out of service-related communications (e.g.,
+                  account verification, security alerts).
                 </li>
               </ul>
               <p className="mt-4">
-                To exercise any of these rights, please contact us using the information in Section
-                7.
+                You can export your data and delete your account from the privacy settings of your
+                account, or contact us using the information in Section 7. You also have the right
+                to complain to a data protection supervisory authority.
               </p>
             </section>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">6. Data Security</h2>
+              <h2 className={H2}>6. Data Security</h2>
               <p>
                 We implement reasonable security measures designed to protect the Personal Data we
                 collect from unauthorized access, use, alteration, or destruction. Please note,
@@ -359,7 +404,7 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">7. Contact Us</h2>
+              <h2 className={H2}>7. Contact Us</h2>
               <p className="mb-4">
                 If you have any questions about this Privacy Policy or our data practices, please
                 contact us at:
@@ -368,10 +413,7 @@ export default function PrivacyPage() {
                 <p className="font-semibold text-gray-900">vayada</p>
                 <p>
                   Email:{" "}
-                  <a
-                    href="mailto:privacy@vayada.com"
-                    className="text-primary-600 hover:text-primary-700 underline"
-                  >
+                  <a href="mailto:privacy@vayada.com" className={LINK}>
                     privacy@vayada.com
                   </a>
                 </p>
@@ -380,14 +422,10 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mt-12">
-              <h2 className="text-2xl font-bold text-primary-800 mb-4">
-                8. Contact Form and Communication
-              </h2>
+              <h2 className={H2}>8. Contact Form and Communication</h2>
 
               <div className="mt-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  A. Data Processing via Contact Form
-                </h3>
+                <h3 className={H3}>A. Data Processing via Contact Form</h3>
                 <p className="mb-3">
                   We provide an online form on our site to allow you to contact us electronically.
                   When you submit an inquiry, we process the data you provide. The specific fields
@@ -395,19 +433,17 @@ export default function PrivacyPage() {
                 </p>
                 <ul className="list-disc list-inside ml-4 space-y-2">
                   <li>
-                    <strong>Required Data:</strong> Your Name, Email Address, the User Category ("I
-                    am a..."), and your Message.
+                    <strong>Required Data:</strong> Your Name, Email Address, and your Message.
                   </li>
                   <li>
-                    <strong>Optional Data:</strong> Your Phone Number, Company Name, and Country.
+                    <strong>Optional Data: </strong>Your Phone Number, Company Name, Country, and
+                    the User Category (&quot;I am a...&quot;).
                   </li>
                 </ul>
               </div>
 
               <div className="mt-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  B. Purpose and Legal Basis
-                </h3>
+                <h3 className={H3}>B. Purpose and Legal Basis</h3>
                 <p className="mb-3">
                   We process this data solely for the purpose of answering your inquiry and the
                   related technical administration.
@@ -416,38 +452,204 @@ export default function PrivacyPage() {
                   <strong>Legal Basis:</strong> Processing of this data is based on Article 6(1)
                   lit. b of the GDPR (General Data Protection Regulation), as the processing is
                   necessary for the performance of a contract or in order to take steps at your
-                  request prior to entering into a contract (e.g., establishing a new user account
-                  or collaboration agreement).
+                  request prior to entering into a contract (e.g., setting up a new Hotel account).
                 </p>
               </div>
 
               <div className="mt-6">
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  C. Internal Handling and International Transfer
-                </h3>
+                <h3 className={H3}>C. Internal Handling and International Transfer</h3>
                 <p>
-                  Your inquiry is received by our Customer Service department. We do not transfer
-                  your inquiries or any associated personal data to third countries or organizations
-                  outside the European Union (EU).
+                  We store your inquiry in our database, hosted by Amazon Web Services in the
+                  European Union (Ireland), and send it by email to the member of our team who
+                  answers inquiries; our mailboxes are hosted by Google Workspace. That email goes
+                  through Resend, our email service provider. Resend and Google may process it in
+                  the United States; these transfers are covered by the EU–US Data Privacy Framework
+                  or the European Commission&apos;s standard contractual clauses. When you or we
+                  reply, the conversation continues by email.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className={H3}>D. Data Retention and Deletion</h3>
+                <p className="mb-3">
+                  We delete your inquiry from our database 90 days after you send it; our automatic
+                  database backups are overwritten within seven days after that. The notification
+                  email and the emails we exchange with you are kept in our mailboxes only as long
+                  as we need them to handle your inquiry.
+                </p>
+                <p>
+                  If your inquiry leads to a contract, warranty, or guarantee claim, we keep that
+                  correspondence for the statutory retention periods (e.g., commercial and tax law,
+                  typically up to ten years, as per Article 6(1) lit. c of the GDPR) and delete it
+                  at the latest when these periods expire, without requiring a specific request from
+                  you.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className={H3}>E. Support Requests from the Apps</h3>
+                <p>
+                  When you send a support request or bug report from Booking Admin or the PMS, we
+                  store your message, the request type, the app and page you sent it from, your
+                  name, email address and user ID, and your account&apos;s ID and name, and look up
+                  the names of the hotels in your account. We handle it like a contact form inquiry:
+                  it is emailed to our team through Resend, arrives in our Google Workspace
+                  mailboxes, and is deleted from our database 90 days after you send it (Article
+                  6(1) lit. b GDPR, to help you use the Services).
+                </p>
+              </div>
+            </section>
+
+            <section id="booking-guests" className="mt-12 scroll-mt-24">
+              <h2 className="text-2xl font-bold text-primary-800 mb-4">
+                9. Guests of Hotel Booking Sites
+              </h2>
+              <p className="mb-4">
+                Hotels use vayada to run their own booking sites (for example
+                hotel-name.booking.vayada.com, or a hotel&apos;s own domain). This section explains
+                how your data is handled when you visit or book on such a site.
+              </p>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">A. Who Is Responsible</h3>
+                <p>
+                  The hotel named on the booking site is the controller for your booking and for the
+                  optional analytics on its booking site. vayada runs the booking site and processes
+                  this data on the hotel&apos;s behalf and on its instructions (Article 28 GDPR).
+                  The hotel and vayada have a{" "}
+                  <a href="/terms/dpa" className={LINK}>
+                    data processing agreement
+                  </a>{" "}
+                  for this. vayada is the controller for its own server logs and for the
+                  partner-link records described below. The hotel&apos;s contact details are shown
+                  at the bottom of its booking site.
                 </p>
               </div>
 
               <div className="mt-6">
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  D. Data Retention and Deletion
+                  B. What the Booking Site Processes
+                </h3>
+                <ul className="list-disc list-inside ml-4 space-y-2">
+                  <li>
+                    <strong>Your booking:</strong> your name, email address, phone number, country,
+                    stay dates, rooms, guests, extras, price and payment method, and any arrival
+                    time or requests you add. The hotel uses this data to take and manage your
+                    booking and to contact you about it (Article 6(1) lit. b GDPR), and keeps it as
+                    long as it needs it for your stay and as tax and accounting rules require
+                    (Article 6(1) lit. c GDPR).
+                  </li>
+                  <li>
+                    <strong>Check-in registration (at the hotel): </strong>when you check in, the
+                    hotel&apos;s staff may record your date of birth, the type and number of your
+                    identity document, your gender, which room you sleep in and internal notes, for
+                    example to meet local guest registration rules (Article 6(1) lit. c GDPR) and to
+                    look after your stay (Article 6(1) lit. b GDPR). Only the hotel&apos;s staff see
+                    this data, and the hotel keeps it as long as it keeps your booking.
+                  </li>
+                  <li>
+                    <strong>What you agreed to: </strong>when you book, we keep a record with your
+                    booking of when you agreed and to what: the version of the wording you saw, and
+                    references to the room and rate terms, the hotel&apos;s guest rules and the
+                    hotel&apos;s terms &amp; conditions as they were at that moment. The hotel uses
+                    this record to show what was agreed for your booking (Article 6(1) lit. b and f
+                    GDPR) and keeps it as long as it keeps your booking.
+                  </li>
+                  <li>
+                    <strong>Technical data:</strong> our servers log each request, including your IP
+                    address, to keep the booking site secure and working. These logs are kept for 30
+                    days. When you look up a booking, we also count the attempts from your IP
+                    address for one minute, in memory only, to stop abuse; this count is not stored
+                    (Article 6(1) lit. f GDPR).
+                  </li>
+                  <li>
+                    <strong>Optional analytics (only if you allow it): </strong>which pages and
+                    booking steps you reach, the room, extras and payment method you choose, whether
+                    the booking goes through, and any error, together with a random identifier for
+                    your browser tab. The hotel uses this to see where guests leave the booking.
+                    These events contain no name, email address or phone number, and we do not keep
+                    your IP address, or anything derived from it, with them. We keep them for 13
+                    months (Article 6(1) lit. a GDPR). Your choice is saved in your browser&apos;s
+                    local storage, for that hotel&apos;s booking site only.
+                  </li>
+                  <li>
+                    <strong>Partner links: </strong>if you arrive through a link from one of the
+                    hotel&apos;s referral partners, we record the partner code, the page you arrived
+                    on and the site you came from, so the partner can be credited (Article 6(1) lit.
+                    f GDPR).
+                  </li>
+                  <li>
+                    <strong>Your browser:</strong> the booking site also keeps a few necessary items
+                    in your browser: the currency you chose, and the booking details you are filling
+                    in (for the current tab only).
+                  </li>
+                </ul>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">
+                  C. Card Payments and Other Services
                 </h3>
                 <p className="mb-3">
-                  We delete the data relating to your contact inquiry promptly after the inquiry has
-                  been fully handled and resolved.
+                  If you pay by card, your card details go directly to Stripe, the payment provider
+                  for card payments on the booking site; neither the hotel nor vayada sees your full
+                  card number. Stripe&apos;s payment form (Stripe.js) loads only when you open the
+                  card payment form, and Stripe processes your data under its own{" "}
+                  <a
+                    href="https://stripe.com/privacy"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    privacy policy
+                  </a>
+                  . To prevent fraud, Stripe.js stores two cookies on the booking site once the card
+                  payment form opens: __stripe_mid (for one year) and __stripe_sid (for 30 minutes).
+                </p>
+                <p className="mb-3">
+                  If the hotel shows a map of where its rooms are, the map comes from Google Maps
+                  and loads only when you press &quot;Show map&quot;. Google then receives your
+                  request, including your IP address, and processes it under its own{" "}
+                  <a
+                    href="https://policies.google.com/privacy"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    privacy policy
+                  </a>
+                  .
+                </p>
+                <p className="mb-3">
+                  The booking site and booking data are hosted by Amazon Web Services in the
+                  European Union (Ireland). Booking emails are sent through Resend. Stripe, Resend
+                  and Google may process data in the United States; these transfers are covered by
+                  the EU–US Data Privacy Framework or the European Commission&apos;s standard
+                  contractual clauses.
                 </p>
                 <p>
-                  However, statutory retention periods may prevent immediate deletion. This is
-                  particularly true if your inquiry is related to a contract, warranty, or guarantee
-                  claim. In such cases, we store your inquiry data only for the purpose of
-                  fulfilling legal retention obligations (e.g., commercial and tax law retention
-                  periods, typically up to ten years, as per Article 6(1) lit. c of the GDPR). We
-                  will delete your data at the latest when these statutory retention periods expire,
-                  without requiring a specific request from you.
+                  Fonts, images and all other parts of the booking site are served by vayada. Unless
+                  you pay by card or open the map, the booking site does not load content from other
+                  companies, such as Google Fonts.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">D. Your Rights</h3>
+                <p className="mb-3">
+                  You can ask for access to your data, for its correction or deletion, for its use
+                  to be restricted, or to receive it in a portable format. You can object to
+                  processing based on legitimate interests (Article 6(1) lit. f GDPR). You can
+                  withdraw your analytics consent at any time with the &quot;Privacy choices&quot;
+                  button on the booking site; this stops further events and does not affect
+                  processing before you withdrew it.
+                </p>
+                <p>
+                  Please send requests to the hotel. You can also write to us at{" "}
+                  <a
+                    href="mailto:privacy@vayada.com"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    privacy@vayada.com
+                  </a>
+                  , and we will pass your request on to the hotel. You also have the right to
+                  complain to a data protection supervisory authority.
                 </p>
               </div>
             </section>

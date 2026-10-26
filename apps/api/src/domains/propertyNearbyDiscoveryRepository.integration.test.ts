@@ -85,7 +85,7 @@ describe.skipIf(!url)("nearby discovery PostgreSQL leases", () => {
     });
     expect(await repository.claim(scope, 1, true)).toMatchObject({ status: "cooldown" });
   });
-  it("isolates properties, organizations and stale profile revisions", async () => {
+  it("isolates properties, organizations and moved pins", async () => {
     expect(await repository.read({ ...scope, propertyId: otherPropertyId })).toMatchObject({
       status: "stale",
       places: [],
@@ -100,6 +100,10 @@ describe.skipIf(!url)("nearby discovery PostgreSQL leases", () => {
     await admin.query("UPDATE hotel_catalog.properties SET profile_revision=2 WHERE id=$1", [
       scope.propertyId,
     ]);
+    await admin.query(
+      "UPDATE hotel_catalog.property_locations SET latitude=-1.2 WHERE property_id=$1",
+      [scope.propertyId],
+    );
     expect(await repository.complete(scope, claim.token, 1, result)).toMatchObject({
       status: "stale",
       places: [],
@@ -152,6 +156,60 @@ describe.skipIf(!url)("nearby discovery PostgreSQL leases", () => {
     );
     await age();
     expect(await repository.claim(scope, 2, true)).toMatchObject({ status: "cooldown" });
+  });
+  it("keeps a lookup across profile saves that leave the pin alone (VAY-2104)", async () => {
+    await age();
+    const claim = await repository.claim(scope, 2);
+    if (claim.status !== "claimed") throw new Error("Claim required");
+    // A Property save lands while Google answers: the result still counts.
+    await admin.query("UPDATE hotel_catalog.properties SET profile_revision=3 WHERE id=$1", [
+      scope.propertyId,
+    ]);
+    expect(await repository.complete(scope, claim.token, 2, result)).toMatchObject({
+      status: "ready",
+      profileRevision: 3,
+      places: [{ placeId: "beach", category: "nature" }],
+    });
+    await admin.query("UPDATE hotel_catalog.properties SET profile_revision=4 WHERE id=$1", [
+      scope.propertyId,
+    ]);
+    expect(await repository.read(scope)).toMatchObject({ status: "ready", profileRevision: 4 });
+    expect(await repository.claim(scope, 4)).toMatchObject({
+      status: "state",
+      state: { status: "ready" },
+    });
+    // Rows from before VAY-2104 have no pin and keep the same-revision rule.
+    const { origin } = (
+      await admin.query(
+        "SELECT origin FROM hotel_catalog.property_nearby_discovery WHERE property_id=$1",
+        [scope.propertyId],
+      )
+    ).rows[0];
+    expect(origin).toMatch(/^[0-9a-f]{64}$/);
+    await admin.query(
+      "UPDATE hotel_catalog.property_nearby_discovery SET origin=NULL WHERE property_id=$1",
+      [scope.propertyId],
+    );
+    expect(await repository.read(scope)).toMatchObject({ status: "stale", places: [] });
+    await admin.query(
+      "UPDATE hotel_catalog.property_nearby_discovery SET origin=$2 WHERE property_id=$1",
+      [scope.propertyId, origin],
+    );
+    expect(await repository.read(scope)).toMatchObject({ status: "ready" });
+    // Moving the pin needs a new lookup.
+    await admin.query(
+      "UPDATE hotel_catalog.property_locations SET longitude=1.1 WHERE property_id=$1",
+      [scope.propertyId],
+    );
+    expect(await repository.read(scope)).toMatchObject({ status: "stale", places: [] });
+    // Back to the revision the next case expects, with nothing current to reuse.
+    await admin.query("UPDATE hotel_catalog.properties SET profile_revision=2 WHERE id=$1", [
+      scope.propertyId,
+    ]);
+    await admin.query(
+      "UPDATE hotel_catalog.property_nearby_discovery SET valid_until=now()-interval '1 second' WHERE property_id=$1",
+      [scope.propertyId],
+    );
   });
   it("expires snapshots, suppresses private locations and respects revoked links", async () => {
     await age();

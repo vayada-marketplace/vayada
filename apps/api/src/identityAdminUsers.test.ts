@@ -10,11 +10,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
-import type {
-  IdentityAdminCommandResponse,
-  IdentityAdminUsersListResponse,
-  IdentityAdminUsersReadRepository,
-  IdentityAdminUserDetailResponse,
+import {
+  createPgIdentityAdminUsersReadRepository,
+  type IdentityAdminCommandResponse,
+  type IdentityAdminUsersListResponse,
+  type IdentityAdminUsersReadRepository,
+  type IdentityAdminUserDetailResponse,
 } from "./routes/identityAdminUsers.js";
 
 const session: VerifiedSession = {
@@ -78,9 +79,9 @@ describe("identity admin user routes", () => {
       url: "/api/identity/admin/users",
       headers: { authorization: "Bearer valid-token" },
       payload: {
-        email: "creator@example.com",
-        name: "Creator Example",
-        type: "creator",
+        email: "hotel@example.com",
+        name: "Hotel Example",
+        type: "hotel",
         status: "verified",
       },
     });
@@ -89,11 +90,138 @@ describe("identity admin user routes", () => {
     expect(commandBus.commands[0]).toMatchObject({
       commandType: "identity.user.create",
       payload: {
-        email: "creator@example.com",
-        legacyUserType: "creator",
+        email: "hotel@example.com",
+        legacyUserType: "hotel",
         initialStatus: "active",
       },
     });
+  });
+
+  it("refuses to create creator or affiliate users (VAY-2272)", async () => {
+    const commandBus = createRecordingCommandBus();
+    app = buildAdminApp(commandBus);
+
+    for (const type of ["creator", "affiliate"]) {
+      const response = await injectJson(app, {
+        method: "POST",
+        url: "/api/identity/admin/users",
+        headers: { authorization: "Bearer valid-token" },
+        payload: { email: `${type}@example.com`, type },
+      });
+      expect(response.statusCode).toBe(422);
+    }
+    expect(commandBus.commands).toEqual([]);
+  });
+
+  it("never lists, counts or reads deleted users (VAY-2272)", async () => {
+    const statements: string[] = [];
+    const repository = createPgIdentityAdminUsersReadRepository({
+      connectionString: "postgresql://admin-users.invalid/vayada",
+      pool: {
+        async query(text: string) {
+          statements.push(text);
+          return { rows: text.includes("count(*)") ? [{ total: "0" }] : [] };
+        },
+        async end() {},
+      } as never,
+    });
+
+    await repository.listUsers({ limit: 10, offset: 0, search: "anna" });
+    await expect(repository.findUserById("user_deleted")).resolves.toBeNull();
+
+    expect(statements).toHaveLength(3);
+    for (const statement of statements) expect(statement).toContain("status <> 'deleted'");
+  });
+
+  it("labels accounts by what they are now, staff when nothing says otherwise (VAY-2272)", async () => {
+    const statements: string[] = [];
+    const repository = createPgIdentityAdminUsersReadRepository({
+      connectionString: "postgresql://admin-users.invalid/vayada",
+      pool: {
+        async query(text: string) {
+          statements.push(text);
+          if (text.includes("AS total")) return { rows: [{ total: "1" }] };
+          return {
+            rows: [
+              {
+                id: "user_invited",
+                email: "staff@example.com",
+                name: "Invited Staff",
+                type: null,
+                status: "active",
+                email_verified: true,
+                created_at: "2026-10-21T10:00:00.000Z",
+                updated_at: "2026-10-21T10:00:00.000Z",
+              },
+            ],
+          };
+        },
+        async end() {},
+      } as never,
+    });
+
+    const list = await repository.listUsers({ limit: 10, offset: 0 });
+    expect(list.users).toEqual([expect.objectContaining({ id: "user_invited", type: "staff" })]);
+    expect(statements[0]).toContain("WHEN hotel_members.owner THEN 'hotel'");
+    expect(statements[0]).toContain("ELSE 'staff'");
+  });
+
+  it("lists only accounts provisioning accepts for the Hotels page (VAY-2272)", async () => {
+    const statements: string[] = [];
+    const repository = createPgIdentityAdminUsersReadRepository({
+      connectionString: "postgresql://admin-users.invalid/vayada",
+      pool: {
+        async query(text: string) {
+          statements.push(text);
+          // The filter has its own count(*), so tell the count query by its alias.
+          return { rows: text.includes("AS total") ? [{ total: "0" }] : [] };
+        },
+        async end() {},
+      } as never,
+    });
+
+    await repository.listUsers({ type: "hotel", limit: 10, offset: 0 });
+    for (const statement of statements) expect(statement).not.toContain("HAVING count(*) = 1");
+    statements.length = 0;
+    await repository.listUsers({ type: "hotel", provisionable: true, limit: 10, offset: 0 });
+    expect(statements).toHaveLength(2);
+    for (const statement of statements) {
+      expect(statement).toContain("status = 'active' AND id IN (");
+      expect(statement).toContain("organization.kind = 'hotel_group'");
+      expect(statement).toContain("HAVING count(*) = 1");
+      expect(statement).toContain("owner_link.relationship = 'owner'");
+    }
+  });
+
+  it("passes the provisionable filter from the query string (VAY-2272)", async () => {
+    const commandBus = createRecordingCommandBus();
+    const inputs: Parameters<IdentityAdminUsersReadRepository["listUsers"]>[0][] = [];
+    const readRepository: IdentityAdminUsersReadRepository = {
+      async listUsers(input) {
+        inputs.push(input);
+        return { users: [], total: 0 };
+      },
+      async findUserById() {
+        return null;
+      },
+    };
+    app = buildAdminApp(commandBus, readRepository);
+
+    for (const url of [
+      "/api/identity/admin/users?type=hotel&provisionable=true",
+      "/api/identity/admin/users?type=hotel",
+    ]) {
+      const response = await injectJson<IdentityAdminUsersListResponse>(app, {
+        method: "GET",
+        url,
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+    expect(inputs.map((input) => [input.type, input.provisionable])).toEqual([
+      ["hotel", true],
+      ["hotel", false],
+    ]);
   });
 
   it("lists and reads users from the identity admin surface", async () => {
@@ -103,28 +231,28 @@ describe("identity admin user routes", () => {
 
     const list = await injectJson<IdentityAdminUsersListResponse>(app, {
       method: "GET",
-      url: "/api/identity/admin/users?type=creator",
+      url: "/api/identity/admin/users?type=hotel",
       headers: { authorization: "Bearer valid-token" },
     });
 
     expect(list.statusCode).toBe(200);
     expect(list.body.users).toEqual([
       expect.objectContaining({
-        id: "user_creator",
-        email: "creator@example.com",
-        type: "creator",
+        id: "user_hotel",
+        email: "hotel@example.com",
+        type: "hotel",
       }),
     ]);
 
     const detail = await injectJson<IdentityAdminUserDetailResponse>(app, {
       method: "GET",
-      url: "/api/identity/admin/users/user_creator",
+      url: "/api/identity/admin/users/user_hotel",
       headers: { authorization: "Bearer valid-token" },
     });
 
     expect(detail.statusCode).toBe(200);
     expect(detail.body).toMatchObject({
-      id: "user_creator",
+      id: "user_hotel",
       emailVerified: true,
       profile: null,
     });
@@ -207,10 +335,10 @@ function buildAdminApp(
 function createMemoryAdminUsersReadRepository(): IdentityAdminUsersReadRepository {
   const users: IdentityAdminUsersListResponse["users"] = [
     {
-      id: "user_creator",
-      email: "creator@example.com",
-      name: "Creator Example",
-      type: "creator",
+      id: "user_hotel",
+      email: "hotel@example.com",
+      name: "Hotel Example",
+      type: "hotel",
       status: "verified",
       avatar: null,
       email_verified: true,

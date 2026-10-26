@@ -3,6 +3,7 @@ import {
   type RoomTypeFacts,
   parseConfirmRoomTypeAmenitiesResult,
   parseCreateRoomTypeFactsResult,
+  parseUpdateRoomTypeFactsResult,
   parsePhysicalRoomUnitIdentity,
   parseReconcilePhysicalRoomUnitsResult,
   parseRoomTypeCapacitySnapshot,
@@ -21,7 +22,9 @@ import type { RoomImageReference } from "../upload";
 import { imageReferenceUrl, pmsRoomMediaResource, uploadService } from "../upload";
 import {
   bedSummaryFromFacts,
+  roomAmenityInputsChanged,
   roomAmenityKeys,
+  roomFactInputsChanged,
   roomAmenityLabels,
   roomCategoryLabel,
   roomSizeValue,
@@ -81,6 +84,7 @@ export interface RoomType {
   maxChildren: number | null;
   bedrooms: number;
   bathrooms: number;
+  bathroomType: "private" | "shared";
   size: number;
   baseRate: number;
   nonRefundableRate: number | null;
@@ -88,9 +92,16 @@ export interface RoomType {
   locationAddress: string;
   latitude: number | null;
   longitude: number | null;
+  /** How guests see the room's place (VAY-2321); undefined until the host chooses (see roomLocationSource). */
+  locationSource?: RoomLocationSource;
+  locationPrecision?: RoomLocationPrecision;
+  locationArea?: string;
+  showMapInDetails?: boolean;
   amenities: string[];
   images: RoomImageReference[];
   roomMediaRevision: number;
+  /** Null until the API reports it; amenity edits then need a reload. */
+  roomAmenitiesRevision: number | null;
   bedType: string;
   features: string[];
   benefits: string[];
@@ -138,6 +149,10 @@ export interface RoomTypeCreate {
   locationAddress?: string;
   latitude?: number | null;
   longitude?: number | null;
+  locationSource?: RoomLocationSource;
+  locationPrecision?: RoomLocationPrecision;
+  locationArea?: string;
+  showMapInDetails?: boolean;
   amenities?: string[];
   images?: RoomImageReference[];
   bedType?: string;
@@ -168,6 +183,12 @@ export interface RoomTypeCreate {
 }
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>;
+
+export interface RoomTypeSaveResult {
+  roomType: RoomType;
+  /** The edit changed room facts or attributes, which published prices pin. */
+  pricesNeedPublishing: boolean;
+}
 
 export interface Room {
   roomUnitsRevision?: number;
@@ -254,6 +275,7 @@ export interface PmsOperationsRoomType {
   amenities: string[];
   media: { mediaObjectId?: string; url: string; altText?: string | null }[];
   roomMediaRevision: number;
+  roomAmenitiesRevision?: number;
   baseRate: PmsOperationsMoney;
   active: boolean;
   sortOrder: number;
@@ -313,10 +335,23 @@ export interface RoomTypeRetirementImpact {
       | "active_reservations"
       | "active_physical_units"
       | "future_inventory"
-      | "active_publication";
+      | "active_publication"
+      // What still stops a Delete that does the cleanup (VAY-2132).
+      | "channel_mapping"
+      | "last_room_type"
+      | "calendar_not_current"
+      | "protected_inventory"
+      | "unavailable_units";
     affectedCount: number;
     action: string;
   }>;
+  /** Present where Delete also retires the rooms, closes the future nights and leaves the calendar. */
+  cleanup?: {
+    physicalUnits: number;
+    futureNights: number;
+    roomBlocks: number;
+    linkedGroups: number;
+  };
 }
 
 export interface RoomCreate {
@@ -436,6 +471,7 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
     maxChildren,
     bedrooms: asNumber(roomType.attributes.bedrooms, 1),
     bathrooms: asNumber(roomType.attributes.bathrooms, 1),
+    bathroomType: roomType.attributes.bathroomType === "shared" ? "shared" : "private",
     size: asNumber(roomSizeValue(roomType.attributes.size)),
     baseRate,
     nonRefundableRate,
@@ -443,6 +479,7 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
     locationAddress: asString(roomType.attributes.locationAddress),
     latitude: asNullableNumber(roomType.attributes.latitude),
     longitude: asNullableNumber(roomType.attributes.longitude),
+    ...roomLocationDisplay(roomType.attributes),
     amenities: roomAmenityLabels(roomType.amenities),
     images: roomType.media.map((image) =>
       image.altText === undefined
@@ -454,7 +491,9 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
           },
     ),
     roomMediaRevision: roomType.roomMediaRevision ?? 1,
-    bedType: asString(roomType.attributes.bedType, bedSummaryFromFacts(roomType.attributes.beds)),
+    roomAmenitiesRevision: roomType.roomAmenitiesRevision ?? null,
+    // Room facts write `beds`; an older free-text `bedType` stays behind in the row.
+    bedType: bedSummaryFromFacts(roomType.attributes.beds) ?? asString(roomType.attributes.bedType),
     features: [],
     benefits: [],
     totalRooms: roomType.roomCount,
@@ -606,7 +645,7 @@ export const roomsService = {
 
   create: async (data: RoomTypeCreate) => {
     const propertyId = await resolveSelectedPmsPropertyId("creating room type");
-    // The same room-facts command as hotel setup; prices are published from PMS → Pricing.
+    // The same room-facts command as hotel setup; prices are published from the room's Prices tab.
     const facts = roomTypeFactsFromForm(data);
     const amenities = roomAmenityKeys(data.amenities ?? []);
     const location = roomTypeUpdatePayload(data);
@@ -637,11 +676,21 @@ export const roomsService = {
           }
           throw error;
         }
-        if (location.locationAddress || location.latitude != null || location.longitude != null) {
+        if (
+          Object.values(location).some(
+            (value) => value !== undefined && value !== null && value !== "",
+          )
+        ) {
           await pmsOperationsRoomsReadService.updateRoomType(propertyId, roomTypeId, location);
         }
         // Confirming, even an empty list, marks the amenities reviewed for room publication.
-        await confirmNewRoomTypeAmenities(propertyId, roomTypeId, commandId, amenities);
+        await confirmRoomTypeAmenities(
+          propertyId,
+          roomTypeId,
+          `${commandId}:amenities`,
+          1,
+          amenities,
+        );
         await preparePhysicalRooms(propertyId, roomTypeId, facts.name, data.totalRooms);
         const current = await pmsOperationsRoomsReadService.getRoomType(propertyId, roomTypeId);
         let created = toRoomType(current.propertyId, current.item);
@@ -690,28 +739,57 @@ export const roomsService = {
     );
   },
 
-  update: async (id: string, data: RoomTypeUpdate) => {
+  /** Saves what changed against `saved`, the room the form was loaded from, then re-reads it. */
+  update: async (
+    id: string,
+    data: RoomTypeUpdate,
+    saved: RoomType,
+  ): Promise<RoomTypeSaveResult> => {
     const propertyId = await resolveSelectedPmsPropertyId("updating room type");
-    const response = await pmsOperationsRoomsReadService.updateRoomType(propertyId, id, data);
-    let updated = toRoomType(response.propertyId, response.item);
-    await preparePhysicalRooms(propertyId, id, updated.name, data.totalRooms);
-    if (Number.isInteger(data.totalRooms) && data.totalRooms! >= 1) {
-      const refreshed = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
-      updated = toRoomType(refreshed.propertyId, refreshed.item);
+    const savedForm = roomTypeUpdateForm(saved);
+    const next = { ...savedForm, ...data } as RoomTypeCreate;
+    // Check every part before the first write, so a rejected edit saves nothing.
+    const facts = roomFactInputsChanged(next, savedForm) ? roomTypeFactsFromForm(next) : null;
+    const amenities = roomAmenityInputsChanged(next.amenities ?? [], saved.amenities)
+      ? roomAmenityKeys(next.amenities ?? [])
+      : null;
+    if (data.images) assertRoomImagesUploaded(data.images);
+    if (amenities && saved.roomAmenitiesRevision === null) {
+      throw new Error("Room amenities are unavailable. Reload the room and try again.");
     }
-    if (data.images && !sameRoomImageOrder(data.images, updated.images)) {
-      await replaceRoomTypeMedia(propertyId, updated, data.images);
+    const location = changedRoomLocation(next, saved);
+    if (facts) await updateRoomTypeFacts(propertyId, id, saved.version, facts);
+    if (location) await pmsOperationsRoomsReadService.updateRoomType(propertyId, id, location);
+    if (amenities) {
+      await confirmRoomTypeAmenities(
+        propertyId,
+        id,
+        randomCommandId("pms-room-amenities"),
+        saved.roomAmenitiesRevision!,
+        amenities,
+      );
     }
-    if (data.images) {
-      const refreshed = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
-      return toRoomType(refreshed.propertyId, refreshed.item);
+    await preparePhysicalRooms(propertyId, id, next.name, data.totalRooms);
+    let current = await readRoomType(propertyId, id);
+    if (data.images && !sameRoomImageOrder(data.images, current.images)) {
+      await replaceRoomTypeMedia(propertyId, current, data.images);
+      current = await readRoomType(propertyId, id);
     }
-    return updated;
+    // Published prices pin room facts and attributes: guests see no offers until republished.
+    return { roomType: current, pricesNeedPublishing: facts !== null || location !== null };
   },
 
-  delete: async (id: string) => {
+  /** What Delete would do, and what still stops it, for the confirmation. */
+  deleteImpact: async (id: string) => {
     const propertyId = await resolveSelectedPmsPropertyId("retiring room type");
-    const impact = await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
+    return pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id);
+  },
+
+  /** Retires the room type; `shown` is the impact a confirmation already read (VAY-2132). */
+  delete: async (id: string, shown?: RoomTypeRetirementImpact) => {
+    const propertyId = await resolveSelectedPmsPropertyId("retiring room type");
+    const impact =
+      shown ?? (await pmsOperationsRoomsReadService.inspectRoomTypeRetirement(propertyId, id));
     if (!impact.canRetire) throw new RoomTypeRetirementBlockedError(impact);
     await runRoomTypeLifecycleCommand(
       ["retire", propertyId, id, impact.version],
@@ -752,17 +830,7 @@ async function createRoomTypeFacts(
       idempotentRequestOptions(commandId),
     );
   } catch (error) {
-    if (error instanceof ApiErrorResponse && error.data.code === "room_type_name_conflict") {
-      throw new Error("A room type with this name already exists. Choose another name.", {
-        cause: error,
-      });
-    }
-    if (error instanceof ApiErrorResponse && error.data.code === "unsupported_room_fact_keys") {
-      throw new Error("This room category or bed type is not supported. Choose another one.", {
-        cause: error,
-      });
-    }
-    throw error;
+    throw roomFactsCommandError(error);
   }
   const result = parseCreateRoomTypeFactsResult({ ok: true, response: value });
   if (
@@ -775,19 +843,110 @@ async function createRoomTypeFacts(
   return result.response.roomType.roomTypeId;
 }
 
-async function confirmNewRoomTypeAmenities(
+async function updateRoomTypeFacts(
   propertyId: string,
   roomTypeId: string,
-  commandId: string,
+  version: string,
+  facts: RoomTypeFacts,
+): Promise<void> {
+  const revision = /^room-type-facts-v(\d+)$/.exec(version)?.[1];
+  if (!revision)
+    throw new Error("The room details could not be saved. Reload the room and try again.");
+  let value: unknown;
+  try {
+    value = await pmsOperationsClient.put<unknown>(
+      `/api/pms/setup/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}`,
+      { expectedRevision: Number(revision), facts },
+      idempotentRequestOptions(randomCommandId("pms-room-facts-update")),
+    );
+  } catch (error) {
+    throw roomFactsCommandError(error);
+  }
+  const result = parseUpdateRoomTypeFactsResult({ ok: true, response: value });
+  if (!result?.ok || result.response.roomType.roomTypeId !== roomTypeId.toLowerCase()) {
+    throw new Error("The room details could not be confirmed. Reload the room and try again.");
+  }
+}
+
+function roomFactsCommandError(error: unknown): unknown {
+  const code = error instanceof ApiErrorResponse ? error.data.code : undefined;
+  const message =
+    code === "room_type_name_conflict"
+      ? "A room type with this name already exists. Choose another name."
+      : code === "unsupported_room_fact_keys"
+        ? "This room category or bed type is not supported. Choose another one."
+        : code === "room_facts_revision_conflict"
+          ? "This room type was changed somewhere else. Reload the room and try again."
+          : code === "room_type_not_found"
+            ? "This room type is closing or no longer active, so its details can't be changed."
+            : null;
+  return message ? new Error(message, { cause: error }) : error;
+}
+
+async function confirmRoomTypeAmenities(
+  propertyId: string,
+  roomTypeId: string,
+  idempotencyKey: string,
+  expectedRoomAmenitiesRevision: number,
   amenities: string[],
 ): Promise<void> {
-  const response = await pmsOperationsClient.put<unknown>(
-    `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}/amenities`,
-    { expectedRoomAmenitiesRevision: 1, amenities },
-    idempotentRequestOptions(`${commandId}:amenities`),
-  );
+  let response: unknown;
+  try {
+    response = await pmsOperationsClient.put<unknown>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}/amenities`,
+      { expectedRoomAmenitiesRevision, amenities },
+      idempotentRequestOptions(idempotencyKey),
+    );
+  } catch (error) {
+    if (
+      error instanceof ApiErrorResponse &&
+      error.data.code === "room_amenities_revision_conflict"
+    ) {
+      throw new Error(
+        "This room's amenities were changed somewhere else. Reload the room and try again.",
+        {
+          cause: error,
+        },
+      );
+    }
+    throw error;
+  }
   if (!parseConfirmRoomTypeAmenitiesResult({ ok: true, response })?.ok) {
     throw new Error("Room amenities could not be confirmed. Reload the room and try again.");
+  }
+}
+
+async function readRoomType(propertyId: string, roomTypeId: string): Promise<RoomType> {
+  const response = await pmsOperationsRoomsReadService.getRoomType(propertyId, roomTypeId);
+  return toRoomType(response.propertyId, response.item);
+}
+
+function changedRoomLocation(next: RoomTypeUpdate, saved: RoomType): RoomTypeUpdate | null {
+  const location: RoomTypeUpdate = {};
+  if ((next.locationAddress || "") !== (saved.locationAddress || "")) {
+    location.locationAddress = next.locationAddress || "";
+  }
+  if ((next.latitude ?? null) !== saved.latitude) location.latitude = next.latitude ?? null;
+  if ((next.longitude ?? null) !== saved.longitude) location.longitude = next.longitude ?? null;
+  // Only choices that change what is saved: a default shown, or a choice made and undone, is not written, so
+  // room_attributes (which older published prices fingerprint) stays as it was (VAY-2321).
+  for (const key of ROOM_LOCATION_DISPLAY_KEYS) {
+    const effective = (room: RoomTypeUpdate) => room[key] ?? ROOM_LOCATION_DISPLAY_DEFAULTS[key];
+    if (next[key] !== undefined && effective(next) !== effective(saved)) {
+      Object.assign(location, { [key]: next[key] });
+    }
+  }
+  return Object.keys(location).length > 0 ? location : null;
+}
+
+function assertRoomImagesUploaded(images: RoomImageReference[]): void {
+  const pending = images.some((image) => {
+    if (typeof image !== "string" && image.platformMediaObjectId) return false;
+    const url = imageReferenceUrl(image).trim();
+    return !url || url.startsWith("blob:");
+  });
+  if (pending) {
+    throw new Error("Every saved room photo must finish uploading before the room can be saved.");
   }
 }
 
@@ -1247,7 +1406,40 @@ function roomTypeUpdatePayload(data: RoomTypeUpdate) {
   if (Object.hasOwn(data, "locationAddress")) payload.locationAddress = data.locationAddress;
   if (Object.hasOwn(data, "latitude")) payload.latitude = data.latitude ?? null;
   if (Object.hasOwn(data, "longitude")) payload.longitude = data.longitude ?? null;
+  for (const key of ROOM_LOCATION_DISPLAY_KEYS) {
+    if (data[key] !== undefined) Object.assign(payload, { [key]: data[key] });
+  }
   return payload;
+}
+
+export type RoomLocationSource = "property" | "custom";
+export type RoomLocationPrecision = "exact" | "approximate";
+const ROOM_LOCATION_DISPLAY_KEYS = [
+  "locationSource",
+  "locationPrecision",
+  "locationArea",
+  "showMapInDetails",
+] as const;
+// What a key the host never chose means. A missing locationSource is derived from the pin (the field restores
+// it to undefined when the host goes back to the derived choice), so it has no default here.
+const ROOM_LOCATION_DISPLAY_DEFAULTS = {
+  locationSource: undefined,
+  locationPrecision: "exact",
+  locationArea: "",
+  showMapInDetails: true,
+} as const;
+
+/** The VAY-2321 choices as saved; a key the host never chose stays undefined, so a save leaves it unwritten. */
+function roomLocationDisplay(attributes: Record<string, unknown>): Partial<RoomType> {
+  const { locationSource, locationPrecision, locationArea, showMapInDetails } = attributes;
+  return {
+    ...(locationSource === "property" || locationSource === "custom" ? { locationSource } : {}),
+    ...(locationPrecision === "exact" || locationPrecision === "approximate"
+      ? { locationPrecision }
+      : {}),
+    ...(typeof locationArea === "string" ? { locationArea } : {}),
+    ...(typeof showMapInDetails === "boolean" ? { showMapInDetails } : {}),
+  };
 }
 
 export function roomTypeUpdateForm(r: RoomType): RoomTypeUpdate {
@@ -1256,6 +1448,8 @@ export function roomTypeUpdateForm(r: RoomType): RoomTypeUpdate {
     category: r.category || "",
     bedrooms: r.bedrooms ?? 1,
     bathrooms: r.bathrooms ?? 1,
+    // The form shows one king bed when a room has none; start from what it shows.
+    bedType: r.bedType || "1 King Bed",
     locationAddress: r.locationAddress || "",
   };
 }

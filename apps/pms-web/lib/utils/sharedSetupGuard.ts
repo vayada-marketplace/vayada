@@ -14,14 +14,17 @@ type HotelSelectionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
 type PmsSetupGuardOptions = {
   propertyId?: string | null;
 };
-const MARKETPLACE_FRONTEND_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
 
+/**
+ * Booking Admin hosts the shared hotel setup wizard (VAY-2261). By default a redirect decision
+ * points at the PMS's own relative /setup alias, which hands the session to Booking Admin
+ * (VAY-2266); an explicit setupBaseUrl makes the path absolute for callers that need it.
+ */
 export async function resolvePmsSetupGuard(
   returnTo: string,
   api: Pick<SharedHotelSetupApi, "getStatus"> = sharedHotelSetupApi,
   storage: HotelSelectionStorage | null = browserStorage(),
-  setupBaseUrl = MARKETPLACE_FRONTEND_URL,
+  setupBaseUrl?: string,
   options: PmsSetupGuardOptions = {},
 ): Promise<SharedHotelSetupGuardDecision> {
   const explicitPropertyId = options.propertyId?.trim() || null;

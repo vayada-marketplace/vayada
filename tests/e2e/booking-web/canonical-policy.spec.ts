@@ -75,9 +75,9 @@ test.describe("booking-web canonical URL policy", () => {
     expect(
       getCanonicalHostRedirectUrl(
         policy,
-        new URL("https://legacy-alpenrose.booking.vayada.com/en?ref=creator"),
+        new URL("https://legacy-alpenrose.booking.vayada.com/en?utm_source=newsletter"),
       ),
-    ).toBe("https://hotel-alpenrose.booking.vayada.com/en?ref=creator");
+    ).toBe("https://hotel-alpenrose.booking.vayada.com/en?utm_source=newsletter");
   });
 
   test("does not redirect when the request host is already canonical", () => {

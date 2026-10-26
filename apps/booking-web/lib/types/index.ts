@@ -48,8 +48,10 @@ export interface Hotel {
   country: string;
   starRating: number;
   currency: string;
-  supportedCurrencies: string[];
-  heroImage: string;
+  /** Display-only currencies a guest may switch to, the hotel currency first. */
+  displayCurrencies: string[];
+  /** The hero photo, else the first gallery photo; null when the hotel has no photos yet (VAY-2247). */
+  heroImage: string | null;
   images: string[];
   amenities: string[];
   checkInTime: string;
@@ -57,6 +59,8 @@ export interface Hotel {
   checkInUntil?: string;
   checkOutFrom?: string;
   timezone?: string;
+  /** The public map pin, only when the hotel shows its location (rounded when "approximate"). */
+  mapPin?: { latitude: number; longitude: number };
   contact: HotelContact;
   bookingFilters: string[];
   customFilters?: Record<string, string>;
@@ -69,6 +73,8 @@ export interface Hotel {
   guestTypeSettings?: GuestTypeSettings;
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
+  /** Guests can enter a promo code: the hotel's Promos switch is on and a code is live (VAY-2200). */
+  promoCodesEnabled?: boolean;
 }
 
 export type RoomSelectionLine = {
@@ -92,6 +98,19 @@ export interface RoomSelectionSnapshot {
   roomSelection?: RoomSelection;
   roomLines?: SelectedRoomLine[];
 }
+/** VAY-2320: one booked room of a pricing booking, as the guest booking view sends it. */
+export type BookedRoom = {
+  roomTypeId: string;
+  roomName: string | null;
+  mealPlan: string | null;
+  adults: number;
+  children: number;
+  cancellation:
+    | { kind: "non_refundable" }
+    | { kind: "free_until_days_before_arrival"; days: number }
+    | { kind: "partial_refund" }
+    | null;
+};
 export type RoomCombination = {
   roomSelection: RoomSelection;
   roomLines: SelectedRoomLine[];
@@ -159,6 +178,8 @@ export interface SearchParams {
 }
 
 export interface Booking extends RoomSelectionSnapshot {
+  /** VAY-2320: every booked room, each with its own type, guests, meal and terms. */
+  bookedRooms?: BookedRoom[];
   mealDescription?: string | null;
   canEditRequest?: boolean;
   id: string;

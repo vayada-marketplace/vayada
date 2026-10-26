@@ -33,5 +33,17 @@ export function createWorkOSStaffInvitationProvider(config: {
         expiresAt: invitation.expiresAt,
       };
     },
+
+    async revokeInvitation(providerInvitationId) {
+      try {
+        await workos.userManagement.revokeInvitation(providerInvitationId);
+        return "revoked";
+      } catch (error) {
+        // Accepted, expired, already revoked or gone: nothing pending is left to revoke.
+        const status = (error as { status?: unknown } | null)?.status;
+        if (status === 400 || status === 404) return "not_pending";
+        throw error;
+      }
+    },
   };
 }

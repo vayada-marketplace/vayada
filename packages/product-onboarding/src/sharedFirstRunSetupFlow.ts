@@ -1,11 +1,10 @@
 import {
-  isSetupTaskLaunchable,
   PRODUCT_ENTRY_PRODUCTS,
+  SETUP_TRACKS,
   type AdaptiveHotelSetupStatus,
   type ProductEntryDecision,
   type PropertySetupPlan,
   type SetupComponentProduct,
-  type SetupTask,
   type SetupTrack,
 } from "@vayada/domain-hotels";
 
@@ -16,6 +15,8 @@ export type SharedHotelSetupEntryProduct = ProductEntryDecision["requestedProduc
 export function parseSharedHotelSetupEntryProduct(
   value: string | null | undefined,
 ): SharedHotelSetupEntryProduct | null {
+  // An old Creator Marketplace link (VAY-2270) sets up the hotel's booking engine.
+  if (value === "marketplace") return "booking";
   return PRODUCT_ENTRY_PRODUCTS.includes(value as SetupComponentProduct)
     ? (value as SharedHotelSetupEntryProduct)
     : null;
@@ -55,13 +56,12 @@ export function resolveSharedFirstRunSetupView(
   status: AdaptiveHotelSetupStatus | null,
   options: {
     forceCreateProperty?: boolean;
-    forceTrackSelection?: boolean;
     editPropertyProfile?: boolean;
   } = {},
 ): SharedFirstRunSetupViewModel {
   if (!status) return emptyView("loading", "Loading setup");
 
-  if (status.organization.selectedTracks.length === 0 || options.forceTrackSelection) {
+  if (status.organization.selectedTracks.length === 0) {
     return emptyView("track_selection", "Choose how you’ll use vayada");
   }
 
@@ -127,15 +127,7 @@ export function toggleSetupTrackSelection(
   const next = selectedTracks.includes(track)
     ? selectedTracks.filter((candidate) => candidate !== track)
     : [...selectedTracks, track];
-  return (["hotel_operations", "creator_marketplace"] as const).filter((candidate) =>
-    next.includes(candidate),
-  );
-}
-
-export function isSetupTaskActionable(
-  task: Pick<SetupTask, "track" | "readiness" | "callerCapability">,
-): boolean {
-  return isSetupTaskLaunchable(task);
+  return SETUP_TRACKS.filter((candidate) => next.includes(candidate));
 }
 
 function emptyView(screen: SharedFirstRunSetupScreen, title: string): SharedFirstRunSetupViewModel {

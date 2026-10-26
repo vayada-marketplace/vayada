@@ -37,6 +37,25 @@ describe("BillingSettingsUi", () => {
     expect(available).toContain("Flat monthly subscription");
   });
 
+  it("offers a plan choice instead of a switch while the hotel has none (VAY-2171)", () => {
+    const choice = renderToStaticMarkup(
+      createElement(PlanCard, {
+        title: "Commission",
+        label: "Percentage per direct booking",
+        price: "5%",
+        priceSuffix: "per direct booking",
+        description: "",
+        benefits: [],
+        current: false,
+        actionLabel: "Choose this plan",
+        onSwitch: vi.fn(),
+      }),
+    );
+    expect(choice).toContain("Choose this plan");
+    expect(choice).not.toContain("CURRENT");
+    expect(choice).not.toContain("Switch now");
+  });
+
   it("renders the exact payment and empty-invoice guidance", () => {
     const payment = renderToStaticMarkup(
       createElement(PaymentChoice, {

@@ -1,7 +1,8 @@
 import type { PreparedHotelImport } from "@vayada/domain-hotels";
 import { apiClient } from "./client";
 
-export const HOTEL_SETUP_TRACKS = ["hotel_operations", "creator_marketplace"] as const;
+// The API reads every stored invite as a Hotel Operations invite (VAY-2270).
+export const HOTEL_SETUP_TRACKS = ["hotel_operations"] as const;
 
 export type HotelSetupTrack = (typeof HOTEL_SETUP_TRACKS)[number];
 

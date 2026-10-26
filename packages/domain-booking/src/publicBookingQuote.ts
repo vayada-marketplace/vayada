@@ -6,12 +6,15 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import type { PublicPricingSelection } from "./publicPricingSelection.js";
 import type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
-import { validOptionalPricingPaymentMethods } from "./pricingPaymentMethods.js";
+import {
+  validOptionalPricingPaymentMethods,
+  type PricingPaymentMethod,
+} from "./pricingPaymentMethods.js";
 
 export type PublicBookingQuoteRequest = Readonly<{
   version: "public-booking-quote-request.v1";
   selection: PublicPricingSelection;
-  paymentMethod: "card" | "pay_at_property";
+  paymentMethod: PricingPaymentMethod;
 }>;
 export type PublicBookingQuote = Readonly<{
   version: "public-booking-quote.v1";
@@ -88,6 +91,7 @@ export function parsePublicBookingQuote(
     return null;
   const ids = new Set(request.selection.rooms.map((room) => room.selectionId));
   const seen = new Set<string>();
+  const schedules = new Set<string>();
   for (const room of value.rooms) {
     if (
       !exact(room, ["selectionId", "mealPlan", "cancellation", "payment"]) ||
@@ -111,14 +115,24 @@ export function parsePublicBookingQuote(
       )
     )
       return null;
-    // Public issuance currently supports full payment terms only; do not infer deposit execution.
+    // Full payment, or a deposit: a share by card now and the rest at the property (VAY-2205).
+    const full = exact(p, ["kind", "acceptedMethods"]) && p.kind === "full";
+    const deposit =
+      exact(p, ["kind", "basisPoints", "balanceDaysBeforeArrival", "acceptedMethods"]) &&
+      p.kind === "deposit" &&
+      Number.isInteger(p.basisPoints) &&
+      (p.basisPoints as number) >= 1 &&
+      (p.basisPoints as number) <= 9999 &&
+      p.balanceDaysBeforeArrival === 0 &&
+      request.paymentMethod === "card";
     if (
-      !exact(p, ["kind", "acceptedMethods"]) ||
-      p.kind !== "full" ||
+      !(full || deposit) ||
       !validOptionalPricingPaymentMethods(p) ||
-      !(p.acceptedMethods as string[]).includes(request.paymentMethod)
+      !(p.acceptedMethods as string[]).includes(request.paymentMethod) ||
+      (deposit && (p.acceptedMethods as string[]).length !== 1)
     )
       return null;
+    schedules.add(deposit ? `deposit:${p.basisPoints}` : "full");
   }
   let sum = BigInt(0);
   const roomLines = new Set<string>();
@@ -142,7 +156,10 @@ export function parsePublicBookingQuote(
     sum <= BigInt(0) ||
     sum !== BigInt(value.totalMinor as string) ||
     roomLines.size !== ids.size ||
-    BigInt(value.dueNowMinor as string) + BigInt(value.dueLaterMinor as string) !== sum
+    BigInt(value.dueNowMinor as string) + BigInt(value.dueLaterMinor as string) !== sum ||
+    // A stay is paid on one schedule; a deposit charges part now and leaves the rest.
+    schedules.size !== 1 ||
+    ([...schedules][0] !== "full" && (value.dueNowMinor === "0" || value.dueLaterMinor === "0"))
   )
     return null;
   return structuredClone(value) as PublicBookingQuote;

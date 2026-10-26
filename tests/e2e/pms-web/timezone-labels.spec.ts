@@ -28,7 +28,7 @@ test("readable timezone labels preserve IANA values when saved and reloaded", as
       },
     });
   });
-  await page.goto("/settings");
+  await page.goto("/settings/property");
   const timezone = page.getByLabel("Timezone*");
   await expect(timezone).toHaveValue("America/Sao_Paulo");
   await expect(timezone.locator("option:checked")).toHaveText("America/Sao Paulo");

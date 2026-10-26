@@ -1,7 +1,8 @@
 import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import type { FastifyRequest } from "fastify";
-import { parsePublicPricingSelection } from "@vayada/domain-booking";
+import { isManualPricingPaymentMethod, parsePublicPricingSelection } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
+import type { GuestModuleSwitches } from "../domains/bookingGuestModules.js";
 import type { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { PricingStorageError } from "../domains/replacementPricingStore.js";
 
@@ -22,6 +23,15 @@ export function requirePublicQuoteKey(request: FastifyRequest): string {
 /** Public DTO boundary. Private calculation/provenance never leaves the quote store. */
 export function createReplacementBookingQuoteIssuer(
   store: Pick<ReturnType<typeof createCurrentPricingQuoteStore>, "issue">,
+  /** The bank-transfer and PayPal methods acceptance can take: none while
+   * REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED is off, and bank transfer only with the
+   * bank-details binding. */
+  manualMethods: readonly string[] = [],
+  /** The hotel's Feature Hub Add-ons and Promos switches (VAY-2200). */
+  guestModules?: (slug: string) => Promise<GuestModuleSwitches>,
+  /** Card quotes that leave the rest to pay at the property: deposits
+   * (REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED, VAY-2205). */
+  cardSplits = false,
 ) {
   return async (slug: string, input: unknown, requestId: unknown, signal?: AbortSignal) => {
     if (
@@ -29,11 +39,35 @@ export function createReplacementBookingQuoteIssuer(
       !pricingObject(input) ||
       !pricingKeys(input, ["version", "selection", "paymentMethod"]) ||
       input.version !== "public-booking-quote-request.v1" ||
-      !["card", "pay_at_property"].includes(input.paymentMethod as string)
+      !(
+        ["card", "pay_at_property"].includes(input.paymentMethod as string) ||
+        (isManualPricingPaymentMethod(input.paymentMethod) &&
+          manualMethods.includes(input.paymentMethod))
+      )
     )
       throw httpError(400, "Invalid quote request.");
     const selection = parsePublicPricingSelection(input.selection);
     if (!selection) throw httpError(400, "Invalid quote selection.");
+    // Only new quotes are gated: accepting a quote issued before a switch keeps the shown price.
+    if (guestModules && (selection.addons.length > 0 || selection.promoCode !== null)) {
+      let switches: GuestModuleSwitches;
+      try {
+        switches = await guestModules(slug);
+      } catch (error) {
+        if (typeof (error as { statusCode?: unknown }).statusCode === "number") throw error;
+        throw Object.assign(new Error("Quote temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (selection.addons.length > 0 && !switches.addOns)
+        throw Object.assign(httpError(422, "Extras aren't available at this hotel."), {
+          code: "ADDONS_UNAVAILABLE",
+        });
+      if (selection.promoCode !== null && !switches.promoCodes)
+        throw Object.assign(httpError(422, "Promo codes aren't available at this hotel."), {
+          code: "PROMO_CODES_UNAVAILABLE",
+        });
+    }
     try {
       const { quote, replayed } = await store.issue(
         slug,
@@ -47,6 +81,8 @@ export function createReplacementBookingQuoteIssuer(
       if (quote.acceptanceMode !== "instant" && quote.acceptanceMode !== "request")
         throw new PricingStorageError("stale");
       const evidence = quote.evidence;
+      if (quote.paymentMethod === "card" && evidence.dueLaterMinor !== "0" && !cardSplits)
+        throw new PricingStorageError("denied", "card_deposit_unavailable");
       return {
         version: "public-booking-quote.v1",
         quoteId: quote.quoteId,
@@ -85,13 +121,47 @@ export function createReplacementBookingQuoteIssuer(
           statusCode: 503,
         });
       if (error.code === "invalid") throw httpError(400, "Invalid quote request.");
+      // VAY-2145: check-in is too close for this method's payment deadline.
+      if (error.code === "denied" && error.reason === "manual_payment_too_soon")
+        throw Object.assign(
+          httpError(422, "This payment method isn't available this close to check-in."),
+          { code: "MANUAL_PAYMENT_TOO_SOON" },
+        );
+      // VAY-2348: the hotel's booking window for this method doesn't cover this arrival.
+      if (error.code === "denied" && error.reason === "payment_method_window")
+        throw Object.assign(
+          httpError(422, "This payment method isn't available for these dates."),
+          { code: "PAYMENT_METHOD_WINDOW" },
+        );
+      // VAY-2205: part now by card, the rest at the property, while deposits are switched off.
+      if (error.code === "denied" && error.reason === "card_deposit_unavailable")
+        throw Object.assign(
+          httpError(422, "Paying part now by card isn't available at this hotel yet."),
+          { code: "CARD_DEPOSIT_UNAVAILABLE" },
+        );
+      // VAY-2232: an extra needs more notice than this stay gives.
+      if (error.code === "denied" && error.reason === "addon_lead_time")
+        throw Object.assign(httpError(422, "An extra needs more notice than this stay gives."), {
+          code: "ADDON_NEEDS_NOTICE",
+        });
+      // VAY-2309: a chosen rate doesn't take this way to pay (a non-refundable rate never takes
+      // pay at the property).
+      if (error.code === "denied" && error.reason === "payment_method_not_accepted")
+        throw Object.assign(httpError(422, "A chosen rate can't be paid this way."), {
+          code: "PAYMENT_METHOD_NOT_ACCEPTED",
+        });
       if (error.code === "idempotency_conflict")
         throw httpError(409, "Quote request changed. Use a new Idempotency-Key.");
       if (error.code === "stale")
         throw Object.assign(httpError(409, "Quote needs refreshing. Request a new quote."), {
           code: "QUOTE_REFRESH_REQUIRED",
         });
-      throw httpError(404, "Quote unavailable.");
+      // VAY-2309: the request log names the refusal (its code and reason, never guest data); the
+      // response stays "Quote unavailable.".
+      throw Object.assign(httpError(404, "Quote unavailable."), {
+        pricingCode: error.code,
+        pricingReason: error.reason ?? null,
+      });
     }
   };
 }

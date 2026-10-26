@@ -5,6 +5,10 @@ VAY-601 Ask Intelligence architecture, and VAY-604 AI-agent bookability
 recommendation. Updated after VAY-605 selected a planned big-bang database
 rewrite._
 
+> **Note (VAY-2259, 2026-10-19):** `apps/marketplace-api`, the old Python Marketplace API, is switched
+> off (api.vayada.com answers 410) and its source is deleted. Paths into it below refer to its last
+> source at commit `897d64c6e`.
+
 > **Retirement update:** VAY-601 is a historical input only. Migration `0090`
 > removes the retired Ask Intelligence schema. Any future hotel employee agent
 > starts with the VAY-1091 design spike and must define a new runtime and
@@ -105,18 +109,18 @@ apps/api
 This app can expose route groups for existing products:
 
 ```text
-/api/marketplace/*
+/api/marketplace/*   (hotel account invites only, VAY-2272)
 /api/booking/*
 /api/pms/*
 /api/platform/*
 /api/ai/*
 ```
 
-Product subdomains such as `api.marketplace.localhost`,
-`api.booking.localhost`, and `api.pms.localhost` can route to the same backend
-app during or after migration. The API boundary should be logical first. Split
-into separate deployable services only when there is operational pressure such
-as scaling, ownership, compliance, or release isolation.
+Product subdomains such as `api.booking.localhost` and `api.pms.localhost` can
+route to the same backend app during or after migration. The API boundary
+should be logical first. Split into separate deployable services only when
+there is operational pressure such as scaling, ownership, compliance, or release
+isolation.
 
 This app should be able to run against target-schema fixtures and staging target
 databases before production cutover. Legacy Python APIs may continue serving
@@ -126,7 +130,6 @@ target model rather than mirror the old database layout.
 If the team later wants separate deployables, keep them thin:
 
 ```text
-apps/marketplace-api-ts
 apps/booking-api-ts
 apps/pms-api-ts
 apps/platform-api-ts
@@ -154,7 +157,6 @@ packages/domain-identity
 packages/domain-hotels
 packages/domain-booking
 packages/domain-pms
-packages/domain-marketplace
 packages/domain-finance
 packages/domain-distribution
 ```
@@ -210,9 +212,6 @@ RequestContext
     hotelGroupIds
     bookingHotelIds
     pmsHotelIds
-    marketplaceHotelProfileIds
-    creatorProfileIds
-    affiliateIds
   locale
   currency
   source
@@ -265,7 +264,7 @@ Preserve:
 
 ### Hotels and property content
 
-Owns shared hotel/property facts used by marketplace, booking, PMS, and AI:
+Owns shared hotel/property facts used by booking, PMS, and AI:
 
 - hotel identity, slug, canonical names, previous slug history
 - address, geo, timezone, country, descriptions, amenities, images
@@ -273,8 +272,8 @@ Owns shared hotel/property facts used by marketplace, booking, PMS, and AI:
 - setup completeness and freshness signals
 - resource links from hotel groups to product-specific hotel records
 
-This domain should provide canonical read models rather than letting PMS,
-booking-api, and marketplace-api keep duplicating hotel identity reads.
+This domain should provide canonical read models rather than letting PMS and
+booking-api keep duplicating hotel identity reads.
 
 VAY-605 should define whether this is one physical target database with schemas
 per domain or multiple physical databases cut over together. Either way,
@@ -303,7 +302,7 @@ Redesign:
 
 - extract quote calculation into a deterministic application service
 - separate payment orchestration from booking persistence
-- publish booking events for email, Channex, metrics, and affiliate handling
+- publish booking events for email, Channex, and metrics
 
 Boundaries:
 
@@ -351,28 +350,12 @@ Boundaries:
 - expose PMS reservation sink and operational reservation read ports that Vayada
   PMS, external PMS adapters, and test fakes can all implement.
 
-### Marketplace and collaborations
-
-Owns:
-
-- creators and creator profiles
-- marketplace hotel profiles/listings
-- collaboration offerings, deliverables, lifecycle, ratings, notifications
-- trips and public marketplace browsing
-- marketplace admin moderation flows
-
-Redesign:
-
-- move long router logic into application services
-- treat PMS/booking facts as read models or domain interfaces rather than
-  direct cross-database queries
-
 ### Finance, billing, and payouts
 
 Owns:
 
 - product subscription and module entitlements
-- platform fees, affiliate commissions, property payouts
+- platform fees and property payouts
 - payment provider configuration and account readiness
 - payout settings and payout runs
 
@@ -459,8 +442,8 @@ Preserve:
 - existing public booking URLs through redirects or compatibility adapters
 - existing production databases as source of truth until the VAY-605 cutover
   window
-- Channex, Stripe, Xendit, email, affiliate, and marketplace integration
-  behavior while moving orchestration behind typed services
+- Channex, Stripe, Xendit, and email integration behavior while moving
+  orchestration behind typed services
 - local portless hostnames and app paths during migration
 
 Redesign:
@@ -485,8 +468,8 @@ These are the smallest useful follow-ups after this decision:
 
 2. **Define target-schema boundaries and migration harness**
    - Convert the VAY-605 ownership map into target-schema contracts for
-     identity, hotel catalog, booking, PMS, marketplace, finance,
-     distribution, and jobs/audit.
+     identity, hotel catalog, booking, PMS, finance, distribution, and
+     jobs/audit.
    - Add migration/parity harness interfaces to `backend-migration`.
    - Validation: target-schema contract fixtures and source-to-target mapping
      tests for representative records.

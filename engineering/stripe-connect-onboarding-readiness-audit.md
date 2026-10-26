@@ -4,6 +4,11 @@ _VAY-1075 audit record. Initially reviewed against VAY-815, VAY-1064,
 VAY-1301, and VAY-947 on 2026-08-28. Reconciled with `main` after all seven
 repository implementation children merged on 2026-08-31._
 
+> **Note (VAY-2272, 2026-10-20):** Marketplace Web is gone. Its setup wizard and
+> the Stripe return to `/setup?propertyId=<id>&step=payments` now live in
+> Booking Admin (VAY-2261, VAY-2262); the Marketplace parts below describe the
+> state before.
+
 ## Result
 
 Stripe Connect onboarding is **not ready for production cutover**. All seven
@@ -78,10 +83,11 @@ onboarding, and reload back to the previously persisted provider.
 
 Closed by VAY-1342/#1208.
 
-Marketplace also starts property Stripe onboarding from
-apps/marketplace-web/components/setup/operations/PaymentSetupForm.tsx. Unlike
-Booking Admin, it saves payment settings before requesting an account or link
-and stops when that write fails. Its provider-selection order is sound.
+Marketplace's old setup form,
+apps/marketplace-web/components/setup/operations/PaymentSetupForm.tsx (deleted
+in VAY-2174), also started property Stripe onboarding. Unlike Booking Admin, it
+saved payment settings before requesting an account or link and stopped when
+that write failed. Its provider-selection order was sound.
 
 ### 2. Account creation, replay, and authorization
 

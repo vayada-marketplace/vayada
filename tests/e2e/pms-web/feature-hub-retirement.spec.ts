@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import { featureHubRetirementChecks } from "../support/featureHubRetirementChecks";
 import {
   PMS_WEB_PROPERTY_ID,
   mockPmsWebAuthenticatedSession,
@@ -19,8 +18,6 @@ async function setup(page: Page) {
     }),
   );
 }
-
-featureHubRetirementChecks(PMS_WEB_PROPERTY_ID, setup);
 
 test("Financials can be switched off during suspension without showing effective access", async ({
   page,

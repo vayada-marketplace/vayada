@@ -91,7 +91,7 @@
       "given": {
         "authentication": "valid",
         "permissions": ["hotel_catalog.products.manage"],
-        "organizationKind": "creator_workspace"
+        "organizationKind": "platform"
       },
       "expected": {
         "status": 403,

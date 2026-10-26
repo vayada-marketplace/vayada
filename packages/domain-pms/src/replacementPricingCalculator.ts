@@ -118,7 +118,7 @@ export function calculateReplacementRoomStay(
   configuration: unknown,
   request: RoomStayPricingRequest,
 ): RoomStayPricingResult {
-  const result = evaluateRoomPricing(configuration, request, {
+  const result = evaluateRoomPricing(parsePricingConfiguration(configuration), request, {
     kind: "stay",
     checkIn: request?.checkIn,
     checkOut: request?.checkOut,
@@ -136,20 +136,36 @@ export function projectReplacementRoomNight(
   configuration: unknown,
   request: RoomNightProjectionRequest,
 ): RoomNightProjectionResult {
-  const config = parsePricingConfiguration(configuration);
-  if (!config) return { kind: "unavailable", reason: "invalid_configuration" };
-  return projectParsedReplacementRoomNight(config, request);
+  return nightProjection(
+    evaluateRoomPricing(parsePricingConfiguration(configuration), request, {
+      kind: "night",
+      date: request?.date,
+    }),
+  );
 }
 /** projectReplacementRoomNight over a configuration returned by parsePricingConfiguration, for
- * callers that project one configuration many times (parsing dominates a night's cost). */
+ * callers that project one configuration many times with varying requests (parsing dominates a
+ * night's cost; VAY-2108 ongoing ARI projects every adult occupancy per night). */
 export function projectParsedReplacementRoomNight(
   config: PricingConfiguration,
   request: RoomNightProjectionRequest,
 ): RoomNightProjectionResult {
-  const result = evaluateParsedRoomPricing(config, request, {
-    kind: "night",
-    date: request?.date,
-  });
+  return nightProjection(
+    evaluateRoomPricing(config, request, { kind: "night", date: request?.date }),
+  );
+}
+/** projectReplacementRoomNight for many dates of one offer, parsing the configuration once. */
+export function projectReplacementRoomNights(
+  configuration: unknown,
+  request: Omit<RoomNightProjectionRequest, "date">,
+  dates: readonly string[],
+): RoomNightProjectionResult[] {
+  const config = parsePricingConfiguration(configuration);
+  return dates.map((date) =>
+    nightProjection(evaluateRoomPricing(config, request, { kind: "night", date })),
+  );
+}
+function nightProjection(result: EvaluatedRoomStayResult): RoomNightProjectionResult {
   if (result.kind === "unavailable") return result;
   const {
     kind: _kind,
@@ -162,19 +178,11 @@ export function projectParsedReplacementRoomNight(
   return { ...evidence, kind: "projected", night: nights[0] };
 }
 function evaluateRoomPricing(
-  configuration: unknown,
+  config: PricingConfiguration | null,
   request: Omit<RoomStayPricingRequest, "checkIn" | "checkOut">,
   period: PricingPeriod,
 ): EvaluatedRoomStayResult {
-  const config = parsePricingConfiguration(configuration);
   if (!config) return { kind: "unavailable", reason: "invalid_configuration" };
-  return evaluateParsedRoomPricing(config, request, period);
-}
-function evaluateParsedRoomPricing(
-  config: PricingConfiguration,
-  request: Omit<RoomStayPricingRequest, "checkIn" | "checkOut">,
-  period: PricingPeriod,
-): EvaluatedRoomStayResult {
   const step = BigInt(pricingAmountStep(config.currency));
   const firstDate = period.kind === "stay" ? period.checkIn : period.date;
   if (

@@ -1,18 +1,29 @@
-export const SETUP_TRACKS = Object.freeze(["hotel_operations", "creator_marketplace"] as const);
+// The Creator Marketplace track is retired (VAY-2270); Hotel Operations is the only setup track.
+export const SETUP_TRACKS = Object.freeze(["hotel_operations"] as const);
 
 export type SetupTrack = (typeof SETUP_TRACKS)[number];
 
 export const SETUP_TRACK_COMPONENT_PRODUCTS = Object.freeze({
   hotel_operations: Object.freeze(["pms", "booking"] as const),
-  creator_marketplace: Object.freeze(["marketplace"] as const),
 }) satisfies Record<SetupTrack, readonly string[]>;
+
+/** The tracks a hotel can choose: every setup track. */
+export const OFFERED_SETUP_TRACKS = SETUP_TRACKS;
+
+/**
+ * Reads stored track selections in canonical order, dropping unknown values. Stored rows may still
+ * name the retired creator_marketplace track until the data migration rewrites them.
+ */
+export function normalizeStoredSetupTracks(values: readonly unknown[]): SetupTrack[] {
+  return SETUP_TRACKS.filter((track) => values.includes(track));
+}
 
 export type UpdateTracksRequest = {
   selectedTracks: SetupTrack[];
   expectedRevision: number;
 };
 
-export type SetupComponentProduct = "pms" | "booking" | "marketplace";
+export type SetupComponentProduct = "pms" | "booking";
 
 export type TrackStatus = {
   track: SetupTrack;
@@ -45,8 +56,6 @@ export type SetupCommandError = {
 export const ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION = "adaptive-hotel-setup.v1" as const;
 export const SETUP_TASK_IDS = [
   "shared_identity",
-  "public_profile",
-  "creator_offer",
   "rooms_rates_availability",
   "guest_settings_policies",
   "billing_plan",
@@ -55,8 +64,6 @@ export const SETUP_TASK_IDS = [
 ] as const;
 export const SETUP_TASK_DESTINATION_ROUTE_KEYS = {
   shared_identity: "hotel_catalog.shared_identity",
-  public_profile: "hotel_catalog.public_profile",
-  creator_offer: "marketplace.creator_offer",
   rooms_rates_availability: "pms.rooms_rates_availability",
   guest_settings_policies: "booking.guest_settings_policies",
   billing_plan: "finance.billing_plan",
@@ -66,7 +73,6 @@ export const SETUP_TASK_DESTINATION_ROUTE_KEYS = {
 export const SETUP_TASK_TRACKS = ["shared", ...SETUP_TRACKS] as const;
 export const SETUP_REQUIREMENT_OWNER_DOMAINS = [
   "hotel_catalog",
-  "marketplace",
   "pms",
   "booking",
   "finance",
@@ -88,7 +94,7 @@ export const SETUP_TASK_READINESS_STATES = [
 ] as const;
 export const SETUP_ACTIONABLE_BY = ["owner", "operator", "support", "system"] as const;
 export const SETUP_FACT_FRESHNESS = ["fresh", "stale"] as const;
-export const PRODUCT_ENTRY_PRODUCTS = ["booking", "pms", "marketplace"] as const;
+export const PRODUCT_ENTRY_PRODUCTS = ["booking", "pms"] as const;
 export const PRODUCT_ENTRY_DECISIONS = ["enter", "setup_required", "unavailable"] as const;
 export const PROPERTY_SELECTION_STATES = [
   "no_property",
@@ -122,11 +128,7 @@ export type SetupTask = {
 export function isSetupTaskLaunchable(
   task: Pick<SetupTask, "track" | "callerCapability" | "readiness"> | null | undefined,
 ): boolean {
-  return (
-    task?.callerCapability === "allowed" &&
-    (task.readiness === "actionable" ||
-      (task.track === "creator_marketplace" && task.readiness === "rejected"))
-  );
+  return task?.callerCapability === "allowed" && task.readiness === "actionable";
 }
 
 export type ProductEntryDecision = {
@@ -146,7 +148,6 @@ export type PropertySetupPlan = {
   launchReadiness: {
     operationsUse: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
     directBookingPublish: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
-    marketplacePublish: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
   };
 };
 
@@ -178,8 +179,6 @@ export type AdaptiveHotelSetupStatus = {
 
 const SETUP_TASK_TRACK: Record<SetupTaskId, SetupTask["track"]> = {
   shared_identity: "shared",
-  public_profile: "creator_marketplace",
-  creator_offer: "creator_marketplace",
   rooms_rates_availability: "hotel_operations",
   guest_settings_policies: "hotel_operations",
   billing_plan: "hotel_operations",
@@ -324,7 +323,7 @@ function isTrackStatus(value: unknown): value is TrackStatus {
           return (
             isRecord(component) &&
             hasOnlyKeys(component, ["product", "access"]) &&
-            isOneOf(component["product"], ["pms", "booking", "marketplace"]) &&
+            isOneOf(component["product"], ["pms", "booking"]) &&
             isOneOf(component["access"], ["absent", "active", "suspended", "unavailable"])
           );
         },
@@ -447,10 +446,9 @@ function isPropertySetupPlan(
       isNonNegativeInteger(progress["total"]) &&
       (progress["complete"] as number) <= (progress["total"] as number) &&
       isRecord(launch) &&
-      hasOnlyKeys(launch, ["operationsUse", "directBookingPublish", "marketplacePublish"]) &&
+      hasOnlyKeys(launch, ["operationsUse", "directBookingPublish"]) &&
       isOneOf(launch["operationsUse"], SETUP_LAUNCH_READINESS_STATES) &&
-      isOneOf(launch["directBookingPublish"], SETUP_LAUNCH_READINESS_STATES) &&
-      isOneOf(launch["marketplacePublish"], SETUP_LAUNCH_READINESS_STATES)
+      isOneOf(launch["directBookingPublish"], SETUP_LAUNCH_READINESS_STATES)
     )
   ) {
     return false;
@@ -464,7 +462,6 @@ function isPropertySetupPlan(
       selectedTracks.includes(SETUP_TASK_TRACK[taskId] as SetupTrack),
   );
   const operationsSelected = selectedTracks.includes("hotel_operations");
-  const marketplaceSelected = selectedTracks.includes("creator_marketplace");
   return (
     sameOrder(
       tasks.map(({ taskId }) => taskId),
@@ -483,9 +480,6 @@ function isPropertySetupPlan(
         launch["directBookingPublish"] !== "not_applicable"
       : launch["operationsUse"] === "not_applicable" &&
         launch["directBookingPublish"] === "not_applicable") &&
-    (marketplaceSelected
-      ? launch["marketplacePublish"] !== "not_applicable"
-      : launch["marketplacePublish"] === "not_applicable") &&
     (recommendedTaskId === null || isSetupTaskLaunchable(recommendedTask)) &&
     launchReadinessMatchesTasks(value as unknown as PropertySetupPlan, selectedTracks)
   );
@@ -566,9 +560,7 @@ function launchReadinessMatchesTasks(
         "billing_plan",
         "payment",
         "direct_booking_publication",
-      ]) &&
-    plan.launchReadiness.marketplacePublish ===
-      expected("creator_marketplace", ["shared_identity", "public_profile", "creator_offer"])
+      ])
   );
 }
 

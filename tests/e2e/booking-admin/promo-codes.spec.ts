@@ -161,6 +161,33 @@ test.describe("booking-admin promo-code settings cutover", () => {
     expect(desktopDetails).not.toBeNull();
     expect(desktopRules).not.toBeNull();
     expect(Math.abs(desktopDetails!.y - desktopRules!.y)).toBeLessThanOrEqual(1);
+    // VAY-2233: both cards end together and their fields line up row by row.
+    expect(Math.abs(desktopDetails!.height - desktopRules!.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(desktopDetails!.width - desktopRules!.width)).toBeLessThanOrEqual(1);
+    const topOf = async (selector: string) => (await editor.locator(selector).boundingBox())!.y;
+    for (const [left, right] of [
+      ["#promo-code", "#promo-min-booking-value"],
+      ['label:has(> input[value="percentage"])', "#promo-max-uses"],
+      ["#promo-discount-value", "details"],
+      ["#promo-valid-from", "#promo-stay-from"],
+    ]) {
+      expect(
+        Math.abs((await topOf(left)) - (await topOf(right))),
+        `${left} / ${right}`,
+      ).toBeLessThanOrEqual(1);
+    }
+    // The Active switch sits in the footer, on the same line as Cancel.
+    await expect(promoDetails.getByRole("switch")).toHaveCount(0);
+    await expect(promoRules.getByRole("switch")).toHaveCount(0);
+    const footerSwitch = await editor.getByRole("switch", { name: "Active" }).boundingBox();
+    const cancelButton = await editor.getByRole("button", { name: "Cancel" }).boundingBox();
+    expect(
+      Math.abs(
+        footerSwitch!.y + footerSwitch!.height / 2 - (cancelButton!.y + cancelButton!.height / 2),
+      ),
+    ).toBeLessThanOrEqual(2);
+    // On a short desktop viewport (1280×720) the body scrolls and the footer stays on screen.
+    expect(cancelButton!.y + cancelButton!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
     const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
     expect(
       accessibility.violations
@@ -181,6 +208,9 @@ test.describe("booking-admin promo-code settings cutover", () => {
     expect(mobileRules!.y).toBeGreaterThan(mobileDetails!.y + mobileDetails!.height);
     await expect(editor.getByRole("button", { name: "Cancel" })).toBeVisible();
     await expect(editor.getByRole("button", { name: "Create promo code" })).toBeVisible();
+    const mobileSwitch = await editor.getByRole("switch", { name: "Active" }).boundingBox();
+    const mobileCancel = await editor.getByRole("button", { name: "Cancel" }).boundingBox();
+    expect(mobileSwitch!.y + mobileSwitch!.height).toBeLessThanOrEqual(mobileCancel!.y);
     const mobileLayout = await page.evaluate(() => ({
       documentWidth: document.documentElement.scrollWidth,
       viewportWidth: document.documentElement.clientWidth,
@@ -188,10 +218,10 @@ test.describe("booking-admin promo-code settings cutover", () => {
     expect(mobileLayout.documentWidth).toBeLessThanOrEqual(mobileLayout.viewportWidth);
     await page.setViewportSize({ width: 1280, height: 720 });
 
-    const activeSwitch = editor.getByRole("switch");
-    const switchTrack = activeSwitch.locator(":scope > div.relative");
-    const track = await switchTrack.boundingBox();
-    const knob = await switchTrack.locator(":scope > div").boundingBox();
+    const activeSwitch = editor.getByRole("switch", { name: "Active" });
+    const switchKnob = activeSwitch.locator(":scope > span");
+    const track = await activeSwitch.boundingBox();
+    const knob = await switchKnob.boundingBox();
     expect(track).not.toBeNull();
     expect(knob).not.toBeNull();
     expect(knob!.x).toBeGreaterThanOrEqual(track!.x);
@@ -202,7 +232,7 @@ test.describe("booking-admin promo-code settings cutover", () => {
     await expect(activeSwitch).toHaveAttribute("aria-checked", "false");
     await expect
       .poll(async () => {
-        const bounds = await switchTrack.locator(":scope > div").boundingBox();
+        const bounds = await switchKnob.boundingBox();
         return bounds ? bounds.x + bounds.width / 2 : undefined;
       })
       .toBeLessThan(track!.x + track!.width / 2);

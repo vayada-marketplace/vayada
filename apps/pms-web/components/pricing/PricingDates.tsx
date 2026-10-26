@@ -15,6 +15,8 @@ import {
   PricingError,
 } from "./pricingAmounts";
 import { recurringPrice, recurringAdjustments, recurringTemplate } from "./recurringPricingInputs";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 import {
   IncludedPricing,
   includedInput,
@@ -183,12 +185,15 @@ export function PricingDates({
       )
     : [[t("pricing.perRoom"), ""]];
   return (
-    <details className="sm:col-span-2 text-sm">
-      <summary className="cursor-pointer">{t("pricing.dates.summary", { label })}</summary>
-      <p className="mt-2 text-gray-600">{t("pricing.dates.intro")}</p>
-      <ul className="my-3 space-y-2">
+    <PricingSection
+      title={t("pricing.dates.section")}
+      label={t("pricing.dates.summary", { label })}
+      keepOpen={pending}
+    >
+      <p className={ui.help}>{t("pricing.dates.intro")}</p>
+      <ul className="space-y-1.5">
         {datesOf(offer).map((entry) => (
-          <li key={entry.date} className="flex flex-wrap items-center gap-3">
+          <li key={entry.date} className={ui.entry}>
             <span>
               {entry.date}:{" "}
               {baseAmounts(entry.price, t)
@@ -198,7 +203,7 @@ export function PricingDates({
             </span>
             <button
               type="button"
-              className="rounded border px-3 py-1 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled || pending}
               aria-label={t("pricing.dates.editAria", { date: entry.date, label })}
               onClick={() => {
@@ -219,7 +224,7 @@ export function PricingDates({
             </button>
             <button
               type="button"
-              className="rounded border px-3 py-1 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled || pending}
               aria-label={t("pricing.dates.clearAria", { date: entry.date, label })}
               onClick={() => apply(entry.date, null)}
@@ -238,11 +243,11 @@ export function PricingDates({
       {!editing && (
         <>
           {recurring && (
-            <label className="mb-3 block">
+            <label className={ui.fieldLabel}>
               {t("pricing.dates.newPricing")}
               <select
                 aria-label={t("pricing.dates.newPricingAria", { label })}
-                className="mt-1 block rounded border px-3 py-2"
+                className={`mt-1.5 block ${ui.field}`}
                 disabled={disabled}
                 value={useRecurring ? "recurring" : "flat"}
                 onChange={(event) => {
@@ -269,13 +274,13 @@ export function PricingDates({
         </>
       )}
       <div className="flex flex-wrap items-end gap-3">
-        <label>
+        <label className={ui.fieldLabel}>
           {t("pricing.dateLabel")}
           <input
             type="text"
             placeholder={t("pricing.dates.datePlaceholder")}
             aria-label={t("pricing.dates.dateAria", { label })}
-            className="mt-1 block w-40 rounded border px-3 py-2"
+            className={`mt-1.5 block w-40 ${ui.field}`}
             disabled={disabled || editing}
             value={date}
             onChange={(event) => {
@@ -287,7 +292,7 @@ export function PricingDates({
           />
         </label>
         {fields.map(([name], index) => (
-          <label key={index}>
+          <label key={index} className={ui.fieldLabel}>
             {name} ({room.currency})
             <input
               aria-label={
@@ -295,7 +300,7 @@ export function PricingDates({
                   ? t("pricing.dates.roomPriceAria", { label })
                   : t("pricing.dates.amountAria", { name, label })
               }
-              className="mt-1 block w-36 rounded border px-3 py-2"
+              className={`mt-1.5 block w-36 ${ui.field}`}
               disabled={disabled}
               value={amounts[index] ?? ""}
               onChange={(event) => {
@@ -328,19 +333,14 @@ export function PricingDates({
         )}
         <button
           type="button"
-          className="rounded border px-3 py-2 disabled:opacity-50"
+          className={ui.secondaryButton}
           disabled={disabled}
           onClick={() => apply(date, editing || useRecurring ? amounts : (amounts[0] ?? ""))}
         >
           {editing ? t("pricing.dates.apply") : t("pricing.dates.add")}
         </button>
         {pending && (
-          <button
-            type="button"
-            className="rounded border px-3 py-2 disabled:opacity-50"
-            disabled={disabled}
-            onClick={reset}
-          >
+          <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={reset}>
             {t("pricing.dates.cancel")}
           </button>
         )}
@@ -351,10 +351,10 @@ export function PricingDates({
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={ui.errorText}>
           {error}
         </p>
       )}
-    </details>
+    </PricingSection>
   );
 }

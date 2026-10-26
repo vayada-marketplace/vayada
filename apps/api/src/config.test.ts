@@ -13,10 +13,6 @@ const completeCreatorMarketplaceEnv = {
   PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
 };
 
-const completeCreatorPlatformConnectionEnv = {
-  ...completeCreatorMarketplaceEnv,
-};
-
 const completeAuthSessionEnv = {
   WORKOS_CLIENT_ID: "client",
   WORKOS_API_KEY: "sk_test",
@@ -24,13 +20,11 @@ const completeAuthSessionEnv = {
   AUTH_LOGOUT_URL: "https://admin.localhost/login",
   AUTH_ALLOWED_ORIGINS:
     "https://admin.localhost, https://api.localhost, https://admin.booking.localhost, " +
-    "https://pms.localhost, https://affiliate.localhost, https://marketplace.localhost",
+    "https://pms.localhost",
   AUTH_COMPATIBILITY_CALLBACK_ORIGIN: "https://api.localhost",
   AUTH_PLATFORM_ADMIN_ORIGIN: "https://admin.localhost",
   AUTH_BOOKING_ADMIN_ORIGIN: "https://admin.booking.localhost",
   AUTH_PMS_WEB_ORIGIN: "https://pms.localhost",
-  AUTH_AFFILIATE_DASHBOARD_ORIGIN: "https://affiliate.localhost",
-  AUTH_MARKETPLACE_WEB_ORIGIN: "https://marketplace.localhost",
 };
 
 const financeFolioKmsEnv = {
@@ -56,127 +50,16 @@ describe("api config", () => {
     );
   });
 
-  it("keeps affiliate capture closed unless its isolated runtime is complete", () => {
-    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateCapture).toBeUndefined();
+  it("keeps the room type Delete cleanup off unless properties are listed (VAY-2132)", () => {
+    const key = "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS";
+    expect(loadConfig({}).pmsRoomTypeDeleteCleanupPropertyIds).toEqual([]);
+    expect(loadConfig({ [key]: " " }).pmsRoomTypeDeleteCleanupPropertyIds).toEqual([]);
+    expect(loadConfig({ [key]: "*" }).pmsRoomTypeDeleteCleanupPropertyIds).toBe("all");
     expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-      }).affiliateCapture,
-    ).toEqual({
-      databaseUrl: "postgresql://vayada_next_affiliate_capture@target-db/app",
-      internalToken: "x".repeat(32),
-    });
-    expect(() =>
-      loadConfig({ ...completeCreatorMarketplaceEnv, AFFILIATE_CAPTURE_ENABLED: "true" }),
-    ).toThrow("AFFILIATE_CAPTURE_ENABLED requires");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://api_runtime@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-      }),
-    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
-    for (const conflictingDatabaseUrl of [
-      {
-        TARGET_DATABASE_URL:
-          "postgresql://api_runtime@target-db/app?user=vayada_next_affiliate_capture",
-      },
-      {
-        AUTH_DATABASE_URL:
-          "postgresql://auth_runtime@auth-db/app?user=vayada_next_affiliate_capture",
-      },
-    ]) {
-      expect(() =>
-        loadConfig({
-          ...completeCreatorMarketplaceEnv,
-          ...conflictingDatabaseUrl,
-          AFFILIATE_CAPTURE_ENABLED: "true",
-          AFFILIATE_CAPTURE_DATABASE_URL:
-            "postgresql://vayada_next_affiliate_capture@target-db/app",
-          BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-        }),
-      ).toThrow("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
-    }
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL:
-          "postgresql://vayada_next_affiliate_capture@target-db/app?user=api_runtime",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-      }),
-    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "short",
-      }),
-    ).toThrow("must be at least 32 bytes");
-  });
-
-  it("keeps live booking binding behind capture and target runtime gates", () => {
-    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateBookingBindingEnabled).toBe(false);
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
-      }),
-    ).toThrow("requires affiliate capture and TARGET_DATABASE_URL");
-    expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
-      }).affiliateBookingBindingEnabled,
-    ).toBe(true);
-  });
-
-  it("keeps the public affiliate redirect behind the complete capture runtime", () => {
-    expect(loadConfig(completeCreatorMarketplaceEnv).affiliatePublicRedirectEnabled).toBe(false);
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
-      }),
-    ).toThrow("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
-    expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        AFFILIATE_CAPTURE_ENABLED: "true",
-        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
-        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
-        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
-      }).affiliatePublicRedirectEnabled,
-    ).toBe(true);
-  });
-
-  it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
-    const keys = {
-      "key-1": Buffer.alloc(32, 1).toString("base64url"),
-      "key-2": Buffer.alloc(32, 2).toString("base64url"),
-    };
-    const config = (current = "key-2", encoded = JSON.stringify(keys)) =>
-      loadConfig({
-        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: current,
-        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_KEYS_JSON: encoded,
-      });
-    expect(config().marketplaceCommunicationUnsubscribe).toEqual({
-      currentKeyVersion: "key-2",
-      keys,
-    });
-    expect(() =>
-      loadConfig({ MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: "key-2" }),
-    ).toThrow("Incomplete Marketplace communication unsubscribe signing config");
-    expect(() => config("missing")).toThrow("signing keys are invalid");
-    expect(() => config("key-2", "not-json")).toThrow("must be valid JSON");
+      loadConfig({ [key]: "1DEE5712-6074-4FB0-8B1D-EC3601943526" })
+        .pmsRoomTypeDeleteCleanupPropertyIds,
+    ).toEqual(["1dee5712-6074-4fb0-8b1d-ec3601943526"]);
+    expect(() => loadConfig({ [key]: "sri-journeys" })).toThrow(key);
   });
 
   it("parses a review-only webhook override without changing other intake modes", () => {
@@ -636,13 +519,11 @@ describe("api config", () => {
       loadConfig({
         ...completeAuthSessionEnv,
         AUTH_OAUTH_STATE_SECRET: "oauth-state-secret",
-        AUTH_FIRST_PARTY_SURFACES: "marketplace-web,pms-web,marketplace-web",
+        AUTH_FIRST_PARTY_SURFACES: "booking-admin,pms-web,booking-admin",
         AUTH_COOKIE_SECURE: "true",
         AUTH_COOKIE_DOMAIN: "localhost",
+        // VAY-2259: still set in production until the platform mapping goes; now ignored.
         AUTH_LEGACY_MARKETPLACE_JWT_SECRET: "legacy-secret",
-        AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL: "https://affiliate.localhost/login",
-        AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET: "affiliate-pms-secret",
-        AUTH_MARKETPLACE_WEB_LOGOUT_URL: "https://marketplace.localhost/login",
       }).authSession,
     ).toEqual({
       workosClientId: "client",
@@ -655,24 +536,16 @@ describe("api config", () => {
         "https://api.localhost",
         "https://admin.booking.localhost",
         "https://pms.localhost",
-        "https://affiliate.localhost",
-        "https://marketplace.localhost",
       ],
       authCompatibilityCallbackOrigin: "https://api.localhost",
       authSurfaceOrigins: {
         "platform-admin": "https://admin.localhost",
         "booking-admin": "https://admin.booking.localhost",
         "pms-web": "https://pms.localhost",
-        "affiliate-dashboard": "https://affiliate.localhost",
-        "marketplace-web": "https://marketplace.localhost",
       },
-      authFirstPartySurfaces: ["marketplace-web", "pms-web"],
+      authFirstPartySurfaces: ["booking-admin", "pms-web"],
       authCookieSecure: true,
       authCookieDomain: "localhost",
-      authLegacyMarketplaceJwtSecret: "legacy-secret",
-      authAffiliateDashboardLogoutUrl: "https://affiliate.localhost/login",
-      authLegacyAffiliatePmsJwtSecret: "affiliate-pms-secret",
-      authMarketplaceWebLogoutUrl: "https://marketplace.localhost/login",
     });
   });
 
@@ -684,11 +557,32 @@ describe("api config", () => {
     ).toThrow("Incomplete auth session config");
   });
 
+  // VAY-2271: the retired Marketplace and affiliate surfaces are unknown now.
+  it("rejects the retired Marketplace and affiliate login addresses and surfaces", () => {
+    expect(
+      loadConfig({
+        ...completeAuthSessionEnv,
+        AUTH_MARKETPLACE_WEB_ORIGIN: "https://marketplace.localhost",
+        AUTH_AFFILIATE_DASHBOARD_ORIGIN: "https://affiliate.localhost",
+      }).authSession?.authSurfaceOrigins,
+    ).toEqual({
+      "platform-admin": "https://admin.localhost",
+      "booking-admin": "https://admin.booking.localhost",
+      "pms-web": "https://pms.localhost",
+    });
+    expect(() =>
+      loadConfig({
+        ...completeAuthSessionEnv,
+        AUTH_FIRST_PARTY_SURFACES: "marketplace-web",
+      }),
+    ).toThrow("AUTH_FIRST_PARTY_SURFACES contains unsupported surfaces: marketplace-web");
+  });
+
   it("rejects auth callback origins outside the exact allowlist", () => {
     expect(() =>
       loadConfig({
         ...completeAuthSessionEnv,
-        AUTH_MARKETPLACE_WEB_ORIGIN: "https://evil.example",
+        AUTH_PMS_WEB_ORIGIN: "https://evil.example",
       }),
     ).toThrow("Auth callback origins must be included in AUTH_ALLOWED_ORIGINS");
   });
@@ -703,7 +597,7 @@ describe("api config", () => {
     expect(() =>
       loadConfig({
         ...completeAuthSessionEnv,
-        AUTH_FIRST_PARTY_SURFACES: "marketplace-web,unknown-surface",
+        AUTH_FIRST_PARTY_SURFACES: "booking-admin,unknown-surface",
       }),
     ).toThrow("AUTH_FIRST_PARTY_SURFACES contains unsupported surfaces: unknown-surface");
   });
@@ -713,61 +607,9 @@ describe("api config", () => {
       loadConfig({
         ...completeAuthSessionEnv,
         AUTH_COOKIE_SECURE: "false",
-        AUTH_FIRST_PARTY_SURFACES: "marketplace-web",
+        AUTH_FIRST_PARTY_SURFACES: "booking-admin",
       }),
-    ).toThrow("AUTH_COOKIE_SECURE must be true for HTTPS first-party surfaces: marketplace-web");
-  });
-
-  it("loads independently configured creator platform providers", () => {
-    expect(
-      loadConfig({
-        ...completeCreatorPlatformConnectionEnv,
-        NODE_ENV: "test",
-        CREATOR_PLATFORM_CALLBACK_BASE_URL: "https://creator.api.localhost:1356",
-        CREATOR_PLATFORM_WEB_RETURN_URL: "https://marketplace.localhost:1356/profile/complete",
-        CREATOR_PLATFORM_CREDENTIAL_VAULT: "memory",
-        CREATOR_PLATFORM_SECRET_PREFIX: "vayada/test/creator-platforms",
-        TIKTOK_CLIENT_KEY: "client-key",
-        TIKTOK_CLIENT_SECRET: "client-secret",
-      }).creatorPlatformConnections,
-    ).toEqual({
-      callbackBaseUrl: "https://creator.api.localhost:1356",
-      webReturnUrl: "https://marketplace.localhost:1356/profile/complete",
-      sync: {
-        enabled: true,
-        pollIntervalMs: 60_000,
-        recurringIntervalMs: 86_400_000,
-        batchSize: 10,
-        maxAttempts: 5,
-        minimumSpacingMs: { meta: 1_000, tiktok: 2_000, google: 1_000 },
-      },
-      credentialVault: {
-        provider: "memory",
-        secretPrefix: "vayada/test/creator-platforms",
-      },
-      tiktok: { clientKey: "client-key", clientSecret: "client-secret" },
-    });
-  });
-
-  it("rejects partial creator platform provider config", () => {
-    expect(() => loadConfig({ INSTAGRAM_CLIENT_ID: "instagram-client" })).toThrow(
-      "Incomplete Instagram creator platform config; missing INSTAGRAM_CLIENT_SECRET, INSTAGRAM_API_VERSION",
-    );
-  });
-
-  it("rejects the in-memory creator credential vault in production", () => {
-    expect(() =>
-      loadConfig({
-        ...completeCreatorPlatformConnectionEnv,
-        NODE_ENV: "production",
-        CREATOR_PLATFORM_CALLBACK_BASE_URL: "https://api.example.com",
-        CREATOR_PLATFORM_WEB_RETURN_URL: "https://marketplace.example.com/profile/complete",
-        CREATOR_PLATFORM_CREDENTIAL_VAULT: "memory",
-        CREATOR_PLATFORM_SECRET_PREFIX: "vayada/production/creator-platforms",
-        TIKTOK_CLIENT_KEY: "client-key",
-        TIKTOK_CLIENT_SECRET: "client-secret",
-      }),
-    ).toThrow("CREATOR_PLATFORM_CREDENTIAL_VAULT=memory is not allowed in production");
+    ).toThrow("AUTH_COOKIE_SECURE must be true for HTTPS first-party surfaces: booking-admin");
   });
 
   it("loads target public hotel profile config", () => {
@@ -913,6 +755,27 @@ describe("api config", () => {
       loadConfig({ REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED: "true" })
         .replacementPricingCardAcceptanceEnabled,
     ).toBe(true);
+  });
+
+  it("keeps deposit quote acceptance off unless explicitly enabled (VAY-2205)", () => {
+    expect(loadConfig({}).replacementPricingDepositAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingDepositAcceptanceEnabled,
+    ).toBe(true);
+  });
+
+  it("keeps bank-transfer and PayPal quote acceptance off unless explicitly enabled", () => {
+    expect(loadConfig({}).replacementPricingManualPaymentAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingManualPaymentAcceptanceEnabled,
+    ).toBe(true);
+  });
+
+  it("keeps the hotel first run (VAY-2247) unmounted unless explicitly enabled", () => {
+    expect(loadConfig({}).hotelFirstRunEnabled).toBe(false);
+    expect(loadConfig({ HOTEL_FIRST_RUN_ENABLED: "true" }).hotelFirstRunEnabled).toBe(true);
   });
 
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
@@ -1095,16 +958,7 @@ describe("api config", () => {
     ).toThrow("BOOKING_WEB_EVENT_SINK must be one of: disabled, target");
   });
 
-  it("keeps marketplace admin legacy superadmin fallback disabled by default", () => {
-    expect(loadConfig({}).marketplaceAdminLegacySuperadminFallbackEnabled).toBe(false);
-    expect(
-      loadConfig({
-        MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED: "true",
-      }).marketplaceAdminLegacySuperadminFallbackEnabled,
-    ).toBe(true);
-  });
-
-  it("requires durable media whenever target Marketplace and auth make the server creator-capable", () => {
+  it("requires durable media whenever the target database and auth make the server hotel-capable", () => {
     expect(loadConfig(completeCreatorMarketplaceEnv).platformMediaServing).toBeDefined();
     expect(() =>
       loadConfig({
@@ -1114,7 +968,7 @@ describe("api config", () => {
         PLATFORM_MEDIA_CDN_ORIGIN_HOST: undefined,
       }),
     ).toThrow(
-      "Target Marketplace with complete auth requires complete PLATFORM_MEDIA_* config because creator profile photos are required",
+      "Target database with complete auth requires complete PLATFORM_MEDIA_* config because hotel profile photos are required",
     );
   });
 
@@ -1132,7 +986,6 @@ describe("api config", () => {
     expect(config.pmsOperationsAllowedOrigins).toEqual([
       "https://pms.localhost",
       "https://admin.booking.localhost",
-      "https://marketplace.localhost",
     ]);
   });
 
@@ -1189,42 +1042,41 @@ describe("api config", () => {
     ).toThrow("FINANCE_SOURCE must be one of: legacy, target");
   });
 
-  it("loads target-owned affiliate public route config", () => {
+  it("loads identity privacy allowed origins from either setting name", () => {
     expect(
       loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
-        AFFILIATE_PUBLIC_SOURCE: "target",
-      }),
-    ).toMatchObject({
-      targetDatabaseUrl: "postgresql://target-db",
-      affiliatePublicSource: "target",
-    });
-  });
-
-  it("requires a target database for target-owned affiliate public routes", () => {
-    expect(() =>
-      loadConfig({
-        AFFILIATE_PUBLIC_SOURCE: "target",
-      }),
-    ).toThrow("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
-  });
-
-  it("rejects unsupported affiliate public route sources", () => {
-    expect(() =>
-      loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
-        AFFILIATE_PUBLIC_SOURCE: "pms",
-      }),
-    ).toThrow("Unsupported AFFILIATE_PUBLIC_SOURCE");
-  });
-
-  it("loads marketplace discovery allowed origins from comma-separated config", () => {
+        IDENTITY_PRIVACY_ALLOWED_ORIGINS:
+          "https://admin.booking.localhost, https://admin.localhost,",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.booking.localhost", "https://admin.localhost"]);
+    // The old Terraform variable name still works until the platform renames it (VAY-2270).
     expect(
       loadConfig({
-        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS:
-          "https://marketplace.localhost, https://admin.localhost,",
-      }).marketplaceDiscoveryAllowedOrigins,
-    ).toEqual(["https://marketplace.localhost", "https://admin.localhost"]);
+        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.localhost"]);
+    expect(
+      loadConfig({
+        IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.booking.localhost",
+        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
+      }).identityPrivacyAllowedOrigins,
+    ).toEqual(["https://admin.booking.localhost"]);
+  });
+
+  it("keeps the contact form origins apart from the identity privacy origins", () => {
+    // VAY-2286: production sets CONTACT_INTAKE_ALLOWED_ORIGINS=https://vayada.com.
+    expect(
+      loadConfig({ CONTACT_INTAKE_ALLOWED_ORIGINS: "https://vayada.com, " })
+        .contactIntakeAllowedOrigins,
+    ).toEqual(["https://vayada.com"]);
+    expect(loadConfig({}).contactIntakeAllowedOrigins).toEqual([
+      "https://landing.localhost",
+      "http://localhost:3006",
+    ]);
+    expect(
+      loadConfig({ IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.localhost" })
+        .contactIntakeAllowedOrigins,
+    ).not.toContain("https://admin.localhost");
   });
 
   it("requires booking email delivery for checkout in production", () => {
@@ -1315,6 +1167,36 @@ describe("api config", () => {
     );
   });
 
+  it("keeps the retired-media purge off unless it is switched on with the CDN and media config (VAY-2272)", () => {
+    const media = {
+      PLATFORM_MEDIA_BUCKET: "vayada-media-staging",
+      PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.staging.vayada.com",
+      PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
+    };
+    const runtime = completeCreatorMarketplaceEnv;
+    const distribution = { PLATFORM_MEDIA_CDN_DISTRIBUTION_ID: "E2EXAMPLE12345" };
+    const on = { PLATFORM_MEDIA_RETIRED_PURGE_ENABLED: "true" };
+
+    expect(loadConfig({ ...media, ...distribution }).platformMediaRetiredPurge).toBeUndefined();
+    expect(loadConfig({ ...runtime, ...distribution, ...on }).platformMediaRetiredPurge).toEqual({
+      cdnDistributionId: "E2EXAMPLE12345",
+    });
+    expect(
+      loadConfig({ ...runtime, ...distribution, ...on, API_BACKGROUND_WORKERS_ENABLED: "false" })
+        .platformMediaRetiredPurge,
+    ).toEqual({ cdnDistributionId: "E2EXAMPLE12345" });
+    expect(() => loadConfig({ ...media, ...on })).toThrow("PLATFORM_MEDIA_CDN_DISTRIBUTION_ID");
+    expect(() => loadConfig({ ...distribution, ...on })).toThrow(
+      "complete PLATFORM_MEDIA_* config",
+    );
+    expect(() => loadConfig({ ...media, ...distribution, ...on })).toThrow(
+      "TARGET_DATABASE_URL and complete auth config",
+    );
+    expect(() =>
+      loadConfig({ ...runtime, ...distribution, ...on, PLATFORM_MEDIA_CLEANUP_ENABLED: "false" }),
+    ).toThrow("PLATFORM_MEDIA_CLEANUP_ENABLED must stay on");
+  });
+
   it("runs the calendar auto-open scheduler hourly unless switched off", () => {
     expect(loadConfig({})).toMatchObject({
       pmsCalendarAutoOpenSchedulerEnabled: true,
@@ -1375,6 +1257,40 @@ describe("api config", () => {
     );
   });
 
+  it("re-publishes prices after payment changes every five minutes unless switched off (VAY-2304)", () => {
+    expect(loadConfig({})).toMatchObject({
+      pricingPaymentRepublishEnabled: true,
+      pricingPaymentRepublishIntervalMs: 5 * 60 * 1000,
+    });
+    expect(
+      loadConfig({
+        PRICING_PAYMENT_REPUBLISH_ENABLED: "false",
+        PRICING_PAYMENT_REPUBLISH_INTERVAL_MS: "60000",
+      }),
+    ).toMatchObject({
+      pricingPaymentRepublishEnabled: false,
+      pricingPaymentRepublishIntervalMs: 60_000,
+    });
+    expect(() => loadConfig({ PRICING_PAYMENT_REPUBLISH_INTERVAL_MS: "59999" })).toThrow(
+      "PRICING_PAYMENT_REPUBLISH_INTERVAL_MS must be at least 60000",
+    );
+  });
+
+  it("reads the contact notification recipient (VAY-2286)", () => {
+    const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
+    expect(loadConfig(email).contactNotificationRecipient).toBeUndefined();
+    expect(
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: " team@example.test " })
+        .contactNotificationRecipient,
+    ).toBe("team@example.test");
+    expect(() =>
+      loadConfig({ ...email, CONTACT_NOTIFICATION_RECIPIENT: "Team <team@example.test>" }),
+    ).toThrow("CONTACT_NOTIFICATION_RECIPIENT must be one email address");
+    expect(() => loadConfig({ CONTACT_NOTIFICATION_RECIPIENT: "team@example.test" })).toThrow(
+      "CONTACT_NOTIFICATION_RECIPIENT requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
+    );
+  });
+
   it("configures and can disable property setup draft retention", () => {
     expect(loadConfig({})).toMatchObject({
       propertySetupDraftRetentionEnabled: true,
@@ -1400,6 +1316,31 @@ describe("api config", () => {
     );
     expect(() => loadConfig({ PROPERTY_SETUP_DRAFT_RETENTION_INTERVAL_MS: "2147483648" })).toThrow(
       "PROPERTY_SETUP_DRAFT_RETENTION_INTERVAL_MS must not exceed 2147483647",
+    );
+  });
+
+  it("configures and can disable booking web event retention", () => {
+    expect(loadConfig({})).toMatchObject({
+      bookingWebEventRetentionEnabled: true,
+      bookingWebEventRetentionIntervalMs: 24 * 60 * 60 * 1000,
+      bookingWebEventRetentionBatchSize: 1_000,
+    });
+    expect(
+      loadConfig({
+        BOOKING_WEB_EVENT_RETENTION_ENABLED: "false",
+        BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS: "60000",
+        BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE: "25",
+      }),
+    ).toMatchObject({
+      bookingWebEventRetentionEnabled: false,
+      bookingWebEventRetentionIntervalMs: 60_000,
+      bookingWebEventRetentionBatchSize: 25,
+    });
+    expect(() => loadConfig({ BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE: "0" })).toThrow(
+      "BOOKING_WEB_EVENT_RETENTION_BATCH_SIZE must be a positive integer",
+    );
+    expect(() => loadConfig({ BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS: "2147483648" })).toThrow(
+      "BOOKING_WEB_EVENT_RETENTION_INTERVAL_MS must not exceed 2147483647",
     );
   });
 
