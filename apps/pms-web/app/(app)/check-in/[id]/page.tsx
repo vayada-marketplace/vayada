@@ -103,8 +103,14 @@ type MarkPaidOffer = "transfer" | "atProperty" | "cardRest";
 /** The payment the hotel can record at the desk; the same cases the booking page offers. */
 function markPaidOffer(b: Booking): MarkPaidOffer | null {
   if (b.amountStatus === "unverified") return null;
-  // VAY-2205: a card deposit leaves the rest to pay at the hotel.
-  if (b.paymentMethod === "card" && b.paymentStatus === "partially_paid") return "cardRest";
+  // VAY-2205: a card deposit leaves the rest to pay at the hotel, also once the guest is in: check-in
+  // moves the room assignments, the booking itself stays confirmed.
+  if (
+    b.paymentMethod === "card" &&
+    b.paymentStatus === "partially_paid" &&
+    ["confirmed", "checked_in", "in_house", "checked_out"].includes(b.status)
+  )
+    return "cardRest";
   if (b.status !== "confirmed" || b.paymentStatus !== "unpaid") return null;
   if (b.paymentMethod === "bank_transfer") return "transfer";
   if (b.paymentMethod === "pay_at_property") return "atProperty";

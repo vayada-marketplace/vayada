@@ -137,6 +137,24 @@ test("shows and records the rest of a card deposit at check-in", async ({ page }
   await assertHealthy();
 });
 
+test("offers no payment record for a cancelled card-deposit stay", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockReservation(page, () => ({
+    ...pmsWebReservation,
+    status: "cancelled",
+    pricing: {
+      totalAmount: { amountDecimal: "240.00", currency: "EUR" },
+      balanceAmount: { amountDecimal: "168.00", currency: "EUR" },
+    },
+    payment: { method: "card", expectedMethod: "card", status: "partially_paid" },
+  }));
+
+  await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  await expect(page.getByText("€168 outstanding", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
+  await assertHealthy();
+});
+
 test("offers no payment record for an OTA-collected stay", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   await mockReservation(page, () => ({
