@@ -957,6 +957,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "channex_room_availability_reconciliation_attestations",
         "channex_staging_catalog_references",
         "checkin_checklist_templates",
+        "checkin_settings",
         "checkout_inspection_templates",
         "effective_calendar_auto_open_settings",
         "effective_room_assignment_optimization_settings",

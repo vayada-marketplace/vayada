@@ -321,6 +321,7 @@ import {
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
 import { createPgPmsNavigationModuleRepository } from "./routes/pmsNavigationModules.js";
 import { createPgPmsGuestRegistrationRepository } from "./routes/pmsGuestRegistrations.js";
+import { createPgPmsCheckinSettingsRepository } from "./routes/pmsCheckinSettings.js";
 import { createPgBookingModuleRepository } from "./routes/pmsBookingModules.js";
 import { createPgBookingLocationMapRepository } from "./domains/bookingLocationMap.js";
 import { createPgBookingHostNotificationsRepository } from "./domains/bookingHostNotifications.js";
@@ -624,6 +625,10 @@ const pmsNavigationModuleRepository = config.auth
 // Guest ID details recorded at check-in (VAY-2373).
 const pmsGuestRegistrationRepository = config.auth
   ? createPgPmsGuestRegistrationRepository({ connectionString: targetDatabaseUrl, max: 2 })
+  : undefined;
+// Settings → Check-in (VAY-2374).
+const pmsCheckinSettingsRepository = config.auth
+  ? createPgPmsCheckinSettingsRepository({ connectionString: targetDatabaseUrl, max: 2 })
   : undefined;
 const bookingModuleRepository = config.auth
   ? createPgBookingModuleRepository({ connectionString: targetDatabaseUrl })
@@ -1969,6 +1974,7 @@ const app = buildApp({
   pmsModuleActivationRepository,
   pmsNavigationModuleRepository,
   pmsGuestRegistrationRepository,
+  pmsCheckinSettingsRepository,
   bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
   hotelFirstRun,
