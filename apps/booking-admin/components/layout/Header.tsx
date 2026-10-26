@@ -1,25 +1,24 @@
 "use client";
 
-import { SupportButton } from "@vayada/settings-ui";
+import { isSupportAvailable, SupportDialog, type SupportDialogHandle } from "@vayada/settings-ui";
 import { apiClient } from "@/services/api/client";
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import {
-  BellIcon,
-  ChevronDownIcon,
-  ArrowTopRightOnSquareIcon,
-  PlusIcon,
-} from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ArrowTopRightOnSquareIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { authService } from "@/services/auth";
 import { settingsService, HotelSummary, SuperAdminHotel } from "@/services/settings";
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import NavigationSearch from "./NavigationSearch";
+import DailyStatsStrip from "./DailyStatsStrip";
+import NotificationsBell from "./notifications/NotificationsBell";
+import NotificationToasts from "./notifications/NotificationToasts";
+import { useHostNotifications } from "./notifications/useHostNotifications";
+import { useNotificationActions } from "./notifications/useNotificationActions";
 import ManagePropertiesModal from "./ManagePropertiesModal";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
-
-const SELECTED_HOTEL_CHANGED_EVENT = "booking-admin:selected-hotel-changed";
+import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
 
 function storeSelectedHotelId(hotelId: string): void {
   localStorage.setItem("selectedHotelId", hotelId);
@@ -36,7 +35,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [hotels, setHotels] = useState<(HotelSummary | SuperAdminHotel)[]>([]);
   const [selectedHotel, setSelectedHotel] = useState<(HotelSummary | SuperAdminHotel) | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [currencyOpen, setCurrencyOpen] = useState(false);
@@ -48,16 +46,14 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [userEmail, setUserEmail] = useState("");
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const notificationsRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+  const supportDialog = useRef<SupportDialogHandle>(null);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
-      }
-      if (notificationsRef.current && !notificationsRef.current.contains(e.target as Node)) {
-        setNotificationsOpen(false);
       }
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setProfileOpen(false);
@@ -99,6 +95,11 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
       })
       .catch(() => {});
   }, []);
+
+  // The bell's feed for the selected property (VAY-2349), by its canonical property id.
+  const propertyId = selectedHotel?.propertyId ?? selectedHotel?.id;
+  const notifications = useHostNotifications(propertyId);
+  const notificationActions = useNotificationActions(propertyId, notifications);
 
   const handleCurrencyChange = async (code: string) => {
     if (code === currency || savingCurrency) return;
@@ -147,8 +148,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
   return (
     <header className="relative h-12 bg-white border-b border-gray-200 flex items-center justify-between px-4 shrink-0">
-      {/* Left section: Hamburger + Property Selector + Super Admin Badge */}
-      <div className="flex items-center gap-2 md:gap-4">
+      {/* Left section: Hamburger + Property Selector + Super Admin Badge + Today's stats.
+          min-w-0 lets the stats strip give up room before the search box does (VAY-2203). */}
+      <div className="flex min-w-0 items-center gap-2 md:gap-4">
         {/* Mobile hamburger */}
         <button
           onClick={onMenuToggle}
@@ -171,12 +173,13 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </button>
         {/* Property Selector Dropdown — always shown so single-hotel users
             can still reach the "Add Property" action that lives inside it. */}
-        <div className="relative" ref={dropdownRef}>
+        <div className="relative shrink-0" ref={dropdownRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
             className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
+            title={selectedHotel?.name || undefined}
           >
-            <span className="max-w-[110px] truncate font-medium sm:max-w-none">
+            <span className="max-w-[110px] truncate font-medium sm:max-w-[220px]">
               {selectedHotel?.name || t("layout.header.noProperties")}
             </span>
             <ChevronDownIcon
@@ -252,22 +255,16 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
         {/* Super Admin Badge */}
         {isManagingOtherHotel && (
-          <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full">
+          <span className="inline-flex shrink-0 items-center px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full">
             {t("layout.header.superAdmin")}
           </span>
         )}
+
+        <DailyStatsStrip hotelId={selectedHotel?.id} />
       </div>
 
       <NavigationSearch hotelId={selectedHotel?.id} />
 
-      <SupportButton
-        placement="header"
-        translate={t}
-        product="booking"
-        submit={(request) =>
-          apiClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
-        }
-      />
       {/* Right section: Preview + Notifications + Profile */}
       <div className="flex items-center gap-2">
         {/* Preview Button */}
@@ -288,33 +285,17 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           </div>
         )}
 
-        {/* Notification Bell + Dropdown */}
-        <div className="relative" ref={notificationsRef}>
-          <button
-            onClick={() => setNotificationsOpen(!notificationsOpen)}
-            className="relative p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
-          >
-            <BellIcon className="w-4 h-4" />
-          </button>
-
-          {notificationsOpen && (
-            <div className="absolute top-full right-0 mt-1.5 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-              <div className="px-4 py-3">
-                <h3 className="text-[13px] font-semibold text-gray-900">
-                  {t("layout.header.notifications")}
-                </h3>
-              </div>
-              <div className="px-4 py-6 text-center">
-                <BellIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                <p className="text-[13px] text-gray-500">{t("layout.header.noNotifications")}</p>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Notifications bell and panel (VAY-2349) */}
+        <NotificationsBell
+          hotelName={selectedHotel?.name ?? ""}
+          notifications={notifications}
+          actions={notificationActions}
+        />
 
         {/* Profile Avatar + Dropdown */}
         <div className="relative" ref={profileRef}>
           <button
+            ref={profileButtonRef}
             onClick={() => setProfileOpen(!profileOpen)}
             className="w-7 h-7 bg-primary-600 rounded-full flex items-center justify-center text-white text-[10px] font-semibold hover:bg-primary-700 transition-colors"
           >
@@ -441,6 +422,19 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                     </div>
                   )}
                 </div>
+                {isSupportAvailable() && (
+                  <button
+                    onClick={() => {
+                      setProfileOpen(false);
+                      // The closing menu removes this item; return focus to the avatar instead.
+                      profileButtonRef.current?.focus();
+                      supportDialog.current?.open();
+                    }}
+                    className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    {t("support.help")}
+                  </button>
+                )}
               </div>
               <div className="border-t border-gray-100" />
               {/* Sign out */}
@@ -457,6 +451,20 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </div>
       </div>
 
+      <SupportDialog
+        ref={supportDialog}
+        translate={t}
+        product="booking"
+        submit={(request) =>
+          apiClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
+        }
+      />
+      {/* Toasts for new bookings, missed payments and sync errors (VAY-2349) */}
+      <NotificationToasts
+        hotelId={propertyId}
+        feed={notifications.feed}
+        actions={notificationActions}
+      />
       <ManagePropertiesModal
         open={manageOpen}
         onClose={() => setManageOpen(false)}

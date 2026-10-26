@@ -14,6 +14,7 @@ import {
 } from "date-fns";
 import { CalendarRoom, CalendarBooking, CalendarBlock } from "@/services/calendar";
 import { getChannelBarColor } from "@/lib/constants/statusStyles";
+import { AWAITING_PAYMENT_BAR_CLASS, AWAITING_PAYMENT_BAR_STYLE } from "@/lib/awaitingPayment";
 import { useTranslation } from "@/lib/i18n";
 
 interface MonthViewProps {
@@ -180,7 +181,11 @@ export default function MonthView({
                             </button>
                           ))}
                           {dayBookings.map((b) => {
-                            const channelColor = getChannelBarColor(b.channel);
+                            // VAY-2348: a held booking waiting for its bank transfer is striped amber.
+                            const awaiting = b.status === "awaiting_payment";
+                            const barColor = awaiting
+                              ? `${AWAITING_PAYMENT_BAR_CLASS} hover:brightness-95`
+                              : `text-white ${getChannelBarColor(b.channel)} hover:brightness-110`;
                             // VAY-403: a multi-room booking spans several room
                             // rows. Tag every bar with its reference + a ×N
                             // count so staff read them as ONE reservation
@@ -194,10 +199,11 @@ export default function MonthView({
                                 key={`booking-${b.id}-${b.roomPosition}-${day.toISOString()}`}
                                 type="button"
                                 onClick={() => onSelectBooking(b)}
-                                title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}${multiRoomTitle}`}
-                                className={`w-full flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium text-white ${channelColor} hover:brightness-110 transition-all truncate ${
+                                title={`${b.guestFirstName} ${b.guestLastName} (${awaiting ? t("bookings.statusAwaitingPayment") : b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}${multiRoomTitle}`}
+                                className={`w-full flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium ${barColor} transition-all truncate ${
                                   isMultiRoom ? "ring-1 ring-inset ring-white/50" : ""
                                 }`}
+                                style={awaiting ? AWAITING_PAYMENT_BAR_STYLE : undefined}
                               >
                                 <span className="w-3.5 h-3.5 rounded-full bg-white/25 flex items-center justify-center text-[8px] font-bold flex-shrink-0">
                                   {getInitials(b.guestFirstName, b.guestLastName)}

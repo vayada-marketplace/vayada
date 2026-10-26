@@ -1,9 +1,9 @@
 -- Fixture: media-url-migration / media.sql
 -- Source: migration_source_media schema.
 --
--- Represents the one-time existing URL migration inventory from Booking,
--- Marketplace, and PMS source snapshots into the platform media registry and
--- domain reference/read-model fields.
+-- Represents the one-time existing URL migration inventory from Booking and
+-- PMS source snapshots into the platform media registry and domain
+-- reference/read-model fields.
 
 DROP SCHEMA IF EXISTS migration_source_media CASCADE;
 CREATE SCHEMA migration_source_media;
@@ -13,13 +13,7 @@ SELECT
   'f8221000-0000-0000-0000-000000000001'::uuid AS id,
   'media.hotel.owner@example.test'::text AS email,
   'Media Hotel Owner'::text AS name,
-  'active'::text AS status
-UNION ALL
-SELECT
-  'f8221000-0000-0000-0000-000000000002'::uuid,
-  'media.creator@example.test'::text,
-  'Media Creator'::text,
-  'active'::text;
+  'active'::text AS status;
 
 CREATE TABLE migration_source_media.organizations AS
 SELECT
@@ -27,14 +21,7 @@ SELECT
   'hotel_group'::text AS kind,
   'Media Migration Hotel Group'::text AS name,
   'media-migration-hotel-group'::text AS slug,
-  'active'::text AS status
-UNION ALL
-SELECT
-  'f8222000-0000-0000-0000-000000000002'::uuid,
-  'creator_workspace'::text,
-  'Media Creator Studio'::text,
-  'media-creator-studio'::text,
-  'active'::text;
+  'active'::text AS status;
 
 CREATE TABLE migration_source_media.properties AS
 SELECT
@@ -58,15 +45,6 @@ SELECT
   '{"fixture": "media-url-migration"}'::jsonb AS metadata
 UNION ALL
 SELECT
-  'f8223100-0000-0000-0000-000000000002'::uuid,
-  'f8223000-0000-0000-0000-000000000001'::uuid,
-  'marketplace'::text,
-  'hotel_listings'::text,
-  'marketplace-listing-822'::text,
-  'listing_input'::text,
-  '{"fixture": "media-url-migration"}'::jsonb
-UNION ALL
-SELECT
   'f8223100-0000-0000-0000-000000000003'::uuid,
   'f8223000-0000-0000-0000-000000000001'::uuid,
   'pms'::text,
@@ -81,77 +59,7 @@ SELECT
   'f8223000-0000-0000-0000-000000000001'::uuid AS property_id,
   'media-migration-hotel'::text AS slug,
   'canonical'::text AS purpose,
-  'active'::text AS status
-UNION ALL
-SELECT
-  'f8223200-0000-0000-0000-000000000002'::uuid,
-  'f8223000-0000-0000-0000-000000000001'::uuid,
-  'media-migration-listing'::text,
-  'marketplace_overlay'::text,
-  'active'::text;
-
-CREATE TABLE migration_source_media.marketplace_creators AS
-SELECT
-  'f8226000-0000-0000-0000-000000000001'::uuid AS id,
-  'f8222000-0000-0000-0000-000000000002'::uuid AS organization_id,
-  'f8221000-0000-0000-0000-000000000002'::uuid AS owner_user_id,
-  'marketplace-creator-822'::text AS source_creator_id,
-  'Media Creator'::text AS display_name,
-  'travel'::text AS creator_type,
-  'https://legacy-marketplace-media.s3.amazonaws.com/creators/creator-822/profile.jpg'::text AS profile_picture_url,
-  TRUE::boolean AS profile_complete,
-  'active'::text AS profile_status;
-
-CREATE TABLE migration_source_media.marketplace_hotel_profiles AS
-SELECT
-  'f8223000-0000-0000-0000-000000000001'::uuid AS property_id,
-  'f8222000-0000-0000-0000-000000000001'::uuid AS organization_id,
-  'marketplace-hotel-profile-822'::text AS source_hotel_profile_id,
-  'verified'::text AS marketplace_profile_status,
-  TRUE::boolean AS profile_complete;
-
-CREATE TABLE migration_source_media.marketplace_hotel_listings AS
-SELECT
-  'f8226100-0000-0000-0000-000000000001'::uuid AS id,
-  'f8223000-0000-0000-0000-000000000001'::uuid AS property_id,
-  'f8222000-0000-0000-0000-000000000001'::uuid AS organization_id,
-  'marketplace-listing-822'::text AS source_listing_id,
-  'Media Migration Stay'::text AS title,
-  'Listing used for platform media migration parity.'::text AS listing_summary,
-  'boutique_hotel'::text AS accommodation_type,
-  'verified'::text AS listing_status,
-  ARRAY[
-    'https://legacy-marketplace-media.s3.amazonaws.com/listings/listing-822/gallery-1.jpg'
-  ]::text[] AS image_urls;
-
-CREATE TABLE migration_source_media.marketplace_collaborations AS
-SELECT
-  'f8226200-0000-0000-0000-000000000001'::uuid AS id,
-  'f8226000-0000-0000-0000-000000000001'::uuid AS creator_profile_id,
-  'f8222000-0000-0000-0000-000000000002'::uuid AS creator_organization_id,
-  'f8223000-0000-0000-0000-000000000001'::uuid AS property_id,
-  'f8222000-0000-0000-0000-000000000001'::uuid AS hotel_organization_id,
-  'f8226100-0000-0000-0000-000000000001'::uuid AS listing_id,
-  'marketplace-collaboration-822'::text AS source_collaboration_id,
-  'creator'::text AS initiator_type,
-  'accepted'::text AS lifecycle_status,
-  'free_stay'::text AS collaboration_type,
-  1::integer AS free_stay_min_nights,
-  2::integer AS free_stay_max_nights,
-  'EUR'::char(3) AS currency,
-  TRUE::boolean AS creator_consent;
-
-CREATE TABLE migration_source_media.marketplace_chat_messages AS
-SELECT
-  'f8226300-0000-0000-0000-000000000001'::uuid AS id,
-  'f8226200-0000-0000-0000-000000000001'::uuid AS collaboration_id,
-  'f8223000-0000-0000-0000-000000000001'::uuid AS property_id,
-  'f8221000-0000-0000-0000-000000000002'::uuid AS sender_user_id,
-  'creator'::text AS sender_type,
-  'image'::text AS message_type,
-  '[image attachment migrated]'::text AS body,
-  '{"legacySourceUrl": "https://legacy-marketplace-private.s3.amazonaws.com/chat/collaboration-822/image.png"}'::jsonb AS message_metadata,
-  '2026-06-01T12:00:00Z'::timestamptz AS created_at;
+  'active'::text AS status;
 
 CREATE TABLE migration_source_media.pms_room_types AS
 SELECT
@@ -279,93 +187,6 @@ FROM (
       FALSE,
       'f8221000-0000-0000-0000-000000000001'::uuid,
       '{"migrationRule": "booking external gallery preserved"}'::jsonb
-    ),
-    (
-      'f8224000-0000-0000-0000-000000000003'::uuid,
-      'marketplace.listing.gallery',
-      'public',
-      'vayada_managed',
-      'marketplace',
-      'hotel_listings',
-      'marketplace-listing-822:image_urls:1',
-      'image_urls[0]',
-      'https://legacy-marketplace-media.s3.amazonaws.com/listings/listing-822/gallery-1.jpg',
-      'legacy-marketplace-media',
-      'listings/listing-822/gallery-1.jpg',
-      'vayada-media-local',
-      'public/marketplace/listings/f8226100-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000003/original_safe.webp',
-      'image/webp',
-      196608::bigint,
-      'sha256:marketplace-listing-822',
-      1600,
-      900,
-      'listing-gallery-1.jpg',
-      'f8222000-0000-0000-0000-000000000001'::uuid,
-      'f8223000-0000-0000-0000-000000000001'::uuid,
-      'marketplace',
-      'hotel_listing',
-      'f8226100-0000-0000-0000-000000000001',
-      TRUE,
-      'f8221000-0000-0000-0000-000000000001'::uuid,
-      '{"migrationRule": "marketplace listing image copied"}'::jsonb
-    ),
-    (
-      'f8224000-0000-0000-0000-000000000004'::uuid,
-      'marketplace.creator.profile_image',
-      'public',
-      'vayada_managed',
-      'marketplace',
-      'creators',
-      'marketplace-creator-822:profile_picture_url',
-      'profile_picture_url',
-      'https://legacy-marketplace-media.s3.amazonaws.com/creators/creator-822/profile.jpg',
-      'legacy-marketplace-media',
-      'creators/creator-822/profile.jpg',
-      'vayada-media-local',
-      'public/marketplace/creators/f8226000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000004/original_safe.webp',
-      'image/webp',
-      131072::bigint,
-      'sha256:marketplace-creator-822',
-      1024,
-      1024,
-      'creator-profile.jpg',
-      'f8222000-0000-0000-0000-000000000002'::uuid,
-      NULL::uuid,
-      'marketplace',
-      'creator_profile',
-      'f8226000-0000-0000-0000-000000000001',
-      TRUE,
-      'f8221000-0000-0000-0000-000000000002'::uuid,
-      '{"migrationRule": "marketplace creator profile copied"}'::jsonb
-    ),
-    (
-      'f8224000-0000-0000-0000-000000000005'::uuid,
-      'marketplace.collaboration_chat.attachment',
-      'private',
-      'vayada_managed',
-      'marketplace',
-      'chat_messages',
-      'marketplace-chat-822:image_url',
-      'message_metadata.legacySourceUrl',
-      'https://legacy-marketplace-private.s3.amazonaws.com/chat/collaboration-822/image.png',
-      'legacy-marketplace-private',
-      'chat/collaboration-822/image.png',
-      'vayada-media-local',
-      'private/marketplace/collaborations/f8226200-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000005/image.png',
-      'image/png',
-      65536::bigint,
-      'sha256:marketplace-chat-822',
-      800,
-      600,
-      'image.png',
-      'f8222000-0000-0000-0000-000000000002'::uuid,
-      'f8223000-0000-0000-0000-000000000001'::uuid,
-      'marketplace',
-      'collaboration_chat_message',
-      'f8226300-0000-0000-0000-000000000001',
-      FALSE,
-      'f8221000-0000-0000-0000-000000000002'::uuid,
-      '{"migrationRule": "marketplace private chat copied"}'::jsonb
     ),
     (
       'f8224000-0000-0000-0000-000000000006'::uuid,
@@ -584,19 +405,6 @@ CROSS JOIN (
 INSERT INTO migration_source_media.media_variants
 VALUES
   (
-    'f8224100-0000-0000-0000-000000000017',
-    'f8224000-0000-0000-0000-000000000005',
-    'provider_original',
-    'private',
-    'private/marketplace/collaborations/f8226200-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000005/image.png',
-    'image/png',
-    800,
-    600,
-    65536,
-    'sha256:marketplace-chat-822:provider_original',
-    NULL
-  ),
-  (
     'f8224100-0000-0000-0000-000000000018',
     'f8224000-0000-0000-0000-000000000008',
     'provider_original',
@@ -634,23 +442,6 @@ SELECT
   TRUE::boolean,
   '{"platformMediaObjectId": "f8224000-0000-0000-0000-000000000002", "externalReference": true}'::jsonb,
   'f8224000-0000-0000-0000-000000000002'::uuid;
-
-CREATE TABLE migration_source_media.marketplace_creator_profile_references AS
-SELECT
-  'f8226000-0000-0000-0000-000000000001'::uuid AS creator_profile_id,
-  'https://media.localhost/public-cdn/marketplace/creators/f8226000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000004/original_safe.webp'::text AS target_profile_picture_url;
-
-CREATE TABLE migration_source_media.marketplace_listing_image_references AS
-SELECT
-  'f8226100-0000-0000-0000-000000000001'::uuid AS listing_id,
-  ARRAY[
-    'https://media.localhost/public-cdn/marketplace/listings/f8226100-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000003/original_safe.webp'
-  ]::text[] AS target_image_urls;
-
-CREATE TABLE migration_source_media.marketplace_chat_media_references AS
-SELECT
-  'f8226300-0000-0000-0000-000000000001'::uuid AS message_id,
-  'f8224000-0000-0000-0000-000000000005'::text AS media_object_id;
 
 CREATE TABLE migration_source_media.pms_room_media_references AS
 SELECT

@@ -238,6 +238,49 @@ export async function mockPricingCatalogue(page: Page) {
   await page.route("**/pricing-addons", (route) =>
     route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
   );
+  await mockStayPrices(page, {
+    suite: { [`pricing-offer.v2:${"a".repeat(64)}`]: "30000" },
+  });
+}
+
+/** The room cards' stay prices (VAY-2190), echoing the requested stay. `prices` maps room type
+ * to offer key to total in minor units, or null for an offer without a price. */
+export async function mockStayPrices(
+  page: Page,
+  prices: Record<string, Record<string, string | null>>,
+  rooms: Record<
+    string,
+    { availability?: string; roomsLeft?: number | null; roomCount?: number | null }
+  > = {},
+) {
+  await page.route("**/pricing-offers/stay-prices**", (route) => {
+    const url = new URL(route.request().url());
+    return route.fulfill({
+      json: {
+        version: "public-pricing-stay-prices.v1",
+        checkIn: url.searchParams.get("checkIn"),
+        checkOut: url.searchParams.get("checkOut"),
+        rooms: Object.entries(prices).map(([roomTypeId, offers]) => ({
+          roomTypeId,
+          roomCount: 1,
+          availability: "available",
+          roomsLeft: null,
+          ...rooms[roomTypeId],
+          offers: Object.entries(offers).map(([publicOfferKey, totalMinor]) =>
+            totalMinor === null
+              ? { publicOfferKey, status: "unavailable" }
+              : {
+                  publicOfferKey,
+                  status: "priced",
+                  totalMinor,
+                  currency: "EUR",
+                  promoApplied: false,
+                },
+          ),
+        })),
+      },
+    });
+  });
 }
 
 export function legacyPricingRequests(page: Page): string[] {
@@ -253,7 +296,7 @@ type MockBookingApisOptions = {
   arrivalBounds?: { checkInUntil: string; checkOutFrom: string };
   supportedQuoteParameters?: Partial<typeof publicHotelProfile.hotel.supportedQuoteParameters>;
   supportedLocales?: string[];
-  supportedCurrencies?: string[];
+  displayCurrencies?: string[];
   headerLogoUrl?: string;
   headerSettings?: {
     showContactButton: boolean;
@@ -262,14 +305,28 @@ type MockBookingApisOptions = {
     showCurrencySelector: boolean;
   };
   publicContacts?: typeof publicHotelProfile.hotel.publicContacts;
+  /** VAY-2200: false while the hotel has Promos off or no live code. */
+  promoCodes?: boolean;
+  /** A Design Studio font pairing id, e.g. "high-end-serif". */
+  fontPairing?: string;
+  /** The published brand colour, e.g. "#5E0000" (VAY-2318). */
+  primaryColor?: string;
+  /** VAY-2247: a hotel that went live before adding any photos. */
+  noPhotos?: boolean;
+  /** VAY-2307: the public map pin, shown only when the hotel shows its location. */
+  mapPin?: { latitude: number; longitude: number };
 };
 
 export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
+  const displayCurrencies = options.displayCurrencies ?? ["EUR", "USD"];
   const profile = {
     ...publicHotelProfile,
     hotel: {
       ...publicHotelProfile.hotel,
-      ...(options.headerLogoUrl || options.headerSettings
+      ...(options.headerLogoUrl ||
+      options.headerSettings ||
+      options.fontPairing ||
+      options.primaryColor
         ? {
             branding: {
               logoUrl: options.headerLogoUrl ?? null,
@@ -277,19 +334,26 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
               showReferAGuestButton: options.headerSettings?.showReferAGuestButton ?? true,
               showLanguageSelector: options.headerSettings?.showLanguageSelector ?? true,
               showCurrencySelector: options.headerSettings?.showCurrencySelector ?? true,
+              ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
               heroImage: null,
               heroHeading: null,
               heroSubtext: null,
-              primaryColor: null,
-              fontPairing: null,
+              primaryColor: options.primaryColor ?? null,
+              fontPairing: options.fontPairing ?? null,
             },
           }
         : {}),
+      ...(options.noPhotos ? { images: [] } : {}),
+      ...(options.mapPin
+        ? { location: { ...publicHotelProfile.hotel.location, ...options.mapPin } }
+        : {}),
       policies: { ...publicHotelProfile.hotel.policies, ...options.arrivalBounds },
+      capabilities: {
+        ...publicHotelProfile.hotel.capabilities,
+        promoCodes: options.promoCodes ?? true,
+      },
       publicContacts: options.publicContacts ?? publicHotelProfile.hotel.publicContacts,
       supportedLocales: options.supportedLocales ?? publicHotelProfile.hotel.supportedLocales,
-      supportedCurrencies:
-        options.supportedCurrencies ?? publicHotelProfile.hotel.supportedCurrencies,
       supportedQuoteParameters: {
         ...publicHotelProfile.hotel.supportedQuoteParameters,
         ...options.supportedQuoteParameters,
@@ -311,11 +375,16 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     },
   );
 
-  await page.route(
-    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/attribution/clicks`,
-    async (route) => {
-      await route.fulfill({ status: 204, body: "" });
-    },
+  // A booking's stay details (VAY-2360): none unless a test gives some.
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/bookings/*/stay`, (route) =>
+    route.fulfill({ json: { version: "booking-stay.v1", cancellation: null, places: [] } }),
+  );
+
+  // The host's nearby places (VAY-2327): none unless a test gives some.
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/nearby`, (route) =>
+    route.fulfill({
+      json: { schemaVersion: 1, status: "hidden", location: null, places: [], categories: [] },
+    }),
   );
 
   for (const retired of ["offers", "calendar"]) {
@@ -352,11 +421,26 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     await route.fulfill({ json: addons });
   });
 
-  await page.route("**/api/exchange-rates**", async (route) => {
-    await route.fulfill({ json: { base: "EUR", rates: { EUR: 1, USD: 1.1 } } });
-  });
+  await page.route(
+    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/exchange-rates`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          base: "EUR",
+          rates: { USD: 1.1 },
+          attribution: {
+            label: "Rates By Exchange Rate API",
+            url: "https://www.exchangerate-api.com",
+          },
+        },
+      });
+    },
+  );
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/unavailable-dates**`, async (route) => {
     await route.fulfill({ json: { dates: [], min_stay_by_arrival: {} } });
   });
+
+  // The home page's room cards read the catalog and stay prices; specs override these.
+  await mockPricingCatalogue(page);
 }

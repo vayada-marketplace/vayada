@@ -10,6 +10,7 @@ import {
   type AuthOrganizationSelectionResponse,
 } from "@/services/auth/sessionStore";
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
+import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
 import { useTranslation } from "@/lib/i18n";
 
 function LoginContent() {
@@ -18,6 +19,9 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [hotelSetupRequired, setHotelSetupRequired] = useState(
+    searchParams.get("auth_error_code") === "hotel_workspace_required",
+  );
   const [submitError, setSubmitError] = useState(
     searchParams.get("auth_error") ??
       (searchParams.get("expired") === "true" ? t("auth.login.errorSessionExpired") : ""),
@@ -31,8 +35,15 @@ function LoginContent() {
   const returnTo = safeRelativeReturnTo(searchParams.get("returnTo"), "/dashboard");
 
   const redirectAfterLogin = useCallback(async () => {
-    if (new URL(returnTo, "https://vayada.local").pathname === "/handoff") {
+    // /handoff and /setup carry their own context (entry product, step, PMS return); the
+    // setup page checks access itself, so the booking guard must not rewrite them.
+    if (["/handoff", "/setup"].includes(new URL(returnTo, "https://vayada.local").pathname)) {
       router.replace(returnTo);
+      return;
+    }
+    // An owner who came from /invite (incl. Google sign-up) finishes the invitation first.
+    if (hasPendingHotelAccountInvite()) {
+      router.replace("/invite");
       return;
     }
     const decision = await resolveBookingSetupGuard(returnTo);
@@ -46,6 +57,7 @@ function LoginContent() {
   const handleOrganizationSelect = useCallback(
     async (workosOrganizationId: string) => {
       setSubmitError("");
+      setHotelSetupRequired(false);
       setIsSubmitting(true);
       try {
         const response = passwordOrganizations.length
@@ -70,6 +82,7 @@ function LoginContent() {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setSubmitError("");
+      setHotelSetupRequired(false);
       setIsSubmitting(true);
       setPasswordOrganizations([]);
       try {
@@ -86,6 +99,10 @@ function LoginContent() {
           error.organizations?.length
         ) {
           setPasswordOrganizations(error.organizations);
+          return;
+        }
+        if (error instanceof AuthStateError && error.state === "hotel_workspace_required") {
+          setHotelSetupRequired(true);
           return;
         }
         setSubmitError(error instanceof Error ? error.message : t("auth.login.errorUnexpected"));
@@ -159,7 +176,7 @@ function LoginContent() {
       email={email}
       password={password}
       isSubmitting={isSubmitting}
-      submitError={submitError}
+      submitError={hotelSetupRequired ? t("auth.login.hotelWorkspaceRequired") : submitError}
       organizations={workspaceOptions ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}
@@ -174,6 +191,7 @@ function LoginContent() {
               setPassword("");
               setPasswordOrganizations([]);
               setSubmitError("");
+              setHotelSetupRequired(false);
             }
           : undefined
       }

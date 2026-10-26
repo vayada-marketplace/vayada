@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeftIcon,
   ArrowPathIcon,
   Bars3Icon,
   CheckCircleIcon,
@@ -16,6 +15,7 @@ import {
   CheckinChecklistStepType,
   settingsService,
 } from "@/services/settings";
+import { SettingsSection } from "@vayada/settings-ui";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import {
@@ -184,34 +184,23 @@ export function CheckinChecklistBuilder() {
     sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(normalizedSteps));
   };
 
+  // One of the two sections of Settings › Guest flows (VAY-2275).
+  const heading = {
+    id: "check-in",
+    title: t("settings.guestFlows.checkIn"),
+    description: t("settings.checklist.description"),
+  };
   if (loading) {
-    return <div className="p-4 text-sm text-gray-500">{t("settings.checklist.loading")}</div>;
+    return (
+      <SettingsSection {...heading}>
+        <p className="text-sm text-gray-500">{t("settings.checklist.loading")}</p>
+      </SettingsSection>
+    );
   }
 
   return (
-    <main className="min-h-[100dvh] bg-gray-50 p-4 md:p-6">
-      <div className="mx-auto max-w-6xl space-y-5">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-sm text-gray-500">
-              {t("settings.title")} / {t("settings.navigation.checkinChecklist")}
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold text-gray-950">
-              {t("settings.navigation.checkinChecklist")}
-            </h1>
-            <p className="mt-1 max-w-2xl text-sm text-gray-600">
-              {t("settings.checklist.description")}
-            </p>
-          </div>
-          <Link
-            href="/settings"
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-          >
-            <ArrowLeftIcon className="h-4 w-4" />
-            {t("settings.title")}
-          </Link>
-        </header>
-
+    <SettingsSection {...heading}>
+      <div className="space-y-5">
         {error && (
           <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
@@ -382,7 +371,7 @@ export function CheckinChecklistBuilder() {
           <CheckinChecklistPreview steps={normalizedSteps} />
         </section>
       </div>
-    </main>
+    </SettingsSection>
   );
 }
 

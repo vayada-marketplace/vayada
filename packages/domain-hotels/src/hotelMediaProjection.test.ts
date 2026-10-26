@@ -6,7 +6,6 @@ import {
   createRoomMediaProjectionInput,
   type BookingHotelMediaProjectionInput,
   type HotelMediaResolutionAdapter,
-  type MarketplaceHotelMediaProjectionInput,
   type PublicHotelMediaResolutionSnapshot,
   type ResolvedPropertyMediaBatch,
   type ResolvedRoomMediaBatch,
@@ -92,8 +91,7 @@ describe("resolved hotel media projection contract", () => {
       ],
     });
     expect(projection).not.toBeNull();
-    const marketplaceProjection: MarketplaceHotelMediaProjectionInput = projection!;
-    const bookingProjection: BookingHotelMediaProjectionInput = marketplaceProjection;
+    const bookingProjection: BookingHotelMediaProjectionInput = projection!;
 
     expect(bookingProjection.logoAssignment?.media.mediaObjectId).toBe(mediaObjectId);
     expect(

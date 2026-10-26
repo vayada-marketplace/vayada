@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { runAdminTransfer } from "./accountAdminTransferCommand.js";
@@ -17,6 +18,10 @@ import {
   type AdminTransferRequest,
 } from "./accountAdminTransferValidation.js";
 const url = process.env["TEST_DATABASE_URL"];
+const readyMadeRoles = new URL(
+  "../../backend-migration/fixtures/ready-made-team-roles.sql",
+  import.meta.url,
+);
 describe.skipIf(!url)("atomic administrator transfer", () => {
   let pool: pg.Pool;
   let source: Parameters<typeof runAdminTransfer>[1];
@@ -48,6 +53,8 @@ describe.skipIf(!url)("atomic administrator transfer", () => {
         "INSERT INTO identity.organizations(id,kind,name,slug,workos_org_id) VALUES($1,'hotel_group','Transfer fixture',$1::uuid::text,$2)",
         [source.organizationId, source.workosOrgId],
       );
+      // New accounts no longer get the ready-made staff roles (VAY-2276); this fixture is an older account.
+      await client.query(await readFile(readyMadeRoles, "utf8"), [[source.organizationId]]);
       await client.query(
         "INSERT INTO identity.users(id,email) VALUES($1,$1::uuid::text||'@example.test'),($2,$2::uuid::text||'@example.test')",
         [source.actorUserId, targetUser],

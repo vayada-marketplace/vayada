@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import type { ChannexManagementConfig } from "../config.js";
 import { verifyChannexRoomClosure } from "../integrations/channexRoomClosure.js";
+import type { DistributionBookingPublicationTransaction } from "./distributionBookingPublicationProjection.js";
 import { suppressClosingRoomOffers } from "./distributionRoomClosure.js";
 import { lockBookingPublication } from "./bookingPublicationLock.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
@@ -64,7 +65,7 @@ export function createPgPmsRoomClosureRepository(config: {
     dispose: () => pool.end(),
     preview: (scope: PmsRoomClosureScope) =>
       transaction<{ ok: true; impact: PmsRoomClosureState }>(scope, async (client, at) => {
-        await lockScope(client, scope.propertyId);
+        await lockPmsRoomClosureScope(client, scope.propertyId);
         const impact = await readPmsRoomClosureState(client, scope, at);
         if (!impact) throw new ClosureRejected("room_type_not_found");
         return { ok: true, impact };
@@ -118,7 +119,7 @@ export function createPgPmsRoomClosureRepository(config: {
           return result;
         }
         if (!inserted.rowCount) throw new ClosureRejected("command_in_progress");
-        await lockScope(client, command.propertyId);
+        await lockPmsRoomClosureScope(client, command.propertyId);
         const state = await readPmsRoomClosureState(client, command, at);
         if (!state) throw new ClosureRejected("room_type_not_found");
         if (state.blockers.length)
@@ -248,7 +249,11 @@ export function createPgPmsRoomClosureRepository(config: {
   }
 }
 
-async function lockScope(client: pg.PoolClient, propertyId: string): Promise<void> {
+/** The closure lock order: inventory, room facts, every room's units, then booking publication. */
+export async function lockPmsRoomClosureScope(
+  client: DistributionBookingPublicationTransaction,
+  propertyId: string,
+): Promise<void> {
   await lockPmsInventoryMutationScope(client, propertyId);
   await lockPmsRoomFactsMutationScope(client, propertyId);
   const rooms = await client.query<{ id: string }>(

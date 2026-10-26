@@ -128,6 +128,14 @@ export function useGuestFormSettingsTab({
   };
 }
 
+// A currency/language write outlives the Settings page that started it; other Settings pages
+// wait for it before reading the canonical currency (Payments saves it).
+let pendingLocalizationWrite: Promise<unknown> = Promise.resolve();
+
+export function localizationWriteSettled(): Promise<unknown> {
+  return pendingLocalizationWrite;
+}
+
 export function useLocalizationSettingsTab({
   getBookingHotelIdForSave,
   showFeedback,
@@ -149,7 +157,7 @@ export function useLocalizationSettingsTab({
   const handleSaveCurrencyLang = async () => {
     try {
       setSavingCurrencyLang(true);
-      const saved = await updateBookingLocalizationSettings({
+      const write = updateBookingLocalizationSettings({
         hotelId: getBookingHotelIdForSave(),
         body: {
           defaultCurrency,
@@ -158,6 +166,8 @@ export function useLocalizationSettingsTab({
           supportedLanguages,
         },
       });
+      pendingLocalizationWrite = write.catch(() => undefined);
+      const saved = await write;
       applyLocalizationSettings(saved);
       showFeedback("success", t("bookingFlow.localization.feedback.saveSuccess"));
       return saved;

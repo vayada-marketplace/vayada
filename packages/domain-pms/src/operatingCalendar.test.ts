@@ -18,7 +18,9 @@ import {
   parsePmsOperatingSchedule,
   parsePmsOperatingCalendarMonthDay,
   parseUpsertPmsOperatingCalendarCommand,
+  pmsOperatingCalendarTimeZoneIsCurrent,
   resolvePmsOperatingCalendarPropertyProfileConflict,
+  resolvePmsOperatingCalendarTimeZoneConflict,
   serializePmsOperatingCalendarFingerprint,
   serializePmsOperatingCalendarSourceRevision,
   sortPmsOperatingCalendarStaleSourceConflicts,
@@ -551,5 +553,68 @@ describe("PMS operating calendar contract", () => {
         timeZoneRegistry,
       ),
     ).toThrow(TypeError);
+  });
+
+  it("keeps a saved calendar current across profile edits until its time zone changes (VAY-2150)", () => {
+    const source = snapshot.sourceInputs.propertyProfile;
+    const edited = { ...source, revision: "profile:12" };
+    const berlin = snapshot.sourceInputs.propertyTimeZone;
+    const available = (timeZone: string, evidenceSource = edited) => ({
+      status: "available" as const,
+      evidence: { source: evidenceSource, timeZone: timeZone as typeof berlin },
+    });
+
+    expect(
+      resolvePmsOperatingCalendarTimeZoneConflict(available(berlin), berlin, timeZoneRegistry),
+    ).toBeNull();
+    expect(
+      resolvePmsOperatingCalendarTimeZoneConflict(
+        available("America/Nuuk"),
+        berlin,
+        timeZoneRegistry,
+      ),
+    ).toEqual({ code: "property_profile_revision_conflict", currentRevision: 12 });
+    expect(
+      resolvePmsOperatingCalendarTimeZoneConflict(
+        { status: "timezone_missing", source: edited },
+        berlin,
+        timeZoneRegistry,
+      ),
+    ).toEqual({ code: "property_timezone_missing" });
+    expect(
+      resolvePmsOperatingCalendarTimeZoneConflict(
+        { status: "timezone_invalid", source: edited },
+        berlin,
+        timeZoneRegistry,
+      ),
+    ).toEqual({ code: "property_timezone_invalid" });
+    expect(() =>
+      resolvePmsOperatingCalendarTimeZoneConflict(
+        { status: "available", evidence: { source: edited, timeZone: "US/Eastern" } } as never,
+        berlin,
+        timeZoneRegistry,
+      ),
+    ).toThrow(TypeError);
+
+    expect(
+      pmsOperatingCalendarTimeZoneIsCurrent(available(berlin), snapshot, timeZoneRegistry),
+    ).toBe(true);
+    expect(
+      pmsOperatingCalendarTimeZoneIsCurrent(available("America/Nuuk"), snapshot, timeZoneRegistry),
+    ).toBe(false);
+    expect(
+      pmsOperatingCalendarTimeZoneIsCurrent(
+        available(berlin, { ...edited, entityId: ROOM_A as typeof edited.entityId }),
+        snapshot,
+        timeZoneRegistry,
+      ),
+    ).toBe(false);
+    expect(
+      pmsOperatingCalendarTimeZoneIsCurrent(
+        { status: "timezone_missing", source: edited },
+        snapshot,
+        timeZoneRegistry,
+      ),
+    ).toBe(false);
   });
 });

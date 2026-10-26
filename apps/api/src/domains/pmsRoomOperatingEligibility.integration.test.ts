@@ -4,8 +4,8 @@ import { validateInventoryRules } from "./pmsChannexInventoryRules.js";
 import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
 import { suppressClosingRoomOffers } from "./distributionRoomClosure.js";
 import {
-  PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS,
   createTargetPmsInventoryPublicOfferProjection,
+  projectPmsInventoryToPublicOffers,
 } from "./pmsInventoryPublicOfferProjection.js";
 import {
   createProductReadinessResult,
@@ -495,7 +495,7 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
       );
     }
     const project = () =>
-      db.query(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS, [propertyId, "2026-09-09T12:00:00Z"]);
+      projectPmsInventoryToPublicOffers(db, propertyId, new Date("2026-09-09T12:00:00Z"));
     const offers = async () =>
       (
         await db.query(

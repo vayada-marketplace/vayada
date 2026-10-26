@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import type { RequestAuditMetadata } from "@vayada/backend-auth";
 import {
   getActivePropertySetupStepIds,
+  isPropertySetupLegacyCalendarBaseRevisionManifest,
   PROPERTY_SETUP_ACTIVE_RETENTION_DAYS,
   PROPERTY_SETUP_DRAFT_CONTRACT_VERSION,
   PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION,
   PROPERTY_SETUP_DRAFT_RESET_CONTRACT_VERSION,
   PROPERTY_SETUP_STEP_DEFINITIONS,
   SETUP_TRACKS,
+  normalizeStoredSetupTracks,
   type ResetPropertySetupDraftError,
   type ResetPropertySetupDraftReceipt,
   type ResetPropertySetupDraftRequest,
@@ -20,6 +22,8 @@ import {
   type SetupTrack,
 } from "@vayada/domain-hotels";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+
+import { lockMemberPermissions } from "./memberPermissions.js";
 
 export type PropertySetupDraftSaveCommand = {
   organizationId: string;
@@ -408,9 +412,7 @@ export function createPgPropertySetupDraftCommandRepository(
           await finalizeResetConflict(client, command, idempotency, keyHash, result, resetAt);
           return result;
         }
-        if (
-          stableJson(draft!.baseRevisions) !== stableJson(command.request.expectedBaseRevisions)
-        ) {
+        if (!sameResetBase(draft!.baseRevisions, command.request.expectedBaseRevisions)) {
           const result = resetFailure({ code: "draft_base_revision_conflict" });
           await finalizeResetConflict(client, command, idempotency, keyHash, result, resetAt);
           return result;
@@ -513,16 +515,13 @@ async function lockAuthorizedScope(
        ON membership.organization_id = $1::uuid
       AND membership.user_id = actor.id
       AND membership.status = 'active'
-     JOIN identity.role_permission_grants role_grant
-       ON role_grant.organization_kind = 'hotel_group'
-      AND role_grant.role_key = membership.role_key
-      AND role_grant.permission_key = $4
      WHERE property.id = $2::uuid
-     FOR SHARE OF property, property_link, actor, membership
-     FOR KEY SHARE OF role_grant`,
-    [command.organizationId, command.propertyId, command.actorUserId, permission],
+     FOR SHARE OF property, property_link, actor, membership`,
+    [command.organizationId, command.propertyId, command.actorUserId],
   );
-  return (result.rowCount ?? 0) > 0;
+  if ((result.rowCount ?? 0) < 1) return false;
+  const permissions = await lockMemberPermissions(client, command);
+  return permissions?.some((key) => key === permission) === true;
 }
 
 async function lockDraftScope(
@@ -550,7 +549,9 @@ async function lockTrackIntent(
      FOR SHARE`,
     [organizationId],
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  // Stored selections may still name the retired Creator Marketplace track (VAY-2270).
+  return row ? { ...row, selectedTracks: normalizeStoredSetupTracks(row.selectedTracks) } : null;
 }
 
 function validateTrack(
@@ -1429,6 +1430,25 @@ function isIsoDate(value: unknown): value is string {
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+/**
+ * The reset names the manifest the route showed. A calendar draft saved before VAY-2198 is shown
+ * with a converted manifest, so for it only the calendar and inventory revisions it shares with
+ * the stored one must match; the draft revision check already guards concurrent changes.
+ */
+function sameResetBase(
+  stored: Record<string, string>,
+  expected: ResetPropertySetupDraftRequest["expectedBaseRevisions"],
+): boolean {
+  if (stableJson(stored) === stableJson(expected)) return true;
+  const sent: Readonly<Record<string, string>> = expected;
+  return (
+    isPropertySetupLegacyCalendarBaseRevisionManifest(stored) &&
+    !isPropertySetupLegacyCalendarBaseRevisionManifest(sent) &&
+    sent["pms.operating_calendar"] === stored["pms.operating_calendar"] &&
+    sent["pms.inventory"] === stored["pms.inventory"]
+  );
 }
 
 function stableJson(value: unknown): string {

@@ -808,7 +808,7 @@ describe("staff invitation routes", () => {
 
   it.each([
     ["unauthenticated", { authenticated: false }, 401],
-    ["wrong organization", { organizationKind: "creator_workspace" }, 403],
+    ["wrong organization", { organizationKind: "platform" }, 403],
     ["inactive actor", { actorStatus: "suspended" }, 403],
     ["inactive organization", { organizationStatus: "suspended" }, 403],
     ["inactive membership", { membershipStatus: "inactive" }, 403],

@@ -33,6 +33,9 @@ export interface BookingAddonItem {
   location?: string | null;
   maxGuests?: number | null;
   maxQuantity?: number;
+  /** VAY-2232: one of 12, 24, 48, 72 or 168 hours; null for none. */
+  leadTimeHours?: number | null;
+  /** Free text from before VAY-2232; null once a lead time is chosen. */
   leadTime?: string | null;
   duration: string | null;
   pricingModel: BookingAddonPricingModel;
@@ -72,7 +75,9 @@ type BookingAddonItemWriteFields = {
   location?: string | null;
   maxGuests?: number | null;
   maxQuantity?: number;
-  leadTime?: string | null;
+  leadTimeHours?: number | null;
+  /** Only to copy an add-on whose lead time was typed before VAY-2232. */
+  leadTime?: string;
   duration?: string | null;
   pricingModel?: BookingAddonPricingModel;
   publicVisible?: boolean;

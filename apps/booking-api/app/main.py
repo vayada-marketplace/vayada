@@ -9,7 +9,6 @@ from app.config import settings
 from app.database import (
     AuthDatabase,
     Database,
-    MarketplaceDatabase,
     PmsDatabase,
     check_database_connection,
 )
@@ -22,13 +21,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await Database.get_pool()
     await AuthDatabase.get_pool()
-    if settings.MARKETPLACE_DATABASE_URL:
-        await MarketplaceDatabase.get_pool()
     if settings.PMS_DATABASE_URL:
         await PmsDatabase.get_pool()
     yield
     await PmsDatabase.close_pool()
-    await MarketplaceDatabase.close_pool()
     await AuthDatabase.close_pool()
     await Database.close_pool()
 

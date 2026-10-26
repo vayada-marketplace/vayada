@@ -1,6 +1,6 @@
 "use client";
 
-import { SupportButton } from "@vayada/settings-ui";
+import { isSupportAvailable, SupportDialog, type SupportDialogHandle } from "@vayada/settings-ui";
 import { pmsOperationsClient } from "@/services/api/pmsOperationsClient";
 
 import { useState, useRef, useEffect } from "react";
@@ -32,6 +32,9 @@ interface DayStats {
   departures: number;
 }
 
+/** A room page can hold unsaved prices: leaving through the document lets its beforeunload warning run. */
+const holdsPrices = () => /^\/rooms\/[^/]+$/.test(window.location.pathname);
+
 export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const router = useRouter();
   const { t, locale, setLocale } = useTranslation();
@@ -55,6 +58,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
     departures: 0,
   });
   const profileRef = useRef<HTMLDivElement>(null);
+  const supportDialog = useRef<SupportDialogHandle>(null);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
   const propertyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -256,7 +261,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                 <button
                   onClick={() => {
                     setPropertyOpen(false);
-                    if (window.location.pathname === "/pricing") window.location.assign("/setup?mode=add&entryProduct=pms");
+                    if (holdsPrices()) window.location.assign("/setup?mode=add&entryProduct=pms");
                     else router.push("/setup?mode=add&entryProduct=pms");
                   }}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
@@ -302,18 +307,12 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </button>
       </div>
 
-      <SupportButton
-        product="pms"
-        placement="header"
-        submit={(request) =>
-          pmsOperationsClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
-        }
-      />
       {/* Right: avatar */}
       <div className="flex items-center gap-3 shrink-0">
         {/* Profile avatar */}
         <div className="relative" ref={profileRef}>
           <button
+            ref={profileButtonRef}
             onClick={() => setProfileOpen(!profileOpen)}
             className="w-7 h-7 bg-primary-600 rounded-full flex items-center justify-center text-white text-[10px] font-semibold hover:bg-primary-700 transition-colors"
           >
@@ -338,7 +337,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                 <button
                   onClick={() => {
                     setProfileOpen(false);
-                    if (window.location.pathname === "/pricing") window.location.assign("/settings");
+                    if (holdsPrices()) window.location.assign("/settings");
                     else router.push("/settings");
                   }}
                   className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
@@ -422,6 +421,19 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                     </div>
                   )}
                 </div>
+                {isSupportAvailable() && (
+                  <button
+                    onClick={() => {
+                      setProfileOpen(false);
+                      // The closing menu removes this item; return focus to the avatar instead.
+                      profileButtonRef.current?.focus();
+                      supportDialog.current?.open();
+                    }}
+                    className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    {t("layout.header.help")}
+                  </button>
+                )}
               </div>
               <div className="border-t border-gray-100" />
               <div className="py-1">
@@ -437,6 +449,13 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </div>
       </div>
 
+      <SupportDialog
+        ref={supportDialog}
+        product="pms"
+        submit={(request) =>
+          pmsOperationsClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
+        }
+      />
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   );

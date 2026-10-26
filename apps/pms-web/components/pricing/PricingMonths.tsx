@@ -10,6 +10,8 @@ import { useTranslation } from "@/lib/i18n";
 import { baseAmounts, decimalAmount, errorText, PricingError } from "./pricingAmounts";
 
 import { recurringTemplate, recurringPrice, recurringAdjustments } from "./recurringPricingInputs";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 import {
   IncludedPricing,
@@ -122,12 +124,15 @@ export function PricingMonths({
   };
 
   return (
-    <details className="sm:col-span-2 text-sm">
-      <summary className="cursor-pointer">{t("pricing.months.summary", { label })}</summary>
-      <p className="mt-2 text-gray-600">{t("pricing.months.intro")}</p>
-      <ul className="my-3 space-y-2">
+    <PricingSection
+      title={t("pricing.months.section")}
+      label={t("pricing.months.summary", { label })}
+      keepOpen={pending}
+    >
+      <p className={ui.help}>{t("pricing.months.intro")}</p>
+      <ul className="space-y-1.5">
         {offer.price.calendar.months.map((entry) => (
-          <li key={entry.month} className="flex flex-wrap items-center gap-3">
+          <li key={entry.month} className={ui.entry}>
             <span>
               {t(`pricing.month.${entry.month}`)}:{" "}
               {baseAmounts(entry.price, t)
@@ -137,7 +142,7 @@ export function PricingMonths({
             </span>
             <button
               type="button"
-              className="rounded border px-3 py-1 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled || pending}
               aria-label={t("pricing.months.editAria", {
                 month: t(`pricing.month.${entry.month}`),
@@ -159,7 +164,7 @@ export function PricingMonths({
             </button>
             <button
               type="button"
-              className="rounded border px-3 py-1 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled || pending}
               aria-label={t("pricing.months.clearAria", {
                 month: t(`pricing.month.${entry.month}`),
@@ -184,11 +189,11 @@ export function PricingMonths({
               ` ${t("pricing.months.includedHint")}`}
           </p>
           <div className="flex flex-wrap items-end gap-3">
-            <label>
+            <label className={ui.fieldLabel}>
               {t("pricing.months.month")}
               <select
                 aria-label={t("pricing.months.monthAria", { label })}
-                className="mt-1 block rounded border px-3 py-2"
+                className={`mt-1.5 block ${ui.field}`}
                 disabled={disabled || editing}
                 value={month}
                 onChange={(event) => {
@@ -212,11 +217,11 @@ export function PricingMonths({
                 : template,
               t,
             ).map(([name], index) => (
-              <label key={index}>
+              <label key={index} className={ui.fieldLabel}>
                 {name} ({room.currency})
                 <input
                   aria-label={t("pricing.months.amountAria", { name, label })}
-                  className="mt-1 block w-36 rounded border px-3 py-2"
+                  className={`mt-1.5 block w-36 ${ui.field}`}
                   disabled={disabled}
                   value={values[index] ?? ""}
                   onChange={(event) => {
@@ -249,7 +254,7 @@ export function PricingMonths({
             )}
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={() => apply(month, values)}
             >
@@ -260,12 +265,7 @@ export function PricingMonths({
       )}
       {pending && (
         <>
-          <button
-            type="button"
-            className="mt-3 rounded border px-3 py-2 disabled:opacity-50"
-            disabled={disabled}
-            onClick={reset}
-          >
+          <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={reset}>
             {t("pricing.months.cancel")}
           </button>
           <p className="mt-2">
@@ -274,10 +274,10 @@ export function PricingMonths({
         </>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={ui.errorText}>
           {error}
         </p>
       )}
-    </details>
+    </PricingSection>
   );
 }

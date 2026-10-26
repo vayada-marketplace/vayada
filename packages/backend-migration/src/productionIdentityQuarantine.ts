@@ -16,18 +16,17 @@ export type MissingOwnerQuarantinePlan = {
   blockers: IdentityMigrationBlocker[];
 };
 
-const TYPE_BY_KIND = {
-  hotel_group: "hotel",
-  creator_workspace: "creator",
-  affiliate_partner: "affiliate",
-} as const;
+const TYPE_BY_KIND = { hotel_group: "hotel" } as const;
 export function planMissingOwnerQuarantine(
   rows: IdentitySourceRow[],
   sourceUsers: PlannedIdentityUser[],
   existingUsers: ExistingIdentityUser[] = [],
   sourceHorizonAt?: string,
+  retiredUserIds: Iterable<string> = [],
 ): MissingOwnerQuarantinePlan {
-  const knownUsers = new Set(sourceUsers.map((user) => user.id));
+  // A creator or affiliate who is not migrated is not a missing owner: the ownership plan
+  // quarantines their hotel without a user (VAY-2272).
+  const knownUsers = new Set([...sourceUsers.map((user) => user.id), ...retiredUserIds]);
   const missing = new Map<string, ReturnType<typeof parseIdentityOwnershipRows>["owners"]>();
   for (const owner of parseIdentityOwnershipRows(rows).owners) {
     if (knownUsers.has(owner.userId)) continue;

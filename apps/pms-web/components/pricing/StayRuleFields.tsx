@@ -1,5 +1,6 @@
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
+import * as ui from "./pricingStyles";
 export type RuleInput = { minimum: string; maximum: string; closedToArrival: boolean; closedToDeparture: boolean; stopSell: boolean };
 type Rules = Extract<PricingConfiguration["offers"][number]["restrictions"], { kind: "own" }>["rules"];
 export const stayRuleInput = (rules: Rules): RuleInput => ({ minimum: String(rules.minArrivalNights), maximum: rules.maxStayNights === null ? "" : String(rules.maxStayNights), closedToArrival: rules.closedToArrival, closedToDeparture: rules.closedToDeparture, stopSell: rules.stopSell });
@@ -10,9 +11,9 @@ export function stayRules(input: RuleInput) {
 export function StayRuleFields({ entry, label, disabled, onChange }: { entry: RuleInput; label: string; disabled: boolean; onChange: (entry: RuleInput) => void }) {
   const { t } = useTranslation();
   return (
-      <div className="mt-3 flex flex-wrap items-end gap-3">
-        {([["minimum", t("pricing.stayFields.minimum")], ["maximum", t("pricing.stayFields.maximum")]] as const).map(([key, name]) => <label key={key}>{name}<input aria-label={t("pricing.stayFields.fieldFor", { field: name, label })} className="mt-1 block w-40 rounded border px-3 py-2" disabled={disabled} value={entry[key]} onChange={(event) => { onChange({ ...entry, [key]: event.target.value }); }} /></label>)}
-        {([["closedToArrival", t("pricing.stayFields.closeArrivals")], ["closedToDeparture", t("pricing.stayFields.closeDepartures")], ["stopSell", t("pricing.stayFields.stopSales")]] as const).map(([key, name]) => <label key={key} className="flex items-center gap-2 py-2"><input type="checkbox" aria-label={t("pricing.stayFields.fieldFor", { field: name, label })} disabled={disabled} checked={entry[key]} onChange={(event) => { onChange({ ...entry, [key]: event.target.checked }); }} />{name}</label>)}
+      <div className="flex flex-wrap items-end gap-3">
+        {([["minimum", t("pricing.stayFields.minimum")], ["maximum", t("pricing.stayFields.maximum")]] as const).map(([key, name]) => <label key={key} className={ui.fieldLabel}>{name}<input aria-label={t("pricing.stayFields.fieldFor", { field: name, label })} className={`mt-1.5 block w-40 ${ui.field}`} disabled={disabled} value={entry[key]} onChange={(event) => { onChange({ ...entry, [key]: event.target.value }); }} /></label>)}
+        {([["closedToArrival", t("pricing.stayFields.closeArrivals")], ["closedToDeparture", t("pricing.stayFields.closeDepartures")], ["stopSell", t("pricing.stayFields.stopSales")]] as const).map(([key, name]) => <label key={key} className="flex items-center gap-2 py-2 text-[12px] text-gray-700"><input type="checkbox" aria-label={t("pricing.stayFields.fieldFor", { field: name, label })} disabled={disabled} checked={entry[key]} onChange={(event) => { onChange({ ...entry, [key]: event.target.checked }); }} />{name}</label>)}
       </div>
   );
 }

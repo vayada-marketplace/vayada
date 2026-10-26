@@ -1,6 +1,6 @@
 # vayada — agent guide
 
-Hospitality platform with three products — **Creator Marketplace**, **Booking Engine**, and **PMS** — sharing a central auth DB. This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
+Hospitality platform with two products — **Booking Engine** and **PMS** — sharing a central auth DB. The Creator Marketplace is retired (VAY-2259): its app is gone, its legacy API (`apps/marketplace-api`) is switched off (api.vayada.com answers 410) and its source is deleted. VAY-2272 removed its data from the new database: the `marketplace` schema, the affiliate program and the creator accounts (migrations 0496–0502). This repo is the product application monorepo: app code lives under `apps/`, shared code belongs under `packages/`, and root tooling owns cross-app workflow, docs, Docker Compose, scripts, and auth DB setup.
 
 This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, and any other agent should read this first. `README.md` covers architecture, ports, DBs, test accounts, and seeding in depth — this file covers what those references don't: how to actually do work in the repo.
 
@@ -8,22 +8,20 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path                       | Stack      | Port | Local URL                           |
-| -------------------------- | ---------- | ---- | ----------------------------------- |
-| `apps/api`                 | Node/TS    | 8003 | `https://api.localhost`             |
-| `apps/marketplace-api`     | FastAPI    | 8000 | `https://api.marketplace.localhost` |
-| `apps/marketplace-web`     | Next.js 14 | 3000 | `https://marketplace.localhost`     |
-| `apps/vayada-admin`        | Next.js 14 | 3001 | `https://admin.localhost`           |
-| `apps/booking-api`         | FastAPI    | 8001 | `https://api.booking.localhost`     |
-| `apps/booking-web`         | Next.js 14 | 3002 | `https://booking.localhost`         |
-| `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`   |
-| `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`         |
-| `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`             |
-| `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`         |
+| Path                 | Stack      | Port | Local URL                         |
+| -------------------- | ---------- | ---- | --------------------------------- |
+| `apps/api`           | Node/TS    | 8003 | `https://api.localhost`           |
+| `apps/vayada-admin`  | Next.js 14 | 3001 | `https://admin.localhost`         |
+| `apps/booking-api`   | FastAPI    | 8001 | `https://api.booking.localhost`   |
+| `apps/booking-web`   | Next.js 14 | 3002 | `https://booking.localhost`       |
+| `apps/booking-admin` | Next.js 14 | 3003 | `https://admin.booking.localhost` |
+| `apps/pms-api`       | FastAPI    | 8002 | `https://api.pms.localhost`       |
+| `apps/pms-web`       | Next.js 14 | 3004 | `https://pms.localhost`           |
+| `apps/landing`       | Next.js 14 | 3006 | `https://landing.localhost`       |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
-`apps/landing` is the **public marketing/landing site**, split out of `apps/marketplace-web`. The marketplace frontend is the authenticated app only; its `/` redirects to `/login`. The marketing pages (home, `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing`, about/contact/benefits, legal) live in `apps/landing`; `/hotel-creator-network` there fetches live creators/hotels from the marketplace API cross-origin. The public chrome (`Navigation` / `Footer` / `LandingFooter`) is intentionally duplicated in both apps because app pages (`/hotels/[id]`, `/creators`, `/properties`) still use it. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated app and APIs remain on their separate hostnames.
+`apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form posts `/api/contact` to `NEXT_PUBLIC_API_URL`, the platform contact intake in `apps/api` (`next-api.vayada.com` in production, VAY-2286); next-api allows the `vayada.com` origin through `CONTACT_INTAKE_ALLOWED_ORIGINS`. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
 
 ## Local dev — portless
 
@@ -37,7 +35,7 @@ npm install -g portless                # requires Node 24+
 ./scripts/portless-setup.sh            # trusts local CA (sudo) + registers the FastAPI aliases
 ```
 
-`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings (may prompt for sudo on first run). The proxy then binds **port 443** and requires sudo to do so — accept the prompt when launching an app for the first time. If you skip sudo, portless falls back to **port 1355** and all URLs become `https://<name>.localhost:1355`; functional but loses the "clean URL" payoff. The checked-in frontend defaults assume port 443, so when you are on the 1355 fallback you must override API URLs with the explicit port, e.g. `NEXT_PUBLIC_API_URL=https://api.marketplace.localhost:1355`. To recover, stop the proxy and re-run `portless proxy start` accepting the sudo prompt, or install the proxy as a launch-time service: `portless service install`.
+`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings (may prompt for sudo on first run). The proxy then binds **port 443** and requires sudo to do so — accept the prompt when launching an app for the first time. If you skip sudo, portless falls back to **port 1355** and all URLs become `https://<name>.localhost:1355`; functional but loses the "clean URL" payoff. The checked-in frontend defaults assume port 443, so when you are on the 1355 fallback you must override API URLs with the explicit port, e.g. `NEXT_PUBLIC_API_URL=https://api.booking.localhost:1355`. To recover, stop the proxy and re-run `portless proxy start` accepting the sudo prompt, or install the proxy as a launch-time service: `portless service install`.
 
 ### Running apps
 
@@ -49,7 +47,7 @@ npm install -g portless                # requires Node 24+
 | Start `apps/api`                      | `cd apps/api && npm run dev`                                                     |
 | Start a FastAPI backend               | `cd apps/<api> && uvicorn app.main:app --reload --port <P>` (P from the App map) |
 
-The Next.js apps and `apps/api` register their portless names via a `"portless"` key in `apps/<name>/package.json`. The FastAPI apps run on their existing uvicorn ports (8000 / 8001 / 8002) and are reached at `https://api.<product>.localhost` thanks to the static aliases registered by `scripts/portless-setup.sh`.
+The Next.js apps and `apps/api` register their portless names via a `"portless"` key in `apps/<name>/package.json`. The FastAPI apps run on their existing uvicorn ports (8001 / 8002) and are reached at `https://api.<product>.localhost` thanks to the static aliases registered by `scripts/portless-setup.sh`.
 
 `npm run dev:workos-local` requires `apps/api/.env` with local WorkOS settings and wires AuthKit/target frontend calls to `https://api.localhost`. `npm run dev:portless` delegates to that AuthKit-capable workflow so signup/login routes work by default. Use `./scripts/dev-portless.sh --legacy` only for the old FastAPI-backed surfaces without WorkOS/AuthKit env wiring.
 
@@ -72,7 +70,7 @@ PORTLESS_STATE_DIR=/tmp/vayada-review-1356 PORTLESS_PORT=1356 npm run dev:workos
 ```
 
 These commands start independent proxies and produce matching app and API URLs,
-for example `https://marketplace.localhost:1355` with
+for example `https://admin.booking.localhost:1355` with
 `https://api.localhost:1355`, and the same pair on `:1356`. Do not attach either
 checkout to the default proxy. `dev:workos-local` derives browser origins,
 OAuth callback URLs, and `AUTH_ALLOWED_ORIGINS` from that checkout's suffixed
@@ -96,7 +94,7 @@ Plain-port fallback still works: `cd apps/booking-web && npm run dev` and reach 
 
 ### Plain-port fallback
 
-Without portless, `npm run dev` in each Next.js app binds to its conventional port (3000-3006), `apps/api` binds to 8003, and uvicorn binds to 8000/8001/8002 as before. To make the frontends talk to plain-port backends, override the API URLs in `apps/<name>/.env.local` — each `apps/*/.env.example` lists the plain-port URL alongside the portless default.
+Without portless, `npm run dev` in each Next.js app binds to its conventional port (3000-3006), `apps/api` binds to 8003, and uvicorn binds to 8001/8002 as before. To make the frontends talk to plain-port backends, override the API URLs in `apps/<name>/.env.local` — each `apps/*/.env.example` lists the plain-port URL alongside the portless default.
 
 ### Pre-1.0 caveat
 
@@ -160,14 +158,13 @@ Before claiming a change is complete:
 
 **Playwright surface-to-command mapping:**
 
-| Surface                    | Command                           | portless URL                                |
-| -------------------------- | --------------------------------- | ------------------------------------------- |
-| `apps/landing`             | `npm run e2e:landing`             | `https://landing.localhost`                 |
-| `apps/booking-web`         | `npm run e2e:booking-web`         | `https://hotel-alpenrose.booking.localhost` |
-| `apps/booking-admin`       | `npm run e2e:booking-admin`       | `https://admin.booking.localhost`           |
-| `apps/marketplace-web`     | `npm run e2e:marketplace-web`     | `https://marketplace.localhost`             |
-| `apps/pms-web`             | `npm run e2e:pms-web`             | `https://pms.localhost`                     |
-| `apps/vayada-admin`        | `npm run e2e:vayada-admin`        | `https://admin.localhost`                   |
+| Surface              | Command                     | portless URL                                |
+| -------------------- | --------------------------- | ------------------------------------------- |
+| `apps/landing`       | `npm run e2e:landing`       | `https://landing.localhost`                 |
+| `apps/booking-web`   | `npm run e2e:booking-web`   | `https://hotel-alpenrose.booking.localhost` |
+| `apps/booking-admin` | `npm run e2e:booking-admin` | `https://admin.booking.localhost`           |
+| `apps/pms-web`       | `npm run e2e:pms-web`       | `https://pms.localhost`                     |
+| `apps/vayada-admin`  | `npm run e2e:vayada-admin`  | `https://admin.localhost`                   |
 
 `npm run e2e` runs all of the above. URL overrides and debugging are documented in `tests/e2e/README.md`.
 
@@ -195,7 +192,7 @@ Ponytail comes from the installed plugin; its hooks and skills own the detailed 
 - For shared packages, cross-domain architecture, auth, tenant boundaries, booking, payment, availability, or PMS workflows: explicitly use an independent subagent adversarial review before opening or finalizing the PR. Do not count a local self-review as satisfying this requirement.
 - PR descriptions should include the Linear issue ID, summary, validation, and risk notes.
 - CodeRabbit is expected to review every non-draft PR; address or explicitly resolve its findings before merge.
-- Merge with squash merge after required checks pass.
+- Merge with squash merge after required checks pass. Once the `main` ruleset requires the merge queue, merging means adding the PR to the queue; an open `release-train-hold` issue pauses it during releases. See [Merge queue and holds](engineering/code-quality-gates.md#merge-queue-and-holds).
 - Do not reintroduce app submodules or submodule pointer commits.
 
 ## Linear workflow
@@ -222,8 +219,9 @@ GitHub Actions under `.github/workflows/`. Canonical frontend builds are frozen
 on the legacy APIs and intentionally have no active deploy workflow; restoring
 their delivery requires explicit rollback-compatibility or cutover work.
 
-- **PMS migrations** auto-run on ECS container start. Do not suggest manually running `scripts/run_migration.sh` after a push to `main`.
-- **auth-db** does **not** auto-migrate in production — run `scripts/run_migration.sh auth` against RDS for any schema change. Locally, the `auth-db-migrate` one-shot service in `docker-compose.yml` runs migrations on `docker compose up`.
+- **PMS migrations** auto-run on ECS container start.
+- **Production databases** are reached only from inside the AWS VPC (VAY-2339). No laptop or GitHub-hosted runner connects to RDS; database work runs as a reviewed one-off ECS task from `vayada-platform`.
+- **auth-db** does **not** auto-migrate in production and is frozen with the legacy stack. A production auth-db schema change needs a reviewed one-off ECS task in `vayada-platform` (`scripts/legacy-migration-oneoff.sh` has no auth-db command yet). Locally, the `auth-db-migrate` one-shot service in `docker-compose.yml` runs migrations on `docker compose up`.
 - Infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/vayada-marketplace/vayada-platform) repository. This repo contains no infrastructure code.
 
 ## Skills
@@ -234,10 +232,12 @@ Start with `.agents/skills/vayada-skills-storage/SKILL.md` to understand the thr
 
 Use `.agents/skills/typescript-rewrite-workflow/SKILL.md` for the TypeScript backend rewrite and adjacent WorkOS, Ask Intelligence, target-schema, migration, and cutover work.
 
+Use `.agents/skills/vayada-paper-design/SKILL.md` whenever work touches the Paper design files. That means new screens or visible layout changes (design first in Paper, approved by Flamur, before building), and keeping the "(current)" Paper files in sync after each release that changes visible UI.
+
 ## Gotchas
 
 - **SMTP** — port 587 SES uses `start_tls=True`, **not** `use_tls=True`. Recurring regression — check on any email/SMTP change.
 - **Booking Engine guest copy** — guest-facing direct-booking pages and emails speak as the property in first person (`we` / `our` / `us`). Do not refer to the property as `the host`, `the hotel`, or `the property` when it is reviewing, accepting, declining, confirming, or verifying a guest booking/payment/change.
-- **PMS migrations auto-run** on ECS container start. After a push to `main`, do **not** suggest manually running `scripts/run_migration.sh`.
-- **auth-db** does **not** auto-migrate **in production** (unlike PMS). Locally, `docker compose up` runs auth migrations via the `auth-db-migrate` one-shot service. For prod schema changes, run `scripts/run_migration.sh auth` against RDS.
+- **PMS migrations auto-run** on ECS container start. After a push to `main`, do **not** suggest running migrations by hand.
+- **auth-db** does **not** auto-migrate **in production** (unlike PMS). Locally, `docker compose up` runs auth migrations via the `auth-db-migrate` one-shot service. The production database has no public path (VAY-2339): a prod schema change needs a reviewed one-off ECS task in `vayada-platform`.
 - **`vw` worktree helper is gone.** Ticket work uses normal git branches and direct-to-main commits — no worktree scripts, no shipping helpers.

@@ -24,7 +24,7 @@ keep our hide/favorite/note controls outside the Google element. This is one
 proposed rendering path for all accounts, avoiding a second EEA-specific UI.
 
 The repository has a GitHub secret named `GOOGLE_MAPS_BROWSER_API_KEY`, wired
-into next Marketplace, Booking Admin and PMS deploy workflows. Secret presence
+into next Booking Admin and PMS deploy workflows. Secret presence
 does not prove enabled APIs, billing, restrictions, quota, or working access.
 The checked local app env files provided no configured Maps/Places credentials.
 No server Places key or usable billing-account metadata was verified.
@@ -206,7 +206,7 @@ It returns the shared preview with `schemaVersion` and public `status`; revision
 scope and provider failure details stay server-only. `Cache-Control: no-store`
 keeps privacy changes immediate. Opening surroundings may refresh expired IDs
 through the existing property lease/cooldown; publication and privacy are re-read
-after provider I/O. The UI says that place details load when opened; it does not
+after provider I/O (paused in v1: see Editor v2 data below). The UI says that place details load when opened; it does not
 present discovery timestamps as the freshness of third-party descriptions.
 Use existing API envelopes; each success contains `schemaVersion: 1`.
 Exact route mounting must be checked against existing adapters before coding.
@@ -247,6 +247,8 @@ type CustomPlace = {
   hidden: boolean;
   note: string | null;
 };
+// Extended by VAY-2326 (Editor v2 data below): choices may be left out, custom places may use
+// the host's own categories, and customCategories / categoryNames are added.
 type CurationWrite = {
   schemaVersion: 1;
   expectedProfileRevision: number;
@@ -261,8 +263,9 @@ HTML content, oversized payloads, and `hidden && favorite` (the UI clears a
 favorite on hide). Coordinates must occur as a pair, latitude -90..90 and
 longitude -180..180; 0 is valid. Limit request body to 64 KiB and 100 stored
 Google choices including hidden references; at most 20 combined explicit Google
-and custom additions. Omitted choices in PUT mean reset to automatic behavior;
-omitted custom IDs mean delete. Preserve drafts on conflict and never silently
+and custom additions. Omitted choices in PUT mean reset to automatic behavior
+(since VAY-2326 an empty `choices` array does that, and a left-out `choices` keeps
+the saved ones; see Editor v2 data below); omitted custom IDs mean delete. Preserve drafts on conflict and never silently
 retry them over someone else's edit.
 
 Read state includes profile/curation revisions, `status` (`ready`, `empty`,
@@ -327,6 +330,37 @@ Errors: 400 invalid request; 401 missing/invalid auth; 403 permission/link denia
 404 unpublished/unknown public property; 409 revision conflict; 429 throttled;
 503 provider unavailable. Curation PUT never calls Google. Public provider
 failure returns a usable 200 state with existing permitted hotel content.
+
+## Editor v2 data (VAY-2326)
+
+Decided 2026-10-24 for the v1 editor in Booking Admin › Location & surroundings (migration 0513).
+Where this section differs from the text above, this section applies.
+
+- Guests see only the host's own places in v1 (D5): the public nearby response leaves out Google places
+  and never starts a lookup (`status` is `ready`, `empty`, `location_required` or `hidden`). The v2
+  editor (VAY-2326 part G2) drops Google suggestions; both return with VAY-2207. Saved Google choices stay stored: a
+  curation `PUT` may leave out `choices`, and then the saved ones are kept.
+- `customPlaces` order is the order guests see. `projectNearbyPreview` lists own places first, in that
+  order, then Google places with favorites first.
+- A save fails with `payload_too_large` when what it saves, kept parts included, exceeds the 64 KiB
+  limit that every read checks again.
+- The four categories keep their keys and get colours and icons: `food` (orange, cake), `nature`
+  (teal, sun), `activities` (purple, camera), `transport` (slate, map). `categoryNames` holds the host's
+  own names for them (1..24 characters each); a missing key keeps the translated name. They can't be
+  deleted.
+- `customCategories`: up to 8 of the host's own, each `{ id: UUID, name: 1..24, color, icon }` with
+  `color` one of red, amber, green, sky, indigo, pink, stone and `icon` one of musical-note, cake,
+  sun, camera, map, heart, star, shopping-bag. A custom place's `category` is one of the four keys or
+  one of these IDs. Leaving out `customCategories` or `categoryNames` keeps the saved ones; a category
+  can't be removed while a place uses it.
+- Tips: a new or changed note has at most 140 characters. A note saved before keeps up to 500 until
+  the host changes it.
+- Public and editor previews carry `categories` (the four, then the host's own) with `name: null` for
+  a default without a host name.
+- "Show nearby places" is `booking.booking_settings.nearby_places_enabled` (off by default), switched
+  with `PUT /api/booking/properties/:id/location-map/nearby` `{ enabled }` and read as `nearbyEnabled`
+  on the location map summary. Like the location map switch it leaves `updated_at` alone. While it is
+  off, the public nearby response is `hidden`.
 
 ## Desktop and mobile flows
 

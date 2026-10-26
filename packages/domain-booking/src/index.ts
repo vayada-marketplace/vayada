@@ -18,6 +18,9 @@ export {
 } from "@vayada/domain-pms";
 
 export * from "./onboardingPublication.js";
+export * from "./defaultGuestTerms.js";
+export * from "./firstRunDefaults.js";
+export * from "./firstRunBuilders.js";
 export * from "./bookingLaunchEvidence.js";
 export * from "./bookingLaunchReadiness.js";
 export * from "./bookingDesign.js";
@@ -35,7 +38,7 @@ export * from "./bookingGuestPolicyReadiness.js";
 export * from "./bookingGuestPolicyProjection.js";
 export * from "./manualBookingPaymentIntent.js";
 export * from "./bookingAttribution.js";
-export * from "./affiliateArrivalTransport.js";
+export * from "./bookingCustomDomainLock.js";
 export * from "./bookingAddonEconomics.js";
 export * from "./sameDayBookingPolicy.js";
 export * from "./bookedCancellationOutcome.js";
@@ -671,7 +674,10 @@ export * from "./bookingPromotions.js";
 export * from "./roomCombinationSearch.js";
 
 export * from "./replacementPricingEvidence.js";
+export * from "./pricingPaymentMethods.js";
+export * from "./paymentMethodWindows.js";
+export * from "./pricingPaidWhenBooking.js";
+export * from "./pricingOfferNames.js";
 export * from "./publicPricingSelection.js";
 
 export * from "./storedPricingQuote.js";
-export * from "./affiliateBookingDestination.js";

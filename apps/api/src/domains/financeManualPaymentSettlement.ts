@@ -203,6 +203,12 @@ async function loadBookingSettlement(
          AND payment.guest_booking_id = booking.id
          AND payment.status IN ('authorized', 'pending', 'paid', 'partially_refunded')
          AND payment.visibility_class IN ('pms_finance', 'migration')
+         -- A pricing-v2 card payment already left the balance when it completed: a deposit's
+         -- balance is only the rest due at the property (VAY-2205).
+         AND NOT (
+           payment.id IS NOT DISTINCT FROM booking.active_card_payment_id
+           AND (booking.booking_metadata->>'targetSource' = 'pricing_quote_draft') IS TRUE
+         )
      ) payment_totals ON TRUE
      WHERE booking.property_id = $1::uuid
        AND COALESCE(booking.booking_metadata ->> 'invoiceId', booking.id::text) = $2

@@ -3,11 +3,16 @@ import { createHash } from "node:crypto";
 import { parseBookingGuestPolicyPmsCurrentOwnerEvidence } from "@vayada/domain-booking";
 import { isPropertySetupBaseRevisionManifest } from "@vayada/domain-hotels";
 import {
+  PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
   createPmsMandatoryChargePricingSourceSnapshot,
+  createPmsOperatingCalendarSourceRevision,
   parsePmsMandatoryChargePricingSourceFingerprint,
   parsePmsPricingSourceSnapshot,
   parsePmsRecurringPricingBookingEvidence,
   parseRoomTypeFacts,
+  type PmsCanonicalIanaTimeZone,
+  type PmsOperatingCalendarCurrentReadResult,
+  type PmsOperatingCalendarStaleSourceConflict,
 } from "@vayada/domain-pms";
 import { describe, expect, it, vi } from "vitest";
 
@@ -52,9 +57,7 @@ describe("property setup PMS owner state", () => {
         true,
       );
       for (const revision of Object.values(fact.currentBaseRevisions)) {
-        expect(revision).toMatch(
-          /^(?:[a-z-]+:(?:0|[0-9a-f]{64})|hotel_catalog\.location:[0-9a-f-]{36}:r5)$/,
-        );
+        expect(revision).toMatch(/^[a-z-]+:(?:0|[0-9a-f]{64})$/);
       }
     }
     expect(Object.keys(result.facts[0]!.currentBaseRevisions)).toEqual([
@@ -70,10 +73,133 @@ describe("property setup PMS owner state", () => {
     expect(Object.keys(result.facts[2]!.currentBaseRevisions)).toEqual([
       "pms.operating_calendar",
       "pms.inventory",
-      "pms.room_types",
-      "hotel_catalog.location",
+      "pms.room_units",
+      "hotel_catalog.time_zone",
     ]);
+    // Today's values under the keys calendar drafts used before VAY-2198, for converting them.
+    expect(result.facts[2]).toMatchObject({
+      legacyBaseRevisions: {
+        "pms.operating_calendar": "calendar:0",
+        "pms.inventory": "inventory:0",
+        "pms.room_types": result.facts[0]!.currentBaseRevisions["pms.room_types"],
+        "hotel_catalog.location": `hotel_catalog.location:${propertyId}:r5`,
+      },
+    });
     expect(inventory).toHaveBeenCalledTimes(2);
+  });
+
+  it("pins the calendar draft to the time zone, the rooms and their units (VAY-2198)", async () => {
+    const calendarManifest = async (
+      overrides: Partial<PropertySetupPmsStateOptions>,
+      room: Partial<{
+        roomTypeId: string;
+        roomFactsRevision: number;
+        roomUnitsRevision: number;
+      }> = {},
+    ) => {
+      const result = await createPropertySetupPmsStateProvider(
+        options({
+          owner: {
+            getRoomOwnerSnapshot: vi.fn(async () => ({
+              ...emptyRooms(),
+              rooms: [{ ...completeRoom(), ...room }],
+            })),
+            getInventoryOwnerSnapshot: vi.fn(async () => null),
+          },
+          ...overrides,
+        }),
+      ).getOwnerState(request());
+      if (result.outcome !== "found") throw new Error("Expected PMS facts");
+      return result.facts[2]!.currentBaseRevisions;
+    };
+    const saved = await calendarManifest({});
+
+    const changed = (manifest: typeof saved) =>
+      Object.keys(saved).filter(
+        (key) => manifest[key as keyof typeof saved] !== saved[key as keyof typeof saved],
+      );
+
+    // Room details and an address edit that keeps the time zone leave the draft current.
+    expect(changed(await calendarManifest({}, { roomFactsRevision: 3 }))).toEqual([]);
+    expect(
+      changed(
+        await calendarManifest({ catalogLocation: catalogLocation(6) }, { roomFactsRevision: 3 }),
+      ),
+    ).toEqual([]);
+    // New units, another room or another time zone change what the calendar uses.
+    expect(changed(await calendarManifest({}, { roomUnitsRevision: 3 }))).toEqual([
+      "pms.room_units",
+    ]);
+    expect(
+      changed(await calendarManifest({}, { roomTypeId: "66666666-6666-4666-8666-666666666666" })),
+    ).toEqual(["pms.room_units"]);
+    expect(await calendarManifest({ propertyTimeZone: timeZone("Asia/Kolkata") })).toEqual({
+      ...saved,
+      "hotel_catalog.time_zone": `time-zone:${sha256("Asia/Kolkata")}`,
+    });
+    expect(saved["hotel_catalog.time_zone"]).toBe(`time-zone:${sha256("Asia/Colombo")}`);
+    expect(
+      await calendarManifest({
+        propertyTimeZone: {
+          getPropertyProfileEvidence: vi.fn(async () => ({
+            status: "timezone_missing" as const,
+            source: profileSource(propertyId),
+          })),
+        },
+      }),
+    ).toMatchObject({ "hotel_catalog.time_zone": "time-zone:missing" });
+
+    // Evidence for another property fails closed.
+    await expect(
+      createPropertySetupPmsStateProvider(
+        options({
+          propertyTimeZone: {
+            getPropertyProfileEvidence: vi.fn(async () => ({
+              status: "timezone_missing" as const,
+              source: profileSource("77777777-7777-4777-8777-777777777777"),
+            })),
+          },
+        }),
+      ).getOwnerState(request()),
+    ).resolves.toEqual({ outcome: "provider_failure" });
+  });
+
+  it("offers legacy values for old drafts only while units match the saved calendar", async () => {
+    const legacyValues = async (calendar: PmsOperatingCalendarCurrentReadResult | null) => {
+      const result = await createPropertySetupPmsStateProvider(
+        options({
+          owner: {
+            getRoomOwnerSnapshot: vi.fn(async () => ({ ...emptyRooms(), rooms: [completeRoom()] })),
+            getInventoryOwnerSnapshot: vi.fn(async () => null),
+          },
+          operatingCalendar: {
+            getCurrentOperatingCalendarConfiguration: vi.fn(async () => calendar),
+          },
+        }),
+      ).getOwnerState(request());
+      if (result.outcome !== "found") throw new Error("Expected PMS facts");
+      return result.facts[2]!.legacyBaseRevisions;
+    };
+    const roomTypeId = completeRoom().roomTypeId;
+
+    expect(await legacyValues(null)).toMatchObject({ "pms.operating_calendar": "calendar:0" });
+    expect(await legacyValues(savedCalendar())).toMatchObject({
+      "pms.operating_calendar": "calendar:1",
+    });
+    // Time zone and room-set changes already change the legacy values; units need the calendar.
+    expect(
+      await legacyValues(
+        savedCalendar([{ code: "property_profile_revision_conflict", currentRevision: 5 }]),
+      ),
+    ).toMatchObject({ "pms.operating_calendar": "calendar:1" });
+    expect(
+      await legacyValues(
+        savedCalendar([{ code: "room_units_revision_conflict", roomTypeId, currentRevision: 3 }]),
+      ),
+    ).toBeUndefined();
+    expect(
+      await legacyValues(savedCalendar([{ code: "room_capacity_unavailable", roomTypeId }])),
+    ).toBeUndefined();
   });
 
   it("fails closed on owner revision races and malformed mandatory-charge facts", async () => {
@@ -325,22 +451,80 @@ function options(
       registryVersion: "test.v1",
       isCanonicalIanaTimeZone: vi.fn(() => true),
     },
-    catalogLocation: {
-      ownerKey: "hotel_catalog.location",
-      getCurrentLocationOwnerEvidence: vi.fn(async () => ({
-        outcome: "available" as const,
-        evidence: {
-          organizationId,
-          propertyId,
-          ownerKey: "hotel_catalog.location" as const,
-          sourceIdentity: `hotel_catalog.location:${propertyId}` as const,
-          revision: 5,
-          baseRevision: `hotel_catalog.location:${propertyId}:r5` as const,
-        },
-      })),
-    },
+    propertyTimeZone: timeZone("Asia/Colombo"),
+    catalogLocation: catalogLocation(5),
     ...overrides,
   };
+}
+
+function catalogLocation(revision: number): PropertySetupPmsStateOptions["catalogLocation"] {
+  return {
+    ownerKey: "hotel_catalog.location",
+    getCurrentLocationOwnerEvidence: vi.fn(async () => ({
+      outcome: "available" as const,
+      evidence: {
+        organizationId,
+        propertyId,
+        ownerKey: "hotel_catalog.location" as const,
+        sourceIdentity: `hotel_catalog.location:${propertyId}` as const,
+        revision,
+        baseRevision: `hotel_catalog.location:${propertyId}:r${revision}` as const,
+      },
+    })),
+  };
+}
+
+function timeZone(name: string): PropertySetupPmsStateOptions["propertyTimeZone"] {
+  return {
+    getPropertyProfileEvidence: vi.fn(async () => ({
+      status: "available" as const,
+      evidence: { source: profileSource(propertyId), timeZone: name as PmsCanonicalIanaTimeZone },
+    })),
+  };
+}
+
+function profileSource(entityId: string) {
+  return {
+    ownerDomain: "hotel_catalog" as const,
+    entityType: "property_profile" as const,
+    entityId,
+    revision: "profile:4",
+  };
+}
+
+function savedCalendar(
+  sourceConflicts: readonly PmsOperatingCalendarStaleSourceConflict[] = [],
+): PmsOperatingCalendarCurrentReadResult {
+  const configuration = {
+    contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
+    propertyId,
+    calendarRevision: 1,
+    source: createPmsOperatingCalendarSourceRevision(propertyId, 1),
+    sourceInputs: {
+      propertyProfile: profileSource(propertyId),
+      propertyTimeZone: "Asia/Colombo" as PmsCanonicalIanaTimeZone,
+      roomBindings: [
+        {
+          roomTypeId: completeRoom().roomTypeId,
+          sourceRoomFactsRevision: completeRoom().roomFactsRevision,
+          sourceRoomUnitsRevision: completeRoom().roomUnitsRevision,
+          physicalCapacityCount: completeRoom().activeUnitCount,
+          startingSellableLimitCount: 1,
+        },
+      ],
+    },
+    schedule: { mode: "year_round" as const, periods: [] as const },
+    defaultMinimumStayNights: 2,
+    createdAt: "2026-08-05T12:00:00.000Z",
+    updatedAt: "2026-08-05T12:00:00.000Z",
+  };
+  return sourceConflicts.length === 0
+    ? { configuration, sourceStatus: "current", sourceConflicts: [] }
+    : { configuration, sourceStatus: "stale", sourceConflicts };
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function request() {

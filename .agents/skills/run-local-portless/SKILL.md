@@ -23,9 +23,9 @@ Equivalent direct command:
 
 What this does:
 
-- Starts Docker databases, MinIO, auth migrations, and the three FastAPI backends in the background.
+- Starts Docker databases, MinIO, auth migrations, and the two FastAPI backends (booking, PMS) in the background.
 - Applies `docker-compose.portless.yml` so backend CORS allows portless frontend origins.
-- Registers the `api.marketplace`, `api.booking`, and `api.pms` portless aliases.
+- Registers the `api.booking` and `api.pms` portless aliases.
 - Starts the TypeScript API with WorkOS/AuthKit env wiring and runs `portless`
   in the foreground for all Next.js frontends.
 
@@ -42,8 +42,7 @@ second shell/tool call:
 npm run seed:test-data
 ```
 
-This seeds auth users, marketplace demo profiles/listings/collaborations, booking
-engine hotels/translations, and PMS hotels/room types/sample bookings. The seed
+This seeds auth users, booking engine hotels/translations, and PMS hotels/room types/sample bookings. The seed
 runner is intended to be rerunnable for local development. If `asyncpg` or
 `bcrypt` is missing, follow the wrapper's install message and rerun the same npm
 command.

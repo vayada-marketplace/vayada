@@ -2,7 +2,7 @@
 
 Defines what the `vayada` app repository produces and what the `vayada-platform` repository consumes. Both sides must implement against this contract without hidden assumptions.
 
-The six active `next-*` services also have a versioned, complete-release
+The five active `next-*` services also have a versioned, complete-release
 contract. Its schemas, immutable digest rules, successful-run publisher,
 retention, redispatch, and activation gate are documented in
 [`coordinated-release-publishing.md`](coordinated-release-publishing.md). The
@@ -21,22 +21,25 @@ ECR repositories are created and owned by `vayada-platform` (via `ecr.tf`). The 
 
 ## Services
 
-| App directory          | ECR repository                       | Deploy target |
-| ---------------------- | ------------------------------------ | ------------- |
-| `apps/booking-api`     | `vayada-booking-backend`             | ECS Fargate   |
-| `apps/booking-web`     | `vayada-booking-frontend`            | ECS Fargate   |
-| `apps/booking-admin`   | `vayada-booking-admin-frontend`      | ECS Fargate   |
-| `apps/pms-api`         | `vayada-pms-backend`                 | ECS Fargate   |
-| `apps/pms-web`         | `vayada-pms-frontend`                | ECS Fargate   |
-| `apps/marketplace-api` | `vayada-creator-marketplace-backend` | ECS Fargate   |
-| `apps/vayada-admin`    | `vayada-admin-frontend`              | ECS Fargate   |
-| `apps/landing`         | `vayada-landing`                     | App Runner    |
+| App directory        | ECR repository                  | Deploy target |
+| -------------------- | ------------------------------- | ------------- |
+| `apps/booking-api`   | `vayada-booking-backend`        | ECS Fargate   |
+| `apps/booking-web`   | `vayada-booking-frontend`       | ECS Fargate   |
+| `apps/booking-admin` | `vayada-booking-admin-frontend` | ECS Fargate   |
+| `apps/pms-api`       | `vayada-pms-backend`            | ECS Fargate   |
+| `apps/pms-web`       | `vayada-pms-frontend`           | ECS Fargate   |
+| `apps/vayada-admin`  | `vayada-next-admin-frontend`    | ECS Fargate   |
+| `apps/landing`       | `vayada-landing`                | App Runner    |
 
-The affiliate portal source has been retired. Existing `vayada-affiliate-dashboard`
-and `vayada-next-affiliate-dashboard` images/services remain for temporary runtime
-continuity; they are not built from this checkout. Preserve the retained artifacts
-and API contracts until the separate cutover described in
-[Affiliate portal source retirement](affiliate-portal-retirement.md).
+The legacy Python Marketplace (`apps/marketplace-api`, image `vayada-creator-marketplace-backend`)
+and the legacy admin build (`vayada-admin-frontend`, admin.vayada.com) are switched off (VAY-2259);
+this repository no longer deploys or recovers them.
+
+The affiliate portal source has been retired, and the API refuses its auth surface
+(VAY-2271). The existing `vayada-affiliate-dashboard` and `vayada-next-affiliate-dashboard`
+images and services are not built from this checkout;
+[Affiliate portal source retirement](affiliate-portal-retirement.md) records their shutdown
+and removal (VAY-2242).
 
 ## Image tagging
 

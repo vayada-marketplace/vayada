@@ -15,6 +15,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       returnTo={returnTo}
       resumeSession={firstSearchParam(params.auth) === "callback"}
       authError={authError}
+      hotelWorkspaceRequired={
+        firstSearchParam(params.auth_error_code) === "hotel_workspace_required"
+      }
       workosReturn={
         workosReturn === "complete" || workosReturn === "failed" ? workosReturn : undefined
       }

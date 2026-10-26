@@ -5,6 +5,18 @@ const SPECIALIZED_POOL_MAX = 1;
 const CONNECTION_TIMEOUT_MS = 3_000;
 const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 const HEALTH_PROBE_CACHE_MS = 5_000;
+// Connect and query each give up after HEALTH_PROBE_TIMEOUT_MS; a probe still running after both is dropped.
+const HEALTH_PROBE_GIVE_UP_MS = 2 * HEALTH_PROBE_TIMEOUT_MS;
+// Requests waiting this long for a connection, without a break, is reported once (VAY-2247 incident).
+const SUSTAINED_SATURATION_MS = 30_000;
+// Waiters may clear for a second or two inside one episode; it ends after this long without any.
+const SATURATION_QUIET_MS = 5_000;
+const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000;
+// A pool that is still full after this many waiter timeouts, with no client handed out since, has
+// stopped serving (for example every slot hung on a peer that vanished in a failover).
+const STALLED_POOL_TIMEOUTS = 5;
+// pg-pool's message when a request waited connectionTimeoutMillis for an existing client.
+const POOL_WAITER_TIMEOUT_MESSAGE = "timeout exceeded when trying to connect";
 // SQLSTATEs for a refused, dropped or shutting-down connection (classes 08 and 57P, plus 53300).
 const CONNECTION_FAILURE_STATES = new Set([
   "08000",
@@ -36,7 +48,12 @@ const connectionFailures = new WeakSet<object>();
 type PgModule = Pick<typeof pg, "Pool">;
 type ClientClass = typeof pg.Client;
 type ConnectCallback = Parameters<pg.Client["connect"]>[0];
-type PoolEntry = { pool: pg.Pool; references: number; closed: boolean };
+type PoolEntry = {
+  pool: pg.Pool;
+  references: number;
+  closed: boolean;
+  waiterTimeouts: number;
+};
 type OwnedListener = {
   event: string | symbol;
   original: (...arguments_: unknown[]) => void;
@@ -51,18 +68,40 @@ type ConnectionErrorReporter = (fields: { code: string | null; error: string }) 
 /** Resolves false while PostgreSQL does not answer; results are cached briefly. */
 export type DatabaseHealthCheck = () => Promise<boolean>;
 
+/**
+ * liveness answers /health, the ALB's check: whether PostgreSQL answers the probe's own connection.
+ * readiness answers /ready: also false while a shared pool has stopped handing out connections.
+ */
+export type DatabaseHealthChecks = Readonly<{
+  liveness: DatabaseHealthCheck;
+  readiness: DatabaseHealthCheck;
+}>;
+
 export type PostgresPoolSnapshot = Readonly<{
   physicalPoolCount: number;
   maxConnections: number;
   totalConnections: number;
   idleConnections: number;
   waitingRequests: number;
+  stalledPools: number;
+}>;
+
+/** Requests have waited for a connection for durationMs without a break; the snapshot is the latest. */
+export type PostgresSaturationEpisode = PostgresPoolSnapshot & Readonly<{ durationMs: number }>;
+
+export type PostgresTelemetryOptions = Readonly<{
+  /** Called once per episode, when it has lasted SUSTAINED_SATURATION_MS. */
+  onSustainedSaturation?: (episode: PostgresSaturationEpisode) => void;
 }>;
 
 export function installPostgresPoolRuntime(postgres: PgModule = pg): {
   snapshot(): PostgresPoolSnapshot;
-  startTelemetry(logger: Logger, intervalMs?: number): () => void;
-  healthCheck(connectionString: string): DatabaseHealthCheck;
+  startTelemetry(
+    logger: Logger,
+    intervalMs?: number,
+    options?: PostgresTelemetryOptions,
+  ): () => void;
+  healthCheck(connectionString: string): DatabaseHealthChecks;
   close(): Promise<void>;
 } {
   const OriginalPool = postgres.Pool;
@@ -92,6 +131,10 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         max: specialized ? SPECIALIZED_POOL_MAX : GENERAL_POOL_MAX,
         connectionTimeoutMillis: boundedTimeout(requested.connectionTimeoutMillis),
         idleTimeoutMillis: 30_000,
+        // Without keepalive an idle connection to a peer that vanished silently is only noticed
+        // when the next query on it times out at the TCP level.
+        keepAlive: true,
+        keepAliveInitialDelayMillis: KEEP_ALIVE_INITIAL_DELAY_MS,
       };
       const key = Object.values(requested).some(
         (value) => value !== null && (typeof value === "object" || typeof value === "function"),
@@ -105,11 +148,16 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         // pg-pool re-emits idle-client errors here after the client listener reported them, and
         // an unhandled pool 'error' event would exit the process.
         pool.on("error", () => undefined);
-        entry = { pool, references: 0, closed: false };
+        const created: PoolEntry = { pool, references: 0, closed: false, waiterTimeouts: 0 };
+        // Any client handed out, including after a waiter timed out, means the pool still serves.
+        pool.on("acquire", () => {
+          created.waiterTimeouts = 0;
+        });
+        entry = created;
         entries.set(key, entry);
       }
       entry.references += 1;
-      return lease(entry, key, entries);
+      return lease(entry, key, entries, recordWaiterTimeout);
     },
   }) as typeof pg.Pool;
   Object.defineProperty(postgres, "Pool", {
@@ -117,6 +165,30 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
     writable: true,
     value: SharedPool,
   });
+  let reportStalledPool = (fields: object) =>
+    process.emitWarning("PostgreSQL pool stopped handing out connections", {
+      code: "POSTGRES_POOL_STALLED",
+      detail: JSON.stringify(fields),
+    });
+  const isFull = ({ pool }: PoolEntry) =>
+    pool.idleCount === 0 && pool.totalCount >= pool.options.max;
+  const isStalled = (entry: PoolEntry) =>
+    !entry.closed && entry.waiterTimeouts >= STALLED_POOL_TIMEOUTS && isFull(entry);
+  const recordWaiterTimeout = (entry: PoolEntry, error: unknown) => {
+    if (!(error instanceof Error && error.message === POOL_WAITER_TIMEOUT_MESSAGE)) return;
+    entry.waiterTimeouts += 1;
+    if (entry.waiterTimeouts !== STALLED_POOL_TIMEOUTS || !isFull(entry)) return;
+    try {
+      reportStalledPool({
+        waiterTimeouts: entry.waiterTimeouts,
+        maxConnections: entry.pool.options.max,
+        totalConnections: entry.pool.totalCount,
+        waitingRequests: entry.pool.waitingCount,
+      });
+    } catch {
+      // Reporting must never break the caller's checkout.
+    }
+  };
   const snapshot = (): PostgresPoolSnapshot => {
     const pools = [...entries.values()].filter(({ closed }) => !closed).map(({ pool }) => pool);
     return {
@@ -125,14 +197,17 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
       totalConnections: pools.reduce((sum, pool) => sum + pool.totalCount, 0),
       idleConnections: pools.reduce((sum, pool) => sum + pool.idleCount, 0),
       waitingRequests: pools.reduce((sum, pool) => sum + pool.waitingCount, 0),
+      stalledPools: [...entries.values()].filter(isStalled).length,
     };
   };
 
   return {
     snapshot,
-    startTelemetry(logger, intervalMs = 1_000) {
+    startTelemetry(logger, intervalMs = 1_000, options = {}) {
       reportConnectionError = (fields) =>
         logger.warn(fields, "PostgreSQL client connection failed");
+      reportStalledPool = (fields) =>
+        logger.warn(fields, "PostgreSQL pool stopped handing out connections");
       logger.info(
         {
           ...snapshot(),
@@ -142,9 +217,18 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         },
         "PostgreSQL runtime pool budget configured",
       );
+      const episodes = poolSaturationEpisodes();
       const timer = setInterval(() => {
         const state = snapshot();
         if (state.waitingRequests > 0) logger.warn(state, "PostgreSQL runtime pool is saturated");
+        const sustained = episodes(state, Date.now());
+        if (!sustained) return;
+        logger.warn(sustained, "PostgreSQL runtime pool saturated for 30 s");
+        try {
+          options.onSustainedSaturation?.(sustained);
+        } catch {
+          // Alerting must never stop the telemetry.
+        }
       }, intervalMs);
       timer.unref();
       return () => clearInterval(timer);
@@ -158,11 +242,20 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         connectionTimeoutMillis: HEALTH_PROBE_TIMEOUT_MS,
         query_timeout: HEALTH_PROBE_TIMEOUT_MS,
         idleTimeoutMillis: 60_000,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: KEEP_ALIVE_INITIAL_DELAY_MS,
         Client: runtimeClient(pg.Client),
       });
       pool.on("error", () => undefined);
       probePools.push(pool);
-      return cachedHealthCheck(() => pool.query("SELECT 1"), HEALTH_PROBE_CACHE_MS);
+      const probe = cachedHealthCheck(() => pool.query("SELECT 1"), HEALTH_PROBE_CACHE_MS);
+      return {
+        // A pool that stopped serving doesn't fail liveness: replacing the task only moves the load
+        // to a new one and drops every request in flight (VAY-2247 incident, 2026-10-21).
+        liveness: probe,
+        // The probe has its own connection, so it can't see shared pools that stopped serving.
+        readiness: async () => ![...entries.values()].some(isStalled) && (await probe()),
+      };
     },
     async close() {
       await Promise.all(probePools.splice(0).map((pool) => pool.end()));
@@ -177,6 +270,43 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
       );
     },
   };
+}
+
+/**
+ * Follows the pool samples and returns an episode once, when requests have waited for a connection for
+ * sustainedMs without a break. A gap shorter than quietMs doesn't end the episode.
+ */
+export function poolSaturationEpisodes(
+  sustainedMs = SUSTAINED_SATURATION_MS,
+  quietMs = SATURATION_QUIET_MS,
+) {
+  let episode: { since: number; lastWaitingAt: number; reported: boolean } | undefined;
+  return (state: PostgresPoolSnapshot, at: number): PostgresSaturationEpisode | null => {
+    if (state.waitingRequests === 0) {
+      if (episode && at - episode.lastWaitingAt >= quietMs) episode = undefined;
+      return null;
+    }
+    episode ??= { since: at, lastWaitingAt: at, reported: false };
+    episode.lastWaitingAt = at;
+    if (episode.reported || at - episode.since < sustainedMs) return null;
+    episode.reported = true;
+    return { ...state, durationMs: at - episode.since };
+  };
+}
+
+/**
+ * A lock wait that gave up (SQLSTATE 55P03: lock_timeout, or NOWAIT): another connection holds what this one
+ * needs. Looks through `cause`, as wrapped provider errors keep the original there. The API answers it with
+ * 409 busy_try_again (VAY-2247 incident follow-up, 2026-10-21).
+ */
+export function isPostgresLockTimeoutError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth += 1) {
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === "55P03") return true;
+    current = candidate.cause;
+  }
+  return false;
 }
 
 export function isPostgresUnavailableError(error: unknown): boolean {
@@ -198,18 +328,22 @@ export function isPostgresUnavailableError(error: unknown): boolean {
   return false;
 }
 
-/** Shares one in-flight probe and reuses its result for cacheMs. */
+/**
+ * Shares one in-flight probe and reuses its result for cacheMs. A probe that hasn't settled after
+ * giveUpMs counts as down, so one stuck probe can't hold every later check.
+ */
 export function cachedHealthCheck(
   probe: () => Promise<unknown>,
   cacheMs: number,
   now: () => number = Date.now,
+  giveUpMs: number = HEALTH_PROBE_GIVE_UP_MS,
 ): DatabaseHealthCheck {
   let checkedAt = Number.NEGATIVE_INFINITY;
   let healthy = true;
   let pending: Promise<boolean> | undefined;
   return () => {
     if (now() - checkedAt < cacheMs) return Promise.resolve(healthy);
-    pending ??= probe()
+    pending ??= settledWithin(probe(), giveUpMs)
       .then(
         () => true,
         () => false,
@@ -222,6 +356,15 @@ export function cachedHealthCheck(
       });
     return pending;
   };
+}
+
+function settledWithin(work: Promise<unknown>, ms: number): Promise<unknown> {
+  let timer: NodeJS.Timeout | undefined;
+  const giveUp = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("PostgreSQL health probe did not settle")), ms);
+    timer.unref();
+  });
+  return Promise.race([work, giveUp]).finally(() => clearTimeout(timer));
 }
 
 // Transient connect failures only: a rejected password, a missing database or a TLS mismatch
@@ -275,7 +418,12 @@ function createRuntimeClient(base: ClientClass, report: ConnectionErrorReporter)
   };
 }
 
-function lease(entry: PoolEntry, key: string, entries: Map<string, PoolEntry>): pg.Pool {
+function lease(
+  entry: PoolEntry,
+  key: string,
+  entries: Map<string, PoolEntry>,
+  recordWaiterTimeout: (entry: PoolEntry, error: unknown) => void,
+): pg.Pool {
   let released = false;
   const listeners: OwnedListener[] = [];
   let facade: pg.Pool;
@@ -330,6 +478,25 @@ function lease(entry: PoolEntry, key: string, entries: Map<string, PoolEntry>): 
             listeners.splice(index, 1);
           }
           return facade;
+        };
+      }
+      if (property === "connect" || property === "query") {
+        const method = Reflect.get(pool, property, pool) as (...arguments_: unknown[]) => unknown;
+        return (...arguments_: unknown[]) => {
+          const callback = arguments_.at(-1);
+          if (typeof callback === "function") {
+            arguments_[arguments_.length - 1] = (error: unknown, ...rest: unknown[]) => {
+              recordWaiterTimeout(entry, error);
+              return Reflect.apply(callback, undefined, [error, ...rest]);
+            };
+            return Reflect.apply(method, pool, arguments_);
+          }
+          const result = Reflect.apply(method, pool, arguments_) as Promise<unknown>;
+          // Rethrow so an ignored rejection still surfaces as unhandled, exactly as before.
+          return result.then(undefined, (error: unknown) => {
+            recordWaiterTimeout(entry, error);
+            throw error;
+          });
         };
       }
       const value = Reflect.get(pool, property, pool) as unknown;

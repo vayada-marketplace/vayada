@@ -28,7 +28,6 @@ for (const locale of ["de", "fr", "es", "id", "ja", "zh", "ru", "it", "nl"]) {
     await expect(
       page.getByText(messages["admin.howYourHotelCollectsPaymentsFromGuests"], { exact: true }),
     ).toBeVisible();
-    await page.goto("/settings?section=billing");
     await expect(
       page.getByRole("heading", { name: messages["settings.billing.paymentMethods"], exact: true }),
     ).toBeVisible();
@@ -40,13 +39,8 @@ for (const locale of ["de", "fr", "es", "id", "ja", "zh", "ru", "it", "nl"]) {
     await expect(
       page.getByText("Guest pays online with credit or debit card via Stripe", { exact: true }),
     ).toHaveCount(0);
-    await page.goto("/booking-flow");
-    await page
-      .getByRole("button", { name: messages["bookingFlow.tabs.addons"], exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: messages["bookingFlow.addons.addExperience"], exact: true })
-      .click();
+    await page.goto("/add-ons");
+    await page.getByRole("button", { name: messages["addons.list.new"], exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(
       dialog.getByRole("radio", { name: messages["addons.editor.perPersonNight"], exact: true }),
@@ -61,7 +55,7 @@ for (const locale of ["de", "fr", "es", "id", "ja", "zh", "ru", "it", "nl"]) {
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
     await expect(
-      page.getByRole("heading", { name: messages["bookingFlow.title"], exact: true }),
+      page.getByRole("heading", { name: messages["bookingFlow.tabs.addons"], exact: true }),
     ).toBeVisible();
     await noLegacy();
   });
@@ -96,8 +90,10 @@ test("switches language through the profile menu and translates the live preview
 
 test("a visible module inventory error follows a later language change", async ({ page }) => {
   await mockBookingAdminBookingFlow(page);
-  await page.route("**/api/pms/properties/*/module-activations**", (route) =>
-    route.fulfill({ status: 503, json: { detail: "Backend failure in English" } }),
+  // No module store can be read (VAY-2200: each one alone is optional in Booking Admin).
+  await page.route(
+    /\/api\/pms\/properties\/[^/]+\/(?:module-activations|navigation-modules|booking-modules)/,
+    (route) => route.fulfill({ status: 503, json: { detail: "Backend failure in English" } }),
   );
   const en = catalog("en"),
     de = catalog("de");
@@ -119,11 +115,8 @@ test("German add-on editor fits a narrow screen", async ({ page }, testInfo) => 
   await mockBookingAdminBookingFlow(page);
   await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
   const de = catalog("de");
-  await page.goto("/booking-flow");
-  await page.getByRole("button", { name: de["bookingFlow.tabs.addons"], exact: true }).click();
-  await page
-    .getByRole("button", { name: de["bookingFlow.addons.addExperience"], exact: true })
-    .click();
+  await page.goto("/add-ons");
+  await page.getByRole("button", { name: de["addons.list.new"], exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);

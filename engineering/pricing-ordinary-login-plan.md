@@ -6,6 +6,11 @@ nothing here grants, deploys, merges or activates anything. Evidence:
 (`inventory-api.md`, `migrations-and-rls.md`, `platform-apparatus.md`,
 `open-pricing-prs.md`, `vay1543-comments-export.md`)._
 
+> **Note (VAY-2272, 2026-10-20):** Marketplace Web and the affiliate program are
+> gone. Slice B's setup wizard now lives in Booking Admin (VAY-2261), and
+> `domains/affiliateCaptureRoleBoundary.ts` (section 3.3) was deleted (VAY-2263);
+> paths below are as of `702f777c6`.
+
 ## 0. Decision
 
 2026-10-07, Flamur: "yes proceed". Pricing writes rely on application-level
@@ -240,7 +245,8 @@ h,r` lock to succeed). ~120 lines. **0.5 day.** **Production step:** the
   grant mode applies the grant set and the protected-list revokes in one
   transaction, so if the VAY-2054 grant has already run, an operator must
   re-run `--grant-runtime-product-dml` after 0.3 merges, then
-  `--preflight-runtime-product-dml` must PASS. Until then authority, offers
+  the runtime preflight must PASS (`--preflight-runtime-product-dml` until
+  VAY-2211; plain `preflight` since). Until then authority, offers
   and quotes keep returning 503 exactly as today; nothing regresses.
 - Risk: none functional; the runtime-scope unit tests encode the old boundary
   and must be deleted, not weakened.

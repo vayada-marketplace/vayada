@@ -9,6 +9,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  canPublishBookingPage,
   createPgBookingPublicationCommandRepository,
   type BookingPublicationCommandPool,
 } from "./bookingPublicationCommandRepository.js";
@@ -55,7 +56,14 @@ const builder: BookingPublicationBuilderPort = {
       builderMode !== "wrong_hash" &&
       builderMode !== "wrong_readiness_hash"
     ) {
-      return { outcome: "rejected", code: builderMode };
+      return builderMode === "public_content_incomplete"
+        ? {
+            outcome: "rejected",
+            code: builderMode,
+            reason: "profile",
+            issuePaths: ["hotel.supportedQuoteParameters.supportedLocales"],
+          }
+        : { outcome: "rejected", code: builderMode };
     }
     return {
       outcome: "built",
@@ -76,6 +84,7 @@ const builder: BookingPublicationBuilderPort = {
 
 describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safety", () => {
   let currentReadinessRevision = "booking-settings:4";
+  const warnings: { fields: Record<string, unknown>; message: string }[] = [];
   const admin = new pg.Client({ connectionString: TEST_DATABASE_URL });
   const distributionPublication = createPgDistributionBookingPublicationProjection({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
@@ -95,6 +104,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     },
     builder,
     now: () => new Date("2026-08-02T13:01:00.000Z"),
+    warn: (fields, message) => warnings.push({ fields, message }),
   });
   const repository = createPgBookingPublicationCommandRepository({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
@@ -112,6 +122,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     currentReadinessRevision = "booking-settings:4";
     builderMode = "built";
     readinessProviderAvailable = true;
+    warnings.length = 0;
     await cleanup();
     await seedAuthorizedScope();
   });
@@ -316,6 +327,63 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       idempotencyKeys: "0",
       outboxEvents: "0",
     });
+  });
+
+  it("checks the member's effective permission like the route does (VAY-2335)", async () => {
+    const granted = ["booking.settings.read", "booking.settings.manage"];
+    const request = await command("effective-permission");
+    // Permission only through a team-role: "Create role" roles sit on hotel_custom, which has
+    // no booking grant rows.
+    await setMemberRole("hotel_custom", { definition: granted });
+    await expect(canPublish()).resolves.toBe(true);
+    const accepted = await repository.requestPublication(request);
+    expect(accepted).toMatchObject({ ok: true, operation: { status: "pending", propertyId } });
+
+    // Permission only through a per-person override; the exact retry re-authorizes.
+    await setMemberRole("hotel_custom", { overrides: { grant: granted, deny: [] } });
+    await expect(canPublish()).resolves.toBe(true);
+    await expect(repository.requestPublication(request)).resolves.toEqual(accepted);
+
+    // The base role's grant rows include it.
+    await setMemberRole("hotel_manager", {});
+    await expect(canPublish()).resolves.toBe(true);
+    await expect(repository.requestPublication(request)).resolves.toEqual(accepted);
+
+    for (const [roleKey, access] of [
+      ["hotel_custom", {}], // without the permission
+      ["hotel_manager", { definition: ["booking.settings.read"] }], // removed by a team-role
+      ["hotel_manager", { bookingAccess: false }], // Booking switched off
+    ] as const) {
+      await setMemberRole(roleKey, access);
+      await expect(canPublish()).resolves.toBe(false);
+      await expect(repository.requestPublication(request)).resolves.toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+    }
+    await expect(counts()).resolves.toMatchObject({ attempts: "1", idempotencyKeys: "1" });
+  });
+
+  it("checks the republishing user's property access, which no route checked (VAY-2335)", async () => {
+    await setMemberRole("hotel_custom", {
+      definition: ["booking.settings.read", "booking.settings.manage"],
+      assigned: true,
+    });
+    await expect(canPublish()).resolves.toBe(false);
+    // Assignments need the account's canonical Catalog property link.
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links
+         (organization_id, product, resource_type, resource_id, relationship, status)
+       VALUES ($1::uuid, 'hotel_catalog', 'property', $2::uuid::text, 'owner', 'active')`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO identity.membership_property_assignments (membership_id, property_id)
+       SELECT id, $3::uuid FROM identity.organization_memberships
+       WHERE organization_id = $1::uuid AND user_id = $2::uuid`,
+      [organizationId, actorUserId, propertyId],
+    );
+    await expect(canPublish()).resolves.toBe(true);
   });
 
   it("re-authorizes an exact retry before returning its stored result", async () => {
@@ -556,11 +624,24 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
   });
 
   it.each([
-    ["source_manifest_mismatch", "source_content_changed"],
-    ["public_content_incomplete", "projection_failed"],
-    ["wrong_hash", "source_content_changed"],
-    ["wrong_readiness_hash", "source_content_changed"],
-  ] as const)("fails safely when the builder returns %s", async (mode, failureCode) => {
+    [
+      "source_manifest_mismatch",
+      "source_content_changed",
+      { stage: "build", builderCode: "source_manifest_mismatch" },
+    ],
+    [
+      "public_content_incomplete",
+      "projection_failed",
+      {
+        stage: "build",
+        builderCode: "public_content_incomplete",
+        reason: "profile",
+        issuePaths: ["hotel.supportedQuoteParameters.supportedLocales"],
+      },
+    ],
+    ["wrong_hash", "source_content_changed", { stage: "build_hash" }],
+    ["wrong_readiness_hash", "source_content_changed", { stage: "build_hash" }],
+  ] as const)("fails safely when the builder returns %s", async (mode, failureCode, detail) => {
     builderMode = mode;
     const accepted = await repository.requestPublication(await command(`builder-${mode}`));
     if (!accepted.ok) throw new Error("Expected accepted publication request");
@@ -580,6 +661,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
         operationId: accepted.operation.operationId,
       }),
     ).resolves.toMatchObject({ status: "failed", failureCode });
+    // The failure names its reason in the logs, with IDs and codes only (VAY-2292).
+    expect(warnings).toEqual([
+      {
+        message: "Booking publication failed",
+        fields: {
+          propertyId,
+          operationId: accepted.operation.operationId,
+          failureCode,
+          ...detail,
+        },
+      },
+    ]);
   });
 
   it("retries status terminalization without failing an already-active revision", async () => {
@@ -832,12 +925,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     if (!accepted.ok) throw new Error("Expected accepted publication request");
     const projectionPool = new pg.Pool({ connectionString: TEST_DATABASE_URL!, max: 1 });
     const workerPool = new pg.Pool({ connectionString: TEST_DATABASE_URL!, max: 1 });
-    const projectionEntered = deferred<void>();
+    const projectionEntered = deferred<number>();
     const releaseProjection = deferred<void>();
-    const recoveryStarted = deferred<void>();
+    const recoveryStarted = deferred<number>();
+    const recoveryFinished = deferred<void>();
     const pausedProjection = createPgDistributionBookingPublicationProjection({
       connectionString: TEST_DATABASE_URL!,
-      pool: pauseBeforeProjectionCommitPool(projectionPool, projectionEntered, releaseProjection),
+      pool: pauseAroundProjectionCommitPool(
+        projectionPool,
+        projectionEntered,
+        releaseProjection,
+        recoveryFinished.promise,
+      ),
     });
     const firstWorker = createBookingPublicationProjector({
       connectionString: TEST_DATABASE_URL!,
@@ -850,7 +949,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     });
     const replacementWorker = createBookingPublicationProjector({
       connectionString: TEST_DATABASE_URL!,
-      pool: signalLeaseRecoveryPool(workerPool, recoveryStarted),
+      pool: signalLeaseRecoveryPool(workerPool, recoveryStarted, recoveryFinished),
       projection: distributionPublication,
       attempts: attemptStatus,
       readiness: {
@@ -859,15 +958,31 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       builder,
       now: () => new Date("2026-08-02T13:01:00.002Z"),
     });
+    let first: Promise<unknown> | undefined;
+    let replacement: Promise<unknown> | undefined;
     try {
-      const first = firstWorker.projectPending({ propertyId });
-      await projectionEntered.promise;
+      first = firstWorker.projectPending({ propertyId });
+      const projectionBackend = await beforeSettled(projectionEntered.promise, first);
       currentReadinessRevision = "booking-settings:5";
-      const replacement = replacementWorker.projectPending({ propertyId });
-      await recoveryStarted.promise;
+      replacement = replacementWorker.projectPending({ propertyId });
+      const recoveryBackend = await beforeSettled(recoveryStarted.promise, first, replacement);
+      // The paused activation holds the outbox row, so lease recovery must wait for its commit.
+      await waitForLockWaiter(admin, recoveryBackend, projectionBackend);
       releaseProjection.resolve();
-      await Promise.allSettled([first, replacement]);
+      const [firstResult, replacementResult] = await Promise.allSettled([first, replacement]);
 
+      // The first worker resumes only after recovery committed, so its lease-fenced status
+      // fallback finds the lease gone instead of locking the row the replacement must claim.
+      expect(firstResult).toMatchObject({
+        status: "rejected",
+        reason: {
+          message: "Booking publication outbox lease was lost during status reconciliation",
+        },
+      });
+      expect(replacementResult).toEqual({
+        status: "fulfilled",
+        value: { processed: 1, succeeded: 1, failed: 0, exhausted: 0 },
+      });
       await expect(
         repository.getPublicationStatus({
           actorUserId,
@@ -894,6 +1009,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       });
     } finally {
       releaseProjection.resolve();
+      recoveryFinished.resolve();
+      await Promise.allSettled([first, replacement]);
       await firstWorker.close?.();
       await replacementWorker.close?.();
       await pausedProjection.close?.();
@@ -1023,7 +1140,67 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     ).resolves.toMatchObject({
       rows: [{ outboxStatus: "failed", reasonCode: "max_attempts_exhausted" }],
     });
+    expect(warnings).toEqual([
+      {
+        message: "Booking publication failed",
+        fields: {
+          propertyId,
+          operationId: accepted.operation.operationId,
+          failureCode: "projection_failed",
+          stage: "retries_exhausted",
+          errorCode: "owner_snapshot_unavailable",
+        },
+      },
+    ]);
   });
+
+  function canPublish(): Promise<boolean> {
+    return canPublishBookingPage(
+      { query: (text, values) => admin.query(text, values as unknown[]) },
+      { organizationId, propertyId, actorUserId },
+      new Date("2026-08-02T13:00:00.000Z"),
+    );
+  }
+
+  async function setMemberRole(
+    roleKey: string,
+    access: {
+      definition?: readonly string[];
+      overrides?: unknown;
+      bookingAccess?: boolean;
+      assigned?: boolean;
+    },
+  ): Promise<void> {
+    const definition = access.definition
+      ? await admin.query<{ id: string }>(
+          `INSERT INTO identity.organization_roles
+             (organization_id, name, security_class, base_role_key, default_permissions)
+           VALUES ($1::uuid, $2, 'staff', $3, $4::jsonb)
+           RETURNING id`,
+          [
+            organizationId,
+            `Role ${crypto.randomUUID()}`,
+            roleKey,
+            JSON.stringify(access.definition),
+          ],
+        )
+      : null;
+    await admin.query(
+      `UPDATE identity.organization_memberships
+       SET role_key = $3, role_definition_id = $4::uuid, permission_overrides = $5::jsonb,
+           booking_access_enabled = $6, property_access_mode = $7
+       WHERE organization_id = $1::uuid AND user_id = $2::uuid`,
+      [
+        organizationId,
+        actorUserId,
+        roleKey,
+        definition?.rows[0]!.id ?? null,
+        access.overrides === undefined ? null : JSON.stringify(access.overrides),
+        access.bookingAccess ?? true,
+        access.assigned ? "assigned" : "all",
+      ],
+    );
+  }
 
   async function counts() {
     const result = await admin.query<{
@@ -1121,6 +1298,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       await admin.query(
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1",
         [secondOrganizationId],
+      );
+      await admin.query("DELETE FROM identity.organization_roles WHERE organization_id = $1", [
+        organizationId,
+      ]);
+      await admin.query(
+        "DELETE FROM identity.membership_property_assignments WHERE property_id = $1",
+        [propertyId],
       );
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = $1", [propertyId]);
       await admin.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);
@@ -1413,10 +1597,12 @@ function deferred<Value>(): Deferred<Value> {
   return { promise, resolve };
 }
 
-function pauseBeforeProjectionCommitPool(
+// Pauses before the activation commits (resolving its backend pid), and again after it.
+function pauseAroundProjectionCommitPool(
   pool: pg.Pool,
-  entered: Deferred<void>,
+  entered: Deferred<number>,
   resume: Deferred<void>,
+  resumeAfterCommit: Promise<void>,
 ): DistributionBookingPublicationPool {
   return {
     async connect() {
@@ -1431,8 +1617,12 @@ function pauseBeforeProjectionCommitPool(
             activationWritten = true;
           }
           if (text === "COMMIT" && activationWritten) {
-            entered.resolve();
+            const backend = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+            entered.resolve(backend.rows[0]!.pid);
             await resume.promise;
+            const committed = await client.query<T>(text, values as unknown[]);
+            await resumeAfterCommit;
+            return committed;
           }
           return client.query<T>(text, values as unknown[]);
         },
@@ -1443,13 +1633,16 @@ function pauseBeforeProjectionCommitPool(
   };
 }
 
+// Resolves the recovering backend's pid, then signals when recovery commits or rolls back.
 function signalLeaseRecoveryPool(
   pool: pg.Pool,
-  recoveryStarted: Deferred<void>,
+  recoveryStarted: Deferred<number>,
+  recoveryFinished: Deferred<void>,
 ): BookingPublicationProjectorPool {
   return {
     async connect() {
       const client = await pool.connect();
+      let recovering = false;
       return {
         async query<T extends QueryResultRow = QueryResultRow>(
           text: string,
@@ -1459,7 +1652,19 @@ function signalLeaseRecoveryPool(
             text.includes("UPDATE platform.outbox_events") &&
             text.includes("lease_expired_requeued")
           ) {
-            recoveryStarted.resolve();
+            recovering = true;
+            const backend = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+            const recovery = client.query<T>(text, values as unknown[]);
+            recoveryStarted.resolve(backend.rows[0]!.pid);
+            return recovery;
+          }
+          if (recovering && (text === "COMMIT" || text === "ROLLBACK")) {
+            recovering = false;
+            try {
+              return await client.query<T>(text, values as unknown[]);
+            } finally {
+              recoveryFinished.resolve();
+            }
           }
           return client.query<T>(text, values as unknown[]);
         },
@@ -1468,6 +1673,35 @@ function signalLeaseRecoveryPool(
     },
     end: () => pool.end(),
   };
+}
+
+// Fails instead of hanging when a worker settles before sending the signal.
+function beforeSettled<Value>(
+  signal: Promise<Value>,
+  ...workers: Promise<unknown>[]
+): Promise<Value> {
+  return Promise.race([
+    signal,
+    Promise.allSettled(workers).then((): never => {
+      throw new Error("A worker settled before signalling");
+    }),
+  ]);
+}
+
+async function waitForLockWaiter(
+  observer: pg.Client,
+  pid: number,
+  blockingPid: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await observer.query<{ blocked: boolean }>(
+      "SELECT $2::int = ANY(pg_blocking_pids($1::int)) AS blocked",
+      [pid, blockingPid],
+    );
+    if (result.rows[0]?.blocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Backend ${pid} never waited for backend ${blockingPid}`);
 }
 
 function assertSafeTestDatabase(url: string): void {

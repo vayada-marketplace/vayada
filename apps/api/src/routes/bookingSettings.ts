@@ -13,7 +13,7 @@ import {
 } from "../domains/bookingAcceptanceSettings.js";
 import type { SameDayBookingSettingsPort } from "../domains/sameDayBookingSettings.js";
 import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
-import { syncPropertyOfferReadModels } from "./marketplaceAdmin.js";
+import { projectPropertyPublicProfile } from "../platform/propertyPublicProfileProjection.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 export const BOOKING_ADDON_SETTINGS_CONTRACT = {
@@ -226,7 +226,6 @@ export type BookingDesignSettingsReadModel = {
   headerLogo?: string | null;
   headerLogoMediaObjectId?: string | null;
   showContactButton?: boolean | null;
-  showReferAGuestButton?: boolean | null;
   showLanguageSelector?: boolean | null;
   showCurrencySelector?: boolean | null;
   heroImage?: string | null;
@@ -319,7 +318,6 @@ export type BookingDesignSettingsResponse = {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
   showContactButton: boolean;
-  showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
   heroImage: string;
@@ -864,7 +862,6 @@ type TargetBookingSettingsRow = {
   header_logo_media_object_id: string | null;
   header_logo_url: string | null;
   show_contact_button: boolean | null;
-  show_refer_a_guest_button: boolean | null;
   show_language_selector: boolean | null;
   show_currency_selector: boolean | null;
   hero_image_url: string | null;
@@ -1040,20 +1037,13 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
     contact.facebook,
     contact.tiktok,
     contact.youtube,
-    COALESCE(
-      NULLIF(location.raw_marketplace_location, ''),
-      NULLIF(
-        concat_ws(
-          ', ',
-          NULLIF(location.street_address, ''),
-          NULLIF(location.city, ''),
-          NULLIF(location.region, ''),
-          NULLIF(location.postal_code, ''),
-          NULLIF(location.country_code, '')
-        ),
-        ''
-      )
-    ) AS address,
+    -- The imported marketplace text stands in until the location is saved natively
+    -- (hotel setup, Location & surroundings), which moves its owner revision past 1.
+    CASE
+      WHEN COALESCE(location_revision.revision, 1) <= 1
+        THEN COALESCE(NULLIF(location.raw_marketplace_location, ''), structured_location.address)
+      ELSE COALESCE(structured_location.address, NULLIF(location.raw_marketplace_location, ''))
+    END AS address,
     location.city,
     location.country_code AS country,
     location.timezone,
@@ -1083,7 +1073,6 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
     settings.show_contact_button,
-    settings.show_refer_a_guest_button,
     settings.show_language_selector,
     settings.show_currency_selector,
     settings.hero_image_url,
@@ -1119,6 +1108,22 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
   ) slug ON TRUE
   LEFT JOIN hotel_catalog.property_locations location
     ON location.property_id = property.id
+  LEFT JOIN hotel_catalog.property_owner_revisions location_revision
+    ON location_revision.property_id = property.id
+   AND location_revision.owner_key = 'hotel_catalog.location'
+  CROSS JOIN LATERAL (
+    SELECT NULLIF(
+      concat_ws(
+        ', ',
+        NULLIF(location.street_address, ''),
+        NULLIF(location.city, ''),
+        NULLIF(location.region, ''),
+        NULLIF(location.postal_code, ''),
+        NULLIF(location.country_code, '')
+      ),
+      ''
+    ) AS address
+  ) structured_location
   LEFT JOIN LATERAL (
     SELECT
       COALESCE(
@@ -1190,7 +1195,6 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
     settings.show_contact_button,
-    settings.show_refer_a_guest_button,
     settings.show_language_selector,
     settings.show_currency_selector,
     settings.hero_image_url,
@@ -1252,11 +1256,6 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
             THEN ($2::jsonb ->> 'showContactButton')::boolean
           ELSE settings.show_contact_button
         END,
-        show_refer_a_guest_button = CASE
-          WHEN $2::jsonb ? 'showReferAGuestButton'
-            THEN ($2::jsonb ->> 'showReferAGuestButton')::boolean
-          ELSE settings.show_refer_a_guest_button
-        END,
         show_language_selector = CASE
           WHEN $2::jsonb ? 'showLanguageSelector'
             THEN ($2::jsonb ->> 'showLanguageSelector')::boolean
@@ -1315,7 +1314,6 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
       settings.filter_rooms,
       settings.header_logo_media_object_id,
       settings.show_contact_button,
-      settings.show_refer_a_guest_button,
       settings.show_language_selector,
       settings.show_currency_selector,
       settings.hero_image_url,
@@ -1352,7 +1350,6 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
     updated_settings.show_contact_button,
-    updated_settings.show_refer_a_guest_button,
     updated_settings.show_language_selector,
     updated_settings.show_currency_selector,
     updated_settings.hero_image_url,
@@ -1616,7 +1613,6 @@ function toTargetDesignSettings(row: TargetBookingSettingsRow): BookingDesignSet
     headerLogo: row.header_logo_url,
     headerLogoMediaObjectId: row.header_logo_media_object_id,
     showContactButton: row.show_contact_button,
-    showReferAGuestButton: row.show_refer_a_guest_button,
     showLanguageSelector: row.show_language_selector,
     showCurrencySelector: row.show_currency_selector,
     heroImage: row.hero_image_url,
@@ -1860,7 +1856,6 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.filter_rooms,
           settings.header_logo_media_object_id,
           settings.show_contact_button,
-          settings.show_refer_a_guest_button,
           settings.show_language_selector,
           settings.show_currency_selector,
           settings.hero_image_url,
@@ -1896,7 +1891,6 @@ export function createPgTargetBookingSettingsRepository(config: {
           END AS header_logo_media_object_id,
           booking_header_logo.public_cdn_url AS header_logo_url,
           updated_settings.show_contact_button,
-          updated_settings.show_refer_a_guest_button,
           updated_settings.show_language_selector,
           updated_settings.show_currency_selector,
           updated_settings.hero_image_url,
@@ -2007,7 +2001,7 @@ export function createPgTargetBookingSettingsRepository(config: {
           return null;
         }
 
-        await syncPropertyOfferReadModels(transaction, {
+        await projectPropertyPublicProfile(transaction, {
           propertyId: row.propertyId,
         });
         await transaction.query("COMMIT");
@@ -2152,6 +2146,7 @@ export async function registerBookingSettingsRoutes(
   bookingAcceptanceSettings?: BookingAcceptanceSettingsPort,
   sameDayBookingSettings?: SameDayBookingSettingsPort,
   ownsSameDayBookingSettings = true,
+  publicPageRefresh?: (propertyId: string) => Promise<void>,
 ): Promise<void> {
   const closeables = new Set(
     [
@@ -2616,7 +2611,7 @@ export async function registerBookingSettingsRoutes(
 
   const targetPublicBookabilityPublisher = publicBookabilityPublisher;
   if (targetPublicBookabilityPublisher || bookingPublicationRefresh) {
-    app.post<{ Params: BookingHotelParams }>(
+    app.post<{ Params: BookingHotelParams; Querystring: { when?: string } }>(
       "/hotels/:hotelId/public-bookability",
       async (request, reply) => {
         const { hotelId } = request.params;
@@ -2663,13 +2658,16 @@ export async function registerBookingSettingsRoutes(
 
         try {
           if (bookingPublicationRefresh) {
-            return await bookingPublicationRefresh.refresh({
+            const refreshed = await bookingPublicationRefresh.refresh({
               organizationId: context.selectedOrganization.organizationId,
               propertyId: propertyLink.propertyId,
               actorUserId: context.actor.internalUserId,
               idempotencyKey: context.audit.requestId,
               audit: context.audit,
+              // Design and settings saves pass when=live: they refresh a live page only.
+              onlyIfLive: request.query.when === "live",
             });
+            return refreshed ?? { propertyId: propertyLink.propertyId, status: "not_live" };
           }
           if (!targetPublicBookabilityPublisher) {
             throw new Error("Public bookability publication is unavailable.");
@@ -2802,6 +2800,35 @@ export async function registerBookingSettingsRoutes(
 
   if (!writeRepository) return;
 
+  // Hotel-level saves reach the live booking page without republishing (VAY-2129). Fire and
+  // forget: the save never waits for it, and a failure is logged; the next save or inventory
+  // projection refreshes the page again. Before go-live the page is left as it is.
+  const refreshPublicPage = (
+    hotelId: string,
+    request: FastifyRequest<{ Params: BookingHotelParams; Body: unknown }>,
+  ) => {
+    void (async () => {
+      const propertyLink = await repository.findPropertyLinkByHotelId?.(hotelId);
+      if (!propertyLink) return;
+      if (bookingPublicationRefresh) {
+        const context = enforceBookingSettingsPolicy(request, hotelId);
+        await bookingPublicationRefresh.refresh({
+          organizationId: context.selectedOrganization.organizationId,
+          propertyId: propertyLink.propertyId,
+          actorUserId: context.actor.internalUserId,
+          idempotencyKey: context.audit.requestId,
+          audit: context.audit,
+          onlyIfLive: true,
+        });
+      } else await publicPageRefresh?.(propertyLink.propertyId);
+    })().catch((error: unknown) =>
+      request.log.warn(
+        { err: error, hotelId },
+        "Booking page refresh after a settings save failed",
+      ),
+    );
+  };
+
   app.patch<{ Params: BookingHotelParams; Body: unknown }>(
     "/hotels/:hotelId/settings/property",
     async (request, reply) =>
@@ -2819,6 +2846,8 @@ export async function registerBookingSettingsRoutes(
             context.selectedOrganization.organizationId,
           );
         },
+        afterWrite: async (hotelId, _settings, _stored, request) =>
+          refreshPublicPage(hotelId, request),
         toResponse: toPropertySettingsResponse,
       }),
   );
@@ -2845,6 +2874,8 @@ export async function registerBookingSettingsRoutes(
         parseBody: parseGuestFormSettingsWriteBody,
         write: (hotelId, settings) =>
           writeRepository.updateGuestFormSettingsByHotelId(hotelId, settings),
+        afterWrite: async (hotelId, _settings, _stored, request) =>
+          refreshPublicPage(hotelId, request),
         toResponse: toGuestFormSettingsResponse,
       }),
   );
@@ -3176,13 +3207,15 @@ function parsePropertySettingsWriteBody(
 
   const details: string[] = [];
   const value: UpdateBookingPropertySettingsBody = {};
-  const propertyName = expectOptionalRequiredString(body, "property_name", details);
-  if (propertyName !== undefined) value.propertyName = propertyName;
+  // The shared property profile owns the name and location; this write never stored them.
+  for (const field of ["property_name", "address", "city", "country"]) {
+    if (Object.hasOwn(body, field)) {
+      details.push(`${field} is saved through the property profile, not booking settings.`);
+    }
+  }
   assignOptionalNullableString(value, "reservationEmail", body, "reservation_email", details);
   assignOptionalNullableString(value, "phoneNumber", body, "phone_number", details);
   assignOptionalNullableString(value, "whatsappNumber", body, "whatsapp_number", details);
-  assignOptionalNullableString(value, "address", body, "address", details);
-  assignOptionalNullableString(value, "city", body, "city", details);
   assignOptionalNullableString(value, "instagram", body, "instagram", details);
   assignOptionalNullableString(value, "facebook", body, "facebook", details);
   assignOptionalNullableString(value, "tiktok", body, "tiktok", details);
@@ -3197,15 +3230,6 @@ function parsePropertySettingsWriteBody(
     if (socialUrl && !isHttpUrl(socialUrl)) {
       details.push(`${bodyField} must be an http or https URL.`);
     }
-  }
-
-  const country = expectOptionalNullableString(body, "country", details);
-  if (country !== undefined) {
-    const normalizedCountry = country?.toUpperCase() ?? null;
-    if (normalizedCountry && !/^[A-Z]{2}$/.test(normalizedCountry)) {
-      details.push("country must be a two-letter country code.");
-    }
-    value.country = normalizedCountry;
   }
 
   const defaultCurrency = expectOptionalCurrencyCode(body, "default_currency", details);
@@ -3461,7 +3485,6 @@ function parseDesignSettingsWriteBody(
   const allowedKeys = new Set([
     "headerLogoMediaObjectId",
     "showContactButton",
-    "showReferAGuestButton",
     "showLanguageSelector",
     "showCurrencySelector",
     "heroImage",
@@ -3496,8 +3519,6 @@ function parseDesignSettingsWriteBody(
   }
   const showContactButton = expectOptionalBoolean(body, "showContactButton", details);
   if (showContactButton !== undefined) value.showContactButton = showContactButton;
-  const showReferAGuestButton = expectOptionalBoolean(body, "showReferAGuestButton", details);
-  if (showReferAGuestButton !== undefined) value.showReferAGuestButton = showReferAGuestButton;
   const showLanguageSelector = expectOptionalBoolean(body, "showLanguageSelector", details);
   if (showLanguageSelector !== undefined) value.showLanguageSelector = showLanguageSelector;
   const showCurrencySelector = expectOptionalBoolean(body, "showCurrencySelector", details);
@@ -3648,7 +3669,6 @@ export function toDesignSettingsResponse(
       ? (settings.headerLogoMediaObjectId ?? null)
       : null,
     showContactButton: settings.showContactButton ?? true,
-    showReferAGuestButton: settings.showReferAGuestButton ?? false,
     showLanguageSelector: settings.showLanguageSelector ?? true,
     showCurrencySelector: settings.showCurrencySelector ?? true,
     heroImage: settings.heroImage ?? "",
@@ -3735,7 +3755,6 @@ export function toPropertySettingsResponse(
     special_requests_enabled: guestForm.specialRequestsEnabled,
     arrival_time_enabled: guestForm.arrivalTimeEnabled,
     guest_count_enabled: guestForm.guestCountEnabled,
-    refer_a_guest_enabled: false,
     map_view_enabled: false,
     free_cancellation_days: 7,
     email_notifications: true,
@@ -3944,25 +3963,6 @@ function assignOptionalBoolean(
 ): void {
   const value = expectOptionalBoolean(record, sourceKey, details);
   if (value !== undefined) target[targetKey] = value;
-}
-
-function expectOptionalRequiredString(
-  record: Record<string, unknown>,
-  key: string,
-  details: string[],
-): string | undefined {
-  if (!Object.hasOwn(record, key)) return undefined;
-  const value = record[key];
-  if (typeof value !== "string") {
-    details.push(`${key} must be a string.`);
-    return undefined;
-  }
-  const normalized = value.trim();
-  if (!normalized) {
-    details.push(`${key} must not be empty.`);
-    return undefined;
-  }
-  return normalized;
 }
 
 function expectOptionalNullableString(

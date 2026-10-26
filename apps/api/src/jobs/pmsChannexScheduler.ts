@@ -278,6 +278,7 @@ type CalendarSourceRow = {
   optionalPricingAggregateRevision: number | string | null;
   generatedCoverageFrom: string | Date | null;
   generatedCoverageThrough: string | Date | null;
+  roomAdditionStoredThrough: string | Date | null;
   successfulApplications: Array<{
     sourceFingerprint: string;
     openThrough: string;
@@ -488,8 +489,8 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
            stored.property_id IS NOT NULL
            OR (
              EXISTS (
-               -- The current calendar was saved against the current profile and timezone;
-               -- after a profile edit the calendar needs a re-save (a stale-source conflict).
+               -- The current calendar was saved for the current time zone; a new time zone needs
+               -- a re-save. Other profile edits keep it current (VAY-2150).
                SELECT 1
                FROM pms.operating_calendar_revisions latest
                JOIN hotel_catalog.property_locations location
@@ -499,7 +500,6 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
                    SELECT max(revision.calendar_revision) FROM pms.operating_calendar_revisions revision
                    WHERE revision.property_id = property.id
                  )
-                 AND latest.property_profile_revision = property.profile_revision
                  AND latest.property_time_zone = location.timezone
              )
              AND NOT EXISTS (
@@ -529,7 +529,6 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
                  )
                  AND (
                    binding.room_type_id IS NULL
-                   OR binding.source_room_facts_revision IS DISTINCT FROM room.room_facts_revision
                    OR binding.source_room_units_revision IS DISTINCT FROM room.room_units_revision
                  )
              )
@@ -955,7 +954,9 @@ async function selectCalendarAutoOpenCandidates(
          setting.mode,
          setting.rolling_months AS "rollingMonths",
          setting.fixed_end_month AS "fixedEndMonth",
-         property.profile_revision AS "propertyProfileRevision",
+         -- The calendar's own profile and room-facts pins, so detail edits don't change the job
+         -- source and re-run auto-open (VAY-2150).
+         calendar.property_profile_revision AS "propertyProfileRevision",
          location.timezone AS "propertyTimeZone",
          calendar.calendar_revision AS "operatingCalendarRevision",
          room_source.rooms,
@@ -964,6 +965,25 @@ async function selectCalendarAutoOpenCandidates(
          pricing.optional_pricing_aggregate_revision AS "optionalPricingAggregateRevision",
          coverage.coverage_from AS "generatedCoverageFrom",
          coverage.coverage_through AS "generatedCoverageThrough",
+         CASE WHEN EXISTS (
+           SELECT 1
+           FROM pms.inventory_materialization_coverage stored
+           JOIN pms.operating_calendar_room_bindings room
+             ON room.property_id = stored.property_id
+            AND room.calendar_revision = calendar.calendar_revision
+           WHERE stored.property_id = setting.property_id
+             AND stored.calendar_revision < calendar.calendar_revision
+             AND NOT EXISTS (
+               SELECT 1
+               FROM pms.operating_calendar_room_bindings materialized
+               WHERE materialized.property_id = stored.property_id
+                 AND materialized.calendar_revision = stored.calendar_revision
+                 AND materialized.room_type_id = room.room_type_id
+             )
+         ) THEN (
+           SELECT max(day.stay_date) FROM pms.inventory_days day
+           WHERE day.property_id = setting.property_id
+         ) END AS "roomAdditionStoredThrough",
          successful_application.applications AS "successfulApplications"
        FROM candidate_properties setting
        JOIN hotel_catalog.properties property ON property.id = setting.property_id
@@ -972,7 +992,8 @@ async function selectCalendarAutoOpenCandidates(
        LEFT JOIN pms.property_pricing_settings pricing
          ON pricing.property_id = setting.property_id
        LEFT JOIN LATERAL (
-         SELECT revision.organization_id, revision.calendar_revision
+         SELECT revision.organization_id, revision.calendar_revision,
+                revision.property_profile_revision
          FROM pms.operating_calendar_revisions revision
          WHERE revision.property_id = setting.property_id
          ORDER BY revision.calendar_revision DESC
@@ -982,12 +1003,18 @@ async function selectCalendarAutoOpenCandidates(
          SELECT COALESCE(
            json_agg(json_build_object(
              'roomTypeId', room_type.id::text,
-             'roomFactsRevision', room_type.room_facts_revision,
+             'roomFactsRevision', COALESCE(
+               binding.source_room_facts_revision, room_type.room_facts_revision
+             ),
              'roomUnitsRevision', room_type.room_units_revision
            ) ORDER BY room_type.id),
            '[]'::json
          ) AS rooms
          FROM pms.room_types room_type
+         LEFT JOIN pms.operating_calendar_room_bindings binding
+           ON binding.property_id = room_type.property_id
+          AND binding.room_type_id = room_type.id
+          AND binding.calendar_revision = calendar.calendar_revision
          WHERE room_type.property_id = setting.property_id AND room_type.active IS TRUE
        ) room_source ON TRUE
        LEFT JOIN LATERAL (
@@ -1794,6 +1821,14 @@ function calendarCandidateFromSourceRow(
   }
   if (!horizon.targetOpenThrough || horizon.targetOpenThrough < horizon.propertyLocalDate)
     return null;
+  // Stored days from today on lack an added room until setup materializes the calendar, and
+  // opening dates before then fails on that gap; the next run after it picks this up (VAY-2138).
+  if (
+    row.roomAdditionStoredThrough &&
+    dateOnly(row.roomAdditionStoredThrough) >= horizon.propertyLocalDate
+  ) {
+    return null;
+  }
 
   const source = createPmsCalendarAutoOpenSource({
     settingRevision: revision,

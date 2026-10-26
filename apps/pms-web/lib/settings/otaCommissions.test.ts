@@ -27,8 +27,8 @@ describe("PMS OTA commission settings", () => {
   });
   it("renders an accessible persisted-settings loading state", () => {
     const markup = renderToStaticMarkup(createElement(OtaCommissionSettingsSection));
-    expect(markup).toContain("OTA commissions");
-    expect(markup).toContain("future booking economics only");
+    // The title and description sit in the page header (VAY-2275), not in the section.
+    expect(markup).toContain('id="ota-commissions"');
     expect(markup).toContain('role="status"');
     expect(markup).toContain("Loading persisted OTA commission settings");
   });

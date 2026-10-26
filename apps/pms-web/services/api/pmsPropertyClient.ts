@@ -3,6 +3,7 @@ import {
   SELECTED_SHARED_PROPERTY_ID_KEY,
 } from "@/lib/utils/pmsPropertySelectionKeys";
 import type { AdaptiveHotelSetupStatus } from "@vayada/product-onboarding";
+import type { PropertyProfileResponse } from "@vayada/domain-hotels";
 
 import { sharedHotelSetupApi } from "./sharedHotelSetupClient";
 import { pmsOperationsClient, pmsOperationsRequestOptions } from "./pmsOperationsClient";
@@ -152,6 +153,43 @@ export async function getPmsPropertyProfile(): Promise<PmsPropertyProfile> {
   ]);
 
   return toPmsPropertyProfile(status, profile);
+}
+
+/** The property's own place for room locations (VAY-2321): "Same as property" rooms use it, and it is the
+ * reference for a room at its own address. */
+export type PmsPropertyPlace = {
+  propertyId: string;
+  name: string;
+  address: string;
+  /** The area or village (VAY-2322): shown with the address, never copied into a room's street. */
+  area: string;
+  pin: { latitude: number; longitude: number } | null;
+};
+
+export async function getPmsPropertyPlace(): Promise<PmsPropertyPlace> {
+  const propertyId = await resolveSelectedPmsPropertyId("loading the property's location");
+  return pmsPropertyPlace(propertyId, await sharedHotelSetupApi.getPropertyProfile(propertyId));
+}
+
+/** The property's place as the room editor shows it, from its shared profile (also right after a save). */
+export function pmsPropertyPlace(
+  propertyId: string,
+  { profile }: Pick<PropertyProfileResponse, "profile">,
+): PmsPropertyPlace {
+  const { streetAddress, postalCode, city, latitude, longitude, area } = profile.location;
+  return {
+    propertyId,
+    name: profile.displayName,
+    address: [streetAddress, [postalCode, city].filter(Boolean).join(" ")]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(", "),
+    area: area?.trim() ?? "",
+    pin:
+      typeof latitude === "number" && typeof longitude === "number"
+        ? { latitude, longitude }
+        : null,
+  };
 }
 
 export async function updatePmsPropertyProfile(

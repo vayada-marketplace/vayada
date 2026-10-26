@@ -172,7 +172,6 @@ export const PRODUCTION_FINANCE_TABLES: Record<string, FinanceTableDefinition> =
     c("ruleMetadata", "rule_metadata", "jsonb"),
     created,
     updated,
-    c("affiliateId", "affiliate_id", "text"),
     c("otaChannel", "ota_channel", "text"),
     c("revision", "revision", "integer"),
   ]),

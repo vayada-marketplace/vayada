@@ -14,8 +14,7 @@ describe("Stripe Connect provider", () => {
     const provider = createStripeConnectProvider({
       secretKey: "sk_test",
       returnBaseUrls: {
-        marketplace: "https://marketplace.test/untrusted?propertyId=foreign-property",
-        bookingAdmin: "https://admin.booking.test",
+        bookingAdmin: "https://admin.booking.test/untrusted?propertyId=foreign-property",
       },
       fetch: async (input, init) => {
         calls.push({
@@ -67,10 +66,10 @@ describe("Stripe Connect provider", () => {
     expect(calls[0]?.body.get("type")).toBe("express");
     expect(calls[0]?.body.get("capabilities[card_payments][requested]")).toBe("true");
     expect(calls[1]?.body.get("return_url")).toBe(
-      "https://marketplace.test/setup?propertyId=property-1&step=payments&stripe=return",
+      "https://admin.booking.test/setup?propertyId=property-1&step=payments&stripe=return",
     );
     expect(calls[1]?.body.get("refresh_url")).toBe(
-      "https://marketplace.test/setup?propertyId=property-1&step=payments&stripe=refresh",
+      "https://admin.booking.test/setup?propertyId=property-1&step=payments&stripe=refresh",
     );
 
     await provider.createOnboardingLink({
@@ -86,11 +85,25 @@ describe("Stripe Connect provider", () => {
       "https://admin.booking.test/settings?section=payments&stripe=refresh",
     );
 
+    // VAY-2262: the setup wizard in Booking Admin returns to that host's /setup.
+    await provider.createOnboardingLink({
+      owner: { ownerScope: "property", propertyId: "property-1", organizationId: "org-1" },
+      providerAccountRef: "acct_property_1",
+      idempotencyKey: "connect-property-1-admin-setup",
+      returnSurface: "booking_admin_setup",
+    });
+    expect(calls[3]?.body.get("return_url")).toBe(
+      "https://admin.booking.test/setup?propertyId=property-1&step=payments&stripe=return",
+    );
+    expect(calls[3]?.body.get("refresh_url")).toBe(
+      "https://admin.booking.test/setup?propertyId=property-1&step=payments&stripe=refresh",
+    );
+
     await expect(provider.createLoginLink({ providerAccountRef: "acct_property_1" })).resolves.toBe(
       "https://connect.stripe.test/express/session",
     );
-    expect(calls[3]?.url).toMatch(/\/accounts\/acct_property_1\/login_links$/);
-    expect(calls[3]?.key).toBeNull();
+    expect(calls[4]?.url).toMatch(/\/accounts\/acct_property_1\/login_links$/);
+    expect(calls[4]?.key).toBeNull();
     expect(calls.every(({ signal }) => signal instanceof AbortSignal)).toBe(true);
 
     await expect(
@@ -120,10 +133,7 @@ describe("Stripe Connect provider", () => {
   it("aborts stalled Stripe requests at the configured deadline", async () => {
     const provider = createStripeConnectProvider({
       secretKey: "sk_test",
-      returnBaseUrls: {
-        marketplace: "https://marketplace.test",
-        bookingAdmin: "https://admin.booking.test",
-      },
+      returnBaseUrls: { bookingAdmin: "https://admin.booking.test" },
       requestTimeoutMs: 5,
       fetch: async (_input, init) =>
         new Promise<Response>((_resolve, reject) => {

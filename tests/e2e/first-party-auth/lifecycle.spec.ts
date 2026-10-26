@@ -88,7 +88,7 @@ for (const surface of firstPartyAuthSurfaces) {
 }
 
 for (const surface of firstPartyAuthSurfaces.filter(({ key }) =>
-  ["marketplace", "bookingAdmin", "pms"].includes(key),
+  ["bookingAdmin", "pms"].includes(key),
 )) {
   test(`${surface.label} keeps signup and recovery endpoints first-party`, async ({ page }) => {
     const records = await mockFirstPartyAuth(page, surface);
@@ -132,20 +132,21 @@ for (const surface of firstPartyAuthSurfaces.filter(({ key }) =>
     await page.goto(`${surface.baseURL}/signup`);
     await page.getByLabel(/email address/i).fill(`${surface.key}-signup@example.test`);
     await page.getByLabel(/^password$/i).fill("Regression123!");
+    await page
+      .getByRole("checkbox", { name: /I accept the Terms and the Data Processing Agreement/ })
+      .check();
     await page.getByRole("button", { name: /create account/i }).click();
     await expect.poll(() => authRequests(records, "/auth/password/signup").length).toBe(1);
     expect(authRequests(records, "/auth/password/signup")[0]!.body).toMatchObject({
       email: `${surface.key}-signup@example.test`,
       surface: surface.surface,
+      // VAY-2246: the required tickbox accepts the hotel terms and the DPA.
+      acceptedAgreements: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
     });
-    if (surface.key === "marketplace") {
-      await expect(page.locator('[data-signup-e2e="complete"]')).toBeVisible();
-    } else {
-      await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
-    }
+    await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
 
     const endpoints = ["/auth/password/reset/request", "/auth/password/reset/confirm"];
-    if (surface.key === "marketplace" || surface.key === "pms") {
+    if (surface.key === "pms") {
       endpoints.push("/auth/email-verification/confirm", "/auth/email-verification/resend");
     }
     const statuses = await page.evaluate(

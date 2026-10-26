@@ -7,6 +7,14 @@ const nextConfig = {
   turbopack: {
     root: path.join(__dirname, "../.."),
   },
+  // VAY-2260: the Marketplace pages are gone; indexed links land on the home page.
+  async redirects() {
+    return ["/hotel-creator-network", "/creator-benefits", "/hotel-benefits"].map((source) => ({
+      source,
+      destination: "/",
+      permanent: true,
+    }));
+  },
   images: {
     remotePatterns: [
       {

@@ -39,7 +39,7 @@ const manifest: PmsMandatoryChargePricingSourceRevisionManifest = {
 
 type AuthOptions = {
   organizationId?: string;
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -148,7 +148,7 @@ describe("PMS mandatory-charge confirmation routes", () => {
 
   it.each([
     ["missing authentication", {}, null],
-    ["non-hotel organization", { kind: "creator_workspace" }, "valid-token"],
+    ["non-hotel organization", { kind: "platform" }, "valid-token"],
     ["missing manage permission", { permissions: ["pms.operations.read"] }, "valid-token"],
     ["missing entitlement", { entitlements: [] }, "valid-token"],
     ["suspended entitlement", { entitlements: [entitlement("suspended")] }, "valid-token"],

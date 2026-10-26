@@ -4,6 +4,8 @@ export const firstPricingSetupEnglish = {
   "pricing.choose": "Choose…",
   "pricing.error.cancellationDeadline": "Check the cancellation deadline (0–365 days).",
   "pricing.error.invalidPrice": "Enter a valid price using a decimal point.",
+  "pricing.error.nonRefundableNeedsAdvance":
+    "Non-refundable stays are paid in advance. Choose card, bank transfer or PayPal; bank transfer and PayPal need to be ready in Payment settings.",
   "pricing.error.paymentMethodRequired": "Choose at least one accepted payment method.",
   "pricing.error.priceTooLarge": "This price is too large.",
   "pricing.error.priceZero": "Enter a price greater than zero.",
@@ -32,11 +34,14 @@ export const firstPricingSetupEnglish = {
   "pricing.included.type.one": "Adjustment type for {count} adult",
   "pricing.included.type.other": "Adjustment type for {count} adults",
   "pricing.nonRefundable": "Non-refundable",
+  "pricing.paymentMethods.bankTransfer": "Bank transfer",
   "pricing.paymentMethods.card": "Card online",
   "pricing.paymentMethods.hint":
     "Only payment methods ready in Payment settings can be used at checkout.",
   "pricing.paymentMethods.legend": "Accepted payment methods",
+  "pricing.paymentMethods.notOffered": "Not offered: non-refundable stays are paid in advance",
   "pricing.paymentMethods.payAtProperty": "Pay at property",
+  "pricing.paymentMethods.paypal": "PayPal",
   "pricing.paymentPolicy": "Payment policy",
   "pricing.setup.adultAge": "Adult pricing starts at age (1–18)",
   "pricing.setup.adultPrice": "Price per adult per night",

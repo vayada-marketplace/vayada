@@ -15,6 +15,7 @@ import {
 } from "@vayada/domain-distribution";
 import type { FastifyInstance } from "fastify";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+import { LIVE_PROMO_CODES_SQL } from "../domains/bookingGuestModules.js";
 
 export type PublicHotelProfileRepository = {
   findProfileBySlug(slug: string): Promise<PublicBookabilityProfileProjection | null>;
@@ -82,10 +83,10 @@ type TargetPublicHotelProfileRow = {
   supportedQuoteParameters: unknown;
   bookingHeaderLogo: string | null;
   bookingShowContactButton: boolean | null;
-  bookingShowReferAGuestButton: boolean | null;
   bookingShowLanguageSelector: boolean | null;
   bookingShowCurrencySelector: boolean | null;
-  bookingReferAGuestModuleEnabled: boolean;
+  bookingDisplayCurrencies: unknown;
+  bookingPromoCodes: boolean;
   bookingHeroImage: string | null;
   bookingHeroHeading: string | null;
   bookingHeroSubtext: string | null;
@@ -142,10 +143,18 @@ export function createTargetPublicHotelProfileRepository(config: {
   max?: number;
   pool?: PublicHotelProfileReadPool;
   now?: () => Date;
+  /** Only hotels that never published in setup (VAY-2186). */
+  unpublishedOnly?: boolean;
 }): PublicHotelProfileRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Target public hotel profile repository connectionString must not be empty");
   }
+  const unpublished = config.unpublishedOnly
+    ? `AND NOT EXISTS (
+           SELECT 1 FROM distribution.active_public_booking_revision active
+           WHERE active.property_id = profile.property_id
+         )`
+    : "";
 
   const ownsPool = !config.pool;
   const pool =
@@ -171,6 +180,7 @@ export function createTargetPublicHotelProfileRepository(config: {
            AND profile.profile_status = 'public'
            AND ${TARGET_PUBLIC_CATALOG_PROFILE_READY}
            AND (profile.expires_at IS NULL OR profile.expires_at > now())
+           ${unpublished}
          ORDER BY CASE WHEN profile.canonical_slug = lower($1) THEN 0 ELSE 1 END
          LIMIT 1`,
         [slug],
@@ -197,6 +207,7 @@ export function createTargetPublicHotelProfileRepository(config: {
            AND profile.profile_status = 'public'
            AND ${TARGET_PUBLIC_CATALOG_PROFILE_READY}
            AND (profile.expires_at IS NULL OR profile.expires_at > now())
+           ${unpublished}
          LIMIT 1`,
         [normalizedDomain],
       );
@@ -381,6 +392,9 @@ function serializeHotelProfile(
             ...(hotel.branding.showCurrencySelector === undefined
               ? {}
               : { showCurrencySelector: hotel.branding.showCurrencySelector }),
+            ...(hotel.branding.displayCurrencies === undefined
+              ? {}
+              : { displayCurrencies: hotel.branding.displayCurrencies.map((code) => code) }),
             heroImage: hotel.branding.heroImage ?? null,
             heroHeading: hotel.branding.heroHeading ?? null,
             heroSubtext: hotel.branding.heroSubtext ?? null,
@@ -527,41 +541,10 @@ const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
            profile.supported_quote_parameters AS "supportedQuoteParameters",
            booking_header_logo.public_cdn_url AS "bookingHeaderLogo",
            booking_branding.show_contact_button AS "bookingShowContactButton",
-           booking_branding.show_refer_a_guest_button AS "bookingShowReferAGuestButton",
            booking_branding.show_language_selector AS "bookingShowLanguageSelector",
            booking_branding.show_currency_selector AS "bookingShowCurrencySelector",
-           EXISTS (
-             SELECT 1
-             FROM identity.product_entitlements entitlement
-             WHERE entitlement.product = 'pms'
-               AND entitlement.entitlement_key = 'module:affiliates'
-               AND entitlement.status = 'active'
-               AND entitlement.resource_product = 'pms'
-               AND entitlement.resource_type = 'pms_property'
-               AND entitlement.resource_id = profile.property_id::text
-               AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
-               AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
-               AND EXISTS (
-                 SELECT 1
-                 FROM identity.organization_resource_links pms_resource
-                 WHERE pms_resource.organization_id = entitlement.organization_id
-                   AND pms_resource.product = 'pms'
-                   AND pms_resource.resource_type = 'pms_property'
-                   AND pms_resource.resource_id = profile.property_id::text
-                   AND pms_resource.relationship IN ('owner', 'operator')
-                   AND pms_resource.status = 'active'
-               )
-               AND EXISTS (
-                 SELECT 1
-                 FROM identity.organization_resource_links booking_resource
-                 WHERE booking_resource.organization_id = entitlement.organization_id
-                   AND booking_resource.product = 'booking'
-                   AND booking_resource.resource_type = 'booking_hotel'
-                   AND booking_resource.resource_id = profile.property_id::text
-                   AND booking_resource.relationship IN ('owner', 'operator')
-                   AND booking_resource.status = 'active'
-               )
-           ) AS "bookingReferAGuestModuleEnabled",
+           booking_branding.supported_currencies AS "bookingDisplayCurrencies",
+           ${LIVE_PROMO_CODES_SQL("profile.property_id")} AS "bookingPromoCodes",
            booking_branding.hero_image_url AS "bookingHeroImage",
            booking_branding.hero_heading AS "bookingHeroHeading",
            booking_branding.hero_subtext AS "bookingHeroSubtext",
@@ -625,8 +608,9 @@ function toTargetPublicHotelProfileProjection(
     instantBook: booleanValue(capabilities["instantBook"]),
     onlinePayment: booleanValue(capabilities["onlinePayment"]),
     payAtProperty: booleanValue(capabilities["payAtProperty"]),
-    promoCodes: booleanValue(capabilities["promoCodes"]),
-    referralCodes: row.bookingReferAGuestModuleEnabled,
+    // Live: the Feature Hub Promos switch (VAY-2200) and codes made after the profile refresh.
+    promoCodes: row.bookingPromoCodes === true,
+    referralCodes: false,
     bookingDeepLinks: booleanValue(capabilities["bookingDeepLinks"]),
   };
   const trust = targetProfileTrust(
@@ -722,11 +706,17 @@ function toTargetPublicHotelProfileProjection(
 function publicBookingBranding(
   row: TargetPublicHotelProfileRow,
 ): Pick<PublicBookabilityHotelProfile, "branding"> {
+  // Booking's additional currencies are display only; quotes stay in the pricing currency.
+  const displayCurrencies = [
+    ...new Set([
+      row.defaultCurrency,
+      ...stringArray(row.bookingDisplayCurrencies, []).filter((code) => /^[A-Z]{3}$/.test(code)),
+    ]),
+  ];
   const branding = {
     logoUrl: stringValue(row.bookingHeaderLogo),
     showContactButton: row.bookingShowContactButton ?? true,
-    showReferAGuestButton:
-      row.bookingReferAGuestModuleEnabled && (row.bookingShowReferAGuestButton ?? false),
+    showReferAGuestButton: false,
     showLanguageSelector: row.bookingShowLanguageSelector ?? true,
     showCurrencySelector: row.bookingShowCurrencySelector ?? true,
     heroImage: stringValue(row.bookingHeroImage),
@@ -734,6 +724,7 @@ function publicBookingBranding(
     heroSubtext: stringValue(row.bookingHeroSubtext),
     primaryColor: stringValue(row.bookingPrimaryColor),
     fontPairing: stringValue(row.bookingFontPairing),
+    ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
   };
   return Object.values(branding).some((value) => value !== null) ? { branding } : {};
 }

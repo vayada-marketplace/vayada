@@ -1,10 +1,9 @@
 import {
   FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
-  FINANCE_PAYMENT_READINESS_METHODS,
   createFinancePaymentReadinessSnapshot,
+  financePaymentReadinessMethodsFromStored,
   resolveFinanceOnlineCardReadiness,
   type FinanceOnlineCardReadinessEvidence,
-  type FinancePaymentReadinessMethod,
   type FinancePaymentReadinessReadPort,
 } from "@vayada/domain-finance";
 import {
@@ -22,9 +21,18 @@ export type FinancePaymentReadinessReadPool = {
   end?(): Promise<void>;
 };
 
-export type FinancePaymentReadinessReadModel = FinancePaymentReadinessReadPort & {
-  close(): Promise<void>;
+/** Tells "no versioned payment methods yet" apart from "not readable in this scope". */
+export type FinancePaymentReadinessScopePort = {
+  hasPaymentReadinessScope(request: {
+    organizationId: string;
+    propertyId: string;
+  }): Promise<boolean>;
 };
+
+export type FinancePaymentReadinessReadModel = FinancePaymentReadinessReadPort &
+  FinancePaymentReadinessScopePort & {
+    close(): Promise<void>;
+  };
 
 type PaymentSettingsRow = {
   propertyId: unknown;
@@ -56,6 +64,58 @@ type PaymentSettingsRow = {
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Organization, PMS link and entitlement that make a property's payment readiness readable. */
+const SCOPE_PREDICATE = `EXISTS (
+  SELECT 1 FROM identity.organizations organization
+  WHERE organization.id = $1::uuid
+    AND organization.kind = 'hotel_group'
+    AND organization.status = 'active'
+)
+AND EXISTS (
+  SELECT 1 FROM identity.organization_resource_links resource
+  WHERE resource.organization_id = $1::uuid
+    AND resource.product = 'pms'
+    AND resource.resource_type = 'pms_property'
+    AND resource.resource_id = $2::uuid::text
+    -- The aggregate setup route is also readable by PMS operators. This
+    -- snapshot contains only public-safe progress facts; Finance mutations
+    -- remain restricted by their route and command authorization boundary.
+    AND resource.relationship IN ('owner', 'operator', 'finance_manager')
+    AND resource.status = 'active'
+)
+AND EXISTS (
+  SELECT 1 FROM identity.product_entitlements entitlement
+  WHERE entitlement.organization_id = $1::uuid
+    AND entitlement.product = 'pms'
+    AND entitlement.entitlement_key = 'property-management'
+    AND entitlement.status = 'active'
+    AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
+    AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
+    AND (
+      entitlement.resource_product IS NULL OR (
+        entitlement.resource_product = 'pms'
+        AND entitlement.resource_type = 'pms_property'
+        AND entitlement.resource_id = $2::uuid::text
+      )
+    )
+)
+AND NOT EXISTS (
+  SELECT 1 FROM identity.product_entitlements entitlement
+  WHERE entitlement.organization_id = $1::uuid
+    AND entitlement.product = 'pms'
+    AND entitlement.entitlement_key = 'property-management'
+    AND entitlement.status = 'suspended'
+    AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
+    AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
+    AND (
+      entitlement.resource_product IS NULL OR (
+        entitlement.resource_product = 'pms'
+        AND entitlement.resource_type = 'pms_property'
+        AND entitlement.resource_id = $2::uuid::text
+      )
+    )
+)`;
 
 const READINESS_SQL = `SELECT
   settings.property_id::text AS "propertyId",
@@ -92,57 +152,10 @@ LEFT JOIN finance.online_card_readiness online_card
   ON online_card.property_id = settings.property_id
 WHERE settings.property_id = $2::uuid
   AND settings.payment_methods_revision IS NOT NULL
-  AND EXISTS (
-    SELECT 1 FROM identity.organizations organization
-    WHERE organization.id = $1::uuid
-      AND organization.kind = 'hotel_group'
-      AND organization.status = 'active'
-  )
-  AND EXISTS (
-    SELECT 1 FROM identity.organization_resource_links resource
-    WHERE resource.organization_id = $1::uuid
-      AND resource.product = 'pms'
-      AND resource.resource_type = 'pms_property'
-      AND resource.resource_id = $2::uuid::text
-      -- The aggregate setup route is also readable by PMS operators. This
-      -- snapshot contains only public-safe progress facts; Finance mutations
-      -- remain restricted by their route and command authorization boundary.
-      AND resource.relationship IN ('owner', 'operator', 'finance_manager')
-      AND resource.status = 'active'
-  )
-  AND EXISTS (
-    SELECT 1 FROM identity.product_entitlements entitlement
-    WHERE entitlement.organization_id = $1::uuid
-      AND entitlement.product = 'pms'
-      AND entitlement.entitlement_key = 'property-management'
-      AND entitlement.status = 'active'
-      AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
-      AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
-      AND (
-        entitlement.resource_product IS NULL OR (
-          entitlement.resource_product = 'pms'
-          AND entitlement.resource_type = 'pms_property'
-          AND entitlement.resource_id = $2::uuid::text
-        )
-      )
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM identity.product_entitlements entitlement
-    WHERE entitlement.organization_id = $1::uuid
-      AND entitlement.product = 'pms'
-      AND entitlement.entitlement_key = 'property-management'
-      AND entitlement.status = 'suspended'
-      AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
-      AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
-      AND (
-        entitlement.resource_product IS NULL OR (
-          entitlement.resource_product = 'pms'
-          AND entitlement.resource_type = 'pms_property'
-          AND entitlement.resource_id = $2::uuid::text
-        )
-      )
-  )
+  AND ${SCOPE_PREDICATE}
 /* finance_payment_readiness_scope */`;
+
+const SCOPE_SQL = `SELECT ${SCOPE_PREDICATE} AS "inScope" /* finance_payment_readiness_scope_only */`;
 
 export function createPgFinancePaymentReadinessReadModel(config: {
   connectionString: string;
@@ -200,6 +213,14 @@ export function createPgFinancePaymentReadinessReadModel(config: {
       });
     },
 
+    async hasPaymentReadinessScope(request) {
+      const result = await pool.query<{ inScope: boolean }>(SCOPE_SQL, [
+        readUuid(request.organizationId),
+        readUuid(request.propertyId),
+      ]);
+      return result.rows[0]?.inScope === true;
+    },
+
     async close() {
       if (!ownsPool || closed) return;
       if (!pool.end) throw new Error("Owned Finance payment readiness read pool cannot be closed");
@@ -248,7 +269,7 @@ function onlineCardEvidence(row: PaymentSettingsRow): FinanceOnlineCardReadiness
 function storedConfiguration(row: PaymentSettingsRow, propertyId: string) {
   const paymentMethodsRevision = positiveInteger(row.paymentMethodsRevision);
   const sourcePricingCurrencyRevision = positiveInteger(row.sourcePricingCurrencyRevision);
-  const selectedMethods = methods(row.acceptedMethods);
+  const selectedMethods = financePaymentReadinessMethodsFromStored(row.acceptedMethods);
   const updatedAt = isoDate(row.updatedAt);
   if (
     typeof row.propertyId !== "string" ||
@@ -270,15 +291,6 @@ function storedConfiguration(row: PaymentSettingsRow, propertyId: string) {
     selectedMethods,
     updatedAt,
   };
-}
-
-function methods(value: unknown): readonly FinancePaymentReadinessMethod[] | null {
-  if (!Array.isArray(value)) return null;
-  return value.every((method) =>
-    FINANCE_PAYMENT_READINESS_METHODS.includes(method as FinancePaymentReadinessMethod),
-  ) && new Set(value).size === value.length
-    ? (value as readonly FinancePaymentReadinessMethod[])
-    : null;
 }
 
 function readUuid(value: string): string {

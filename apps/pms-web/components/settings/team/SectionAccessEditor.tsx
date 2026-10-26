@@ -59,7 +59,7 @@ export default function SectionAccessEditor({
               <fieldset
                 key={section.id}
                 disabled={!productAccess[product] && section.id !== "team"}
-                className="border-b border-gray-100 px-4 py-3 last:border-0 disabled:opacity-60"
+                className="flex min-h-16 flex-col justify-center border-b border-gray-100 px-4 py-3 last:border-0 disabled:opacity-60"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -77,7 +77,7 @@ export default function SectionAccessEditor({
                     <div
                       role="radiogroup"
                       aria-labelledby={`${id}-${product}-${section.id}`}
-                      className="inline-flex rounded-lg border border-gray-200 p-0.5"
+                      className="flex w-full rounded-lg border border-gray-200 p-0.5 sm:inline-flex sm:w-auto"
                     >
                       {levels.map((level) => {
                         const partial =
@@ -92,7 +92,7 @@ export default function SectionAccessEditor({
                         return (
                           <label
                             key={level}
-                            className={`relative rounded-md px-2.5 py-1.5 text-xs font-medium focus-within:ring-2 focus-within:ring-primary-600 ${selected ? "bg-primary-600 text-white" : "text-gray-600"} ${unavailable ? "cursor-not-allowed opacity-40" : "cursor-pointer"}`}
+                            className={`relative flex-1 rounded-md px-2.5 py-1.5 text-center text-xs font-medium focus-within:ring-2 sm:min-w-[3.5rem] sm:flex-none focus-within:ring-primary-600 ${selected ? "bg-primary-600 text-white" : "text-gray-600"} ${unavailable ? "cursor-not-allowed opacity-40" : "cursor-pointer"}`}
                             title={unavailable ? t("settings.team.unavailable") : undefined}
                           >
                             <input

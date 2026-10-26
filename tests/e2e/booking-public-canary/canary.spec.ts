@@ -65,7 +65,9 @@ test("published next-booking tenant stays publicly reachable", async ({ page, re
   await expect(page.getByRole("link", { name: config.expectedHotelName }).first()).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: /Unable to Load Hotel|isn't online/ }),
+  ).toHaveCount(0);
   expect(pageErrors, `Booking Web raised browser exceptions:\n${pageErrors.join("\n")}`).toEqual(
     [],
   );
