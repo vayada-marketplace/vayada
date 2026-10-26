@@ -782,6 +782,7 @@
   "settings.checkIn.loading": "Memuat pengaturan check-in…",
   "settings.checkIn.readOnly": "Anda dapat melihat pengaturan ini; hanya pemilik dan manajer dengan akses pengaturan yang dapat mengubahnya.",
   "settings.checkIn.checksReadOnly": "Hanya staf yang dapat mengelola operasional yang bisa mengubah pemeriksaan tambahan.",
+  "settings.checkIn.checksUnavailable": "Pemeriksaan tambahan tidak dapat dimuat. Untuk melihatnya diperlukan akses operasional.",
   "settings.checkIn.overview": "Langkah check-in",
   "settings.checkIn.step1.title": "Kedatangan",
   "settings.checkIn.step1.description": "Yang pertama dilihat staf saat memulai check-in.",

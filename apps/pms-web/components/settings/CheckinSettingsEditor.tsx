@@ -61,9 +61,12 @@ export function CheckinSettingsEditor() {
   const [catalog, setCatalog] = useState<BookingAddon[]>([]);
   const [checks, setChecks] = useState<CheckinChecklistStep[]>([]);
   const [savedChecks, setSavedChecks] = useState<CheckinChecklistStep[]>([]);
+  // Null until read; false when the checklist couldn't be read (it takes operations access).
+  const [checksLoaded, setChecksLoaded] = useState<boolean | null>(null);
   const { permissions } = usePmsAccess();
   // The extra checks are the check-in checklist, which takes operations access to change.
-  const canEditChecks = canManage && permissions.includes("pms.operations.manage");
+  const canEditChecks =
+    canManage && checksLoaded === true && permissions.includes("pms.operations.manage");
   const [checkErrors, setCheckErrors] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
@@ -73,14 +76,16 @@ export function CheckinSettingsEditor() {
   useEffect(() => {
     Promise.all([
       settingsService.getCheckinSettings(),
-      settingsService.getCheckinChecklist(),
+      // Settings readers without operations access still get the settings.
+      settingsService.getCheckinChecklist().catch(() => null),
       calendarService.listAvailableAddons("").catch(() => [] as BookingAddon[]),
     ])
       .then(([response, checklist, addons]) => {
         setSettings(response.settings);
         setCanManage(response.canManage);
-        setChecks(checklist.steps || []);
-        setSavedChecks(checklist.steps || []);
+        setChecks(checklist?.steps || []);
+        setSavedChecks(checklist?.steps || []);
+        setChecksLoaded(Boolean(checklist));
         setCatalog(addons);
       })
       .catch((err) =>
@@ -180,6 +185,7 @@ export function CheckinSettingsEditor() {
             settings={settings}
             onChange={update}
             checks={checks}
+            checksLoaded={checksLoaded !== false}
             canEditChecks={canEditChecks}
             checkErrors={checkErrors}
             onChecksChange={(next) => {
@@ -704,6 +710,7 @@ function KeysSection({
   settings,
   onChange,
   checks,
+  checksLoaded,
   canEditChecks,
   checkErrors,
   onChecksChange,
@@ -711,6 +718,7 @@ function KeysSection({
   settings: CheckinSettings;
   onChange: (next: CheckinSettings) => void;
   checks: CheckinChecklistStep[];
+  checksLoaded: boolean;
   canEditChecks: boolean;
   checkErrors: Record<string, string>;
   onChecksChange: (next: CheckinChecklistStep[]) => void;
@@ -740,8 +748,12 @@ function KeysSection({
         </h3>
         <p className="text-sm text-gray-600">{t("settings.checkIn.extraChecksHint")}</p>
         <fieldset disabled={!canEditChecks} className="min-w-0">
-          {!canEditChecks && (
-            <p className="mt-2 text-sm text-gray-600">{t("settings.checkIn.checksReadOnly")}</p>
+          {!checksLoaded ? (
+            <p className="mt-2 text-sm text-gray-600">{t("settings.checkIn.checksUnavailable")}</p>
+          ) : (
+            !canEditChecks && (
+              <p className="mt-2 text-sm text-gray-600">{t("settings.checkIn.checksReadOnly")}</p>
+            )
           )}
           <ul className="mt-3 space-y-2">
             {checks.map((check) => (
@@ -754,6 +766,9 @@ function KeysSection({
                       onChange={(event) => updateCheck(check.id, { label: event.target.value })}
                       placeholder={t("settings.checkIn.checkLabelPlaceholder")}
                       aria-invalid={Boolean(checkErrors[check.id])}
+                      aria-describedby={
+                        checkErrors[check.id] ? `check-error-${check.id}` : undefined
+                      }
                       className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder:text-gray-400"
                     />
                   </label>
@@ -796,7 +811,11 @@ function KeysSection({
                   </button>
                 </div>
                 {checkErrors[check.id] && (
-                  <p role="alert" className="mt-1 text-xs font-medium text-red-700">
+                  <p
+                    id={`check-error-${check.id}`}
+                    role="alert"
+                    className="mt-1 text-xs font-medium text-red-700"
+                  >
                     {checkErrors[check.id]}
                   </p>
                 )}

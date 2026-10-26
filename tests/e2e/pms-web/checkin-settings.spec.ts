@@ -105,6 +105,7 @@ test("edits the check-in and saves it as one object, extra checks included", asy
   await main.getByRole("button", { name: "Add check" }).click();
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(main.getByText("Name the check.")).toBeVisible();
+  await expect(main.getByRole("textbox").nth(1)).toHaveAccessibleDescription("Name the check.");
   expect(writes.settings).toHaveLength(0);
 
   await main.getByRole("textbox").nth(1).fill("Wi-Fi and breakfast times explained");
@@ -174,6 +175,30 @@ test("keeps the extra checks read-only without operations access", async ({ page
   const main = page.locator("main");
   await expect(
     main.getByText("Only staff who can manage operations can change the extra checks."),
+  ).toBeVisible();
+  await expect(main.getByRole("button", { name: "Add check" })).toBeDisabled();
+  await main.getByRole("switch", { name: "Show special request" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Check-in settings saved." }),
+  ).toBeVisible();
+  expect(writes.settings).toHaveLength(1);
+  expect(writes.checklist).toHaveLength(0);
+  await assertHealthy();
+});
+
+test("still shows the settings when the extra checks can't be read", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo, {
+    expectedMissingUrls: [/\/check-in-checklist$/],
+  });
+  const writes = await mockCheckinSettings(page);
+  await page.route(`${property}/check-in-checklist`, (route) =>
+    route.fulfill({ status: 404, json: { code: "not_found" } }),
+  );
+  await page.goto("/settings/check-in");
+  const main = page.locator("main");
+  await expect(
+    main.getByText("The extra checks couldn’t be loaded.", { exact: false }),
   ).toBeVisible();
   await expect(main.getByRole("button", { name: "Add check" })).toBeDisabled();
   await main.getByRole("switch", { name: "Show special request" }).click();

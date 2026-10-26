@@ -778,6 +778,7 @@
   "settings.checkIn.loading": "Загрузка настроек заезда…",
   "settings.checkIn.readOnly": "Вы можете просматривать эти настройки; менять их могут только владельцы и менеджеры с доступом к настройкам.",
   "settings.checkIn.checksReadOnly": "Изменять дополнительные проверки могут только сотрудники с правом управлять операциями.",
+  "settings.checkIn.checksUnavailable": "Не удалось загрузить дополнительные проверки. Для просмотра нужен доступ к операциям.",
   "settings.checkIn.overview": "Шаги заезда",
   "settings.checkIn.step1.title": "Прибытие",
   "settings.checkIn.step1.description": "Что сотрудники видят первым, начиная заезд.",

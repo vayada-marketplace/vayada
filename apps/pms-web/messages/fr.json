@@ -778,6 +778,7 @@
   "settings.checkIn.loading": "Chargement des paramètres…",
   "settings.checkIn.readOnly": "Vous pouvez consulter ces paramètres ; seuls les propriétaires et gérants ayant accès aux paramètres peuvent les modifier.",
   "settings.checkIn.checksReadOnly": "Seul le personnel autorisé à gérer les opérations peut modifier les vérifications supplémentaires.",
+  "settings.checkIn.checksUnavailable": "Impossible de charger les vérifications supplémentaires. Les consulter nécessite l’accès aux opérations.",
   "settings.checkIn.overview": "Étapes de l’enregistrement",
   "settings.checkIn.step1.title": "Arrivée",
   "settings.checkIn.step1.description": "Ce que l’équipe voit en premier au début d’un enregistrement.",
