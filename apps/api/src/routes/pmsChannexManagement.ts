@@ -32,6 +32,9 @@ export type PmsChannexManagementRoutesOptions = {
   publishedOfferProvisioningPropertyId?: string;
   /** VAY-2108 D7: the claimed scope's owned hotels may provision their published offers. */
   publishedOfferProvisioningPropertyIds?: readonly string[];
+  /** VAY-2108 D7: under the claimed ARI scope only these hotels get ARI and provisioning
+   * commands; inventory rules are not processed for anyone (the worker never claims them). */
+  claimedOwnedPropertyIds?: readonly string[];
 };
 
 export async function registerPmsChannexManagementRoutes(
@@ -256,10 +259,15 @@ export async function registerPmsChannexManagementRoutes(
       );
       const input = parseCommand(request.body);
       if (!input) return reply.code(400).send({ code: "invalid_channex_command" });
-      // VAY-2055: the connection-only worker never claims disable jobs.
+      // VAY-2055: the connection-only worker never claims disable jobs. VAY-2108 D7: the claimed
+      // worker claims ARI and provisioning only for the owned hotels, and no inventory rules.
       if (
         !isMutating(options.capabilityModes, input.operationType) ||
-        (options.connectionOnly && input.operationType === "disable")
+        (options.connectionOnly && input.operationType === "disable") ||
+        (options.claimedOwnedPropertyIds &&
+          ((["sync_ari", "provision"].includes(input.operationType) &&
+            !options.claimedOwnedPropertyIds.includes(request.params.propertyId)) ||
+            input.operationType === "update_inventory_rules"))
       ) {
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       }
@@ -344,7 +352,7 @@ export async function registerPmsChannexManagementRoutes(
       const inventoryRules = parseInventoryRules(body);
       if (!body || !inventoryRules || !isCommandIdentity(body.commandId, body.idempotencyKey))
         return reply.code(400).send({ code: "invalid_inventory_rules" });
-      if (options.capabilityModes.ariSync !== "mutating")
+      if (options.capabilityModes.ariSync !== "mutating" || options.claimedOwnedPropertyIds)
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       if (!options.commandPort)
         return reply.code(503).send({ code: "channex_commands_unavailable" });

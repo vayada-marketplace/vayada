@@ -62,6 +62,9 @@ export function createPgPmsChannexManagementWorkerStore(config: {
    * for these, and only while the target owns them (active claim on the connected binding);
    * `enable` jobs keep the connection-scope rule. */
   claimedOwnedPropertyIds?: readonly string[];
+  /** With the claimed list: whether unbound `enable` jobs are claimed at all (the connection
+   * capability is mutating). Off, the worker never creates a Channex property. */
+  claimedEnableJobs?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -78,6 +81,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.stagingInventoryEnabled ?? false,
         config.connectionOnly ?? false,
         config.claimedOwnedPropertyIds ?? null,
+        config.claimedEnableJobs ?? true,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
     continueUpload: (job, progress, input) => continueUpload(pool, job, progress, input),
@@ -100,6 +104,7 @@ async function claim(
   stagingInventoryEnabled: boolean,
   connectionOnly: boolean,
   claimedOwnedPropertyIds: readonly string[] | null,
+  claimedEnableJobs: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
     const result = await client.query<JobRow>(
@@ -124,7 +129,7 @@ async function claim(
                AND NOT (platform.jobs.status = 'running' AND claim.claim_source = 'enable'
                  AND claim.claim_state = 'active' AND claim.created_at >= platform.jobs.created_at))))
          AND ($9::uuid[] IS NULL
-           OR (payload->>'operationType' = 'enable'
+           OR ($10::boolean AND payload->>'operationType' = 'enable'
              AND NOT EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
                WHERE claim.property_id = platform.jobs.property_id AND claim.provider = 'channex'
                  AND NOT (platform.jobs.status = 'running' AND claim.claim_source = 'enable'
@@ -159,6 +164,7 @@ async function claim(
         stagingPublishedOffersEnabled,
         connectionOnly,
         claimedOwnedPropertyIds,
+        claimedEnableJobs,
       ],
     );
     const row = result.rows[0];

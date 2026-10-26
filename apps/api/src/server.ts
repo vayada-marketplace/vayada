@@ -1355,6 +1355,7 @@ const channexManagementWorkerStore =
         claimedOwnedPropertyIds: channexClaimedAri
           ? (config.channexManagement.ownedPropertyIds ?? [])
           : undefined,
+        claimedEnableJobs: config.channexManagement.capabilityModes.connection === "mutating",
       })
     : undefined;
 const channexOfferSchedule = channexManagementDatabase.scheduler
@@ -1382,8 +1383,11 @@ const pmsGuestPolicySetupCommands =
         pricing: createPgPmsPricingCommandRepository({
           connectionString: targetDatabaseUrl,
           currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+          // VAY-2108 D7: meal-plan provisioning has no pricing under the claimed scope (offers
+          // carry their meals), so a meal change must not queue provisioning jobs there.
           channexMealSyncEnabled:
-            config.channexManagement.capabilityModes.provisioning === "mutating",
+            config.channexManagement.capabilityModes.provisioning === "mutating" &&
+            config.channexManagement.scope !== "claimed",
         }),
         recurringPricing: createPgPmsRecurringPricingCommandRepository({
           connectionString: targetDatabaseUrl,
@@ -1946,6 +1950,9 @@ const app = buildApp({
           config.channexManagement.stagingPublishedOffersEnabled === true || channexClaimedAri,
         publishedOfferProvisioningPropertyIds: channexClaimedAri
           ? config.channexManagement.ownedPropertyIds
+          : undefined,
+        claimedOwnedPropertyIds: channexClaimedAri
+          ? (config.channexManagement.ownedPropertyIds ?? [])
           : undefined,
         publishedOfferProvisioningPropertyId:
           config.channexManagement.stagingRestrictionsPropertyId,

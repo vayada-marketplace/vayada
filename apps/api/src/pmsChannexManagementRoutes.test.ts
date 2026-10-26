@@ -462,6 +462,46 @@ describe("PMS Channex management command routes", () => {
     expect(harness.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("queues ARI and provisioning only for owned hotels in the claimed scope, never inventory rules", async () => {
+    const owned = await testApp({}, mutating, undefined, false, false, propertyId, false, undefined, [
+      propertyId,
+    ]);
+    app = owned.app;
+    for (const operationType of ["sync_ari", "provision"] as const) {
+      const accepted = await app.inject({
+        method: "POST",
+        url: `/properties/${propertyId}/channex/commands`,
+        headers: { authorization: "Bearer valid" },
+        payload: { commandId: `c-${operationType}`, idempotencyKey: `k-${operationType}`, operationType },
+      });
+      expect(accepted.statusCode).toBe(202);
+    }
+    expect(owned.enqueue).toHaveBeenCalledTimes(2);
+    const rules = await app.inject({
+      method: "PUT",
+      url: `/properties/${propertyId}/channex/inventory-rules`,
+      headers: { authorization: "Bearer valid" },
+      payload: { commandId: "c-rules", idempotencyKey: "k-rules", rules: [] },
+    });
+    expect(rules.statusCode).toBe(409);
+    await app.close();
+    const foreign = await testApp({}, mutating, undefined, false, false, propertyId, false, undefined, [
+      "29f39aae-0000-4000-8000-000000000001",
+    ]);
+    app = foreign.app;
+    for (const operationType of ["sync_ari", "provision"] as const) {
+      const refused = await app.inject({
+        method: "POST",
+        url: `/properties/${propertyId}/channex/commands`,
+        headers: { authorization: "Bearer valid" },
+        payload: { commandId: `c-${operationType}`, idempotencyKey: `k-${operationType}`, operationType },
+      });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json()).toEqual({ code: "channex_capability_not_mutating" });
+    }
+    expect(foreign.enqueue).not.toHaveBeenCalled();
+  });
+
   it("fails closed for observe-only capabilities and invalid payloads", async () => {
     const harness = await testApp({}, { ...mutating, connection: "observe_only" });
     app = harness.app;
@@ -635,6 +675,7 @@ async function testApp(
   publishedOfferProvisioningPropertyId = propertyId,
   connectionOnly = false,
   publishedOfferProvisioningPropertyIds?: readonly string[],
+  claimedOwnedPropertyIds?: readonly string[],
 ) {
   const app = Fastify({ logger: false });
   const getAlertDiagnostics = vi.fn().mockResolvedValue(null);
@@ -701,6 +742,7 @@ async function testApp(
     publishedOfferProvisioningEnabled,
     publishedOfferProvisioningPropertyId,
     publishedOfferProvisioningPropertyIds,
+    claimedOwnedPropertyIds,
     connectionOnly,
   });
   return {

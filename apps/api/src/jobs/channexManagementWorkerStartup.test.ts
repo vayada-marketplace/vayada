@@ -2,6 +2,13 @@ import pg from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChannexManagementConfig } from "../config.js";
 import { preflightChannexManagementWorker } from "./channexManagementWorkerStartup.js";
+import { assertChannexManagementWorkerBoundary } from "./channexManagementWorkerBoundary.js";
+import { CHANNEX_MANAGEMENT_WORKER_ROLE } from "./channexManagementWorkerPrivileges.js";
+
+vi.mock("./channexManagementWorkerBoundary.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./channexManagementWorkerBoundary.js")>()),
+  assertChannexManagementWorkerBoundary: vi.fn(),
+}));
 
 const config: ChannexManagementConfig = {
   apiBaseUrl: "https://staging.channex.io",
@@ -111,12 +118,17 @@ describe("Channex worker startup", () => {
     ],
     [{ ...claimedAri, offerAriDeliveryEnabled: true }, { claimedScope: true, connectionScope: true, offerDelivery: true }],
   ] as const)("asserts the claimed worker boundary for the claimed ARI scope (%#)", async (scope, expected) => {
-    const connect = vi
-      .spyOn(pg.Client.prototype, "connect")
-      .mockRejectedValue(new Error("fixture_connect"));
-    await expect(preflightChannexManagementWorker(scope, true)).rejects.toThrow("fixture_connect");
+    const connect = vi.spyOn(pg.Client.prototype, "connect").mockResolvedValue(undefined);
+    vi.spyOn(pg.Client.prototype, "query").mockResolvedValue({
+      rows: [
+        { current_user: CHANNEX_MANAGEMENT_WORKER_ROLE, session_user: CHANNEX_MANAGEMENT_WORKER_ROLE },
+      ],
+    } as never);
+    vi.spyOn(pg.Client.prototype, "end").mockResolvedValue(undefined);
+    const boundary = vi.mocked(assertChannexManagementWorkerBoundary).mockResolvedValue(undefined);
+    await preflightChannexManagementWorker(scope, true);
     expect(connect).toHaveBeenCalledTimes(1);
-    void expected;
+    expect(boundary).toHaveBeenCalledWith(expect.anything(), expected);
   });
   it.each([
     { capabilityModes: { ...claimed.capabilityModes, ariSync: "mutating" as const } },

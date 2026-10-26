@@ -43,7 +43,15 @@ describe("PMS Channex management worker store", () => {
     await expect(harness.store.claim({ workerId: "worker-1", now })).resolves.toEqual(job);
     const claim = harness.db.calls.find(({ text }) => text.includes("max_attempts AS"))!;
     expect(claim.values?.[8]).toEqual(owned);
+    expect(claim.values?.[9]).toBe(true);
     expect(claim.text).toContain("property_id = ANY($9::uuid[])");
+    expect(claim.text).toContain("$10::boolean AND payload->>'operationType' = 'enable'");
+    // Without a mutating connection the claimed worker never takes an enable job.
+    const noEnable = setup({ withJob: true, claimedOwnedPropertyIds: owned, claimedEnableJobs: false });
+    await noEnable.store.claim({ workerId: "worker-1", now });
+    expect(
+      noEnable.db.calls.find(({ text }) => text.includes("max_attempts AS"))!.values?.[9],
+    ).toBe(false);
     expect(claim.text).toContain("claim.claim_state = 'active'");
     expect(claim.text).toContain("connection.connection_status IN ('connected', 'degraded')");
     // Outside the claimed scope the list is null and the filter is inert.
@@ -200,6 +208,7 @@ type FakeDbOptions = Partial<FakeJobRow> & {
   rollbackError?: Error;
   connectionOnly?: boolean;
   claimedOwnedPropertyIds?: readonly string[];
+  claimedEnableJobs?: boolean;
 };
 
 function setup(options: FakeDbOptions = {}) {
@@ -211,6 +220,7 @@ function setup(options: FakeDbOptions = {}) {
     targetState: state,
     connectionOnly: options.connectionOnly,
     claimedOwnedPropertyIds: options.claimedOwnedPropertyIds,
+    claimedEnableJobs: options.claimedEnableJobs,
   });
   return { db, state, store };
 }
