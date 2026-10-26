@@ -30,7 +30,38 @@ export type StayPlace =
     }
   | { kind: "elsewhere"; rooms: string[]; address: string | null; pin: Pin | null };
 
-export type BookingStay = { cancellation: StayCancellation | null; places: StayPlace[] };
+/** An extra a booked guest can ask for (part 3), priced for the whole stay (minor units). */
+export type StayExtra = {
+  addonId: string;
+  name: string;
+  pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night";
+  unitMinor: string;
+  amountMinor: string;
+  currency: string;
+};
+/** The guest's latest extras request: the hotel accepts or declines it, and nothing is charged online. */
+export type StayExtrasRequest = {
+  id: string;
+  status: "pending" | "accepted" | "declined" | "canceled" | "expired";
+  items: StayExtra[];
+  totalMinor: string;
+  currency: string;
+  createdAt: string;
+};
+/** What's still offered (not what's waiting or accepted), the latest request, and every extra we accepted:
+ * the guest pays those at the hotel. */
+export type StayExtras = {
+  offered: StayExtra[];
+  request: StayExtrasRequest | null;
+  accepted: StayExtra[];
+};
+
+export type BookingStay = {
+  cancellation: StayCancellation | null;
+  places: StayPlace[];
+  /** Extras after booking (VAY-2360 part 3): only a confirmed stay has them. */
+  extras: StayExtras | null;
+};
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -71,6 +102,63 @@ function cancellation(value: unknown): Cancellation | null {
   )
     return null;
   return value as Cancellation;
+}
+
+const MODELS = ["per_stay", "per_night", "per_guest", "per_guest_night"];
+function extra(value: unknown): StayExtra[] {
+  return record(value) &&
+    typeof value.addonId === "string" &&
+    typeof value.name === "string" &&
+    !!value.name.trim() &&
+    MODELS.includes(String(value.pricingModel)) &&
+    minor(value.unitMinor) &&
+    minor(value.amountMinor) &&
+    typeof value.currency === "string"
+    ? [
+        {
+          addonId: value.addonId,
+          name: value.name,
+          pricingModel: value.pricingModel as StayExtra["pricingModel"],
+          unitMinor: value.unitMinor,
+          amountMinor: value.amountMinor,
+          currency: value.currency,
+        },
+      ]
+    : [];
+}
+
+function extrasRequest(value: unknown): StayExtrasRequest | null {
+  const items = record(value) && Array.isArray(value.items) ? value.items.flatMap(extra) : [];
+  return record(value) &&
+    typeof value.id === "string" &&
+    ["pending", "accepted", "declined", "canceled", "expired"].includes(String(value.status)) &&
+    items.length > 0 &&
+    minor(value.totalMinor) &&
+    typeof value.currency === "string" &&
+    typeof value.createdAt === "string"
+    ? {
+        id: value.id,
+        status: value.status as StayExtrasRequest["status"],
+        items,
+        totalMinor: value.totalMinor,
+        currency: value.currency,
+        createdAt: value.createdAt,
+      }
+    : null;
+}
+
+function extras(value: unknown): StayExtras | null {
+  if (!record(value) || !Array.isArray(value.offered)) return null;
+  return {
+    offered: value.offered.flatMap(extra),
+    request: extrasRequest(value.request),
+    accepted: Array.isArray(value.accepted) ? value.accepted.flatMap(extra) : [],
+  };
+}
+
+/** The request an extras-request answer carries, or null. */
+export function parseExtrasRequest(value: unknown): StayExtrasRequest | null {
+  return record(value) ? extrasRequest(value.request) : null;
 }
 
 function pin(value: unknown): Pin | null {
@@ -115,7 +203,7 @@ function place(value: unknown): StayPlace[] {
 /** The stay details, or none of a part that doesn't check out: they add to the page, they never block it. */
 export function parseBookingStay(value: unknown): BookingStay {
   if (!record(value) || value.version !== "booking-stay.v1")
-    return { cancellation: null, places: [] };
+    return { cancellation: null, places: [], extras: null };
   const terms = value.cancellation;
   const rooms =
     record(terms) && Array.isArray(terms.rooms)
@@ -148,6 +236,7 @@ export function parseBookingStay(value: unknown): BookingStay {
         }
       : null,
     places: Array.isArray(value.places) ? value.places.flatMap(place) : [],
+    extras: extras(value.extras),
   };
 }
 
