@@ -17,6 +17,30 @@ export const CHECKIN_GUEST_FIELDS: CheckinGuestField[] = [
   "gender",
 ];
 
+/** The approved defaults (VAY-2374), the same as the API's; used when the settings can't be read. */
+export const DEFAULT_CHECKIN_SETTINGS: CheckinSettings = {
+  showSpecialRequest: true,
+  confirmSpecialRequest: true,
+  allowRoomChanges: true,
+  allowIncompleteGuests: true,
+  guestNotes: true,
+  registrationScope: "adults",
+  guestFields: [
+    { field: "email", show: true, required: false },
+    { field: "phone", show: true, required: false },
+    { field: "documentType", show: true, required: true },
+    { field: "documentNumber", show: true, required: true },
+    { field: "nationality", show: true, required: true },
+    { field: "dateOfBirth", show: true, required: true },
+    { field: "gender", show: false, required: false },
+  ],
+  offerAddons: true,
+  addonIds: null,
+  settlementOptions: ["card", "cash", "bank_transfer", "at_checkout", "already_paid"],
+  paymentChoiceRequired: true,
+  keyHandover: "physical",
+};
+
 export const CHECKIN_SETTLEMENT_OPTIONS: CheckinSettlementOption[] = [
   "card",
   "cash",

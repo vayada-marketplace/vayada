@@ -583,6 +583,31 @@ export interface BookingAdditionalGuest {
   updatedAt: string;
 }
 
+/** What staff record per guest at check-in (VAY-2373); the API's shape, field for field. */
+export type GuestDocumentType = "passport" | "national_id" | "driving_licence" | "other";
+export type GuestGender = "female" | "male" | "other" | "prefer_not_to_say";
+export interface GuestRegistrationFields {
+  /** The booked room's assignment the guest sleeps in. */
+  assignmentId: string | null;
+  dateOfBirth: string | null;
+  documentType: GuestDocumentType | null;
+  documentNumber: string | null;
+  gender: GuestGender | null;
+  staffNotes: string | null;
+}
+export interface GuestRegistration extends GuestRegistrationFields {
+  guestId: string;
+  role: "booker" | "primary_guest" | "additional_guest";
+  /** Filled fields, also when the reader may not see the ID values. */
+  filledFields: Array<keyof GuestRegistrationFields>;
+  updatedAt: string | null;
+}
+export interface GuestRegistrationsResponse {
+  guestBookingId: string;
+  canReadIdentity: boolean;
+  guests: GuestRegistration[];
+}
+
 export type BookingAdditionalGuestPayload = Partial<
   Omit<
     BookingAdditionalGuest,
@@ -1103,6 +1128,20 @@ export const bookingsService = {
     );
     return { guests: response.items.map(toAdditionalGuest) };
   },
+
+  listGuestRegistrations: async (id: string) =>
+    pmsOperationsClient.get<GuestRegistrationsResponse>(
+      await reservationEndpoint(id, "/guest-registrations"),
+      pmsOperationsRequestOptions,
+    ),
+
+  /** Saves the whole registration; null clears a field. */
+  saveGuestRegistration: async (id: string, guestId: string, fields: GuestRegistrationFields) =>
+    pmsOperationsClient.put<GuestRegistration>(
+      await reservationEndpoint(id, `/guest-registrations/${encodeURIComponent(guestId)}`),
+      fields,
+      pmsOperationsRequestOptions,
+    ),
 
   listAvailableAddons: (_id: string) =>
     unsupportedPmsNextStackFeature<BookingAddon[]>("Booking add-ons"),

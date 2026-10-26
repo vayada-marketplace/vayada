@@ -9,9 +9,12 @@ import {
   Booking,
   BookingAdditionalGuest,
   BookingNote,
+  GuestRegistration,
 } from "@/services/bookings";
 import { calendarService, CalendarInventoryDay } from "@/services/calendar";
-import { pmsSettingsService } from "@/services/settings";
+import { CheckinSettings, pmsSettingsService, settingsService } from "@/services/settings";
+import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
+import { ArrivalPopup } from "@/components/dashboard/ArrivalPopup";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { expectedGuestCount, registeredGuestCount } from "@/lib/guestRegistration";
 import {
@@ -122,6 +125,9 @@ export default function DashboardPage() {
     booking: Booking;
     guests: BookingAdditionalGuest[];
     notes: BookingNote[];
+    /** Arrivals only (VAY-2372); null when they couldn't be read. */
+    registrations: GuestRegistration[] | null;
+    settings: CheckinSettings;
     loading: boolean;
     mode: "arrival" | "departure";
   } | null>(null);
@@ -244,22 +250,45 @@ export default function DashboardPage() {
     : tonightInventoryStatus;
 
   const openQuickView = (booking: Booking, mode: "arrival" | "departure") => {
-    setQuickView({ booking, guests: [], notes: [], loading: true, mode });
+    const empty = { registrations: null, settings: DEFAULT_CHECKIN_SETTINGS };
+    setQuickView({ booking, guests: [], notes: [], ...empty, loading: true, mode });
+    const arrival = mode === "arrival";
     Promise.all([
       bookingsService.listAdditionalGuests(booking.id).catch(() => ({ guests: [] })),
       bookingsService.listNotes(booking.id).catch(() => ({ notes: [] })),
+      arrival
+        ? bookingsService
+            .listGuestRegistrations(booking.id)
+            .then((response) => response.guests)
+            .catch(() => null)
+        : null,
+      // Settings → Check-in decides who must register and with what; the defaults if unreadable.
+      arrival
+        ? settingsService
+            .getCheckinSettings()
+            .then((response) => response.settings)
+            .catch(() => DEFAULT_CHECKIN_SETTINGS)
+        : DEFAULT_CHECKIN_SETTINGS,
     ])
-      .then(([guestRes, noteRes]) =>
+      .then(([guestRes, noteRes, registrations, settings]) =>
         setQuickView((current) =>
           current?.booking.id === booking.id
-            ? { booking, guests: guestRes.guests, notes: noteRes.notes, loading: false, mode }
+            ? {
+                booking,
+                guests: guestRes.guests,
+                notes: noteRes.notes,
+                registrations,
+                settings,
+                loading: false,
+                mode,
+              }
             : current,
         ),
       )
       .catch(() =>
         setQuickView((current) =>
           current?.booking.id === booking.id
-            ? { booking, guests: [], notes: [], loading: false, mode }
+            ? { booking, guests: [], notes: [], ...empty, loading: false, mode }
             : current,
         ),
       );
@@ -679,14 +708,25 @@ export default function DashboardPage() {
         />
       </div>
 
-      {quickView && (
-        <ArrivalQuickView
+      {quickView?.mode === "arrival" && (
+        <ArrivalPopup
+          booking={quickView.booking}
+          additionalGuests={quickView.guests}
+          registrations={quickView.registrations}
+          settings={quickView.settings}
+          loading={quickView.loading}
+          arrivalTime={arrivalTime(quickView.booking)}
+          today={today}
+          onClose={() => setQuickView(null)}
+        />
+      )}
+      {quickView?.mode === "departure" && (
+        <DepartureQuickView
           booking={quickView.booking}
           guests={quickView.guests}
           notes={quickView.notes}
           loading={quickView.loading}
           today={today}
-          mode={quickView.mode}
           onClose={() => setQuickView(null)}
         />
       )}
@@ -696,12 +736,11 @@ export default function DashboardPage() {
 
 /* ── Sub-components ── */
 
-function ArrivalQuickView({
+function DepartureQuickView({
   booking,
   guests,
   notes,
   loading,
-  mode,
   today,
   onClose,
 }: {
@@ -709,7 +748,6 @@ function ArrivalQuickView({
   guests: BookingAdditionalGuest[];
   notes: BookingNote[];
   loading: boolean;
-  mode: "arrival" | "departure";
   today: string;
   onClose: () => void;
 }) {
@@ -719,10 +757,9 @@ function ArrivalQuickView({
   // What is still owed: a deposit or part payment already lowered the balance.
   const due = isPaid(booking) ? 0 : Math.max(0, booking.balanceAmount);
   const internalNotes = notes.filter((note) => note.body.trim().length > 0);
-  const isDeparture = mode === "departure";
-  const eventDate = isDeparture ? booking.checkOut : booking.checkIn;
+  const eventDate = booking.checkOut;
   const isFuture = eventDate > today;
-  const isNotCheckedIn = !isFuture && isDeparture && isNotCheckedInDeparture(booking);
+  const isNotCheckedIn = !isFuture && isNotCheckedInDeparture(booking);
   const isCheckedOut = booking.status === "checked_out";
 
   return createPortal(
@@ -739,7 +776,7 @@ function ArrivalQuickView({
         <div className="sticky top-0 flex items-start justify-between gap-4 border-b border-gray-100 bg-white p-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-              {isDeparture ? t("dashboard.departureQuickView") : t("dashboard.arrivalQuickView")}
+              {t("dashboard.departureQuickView")}
             </p>
             <h2 className="mt-1 truncate text-lg font-semibold text-gray-950">
               {guestName(booking)}
@@ -769,13 +806,11 @@ function ArrivalQuickView({
                   ? "bg-amber-100 text-amber-800"
                   : isCheckedOut
                     ? "bg-gray-100 text-gray-600"
-                    : isDeparture
-                      ? "bg-green-100 text-green-700"
-                      : "bg-blue-100 text-blue-700"
+                    : "bg-green-100 text-green-700"
               }`}
             >
               {isFuture
-                ? t(isDeparture ? "dashboard.departuresOn" : "dashboard.arrivalsOn", {
+                ? t("dashboard.departuresOn", {
                     date: formatPropertyDate(
                       eventDate,
                       { month: "short", day: "numeric", year: "numeric" },
@@ -786,9 +821,7 @@ function ArrivalQuickView({
                   ? t("dashboard.notCheckedIn")
                   : isCheckedOut
                     ? t("dashboard.checkedOut")
-                    : isDeparture
-                      ? t("dashboard.checkedIn")
-                      : t("dashboard.arrivingToday")}
+                    : t("dashboard.checkedIn")}
             </span>
             {(booking.amountStatus === "unverified" || due > 0) && (
               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
@@ -815,14 +848,10 @@ function ArrivalQuickView({
               <dd className="mt-0.5 font-semibold text-gray-900">{roomLabel(booking)}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-gray-500">
-                {isDeparture ? t("bookings.detail.checkOut") : t("dashboard.arrival")}
-              </dt>
+              <dt className="text-xs font-medium text-gray-500">{t("bookings.detail.checkOut")}</dt>
               <dd className="mt-0.5 font-semibold text-gray-900">
                 {t("dashboard.staySummary", {
-                  time: isDeparture
-                    ? t("dashboard.byTime", { time: checkoutTime() })
-                    : arrivalTime(booking),
+                  time: t("dashboard.byTime", { time: checkoutTime() }),
                   nights: booking.nights,
                   guests: (booking.numberOfGuests ?? booking.adults + booking.children) || 1,
                 })}
@@ -830,21 +859,12 @@ function ArrivalQuickView({
             </div>
           </dl>
 
-          {isDeparture && internalNotes.length > 0 && (
+          {internalNotes.length > 0 && (
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 {t("dashboard.internalNote")}
               </p>
               <p className="mt-1 text-sm text-gray-800">{internalNotes[0].body}</p>
-            </div>
-          )}
-
-          {!isDeparture && booking.specialRequests && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-                {t("dashboard.specialRequest")}
-              </p>
-              <p className="mt-1 text-sm text-amber-950">{booking.specialRequests}</p>
             </div>
           )}
 
@@ -867,10 +887,10 @@ function ArrivalQuickView({
                 </>
               ) : (
                 <Link
-                  href={isDeparture ? `/check-out/${booking.id}` : `/check-in/${booking.id}`}
+                  href={`/check-out/${booking.id}`}
                   className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"
                 >
-                  {isDeparture ? t("dashboard.startCheckOut") : t("dashboard.startCheckIn")}
+                  {t("dashboard.startCheckOut")}
                 </Link>
               ))}
             <Link
