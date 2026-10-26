@@ -18,6 +18,7 @@ export const unusedBookingWebCheckoutAdapter = {
   previewChangeRequest: rejectUnexpectedCall("previewChangeRequest"),
   submitChangeRequest: rejectUnexpectedCall("submitChangeRequest"),
   getChangeRequest: rejectUnexpectedCall("getChangeRequest"),
+  getStay: rejectUnexpectedCall("getStay"),
   getPaymentInstructions: rejectUnexpectedCall("getPaymentInstructions"),
   validatePromo: rejectUnexpectedCall("validatePromo"),
 } satisfies BookingWebCheckoutAdapter;

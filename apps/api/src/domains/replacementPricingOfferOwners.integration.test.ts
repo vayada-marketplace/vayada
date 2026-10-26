@@ -6192,11 +6192,23 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await publishContent(built!.publicContent);
       const offers = await catalog.read(scope.propertyId);
       expect(offers?.version).toBe("public-pricing-offers.v1");
+      // Rooms are listed in the hotel's saved order (VAY-2315), so compare them by room type.
       expect(
-        offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
-      ).toEqual(current!.rooms.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
+        Object.fromEntries(
+          (offers?.rooms ?? []).map((room) => [
+            room.roomTypeId,
+            room.offers.map((offer) => offer.publicOfferKey),
+          ]),
+        ),
+      ).toEqual(
+        Object.fromEntries(
+          current!.rooms.map((room) => [
+            room.roomTypeId,
+            room.offers.map((offer) => offer.ratePlanId),
+          ]),
+        ),
+      );
       // Room content is read live after go-live (VAY-2129), not from the published page.
-      // Rooms are listed by room type id, so compare them by name.
       expect(
         Object.fromEntries((offers?.rooms ?? []).map((room) => [room.name, room.images])),
       ).toEqual({ "Terms room": [], "Second room": [] });
@@ -6493,8 +6505,17 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const mapped = await publishBookingPage(f.scope);
     const offers = await createPublicPricingOfferCatalog(pool).read(id);
     expect(
-      offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
-    ).toEqual(mapped.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
+      Object.fromEntries(
+        (offers?.rooms ?? []).map((room) => [
+          room.roomTypeId,
+          room.offers.map((offer) => offer.publicOfferKey),
+        ]),
+      ),
+    ).toEqual(
+      Object.fromEntries(
+        mapped.map((room) => [room.roomTypeId, room.offers.map((offer) => offer.ratePlanId)]),
+      ),
+    );
     expect(offers?.rooms.flatMap((room) => room.offers)).toHaveLength(3);
     // VAY-2320: each rate says how it is paid, so a group combines rates paid the same way.
     expect(
@@ -6636,6 +6657,46 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         expect(offer).toMatchObject({ mealPlan: "breakfast", mealDescription: text });
       else expect(offer).not.toHaveProperty("mealDescription");
   });
+  it("lists rooms in the hotel's saved room order, read live (VAY-2315)", async () => {
+    const f = await publicFixture(true, undefined, undefined, payable),
+      id = f.scope.propertyId;
+    await publishBookingPage(f.scope);
+    const catalog = createPublicPricingOfferCatalog(pool);
+    const names = async () => (await catalog.read(id))?.rooms.map((room) => room.name) ?? null;
+    const keys = async () =>
+      (await catalog.read(id))?.rooms
+        .flatMap((room) => room.offers.map((offer) => offer.publicOfferKey))
+        .sort() ?? null;
+    // Calendar → Reorder rooms writes only room_types.sort_order (VAY-2294).
+    const reorder = async (first: string, second: string) => {
+      for (const [sortOrder, name] of [first, second].entries())
+        await pool.query(
+          "UPDATE pms.room_types SET sort_order=$3 WHERE property_id=$1 AND name=$2",
+          [id, name, sortOrder],
+        );
+    };
+    const sourceRevision = async () => (await f.readPublic())?.pmsSourceRevision;
+    const [firstById, lastById] = (
+      await pool.query<{ name: string }>(
+        "SELECT name FROM pms.room_types WHERE property_id=$1 ORDER BY id",
+        [id],
+      )
+    ).rows.map((row) => row.name) as [string, string];
+    const offered = await keys();
+    const revision = await sourceRevision();
+    expect(revision).toMatch(/^booking\.pms\.publication\.v2:/);
+
+    // Rooms with the same place fall back to their names, as in the Calendar.
+    expect(await names()).toEqual(["Second room", "Terms room"]);
+    // The saved order wins over room type ids, either way round.
+    await reorder(lastById, firstById);
+    expect(await names()).toEqual([lastById, firstById]);
+    await reorder(firstById, lastById);
+    expect(await names()).toEqual([firstById, lastById]);
+    // A new order needs no new prices or publication: the same offers, nothing stale.
+    expect(await keys()).toEqual(offered);
+    expect(await sourceRevision()).toBe(revision);
+  });
   it("serves every saved change after go-live without republishing (VAY-2129)", async () => {
     const f = await publicFixture(true, undefined, undefined, payable),
       id = f.scope.propertyId,
@@ -6645,7 +6706,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       (await catalog.read(id))?.rooms.flatMap((room) =>
         room.offers.map((offer) => offer.publicOfferKey),
       ) ?? null;
-    // The catalog lists rooms by room type id; compare them by name.
+    // Compare rooms by name, whatever the hotel's room order.
     const byName = <T extends { name: string }>(rooms: readonly T[]) =>
       [...rooms].sort((a, b) => a.name.localeCompare(b.name));
     const shown = async () => {

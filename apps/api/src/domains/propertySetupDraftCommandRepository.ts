@@ -23,6 +23,8 @@ import {
 } from "@vayada/domain-hotels";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { lockMemberPermissions } from "./memberPermissions.js";
+
 export type PropertySetupDraftSaveCommand = {
   organizationId: string;
   propertyId: string;
@@ -513,16 +515,13 @@ async function lockAuthorizedScope(
        ON membership.organization_id = $1::uuid
       AND membership.user_id = actor.id
       AND membership.status = 'active'
-     JOIN identity.role_permission_grants role_grant
-       ON role_grant.organization_kind = 'hotel_group'
-      AND role_grant.role_key = membership.role_key
-      AND role_grant.permission_key = $4
      WHERE property.id = $2::uuid
-     FOR SHARE OF property, property_link, actor, membership
-     FOR KEY SHARE OF role_grant`,
-    [command.organizationId, command.propertyId, command.actorUserId, permission],
+     FOR SHARE OF property, property_link, actor, membership`,
+    [command.organizationId, command.propertyId, command.actorUserId],
   );
-  return (result.rowCount ?? 0) > 0;
+  if ((result.rowCount ?? 0) < 1) return false;
+  const permissions = await lockMemberPermissions(client, command);
+  return permissions?.some((key) => key === permission) === true;
 }
 
 async function lockDraftScope(

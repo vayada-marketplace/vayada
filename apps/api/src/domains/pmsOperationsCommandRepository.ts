@@ -130,6 +130,11 @@ import type { PmsJsonRecord, PmsOperationsReadRepository } from "./pmsOperations
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
 import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
 import { lockPmsRoomOrder, pmsRoomOrderVersion } from "./pmsRoomOrder.js";
+import {
+  findAvailableRoomForAssignment,
+  isRoomFreeForAssignmentStay,
+  lockRoomTypeRoomsForAssignment,
+} from "./pmsRoomUnitAssignment.js";
 import { readManualBookingPricingPublication } from "./pmsManualBookingTransactionalPricing.js";
 import type {
   StripeBookingPaymentIntent,
@@ -180,12 +185,6 @@ type PmsAssignmentRow = {
   checkOut: string;
   source: string;
   stayEvidenceKind: string;
-};
-
-type PmsRoomAvailabilityRow = {
-  roomId: string;
-  roomTypeId: string;
-  status: string;
 };
 
 type PmsIdempotencyRow = {
@@ -6734,7 +6733,17 @@ async function applyAssignmentCommandMutation(
     return assignmentConflict("assignment_conflict", "Requested room type changed.");
   }
 
-  if (!(await isRoomAvailableForStay(client, command, source, room.roomTypeId))) {
+  if (
+    !(await isRoomFreeForAssignmentStay(client, {
+      propertyId: command.propertyId,
+      roomId: command.roomId,
+      roomTypeId: room.roomTypeId,
+      assignmentId: source.assignmentId,
+      assignmentRoomTypeId: source.roomTypeId,
+      checkIn: source.checkIn,
+      checkOut: source.checkOut,
+    }))
+  ) {
     return assignmentConflict("room_unavailable", "Requested room is unavailable for this stay.");
   }
 
@@ -7284,28 +7293,6 @@ async function findTargetAssignmentForSwap(
   return result.rows[0] ?? null;
 }
 
-async function findAvailableRoomForAssignment(
-  client: PmsOperationsCommandClient,
-  propertyId: string,
-  roomId: string,
-): Promise<PmsRoomAvailabilityRow | null> {
-  const result = await client.query<PmsRoomAvailabilityRow>(
-    `SELECT
-       id::text AS "roomId",
-       room_type_id::text AS "roomTypeId",
-       status
-     FROM pms.rooms
-     WHERE property_id = $1::uuid
-       AND id = $2::uuid
-       AND status = 'available'
-       AND operational_label_status = 'verified'
-       AND room_number IS NOT NULL
-     LIMIT 1`,
-    [propertyId, roomId],
-  );
-  return result.rows[0] ?? null;
-}
-
 async function assignmentsHaveVerifiedOperationalIdentity(
   client: PmsOperationsCommandClient,
   propertyId: string,
@@ -7339,170 +7326,6 @@ async function roomIdsHaveVerifiedOperationalIdentity(
     [propertyId, uniqueRoomIds],
   );
   return (result.rowCount ?? result.rows.length) === uniqueRoomIds.length;
-}
-
-async function lockRoomTypeRoomsForAssignment(
-  client: PmsOperationsCommandClient,
-  propertyId: string,
-  roomTypeId: string,
-): Promise<void> {
-  await lockPmsPhysicalRoomUnitMutationScope(client, propertyId, roomTypeId);
-  await client.query(
-    `SELECT id
-     FROM pms.rooms
-     WHERE property_id = $1::uuid
-       AND room_type_id = $2::uuid
-     ORDER BY id
-     FOR UPDATE`,
-    [propertyId, roomTypeId],
-  );
-}
-
-async function isRoomAvailableForStay(
-  client: PmsOperationsCommandClient,
-  command: PmsAssignmentCommand,
-  source: PmsAssignmentRow,
-  targetRoomTypeId: string,
-): Promise<boolean> {
-  if (!command.roomId) return false;
-  const result = await client.query(
-    `WITH stay_dates AS (
-       SELECT generate_series($4::date, $5::date - interval '1 day', interval '1 day')::date AS stay_date
-     ),
-     overlapping_assignments AS (
-       SELECT 1
-       FROM pms.operational_booking_assignments other_assignment
-       JOIN booking.guest_bookings other_booking
-         ON other_booking.id = other_assignment.guest_booking_id
-        AND other_booking.property_id = other_assignment.property_id
-       WHERE other_assignment.property_id = $1::uuid
-         AND other_assignment.room_id = $2::uuid
-         AND other_assignment.id <> $3::uuid
-         AND other_assignment.assignment_status IN ('assigned', 'checked_in', 'in_house')
-         AND daterange(
-               COALESCE(other_assignment.check_in, other_booking.check_in),
-               COALESCE(other_assignment.check_out, other_booking.check_out), '[)'
-             ) &&
-             daterange($4::date, $5::date, '[)')
-       LIMIT 1
-     ),
-     room_specific_blocks AS (
-       SELECT 1
-       FROM pms.room_blocks block
-       WHERE block.property_id = $1::uuid
-         AND block.room_type_id = $6::uuid
-         AND block.status = 'active'
-         AND block.room_id = $2::uuid
-         AND daterange(block.starts_on, block.ends_on + 1, '[)') &&
-             daterange($4::date, $5::date, '[)')
-       LIMIT 1
-     ),
-     room_type_capacity AS (
-       SELECT COUNT(*)::integer AS total_count
-       FROM pms.rooms room
-       WHERE room.property_id = $1::uuid
-         AND room.room_type_id = $6::uuid
-         AND room.status = 'available'
-     ),
-     assigned_by_date AS (
-       SELECT
-         stay_dates.stay_date,
-         COUNT(DISTINCT CASE
-           WHEN other_booking.id IS NOT NULL THEN other_assignment.room_id
-         END)::integer AS assigned_count
-       FROM stay_dates
-       LEFT JOIN pms.operational_booking_assignments other_assignment
-         ON other_assignment.property_id = $1::uuid
-        AND other_assignment.room_type_id = $6::uuid
-        AND other_assignment.room_id IS NOT NULL
-        AND other_assignment.id <> $3::uuid
-        AND other_assignment.assignment_status IN ('assigned', 'checked_in', 'in_house')
-       LEFT JOIN booking.guest_bookings other_booking
-         ON other_booking.id = other_assignment.guest_booking_id
-        AND other_booking.property_id = other_assignment.property_id
-        AND daterange(
-              COALESCE(other_assignment.check_in, other_booking.check_in),
-              COALESCE(other_assignment.check_out, other_booking.check_out), '[)'
-            ) @> stay_dates.stay_date
-       GROUP BY stay_dates.stay_date
-     ),
-     type_blocked_by_date AS (
-       SELECT
-         stay_dates.stay_date,
-         COALESCE(SUM(block.blocked_count), 0)::integer AS blocked_count
-       FROM stay_dates
-       LEFT JOIN pms.room_blocks block
-         ON block.property_id = $1::uuid
-        AND block.room_type_id = $6::uuid
-        AND block.room_id IS NULL
-        AND block.status = 'active'
-        AND block.source_assignment_id IS DISTINCT FROM $3::uuid
-        AND daterange(block.starts_on, block.ends_on + 1, '[)') @> stay_dates.stay_date
-       GROUP BY stay_dates.stay_date
-     ),
-     type_capacity_sold_out AS (
-       SELECT 1
-       FROM stay_dates
-       CROSS JOIN room_type_capacity
-       JOIN assigned_by_date USING (stay_date)
-       JOIN type_blocked_by_date USING (stay_date)
-       WHERE assigned_by_date.assigned_count + type_blocked_by_date.blocked_count >=
-             room_type_capacity.total_count
-       LIMIT 1
-     ),
-     canonical_inventory_unavailable AS (
-       SELECT 1
-       FROM stay_dates
-       JOIN type_blocked_by_date USING (stay_date)
-       LEFT JOIN pms.inventory_days inventory
-         ON inventory.property_id=$1::uuid AND inventory.room_type_id=$6::uuid
-        AND inventory.stay_date=stay_dates.stay_date
-       WHERE inventory.calendar_revision IS NULL OR inventory.status<>'open'
-          OR GREATEST(inventory.assigned_count
-               - CASE WHEN $6::uuid=$7::uuid THEN 1 ELSE 0 END,0)
-             + type_blocked_by_date.blocked_count >=
-             inventory.effective_sellable_limit_count
-          OR (inventory.linked_stop_sell AND EXISTS (
-            SELECT 1 FROM pms.room_types target_type
-            JOIN pms.room_types source_type ON source_type.property_id=target_type.property_id
-              AND source_type.linked_inventory_group_id=target_type.linked_inventory_group_id
-            WHERE target_type.property_id=$1::uuid AND target_type.id=$6::uuid
-              AND target_type.linked_inventory_group_id IS NOT NULL
-              AND (EXISTS (SELECT 1 FROM pms.inventory_reservation_receipts receipt
-                JOIN pms.inventory_reservation_statuses receipt_status
-                  ON receipt_status.receipt_id=receipt.receipt_id
-                WHERE receipt.property_id=$1::uuid AND receipt.room_type_id=source_type.id
-                  AND receipt_status.lifecycle_state='reserved'
-                  AND stay_dates.stay_date>=receipt.check_in
-                  AND stay_dates.stay_date<receipt.check_out)
-                OR EXISTS (SELECT 1 FROM pms.operational_booking_assignments cause
-                  WHERE cause.property_id=$1::uuid AND cause.room_type_id=source_type.id
-                    AND cause.id<>$3::uuid AND cause.stay_evidence_kind='exact'
-                    AND cause.assignment_status NOT IN ('canceled','released')
-                    AND stay_dates.stay_date>=cause.check_in
-                    AND stay_dates.stay_date<cause.check_out)
-                OR EXISTS (SELECT 1 FROM pms.room_blocks cause
-                  WHERE cause.property_id=$1::uuid AND cause.room_type_id=source_type.id
-                    AND cause.block_kind='manual' AND cause.status='active'
-                    AND stay_dates.stay_date BETWEEN cause.starts_on AND cause.ends_on))))
-       LIMIT 1
-     )
-     SELECT 1
-     WHERE NOT EXISTS (SELECT 1 FROM overlapping_assignments)
-       AND NOT EXISTS (SELECT 1 FROM room_specific_blocks)
-       AND NOT EXISTS (SELECT 1 FROM type_capacity_sold_out)
-       AND NOT EXISTS (SELECT 1 FROM canonical_inventory_unavailable)`,
-    [
-      command.propertyId,
-      command.roomId,
-      source.assignmentId,
-      source.checkIn,
-      source.checkOut,
-      targetRoomTypeId,
-      source.roomTypeId,
-    ],
-  );
-  return (result.rowCount ?? 0) > 0;
 }
 
 async function enqueueAssignmentCommandSideEffects(

@@ -111,6 +111,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-complete",
     // VAY-2320: the same room type at two rates in one booking.
     "repository-complete-two-rates",
+    // VAY-2361: booked rooms take the first free unit of their room type.
+    "repository-complete-auto-assign",
     "repository-released",
     "repository-wrong-organization",
     "repository-missing-acceptance",
@@ -283,6 +285,17 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         SELECT id,$1,id::text,'{"adults":2,"children":1,"total":3}',100,'EUR' FROM unnest($2::uuid[]) id`,
         [propertyId, types],
       );
+      if (scenario === "repository-complete-auto-assign")
+        // Calendar order is sort_order first; a unit out of service or without a verified label
+        // is never assigned automatically.
+        await db.query(
+          `INSERT INTO pms.rooms
+          (property_id,room_type_id,room_number,status,operational_label_status,sort_order)
+          VALUES($1,$2,'Repair','maintenance','verified',0),($1,$2,'Unlabelled','available','unverified',1),
+            ($1,$2,'First','available','verified',2),
+            ($1,$3,'Alpha','available','verified',5),($1,$3,'Zed','available','verified',1)`,
+          [propertyId, types[0], types[1]],
+        );
       // Only calendar upstream audit fixtures bypass FKs; holds and adoption use live constraints.
       await db.query("SET LOCAL session_replication_role=replica");
       await db.query(
@@ -791,6 +804,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           "legacy-amendment",
           "repository-complete",
           "repository-complete-two-rates",
+          "repository-complete-auto-assign",
           "worker-complete",
           "amended-complete",
         ].includes(scenario)
@@ -850,21 +864,39 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             (b) => b.source_assignment_id && b.source_inventory_reservation_receipt_id === null,
           ),
         ).toBe(true);
-        if (repository)
+        if (repository) {
+          // VAY-2361: the first type's second room finds its only eligible unit taken by the
+          // first room on the same nights, so it stays unassigned.
+          const auto = scenario === "repository-complete-auto-assign";
           expect(
             (
               await db.query(
-                `SELECT position,assignment_status AS status,adults,children
-                 FROM pms.operational_booking_assignments
-                 WHERE property_id=$1 AND guest_booking_id=$2 ORDER BY position`,
+                `SELECT position,assignment_status AS status,adults,children,room.room_number AS room
+                 FROM pms.operational_booking_assignments assignment
+                 LEFT JOIN pms.rooms room ON room.id=assignment.room_id
+                 WHERE assignment.property_id=$1 AND assignment.guest_booking_id=$2
+                 ORDER BY position`,
                 [propertyId, bookingId],
               )
             ).rows,
           ).toEqual([
-            { position: 1, status: "pending", adults: 2, children: 1 },
-            { position: 2, status: "pending", adults: 2, children: 1 },
-            { position: 3, status: "pending", adults: 2, children: 1 },
+            {
+              position: 1,
+              status: auto ? "assigned" : "pending",
+              adults: 2,
+              children: 1,
+              room: auto ? "First" : null,
+            },
+            {
+              position: 2,
+              status: auto ? "assigned" : "pending",
+              adults: 2,
+              children: 1,
+              room: auto ? "Zed" : null,
+            },
+            { position: 3, status: "pending", adults: 2, children: 1, room: null },
           ]);
+        }
         if (scenario === "repository-complete") {
           // VAY-2320: emails and Booking Admin name every booked room type, not the first one,
           // in room order (the names sort the other way round).
@@ -1029,6 +1061,109 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
                   : { kind: "partial_refund" },
           })),
         );
+        // VAY-2360: the confirmation page gets the booked terms the cancel route works from, and the
+        // exact place, by the booking's id and the guest's email only.
+        await db.query(
+          `INSERT INTO hotel_catalog.property_locations
+             (property_id,country_code,city,street_address,postal_code,latitude,longitude)
+           VALUES($1,'LK','Ahangama','12 Matara Road','80650',5.973251,80.362548)
+           ON CONFLICT (property_id) DO UPDATE SET country_code=EXCLUDED.country_code,
+             city=EXCLUDED.city, street_address=EXCLUDED.street_address,
+             postal_code=EXCLUDED.postal_code, latitude=EXCLUDED.latitude,
+             longitude=EXCLUDED.longitude`,
+          [propertyId],
+        );
+        const stay = (await adapter.getStay(propertyId, bookingId, guest, context("s"))) as {
+          cancellation: { totalMinor: string; rooms: Array<Record<string, unknown>> } | null;
+          places: unknown;
+        };
+        const accepted = (
+          await db.query<{
+            terms: Array<{ roomTypeId: string; offerId: string; cancellation: unknown }>;
+          }>(
+            `SELECT quote_snapshot->'evidence'->'terms' AS terms
+             FROM booking.pricing_quote_acceptances WHERE guest_booking_id=$1`,
+            [bookingId],
+          )
+        ).rows[0]!.terms;
+        expect(stay).toMatchObject({
+          version: "booking-stay.v1",
+          cancellation: {
+            checkIn: quote.stay.checkIn,
+            currency: quote.stay.currency,
+            timeZone: expect.any(String),
+            totalMinor: "108000",
+          },
+          places: [
+            {
+              kind: "property",
+              rooms: [types[0], types[1]],
+              streetAddress: "12 Matara Road",
+              city: "Ahangama",
+              postalCode: "80650",
+              countryCode: "LK",
+              pin: { latitude: 5.973251, longitude: 80.362548 },
+            },
+          ],
+        });
+        expect(stay.cancellation!.rooms).toEqual(
+          quote.stay.rooms.map((room) => ({
+            selectionId: room.selectionId,
+            roomTypeId: room.roomTypeId,
+            roomName: room.roomTypeId,
+            cancellation: accepted.find(
+              (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
+            )!.cancellation,
+            subtotalMinor: "36000",
+          })),
+        );
+        await expect(
+          adapter.getStay(
+            propertyId,
+            bookingId,
+            { guest_email: "other@example.test" },
+            context("s2"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        // The exact place only once confirmed, as the email; no terms once a room has started or the
+        // stay has ended.
+        await db.query("SAVEPOINT stay_statuses");
+        await db.query("SET LOCAL session_replication_role=replica");
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='pending_payment' WHERE id=$1",
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s4"))).toMatchObject({
+          cancellation: { totalMinor: "108000" },
+          places: [],
+        });
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='confirmed' WHERE id=$1",
+          [bookingId],
+        );
+        await db.query(
+          `UPDATE pms.operational_booking_assignments SET assignment_status='checked_in'
+           WHERE guest_booking_id=$1 AND position=2`,
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s5"))).toMatchObject({
+          cancellation: null,
+          places: [{ kind: "property" }],
+        });
+        await db.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='canceled' WHERE id=$1",
+          [bookingId],
+        );
+        expect(await adapter.getStay(propertyId, bookingId, guest, context("s6"))).toEqual({
+          version: "booking-stay.v1",
+          cancellation: null,
+          places: [],
+        });
+        await db.query("ROLLBACK TO SAVEPOINT stay_statuses");
+        // Never by a booking reference: those are what the lookup's limit guards.
+        await expect(
+          adapter.getStay(propertyId, "VAY-7C2F4A9E1B3D", guest, context("s3")),
+        ).rejects.toMatchObject({ statusCode: 404 });
         const stayDates = nonRefundableRoom ? await seedRoomNights() : [];
         const preview = (await adapter.cancelPreview(
           propertyId,
