@@ -62,42 +62,6 @@ describe("target Channex management plans", () => {
     expect(title).not.toMatch(/[\uD800-\uDFFF]/u);
   });
 
-  it("provisions missing room types for a claimed hotel and nothing else (VAY-2108 D7)", async () => {
-    const db = new FakePool("multi_room");
-    const port = createPgChannexManagementPlanPort({
-      connectionString: "postgresql://target",
-      pool: db,
-      bookingRevisionHandoff: vi.fn(),
-    });
-    const plan = await port.plan(job("provision"));
-    expect(plan.externalPropertyId).toBe("external-1");
-    expect(plan.requests.map((request) => [request.method, request.path, request.capture?.kind])).toEqual([
-      ["GET", "/api/v1/room_types", "room_type_list"],
-      ["POST", "/api/v1/room_types", "room_type"],
-      ["GET", "/api/v1/room_types", "room_type_list"],
-      ["POST", "/api/v1/room_types", "room_type"],
-    ]);
-    const created = plan.requests[1]!;
-    expect(created.body).toEqual({
-      room_type: {
-        property_id: "external-1",
-        title: "Deluxe [Vayada:room-1]",
-        count_of_rooms: 2,
-        occ_adults: 1,
-        occ_children: 0,
-        occ_infants: 0,
-        default_occupancy: 1,
-        room_kind: "room",
-      },
-    });
-    expect(created.skipIf).toEqual({ kind: "room_type", roomTypeId: "room-1" });
-    expect(db.sql()).toContain("mapping.status <> 'active'");
-    expect(db.sql()).not.toContain("FROM pms.rate_plans");
-    await expect(
-      port.plan({ ...job("provision"), input: { ...job("provision").input, mealRatePlanId: "meal-1" } }),
-    ).rejects.toThrow("Pricing is unavailable");
-  });
-
   it.each([
     ["historical", "sync_bookings", "Channex binding claim is not active"],
     ["retained", "enable", "A retained Channex binding claim requires audited repair"],

@@ -74,9 +74,12 @@ and message jobs that retry and then dead-letter.
    under the claimed DB scope (0519: new RLS helper, the pinned scope functions untouched, digests
    re-pinned) after the platform's claimed grant and preflight. It claims `sync_ari` and
    `provision` jobs only for the owned hotels that pass the gate, plus unbound `enable` jobs.
-   Provisioning creates the missing Channex room types of a hotel that pressed "Enable
-   connection" (adopted rooms of a taken-over hotel are left alone); rate plans come only from
-   published offers, which the owned hotels may provision through the published-offer route. The
+   Creating the missing Channex room types of a hotel that pressed "Enable connection" is the
+   D7b follow-up: the worker login may lock but not insert `pms.channel_room_type_mappings`, so
+   it needs a migration (restrictive insert policy on the claimed gate) and a platform grant
+   first; a taken-over hotel adopts its existing rooms through the attach step and needs none of
+   that. Rate plans come only from published offers, which the owned hotels may provision through
+   the published-offer route. The
    ARI schedule enqueues a full sync for each owned, claimed hotel whenever its pricing, rooms,
    mappings, inventory or closures change, or the local date moves. Then the initial offer ARI
    with `stop_sell=true`, activation, and ongoing delivery

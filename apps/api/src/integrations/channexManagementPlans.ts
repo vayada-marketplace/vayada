@@ -117,15 +117,6 @@ export function createPgChannexManagementPlanPort(config: {
   };
 }
 
-type RoomRow = {
-  roomTypeId: string;
-  name: string;
-  currency: string;
-  countOfRooms: number;
-  adults: number;
-  children: number;
-};
-
 async function basePlan(
   pool: Pool,
   handoff: ChannexBookingRevisionHandoff,
@@ -258,65 +249,22 @@ async function enablePlan(
   };
 }
 
-/** VAY-2108 D7: provisioning creates the hotel's room types in Channex, nothing else. Rate plans
- * come from published offers (the pricing bundle), so a meal-plan or legacy rate provisioning
- * request still has no pricing to draw on. Rooms that already have an active mapping, including
- * the adopted rooms of a taken-over hotel, are left alone; a room is looked up by its exact
- * provider title before it is created, so a retried job never creates it twice. */
+/** VAY-2108 D7 leaves this stub for a plain provisioning job: creating a hotel's Channex room
+ * types from the worker needs an INSERT right on pms.channel_room_type_mappings that the worker
+ * login does not have (its matrix allows locks only), so that part is the D7b follow-up with its
+ * own migration and platform grant. Rate plans come from published offers (the pricing bundle). */
 async function provisioningPlan(
   pool: Pool,
   job: ChannexManagementJob,
   externalPropertyId: string,
 ): Promise<ChannexManagementActionPlan> {
-  if (job.input.mealRatePlanId)
-    throw Object.assign(
-      new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-      { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-    );
-  const rooms = await pool.query<RoomRow>(
-    `SELECT room.id::text AS "roomTypeId", room.name, room.currency,
-       count(unit.id)::integer AS "countOfRooms",
-       COALESCE((room.occupancy_limits ->> 'maxAdults')::integer, 2) AS adults,
-       COALESCE((room.occupancy_limits ->> 'maxChildren')::integer, 0) AS children
-     FROM pms.room_types room LEFT JOIN pms.rooms unit
-       ON unit.room_type_id = room.id AND unit.status <> 'retired'
-     LEFT JOIN pms.channel_connections connection
-       ON connection.property_id = room.property_id AND connection.provider = 'channex'
-     LEFT JOIN pms.channel_room_type_mappings mapping
-       ON mapping.connection_id = connection.id AND mapping.room_type_id = room.id
-     WHERE room.property_id = $1::uuid AND room.active
-       AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
-         WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
-       AND (mapping.id IS NULL OR mapping.status <> 'active')
-     GROUP BY room.id ORDER BY room.sort_order, room.name`,
-    [job.propertyId],
+  void pool;
+  void job;
+  void externalPropertyId;
+  throw Object.assign(
+    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
   );
-  return {
-    externalPropertyId,
-    requests: rooms.rows.flatMap((room) => {
-      const title = providerTitle(room.name, room.roomTypeId);
-      return [
-        channexRequests.listRoomTypes(externalPropertyId, [
-          { roomTypeId: room.roomTypeId, roomTypeName: title },
-        ]),
-        channexRequests.createRoomType({
-          roomTypeId: room.roomTypeId,
-          roomTypeName: title,
-          roomType: {
-            property_id: externalPropertyId,
-            title,
-            count_of_rooms: Math.max(1, room.countOfRooms),
-            occ_adults: Math.max(1, room.adults),
-            occ_children: Math.max(0, room.children),
-            occ_infants: 0,
-            default_occupancy: Math.min(2, Math.max(1, room.adults)),
-            room_kind: "room",
-          },
-        }),
-      ];
-    }),
-    checkpoint: checkpoint(pool, job),
-  };
 }
 
 async function ariPlan(
