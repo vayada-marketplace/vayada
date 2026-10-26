@@ -840,8 +840,9 @@ async function applyAttach(client: Client, plan: ChannexAttachPlan) {
   await client.query(
     `INSERT INTO platform.jobs (job_key, queue_name, job_type, tenant_scope, property_id,
        resource_product, resource_type, resource_id, max_attempts, payload)
-     VALUES ($1 || ':' || $4 || ':' || $5, $2, $1, 'property', $3::uuid, 'pms', 'channel_connection', $3::uuid::text, 3,
-       jsonb_build_object('propertyId', $3::uuid::text, 'providerPropertyId', $6, 'bindingGeneration', $5))
+     VALUES ($1::text || ':' || $4::text || ':' || $5::text, $2::text, $1::text, 'property', $3::uuid, 'pms',
+       'channel_connection', $3::uuid::text, 3,
+       jsonb_build_object('propertyId', $3::uuid::text, 'providerPropertyId', $6::text, 'bindingGeneration', $5::text))
      ON CONFLICT (queue_name, job_key) DO NOTHING`,
     [
       RESYNC_TYPE,
