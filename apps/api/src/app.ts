@@ -218,6 +218,10 @@ import {
   type PmsGuestRegistrationRepository,
 } from "./routes/pmsGuestRegistrations.js";
 import {
+  registerPmsCheckinSettingsRoutes,
+  type PmsCheckinSettingsRepository,
+} from "./routes/pmsCheckinSettings.js";
+import {
   registerPmsBookingModuleRoutes,
   type BookingModuleRepository,
 } from "./routes/pmsBookingModules.js";
@@ -350,6 +354,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsModuleActivationRepository?: PmsModuleActivationRepository;
   pmsNavigationModuleRepository?: PmsNavigationModuleRepository;
   pmsGuestRegistrationRepository?: PmsGuestRegistrationRepository;
+  pmsCheckinSettingsRepository?: PmsCheckinSettingsRepository;
   bookingModuleRepository?: BookingModuleRepository;
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
@@ -978,6 +983,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsGuestRegistrationRoutes, {
       prefix: "/api/pms",
       repository: options.pmsGuestRegistrationRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (options.pmsCheckinSettingsRepository && options.auth) {
+    app.register(registerPmsCheckinSettingsRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsCheckinSettingsRepository,
       propertyAccessRepository: options.auth.propertyAccessRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
     });

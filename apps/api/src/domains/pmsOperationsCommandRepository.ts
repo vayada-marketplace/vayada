@@ -6100,8 +6100,10 @@ async function applyBookingMarkPaidCommandMutation(
     return invalidStatusTransition("booking_amount_unverified", "confirmed/paid");
   }
   const recordPayment = async (
-    paymentMethod: FinanceBookingManualPaymentSettlementCommand["payload"]["paymentMethod"],
+    bookingMethod: FinanceBookingManualPaymentSettlementCommand["payload"]["paymentMethod"],
   ) => {
+    // VAY-2373 (D2): the method staff chose at the desk, else the booking's own.
+    const paymentMethod = command.settlementMethod ?? bookingMethod;
     const financeCommand: FinanceBookingManualPaymentSettlementCommand = {
       commandId: command.commandId,
       idempotencyKey: `pms.booking.mark-paid.finance:${command.idempotencyKey}`,
@@ -6181,6 +6183,7 @@ async function applyBookingMarkPaidCommandMutation(
           requestId: command.audit.requestId,
           correlationId: command.audit.correlationId ?? command.audit.requestId,
           paymentMethod: "pay_at_property",
+          settlementMethod: command.settlementMethod ?? null,
           fromPaymentStatus: "partially_paid",
           toPaymentStatus: "paid",
         }),
@@ -6285,6 +6288,7 @@ async function applyBookingMarkPaidCommandMutation(
         requestId: command.audit.requestId,
         correlationId: command.audit.correlationId ?? command.audit.requestId,
         paymentMethod: booking.paymentMethod,
+        settlementMethod: command.settlementMethod ?? null,
         fromPaymentStatus: "unpaid",
         toPaymentStatus: "paid",
       }),

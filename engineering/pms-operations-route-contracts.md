@@ -362,6 +362,20 @@ and is not implemented by this slice.
 operational charge as settled for checkout. It is not a provider payment
 capture, invoice post, payout trigger, or finance reconciliation event.
 
+VAY-2373/2374 add the step-by-step check-in's data, outside `pmsOperations.ts`:
+
+- `GET/PUT /api/pms/properties/:propertyId/reservations/:guestBookingId/guest-registrations[/:guestId]`
+  (`routes/pmsGuestRegistrations.ts`, `pms.guest_registrations`, migration 0516): date of birth, ID
+  document, gender, room and a staff note per booking guest. Front desk, operators and owners read and
+  write it; the ID fields are hidden from staff without `pms.guest_contact.read`, who also can't save.
+  Audit events carry the changed field names only.
+- `GET/PUT /api/pms/properties/:propertyId/check-in-settings` (`routes/pmsCheckinSettings.ts`,
+  `pms.checkin_settings`, migration 0517): Settings → Check-in. Anyone who checks guests in reads it;
+  owners and operators with `pms.settings.manage` change it. No row means the defaults.
+- `POST .../reservations/:guestBookingId/mark-paid` takes an optional `settlementMethod` (`cash`,
+  `manual_card`, `bank_transfer`, `other`): how staff took the money at the desk, recorded on the
+  Finance payment instead of the booking's own method. Nothing is charged online.
+
 VAY-784 implements the P2c check-out command in `apps/api`.
 `POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`
 uses the PMS operations manage policy and persists `pms.booking_checkout_records`
