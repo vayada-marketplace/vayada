@@ -5,17 +5,25 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0473, checked on PG17.
-const POLICY_DIGEST = "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323";
+// Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0519), both checked on
+// PG16 and PG17. Accepting both lets this image start on either side of 0519, so it is released
+// before 0519 and stays a safe rollback target once 0519 ships.
+const POLICY_DIGESTS = new Set([
+  "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323",
+  "f9a53a613884875be8387bfb59bf5772038eda202d0f213c32854585d247b7be",
+]);
 // Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
 // (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
 // 0474, so it stays a safe rollback target when 0474 ships in a later release.
 // The third value is the catalog after 0489 drops the restriction ARI triggers (VAY-2208, PG16
-// and PG17); it ships one release before 0489 for the same reason.
+// and PG17); it ships one release before 0489 for the same reason. The fourth is the catalog with
+// the claimed helper and the ownership-gated pms.enqueue_restriction_ari (VAY-2108 migration 0519,
+// PG16 and PG17), accepted one release ahead of 0519 in the same way.
 const CATALOG_DIGESTS = new Set([
   "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
   "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
   "2d185251ef0a8949b140fe14469c65f5122b7df055f712ffe64e590f64e24ef2",
+  "48270709c6e36bc4d4c8c1716c8bfa636026bce462fdbc855cf54e410cd4538f",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
@@ -25,10 +33,20 @@ export const channexManagementWorkerFunctions = [
   "pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)",
   "pms.enqueue_restriction_ari(uuid,text)",
 ] as const;
-const pricingScopeViews = new Set(["booking.pricing_runtime_effective_property_scopes"]);
+// Reads tolerated beyond the privilege map: the pricing scope view, and the claimed scope's owner
+// table (VAY-2108, 0519), whose read the claimed grant adds after 0519.
+const toleratedReads = new Set([
+  "booking.pricing_runtime_effective_property_scopes",
+  "platform.channex_management_worker_claimed_operations",
+]);
 export async function assertChannexManagementWorkerBoundary(
   client: Pick<pg.Client, "query">,
-  options: { allowMissingGrants?: boolean; propertyId?: string; connectionScope?: boolean } = {},
+  options: {
+    allowMissingGrants?: boolean;
+    propertyId?: string;
+    connectionScope?: boolean;
+    claimedScope?: boolean;
+  } = {},
 ): Promise<void> {
   const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
   const fail = (code: string): never => {
@@ -88,8 +106,9 @@ export async function assertChannexManagementWorkerBoundary(
       `SELECT schemaname,tablename,policyname,permissive,roles::text,cmd,qual,with_check FROM pg_policies WHERE policyname LIKE 'channex_management_worker_%' ORDER BY schemaname,tablename,policyname`,
     )
   ).rows;
-  if (createHash("sha256").update(JSON.stringify(policyRows)).digest("hex") !== POLICY_DIGEST)
-    fail("policy_drift");
+  // The drift codes carry the actual digest, so a re-pin can be read from the failure.
+  const policyDigest = createHash("sha256").update(JSON.stringify(policyRows)).digest("hex");
+  if (!POLICY_DIGESTS.has(policyDigest)) fail(`policy_drift:${policyDigest}`);
   const relations = (
     await client.query(
       `SELECT n.nspname||'.'||c.relname AS name,c.oid,c.relrowsecurity AS rls FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema'`,
@@ -100,8 +119,8 @@ export async function assertChannexManagementWorkerBoundary(
   const catalog = (
     await client.query(channexWorkerCatalogSql, [Object.keys(channexManagementWorkerPrivileges)])
   ).rows;
-  if (!CATALOG_DIGESTS.has(createHash("sha256").update(JSON.stringify(catalog)).digest("hex")))
-    fail("catalog_drift");
+  const catalogDigest = createHash("sha256").update(JSON.stringify(catalog)).digest("hex");
+  if (!CATALOG_DIGESTS.has(catalogDigest)) fail(`catalog_drift:${catalogDigest}`);
   const version = Number(
     (await client.query("SHOW server_version_num")).rows[0].server_version_num,
   );
@@ -125,7 +144,7 @@ export async function assertChannexManagementWorkerBoundary(
     if (
       row.delegate ||
       (channexManagementWorkerPrivileges[row.name]?.[row.privilege] !== true &&
-        !(row.privilege === "SELECT" && pricingScopeViews.has(row.name)))
+        !(row.privilege === "SELECT" && toleratedReads.has(row.name)))
     )
       fail("table_privileges");
   const columnGrants = (
@@ -141,7 +160,7 @@ export async function assertChannexManagementWorkerBoundary(
       !(
         grant === true ||
         (Array.isArray(grant) && grant.includes(row.attname)) ||
-        (row.privilege === "SELECT" && pricingScopeViews.has(row.name))
+        (row.privilege === "SELECT" && toleratedReads.has(row.name))
       )
     )
       fail("column_privileges");
@@ -197,6 +216,27 @@ export async function assertChannexManagementWorkerBoundary(
     ).rows;
     if (rows.length !== 1 || rows[0].operation_type !== "enable") fail("operation_scope_mismatch");
   }
+  // VAY-2108: the claimed scope is exactly ARI plus published-offer provisioning. Its SELECT comes
+  // from the platform's claimed grant, never the matrix (this preflight gates every next-api
+  // start); without it the claimed helper grants nothing. The grant may land before an image asks
+  // for claimedScope, so only an explicit claimedScope requires it.
+  const readable = (
+    await client.query(
+      "SELECT has_table_privilege($1,'platform.channex_management_worker_claimed_operations','SELECT') AS ok",
+      [role],
+    )
+  ).rows[0]?.ok;
+  const claimed = readable
+    ? (
+        await client.query(
+          "SELECT operation_type FROM platform.channex_management_worker_claimed_operations ORDER BY 1",
+        )
+      ).rows
+        .map((row) => row.operation_type)
+        .join(",")
+    : "";
+  if (claimed !== "provision,sync_ari" && (options.claimedScope || claimed !== ""))
+    fail("claimed_scope_mismatch");
 }
 
 // Attest transitive invoker functions, enabled triggers and the invoker view as
@@ -210,15 +250,16 @@ export const channexWorkerCatalogSql = `
 WITH relations AS (SELECT oid FROM pg_class WHERE oid=ANY($1::regclass[])),
 functions AS (
   SELECT tgfoid AS oid FROM pg_trigger WHERE tgrelid IN (SELECT oid FROM relations) AND NOT tgisinternal
-  UNION SELECT unnest(ARRAY[
-    'platform.channex_management_worker_scope(text,text,uuid)'::regprocedure,
-    'platform.channex_management_worker_connection_scope(text,text)'::regprocedure,
-    'platform.channex_management_worker_source(text,text,uuid)'::regprocedure,
-    'platform.tenant_scope_key(text,uuid,uuid)'::regprocedure,
-    'platform.valid_tenant_scope(text,uuid,uuid)'::regprocedure,
-    'pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)'::regprocedure,
-    'pms.enqueue_restriction_ari(uuid,text)'::regprocedure
-  ])::oid
+  UNION SELECT to_regprocedure(name)::oid FROM unnest(ARRAY[
+    'platform.channex_management_worker_scope(text,text,uuid)',
+    'platform.channex_management_worker_connection_scope(text,text)',
+    'platform.channex_management_worker_claimed_scope(text,text)',
+    'platform.channex_management_worker_source(text,text,uuid)',
+    'platform.tenant_scope_key(text,uuid,uuid)',
+    'platform.valid_tenant_scope(text,uuid,uuid)',
+    'pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)',
+    'pms.enqueue_restriction_ari(uuid,text)'
+  ]) name WHERE to_regprocedure(name) IS NOT NULL
 )
 SELECT 'function:'||n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' AS name,
   pg_get_functiondef(p.oid) AS definition
