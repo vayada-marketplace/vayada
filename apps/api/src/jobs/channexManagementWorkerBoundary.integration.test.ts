@@ -846,13 +846,25 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
         client.release();
       }
     };
+    // Row security on the delivery tables arrives with migration 0521 (D3a); until then an image
+    // with delivery on refuses to start, with delivery off it starts.
+    const secured = (
+      await owner.query<{ all: boolean }>(
+        `SELECT bool_and(c.relrowsecurity) AS all FROM pg_class c
+         JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE c.relkind='r' AND n.nspname='pms' AND c.relname LIKE 'channex_offer_ari_deliver%'`,
+      )
+    ).rows[0]!.all;
     await boundary(false);
-    await boundary(true);
+    if (secured) await boundary(true);
+    else await expect(boundary(true)).rejects.toThrow("channex_worker_rls_disabled");
     await owner.query(`REVOKE ALL ON ${tables.join(",")} FROM ${role}`);
     try {
       // Before the platform's delivery grant mode: an image with delivery off still starts.
       await boundary(false);
-      await expect(boundary(true)).rejects.toThrow("channex_worker_grant_missing");
+      await expect(boundary(true)).rejects.toThrow(
+        secured ? "channex_worker_grant_missing" : "channex_worker_rls_disabled",
+      );
     } finally {
       for (const table of tables)
         for (const [kind, columns] of Object.entries(privileges[table]!))
@@ -860,6 +872,6 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
             `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
           );
     }
-    await boundary(true);
+    await boundary(false);
   });
 });
