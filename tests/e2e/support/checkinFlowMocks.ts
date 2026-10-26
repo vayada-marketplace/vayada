@@ -90,13 +90,44 @@ const registration = (guestId: string, role: string, filledFields: string[]) => 
   updatedAt: null,
 });
 
-export async function mockCheckinFlow(page: Page, settings: Record<string, unknown> = {}) {
+/** The desk add-on catalog: breakfast per guest per night, a scooter a day, a late check-out. */
+export const checkinAddons = [
+  {
+    addonItemId: "a1000000-0000-4000-8000-000000000001",
+    name: "Breakfast",
+    pricingModel: "per_guest_night",
+    price: "8.00",
+  },
+  {
+    addonItemId: "a1000000-0000-4000-8000-000000000002",
+    name: "Scooter rental",
+    pricingModel: "per_night",
+    price: "10.00",
+  },
+  {
+    addonItemId: "a1000000-0000-4000-8000-000000000003",
+    name: "Late check-out",
+    pricingModel: "per_stay",
+    price: "20.00",
+  },
+].map((addon) => ({ ...addon, description: "", currency: "EUR", category: "" }));
+
+export async function mockCheckinFlow(
+  page: Page,
+  settings: Record<string, unknown> = {},
+  reservation: Record<string, unknown> = {},
+) {
   const writes = {
     guests: [] as Record<string, unknown>[],
     registrations: [] as Array<{ guestId: string; body: Record<string, unknown> }>,
     moves: [] as Record<string, unknown>[],
+    charges: [] as Record<string, unknown>[],
+    chargePaid: [] as string[],
+    chargeWaived: [] as string[],
+    markPaid: [] as Record<string, unknown>[],
+    checkIn: [] as Record<string, unknown>[],
   };
-  let current = arrival();
+  let current: Record<string, unknown> = { ...arrival(), ...reservation };
   await page.clock.install({ time: new Date("2026-08-15T12:00:00Z") });
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
@@ -158,8 +189,59 @@ export async function mockCheckinFlow(page: Page, settings: Record<string, unkno
   await page.route(`${base}/assignments`, (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     writes.moves.push(body);
-    current = arrival("102");
+    current = { ...arrival("102"), ...reservation };
     return route.fulfill({ json: { accepted: true } });
+  });
+  await page.route(`${property}/manual-bookings/addons`, (route) =>
+    route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: checkinAddons } }),
+  );
+  // Desk charges (D3): created, paid with the balance, waived when removed.
+  await page.route(`${base}/checkout-charges**`, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "GET") return route.fulfill({ json: { items: [] } });
+    const chargeId = path.split("/").at(-2)!;
+    const status = path.endsWith("/paid") ? "paid" : path.endsWith("/waive") ? "waived" : "pending";
+    if (status === "paid") writes.chargePaid.push(chargeId);
+    if (status === "waived") writes.chargeWaived.push(chargeId);
+    const body =
+      status === "pending" ? (route.request().postDataJSON() as Record<string, unknown>) : {};
+    if (status === "pending") writes.charges.push(body);
+    const amount = { amountDecimal: String(body.amountDecimal ?? "0.00"), currency: "EUR" };
+    return route.fulfill({
+      json: {
+        charge: {
+          chargeId:
+            status === "pending"
+              ? `c1000000-0000-4000-8000-00000000000${writes.charges.length}`
+              : chargeId,
+          label: body.label ?? "",
+          amount,
+          originalAmount: amount,
+          status,
+          createdAt: "2026-08-15T12:10:00.000Z",
+          settledAt: status === "paid" ? "2026-08-15T12:11:00.000Z" : null,
+          waivedAt: status === "waived" ? "2026-08-15T12:11:00.000Z" : null,
+        },
+      },
+    });
+  });
+  // Mark-paid records how the desk took the money (D2); the balance is then settled.
+  await page.route(`${base}/mark-paid`, (route) => {
+    writes.markPaid.push(route.request().postDataJSON() as Record<string, unknown>);
+    current = {
+      ...current,
+      pricing: {
+        totalAmount: (current.pricing as { totalAmount: unknown }).totalAmount,
+        balanceAmount: { amountDecimal: "0.00", currency: "EUR" },
+      },
+      payment: { ...(current.payment as Record<string, unknown>), status: "paid" },
+    };
+    return route.fulfill({ json: { reservation: current } });
+  });
+  await page.route(`${base}/check-in`, (route) => {
+    writes.checkIn.push(route.request().postDataJSON() as Record<string, unknown>);
+    current = { ...current, status: "checked_in" };
+    return route.fulfill({ json: {} });
   });
   await page.route(base, (route) => route.fulfill({ json: { item: current } }));
   // The move picker's calendar read: two room types, one room taken, one blocked, one out of service.

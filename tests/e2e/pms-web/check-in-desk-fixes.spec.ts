@@ -73,7 +73,11 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
   });
   await mockReservation(page, reservation);
   await page.route(`${base}/mark-paid`, (route) => {
-    expect(route.request().postDataJSON()).toMatchObject({ commandId: expect.any(String) });
+    // VAY-2374 D2: the desk records how it took the money.
+    expect(route.request().postDataJSON()).toMatchObject({
+      commandId: expect.any(String),
+      settlementMethod: "cash",
+    });
     paid = true;
     return route.fulfill({ json: { reservation: reservation() } });
   });
@@ -144,15 +148,13 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
   await expect.poll(() => registrations.length).toBe(1);
 
   await openCheckinStep(page, "Add-ons & payment");
-  await page.getByRole("button", { name: "Mark pay-at-hotel payment received" }).click();
-  await expect(
-    page.getByText("Confirm that the pay-at-hotel payment has been received?"),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Mark as paid" }).click();
+  await expect(main.getByText("Due now").locator("..")).toContainText("€240");
+  await main.getByRole("radio", { name: /Collect now/ }).click();
+  await main.getByRole("button", { name: "Cash", exact: true }).click();
+  await main.getByRole("button", { name: "Continue" }).click();
   await expect.poll(() => paid).toBe(true);
-  await expect(
-    page.getByRole("button", { name: "Mark pay-at-hotel payment received" }),
-  ).toHaveCount(0);
+  await expect(main.getByText("Step 4 of 4")).toBeVisible();
+  await expect(main.getByText(/€240(\.00)? · Cash, recorded/)).toBeVisible();
   await assertHealthy();
 });
 
@@ -175,16 +177,17 @@ test("shows and records the rest of a card deposit at check-in", async ({ page }
 
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
   await openCheckinStep(page, "Add-ons & payment");
-  await expect(page.getByText("€168 outstanding", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Mark the rest paid (€168.00)" }).click();
+  const main = page.locator("main").first();
+  // The card deposit already paid €72; the rest is due at the desk.
   await expect(
-    page.getByText(
-      "Mark the rest, €168.00, as paid at the hotel? The booking is then paid in full.",
-    ),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Mark as paid" }).click();
+    main.locator("dl").getByText("Already paid", { exact: true }).locator(".."),
+  ).toContainText("€72");
+  await expect(main.getByText("Due now").locator("..")).toContainText("€168");
+  await main.getByRole("radio", { name: /Collect now/ }).click();
+  await main.getByRole("button", { name: "Card · own terminal", exact: true }).click();
+  await main.getByRole("button", { name: "Continue" }).click();
   await expect.poll(() => paid).toBe(true);
-  await expect(page.getByText("Payment recorded", { exact: true })).toBeVisible();
+  await expect(main.getByText(/€168(\.00)? · Card · own terminal, recorded/)).toBeVisible();
   await assertHealthy();
 });
 
@@ -202,8 +205,10 @@ test("offers no payment record for a cancelled card-deposit stay", async ({ page
 
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
   await openCheckinStep(page, "Add-ons & payment");
-  await expect(page.getByText("€168 outstanding", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
+  // Not a balance the desk can take: nothing to choose, nothing recorded.
+  await expect(page.getByText("Settled outside the desk").locator("..")).toContainText("€168");
+  await expect(page.getByText("Nothing to collect at the desk.")).toBeVisible();
+  await expect(page.getByRole("radio")).toHaveCount(0);
   await assertHealthy();
 });
 
@@ -219,7 +224,7 @@ test("offers no payment record for an OTA-collected stay", async ({ page }, test
   await expect(page.getByRole("heading", { name: /Ada Lovelace/ }).first()).toBeVisible();
   await openCheckinStep(page, "Add-ons & payment");
   await expect(page.getByRole("heading", { name: "Add-ons & payment" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
+  await expect(page.getByRole("radio")).toHaveCount(0);
   await assertHealthy();
 });
 

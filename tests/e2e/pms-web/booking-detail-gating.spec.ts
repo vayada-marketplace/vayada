@@ -531,9 +531,9 @@ test("saves check-in guests to the guest list and their ID to the registration (
   // An OTA stay has no hotel-collected payment to record here.
   const steps = page.getByRole("navigation", { name: "Check-in steps" });
   await steps.getByRole("button", { name: /^Add-ons & payment/ }).click();
-  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
+  await expect(page.getByRole("radio")).toHaveCount(0);
   await steps.getByRole("button", { name: /^Keys & check-in/ }).click();
-  await page.getByRole("button", { name: "Complete check-in" }).click();
+  await page.getByRole("button", { name: "Check in 2 guests" }).click();
   await expect.poll(() => checkIns).toBe(1);
   await assertHealthy();
 });

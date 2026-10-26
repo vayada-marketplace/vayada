@@ -709,6 +709,9 @@ export interface CheckoutInspectionResult {
   completedAt: string | null;
 }
 
+/** How staff took a payment at the desk; the API's PMS_DESK_SETTLEMENT_METHODS. */
+export type DeskSettlementMethod = "cash" | "manual_card" | "bank_transfer" | "other";
+
 export interface CheckoutCharge {
   id: string;
   bookingId: string;
@@ -901,10 +904,14 @@ export const bookingsService = {
     return refreshBooking(id);
   },
 
-  markPaid: async (id: string) => {
+  /** With a settlement method, records how the desk took the money (VAY-2374 D2); nothing is charged. */
+  markPaid: async (id: string, settlementMethod?: DeskSettlementMethod) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(
       await reservationEndpoint(id, "/mark-paid"),
-      bookingLifecycleCommand("mark-paid", id),
+      {
+        ...bookingLifecycleCommand("mark-paid", id),
+        ...(settlementMethod && { settlementMethod }),
+      },
       pmsOperationsRequestOptions,
     );
     return refreshBooking(id);
