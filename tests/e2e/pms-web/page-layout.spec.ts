@@ -6,6 +6,7 @@ import {
   mockPmsWebTargetRoutes,
   pmsWebReservation,
 } from "../support/pmsWebMocks";
+import { checkinSettingsResponse } from "../support/checkinSettingsMocks";
 
 // VAY-2204: every PMS page puts its title in the same place: 24px in from <main>'s left and top
 // edges (16px on phones), at every screen width, so the title never jumps between pages. Pages
@@ -26,6 +27,7 @@ const SUB_PAGES = [
   "/settings/feature-hub",
   "/settings/property",
   "/settings/calendar",
+  "/settings/check-in",
   "/settings/guest-flows",
   "/settings/ota-commissions",
   "/settings/team",
@@ -65,6 +67,16 @@ async function mockPages(page: Page) {
     route.fulfill({ json: { items: [] } }),
   );
   await page.route(`${reservation}/change-request`, (route) => route.fulfill({ json: null }));
+  const property = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}`;
+  await page.route(`${property}/check-in-settings`, (route) =>
+    route.fulfill({ json: checkinSettingsResponse() }),
+  );
+  await page.route(`${property}/check-in-checklist`, (route) =>
+    route.fulfill({ json: { template: { steps: [], updatedAt: null, updatedByUserId: null } } }),
+  );
+  await page.route(`${property}/manual-bookings/addons`, (route) =>
+    route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: [] } }),
+  );
 }
 
 /** True on the route's own URL, so a redirect elsewhere can't pass for it. */
