@@ -74,6 +74,8 @@ export type ChannexManagementConfig = {
   stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
   stagingNoShowEnabled?: boolean;
+  /** VAY-2108 D3: ongoing offer ARI deliveries after activation (needs the delivery grants). */
+  offerAriDeliveryEnabled?: boolean;
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -104,6 +106,7 @@ export function channexConnectionOnlyScope(config: ChannexManagementConfig): boo
     !config.stagingPublishedOffersEnabled &&
     !config.stagingInventoryEnabled &&
     !config.stagingNoShowEnabled &&
+    !config.offerAriDeliveryEnabled &&
     ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
   );
 }
@@ -757,6 +760,17 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       "Scoped Channex restrictions require a property UUID, staging URL, disabled background workers, and only ARI mutations",
     );
   }
+  // VAY-2108 D3: ongoing offer ARI delivery is its own switch, off by default. It only has an
+  // effect inside a mutating full ARI sync, and the worker boundary then requires the delivery
+  // table grants (the platform's delivery grant mode).
+  const offerAriDeliveryEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED",
+    false,
+  );
+  if (offerAriDeliveryEnabled && capabilityModes.ariSync !== "mutating") {
+    throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires a mutating ARI sync");
+  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )
@@ -827,6 +841,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     stagingPublishedOffersEnabled,
     stagingInventoryEnabled,
     stagingNoShowEnabled,
+    offerAriDeliveryEnabled,
     workerEnabled,
     capabilityModes,
   };

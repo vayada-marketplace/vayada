@@ -8,6 +8,10 @@ import { advancePublishedChannexOfferCreates } from "./domains/channexPublishedO
 import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
 import { activatePublishedChannexOffers } from "./domains/replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
+import {
+  prepareNextChannexOfferAriDelivery,
+  reconcilePendingChannexOfferAriDeliveries,
+} from "./domains/channexOfferAriDelivery.js";
 import { prepareNextChannexRoomAvailabilityDispatch } from "./domains/channexRoomAvailabilityCoordinator.js";
 import { reconcilePendingChannexRoomAvailability } from "./domains/channexPendingRoomAvailabilityReconciliation.js";
 import { readChannexOfferPreview } from "./domains/channexOfferPreviewReader.js";
@@ -1296,6 +1300,19 @@ const channexManagementProvider =
         activatePublishedOffers:
           channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
             ? (lease) => activatePublishedChannexOffers(channexUploadReconciliationPool, lease)
+            : undefined,
+        reconcileOfferDeliveries:
+          channexUploadReconciliationPool && config.channexManagement.offerAriDeliveryEnabled
+            ? (lease, get) =>
+                reconcilePendingChannexOfferAriDeliveries(
+                  channexUploadReconciliationPool,
+                  lease,
+                  get,
+                )
+            : undefined,
+        prepareOfferDelivery:
+          channexUploadReconciliationPool && config.channexManagement.offerAriDeliveryEnabled
+            ? (lease) => prepareNextChannexOfferAriDelivery(channexUploadReconciliationPool, lease)
             : undefined,
         bootstrapPublishedOffer:
           channexUploadReconciliationPool && config.channexManagement.stagingPublishedOffersEnabled

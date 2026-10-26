@@ -120,6 +120,32 @@ export async function applyPmsChannexManagementProgress(
       [job.propertyId, JSON.stringify(result.channels), now.toISOString()],
     );
   }
+  // VAY-2108 D3: a successful run that left active offer targets behind is visible as a degraded
+  // ARI status on the channel manager page, with the first reasons, until a run delivers them all.
+  if (result.skippedOfferTargets?.length) {
+    const reasons = [...new Set(result.skippedOfferTargets.map((item) => item.reason))].sort();
+    await client.query(
+      `INSERT INTO pms.channel_sync_status (
+         property_id, connection_id, sync_domain, status, last_attempt_at, last_success_at,
+         last_error_code, last_error_message
+       ) SELECT $1::uuid, connection.id, 'ari', 'degraded', $2::timestamptz, $2::timestamptz, $3, $4
+         FROM pms.channel_connections connection
+         WHERE connection.property_id = $1::uuid AND connection.provider = 'channex'
+       ON CONFLICT (connection_id, sync_domain) DO UPDATE SET status = 'degraded',
+         last_attempt_at = EXCLUDED.last_attempt_at, last_success_at = EXCLUDED.last_success_at,
+         last_error_code = EXCLUDED.last_error_code, last_error_message = EXCLUDED.last_error_message,
+         retry_after = NULL, updated_at = EXCLUDED.last_attempt_at`,
+      [
+        job.propertyId,
+        now.toISOString(),
+        "offer_targets_skipped",
+        `${result.skippedOfferTargets.length} offer target(s) not delivered: ${reasons.join(", ")}`.slice(
+          0,
+          500,
+        ),
+      ],
+    );
+  }
 }
 
 async function requireChannexBindingClaim(

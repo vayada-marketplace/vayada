@@ -137,6 +137,38 @@ export function createChannexManagementProvider(config: {
     lease: Parameters<typeof advancePublishedChannexOfferCreates>[1],
     ports: Parameters<typeof advancePublishedChannexOfferCreates>[2],
   ) => ReturnType<typeof advancePublishedChannexOfferCreates>;
+  /** VAY-2108 D3: settle earlier ongoing offer ARI deliveries from Channex task readback. */
+  reconcileOfferDeliveries?: (
+    lease: { jobId: string; attemptNumber: number; workerId: string },
+    get: (path: string, signal: AbortSignal) => Promise<unknown>,
+  ) => Promise<
+    | { kind: "pending_deliveries_reconciled"; count: number }
+    | { kind: "unavailable"; reason: string }
+  >;
+  /** VAY-2108 D3: claim the next ongoing offer ARI delivery of the owned hotel. */
+  prepareOfferDelivery?: (lease: { jobId: string; attemptNumber: number; workerId: string }) => Promise<
+    | {
+        kind: "offer_ari_current";
+        targetCount: number;
+        skipped: readonly { targetId: string; reason: string }[];
+      }
+    | {
+        kind: "prepared";
+        deliveryId: string;
+        targetId: string;
+        dispatch(
+          post: (
+            request: { method: "POST"; path: "/api/v1/restrictions"; body: unknown },
+            signal: AbortSignal,
+          ) => Promise<Response>,
+        ): Promise<
+          | { kind: "retained"; deliveryId: string }
+          | { kind: "receipt_pending"; deliveryId: string; persist: () => Promise<unknown> }
+          | { kind: "unavailable"; reason: string }
+        >;
+      }
+    | { kind: "unavailable"; reason: string }
+  >;
   bootstrapPublishedOffer?: (
     job: ChannexManagementJob,
     workerId: string,
@@ -371,7 +403,57 @@ export function createChannexManagementProvider(config: {
             if (prepared.kind === "room_availability_current") {
               if (config.activatePublishedOffers) {
                 const activated = await config.activatePublishedOffers(lease);
-                if (activated.kind === "all_targets_active") return { ok: true };
+                if (activated.kind === "all_targets_active") {
+                  if (!config.reconcileOfferDeliveries || !config.prepareOfferDelivery)
+                    return { ok: true };
+                  // VAY-2108 D3: after activation, keep every active rate plan current.
+                  const delivered = await config.reconcileOfferDeliveries(lease, readClosedUpload);
+                  if (delivered.kind !== "pending_deliveries_reconciled")
+                    return failure(
+                      delivered.reason === "delivery_reconciliation_batch_pending" ||
+                        delivered.reason === "delivery_task_observation_unavailable" ||
+                        delivered.reason === "delivery_contention"
+                        ? "provider_unavailable"
+                        : "invalid_state",
+                      new Error("Saved Channex offer deliveries still require reconciliation."),
+                    );
+                  await input.onProgress?.();
+                  const delivery = await config.prepareOfferDelivery(lease);
+                  if (delivery.kind === "offer_ari_current")
+                    return { ok: true, skippedOfferTargets: delivery.skipped };
+                  if (delivery.kind !== "prepared")
+                    return failure(
+                      delivery.reason === "delivery_contention"
+                        ? "provider_unavailable"
+                        : "invalid_state",
+                      new Error("Channex offer delivery is unavailable."),
+                    );
+                  const sent = await delivery.dispatch(async (request, signal) => {
+                    if (request.method !== "POST" || request.path !== "/api/v1/restrictions")
+                      throw new Error("Invalid Channex delivery scope.");
+                    signal.throwIfAborted();
+                    return fetcher(new URL(request.path, apiBaseUrl), {
+                      method: "POST",
+                      headers: { "user-api-key": apiKey, "content-type": "application/json" },
+                      body: JSON.stringify(request.body),
+                      signal,
+                      redirect: "error",
+                    });
+                  });
+                  if (sent.kind === "receipt_pending") await sent.persist();
+                  if (sent.kind === "retained" || sent.kind === "receipt_pending")
+                    return {
+                      ok: false,
+                      code: "offer_delivery_retained",
+                      attemptId: sent.deliveryId,
+                    };
+                  return failure(
+                    sent.reason === "delivery_stale" || sent.reason === "delivery_contention"
+                      ? "provider_unavailable"
+                      : "invalid_state",
+                    new Error("Channex offer delivery dispatch is unavailable."),
+                  );
+                }
                 if (activated.kind !== "no_targets")
                   return failure(
                     activated.reason === "target_activation_pending"
