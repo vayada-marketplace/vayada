@@ -1,5 +1,6 @@
 "use client";
 import { AirbnbChangeRequestCard } from "@/components/bookings/AirbnbChangeRequestCard";
+import { ExtrasRequestCard } from "@/components/bookings/ExtrasRequestCard";
 
 import { NoShowReporting } from "@/components/bookings/NoShowReporting";
 import { useState, useEffect, useCallback, use, useMemo, useRef } from "react";
@@ -25,6 +26,7 @@ import {
   Booking,
   BookingAddon,
   BookingChangeRequest,
+  BookingExtrasRequest,
   BookingNote,
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
@@ -1275,6 +1277,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [decideOpen, setDecideOpen] = useState<"approve" | "decline" | null>(null);
   const [declineReason, setDeclineReason] = useState("");
   const [decidingChange, setDecidingChange] = useState(false);
+  // VAY-2360 part 3: extras the guest asked for after booking.
+  const [extrasRequest, setExtrasRequest] = useState<BookingExtrasRequest | null>(null);
+  const [decidingExtras, setDecidingExtras] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDraftOpen, setNoteDraftOpen] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
@@ -1341,6 +1346,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
     Promise.all([
       bookingsService.getChangeRequest(id).then(setChangeRequest).catch(console.error),
+      bookingsService.getExtrasRequest(id).then(setExtrasRequest).catch(console.error),
       bookingsService
         .listNotes(id)
         .then((r) => setNotes(r.notes))
@@ -1410,6 +1416,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         doAction(() => bookingsService.acceptBooking(id), t("bookings.detail.failedToAccept"));
       },
     });
+  };
+
+  const handleExtrasDecision = async (decision: "accept" | "decline", reason?: string) => {
+    if (!extrasRequest) return;
+    setDecidingExtras(true);
+    setError("");
+    try {
+      setExtrasRequest(
+        await bookingsService.decideExtrasRequest(id, extrasRequest.id, decision, reason),
+      );
+    } catch (err) {
+      setError(errMessage(err, t("bookings.extras.failed")));
+      // Someone may have answered it already: show what it is now.
+      setExtrasRequest(await bookingsService.getExtrasRequest(id).catch(() => extrasRequest));
+    } finally {
+      setDecidingExtras(false);
+    }
   };
 
   const handleApproveChange = async () => {
@@ -2048,6 +2071,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
+      {extrasRequest && (
+        <ExtrasRequestCard
+          request={extrasRequest}
+          guestName={`${booking.guestFirstName} ${booking.guestLastName}`.trim()}
+          busy={decidingExtras}
+          onDecide={(decision, reason) => void handleExtrasDecision(decision, reason)}
+        />
+      )}
       {changeRequest?.providerRequest && (
         <AirbnbChangeRequestCard
           amountStatus={booking.amountStatus}
