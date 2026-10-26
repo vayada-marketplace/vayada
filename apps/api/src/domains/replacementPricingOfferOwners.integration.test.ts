@@ -9643,20 +9643,18 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
     }
     expect(await f.next()).toMatchObject({ kind: "offer_ari_current", skipped: [] });
-    // The published room keeps the flex offer only: the other target's offer vanished, so every
-    // night of its rate plan is closed; the still-published target is untouched.
+    // Publication 2 drops the other offer: its target's offer vanished, so every night of its
+    // rate plan is closed; the still-published target is unchanged (D5) and stays current.
     const other = (
       await pool.query<{ id: string }>(
         "SELECT id::text AS id FROM pms.channex_offer_targets WHERE property_id=$1 AND offer_id='other'",
         [f.scope.propertyId],
       )
     ).rows[0]!.id;
-    await pool.query(
-      `UPDATE pms.pricing_v2_rooms SET configuration=jsonb_set(configuration,'{offers}',
-         (SELECT jsonb_agg(o) FROM jsonb_array_elements(configuration->'offers') o WHERE o->>'id'<>'other'))
-       WHERE property_id=$1 AND revision=1`,
-      [f.scope.propertyId],
-    );
+    await publishRevisionTwo(f, (room) => ({
+      ...room,
+      offers: room.offers.filter((offer) => offer.id !== "other"),
+    }));
     const closed = await f.send(f.accepted());
     expect(closed.targetId).toBe(other);
     expect((closed.posted[0] as { values: unknown[] }).values).toEqual([
