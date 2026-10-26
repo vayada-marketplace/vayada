@@ -344,6 +344,8 @@ for (const width of [1440, 390]) {
     await page.screenshot({
       path: testInfo.outputPath(`extras-picked-${width}.png`),
       fullPage: width < 600,
+      // The chips fade between colours; the shot shows where they end.
+      animations: "disabled",
     });
     await extras.getByRole("button", { name: "Send request" }).click();
     await expect(extras).toContainText("We'll confirm by email; you pay at the hotel.");
@@ -364,6 +366,8 @@ for (const width of [1440, 390]) {
     await page.screenshot({
       path: testInfo.outputPath(`extras-requested-${width}.png`),
       fullPage: width < 600,
+      // The chips fade between colours; the shot shows where they end.
+      animations: "disabled",
     });
   });
 }
