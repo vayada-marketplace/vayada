@@ -76,7 +76,7 @@ it.each(
       findLatestChangeRequest: handler,
       acceptChangeRequest: handler,
       declineChangeRequest: handler,
-      findExtrasRequests: handler,
+      findExtrasRequests: vi.fn(async () => [handler()]),
       decideExtrasRequest: handler,
     },
     propertyAccessRepository: {
