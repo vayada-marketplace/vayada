@@ -51,7 +51,11 @@ export function createBookingGuestPolicyOutboxProjector(config: {
   pool: BookingGuestPolicyProjectionPool;
   handler: BookingGuestPolicyProjectionHandlerPort;
   /** Best effort after an applied change, e.g. refreshing the live booking page (VAY-2129). */
-  afterApplied?: (input: { propertyId: string }) => Promise<void>;
+  afterApplied?: (input: {
+    organizationId: string;
+    propertyId: string;
+    outboxEventId: string;
+  }) => Promise<void>;
   now?: () => Date;
   randomId?: () => string;
   leaseDurationMs?: number;
@@ -111,7 +115,13 @@ export function createBookingGuestPolicyOutboxProjector(config: {
           });
           result[handled.outcome === "applied" ? "applied" : "conflicts"] += 1;
           if (handled.outcome === "applied")
-            await config.afterApplied?.({ propertyId: claim.propertyId }).catch(() => undefined);
+            await config
+              .afterApplied?.({
+                organizationId: claim.organizationId,
+                propertyId: claim.propertyId,
+                outboxEventId: claim.outboxEventId,
+              })
+              .catch(() => undefined);
           continue;
         }
         const exhausted = handled.outcome !== "retry" || claim.attemptsCount >= claim.maxAttempts;

@@ -51,6 +51,45 @@ export interface CheckinChecklistStep {
   position: number;
 }
 
+/** Settings → Check-in (VAY-2374): the API's object, field for field. */
+export type CheckinGuestField =
+  | "email"
+  | "phone"
+  | "documentType"
+  | "documentNumber"
+  | "nationality"
+  | "dateOfBirth"
+  | "gender";
+export type CheckinSettlementOption =
+  | "card"
+  | "cash"
+  | "bank_transfer"
+  | "at_checkout"
+  | "already_paid";
+
+export interface CheckinSettings {
+  showSpecialRequest: boolean;
+  confirmSpecialRequest: boolean;
+  allowRoomChanges: boolean;
+  allowIncompleteGuests: boolean;
+  guestNotes: boolean;
+  registrationScope: "booker" | "adults" | "all";
+  guestFields: Array<{ field: CheckinGuestField; show: boolean; required: boolean }>;
+  offerAddons: boolean;
+  /** null: every active add-on is sold at check-in. */
+  addonIds: string[] | null;
+  settlementOptions: CheckinSettlementOption[];
+  paymentChoiceRequired: boolean;
+  keyHandover: "physical" | "none";
+}
+
+export interface CheckinSettingsResponse {
+  propertyId: string;
+  canManage: boolean;
+  settings: CheckinSettings;
+  updatedAt: string | null;
+}
+
 export interface CheckinChecklistTemplate {
   steps: CheckinChecklistStep[];
   updatedAt: string | null;
@@ -210,6 +249,23 @@ export const settingsService = {
 
   updatePropertySettings: (_data: PropertySettingsUpdate) =>
     unsupportedPmsNextStackFeature<PropertySettings>("Property currency settings"),
+
+  getCheckinSettings: async () => {
+    const propertyId = await resolveSelectedPmsPropertyId("loading check-in settings");
+    return pmsOperationsClient.get<CheckinSettingsResponse>(
+      propertyTemplateEndpoint(propertyId, "check-in-settings"),
+      pmsOperationsRequestOptions,
+    );
+  },
+
+  updateCheckinSettings: async (settings: CheckinSettings) => {
+    const propertyId = await resolveSelectedPmsPropertyId("saving check-in settings");
+    return pmsOperationsClient.put<CheckinSettingsResponse>(
+      propertyTemplateEndpoint(propertyId, "check-in-settings"),
+      settings,
+      pmsOperationsRequestOptions,
+    );
+  },
 
   getCheckinChecklist: async () =>
     toCheckinTemplate(await getOperationsTemplate("check-in-checklist")),

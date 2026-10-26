@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 25, 2026
+              <strong>Effective Date:</strong> October 26, 2026
             </p>
           </div>
 
@@ -135,7 +135,8 @@ export default function PrivacyPage() {
                         <td className={TD}>
                           Bookings, guest names and contact details, stay details, payments and
                           messages that you enter or that arrive through your booking site or
-                          connected channels.
+                          connected channels, and the registration details your staff record at
+                          check-in (date of birth, identity document, gender, room and staff notes).
                         </td>
                         <td className={TD}>
                           Processed on the Hotel&apos;s behalf and instructions as its processor
@@ -537,6 +538,14 @@ export default function PrivacyPage() {
                     booking and to contact you about it (Article 6(1) lit. b GDPR), and keeps it as
                     long as it needs it for your stay and as tax and accounting rules require
                     (Article 6(1) lit. c GDPR).
+                  </li>
+                  <li>
+                    <strong>Check-in registration (at the hotel): </strong>when you check in, the
+                    hotel&apos;s staff may record your date of birth, the type and number of your
+                    identity document, your gender, which room you sleep in and internal notes, for
+                    example to meet local guest registration rules (Article 6(1) lit. c GDPR) and to
+                    look after your stay (Article 6(1) lit. b GDPR). Only the hotel&apos;s staff see
+                    this data, and the hotel keeps it as long as it keeps your booking.
                   </li>
                   <li>
                     <strong>What you agreed to: </strong>when you book, we keep a record with your

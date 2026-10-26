@@ -13,6 +13,7 @@ import {
 import { calendarService, CalendarInventoryDay } from "@/services/calendar";
 import { pmsSettingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
+import { expectedGuestCount, registeredGuestCount } from "@/lib/guestRegistration";
 import {
   addPropertyDays,
   canSeeDashboardFinance,
@@ -88,26 +89,6 @@ function checkoutTime() {
 function isPaid(b: Booking) {
   if (b.amountStatus === "unverified") return false;
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
-}
-
-function expectedAdditionalGuests(b: Booking) {
-  const explicit = b.numberOfGuests ?? b.adults + b.children;
-  return Math.max(0, explicit - 1);
-}
-
-function incompleteGuestCount(b: Booking, guests: BookingAdditionalGuest[]) {
-  const placeholders = Math.max(0, expectedAdditionalGuests(b) - guests.length);
-  return (
-    guests.filter(
-      (g) =>
-        !g.firstName ||
-        !g.lastName ||
-        !g.gender ||
-        !g.nationality ||
-        !g.dateOfBirth ||
-        !g.passportNumber,
-    ).length + placeholders
-  );
 }
 
 const FORECAST_WINDOW_DAYS = 14;
@@ -733,8 +714,10 @@ function ArrivalQuickView({
   onClose: () => void;
 }) {
   const { locale, t } = useTranslation();
-  const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
-  const due = isPaid(booking) ? 0 : booking.totalAmount;
+  const expectedGuests = expectedGuestCount(booking);
+  const registeredGuests = Math.min(expectedGuests, registeredGuestCount(booking, guests));
+  // What is still owed: a deposit or part payment already lowered the balance.
+  const due = isPaid(booking) ? 0 : Math.max(0, booking.balanceAmount);
   const internalNotes = notes.filter((note) => note.body.trim().length > 0);
   const isDeparture = mode === "departure";
   const eventDate = isDeparture ? booking.checkOut : booking.checkIn;
@@ -816,9 +799,12 @@ function ArrivalQuickView({
                     })}
               </span>
             )}
-            {missingIds > 0 && (
+            {!loading && registeredGuests < expectedGuests && (
               <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-800">
-                {t("dashboard.guestIdsMissing", { count: missingIds })}
+                {t("dashboard.guestsRegistered", {
+                  registered: registeredGuests,
+                  total: expectedGuests,
+                })}
               </span>
             )}
           </div>

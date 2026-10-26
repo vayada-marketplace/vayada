@@ -1323,6 +1323,9 @@ type TargetCheckoutConfigRow = QueryResultRow & {
   providerAccountId: string | null;
   providerAccountRef: string | null;
   onlineCardReady: boolean | null;
+  /** Finance's card readiness alone (VAY-2301): the pricing-v2 booking page prices in the
+   * publication currency, which the pricing readiness lock checks against Finance's own. */
+  bookingPageCardReady?: boolean | null;
   bankTransferReady?: boolean;
 };
 
@@ -3172,7 +3175,8 @@ export async function loadTargetCheckoutConfig(
          readiness.online_card_ready
          AND upper(trim(fs.default_currency)) = upper(trim(bs.default_currency)),
          FALSE
-       ) AS "onlineCardReady"
+       ) AS "onlineCardReady",
+       COALESCE(readiness.online_card_ready, FALSE) AS "bookingPageCardReady"
      FROM hotel_catalog.properties p
      LEFT JOIN booking.booking_settings bs ON bs.property_id = p.id
      LEFT JOIN hotel_catalog.property_policy_summaries policy ON policy.property_id = p.id
@@ -3201,29 +3205,38 @@ export function targetCheckoutReadyPaymentMethods(row: TargetCheckoutConfigRow |
   });
 }
 
-/** The methods the pricing-v2 booking page offers (VAY-2139). Until bank transfer and PayPal
- * acceptance is on, it keeps its fixed card and pay-at-property choice. */
+/** The methods the pricing-v2 booking page offers (VAY-2139): the hotel's ready methods, as the
+ * booking page's switches allow. Card needs Finance's card readiness and card acceptance; pay at
+ * the property only needs the hotel to take it (VAY-2301); bank transfer and PayPal need manual
+ * payment acceptance. The same facts and switches decide each rate's own ways to pay
+ * (pricingRatePaymentMethods), so this list always holds every way some offered rate takes. */
 function bookingPagePaymentMethods(
   row: TargetCheckoutConfigRow | null,
   config: Pick<
     PgTargetBookingWebCheckoutAdapterConfig,
+    | "replacementPricingAcceptanceEnabled"
     | "replacementPricingManualPaymentAcceptanceEnabled"
     | "replacementPricingCardAcceptanceEnabled"
     | "stripePaymentProvider"
     | "bankTransfers"
   >,
 ): string[] {
-  if (config.replacementPricingManualPaymentAcceptanceEnabled !== true)
-    return ["card", "pay_at_property"];
   if (row?.paymentsEnabled !== true) return [];
-  const ready = targetCheckoutReadyPaymentMethods(row);
+  // Card readiness without the legacy checkout's currency gate: pricing-v2 prices in the
+  // publication currency, and the pricing readiness lock checks Finance's currency against it.
+  const cardReady = row.bookingPageCardReady ?? row.onlineCardReady;
+  const ready = targetCheckoutReadyPaymentMethods({ ...row, onlineCardReady: cardReady });
   const cardAcceptance =
-    config.replacementPricingCardAcceptanceEnabled === true && !!config.stripePaymentProvider;
+    config.replacementPricingAcceptanceEnabled === true &&
+    config.replacementPricingCardAcceptanceEnabled === true &&
+    !!config.stripePaymentProvider;
+  const manualAcceptance = config.replacementPricingManualPaymentAcceptanceEnabled === true;
   // Bank transfer needs the bank-details binding (KMS settings) to be accepted.
   return ["card", "pay_at_property", "bank_transfer", "paypal"].filter(
     (method) =>
       ready.includes(method) &&
       (method !== "card" || cardAcceptance) &&
+      (!isManualPricingPaymentMethod(method) || manualAcceptance) &&
       (method !== "bank_transfer" || !!config.bankTransfers),
   );
 }

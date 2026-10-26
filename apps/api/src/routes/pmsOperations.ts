@@ -438,12 +438,24 @@ export type PmsManualPriceCorrectionCommand = {
   audit: PmsOperationsCommandAudit;
 };
 
+/** How the hotel took a payment it records at the desk (VAY-2373, D2): nothing is charged online, and
+ * card means the hotel's own terminal (Finance's manual_card, never Stripe's card). */
+export const PMS_DESK_SETTLEMENT_METHODS = [
+  "cash",
+  "manual_card",
+  "bank_transfer",
+  "other",
+] as const;
+export type PmsDeskSettlementMethod = (typeof PMS_DESK_SETTLEMENT_METHODS)[number];
+
 export type PmsBookingLifecycleCommand = {
   propertyId: string;
   guestBookingId: string;
   commandId: string;
   idempotencyKey: string;
   audit: PmsOperationsCommandAudit;
+  /** Mark paid only: the method staff chose; without it the booking's own method is recorded. */
+  settlementMethod?: PmsDeskSettlementMethod;
 };
 
 export type PmsCheckOutCommand = {
@@ -4165,7 +4177,24 @@ export async function registerPmsOperationsRoutes(
           "Mark booking paid",
         );
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
-        const result = await commandRepository.markBookingPaid(command.value);
+        const settlementMethod = (request.body as Record<string, unknown>).settlementMethod;
+        if (
+          settlementMethod !== undefined &&
+          !(PMS_DESK_SETTLEMENT_METHODS as readonly unknown[]).includes(settlementMethod)
+        ) {
+          return sendPmsOperationsError(
+            reply,
+            invalidBody(
+              `settlementMethod must be one of ${PMS_DESK_SETTLEMENT_METHODS.join(", ")}.`,
+            ),
+          );
+        }
+        const result = await commandRepository.markBookingPaid({
+          ...command.value,
+          ...(settlementMethod
+            ? { settlementMethod: settlementMethod as PmsDeskSettlementMethod }
+            : {}),
+        });
         if (!result.ok) return sendPmsOperationalCommandError(reply, result);
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,

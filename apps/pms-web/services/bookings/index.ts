@@ -819,14 +819,14 @@ export const bookingsService = {
     return { charges: response.items.map((charge) => toCheckoutCharge(charge, id)) };
   },
 
-  addCheckoutCharge: async (id: string, label: string, amount: number) => {
+  addCheckoutCharge: async (id: string, label: string, amount: number, currency: string) => {
     const response = await pmsOperationsClient.post<PmsCheckoutChargeCommandResponse>(
       await reservationEndpoint(id, "/checkout-charges"),
       {
         ...commandMetadata("pms.checkout-charge.create"),
         label,
         amountDecimal: amount.toFixed(2),
-        currency: "EUR",
+        currency,
       },
       pmsOperationsRequestOptions,
     );

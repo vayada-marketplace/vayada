@@ -137,6 +137,7 @@ export const PMS_MANUAL_BOOKING_ERROR_CODES = [
   "idempotency_conflict",
   "invalid_dates",
   "occupancy_exceeded",
+  "guests_over_capacity",
   "currency_mismatch",
   "inactive_rate_plan",
   "child_ages_required",
