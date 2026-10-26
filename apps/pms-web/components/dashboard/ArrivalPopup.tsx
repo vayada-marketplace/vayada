@@ -17,6 +17,8 @@ import {
   registrationSummary,
   type RegistrationGuest,
 } from "@/lib/checkin/registration";
+import { countLabel, stayRangeLabel } from "@/lib/checkin/labels";
+import { checkinRooms } from "@/lib/checkin/rooms";
 import { formatPropertyDate } from "@/lib/dashboardBookings";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
@@ -24,53 +26,10 @@ import { useTranslation } from "@/lib/i18n";
 type Translate = ReturnType<typeof useTranslation>["t"];
 type Status = "warn" | "ok" | "info";
 
-const DAY_MS = 86_400_000;
-
-function nightsBetween(checkIn: string, checkOut: string): number {
-  return Math.max(0, Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / DAY_MS));
-}
-
 /** Starts a lower-case fragment ("paid in full") with a capital when nothing comes before it. */
 function sentence(parts: Array<string | null>, locale: string): string {
   const text = parts.filter(Boolean).join(" · ");
   return text.charAt(0).toLocaleUpperCase(locale) + text.slice(1);
-}
-
-/** "1 night" / "3 nights", from the `…One` / `…Many` pair. */
-function counted(t: Translate, key: string, count: number): string {
-  return t(`dashboard.popup.${key}${count === 1 ? "One" : "Many"}`, { count });
-}
-
-function popupRooms(booking: Booking) {
-  const stays = [...booking.stays].sort((a, b) => a.position - b.position);
-  const rooms = stays.length
-    ? stays.map((stay, index) => ({
-        key: String(stay.position),
-        unit: stay.roomNumber ?? (index === 0 ? booking.roomNumber : null),
-        type: stay.roomName,
-        guests: stay.adults == null ? null : stay.adults + (stay.children ?? 0),
-        checkIn: stay.checkIn ?? booking.checkIn,
-        checkOut: stay.checkOut ?? booking.checkOut,
-      }))
-    : [
-        {
-          key: "booking",
-          unit: booking.roomNumber,
-          type: booking.roomName,
-          guests: booking.adults + booking.children,
-          checkIn: booking.checkIn,
-          checkOut: booking.checkOut,
-        },
-      ];
-  const lastCheckOut = rooms.reduce(
-    (last, room) => (room.checkOut > last ? room.checkOut : last),
-    "",
-  );
-  return rooms.map((room) => ({
-    ...room,
-    nights: nightsBetween(room.checkIn, room.checkOut),
-    leavesEarlier: room.checkOut < lastCheckOut,
-  }));
 }
 
 /** Who is still missing what: "Grace Hopper’s ID is missing · Guest 3 and Guest 4 have no details yet". */
@@ -131,7 +90,7 @@ export function ArrivalPopup({
   const { locale, t } = useTranslation();
   const titleId = useId();
   const isFuture = booking.checkIn > today;
-  const rooms = popupRooms(booking);
+  const rooms = checkinRooms(booking);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
@@ -200,16 +159,11 @@ export function ArrivalPopup({
           };
 
   const facts = [
-    counted(t, "nights", booking.nights),
-    counted(t, "adults", booking.adults),
-    ...(booking.children > 0 ? [counted(t, "children", booking.children)] : []),
-    counted(t, "rooms", rooms.length),
+    countLabel(t, "nights", booking.nights),
+    countLabel(t, "adults", booking.adults),
+    ...(booking.children > 0 ? [countLabel(t, "children", booking.children)] : []),
+    countLabel(t, "rooms", rooms.length),
   ].join(" · ");
-  const dateRange = new Intl.DateTimeFormat(locale, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
 
   return createPortal(
     <div
@@ -311,7 +265,7 @@ export function ArrivalPopup({
                       {room.guests != null && (
                         <span className="text-gray-600">
                           {" · "}
-                          {counted(t, "guests", room.guests)}
+                          {countLabel(t, "guests", room.guests)}
                         </span>
                       )}
                     </p>
@@ -319,18 +273,15 @@ export function ArrivalPopup({
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-[15px] font-bold leading-5 text-gray-900">
-                      {dateRange.formatRange(
-                        new Date(`${room.checkIn}T00:00:00Z`),
-                        new Date(`${room.checkOut}T00:00:00Z`),
-                      )}
+                      {stayRangeLabel(locale, room.checkIn, room.checkOut)}
                     </p>
                     <p
                       className={`text-sm ${
-                        room.leavesEarlier ? "font-semibold text-amber-700" : "text-gray-600"
+                        room.departsEarlier ? "font-semibold text-amber-700" : "text-gray-600"
                       }`}
                     >
-                      {counted(t, "nights", room.nights)}
-                      {room.leavesEarlier && ` · ${t("dashboard.popup.leavesEarlier")}`}
+                      {countLabel(t, "nights", room.nights)}
+                      {room.departsEarlier && ` · ${t("dashboard.popup.leavesEarlier")}`}
                     </p>
                   </div>
                 </li>

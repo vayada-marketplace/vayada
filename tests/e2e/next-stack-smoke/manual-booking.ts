@@ -380,10 +380,26 @@ export async function runManualBookingAcceptance(args: Args): Promise<void> {
     );
     expect(publicLookup).not.toContain("Late arrival confirmed once.");
 
+    // VAY-2373: the 4-step check-in. Step 1 shows the request; Settings → Check-in may ask staff
+    // to confirm they read it.
     await page.goto(`${NEXT_STACK_ORIGINS.pms}/check-in/${bookingId}`);
-    await expect(page.getByRole("combobox", { name: "Nationality" }).first()).toHaveValue(
-      "Netherlands",
-    );
+    const checkIn = page.locator("main").first();
+    await expect(checkIn.getByText("Quiet room near the lift")).toBeVisible();
+    const requestRead = checkIn.getByRole("checkbox", { name: "I have read the request" });
+    if (await requestRead.isVisible()) await requestRead.check();
+    await checkIn.getByRole("button", { name: "Continue" }).click();
+    // Step 2: the booker's form carries the corrected nationality.
+    await checkIn
+      .getByRole("button", { name: /^(Complete|View) / })
+      .first()
+      .click();
+    await expect(checkIn.getByRole("combobox", { name: "Nationality" })).toHaveValue("Netherlands");
+    await checkIn.getByRole("button", { name: "Cancel", exact: true }).last().click();
+    // Step 3: the expected method and the recorded payment.
+    await page
+      .getByRole("navigation", { name: "Check-in steps" })
+      .getByRole("button", { name: /^Add-ons & payment/ })
+      .click();
     await expect(page.getByText("Bank Transfer", { exact: true })).toBeVisible();
     await expect(page.getByText("Payment recorded", { exact: true })).toBeVisible();
     await page.screenshot({

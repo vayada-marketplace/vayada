@@ -15,6 +15,7 @@ import { calendarService, CalendarInventoryDay } from "@/services/calendar";
 import { CheckinSettings, pmsSettingsService, settingsService } from "@/services/settings";
 import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
 import { ArrivalPopup } from "@/components/dashboard/ArrivalPopup";
+import { bookingArrivalTime } from "@/lib/checkin/labels";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { expectedGuestCount, registeredGuestCount } from "@/lib/guestRegistration";
 import {
@@ -79,10 +80,6 @@ function roomLabel(b: Booking) {
       ? `${b.roomName} ${b.roomNumber}`
       : b.roomName;
   return assigned || "Unassigned";
-}
-
-function arrivalTime(b: Booking) {
-  return b.estimatedArrivalTime || "3:00 PM";
 }
 
 function checkoutTime() {
@@ -512,7 +509,7 @@ export default function DashboardPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{guestName(b)}</p>
                     <p className="text-xs text-gray-400 truncate">
-                      <span className="text-gray-500">{arrivalTime(b)}</span> ·{" "}
+                      <span className="text-gray-500">{bookingArrivalTime(b)}</span> ·{" "}
                       <span className="text-gray-500">{roomLabel(b)}</span>
                     </p>
                   </div>
@@ -715,7 +712,7 @@ export default function DashboardPage() {
           registrations={quickView.registrations}
           settings={quickView.settings}
           loading={quickView.loading}
-          arrivalTime={arrivalTime(quickView.booking)}
+          arrivalTime={bookingArrivalTime(quickView.booking)}
           today={today}
           onClose={() => setQuickView(null)}
         />
