@@ -79,6 +79,7 @@ import { createPgBookingDesignRepository } from "./domains/bookingDesignReposito
 import { createBookingGuestPolicyCatalogCurrentOwnerEvidenceAdapter } from "./domains/bookingGuestPolicyCatalogCurrentOwnerEvidence.js";
 import { createPgBookingGuestPolicyCatalogProjectionPort } from "./domains/bookingGuestPolicyCatalogProjection.js";
 import { createBookingGuestPolicyCurrentOwnerEvidenceAdapter } from "./domains/bookingGuestPolicyCurrentOwnerEvidence.js";
+import { createBookingGuestPolicyLivePageRefresh } from "./domains/bookingGuestPolicyLivePageRefresh.js";
 import { createBookingGuestPolicyProjectionHandler } from "./domains/bookingGuestPolicyProjectionHandler.js";
 import { createBookingGuestPolicyOutboxProjector } from "./domains/bookingGuestPolicyProjectionRuntime.js";
 import { startBookingGuestPolicyProjectionWorker } from "./domains/bookingGuestPolicyProjectionWorker.js";
@@ -1415,26 +1416,6 @@ const bookingGuestPolicyApplication = pmsRoomPublicationRuntime
       currentOwnerEvidence: bookingGuestPolicyCurrentOwnerEvidence,
     })
   : undefined;
-const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProjector({
-  pool: propertySetupOwnerPool,
-  handler: createBookingGuestPolicyProjectionHandler({
-    read: bookingGuestPolicyRepository,
-    receipts: bookingGuestPolicyRepository,
-    catalog: createPgBookingGuestPolicyCatalogProjectionPort({ pool: propertySetupOwnerPool }),
-  }),
-  // Arrival times and other guest policies reach the live booking page once applied (VAY-2129).
-  afterApplied: refreshLivePublicPage
-    ? async ({ propertyId }) => {
-        await refreshLivePublicPage(propertyId).catch((error: unknown) =>
-          process.emitWarning("Booking page refresh after a guest policy change failed", {
-            code: "BOOKING_PAGE_REFRESH_FAILED",
-            detail: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      }
-    : undefined,
-});
-
 // Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139).
 const financeManualPaymentReadiness = config.replacementPricingManualPaymentAcceptanceEnabled
   ? createFinanceManualPaymentReadinessReader({ pool: propertySetupOwnerPool })
@@ -1471,6 +1452,37 @@ const bookingPublicationRuntime = (() => {
     warn: (fields, message) => app.log.warn(fields, message),
   });
 })();
+
+const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProjector({
+  pool: propertySetupOwnerPool,
+  handler: createBookingGuestPolicyProjectionHandler({
+    read: bookingGuestPolicyRepository,
+    receipts: bookingGuestPolicyRepository,
+    catalog: createPgBookingGuestPolicyCatalogProjectionPort({ pool: propertySetupOwnerPool }),
+  }),
+  // Arrival times and other guest policies reach the live booking page once applied (VAY-2129).
+  // Where the public site serves setup publications (production), the projection has no signed-in
+  // user, so the page is republished as the user who made it live (VAY-2350); the target-mode
+  // refresher only runs without that runtime.
+  afterApplied:
+    config.publicHotelProfileSource === "active_publication" && bookingPublicationRuntime
+      ? createBookingGuestPolicyLivePageRefresh({
+          pool: propertySetupOwnerPool,
+          refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime),
+          // Called by the background worker, after `app` below exists.
+          warn: (fields, message) => app.log.warn(fields, message),
+        })
+      : refreshLivePublicPage
+        ? async ({ propertyId }) => {
+            await refreshLivePublicPage(propertyId).catch((error: unknown) =>
+              process.emitWarning("Booking page refresh after a guest policy change failed", {
+                code: "BOOKING_PAGE_REFRESH_FAILED",
+                detail: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          }
+        : undefined,
+});
 
 const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
   draftRepository: propertySetupDraftRepository,
