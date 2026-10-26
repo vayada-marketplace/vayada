@@ -815,6 +815,7 @@ jobs:
           src/domains/pmsRoomOrder.integration.test.ts
           src/pmsNavigationModules.integration.test.ts
           src/pmsNavigationModules.test.ts
+          src/pmsGuestRegistrations.integration.test.ts
           src/pmsBookingModules.integration.test.ts
           src/pmsBookingModules.test.ts
           src/bookingLocationMap.integration.test.ts
