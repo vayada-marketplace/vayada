@@ -45,6 +45,18 @@ product owner approved this v1 exception, instead of `pms-manual-booking.v2`,
 when approving the slice A merge on 2026-10-08. It applies to the target
 TypeScript endpoints only; the legacy adapter is unchanged.
 
+The VAY-2365 row narrows what a v1 create accepts. It also stays in v1 as an
+exception the product owner approved on 2026-10-25 (decision D6), instead of
+`pms-manual-booking.v2`:
+
+- The only caller is PMS Web's New Booking modal. In the same release it stops
+  adding guests at the same busiest-night limit and won't submit above it.
+- An exact replay of an already created command returns before pricing, so no
+  stored command or booking changes.
+- Caller migration: none beyond that modal. A caller that sends more people
+  than the rooms hold gets `422 guests_over_capacity` and must remove guests or
+  add a room.
+
 ## Current evidence and gaps
 
 | Surface                              | Current behavior                                                                                                                                      | Gap against VAY-647                                                                                                                      |
