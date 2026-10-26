@@ -45,9 +45,38 @@ An audited executor, run through a reviewed platform runner mode with Flamur's g
   is inserted as active with `claim_source = 'handover'` (or a released handover claim is
   reactivated) **before** the connection gets the external id and turns `connected`. Inserting
   the claim first is what keeps trigger 0128 from writing its own claim.
-- `target:channex:handover revoke` is the inverse, also in one transaction: the connection goes back to `disconnected`
-  with a `NULL` external id, then the claim becomes `released`. Both commands write an audit row.
+- `target:channex:handover attach` is the takeover for a hotel that was **not** imported: a fresh
+  target property (normal onboarding) takes over the Channex property the old system ran. It
+  takes the Channex id, the legacy-disable readback and a reviewed manifest (the Channex room
+  type per target room type, the Channex rate plans to adopt under each, the capabilities). In
+  one transaction it inserts the `handover` claim, connects the connection (inserting one when
+  the hotel never pressed "Enable connection"), writes the room-type mappings, one
+  `pms.rate_plans` row (`CH-<id prefix>`) plus its mapping per adopted Channex rate plan, and
+  queues the booking copy below. It refuses when another target property holds the Channex id
+  in any claim state, when the property already has an external id, and when an active room
+  type is neither mapped nor named as deliberately unmapped. The adopted rate plans are what
+  booking intake needs: every OTA booking references the rate plans the old system created in
+  Channex. The rate-owner registry (0314) allows one owner per Channex rate plan, a legacy
+  mapping or an offer target, so ongoing ARI either targets these adopted plans or creates its
+  own and the OTA rate mapping is moved inside Channex.
+- `target:channex:handover revoke` is the inverse of both, also in one transaction: the connection goes back to `disconnected`
+  with a `NULL` external id, mappings are disabled, then the claim becomes `released`. A second
+  `attach` reuses the retained rows. Every command writes an audit row; re-running an applied
+  plan reports `replayed=true`.
 - Never the `disable` command: it deletes the Channex property. Never `enable` either.
+
+### The booking copy on switch day
+
+Legacy acknowledged every revision of the hotel, so the feed shows none of its existing
+bookings. The attach apply queues one `channex.resync-bookings` job for the binding. The
+claimed feed-pull loop runs it on the API login: it lists the hotel's bookings with a
+departure from yesterday (UTC) on, fetches each booking's latest revision and queues it exactly
+like a pulled revision; the booking worker persists it through the same room and rate mapping
+and the same inventory lock. The ingest job's own acknowledgement answers 404 for those
+revisions and counts as done. A failed resync waits five minutes and retries while it has
+attempts; a binding that changed since the attach is refused. Full ARI must wait until the
+resync job succeeded, or the rooms look free. Direct bookings from the old booking engine are
+re-entered as manual bookings in the new PMS (they block the units the same way).
 
 ## Booking intake
 
@@ -68,7 +97,8 @@ and message jobs that retry and then dead-letter.
    `PMS_CHANNEX_BOOKING_SYNC_MODE=mutating`. `CHANNEX_WEBHOOK_INTAKE_MODE` stays `observe_only`.
    This setting exists only on next-api. The legacy variable of the same name freezes legacy
    polling for every hotel and is never set during a wave.
-3. Per hotel: legacy disable and readback, then `activate`, then the first pull within minutes.
+3. Per hotel: legacy disable and readback, then `attach` (or `activate` for an imported row),
+   then the booking copy and the first pull within minutes.
 4. ARI and published offers: a claimed worker scope (new RLS helper, the pinned scope functions
    untouched, digests re-pinned) plus platform grant/preflight. Then the initial offer ARI with
    `stop_sell=true`, and activation at a quiet time.
