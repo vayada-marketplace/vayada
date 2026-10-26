@@ -2761,7 +2761,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       {
         values: [
           expect.objectContaining({
-            date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+            date: new Date(Date.parse(today) + 86400000).toISOString().slice(0, 10),
             stop_sell: true,
           }),
         ],
@@ -3013,22 +3013,44 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("allows only one concurrent ARI reconciliation to commit", async () => {
     const f = await reconciliationFixture();
     await f.retain();
-    let started = 0;
+    // Two overlapping pre-read transactions may time out on the 150 ms property lock and
+    // leave contention to the durable worker (VAY-2370). Start the second reconciliation
+    // once the first has read, so only the two final commits race.
+    let reads = 0;
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const get = async (path: string) => {
+    const reading = (onRead: () => void) => async (path: string) => {
       if (path.includes("/tasks/")) {
-        if (++started === 2) release();
+        reads++;
+        onRead();
         await barrier;
       }
       return f.get(path);
     };
-    const results = await Promise.allSettled([f.reconcile(get), f.reconcile(get)]);
-    expect(
-      results.filter((r) => r.status === "fulfilled" && r.value.kind === "ari_reconciled"),
-    ).toHaveLength(1);
+    let firstRead!: () => void;
+    const firstReading = new Promise<void>((resolve) => {
+      firstRead = resolve;
+    });
+    const first = f.reconcile(reading(firstRead));
+    await Promise.race([firstReading, first.catch(() => undefined)]);
+    // A second reconciliation that settles without reading fails the test instead of stalling it.
+    const second = f.reconcile(reading(release)).finally(release);
+    const results = await Promise.allSettled([first, second]);
+    expect(reads).toBe(2);
+    const outcomes = results.map((r) =>
+      r.status === "rejected"
+        ? (r.reason as { code?: unknown }).code
+        : "reason" in r.value
+          ? r.value.reason
+          : r.value.kind,
+    );
+    expect(outcomes.filter((o) => o === "ari_reconciled")).toHaveLength(1);
+    // The loser stops on the property lock, its serializable snapshot or the resolved attempt.
+    expect(["55P03", "40001", "ari_attempt_unavailable", "ari_reconciliation_stale"]).toContain(
+      outcomes.find((o) => o !== "ari_reconciled"),
+    );
     expect((await f.state()).state).toBe("reconciled");
   });
   it("reads only original receipt tasks and leaves ARI ownership unresolved", async () => {
