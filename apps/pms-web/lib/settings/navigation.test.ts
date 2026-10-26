@@ -9,6 +9,7 @@ it("lists the cards in Timo's order with Feature Hub on top", () => {
   expect(cards.map((card) => [card.id, card.href])).toEqual([
     ["property", "/settings/property"],
     ["calendar", "/settings/calendar"],
+    ["checkIn", "/settings/check-in"],
     ["guestFlows", "/settings/guest-flows"],
     ["otaCommissions", "/settings/ota-commissions"],
     ["team", "/settings/team"],
@@ -43,6 +44,7 @@ it("sends old single-page anchors to the page that holds them now", () => {
   expect(legacySettingsAnchorTarget("#checkout-inspection")).toBe(
     "/settings/guest-flows#check-out",
   );
+  expect(legacySettingsAnchorTarget("#checkin-checklist")).toBe("/settings/check-in#extra-checks");
   expect(legacySettingsAnchorTarget("")).toBeNull();
   expect(legacySettingsAnchorTarget("#unknown")).toBeNull();
 });
