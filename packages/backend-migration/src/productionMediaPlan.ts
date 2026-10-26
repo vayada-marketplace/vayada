@@ -19,9 +19,6 @@ export type ProductionMediaPurpose =
   | "property.hero_image"
   | "property.gallery_image"
   | "property.logo"
-  | "marketplace.offer.media"
-  | "marketplace.creator.profile_image"
-  | "marketplace.collaboration_chat.attachment"
   | "pms.room_type.media"
   | "pms.messaging.attachment";
 
@@ -39,7 +36,7 @@ export type ProductionMediaReference = {
   publicApproved: boolean;
   propertyId: string | null;
   ownerOrganizationId: string;
-  resourceProduct: "booking" | "hotel_catalog" | "marketplace" | "pms";
+  resourceProduct: "booking" | "hotel_catalog" | "pms";
   resourceType: string;
   resourceId: string;
   sortOrder: number;
@@ -150,12 +147,6 @@ export function buildProductionMediaPlan(input: {
         references.push(...bookingAddon(context, row));
       else if (row.sourceDatabase === "marketplace" && row.sourceTable === "hotel_profiles")
         references.push(...marketplaceHotel(context, row));
-      else if (row.sourceDatabase === "marketplace" && row.sourceTable === "hotel_listings")
-        references.push(...marketplaceListing(context, row));
-      else if (row.sourceDatabase === "marketplace" && row.sourceTable === "creators")
-        references.push(...marketplaceCreator(context, row));
-      else if (row.sourceDatabase === "marketplace" && row.sourceTable === "chat_messages")
-        references.push(...marketplaceChat(context, row));
       else if (row.sourceDatabase === "pms" && row.sourceTable === "room_types")
         references.push(...pmsRoomType(context, row));
       else if (row.sourceDatabase === "pms" && row.sourceTable === "message_attachments")
@@ -220,10 +211,7 @@ export function buildProductionMediaPlan(input: {
       existing.resourceType === reference.resourceType &&
       existing.resourceId === reference.resourceId &&
       existing.retainedUntil === reference.retainedUntil &&
-      existing.migrationCase ===
-        (reference.purpose === "marketplace.collaboration_chat.attachment"
-          ? "media-url-migration"
-          : null) &&
+      existing.migrationCase === null &&
       expectedVariants.every((name) =>
         existing.variants.some(
           (variant) =>
@@ -363,13 +351,11 @@ function bookingHotel(context: Context, row: IdentitySourceRow): ProductionMedia
     resourceId: scope.propertyId,
     sortOrder: 0,
   });
-  for (
-    const [index, value] of mediaStrings(context, row, row.data["images"], {
-      field: "images",
-      rowId: `${id}:images`,
-      purpose: "property.gallery_image",
-    }).entries()
-  )
+  for (const [index, value] of mediaStrings(context, row, row.data["images"], {
+    field: "images",
+    rowId: `${id}:images`,
+    purpose: "property.gallery_image",
+  }).entries())
     appendUrl(result, context, row, scope, {
       value,
       field: `images[${index}]`,
@@ -454,129 +440,16 @@ function marketplaceHotel(context: Context, row: IdentitySourceRow): ProductionM
   return result;
 }
 
-function marketplaceListing(context: Context, row: IdentitySourceRow): ProductionMediaReference[] {
-  const id = uuid(row.data["id"], "id");
-  const hotelId = uuid(row.data["hotel_profile_id"], "hotel_profile_id");
-  const scope = hotelScope(
-    context,
-    "marketplace",
-    "hotel_profiles",
-    hotelId,
-    "marketplace",
-    "hotel_profile",
-    "owner",
-  );
-  const result: ProductionMediaReference[] = [];
-  for (
-    const [index, value] of mediaStrings(context, row, row.data["images"], {
-      field: "images",
-      rowId: `${id}:images`,
-      purpose: "marketplace.offer.media",
-    }).entries()
-  )
-    appendUrl(result, context, row, scope, {
-      value,
-      field: `images[${index}]`,
-      rowId: `${id}:images:${index + 1}`,
-      purpose: "marketplace.offer.media",
-      product: "marketplace",
-      resourceType: "marketplace_offer",
-      resourceId: id,
-      sortOrder: index,
-    });
-  return result;
-}
-
-function marketplaceCreator(context: Context, row: IdentitySourceRow): ProductionMediaReference[] {
-  const id = uuid(row.data["id"], "id");
-  const ownerScope = owner(context, "marketplace", "creator_profile", id, "owner");
-  const result: ProductionMediaReference[] = [];
-  appendUrl(
-    result,
-    context,
-    row,
-    { propertyId: null, ...ownerScope },
-    {
-      value: row.data["profile_picture"],
-      field: "profile_picture",
-      rowId: `${id}:profile_picture`,
-      purpose: "marketplace.creator.profile_image",
-      product: "marketplace",
-      resourceType: "creator_profile",
-      resourceId: id,
-      sortOrder: 0,
-    },
-  );
-  return result;
-}
-
-function marketplaceChat(context: Context, row: IdentitySourceRow): ProductionMediaReference[] {
-  if (String(row.data["message_type"] ?? "").toLowerCase() !== "image") return [];
-  const id = uuid(row.data["id"], "id");
-  const collaborationId = uuid(row.data["collaboration_id"], "collaboration_id");
-  const collaboration = find(context, "collaborations", collaborationId);
-  const hotelId = uuid(collaboration.data["hotel_id"], "hotel_id");
-  const hotel = hotelScope(
-    context,
-    "marketplace",
-    "hotel_profiles",
-    hotelId,
-    "marketplace",
-    "hotel_profile",
-    "owner",
-  );
-  const creatorId = uuid(collaboration.data["creator_id"], "creator_id");
-  const creator = find(context, "creators", creatorId);
-  const senderId = uuid(row.data["sender_id"], "sender_id");
-  const creatorUserId = uuid(creator.data["user_id"], "creator.user_id");
-  const hotelProfile = find(context, "hotel_profiles", hotelId);
-  const hotelUserId = uuid(hotelProfile.data["user_id"], "hotel.user_id");
-  const ownerScope =
-    senderId === creatorUserId
-      ? owner(context, "marketplace", "creator_profile", creatorId, "owner")
-      : senderId === hotelUserId
-        ? { organizationId: hotel.organizationId, ownerStatus: hotel.ownerStatus }
-        : null;
-  if (!ownerScope)
-    throw new Error("sender_id is neither the collaboration creator nor hotel owner");
-  const metadata = object(row.data["metadata"]);
-  const value = metadata["legacySourceUrl"] ?? metadata["url"] ?? row.data["content"];
-  const retainedUntil = retentionDate(row.data["created_at"]);
-  if (Date.parse(retainedUntil) <= Date.parse(context.completedAt)) return [];
-  const result: ProductionMediaReference[] = [];
-  appendUrl(
-    result,
-    context,
-    row,
-    { propertyId: hotel.propertyId, ...ownerScope },
-    {
-      value,
-      field: "image",
-      rowId: `${id}:image`,
-      purpose: "marketplace.collaboration_chat.attachment",
-      product: "marketplace",
-      resourceType: "collaboration_chat_message",
-      resourceId: id,
-      sortOrder: 0,
-      visibility: "private",
-      retainedUntil,
-    },
-  );
-  return result;
-}
-
 function pmsRoomType(context: Context, row: IdentitySourceRow): ProductionMediaReference[] {
   const id = uuid(row.data["id"], "id");
   const hotelId = uuid(row.data["hotel_id"], "hotel_id");
   const scope = hotelScope(context, "pms", "hotels", hotelId, "pms", "pms_hotel", "operator");
   const result: ProductionMediaReference[] = [];
-  for (
-    const [index, value] of mediaStrings(context, row, row.data["images"], {
-      field: "images",
-      rowId: `${id}:images`,
-      purpose: "pms.room_type.media",
-    }).entries()
-  )
+  for (const [index, value] of mediaStrings(context, row, row.data["images"], {
+    field: "images",
+    rowId: `${id}:images`,
+    purpose: "pms.room_type.media",
+  }).entries())
     appendUrl(result, context, row, scope, {
       value,
       field: `images[${index}]`,
@@ -699,12 +572,6 @@ function originalFilename(url: URL): string {
   }
 }
 
-function retentionDate(value: unknown): string {
-  const createdAt = new Date(iso(value, "created_at"));
-  createdAt.setUTCFullYear(createdAt.getUTCFullYear() + 2);
-  return createdAt.toISOString();
-}
-
 function normalizedCdnBaseUrl(value: string): string {
   const url = new URL(value);
   if (
@@ -791,12 +658,6 @@ function mediaStrings(
     return [];
   }
   return value.filter((item) => item.trim());
-}
-
-function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 function find(context: Context, table: string, id: string): IdentitySourceRow {

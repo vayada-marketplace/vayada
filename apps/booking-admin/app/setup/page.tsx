@@ -1,51 +1,31 @@
-"use client";
+import { Suspense } from "react";
+import { SharedHotelSetupPage } from "@/components/setup/SharedHotelSetupPage";
+import { isOnboardingV2Enabled } from "@/lib/onboardingV2";
 
-import { Suspense, useEffect, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
-import {
-  buildSharedHotelSetupRedirectPath,
-  parseSharedHotelSetupEntryProduct,
-  safeSharedHotelSetupReturnTo,
-} from "@vayada/product-onboarding";
-
-const MARKETPLACE_FRONTEND_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+// Booking Admin hosts the hotel setup wizard (VAY-2261); it used to redirect to marketplace-web.
+// Server-only switches such as AIRBNB_IMPORT_CALLBACK_ENABLED are read per request.
+export const dynamic = "force-dynamic";
 
 export default function SetupPage() {
   return (
     <Suspense fallback={<SetupLoading />}>
-      <CanonicalSetupRedirect />
+      <SharedHotelSetupPage
+        defaultEntryProduct="booking"
+        airbnbImportEnabled={process.env.AIRBNB_IMPORT_CALLBACK_ENABLED === "true"}
+        quickSetupEnabled={isOnboardingV2Enabled()}
+      />
     </Suspense>
   );
 }
 
-function CanonicalSetupRedirect() {
-  const searchParams = useSearchParams();
-  const redirectUrl = useMemo(
-    () =>
-      buildSharedHotelSetupRedirectPath({
-        entryProduct:
-          parseSharedHotelSetupEntryProduct(searchParams.get("entryProduct")) ?? "booking",
-        returnProduct: "booking",
-        returnTo: safeSharedHotelSetupReturnTo(searchParams.get("returnTo"), "/dashboard"),
-        propertyId: searchParams.get("propertyId"),
-        setupBaseUrl: MARKETPLACE_FRONTEND_URL,
-        mode: searchParams.get("mode") === "add" ? "add" : undefined,
-      }),
-    [searchParams],
-  );
-
-  useEffect(() => {
-    window.location.replace(redirectUrl);
-  }, [redirectUrl]);
-
-  return <SetupLoading />;
-}
-
 function SetupLoading() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-gray-950" />
+    <div
+      className="flex min-h-screen items-center justify-center bg-gray-50 px-6"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="text-sm font-medium text-gray-600">Loading your setup…</p>
     </div>
   );
 }

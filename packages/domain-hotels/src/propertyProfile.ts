@@ -32,6 +32,10 @@ export type PropertyProfileLocation = {
   localityPublic: boolean;
   geoPublic: boolean;
   mapDisplayMode: PropertyProfileMapDisplayMode;
+  /** The area or village (VAY-2322). Always read back, "" when not given; left out of a write, it stays. */
+  area?: string;
+  /** How guests find the entrance, sent in the booking confirmation email (VAY-2322). As `area`. */
+  arrivalDirections?: string;
 };
 
 export type PropertyProfileContact = {
@@ -191,6 +195,8 @@ function isReadablePropertyProfileLocation(value: unknown): value is PropertyPro
       "localityPublic",
       "geoPublic",
       "mapDisplayMode",
+      "area",
+      "arrivalDirections",
     ])
   ) {
     return false;
@@ -201,6 +207,8 @@ function isReadablePropertyProfileLocation(value: unknown): value is PropertyPro
     ) &&
     isNullableFiniteNumber(value["latitude"]) &&
     isNullableFiniteNumber(value["longitude"]) &&
+    isOptionalString(value["area"]) &&
+    isOptionalString(value["arrivalDirections"]) &&
     typeof value["localityPublic"] === "boolean" &&
     typeof value["geoPublic"] === "boolean" &&
     PROPERTY_PROFILE_MAP_DISPLAY_MODES.includes(
@@ -257,24 +265,33 @@ function isPropertyProfileLocation(value: unknown): value is PropertyProfileLoca
       "localityPublic",
       "geoPublic",
       "mapDisplayMode",
+      "area",
+      "arrivalDirections",
     ])
   ) {
     return false;
   }
   return (
     isNonEmptyString(value["streetAddress"]) &&
-    isNonEmptyString(value["postalCode"]) &&
+    // Many addresses have no postal code (VAY-2289).
+    typeof value["postalCode"] === "string" &&
     isNonEmptyString(value["city"]) &&
     isNonEmptyString(value["countryCode"]) &&
     isNonEmptyString(value["timezone"]) &&
     isNullableFiniteNumber(value["latitude"]) &&
     isNullableFiniteNumber(value["longitude"]) &&
+    isOptionalString(value["area"]) &&
+    isOptionalString(value["arrivalDirections"]) &&
     typeof value["localityPublic"] === "boolean" &&
     typeof value["geoPublic"] === "boolean" &&
     PROPERTY_PROFILE_MAP_DISPLAY_MODES.includes(
       value["mapDisplayMode"] as PropertyProfileMapDisplayMode,
     )
   );
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
 }
 
 function isPropertyProfileContact(value: unknown): value is PropertyProfileContact {
@@ -320,12 +337,20 @@ function isPropertyProfilePatch(value: unknown): value is PropertyProfilePatch {
         "localityPublic",
         "geoPublic",
         "mapDisplayMode",
+        "area",
+        "arrivalDirections",
       ])
     ) {
       return false;
     }
-    for (const key of ["streetAddress", "postalCode", "city", "countryCode", "timezone"]) {
+    for (const key of ["streetAddress", "city", "countryCode", "timezone"]) {
       if (location[key] !== undefined && !isNonEmptyString(location[key])) return false;
+    }
+    if (location["postalCode"] !== undefined && typeof location["postalCode"] !== "string") {
+      return false;
+    }
+    if (!isOptionalString(location["area"]) || !isOptionalString(location["arrivalDirections"])) {
+      return false;
     }
     for (const key of ["latitude", "longitude"]) {
       if (location[key] !== undefined && !isNullableFiniteNumber(location[key])) return false;

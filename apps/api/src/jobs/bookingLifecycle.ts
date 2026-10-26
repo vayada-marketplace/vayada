@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
 
-import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { StripeBookingPaymentProvider } from "../domains/stripeBookingPayments.js";
 import {
   expirePricingCardBooking,
@@ -612,7 +611,7 @@ async function applyPgLifecycleMutation(
           ),
       );
       await client.query("COMMIT");
-      return outcome === "pending"
+      return outcome === "pending" || outcome === "authorized"
         ? lifecycleNoopResult(candidate, mutation)
         : {
             ...lifecycleNoopResult(candidate, mutation),
@@ -993,30 +992,6 @@ async function updateBookingLifecycleStatus(
         fromStatus: row.fromStatus,
         toStatus: row.toStatus,
         reason: mutation.cancellationReason ?? null,
-      },
-    });
-  }
-  if (mutation.toStatus === "canceled") {
-    const lifecycleKey = buildBookingLifecycleSweepKey({
-      guestBookingId: candidate.guestBookingId,
-      action: mutation.action,
-      deadlineOrWindow: mutation.deadlineOrWindow,
-    });
-    await publishAffiliateReservationLifecycle(client, {
-      source: "booking",
-      eventKey: `booking.affiliate-reservation.canceled.${lifecycleKey}.v1`,
-      eventType: "booking.affiliate_reservation.canceled",
-      occurredAt: context.now.toISOString(),
-      propertyId: candidate.propertyId,
-      bookingId: candidate.guestBookingId,
-      actorType: "system",
-      correlationId: context.correlationId,
-      causationId: lifecycleKey,
-      idempotencyKeyHash: sha256Key(lifecycleKey),
-      evidence: {
-        sourceEventType: mutation.statusEventType,
-        lifecycleStatus: row.toStatus,
-        cancellationReason: mutation.cancellationReason ?? null,
       },
     });
   }

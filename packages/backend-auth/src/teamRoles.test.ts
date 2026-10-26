@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 import { createPgTeamRoleRepository } from "./teamRoles.js";
@@ -6,6 +7,10 @@ import { validateTeamRoleDefaults } from "./teamRolePolicy.js";
 import type { TeamRoleCreateCommand } from "./teamRoleCreate.js";
 
 const url = process.env["TEST_DATABASE_URL"];
+const readyMadeRoles = new URL(
+  "../../backend-migration/fixtures/ready-made-team-roles.sql",
+  import.meta.url,
+);
 describe.skipIf(!url)("organization role catalog", () => {
   it("creates and clones roles only for a live admin, with replay, audit and protected ceilings", async () => {
     if (!/(^|[_-])test([_-]|$)/i.test(new URL(url!).pathname.slice(1)))
@@ -42,7 +47,15 @@ describe.skipIf(!url)("organization role catalog", () => {
         `INSERT INTO identity.organizations (id, kind, name, slug) VALUES ($1::uuid, 'hotel_group', 'Role command test', $1::text)`,
         [org],
       );
-      // Validate real migration presets, then isolate custom-role command fixtures.
+      // A new account starts with Account admin, Agency manager and Property owner (VAY-2276). Older
+      // accounts may still hold the ready-made staff roles: validate those too, then isolate custom-role
+      // command fixtures.
+      expect((await repository.list(org)).map((role) => role.presetKey).sort()).toEqual([
+        "account_admin",
+        "agency_manager",
+        "property_owner",
+      ]);
+      await client.query(await readFile(readyMadeRoles, "utf8"), [[org]]);
       const presets = await repository.list(org);
       expect(presets).toHaveLength(6);
       expect(presets.every(validateTeamRoleDefaults)).toBe(true);
@@ -290,9 +303,13 @@ describe.skipIf(!url)("organization role catalog", () => {
         `INSERT INTO identity.organizations (id, kind, name, slug) VALUES ($1::uuid, 'hotel_group', 'Role test', $1::text), ($2::uuid, 'hotel_group', 'Other role test', $2::text)`,
         [org, other],
       );
-      // Validate real migration presets, then isolate custom-role command fixtures.
+      // A new account starts with the default set (VAY-2276); isolate custom-role command fixtures.
       const presets = await repository.list(org);
-      expect(presets).toHaveLength(6);
+      expect(presets.map((role) => role.presetKey).sort()).toEqual([
+        "account_admin",
+        "agency_manager",
+        "property_owner",
+      ]);
       expect(presets.every(validateTeamRoleDefaults)).toBe(true);
       await client.query("BEGIN; SET LOCAL session_replication_role = replica");
       await client.query("DELETE FROM identity.organization_roles WHERE organization_id = $1", [
@@ -311,7 +328,12 @@ describe.skipIf(!url)("organization role catalog", () => {
         `INSERT INTO identity.organization_memberships (organization_id, user_id, role_key, status, property_access_mode, role_definition_id, access_origin) VALUES ($1, $2, 'hotel_custom', 'active', 'all', $3, 'agency')`,
         [org, user, role],
       );
-      expect(await repository.list(other)).toHaveLength(6);
+      // The other account keeps its own default set and nothing of this one.
+      expect((await repository.list(other)).map((role) => role.presetKey).sort()).toEqual([
+        "account_admin",
+        "agency_manager",
+        "property_owner",
+      ]);
       const roles = await repository.list(org);
       expect(roles).toHaveLength(1);
       expect(roles[0]).toMatchObject({

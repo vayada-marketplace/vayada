@@ -2,15 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug } from "@/contexts/HotelContext";
 import {
   analyticsChoice,
   clearAnalyticsSession,
   saveAnalyticsChoice,
 } from "@/services/api/analyticsConsent";
 
+// The guest section of Vayada's privacy policy (English only).
+const PRIVACY_NOTICE_URL = "https://vayada.com/privacy#booking-guests";
+
 export default function AnalyticsConsent() {
   const { slug } = useSlug();
+  const { hotel } = useHotel();
   const t = useTranslations("analyticsConsent");
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState<boolean | null>(null);
@@ -68,7 +72,7 @@ export default function AnalyticsConsent() {
         ref={trigger}
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-3 left-3 z-50 rounded-full border bg-white px-3 py-2 text-xs text-gray-700 shadow-sm"
+        className="fixed bottom-[calc(0.75rem+var(--fixed-bottom-bar,0px))] left-3 z-50 rounded-full border bg-white px-3 py-2 text-xs text-gray-700 shadow-sm"
       >
         {t("settings")}
       </button>
@@ -77,12 +81,28 @@ export default function AnalyticsConsent() {
           ref={panel}
           tabIndex={-1}
           aria-labelledby="booking-analytics-title"
-          className="fixed bottom-14 left-3 right-3 z-50 max-h-[75dvh] max-w-md overflow-auto rounded-xl border bg-white p-5 text-gray-900 shadow-xl"
+          className="fixed bottom-[calc(3.5rem+var(--fixed-bottom-bar,0px))] left-3 right-3 z-50 max-h-[75dvh] max-w-md overflow-auto rounded-xl border bg-white p-5 text-gray-900 shadow-xl"
         >
           <h2 id="booking-analytics-title" className="font-semibold">
             {t("title")}
           </h2>
-          <p className="my-3 text-sm">{t("description")}</p>
+          <p className="mt-3 text-sm">{t("description")}</p>
+          <p className="mb-3 mt-2 text-sm">
+            {t.rich("controller", {
+              hotel: hotel?.name ?? "",
+              policy: (chunks) => (
+                <a
+                  href={PRIVACY_NOTICE_URL}
+                  hrefLang="en"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </p>
           {choice !== null && <p className="mb-3 text-sm">{t(choice ? "enabled" : "disabled")}</p>}
           {error && (
             <p role="alert" className="mb-3 text-sm text-red-700">

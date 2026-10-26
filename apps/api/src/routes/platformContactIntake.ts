@@ -5,7 +5,18 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import pg, { type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 
+// The same in-memory, per-address, per-minute counter as "Find my booking" (VAY-2222).
+import { createBookingLookupRateLimit as createPerAddressRateLimit } from "../platform/bookingLookupRateLimit.js";
+
 export const PL1_NON_MEDIA_CONTRACT_VERSION = "pl1-non-media.v1" as const;
+
+/** Public contact messages accepted per address per minute (VAY-2286). */
+export const CONTACT_INTAKE_LIMIT = 5;
+export const CONTACT_NOTIFICATION_QUEUE = "platform.email";
+export const CONTACT_NOTIFICATION_JOB_TYPE = "email.platform-contact-notification";
+
+/** Where a message came from: the vayada.com form or the in-app support form. */
+export type ContactIntakeChannel = "contact_form" | "in_app_support";
 
 export type PlatformContactIntakeRequest = {
   name?: unknown;
@@ -46,6 +57,7 @@ export type PlatformContactIntakePayload = {
 export type PlatformContactIntakeRepository = {
   submitContact(input: {
     payload: PlatformContactIntakePayload;
+    channel: ContactIntakeChannel;
     requestId: string;
     receivedAt: string;
   }): Promise<PlatformContactIntakeResponse>;
@@ -67,8 +79,8 @@ export type PlatformContactIntakeRoutesOptions = {
 };
 
 type ContactIntakeRouteError = {
-  code: "invalid_request" | "intake_unavailable";
-  category: "validation" | "write_model";
+  code: "invalid_request" | "intake_unavailable" | "rate_limited";
+  category: "validation" | "write_model" | "rate_limit";
   message: string;
 };
 
@@ -85,6 +97,7 @@ export function registerPlatformContactIntakeRoutes(
   options: PlatformContactIntakeRoutesOptions,
 ): void {
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
+  const contactRateLimit = createPerAddressRateLimit({ limit: CONTACT_INTAKE_LIMIT });
 
   app.addHook("onClose", async () => {
     await options.repository.close?.();
@@ -120,7 +133,7 @@ export function registerPlatformContactIntakeRoutes(
         page.length > 500 ||
         !/^\/(?!\/)[^?#\\\s]*$/.test(page) ||
         typeof product !== "string" ||
-        !["marketplace", "booking", "pms", "affiliate"].includes(product)
+        !["booking", "pms"].includes(product)
       ) {
         return sendContactIntakeError(reply, 400, {
           code: "invalid_request",
@@ -130,6 +143,7 @@ export function registerPlatformContactIntakeRoutes(
       }
       try {
         const result = await options.repository.submitContact({
+          channel: "in_app_support",
           requestId: request.id,
           receivedAt: new Date().toISOString(),
           payload: {
@@ -146,6 +160,8 @@ export function registerPlatformContactIntakeRoutes(
               product,
               userId: context.actor.internalUserId,
               organizationId: context.selectedOrganization.organizationId,
+              // VAY-2286: names the hotel account in the team's email subject.
+              organizationName: context.selectedOrganization.name ?? null,
             }),
           },
         });
@@ -161,25 +177,49 @@ export function registerPlatformContactIntakeRoutes(
     },
   );
 
-  app.post<{ Body: PlatformContactIntakeRequest }>("/contact", async (request, reply) => {
-    const parsed = parseContactPayload(request.body);
-    if (!parsed.ok) return sendContactIntakeError(reply, 400, parsed.error);
+  // VAY-2286: the public form's fields fit easily; a large body is refused before parsing.
+  app.post<{ Body: PlatformContactIntakeRequest }>(
+    "/contact",
+    { bodyLimit: 24_000 },
+    async (request, reply) => {
+      const parsed = parseContactPayload(request.body);
+      if (!parsed.ok) return sendContactIntakeError(reply, 400, parsed.error);
+      // Counted in memory only for valid messages. Browsers reach next-api through the ALB only
+      // (no Cloudflare, no app proxy) and trustProxy trusts just private addresses, so request.ip
+      // is the visitor's address.
+      const limit = contactRateLimit(request.ip || "unknown");
+      if (!limit.allowed) {
+        reply.header("Retry-After", String(limit.retryAfterSeconds));
+        return sendContactIntakeError(reply, 429, {
+          code: "rate_limited",
+          category: "rate_limit",
+          message: "Too many messages in a short time. Please wait a minute and try again.",
+        });
+      }
 
-    try {
-      return await options.repository.submitContact({
-        payload: parsed.value,
-        requestId: request.id,
-        receivedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      request.log.error({ err: error }, "Platform contact intake failed");
-      return sendContactIntakeError(reply, 500, {
-        code: "intake_unavailable",
-        category: "write_model",
-        message: "Contact intake is temporarily unavailable.",
-      });
-    }
-  });
+      try {
+        return await options.repository.submitContact({
+          payload: parsed.value,
+          channel: "contact_form",
+          requestId: request.id,
+          receivedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        // Only the request id and the error code: a database error's detail can quote the row.
+        request.log.error(
+          { requestId: request.id, code: (error as { code?: unknown })?.code },
+          "Platform contact intake failed",
+        );
+        return sendContactIntakeError(reply, 500, {
+          code: "intake_unavailable",
+          category: "write_model",
+          // Shown to visitors on vayada.com/contact (VAY-2286).
+          message:
+            "We could not send your message. Please try again, or write to the email address on this page.",
+        });
+      }
+    },
+  );
 }
 
 export function createPgPlatformContactIntakeRepository(config: {
@@ -198,11 +238,11 @@ export function createPgPlatformContactIntakeRepository(config: {
     });
 
   return {
-    async submitContact({ payload, requestId, receivedAt }) {
+    async submitContact({ payload, channel, requestId, receivedAt }) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const result = await persistContactIntake(client, payload, requestId, receivedAt);
+        const result = await persistContactIntake(client, payload, channel, requestId, receivedAt);
         await client.query("COMMIT");
         return result;
       } catch (error) {
@@ -218,16 +258,19 @@ export function createPgPlatformContactIntakeRepository(config: {
   };
 }
 
+// VAY-2286: names, addresses and the message live only in the job row, which the retention job
+// empties after 90 days. The append-only event and audit tables get only the channel and outcome
+// (plus keys that are one-way hashes), because their rows can never be changed or deleted.
 async function persistContactIntake(
   client: Pick<PlatformContactIntakePool, "query">,
   payload: PlatformContactIntakePayload,
+  channel: ContactIntakeChannel,
   requestId: string,
   receivedAt: string,
 ): Promise<PlatformContactIntakeResponse> {
   const fingerprint = sha256(stableJson(payload));
   const idempotencyKey = contactIntakeIdempotencyKey(payload.email, fingerprint, receivedAt);
   const intakeId = `contact_${fingerprint.slice(0, 24)}`;
-  const redactedPayload = contactRedactedPayload(payload);
   const privatePayload = {
     name: payload.name,
     email: payload.email,
@@ -290,11 +333,8 @@ async function persistContactIntake(
       intakeId,
       requestId,
       sha256(idempotencyKey),
-      JSON.stringify(privatePayload),
-      JSON.stringify({
-        contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION,
-        redacted: redactedPayload,
-      }),
+      JSON.stringify({ channel }),
+      JSON.stringify({ contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION }),
     ],
   );
   const eventId = event.rows[0]?.eventId;
@@ -314,12 +354,13 @@ async function persistContactIntake(
          correlation_id,
          idempotency_key_hash,
          payload,
-         job_metadata
+         job_metadata,
+         priority
        )
        VALUES (
          $1,
-         'platform.email',
-         'email.platform-contact-notification',
+         $8,
+         $9,
          $2::uuid,
          'platform',
          'platform',
@@ -328,7 +369,8 @@ async function persistContactIntake(
          $4,
          $5,
          $6::jsonb,
-         $7::jsonb
+         $7::jsonb,
+         $10
        )
        ON CONFLICT (queue_name, job_key) DO NOTHING
        RETURNING id::text AS "jobId"
@@ -337,7 +379,7 @@ async function persistContactIntake(
      UNION ALL
      SELECT id::text AS "jobId"
      FROM platform.jobs
-     WHERE queue_name = 'platform.email'
+     WHERE queue_name = $8
        AND job_key = $1
      LIMIT 1`,
     [
@@ -347,7 +389,11 @@ async function persistContactIntake(
       requestId,
       sha256(idempotencyKey),
       JSON.stringify(privatePayload),
-      JSON.stringify({ contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION }),
+      JSON.stringify({ contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION, channel }),
+      CONTACT_NOTIFICATION_QUEUE,
+      CONTACT_NOTIFICATION_JOB_TYPE,
+      // Hotels' support requests go out before public form messages (a flood can't hold them).
+      channel === "in_app_support" ? 1 : 0,
     ],
   );
   const jobId = job.rows[0]?.jobId;
@@ -404,8 +450,8 @@ async function persistContactIntake(
       eventId,
       jobId,
       requestId,
-      JSON.stringify(redactedPayload),
-      JSON.stringify(privatePayload),
+      JSON.stringify({ channel, outcome: "accepted" }),
+      "{}",
       JSON.stringify({ contractVersion: PL1_NON_MEDIA_CONTRACT_VERSION }),
     ],
   );
@@ -459,17 +505,6 @@ function parseContactPayload(
   };
 }
 
-function contactRedactedPayload(payload: PlatformContactIntakePayload): Record<string, unknown> {
-  return {
-    emailDomain: payload.email.split("@")[1] ?? "unknown",
-    hasPhone: Boolean(payload.phone),
-    hasCompany: Boolean(payload.company),
-    country: payload.country,
-    userType: payload.userType,
-    messageLength: payload.message.length,
-  };
-}
-
 function contactIntakeIdempotencyKey(
   email: string,
   fingerprint: string,
@@ -500,7 +535,7 @@ function normalizeEmail(value: unknown): string | null {
 
 function sendContactIntakeError(
   reply: FastifyReply,
-  statusCode: 400 | 500 | 503,
+  statusCode: 400 | 429 | 500 | 503,
   error: ContactIntakeRouteError,
 ): FastifyReply {
   return reply.status(statusCode).send({ ...error, statusCode });

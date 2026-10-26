@@ -5,11 +5,14 @@ export type BookedCancellation = ReplacementOfferTerms["cancellation"];
 /** One booked room: the terms frozen at acceptance and its own lines (room, meal, room-scoped extras). */
 export type BookedCancellationRoom = Readonly<{
   selectionId: string;
+  /** The room's type, carried into its outcome so a guest can tell the rooms apart (VAY-2320). */
+  roomTypeId?: string;
   cancellation: BookedCancellation;
   subtotalMinor: string;
 }>;
 export type BookedCancellationRoomOutcome = Readonly<{
   selectionId: string;
+  roomTypeId?: string;
   rule: "non_refundable" | "free_until_deadline" | "partial_refund";
   refundPercent: number;
   matchedTierMinDays: number | null;
@@ -79,6 +82,7 @@ export function resolveBookedCancellationOutcome(input: {
     const refund = (base * BigInt(rule.refundPercent) + 50n) / 100n;
     return {
       selectionId: room.selectionId,
+      ...(room.roomTypeId !== undefined && { roomTypeId: room.roomTypeId }),
       ...rule,
       baseMinor: base.toString(),
       refundMinor: refund.toString(),

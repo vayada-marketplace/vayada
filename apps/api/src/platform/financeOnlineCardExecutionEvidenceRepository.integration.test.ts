@@ -18,7 +18,10 @@ import { createPgProviderWebhookStore } from "./providerWebhooks.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const actorUserId = randomUUID();
-const platformOrganizationId = randomUUID();
+// Vayada Platform's seeded id (platformIdentityBootstrap). It isn't an RFC 4122 v1–v5 UUID, which the
+// strict check refused, so every approval in production got 400 (VAY-2205).
+const platformOrganizationId = "00000000-0000-0000-0000-000000000001";
+let platformOrganizationCreated = false;
 const hotelGroupOrganizationId = randomUUID();
 const propertyId = randomUUID();
 const otherPropertyId = randomUUID();
@@ -51,15 +54,19 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
     );
     await pool.query(
       `INSERT INTO identity.organizations (id, kind, name, slug, status)
-       VALUES ($1::uuid, 'platform', 'VAY-1345 Platform', $2, 'active'),
-              ($3::uuid, 'hotel_group', 'VAY-1345 Hotel Group', $4, 'active')`,
-      [
-        platformOrganizationId,
-        `vay-1345-${platformOrganizationId}`,
-        hotelGroupOrganizationId,
-        `vay-1345-${hotelGroupOrganizationId}`,
-      ],
+       VALUES ($1::uuid, 'hotel_group', 'VAY-1345 Hotel Group', $2, 'active')`,
+      [hotelGroupOrganizationId, `vay-1345-${hotelGroupOrganizationId}`],
     );
+    // The seeded organization may already be there: then it stays, and cleanup leaves it alone.
+    platformOrganizationCreated =
+      (
+        await pool.query(
+          `INSERT INTO identity.organizations (id, kind, name, slug, status)
+           VALUES ($1::uuid, 'platform', 'VAY-1345 Platform', $2, 'active')
+           ON CONFLICT (id) DO NOTHING RETURNING id`,
+          [platformOrganizationId, `vay-1345-${platformOrganizationId}`],
+        )
+      ).rowCount === 1;
     await pool.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
        VALUES ($1::uuid, $2, 'VAY-1345 Hotel'),
@@ -150,6 +157,16 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
   });
 
   it("accepts exact-revision evidence, replays once, and never silently publishes card", async () => {
+    // VAY-2205: the operator's switch reads the revisions to accept against, and the approval.
+    expect(await repository.readOnlineCardExecutionState(propertyId)).toEqual({
+      propertyId,
+      providerAccount: { ready: true, cardCapabilityRevision: 7 },
+      propertyReadinessRevision: 1,
+      paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: true },
+      evidence: null,
+      cardReady: false,
+    });
+    expect(await repository.readOnlineCardExecutionState(randomUUID())).toBeNull();
     const accepted = await repository.acceptOnlineCardExecutionEvidence(acceptCommand());
     expect(accepted).toMatchObject({
       ok: true,
@@ -171,6 +188,20 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
 
     const replay = await repository.acceptOnlineCardExecutionEvidence(acceptCommand());
     expect(replay).toEqual({ ...accepted, status: "idempotent_replay" });
+    // A retried approval gets a new server time and fingerprint, and still replays (VAY-2205).
+    expect(
+      await repository.acceptOnlineCardExecutionEvidence(
+        acceptCommand({
+          executedAt: "2026-08-28T10:06:00.000Z",
+          evidenceFingerprintHash: "b".repeat(64),
+          requestedAt: "2026-08-28T10:06:00.000Z",
+        }),
+      ),
+    ).toEqual({ ...accepted, status: "idempotent_replay" });
+    expect(await repository.readOnlineCardExecutionState(propertyId)).toMatchObject({
+      evidence: { evidenceId, acceptedAt: accepted.response.acceptedAt, current: true },
+      cardReady: true,
+    });
 
     await expect(publicPaymentMethods()).resolves.toEqual(["pay_at_property"]);
     const durable = await pool.query<{
@@ -511,6 +542,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       [propertyId, providerAccountId],
     );
     expect(state.rows[0]).toMatchObject({ revision: 8, ready: false, losses: 2 });
+    // VAY-2205: the operator's switch shows the approval as out of date.
+    expect(await repository.readOnlineCardExecutionState(propertyId)).toMatchObject({
+      providerAccount: { cardCapabilityRevision: 8 },
+      evidence: { current: false },
+      cardReady: false,
+    });
   });
 
   it("emits and suppresses loss from the legacy payment-settings writer", async () => {
@@ -580,7 +617,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
 
     expect(result).toMatchObject({
       ok: true,
-      commandMeta: { outboxEvents: ["finance.online_card_readiness.changed"] },
+      // VAY-2136: the settings page also records the payment-readiness change it binds.
+      commandMeta: {
+        outboxEvents: [
+          "finance.payment_readiness.changed",
+          "finance.online_card_readiness.changed",
+        ],
+      },
     });
     await expect(publicPaymentMethods()).resolves.toEqual(["pay_at_property"]);
   });
@@ -669,7 +712,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
         payload: {
           email: "compensation-retry@example.test",
           country: "DE",
-          returnSurface: "marketplace",
+          returnSurface: "booking_admin_setup",
         },
       });
 
@@ -751,7 +794,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       payload: {
         email: "foreign-ref@example.test",
         country: "DE",
-        returnSurface: "marketplace",
+        returnSurface: "booking_admin_setup",
       },
     });
 
@@ -821,7 +864,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       payload: {
         email: `concurrent-${suffix}@example.test`,
         country: "DE",
-        returnSurface: "marketplace" as const,
+        returnSurface: "booking_admin_setup" as const,
       },
     });
 
@@ -1193,7 +1236,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
         ]);
       }
       await client.query("DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])", [
-        [platformOrganizationId, hotelGroupOrganizationId],
+        platformOrganizationCreated
+          ? [platformOrganizationId, hotelGroupOrganizationId]
+          : [hotelGroupOrganizationId],
       ]);
       await client.query("DELETE FROM identity.users WHERE id = $1::uuid", [actorUserId]);
       await client.query("COMMIT");

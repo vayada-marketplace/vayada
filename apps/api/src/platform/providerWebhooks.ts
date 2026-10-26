@@ -25,6 +25,8 @@ type PgProviderWebhookStoreConfig = {
   max?: number;
   stripeConnectProvider?: Pick<FinanceStripeConnectProvider, "retrieveAccount">;
   stripePaymentProvider?: Pick<StripeBookingPaymentProvider, "retrievePaymentIntent">;
+  /** VAY-2304: runs after a Stripe account update has committed, to re-publish the hotel's prices. */
+  afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
 };
 class AlterationBindingUnavailable extends Error {}
 
@@ -63,6 +65,7 @@ export function createPgProviderWebhookStore(
         input,
         config.stripeConnectProvider,
         config.stripePaymentProvider,
+        config.afterPaymentChange,
       );
     },
     async close() {
@@ -185,8 +188,11 @@ export async function promoteReceipt(
   input: ProviderWebhookPromotionInput,
   stripeConnectProvider?: Pick<FinanceStripeConnectProvider, "retrieveAccount">,
   stripePaymentProvider?: Pick<StripeBookingPaymentProvider, "retrievePaymentIntent">,
+  afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>,
 ): Promise<ProviderWebhookPromotionResult> {
   const client = await pool.connect();
+  let accountProperty: string | null = null;
+  let released = false;
   try {
     await client.query("BEGIN");
     const receiptStatus = await lockReceiptForPromotion(client, input);
@@ -243,7 +249,7 @@ export async function promoteReceipt(
     if (stripePaymentIntent) {
       await reconcileStripeBookingPaymentProviderDetails(client, stripePaymentIntent, new Date());
     }
-    await reconcileStripeProviderAccount(client, input, stripeConnectProvider);
+    accountProperty = await reconcileStripeProviderAccount(client, input, stripeConnectProvider);
 
     await insertOrTouchIdempotencyKey(client, {
       operation: "external_webhook_job",
@@ -284,6 +290,9 @@ export async function promoteReceipt(
     );
 
     await client.query("COMMIT");
+    client.release();
+    released = true;
+    if (accountProperty) await afterPaymentChange?.(pool, accountProperty);
     return {
       status: promotionStatus,
       receiptId: input.receiptId,
@@ -292,12 +301,13 @@ export async function promoteReceipt(
       auditEventIds: auditEventId ? [auditEventId] : [],
     };
   } catch (error) {
+    if (released) throw error;
     await client.query("ROLLBACK");
     if (error instanceof AlterationBindingUnavailable)
       return { status: "observed", receiptId: input.receiptId, jobIds: [] };
     throw error;
   } finally {
-    client.release();
+    if (!released) client.release();
   }
 }
 
@@ -417,12 +427,12 @@ export async function reconcileStripeProviderAccount(
   client: Pick<pg.PoolClient, "query">,
   input: ProviderWebhookPromotionInput,
   stripeConnectProvider?: Pick<FinanceStripeConnectProvider, "retrieveAccount">,
-): Promise<void> {
+): Promise<string | null> {
   if (
     input.provider !== "stripe" ||
     input.normalizedPreview.domainEventType !== "finance.provider-account.updated"
   ) {
-    return;
+    return null;
   }
   const providerAccountRef = stripeAccountUpdatedProviderRef(input.rawPayload);
   if (
@@ -438,7 +448,7 @@ export async function reconcileStripeProviderAccount(
      LIMIT 2`,
     [providerAccountRef],
   );
-  if (resolved.rows.length !== 1) return;
+  if (resolved.rows.length !== 1) return null;
   const propertyId = resolved.rows[0]!.propertyId;
   const property = await client.query(
     `SELECT id
@@ -447,7 +457,7 @@ export async function reconcileStripeProviderAccount(
      FOR UPDATE`,
     [propertyId],
   );
-  if (!property.rows[0]) return;
+  if (!property.rows[0]) return null;
   const locked = await client.query<{ id: string }>(
     `SELECT account.id::text AS id
      FROM finance.payment_provider_accounts account
@@ -461,7 +471,7 @@ export async function reconcileStripeProviderAccount(
      FOR UPDATE OF account, settings`,
     [providerAccountRef, propertyId],
   );
-  if (!locked.rows[0]) return;
+  if (!locked.rows[0]) return null;
 
   const payload = input.normalizedPreview.payload;
   const canonical = stripeConnectProvider
@@ -494,6 +504,7 @@ export async function reconcileStripeProviderAccount(
       causationId: input.receiptId,
     },
   });
+  return propertyId;
 }
 
 function stripeAccountUpdatedProviderRef(payload: Record<string, unknown>): string | null {

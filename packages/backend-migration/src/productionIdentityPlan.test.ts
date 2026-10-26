@@ -65,6 +65,166 @@ describe("production identity plan", () => {
     expect(verified.checksum).toBe(first.checksum);
   });
 
+  it("leaves creators, affiliates and Marketplace ownership out of the plan (VAY-2272)", () => {
+    const creator = "44444444-4444-4444-8444-444444444444";
+    const creatorHotel = "88888888-8888-4888-8888-888888888888";
+    const cookie = (id: string, userId: string | null, analytics: boolean, updatedAt: string) =>
+      source("auth", "cookie_consent", {
+        id,
+        visitor_id: "visitor-1",
+        user_id: userId,
+        necessary: true,
+        functional: false,
+        analytics,
+        marketing: false,
+        created_at: JAN,
+        updated_at: updatedAt,
+      });
+    const rows = [
+      ...validRows(),
+      source("auth", "users", {
+        ...validRows()[0]!.data,
+        id: creator,
+        email: "creator@example.com",
+        type: "creator",
+      }),
+      source("auth", "login_audit_log", {
+        ...auditData(),
+        id: "55555555-5555-4555-8555-555555555555",
+        user_id: creator,
+      }),
+      // A failed login names the creator by email only.
+      source("auth", "login_audit_log", {
+        ...auditData(),
+        id: "56565656-5656-4565-8565-565656565656",
+        user_id: null,
+        email: "Creator@Example.com",
+        success: false,
+      }),
+      // The creator's newer choice still wins for the visitor, without the user.
+      cookie("99999999-9999-4999-8999-999999999991", null, true, JAN),
+      cookie("99999999-9999-4999-8999-999999999992", creator, false, FEB),
+      source("marketplace", "creators", { id: creator, user_id: creator, created_at: JAN }),
+      source("marketplace", "hotel_profiles", {
+        id: "66666666-6666-4666-8666-666666666666",
+        user_id: USER,
+        name: "Hotel One",
+        status: "verified",
+        created_at: JAN,
+      }),
+      source("pms", "affiliates", {
+        id: "77777777-7777-4777-8777-777777777777",
+        user_id: creator,
+        full_name: "Affiliate",
+        status: "approved",
+        created_at: JAN,
+      }),
+      // A hotel the creator owned is quarantined without a user, as before.
+      source("booking", "booking_hotels", {
+        id: creatorHotel,
+        user_id: creator,
+        name: "Creator hotel",
+        platform_status: "live",
+        created_at: JAN,
+        updated_at: FEB,
+      }),
+    ];
+    const existing = emptyProductionIdentityState();
+    existing.users.push({
+      id: creator,
+      email: "creator@example.com",
+      name: "Creator",
+      status: "active",
+      updatedAt: FEB,
+    });
+
+    const plan = buildProductionIdentityPlan(rows, existing);
+
+    expect(plan.blockers).toEqual([]);
+    expect(plan.users.map((row) => row.id)).toEqual([USER]);
+    expect(plan.organizations.map((row) => [row.kind, row.status])).toEqual(
+      expect.arrayContaining([
+        ["hotel_group", "active"],
+        ["hotel_group", "archived"],
+      ]),
+    );
+    expect(plan.organizations).toHaveLength(2);
+    expect(plan.memberships.map((row) => row.userId)).toEqual([USER]);
+    expect(plan.resourceLinks.map((row) => `${row.product}:${row.resourceType}`)).toEqual([
+      "booking:booking_hotel",
+      "booking:booking_hotel",
+    ]);
+    expect(new Set(plan.entitlements.map((row) => row.entitlementKey))).toEqual(
+      new Set(["booking-engine"]),
+    );
+    expect(plan.auditEvents.map((row) => row.actorUserId)).toEqual([USER]);
+    expect(plan.cookieConsents).toEqual([
+      expect.objectContaining({ visitorId: "visitor-1", userId: null, analytics: false }),
+    ]);
+    expect(plan.retiredProductUserIds).toEqual([creator]);
+    expect(plan.retiredProductUserRows).toEqual({
+      users: 1,
+      login_audit_log: 2,
+      cookie_consent_unlinked: 1,
+    });
+    expect(plan.counts).toMatchObject({
+      users: 1,
+      retiredProductUsers: 1,
+      retiredProductUsersInTarget: 1,
+      retiredProductUserRows: 3,
+      quarantinedUsers: 0,
+      quarantinedOrganizations: 1,
+      loginAuditEvents: 1,
+    });
+  });
+
+  it("names the hotel users whose only legacy hotel was a Marketplace profile (VAY-2272)", () => {
+    const rows = [
+      validRows()[0]!,
+      source("marketplace", "hotel_profiles", {
+        id: "66666666-6666-4666-8666-666666666666",
+        user_id: USER,
+        name: "Hotel One",
+        status: "verified",
+        created_at: JAN,
+      }),
+    ];
+
+    expect(buildProductionIdentityPlan(rows).blockers).toEqual([
+      expect.objectContaining({ code: "MARKETPLACE_ONLY_HOTEL_OWNER", sourceId: USER }),
+    ]);
+    // Without the profile, an active hotel user with no hotel keeps the general blocker.
+    expect(buildProductionIdentityPlan([validRows()[0]!]).blockers).toEqual([
+      expect.objectContaining({ code: "ACTIVE_USER_WITHOUT_OWNERSHIP", sourceId: USER }),
+    ]);
+  });
+
+  it("blocks a retired owner's hotel with a future booking as an owner type mismatch", () => {
+    const creator = "44444444-4444-4444-8444-444444444444";
+    const rows = [
+      source("auth", "users", { ...validRows()[0]!.data, id: creator, type: "creator" }),
+      source("booking", "booking_hotels", {
+        id: HOTEL,
+        user_id: creator,
+        name: "Creator hotel",
+        platform_status: "live",
+        created_at: JAN,
+        updated_at: FEB,
+      }),
+      source("pms", "bookings", {
+        id: "88888888-8888-4888-8888-888888888888",
+        hotel_id: HOTEL,
+        status: "confirmed",
+        is_test_booking: false,
+        check_out: "2099-01-01",
+      }),
+    ];
+
+    expect(buildProductionIdentityPlan(rows).blockers.map((row) => row.code)).toEqual([
+      "OWNER_TYPE_MISMATCH_WITH_FUTURE_BOOKING",
+    ]);
+  });
+
   it("combines fail-closed blockers without losing deterministic counts", () => {
     const rows = validRows();
     rows.push({

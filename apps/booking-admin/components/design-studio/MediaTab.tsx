@@ -40,12 +40,12 @@ interface MediaTabProps {
   uploadingLogo: boolean;
   showContactButton: boolean;
   setShowContactButton: (value: boolean) => void;
-  showReferAGuestButton: boolean;
-  setShowReferAGuestButton: (value: boolean) => void;
-  referAGuestModuleEnabled: boolean | null;
   showLanguageSelector: boolean;
   setShowLanguageSelector: (value: boolean) => void;
   languageSelectorAvailable: boolean;
+  showCurrencySelector: boolean;
+  setShowCurrencySelector: (value: boolean) => void;
+  currencySelectorAvailable: boolean;
   resetContent: () => void;
   galleryImages: PropertyGalleryImage[];
   galleryAtCapacity: boolean;
@@ -82,12 +82,12 @@ export default function MediaTab({
   uploadingLogo,
   showContactButton,
   setShowContactButton,
-  showReferAGuestButton,
-  setShowReferAGuestButton,
-  referAGuestModuleEnabled,
   showLanguageSelector,
   setShowLanguageSelector,
   languageSelectorAvailable,
+  showCurrencySelector,
+  setShowCurrencySelector,
+  currencySelectorAvailable,
   resetContent,
   galleryImages,
   galleryAtCapacity,
@@ -460,23 +460,6 @@ export default function MediaTab({
             onChange={() => setShowContactButton(!showContactButton)}
             label={t("admin.contactButton")}
           />
-          <div
-            title={
-              referAGuestModuleEnabled
-                ? undefined
-                : referAGuestModuleEnabled === false
-                  ? t("admin.enableReferAGuestInFeatureHubFirst")
-                  : t("admin.featureHubStatusIsUnavailable")
-            }
-          >
-            <ToggleSwitch
-              enabled={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
-              onChange={() => setShowReferAGuestButton(!showReferAGuestButton)}
-              label={t("admin.referAGuestButton")}
-              description={t("admin.tiedToFeatureHubActivation")}
-              disabled={!referAGuestModuleEnabled}
-            />
-          </div>
           <ToggleSwitch
             enabled={languageSelectorAvailable && showLanguageSelector}
             onChange={() => setShowLanguageSelector(!showLanguageSelector)}
@@ -485,11 +468,11 @@ export default function MediaTab({
             disabled={!languageSelectorAvailable}
           />
           <ToggleSwitch
-            enabled={false}
-            onChange={() => {}}
+            enabled={currencySelectorAvailable && showCurrencySelector}
+            onChange={() => setShowCurrencySelector(!showCurrencySelector)}
             label={t("admin.currencySelector")}
-            description={t("admin.multiCurrencyIsNotAvailableYet")}
-            disabled
+            description={t("admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured")}
+            disabled={!currencySelectorAvailable}
           />
         </div>
       </div>

@@ -238,6 +238,13 @@ export type PmsTemplateStep = {
   stepId: string;
   label: string;
   required: boolean;
+  /** Check-in checklist: what the step asks and which input it shows. */
+  prompt?: string;
+  type?: "checkbox" | "text" | "amount";
+  /** Check-out inspection: the two answer labels and the note hint. */
+  okLabel?: string;
+  negativeLabel?: string;
+  notePrompt?: string;
 };
 
 export type PmsOperationalTemplateKind = "check_in_checklist" | "check_out_inspection";
@@ -431,12 +438,24 @@ export type PmsManualPriceCorrectionCommand = {
   audit: PmsOperationsCommandAudit;
 };
 
+/** How the hotel took a payment it records at the desk (VAY-2373, D2): nothing is charged online, and
+ * card means the hotel's own terminal (Finance's manual_card, never Stripe's card). */
+export const PMS_DESK_SETTLEMENT_METHODS = [
+  "cash",
+  "manual_card",
+  "bank_transfer",
+  "other",
+] as const;
+export type PmsDeskSettlementMethod = (typeof PMS_DESK_SETTLEMENT_METHODS)[number];
+
 export type PmsBookingLifecycleCommand = {
   propertyId: string;
   guestBookingId: string;
   commandId: string;
   idempotencyKey: string;
   audit: PmsOperationsCommandAudit;
+  /** Mark paid only: the method staff chose; without it the booking's own method is recorded. */
+  settlementMethod?: PmsDeskSettlementMethod;
 };
 
 export type PmsCheckOutCommand = {
@@ -931,6 +950,13 @@ export type PmsRoomTypeRetireCommandResult =
       code: "idempotency_conflict" | "version_conflict" | "room_type_retirement_blocked";
       message: string;
       impact?: PmsRoomTypeRetirementImpact;
+    }
+  | {
+      // A Delete that does the cleanup is for the property's owner or operator (VAY-2132).
+      ok: false;
+      statusCode: 403;
+      code: "room_type_delete_not_allowed";
+      message: string;
     };
 
 export type PmsRoomBlockCommandResult =
@@ -3012,9 +3038,12 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          items: canReadGuestContact
-            ? result.items
-            : result.items.map(redactReservationGuestContact),
+          items: result.items.map((item) =>
+            redactReservationFinance(
+              canReadGuestContact ? item : redactReservationGuestContact(item),
+              context,
+            ),
+          ),
           pagination: {
             total: result.total,
             limit: filters.value.limit,
@@ -3071,12 +3100,15 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          item: await withAdditionalGuestProjection(
-            item,
-            bookingGuestPiiPort,
-            propertyId,
-            guestBookingId,
-            canReadGuestContact,
+          item: redactReservationFinance(
+            await withAdditionalGuestProjection(
+              item,
+              bookingGuestPiiPort,
+              propertyId,
+              guestBookingId,
+              canReadGuestContact,
+            ),
+            context,
           ),
           sourceFreshness: {},
         } satisfies PmsReservationDetailResponse;
@@ -3202,7 +3234,7 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           guestBookingId,
           additionalGuest: result.additionalGuest,
-          reservation,
+          reservation: redactReservationFinance(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestCommandResponse;
       },
@@ -3248,7 +3280,7 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           guestBookingId,
           additionalGuest: result.additionalGuest,
-          reservation,
+          reservation: redactReservationFinance(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestCommandResponse;
       },
@@ -3294,7 +3326,7 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           guestBookingId,
           guestId: result.guestId,
-          reservation,
+          reservation: redactReservationFinance(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestDeleteResponse;
       },
@@ -3785,7 +3817,7 @@ export async function registerPmsOperationsRoutes(
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
           guestBookingId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           checkout: result.checkout,
           charges: result.charges,
           commandMeta: result.commandMeta,
@@ -4059,7 +4091,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4088,7 +4120,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4119,7 +4151,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4145,12 +4177,29 @@ export async function registerPmsOperationsRoutes(
           "Mark booking paid",
         );
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
-        const result = await commandRepository.markBookingPaid(command.value);
+        const settlementMethod = (request.body as Record<string, unknown>).settlementMethod;
+        if (
+          settlementMethod !== undefined &&
+          !(PMS_DESK_SETTLEMENT_METHODS as readonly unknown[]).includes(settlementMethod)
+        ) {
+          return sendPmsOperationsError(
+            reply,
+            invalidBody(
+              `settlementMethod must be one of ${PMS_DESK_SETTLEMENT_METHODS.join(", ")}.`,
+            ),
+          );
+        }
+        const result = await commandRepository.markBookingPaid({
+          ...command.value,
+          ...(settlementMethod
+            ? { settlementMethod: settlementMethod as PmsDeskSettlementMethod }
+            : {}),
+        });
         if (!result.ok) return sendPmsOperationalCommandError(reply, result);
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4179,7 +4228,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4208,7 +4257,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4244,7 +4293,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4272,7 +4321,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4302,7 +4351,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4333,7 +4382,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4637,7 +4686,12 @@ function sendPmsRoomTypeRetireCommandError(
   return reply.status(result.statusCode).send({
     statusCode: result.statusCode,
     code: result.code,
-    category: result.statusCode === 404 ? "not_found" : "conflict",
+    category:
+      result.statusCode === 404
+        ? "not_found"
+        : result.statusCode === 403
+          ? "authorization"
+          : "conflict",
     message: result.message,
     ...("impact" in result && result.impact ? { impact: result.impact } : {}),
   });
@@ -5061,6 +5115,23 @@ function isRecurringMonthDay(value: string): boolean {
   return day <= new Date(Date.UTC(2024, month, 0)).getUTCDate();
 }
 
+const ROOM_TYPE_UPDATE_FIELDS = new Set([
+  "commandId",
+  "idempotencyKey",
+  "locationAddress",
+  "latitude",
+  "longitude",
+  "locationSource",
+  "locationPrecision",
+  "locationArea",
+  "showMapInDetails",
+  "cancellationPolicy",
+  "flexibleCancellationType",
+  "partialRefundCancelWindowDays",
+  "partialRefundAmountPercent",
+  "partialRefundTiers",
+]);
+
 function toRoomTypeUpdateCommand(
   propertyId: string,
   roomTypeId: string,
@@ -5069,6 +5140,22 @@ function toRoomTypeUpdateCommand(
   const raw = objectBody(request.body);
   if (!raw) return { error: invalidBody("Room type update body must be an object.") };
   if (!isUuid(roomTypeId)) return { error: invalidBody("roomTypeId must be a UUID.") };
+  // Refuse fields this command does not store instead of answering 200 without saving them.
+  const unsupported = Object.keys(raw).filter((key) => !ROOM_TYPE_UPDATE_FIELDS.has(key));
+  if (unsupported.length > 0) {
+    const named = unsupported
+      .sort()
+      .slice(0, 5)
+      .map((key) => key.slice(0, 40));
+    return {
+      error: invalidBody(
+        `Room type update does not save ${named.join(", ")}${unsupported.length > 5 ? ", …" : ""}.`,
+      ),
+    };
+  }
+  if (!Object.keys(raw).some((key) => key !== "commandId" && key !== "idempotencyKey")) {
+    return { error: invalidBody("Room type update has nothing to save.") };
+  }
 
   const commandId = stringField(raw.commandId);
   const idempotencyKey = stringField(raw.idempotencyKey);
@@ -5291,6 +5378,33 @@ function roomTypeLocationAttributes(
   const longitude = optionalCoordinate(raw.longitude, "longitude", -180, 180, action);
   if ("error" in longitude) return longitude;
   if (longitude.present) attributes.longitude = longitude.value;
+
+  // How guests see the room's place (VAY-2321): at the property or its own, exact or as an area.
+  for (const [field, allowed] of [
+    ["locationSource", ["property", "custom"]],
+    ["locationPrecision", ["exact", "approximate"]],
+  ] as const) {
+    if (!Object.hasOwn(raw, field)) continue;
+    const value = raw[field];
+    if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) {
+      return { error: `${action} ${field} must be ${allowed.join(" or ")}.` };
+    }
+    attributes[field] = value;
+  }
+  if (Object.hasOwn(raw, "locationArea")) {
+    const value = raw.locationArea;
+    const area = nullableStringField(value);
+    if ((value !== null && value !== "" && area === undefined) || (area && area.length > 120)) {
+      return { error: `${action} locationArea must be text of at most 120 characters, or null.` };
+    }
+    attributes.locationArea = area ?? null;
+  }
+  if (Object.hasOwn(raw, "showMapInDetails")) {
+    if (typeof raw.showMapInDetails !== "boolean") {
+      return { error: `${action} showMapInDetails must be true or false.` };
+    }
+    attributes.showMapInDetails = raw.showMapInDetails;
+  }
 
   return { value: attributes };
 }
@@ -5516,7 +5630,7 @@ function toOperationalTemplateUpdateCommand(
     return { error: invalidBody("Template update requires commandId and idempotencyKey.") };
   }
 
-  const steps = toOperationalTemplateSteps(body.steps);
+  const steps = toOperationalTemplateSteps(body.steps, templateKind);
   if ("error" in steps) return steps;
 
   return {
@@ -5531,8 +5645,14 @@ function toOperationalTemplateUpdateCommand(
   };
 }
 
+const TEMPLATE_STEP_TEXT_FIELDS = {
+  check_in_checklist: { prompt: 500 },
+  check_out_inspection: { okLabel: 60, negativeLabel: 60, notePrompt: 200 },
+} as const satisfies Record<PmsOperationalTemplateKind, Record<string, number>>;
+
 function toOperationalTemplateSteps(
   value: unknown,
+  templateKind: PmsOperationalTemplateKind,
 ): { value: PmsTemplateStep[] } | { error: PmsOperationsError } {
   if (!Array.isArray(value)) {
     return { error: invalidBody("Template steps must be an array.") };
@@ -5576,8 +5696,46 @@ function toOperationalTemplateSteps(
       return { error: invalidBody(`Template step ${index + 1} required must be a boolean.`) };
     }
 
+    const step: PmsTemplateStep = { stepId, label, required: raw.required === true };
+    const textFields: Record<string, number> = TEMPLATE_STEP_TEXT_FIELDS[templateKind];
+    const allowed = new Set(["stepId", "label", "required", ...Object.keys(textFields)]);
+    if (templateKind === "check_in_checklist") allowed.add("type");
+    // Refuse what this template does not store instead of answering 200 without it.
+    const unsupported = Object.keys(raw).filter((key) => !allowed.has(key));
+    if (unsupported.length > 0) {
+      return {
+        error: invalidBody(
+          `Template step ${index + 1} does not save ${unsupported
+            .sort()
+            .slice(0, 5)
+            .map((key) => key.slice(0, 40))
+            .join(", ")}.`,
+        ),
+      };
+    }
+    for (const [field, maxLength] of Object.entries(textFields)) {
+      const text = raw[field];
+      if (text === undefined) continue;
+      if (typeof text !== "string" || text.length > maxLength) {
+        return {
+          error: invalidBody(
+            `Template step ${index + 1} ${field} must be text of at most ${maxLength} characters.`,
+          ),
+        };
+      }
+      if (text.trim()) Object.assign(step, { [field]: text.trim() });
+    }
+    if (raw.type !== undefined) {
+      if (raw.type !== "checkbox" && raw.type !== "text" && raw.type !== "amount") {
+        return {
+          error: invalidBody(`Template step ${index + 1} type must be checkbox, text or amount.`),
+        };
+      }
+      step.type = raw.type;
+    }
+
     seenStepIds.add(stepId);
-    steps.push({ stepId, label, required: raw.required === true });
+    steps.push(step);
   }
 
   return { value: steps };
@@ -5886,6 +6044,18 @@ function applyAdditionalGuestProjection(
         canExposeGuestContact ? guest : redactGuestContact(guest),
       ) ?? [],
   };
+}
+
+// The Stripe fee, Vayada commission and net payout are Financials data, not desk data (VAY-2152).
+function redactReservationFinance<T extends PmsOperationalReservation>(
+  reservation: T,
+  context: RequestContext | null | undefined,
+): T {
+  if (!reservation.payment?.breakdown || (context && hasPermission(context, "pms.finance.read")))
+    return reservation;
+  const payment = { ...reservation.payment };
+  delete payment.breakdown;
+  return { ...reservation, payment };
 }
 
 function redactReservationGuestContact(

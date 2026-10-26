@@ -35,8 +35,6 @@ export {
   validateStaffInviteAccess,
   validateStaffPermissionOverrides,
   type ConsentCommandInput,
-  type CreateAffiliateInviteCommand,
-  type CreateAffiliateInvitePayload,
   type CreateCustomerInviteCommand,
   type CreateCustomerInvitePayload,
   type CreateStaffInviteCommand,
@@ -158,11 +156,17 @@ export {
   createPgStaffInvitationDeliveryRepository,
   createStaffInvitationDeliveryCoordinator,
   type StaffInvitationDeliveryClaim,
+  type ReplacedInvitationRevocation,
   type StaffInvitationDeliveryRepository,
   type StaffInvitationProvider,
   type StaffInvitationProviderResponse,
   type StaffInvitationProviderRole,
 } from "./staffInvitationDelivery.js";
+export {
+  createPgStaffInvitationJoinRepository,
+  type StaffInvitationJoinDetails,
+  type StaffInvitationJoinRepository,
+} from "./staffInvitationJoin.js";
 
 // RequestContext resolution
 export {

@@ -30,10 +30,14 @@ export interface LoginRequest {
   password: string;
 }
 
+/** VAY-2246: the hotel terms and DPA versions the sign-up tickbox accepted. */
+export type AcceptedHotelAgreements = { termsVersion: string; dpaVersion: string };
+
 export interface SignupRequest {
   name?: string;
   email: string;
   password: string;
+  acceptedAgreements?: AcceptedHotelAgreements;
 }
 
 export type AuthStateResponse = {
@@ -44,8 +48,13 @@ export type AuthStateResponse = {
     | "organization_selection_required"
     | "mfa_required"
     | "sso_required"
+    | "hotel_workspace_required"
+    | "account_exists"
+    | "invitation_unavailable"
     | "auth_failed";
   message: string;
+  code?: string;
+  reason?: string;
   pendingAuthenticationToken?: string;
   email?: string;
   emailVerificationId?: string;
@@ -55,6 +64,8 @@ export class AuthStateError extends Error {
   organizations?: { id: string; name?: string | null }[];
   status: number;
   state: AuthStateResponse["state"];
+  code?: string;
+  reason?: string;
   pendingAuthenticationToken?: string;
   email?: string;
   emailVerificationId?: string;
@@ -64,12 +75,32 @@ export class AuthStateError extends Error {
     this.name = "AuthStateError";
     this.status = status;
     this.state = response.state;
+    this.code = response.code;
+    this.reason = response.reason;
     this.organizations = response.organizations;
     this.pendingAuthenticationToken = response.pendingAuthenticationToken;
     this.email = response.email;
     this.emailVerificationId = response.emailVerificationId;
   }
 }
+
+/** A team invitation as the invitee sees it before joining (VAY-2274). */
+export type InvitationPreview = {
+  state: "invitation_ready";
+  email: string;
+  accountExists: boolean;
+  hotelNames: string[];
+  inviterName: string;
+  inviteeName: string | null;
+  roleKey: string;
+  roleName: string | null;
+};
+
+export type AcceptInvitationRequest = {
+  invitationToken: string;
+  password: string;
+  name?: string;
+};
 
 export type PendingEmailVerification = {
   pendingAuthenticationToken: string;
@@ -223,7 +254,7 @@ export const authService = {
     window.location.href = url.toString();
   },
 
-  startGoogleSignup: (returnTo: string): void => {
+  startGoogleSignup: (returnTo: string, acceptedAgreements?: AcceptedHotelAgreements): void => {
     if (typeof window === "undefined") return;
 
     const callbackUrl = new URL("/login", window.location.origin);
@@ -236,6 +267,10 @@ export const authService = {
     url.searchParams.set("surface", AUTH_SURFACE);
     url.searchParams.set("flow", "signup");
     url.searchParams.set("type", "hotel");
+    if (acceptedAgreements) {
+      url.searchParams.set("accepted_terms", acceptedAgreements.termsVersion);
+      url.searchParams.set("accepted_dpa", acceptedAgreements.dpaVersion);
+    }
     url.searchParams.set("return_to", callbackUrl.toString());
     url.searchParams.set("error_return_to", errorUrl.toString());
     window.location.href = url.toString();
@@ -276,6 +311,21 @@ export const authService = {
 
   login: async (data: LoginRequest): Promise<AuthSessionResponse> => {
     const response = await authFetch<AuthSessionResponse>("/password/login", {
+      method: "POST",
+      body: JSON.stringify({ ...data, surface: AUTH_SURFACE }),
+    });
+    return storeAuthSessionResponse(response);
+  },
+
+  // The token travels in the request body, never in a URL the API logs.
+  previewInvitation: (invitationToken: string): Promise<InvitationPreview> =>
+    authFetch<InvitationPreview>("/invitations/preview", {
+      method: "POST",
+      body: JSON.stringify({ invitationToken, surface: AUTH_SURFACE }),
+    }),
+
+  acceptInvitation: async (data: AcceptInvitationRequest): Promise<AuthSessionResponse> => {
+    const response = await authFetch<AuthSessionResponse>("/invitations/accept", {
       method: "POST",
       body: JSON.stringify({ ...data, surface: AUTH_SURFACE }),
     });

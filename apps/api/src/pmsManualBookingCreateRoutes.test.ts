@@ -33,7 +33,7 @@ type Auth = Partial<{
   pmsEntitlement: boolean;
   financeEntitlement: boolean;
   relationship: string;
-  organizationKind: "hotel_group" | "creator_workspace";
+  organizationKind: "hotel_group" | "platform";
 }>;
 
 describe("target manual-booking create route", () => {
@@ -335,7 +335,7 @@ describe("target manual-booking create route", () => {
     ["forbidden", { operationsPermission: false }],
     ["entitlement_required", { pmsEntitlement: false }],
     ["forbidden", { relationship: "viewer" }],
-    ["forbidden", { organizationKind: "creator_workspace" }],
+    ["forbidden", { organizationKind: "platform" }],
   ] as const)("denies %s before the command port", async (code, auth) => {
     const state: State = { calls: [] };
     app = await testApp(state, auth);

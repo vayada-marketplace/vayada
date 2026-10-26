@@ -9,21 +9,18 @@ describe.skipIf(!url)("Platform growth PostgreSQL aggregates", () => {
   beforeAll(async () => {
     await pool.connect();
     await pool.query("BEGIN");
-    await pool.query(`CREATE SCHEMA hotel_catalog; CREATE SCHEMA platform; CREATE SCHEMA booking;
+    await pool.query(`CREATE SCHEMA hotel_catalog; CREATE SCHEMA booking;
       CREATE TABLE hotel_catalog.properties (id text PRIMARY KEY);
-      CREATE TABLE hotel_catalog.property_slugs (property_id text, slug text);
-      CREATE TABLE platform.domain_events (id serial, property_id text, resource_id text, tenant_scope text,
-        source_system text DEFAULT 'distribution', event_type text DEFAULT 'booking_web.page_visit',
-        resource_product text DEFAULT 'distribution', resource_type text DEFAULT 'booking_web_hotel',
-        event_status text DEFAULT 'recorded', event_metadata jsonb DEFAULT '{}', payload jsonb DEFAULT '{}',
+      CREATE SCHEMA distribution;
+      CREATE TABLE distribution.booking_web_events (id serial, property_id text,
+        event_type text DEFAULT 'page_visit', traffic_class text DEFAULT 'human',
         occurred_at timestamptz DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE booking.guest_bookings (id serial, property_id text, created_at timestamptz DEFAULT CURRENT_TIMESTAMP, booking_metadata jsonb DEFAULT '{}');
       INSERT INTO hotel_catalog.properties VALUES ('a'), ('b'), ('empty');
-      INSERT INTO hotel_catalog.property_slugs VALUES ('a','old-a'),('a','shared'),('b','shared');
-      INSERT INTO platform.domain_events (property_id, tenant_scope) VALUES ('a','property'),('b','property'),('b','property');
-      INSERT INTO platform.domain_events (resource_id, tenant_scope) VALUES ('old-a','external'),('shared','external');
-      INSERT INTO platform.domain_events (property_id, tenant_scope, event_metadata) VALUES ('a','property','{"trafficClass":"bot"}'),('a','property','{"trafficClass":"test"}');
-      INSERT INTO platform.domain_events (property_id, tenant_scope, occurred_at) VALUES ('a','property',CURRENT_TIMESTAMP + INTERVAL '1 day');
+      INSERT INTO distribution.booking_web_events (property_id) VALUES ('a'),('a'),('b'),('b');
+      INSERT INTO distribution.booking_web_events (property_id, traffic_class) VALUES ('a','test');
+      INSERT INTO distribution.booking_web_events (property_id, event_type) VALUES ('a','rate_selected');
+      INSERT INTO distribution.booking_web_events (property_id, occurred_at) VALUES ('a',CURRENT_TIMESTAMP + INTERVAL '1 day');
       INSERT INTO booking.guest_bookings (property_id) VALUES ('a'),('b'),('b');
       INSERT INTO booking.guest_bookings (property_id, booking_metadata) VALUES ('a','{"operationalEvidence":{"isTestBooking":true}}');`);
   });
@@ -54,8 +51,8 @@ describe.skipIf(!url)("Platform growth PostgreSQL aggregates", () => {
   );
   it("keeps UTC day boundaries in a non-UTC database session", async () => {
     await pool.query("SET LOCAL TIME ZONE 'Pacific/Honolulu'");
-    await pool.query(`INSERT INTO platform.domain_events (property_id, tenant_scope, occurred_at)
-      VALUES ('b', 'property', (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '1 second') AT TIME ZONE 'UTC')`);
+    await pool.query(`INSERT INTO distribution.booking_web_events (property_id, occurred_at)
+      VALUES ('b', (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '1 second') AT TIME ZONE 'UTC')`);
     const data = await readGrowthTelemetry(pool, {
       propertyIds: ["b"],
       granularity: "daily",

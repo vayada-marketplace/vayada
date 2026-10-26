@@ -1,4 +1,9 @@
-import type { AdaptiveHotelSetupStatus, ProductEntryDecision } from "@vayada/domain-hotels";
+import {
+  PROPERTY_SETUP_STEP_DEFINITIONS,
+  type AdaptiveHotelSetupStatus,
+  type ProductEntryDecision,
+  type PropertySetupStepId,
+} from "@vayada/domain-hotels";
 
 import {
   isSafeSharedHotelSetupReturnTo,
@@ -68,6 +73,7 @@ export async function resolveSharedHotelSetupGuard(
   },
 ): Promise<SharedHotelSetupGuardDecision> {
   let status: AdaptiveHotelSetupStatus;
+  let requestedPropertyId = input.propertyId?.trim();
   try {
     status = await api.getStatus({
       entryProduct: input.entryProduct,
@@ -81,8 +87,9 @@ export async function resolveSharedHotelSetupGuard(
       entryProduct: input.entryProduct,
       propertyId: null,
     });
+    // The stale property is already dropped; this answer is for no property, not a mismatch.
+    requestedPropertyId = undefined;
   }
-  const requestedPropertyId = input.propertyId?.trim();
   if (requestedPropertyId && hasExplicitPropertyMismatch(status, requestedPropertyId)) {
     input.onInvalidPropertyId?.();
     const error = new Error("Setup status returned a different property than requested");
@@ -128,12 +135,19 @@ export function buildSharedHotelSetupRedirectPath(input: {
   propertyId?: string | null;
   setupBaseUrl?: string;
   mode?: "add";
+  /** Opens setup on this step, e.g. to fix a Booking readiness item (VAY-2187). */
+  step?: PropertySetupStepId;
+  /** Opens the hotel details form on its location step instead (VAY-2288). */
+  focus?: "location";
 }): string {
   const query = new URLSearchParams({ entryProduct: input.entryProduct });
   if (input.returnProduct) query.set("returnProduct", input.returnProduct);
   if (isSafeSharedHotelSetupReturnTo(input.returnTo)) query.set("returnTo", input.returnTo);
   if (input.propertyId?.trim()) query.set("propertyId", input.propertyId.trim());
   if (input.mode === "add") query.set("mode", "add");
+  if (input.step && PROPERTY_SETUP_STEP_DEFINITIONS.some(({ stepId }) => stepId === input.step))
+    query.set("step", input.step);
+  if (input.focus === "location") query.set("focus", "location");
   const path = `/setup?${query.toString()}`;
   return input.setupBaseUrl ? new URL(path, input.setupBaseUrl).toString() : path;
 }

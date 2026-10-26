@@ -152,87 +152,6 @@
       }
     },
     {
-      "caseId": "affiliate-payout-settings-read",
-      "description": "Affiliate payout settings are finance-owned while marketplace/affiliate remains the referral identity owner.",
-      "request": {
-        "path": "/api/finance/affiliates/affiliate_finance_partner_686/payout-settings",
-        "query": {}
-      },
-      "expected": {
-        "status": 200,
-        "mustInclude": [
-          "affiliateId",
-          "payoutSettings.payoutsEnabled",
-          "payoutSettings.payoutProvider",
-          "payoutSettings.payoutCurrency",
-          "payoutSettings.providerAccount.status",
-          "payoutSettings.sourceFreshness"
-        ],
-        "ownershipBoundary": {
-          "affiliateIdentityOwner": "marketplace/affiliate",
-          "providerAccountOwner": "finance",
-          "settlementOwner": "finance"
-        },
-        "mustExclude": [
-          "referralCode",
-          "affiliateProfileEmail",
-          "accountNumber",
-          "stripeSecretKey",
-          "providerSecret"
-        ]
-      }
-    },
-    {
-      "caseId": "affiliate-payout-settings-update",
-      "description": "Affiliate payout settings writes are idempotent finance commands and never rewrite marketplace referral identity.",
-      "request": {
-        "path": "/api/finance/affiliates/affiliate_finance_partner_686/payout-settings",
-        "method": "PATCH",
-        "body": {
-          "commandId": "cmd-affiliate-payout-settings-001",
-          "idempotencyKey": "finance-affiliate-payout-settings-686-001",
-          "payoutsEnabled": true,
-          "payoutProvider": "stripe",
-          "payoutCurrency": "EUR",
-          "payoutSchedule": "monthly"
-        }
-      },
-      "expected": {
-        "status": 200,
-        "commandMeta": {
-          "idempotencyKey": "finance-affiliate-payout-settings-686-001",
-          "sideEffects": ["audit_event"]
-        },
-        "mustNotWrite": ["marketplace.affiliates", "marketplace.referral_codes"]
-      }
-    },
-    {
-      "caseId": "affiliate-payout-list-read",
-      "description": "Affiliate payout ledger exposes settlement state without provider destination secrets.",
-      "request": {
-        "path": "/api/finance/affiliates/affiliate_finance_partner_686/payouts",
-        "query": {
-          "limit": 50,
-          "offset": 0
-        }
-      },
-      "expected": {
-        "status": 200,
-        "itemCount": 1,
-        "mustInclude": [
-          "payouts[0].payoutId",
-          "payouts[0].ownerScope",
-          "payouts[0].organizationId",
-          "payouts[0].amount",
-          "payouts[0].netAmount",
-          "payouts[0].provider",
-          "payouts[0].payoutStatus",
-          "sourceFreshness"
-        ],
-        "mustExclude": ["referralCode", "accountNumber", "stripeSecretKey", "xenditApiKey"]
-      }
-    },
-    {
       "caseId": "stripe-property-onboarding-idempotent",
       "description": "Repeated property Stripe Connect commands return the existing provider account and latest onboarding link.",
       "request": {
@@ -252,30 +171,6 @@
         "idempotencyKey": "finance-stripe-property-f300686",
         "mustInclude": ["providerAccountRef", "onboardingStatus", "commandMeta"],
         "mustExclude": ["stripeSecretKey", "accountLinkRefreshToken"]
-      }
-    },
-    {
-      "caseId": "stripe-affiliate-onboarding-boundary",
-      "description": "Affiliate Stripe onboarding is finance-owned after marketplace/affiliate resolves referral identity.",
-      "request": {
-        "path": "/api/finance/affiliates/affiliate_finance_partner_686/provider-accounts/stripe",
-        "method": "POST",
-        "body": {
-          "commandId": "cmd-stripe-affiliate-001",
-          "idempotencyKey": "finance-stripe-affiliate-686",
-          "email": "affiliate@example.test",
-          "country": "AT"
-        }
-      },
-      "expected": {
-        "status": 200,
-        "providerAccountId": "f7100000-0000-0000-0000-000000000686",
-        "ownershipBoundary": {
-          "affiliateIdentityOwner": "marketplace/affiliate",
-          "providerAccountOwner": "finance",
-          "bookingWebRole": "compatibility facade only"
-        },
-        "mustNotWrite": ["marketplace.affiliates.referral_code", "booking_web_affiliates"]
       }
     },
     {
@@ -541,7 +436,10 @@
         "path": "/api/finance/properties/f3000000-0000-4000-8000-000000000686/financials/ota-commission-settings",
         "method": "GET"
       },
-      "expected": { "status": 200, "mustExclude": ["providerSecret", "guestEmail"] }
+      "expected": {
+        "status": 200,
+        "mustExclude": ["providerSecret", "guestEmail"]
+      }
     },
     {
       "caseId": "ota-commission-settings-update",
@@ -556,7 +454,10 @@
           "effectiveFrom": "2026-08-08T00:00:00.000Z"
         }
       },
-      "expected": { "status": 201, "mustExclude": ["providerSecret", "guestEmail"] }
+      "expected": {
+        "status": 201,
+        "mustExclude": ["providerSecret", "guestEmail"]
+      }
     },
     {
       "caseId": "authorization-denial-matrix-missing-permission",

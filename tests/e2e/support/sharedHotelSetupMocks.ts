@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { corsHeaders, fulfillCorsPreflight } from "../marketplace-web/utils/cors";
+import { corsHeaders, fulfillCorsPreflight } from "./cors";
 import type {
   AdaptiveHotelSetupStatus,
   ProductEntryDecision,
@@ -40,18 +40,6 @@ const TASK_DEFINITIONS: Array<
     destinationRouteKey: "hotel_catalog.shared_identity",
   },
   {
-    taskId: "public_profile",
-    track: "creator_marketplace",
-    requirementOwnerDomain: "hotel_catalog",
-    destinationRouteKey: "hotel_catalog.public_profile",
-  },
-  {
-    taskId: "creator_offer",
-    track: "creator_marketplace",
-    requirementOwnerDomain: "marketplace",
-    destinationRouteKey: "marketplace.creator_offer",
-  },
-  {
     taskId: "rooms_rates_availability",
     track: "hotel_operations",
     requirementOwnerDomain: "pms",
@@ -86,7 +74,7 @@ const TASK_DEFINITIONS: Array<
 export function createAdaptiveHotelSetupStatusMock(
   input: AdaptiveHotelSetupStatusMockInput,
 ): AdaptiveHotelSetupStatus {
-  const selectedTracks = canonicalTracks(input.selectedTracks ?? defaultTracks(input.entryProduct));
+  const selectedTracks = canonicalTracks(input.selectedTracks ?? defaultTracks());
   const propertyId = input.propertyId === undefined ? "property-e2e" : input.propertyId;
   const selectedProperty =
     propertyId === null
@@ -131,11 +119,6 @@ export function createAdaptiveHotelSetupStatusMock(
       "payment",
       "direct_booking_publication",
     ]),
-    marketplacePublish: setupLaunchReadiness(selectedTracks, tasks, "creator_marketplace", [
-      "shared_identity",
-      "public_profile",
-      "creator_offer",
-    ]),
   } as const;
   const defaultDecision: ProductEntryDecision =
     selectedProperty === null
@@ -166,12 +149,6 @@ export function createAdaptiveHotelSetupStatusMock(
       tracks: [
         trackStatus(
           "hotel_operations",
-          selectedTracks,
-          input.componentAccess,
-          input.trackProvisioning,
-        ),
-        trackStatus(
-          "creator_marketplace",
           selectedTracks,
           input.componentAccess,
           input.trackProvisioning,
@@ -238,14 +215,12 @@ export function adaptiveSetupTask(
   };
 }
 
-function defaultTracks(entryProduct: ProductEntryDecision["requestedProduct"]): SetupTrack[] {
-  return entryProduct === "marketplace" ? ["creator_marketplace"] : ["hotel_operations"];
+function defaultTracks(): SetupTrack[] {
+  return ["hotel_operations"];
 }
 
 function canonicalTracks(tracks: readonly SetupTrack[]): SetupTrack[] {
-  return (["hotel_operations", "creator_marketplace"] as const).filter((track) =>
-    tracks.includes(track),
-  );
+  return (["hotel_operations"] as const).filter((track) => tracks.includes(track));
 }
 
 function setupLaunchReadiness(
@@ -281,8 +256,7 @@ function trackStatus(
   trackProvisioning: AdaptiveHotelSetupStatusMockInput["trackProvisioning"],
 ): TrackStatus {
   const selected = selectedTracks.includes(track);
-  const componentNames =
-    track === "hotel_operations" ? (["pms", "booking"] as const) : (["marketplace"] as const);
+  const componentNames = ["pms", "booking"] as const;
   const components = componentNames.map((product) => ({
     product,
     access: componentAccess?.[product] ?? (selected ? "active" : "absent"),

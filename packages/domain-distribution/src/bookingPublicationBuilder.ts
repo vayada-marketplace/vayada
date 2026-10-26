@@ -9,7 +9,12 @@ import {
   buildPublicBookabilityProfileProjection,
   type PublicBookabilityProducerInputs,
 } from "./index.js";
-import { buildBookingPublicContent, type BookingPublicContentBuild } from "./bookingPublication.js";
+import {
+  tryBuildBookingPublicContent,
+  type BookingPublicContentBuild,
+  type BookingPublicContentRejection,
+} from "./bookingPublication.js";
+import { publicBookabilityProfileIssuePaths } from "./publicBookabilityProfileParser.js";
 import {
   bookingPublicationOwnerSnapshotProvenanceMatches,
   type BookingPublicationOwnerSnapshot,
@@ -23,7 +28,17 @@ export type BookingPublicationBuildResult =
   | Readonly<{
       outcome: "rejected";
       code: "owner_snapshot_unavailable" | "source_manifest_mismatch" | "public_content_incomplete";
+      /** Which rule refused incomplete content, for logs (VAY-2292). */
+      reason?: BookingPublicationContentRejectionReason;
+      /** Profile fields that break the public contract: paths only, never values. */
+      issuePaths?: readonly string[];
     }>;
+
+export type BookingPublicationContentRejectionReason =
+  | "currency"
+  | "booking_web"
+  | BookingPublicContentRejection
+  | "build_error";
 
 export type BookingPublicationBuilderPort = Readonly<{
   build(
@@ -99,21 +114,30 @@ export function createBookingPublicationBuilder(config: {
       try {
         // Existing publication supports one pricing currency; Finance multi-currency
         // support alone does not establish quote conversion evidence.
-        if (finance.content.supportedCurrencies.length !== 1 ||
-            finance.content.supportedCurrencies[0] !== finance.content.defaultCurrency)
-          return rejected("public_content_incomplete");
+        if (
+          finance.content.supportedCurrencies.length !== 1 ||
+          finance.content.supportedCurrencies[0] !== finance.content.defaultCurrency
+        )
+          return rejected("public_content_incomplete", "currency");
         const bookingWeb = config.bookingWeb({
           propertyId: request.propertyId,
           slug: catalog.content.slug,
           ...catalog.content.bookingWeb,
         });
-        if (!validBookingWeb(bookingWeb)) return rejected("public_content_incomplete");
+        if (!validBookingWeb(bookingWeb))
+          return rejected("public_content_incomplete", "booking_web");
+        // The page and its quotes offer one language list (VAY-2292).
+        const supportedLocales = publishedLocales(
+          catalog.content.defaultLocale,
+          booking.content.supportedQuoteParameters.supportedLocales,
+        );
         const profile = buildPublicBookabilityProfileProjection(input.generatedAt, {
-          hotelCatalog: catalog.content,
+          hotelCatalog: { ...catalog.content, supportedLocales },
           booking: sanitizeBooking({
             ...booking.content,
             supportedQuoteParameters: {
               ...booking.content.supportedQuoteParameters,
+              supportedLocales,
               supportedCurrencies: finance.content.supportedCurrencies,
             },
           }),
@@ -121,7 +145,7 @@ export function createBookingPublicationBuilder(config: {
           finance: finance.content,
           bookingWeb,
         });
-        const build = buildBookingPublicContent({
+        const result = tryBuildBookingPublicContent({
           sourceManifestHash: readiness.sourceManifestHash,
           readinessHash: readiness.readinessHash,
           profile,
@@ -129,14 +153,35 @@ export function createBookingPublicationBuilder(config: {
           calendar: pms.content.calendar,
           finance: finance.content,
         });
-        return build
-          ? deepFreeze({ outcome: "built", build })
-          : rejected("public_content_incomplete");
+        if ("build" in result) return deepFreeze({ outcome: "built", build: result.build });
+        const issuePaths =
+          result.rejected === "profile" ? publicBookabilityProfileIssuePaths(profile) : [];
+        return rejected(
+          "public_content_incomplete",
+          result.rejected,
+          issuePaths.length > 0 ? issuePaths : undefined,
+        );
       } catch {
-        return rejected("public_content_incomplete");
+        return rejected("public_content_incomplete", "build_error");
       }
     },
   };
+}
+
+/** Booking Admin's languages plus the hotel profile's main language, as the old page offered
+ * them. An entry guests can't be served in is dropped, so it never blocks publishing. */
+function publishedLocales(defaultLocale: string, bookingLocales: readonly string[]): string[] {
+  return [...new Set([defaultLocale, ...bookingLocales.filter(servableLocale)])].sort();
+}
+
+function servableLocale(value: unknown): value is string {
+  if (typeof value !== "string" || !value || value.trim() !== value) return false;
+  try {
+    new Intl.Locale(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validBookingWeb(value: PublicBookabilityProducerInputs["bookingWeb"]): boolean {
@@ -202,8 +247,17 @@ async function safeManifestHash(manifest: SourceManifest): Promise<SourceManifes
   }
 }
 
-function rejected(code: Extract<BookingPublicationBuildResult, { outcome: "rejected" }>["code"]) {
-  return Object.freeze({ outcome: "rejected" as const, code });
+function rejected(
+  code: Extract<BookingPublicationBuildResult, { outcome: "rejected" }>["code"],
+  reason?: BookingPublicationContentRejectionReason,
+  issuePaths?: readonly string[],
+) {
+  return deepFreeze({
+    outcome: "rejected" as const,
+    code,
+    ...(reason ? { reason } : {}),
+    ...(issuePaths ? { issuePaths: [...issuePaths] } : {}),
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,12 +1,19 @@
+import { createHash } from "node:crypto";
+
 import {
   PROPERTY_SETUP_DRAFT_CONTRACT_VERSION,
   PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION,
   PROPERTY_SETUP_ROUTE_STEP_STATES,
   PROPERTY_SETUP_STEP_DEFINITIONS,
   SETUP_TRACKS,
+  PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS,
   getActivePropertySetupStepIds,
+  getPropertySetupBaseRevisionKeys,
   isPropertySetupBaseRevisionManifest,
+  isPropertySetupLegacyCalendarBaseRevisionManifest,
   parseSavePropertySetupDraftRequest,
+  type PropertySetupBaseRevisions,
+  type PropertySetupLegacyCalendarBaseRevisions,
   type PropertySetupOwnerDomain,
   type PropertySetupSession,
   type PropertySetupStepId,
@@ -22,7 +29,6 @@ import type {
 
 export const PROPERTY_SETUP_STATE_PROVIDER_KEYS = [
   "hotel_catalog",
-  "marketplace",
   "booking",
   "pms",
   "finance",
@@ -40,10 +46,17 @@ export type PropertySetupOwnerStateRequest = Readonly<{
   stepIds: readonly PropertySetupStepId[];
 }>;
 
+/**
+ * One owner's step fact. The calendar fact also carries today's values under the manifest keys
+ * calendar drafts used before VAY-2198, so those drafts can be converted on read.
+ */
+export type PropertySetupOwnerStateFact = PropertySetupRouteOwnerStepFact &
+  Readonly<{ legacyBaseRevisions?: PropertySetupLegacyCalendarBaseRevisions }>;
+
 export type PropertySetupOwnerStateResult =
   | Readonly<{
       outcome: "found";
-      facts: readonly PropertySetupRouteOwnerStepFact[];
+      facts: readonly PropertySetupOwnerStateFact[];
     }>
   /** Only Hotel Catalog may establish that the canonical property is absent. */
   | Readonly<{ outcome: "not_found"; providerKey: "hotel_catalog" }>
@@ -140,8 +153,11 @@ export function createPropertySetupRouteStateReadPort(
         return {
           outcome: "found",
           trackRevision: currentTrack.trackRevision,
-          session: draftResult.session,
-          ownerFacts,
+          session: convertLegacyCalendarDraft(
+            draftResult.session,
+            ownerFacts.find(({ stepId }) => stepId === "calendar"),
+          ),
+          ownerFacts: ownerFacts.map(({ legacyBaseRevisions: _legacy, ...fact }) => fact),
         };
       } catch {
         return { outcome: "provider_failure" };
@@ -166,7 +182,6 @@ type DraftReadResult =
 
 const PROVIDER_BY_STEP = {
   present_hotel: "hotel_catalog",
-  marketplace_preferences: "marketplace",
   booking_design: "booking",
   rooms: "pms",
   pricing: "pms",
@@ -178,7 +193,6 @@ const PROVIDER_BY_STEP = {
 
 const PROVENANCE_BY_STEP = {
   present_hotel: { product: "hotel_catalog", ownerDomain: "hotel_catalog" },
-  marketplace_preferences: { product: "marketplace", ownerDomain: "marketplace" },
   booking_design: { product: "booking", ownerDomain: "booking" },
   rooms: { product: "pms", ownerDomain: "pms" },
   pricing: { product: "pms", ownerDomain: "pms" },
@@ -275,13 +289,13 @@ function validateOwnerResults(input: {
   activeStepIds: readonly PropertySetupStepId[];
   requests: readonly OwnerRequest[];
   results: readonly FoundOwnerResult[];
-}): PropertySetupRouteOwnerStepFact[] {
+}): PropertySetupOwnerStateFact[] {
   if (input.results.length !== input.requests.length) {
     throw new TypeError("Property setup owner result count does not match its requests");
   }
   const active = new Set(input.activeStepIds);
   const allowedDomains = allowedOwnerDomains(input.selectedTracks);
-  const byStep = new Map<PropertySetupStepId, PropertySetupRouteOwnerStepFact>();
+  const byStep = new Map<PropertySetupStepId, PropertySetupOwnerStateFact>();
 
   input.requests.forEach((request, index) => {
     const result = input.results[index];
@@ -396,6 +410,66 @@ function validateSession(
   }
 }
 
+/**
+ * Calendar drafts saved before VAY-2198 pinned room facts and the full location. One that still
+ * matches today's values under those keys has the same rooms and time zone (and, as the PMS
+ * fact only offers those values then, the same units as the saved calendar), so it is shown
+ * with today's time zone, rooms and units manifest; its next save stores that manifest. Any
+ * other gets a manifest that can never be current, so the Calendar step still offers to start
+ * from the current calendar.
+ */
+function convertLegacyCalendarDraft(
+  session: PropertySetupSession | null,
+  calendar: PropertySetupOwnerStateFact | undefined,
+): PropertySetupSession | null {
+  const current = calendar?.currentBaseRevisions;
+  if (
+    !session ||
+    !current ||
+    getPropertySetupBaseRevisionKeys("calendar", current) ===
+      PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS
+  ) {
+    return session;
+  }
+  const legacy = calendar.legacyBaseRevisions;
+  return {
+    ...session,
+    drafts: session.drafts.map((draft) => {
+      if (
+        draft.stepId !== "calendar" ||
+        !isPropertySetupLegacyCalendarBaseRevisionManifest(draft.baseRevisions)
+      ) {
+        return draft;
+      }
+      const stored = draft.baseRevisions;
+      const unchanged =
+        legacy !== undefined &&
+        PROPERTY_SETUP_LEGACY_CALENDAR_BASE_REVISION_KEYS.every(
+          (key) => stored[key] === legacy[key],
+        );
+      const baseRevisions: PropertySetupBaseRevisions<"calendar"> = unchanged
+        ? {
+            "pms.operating_calendar": current["pms.operating_calendar"]!,
+            "pms.inventory": current["pms.inventory"]!,
+            "pms.room_units": current["pms.room_units"]!,
+            "hotel_catalog.time_zone": current["hotel_catalog.time_zone"]!,
+          }
+        : {
+            "pms.operating_calendar": stored["pms.operating_calendar"],
+            "pms.inventory": stored["pms.inventory"],
+            "pms.room_units": historicalRevision(stored["pms.room_types"]),
+            "hotel_catalog.time_zone": historicalRevision(stored["hotel_catalog.location"]),
+          };
+      return { ...draft, baseRevisions };
+    }),
+  };
+}
+
+/** Never equal to a current revision, which always starts with its own namespace. */
+function historicalRevision(value: string): string {
+  return `legacy:${createHash("sha256").update(value).digest("hex")}`;
+}
+
 function validateSharedBaseRevisions(facts: readonly PropertySetupRouteOwnerStepFact[]): void {
   const revisions = new Map<string, string>();
   for (const fact of facts) {
@@ -410,7 +484,7 @@ function validateSharedBaseRevisions(facts: readonly PropertySetupRouteOwnerStep
 }
 
 function validateOwnerFact(
-  fact: PropertySetupRouteOwnerStepFact,
+  fact: PropertySetupOwnerStateFact,
   scope: {
     organizationId: string;
     propertyId: string;
@@ -433,7 +507,10 @@ function validateOwnerFact(
   if (
     !OWNER_STATES.has(fact.state) ||
     !nonEmpty(fact.sourceRevision) ||
-    !isPropertySetupBaseRevisionManifest(fact.stepId, fact.currentBaseRevisions)
+    !isPropertySetupBaseRevisionManifest(fact.stepId, fact.currentBaseRevisions) ||
+    (fact.legacyBaseRevisions !== undefined &&
+      (fact.stepId !== "calendar" ||
+        !isPropertySetupLegacyCalendarBaseRevisionManifest(fact.legacyBaseRevisions)))
   ) {
     throw new TypeError("Property setup owner fact has invalid progress or revision");
   }
@@ -460,7 +537,6 @@ function validateOwnerFact(
 
 function allowedOwnerDomains(selectedTracks: readonly SetupTrack[]): Set<PropertySetupOwnerDomain> {
   const domains = new Set<PropertySetupOwnerDomain>(["hotel_catalog"]);
-  if (selectedTracks.includes("creator_marketplace")) domains.add("marketplace");
   if (selectedTracks.includes("hotel_operations")) {
     for (const domain of ["booking", "pms", "finance", "distribution"] as const) {
       domains.add(domain);

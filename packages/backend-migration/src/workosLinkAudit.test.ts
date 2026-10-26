@@ -62,6 +62,5 @@ function cleanSummary(): WorkosLinkAuditMetric[] {
     { metric: "platform_orgs_with_workos_linked_active_members_total", value: 1 },
     { metric: "hotel_group_orgs_with_active_members_missing_booking_hotel_link", value: 0 },
     { metric: "hotel_group_orgs_with_active_members_missing_pms_property_link", value: 0 },
-    { metric: "affiliate_partner_orgs_with_active_members_missing_affiliate_link", value: 0 },
   ];
 }

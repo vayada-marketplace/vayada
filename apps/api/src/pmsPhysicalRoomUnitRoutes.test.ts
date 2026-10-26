@@ -33,7 +33,7 @@ const actorUserId = "c1000000-0000-0000-8000-000000000006";
 const now = "2026-08-03T11:00:00.000Z";
 
 type AuthOptions = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -229,7 +229,7 @@ describe("PMS physical room unit reconcile route", () => {
     ["suspended entitlement", { entitlements: [entitlement("suspended")] }, 403],
     ["missing linked property", { links: [] }, 403],
     ["wrong linked property", { links: [link(otherPropertyId)] }, 403],
-    ["wrong organization kind", { kind: "creator_workspace" }, 403],
+    ["wrong organization kind", { kind: "platform" }, 403],
   ] as const)("rejects %s without invoking the command", async (...args) => {
     const [_label, auth, status, token] = args;
     const port = fakePort();

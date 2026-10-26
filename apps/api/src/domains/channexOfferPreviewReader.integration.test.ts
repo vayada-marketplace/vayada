@@ -192,7 +192,7 @@ describe.skipIf(!url)("channel preview published reader", () => {
     expect(await (await fixture(false)).read()).toBeNull();
     const f = await fixture();
     await pool.query(
-      "UPDATE pms.room_types SET room_facts_revision=room_facts_revision+1 WHERE id=$1",
+      `UPDATE pms.room_types SET occupancy_limits='{"total":9,"adults":9,"children":0}' WHERE id=$1`,
       [f.roomTypeId],
     );
     expect(await f.read()).toMatchObject({ stale: true });

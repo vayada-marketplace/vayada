@@ -23,7 +23,6 @@ export type PropertySetupOwnerStepState = Exclude<PropertySetupRouteStepState, "
 export type PropertySetupBlockerKind = "user_fixable" | "external_pending" | "system_error";
 export type PropertySetupOwnerDomain =
   | "hotel_catalog"
-  | "marketplace"
   | "booking"
   | "pms"
   | "finance"

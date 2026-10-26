@@ -112,7 +112,7 @@ export default function RoleEditorDialog({
           </p>
         )}
         <fieldset disabled={readOnly || mutation.busy} className="space-y-4">
-          {!role && (
+          {!role && roles.some((item) => !item.immutable) && (
             <label className="block text-sm font-medium">
               {t("settings.team.startFromRole")}
               <select
@@ -154,8 +154,8 @@ export default function RoleEditorDialog({
               maxLength={1000}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 p-2 text-sm"
-              rows={2}
+              className="mt-1 block min-h-[5.25rem] w-full resize-y rounded-lg border border-gray-300 p-2 text-sm [field-sizing:content]"
+              rows={3}
             />
           </label>
         </fieldset>

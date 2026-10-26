@@ -8,6 +8,8 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 type Offer = PricingConfiguration["offers"][number];
 export function changeMealCharges(
@@ -59,7 +61,7 @@ export function PricingMealCharges({
     [error, setError] = useState("");
   const { t } = useTranslation();
   if (offer.meal.kind === "room_only")
-    return <p className="sm:col-span-2 text-sm">{t("pricing.mealCharges.roomOnly", { label })}</p>;
+    return <p className={ui.note}>{t("pricing.mealCharges.roomOnly")}</p>;
   const charge = offer.meal.charge,
     scale = pricingCurrencyScale(room.currency)!;
   const values =
@@ -81,8 +83,11 @@ export function PricingMealCharges({
     onPending(false);
   };
   return (
-    <details className="sm:col-span-2 text-sm">
-      <summary className="cursor-pointer">{t("pricing.mealCharges.title", { label })}</summary>
+    <PricingSection
+      title={t("pricing.mealCharges.section")}
+      label={t("pricing.mealCharges.title", { label })}
+      keepOpen={!!entry}
+    >
       <p className="mt-2">
         {t(
           charge.kind === "room"
@@ -91,7 +96,7 @@ export function PricingMealCharges({
           { meal: t(`pricing.meal.${offer.meal.kind}`) },
         )}
       </p>
-      <p className="mt-2 text-gray-600">
+      <p className={ui.help}>
         {t("pricing.mealCharges.description")}{" "}
         {charge.kind === "person" && (
           <>{t("pricing.mealCharges.childAges", { age: room.children.adultFromAge })} </>
@@ -109,12 +114,12 @@ export function PricingMealCharges({
               })}
             </p>
             {entry && (
-              <label className="mt-2 block">
+              <label className={`mt-2 ${ui.fieldLabel}`}>
                 {labels[index]} ({room.currency})
                 <input
                   aria-label={t("pricing.mealCharges.inputLabel", { charge: labels[index], label })}
                   inputMode="decimal"
-                  className="mt-1 block w-36 rounded border px-3 py-2"
+                  className={`mt-1.5 block w-36 ${ui.field}`}
                   disabled={disabled}
                   value={entry[index]}
                   onChange={(event) => {
@@ -130,7 +135,7 @@ export function PricingMealCharges({
       {!entry ? (
         <button
           type="button"
-          className="mt-3 rounded border px-3 py-2 disabled:opacity-50"
+          className={ui.secondaryButton}
           disabled={disabled}
           onClick={() => {
             if (disabled) return;
@@ -143,10 +148,10 @@ export function PricingMealCharges({
         </button>
       ) : (
         <>
-          <div className="mt-3 flex gap-3">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={() => {
                 if (disabled) return;
@@ -162,7 +167,7 @@ export function PricingMealCharges({
             </button>
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={cancel}
             >
@@ -173,10 +178,10 @@ export function PricingMealCharges({
         </>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={ui.errorText}>
           {error}
         </p>
       )}
-    </details>
+    </PricingSection>
   );
 }

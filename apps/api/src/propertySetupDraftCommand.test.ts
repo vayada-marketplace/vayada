@@ -666,22 +666,8 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
     expect(stored.rows).toEqual([{ baseRevisions: PRESENT_BASE }]);
   });
 
-  it("rejects inactive steps and revoked access before replay", async () => {
+  it("rejects revoked access before replay", async () => {
     const fixture = await createFixture(["hotel_operations"]);
-    const marketplace = command(fixture, {
-      idempotencyKey: "inactive-marketplace",
-      stepId: "marketplace_preferences",
-      payload: {},
-      dirtyFields: [],
-      expectedBaseRevisions: {
-        "marketplace.collaboration_preferences": "preferences:1",
-      },
-    });
-    await expect(repository.saveStepDraft(marketplace)).resolves.toEqual({
-      ok: false,
-      error: { code: "inactive_setup_step", currentTrackRevision: 1 },
-    });
-
     const initial = command(fixture, {
       idempotencyKey: "revoked-replay",
       payload: { "profile.short_description": "Do not disclose this draft." },
@@ -1027,7 +1013,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
   });
 
   it("resets only the CAS-matched draft and exactly replays without rebasing history", async () => {
-    const fixture = await createFixture(["hotel_operations", "creator_marketplace"]);
+    const fixture = await createFixture(["hotel_operations"]);
     const canonicalBefore = await canonicalStep1State(fixture.propertyId);
     const present = await repository.saveStepDraft(
       command(fixture, {
@@ -1042,24 +1028,10 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
       (
         await repository.saveStepDraft(
           command(fixture, {
-            idempotencyKey: "reset-preserve-marketplace",
-            stepId: "marketplace_preferences",
-            expectedBaseRevisions: {
-              "marketplace.collaboration_preferences": "preferences:3",
-            },
-            expectedSessionRevision: 1,
-          }),
-        )
-      ).ok,
-    ).toBe(true);
-    expect(
-      (
-        await repository.saveStepDraft(
-          command(fixture, {
             idempotencyKey: "reset-target-rooms",
             stepId: "rooms",
             expectedBaseRevisions: ROOM_BASE,
-            expectedSessionRevision: 2,
+            expectedSessionRevision: 1,
           }),
         )
       ).ok,
@@ -1076,7 +1048,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
       sessionId,
       stepId: "rooms",
       expectedTrackRevision: 2,
-      expectedSessionRevision: 3,
+      expectedSessionRevision: 2,
       expectedDraftRevision: 1,
       expectedBaseRevisions: ROOM_BASE,
     });
@@ -1099,7 +1071,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         sessionId,
         stepId: "rooms",
         trackRevision: 2,
-        sessionRevision: 4,
+        sessionRevision: 3,
         discardedDraftRevision: 1,
         resetAt: occurredAt,
         nextRead: {
@@ -1108,9 +1080,10 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         },
       },
     });
+    // A later track revision does not change the exact replay's stored receipt.
     await client.query(
       `UPDATE hotel_catalog.organization_setup_track_intents
-       SET selected_tracks = ARRAY['creator_marketplace']::text[], revision = 3
+       SET selected_tracks = ARRAY['hotel_operations']::text[], revision = 3
        WHERE organization_id = $1::uuid`,
       [fixture.organizationId],
     );
@@ -1166,12 +1139,12 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
     );
     expect(state.rows).toEqual([
       {
-        revision: 4,
-        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        revision: 3,
+        selectedTracks: ["hotel_operations"],
         trackRevision: 1,
         resumeStepId: "rooms",
         completedStepIds: [],
-        stepIds: ["marketplace_preferences", "present_hotel"],
+        stepIds: ["present_hotel"],
       },
     ]);
     await expect(
@@ -1182,7 +1155,7 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
         [fixture.organizationId],
       ),
     ).resolves.toMatchObject({
-      rows: [{ selectedTracks: ["creator_marketplace"], revision: 3 }],
+      rows: [{ selectedTracks: ["hotel_operations"], revision: 3 }],
     });
     await expect(canonicalStep1State(fixture.propertyId)).resolves.toEqual(canonicalBefore);
 
@@ -1207,6 +1180,64 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft save repository", () =
     expect(
       audits.rows.every(({ privatePayload }) => Object.keys(privatePayload).length === 0),
     ).toBe(true);
+  });
+
+  it("resets a calendar draft saved before VAY-2198 by the manifest the route showed", async () => {
+    const fixture = await createFixture(["hotel_operations"]);
+    const legacy = {
+      "pms.operating_calendar": "calendar:2",
+      "pms.inventory": "inventory:2",
+      "pms.room_types": "room-types:9",
+      "hotel_catalog.location": "hotel_catalog.location:r3",
+    };
+    const saved = await repository.saveStepDraft(
+      command(fixture, {
+        idempotencyKey: "legacy-calendar-draft",
+        stepId: "calendar",
+        payload: { "rate.minimum_stay": 3 },
+        dirtyFields: ["rate.minimum_stay"],
+        expectedBaseRevisions: legacy,
+      }),
+    );
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    // The route shows it with today's or a historical time zone, rooms and units manifest.
+    const shown = {
+      "pms.operating_calendar": "calendar:2",
+      "pms.inventory": "inventory:2",
+      "pms.room_units": `legacy:${sha256("room-types:9")}`,
+      "hotel_catalog.time_zone": `legacy:${sha256("hotel_catalog.location:r3")}`,
+    };
+    const reset = resetCommand(fixture, {
+      idempotencyKey: "legacy-calendar-reset",
+      sessionId: saved.receipt.sessionId,
+      stepId: "calendar",
+      expectedBaseRevisions: shown,
+    });
+    for (const [key, expectedBaseRevisions] of [
+      ["legacy-calendar-newer", { ...shown, "pms.operating_calendar": "calendar:3" }],
+      ["legacy-calendar-inventory", { ...shown, "pms.inventory": "inventory:3" }],
+      ["legacy-calendar-history", { ...legacy, "pms.room_types": "room-types:8" }],
+    ] as const) {
+      await expect(
+        repository.resetStepDraft({
+          ...reset,
+          idempotencyKey: key,
+          request: { ...reset.request, expectedBaseRevisions } as ResetPropertySetupDraftRequest,
+        }),
+      ).resolves.toEqual({ ok: false, error: { code: "draft_base_revision_conflict" } });
+    }
+    await expect(repository.resetStepDraft(reset)).resolves.toMatchObject({
+      ok: true,
+      receipt: { stepId: "calendar", discardedDraftRevision: 1 },
+    });
+    expect(
+      (
+        await client.query(
+          "SELECT count(*)::int AS n FROM hotel_catalog.property_setup_step_drafts WHERE session_id = $1::uuid",
+          [saved.receipt.sessionId],
+        )
+      ).rows[0]!.n,
+    ).toBe(0);
   });
 
   it("serializes a reset race with a newer edit so exactly one CAS command wins", async () => {

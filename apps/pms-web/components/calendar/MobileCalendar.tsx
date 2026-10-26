@@ -16,6 +16,7 @@ import {
 } from "date-fns";
 import { CalendarBooking, CalendarBlock, CalendarRoomType } from "@/services/calendar";
 import { getChannelBarColor } from "@/lib/constants/statusStyles";
+import { AWAITING_PAYMENT_BADGE_CLASS, formatPaymentDeadline } from "@/lib/awaitingPayment";
 import { useTranslation } from "@/lib/i18n";
 
 export const calendarLaneTop = (index: number) => index * 36 + 6;
@@ -36,6 +37,8 @@ interface MobileCalendarProps {
   onSelectBlock: (block: CalendarBlock) => void;
   writeActionsAvailable?: boolean;
   manualBookingAvailable?: boolean;
+  /** The hotel's time zone, for payment deadlines (VAY-2348). */
+  hotelTimeZone?: string | null;
 }
 
 export default function MobileCalendar({
@@ -52,6 +55,7 @@ export default function MobileCalendar({
   onSelectBlock,
   writeActionsAvailable = true,
   manualBookingAvailable = writeActionsAvailable,
+  hotelTimeZone = null,
 }: MobileCalendarProps) {
   const { locale, t } = useTranslation();
   const weekdays = useMemo(
@@ -575,11 +579,17 @@ export default function MobileCalendar({
               })}
               {selectedBookings.map((b) => {
                 const channelColor = getChannelBarColor(b.channel);
+                // VAY-2348: held for a bank transfer: amber, with the payment deadline.
+                const awaiting = b.status === "awaiting_payment";
                 return (
                   <button
                     key={`${b.id}:${b.roomPosition}`}
                     onClick={() => onSelectBooking(b)}
-                    className="w-full bg-white rounded-lg border border-gray-200 p-3 text-left hover:border-gray-300 transition-colors"
+                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                      awaiting
+                        ? "border-amber-200 border-l-4 border-l-amber-600 bg-amber-50 hover:border-amber-300"
+                        : "bg-white border-gray-200 hover:border-gray-300"
+                    }`}
                   >
                     <div className="flex items-center gap-2.5">
                       <div
@@ -597,18 +607,31 @@ export default function MobileCalendar({
                             `Room ${b.roomPosition + 1} of ${b.numberOfRooms} · `}
                           {b.checkIn} → {b.checkOut}
                         </div>
+                        {awaiting && b.paymentDeadlineAt && (
+                          <div className="text-[11px] font-semibold text-amber-800">
+                            {t("bookings.payBy", {
+                              date: formatPaymentDeadline(
+                                b.paymentDeadlineAt,
+                                locale,
+                                hotelTimeZone,
+                              ),
+                            })}
+                          </div>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <span
                           className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                            b.status === "confirmed"
-                              ? "bg-green-100 text-green-700"
-                              : b.status === "pending"
-                                ? "bg-yellow-100 text-yellow-700"
-                                : "bg-gray-100 text-gray-600"
+                            awaiting
+                              ? `border ${AWAITING_PAYMENT_BADGE_CLASS}`
+                              : b.status === "confirmed"
+                                ? "bg-green-100 text-green-700"
+                                : b.status === "pending"
+                                  ? "bg-yellow-100 text-yellow-700"
+                                  : "bg-gray-100 text-gray-600"
                           }`}
                         >
-                          {b.status}
+                          {awaiting ? t("bookings.statusAwaitingPayment") : b.status}
                         </span>
                         <div className="text-[10px] text-gray-400 mt-0.5 capitalize">
                           {b.channel}

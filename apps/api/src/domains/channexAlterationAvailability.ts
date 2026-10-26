@@ -107,7 +107,6 @@ export async function assertChannexAlterationAvailability(
        AND coverage.coverage_from <= $3::date AND coverage.coverage_through >= $4::date-1
        AND day.calendar_revision=(SELECT MAX(calendar_revision) FROM pms.operating_calendar_revisions WHERE property_id=$1::uuid)
        AND day.inventory_revision IS NOT NULL AND day.generated_source_revision=day.calendar_revision
-       AND binding.source_room_facts_revision=room.room_facts_revision
        AND binding.source_room_units_revision=room.room_units_revision
        AND binding.physical_capacity_count=day.total_count
        AND binding.physical_capacity_count=(SELECT COUNT(*) FROM pms.rooms unit

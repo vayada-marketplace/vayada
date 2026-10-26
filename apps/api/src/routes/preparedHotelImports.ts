@@ -24,6 +24,7 @@ import {
   type SharedHotelSetupStatusRepository,
 } from "./sharedHotelSetupStatus.js";
 import { enforceRoutePolicy } from "./policy.js";
+import { isPostgresLockTimeoutError } from "../platform/postgresRuntime.js";
 
 export type PreparedHotelImportRoutesOptions = {
   repository: PreparedImportRepository;
@@ -254,6 +255,8 @@ export async function registerPreparedHotelImportRoutes(
         );
         return { items };
       } catch (error) {
+        // Another run of this import holds its lock: the API answers busy, try again.
+        if (isPostgresLockTimeoutError(error)) throw error;
         if (error instanceof Error && error.message === "import_not_available")
           return reply.status(404).send({ code: error.message });
         if (error instanceof Error && error.message === "import_property_conflict")
@@ -291,10 +294,7 @@ export function mergeImportProperty(
 }
 
 function profileAccess(context: RequestContext) {
-  return (
-    hasPermission(context, "marketplace.profile.manage") ||
-    hasPermission(context, "booking.settings.manage")
-  );
+  return hasPermission(context, "booking.settings.manage");
 }
 function roomAccess(context: RequestContext, propertyId: string) {
   const resource = {

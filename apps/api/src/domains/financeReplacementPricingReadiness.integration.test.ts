@@ -55,15 +55,65 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     expect(await f.read({ terms: [{ ...f.input.terms[0], revision: randomUUID() }], expectedEvidenceId: first.evidenceId })).toMatchObject({ reason: "stale" });
     expect(await f.read({ propertyId: randomUUID() })).toMatchObject({ reason: "settings_missing" });
   });
-  it("fails explicitly for disabled payments, currency mismatch, unsupported methods and deposit execution", async () => {
+  it("fails explicitly for disabled payments, currency mismatch and unsupported methods", async () => {
     const f = await fixture();
     expect(await f.read({ currency: "USD" })).toMatchObject({ reason: "currency_mismatch" });
-    expect(await f.read({ terms: [{ ...f.input.terms[0], payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } }] })).toMatchObject({ reason: "deposit_execution_unavailable" });
+    // VAY-2304: a deposit the booking page can't run only stops its own rate, not the hotel.
+    expect(await f.read({ terms: [{ ...f.input.terms[0], payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } }] })).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
     expect(await f.read({ terms: [] })).toMatchObject({ reason: "invalid" });
     await pool.query("UPDATE finance.payment_settings SET accepted_methods=ARRAY['bank_transfer'] WHERE property_id=$1", [f.propertyId]);
     expect(await f.read()).toMatchObject({ reason: "method_unavailable" });
     await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.propertyId]);
     expect(await f.read()).toMatchObject({ reason: "payments_disabled" });
+  });
+  it("takes a deposit by card with the rest at the property, and a card lapse never stops the other rates (VAY-2205)", async () => {
+    const f = await fixture(["card", "pay_at_property"]);
+    const deposit = (payment: Record<string, unknown>) =>
+      f.read({ terms: [{ ...f.input.terms[0], payment } as ReplacementOfferTerms] });
+    const cardDeposit = { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0, acceptedMethods: ["card"] };
+    // Without card the deposit rate is published but can't take card; pay at property sells as before.
+    expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
+    await f.executionEvidence();
+    expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property", "card"] });
+    // No other deposit shape runs (a later balance, other methods, none named, or the whole stay), but
+    // such a rate only stops itself (pricingRateSells); the hotel stays ready (VAY-2304).
+    for (const payment of [
+      { ...cardDeposit, balanceDaysBeforeArrival: 7 },
+      { ...cardDeposit, acceptedMethods: ["card", "pay_at_property"] },
+      { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0 },
+      { ...cardDeposit, basisPoints: 10000 },
+    ])
+      expect(await deposit(payment)).toMatchObject({ kind: "ready", methods: ["pay_at_property", "card"] });
+    // Card lapses with the deposit rate among the saved ones: the hotel stays publishable, without card.
+    await pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE id=$1", [f.accountId]);
+    expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
+  });
+  it("adds bank transfer and PayPal only with bank details or a PayPal email, keeping the evidence (VAY-2139)", async () => {
+    const destination = async (propertyId: string) => (await pool.query(`INSERT INTO finance.bank_transfer_destinations
+      (property_id,revision,ciphertext,key_arn,account_last4) VALUES($1,1,$2,'key','3000') RETURNING id`, [propertyId, Buffer.alloc(40)])).rows[0].id;
+    const paypal = (propertyId: string, email: string) => pool.query(
+      "UPDATE finance.payment_settings SET deposit_policy=jsonb_build_object('paypalEmail',$2::text) WHERE property_id=$1", [propertyId, email]);
+    const f = await fixture(["pay_at_property", "bank_transfer", "paypal"]), before = await f.read();
+    expect(before).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
+    if (before.kind !== "ready") throw new Error("expected readiness");
+    const destinationId = await destination(f.propertyId);
+    await paypal(f.propertyId, "pay@example.test");
+    // Saved prices stay current: the methods are outside the evidence hash.
+    expect(await f.read({ expectedEvidenceId: before.evidenceId })).toEqual({ ...before, methods: ["pay_at_property", "bank_transfer", "paypal"] });
+    await pool.query("UPDATE finance.bank_transfer_destinations SET enabled=false WHERE id=$1", [destinationId]);
+    await paypal(f.propertyId, "not an email");
+    expect(await f.read({ expectedEvidenceId: before.evidenceId })).toEqual(before);
+    const bankOnly = await fixture(["bank_transfer"]), paypalOnly = await fixture(["paypal"]);
+    expect(await bankOnly.read()).toMatchObject({ reason: "method_unavailable" });
+    expect(await paypalOnly.read()).toMatchObject({ reason: "method_unavailable" });
+    await destination(bankOnly.propertyId);
+    await paypal(paypalOnly.propertyId, " pay@example.test ");
+    expect(await bankOnly.read()).toMatchObject({ kind: "ready", methods: ["bank_transfer"] });
+    expect(await paypalOnly.read()).toMatchObject({ kind: "ready", methods: ["paypal"] });
+    // A card hotel without Stripe readiness still fails, even with bank details.
+    const cardAndBank = await fixture(["card", "bank_transfer"]);
+    await destination(cardAndBank.propertyId);
+    expect(await cardAndBank.read()).toMatchObject({ reason: "method_unavailable" });
   });
   it("requires actual scoped execution evidence and invalidates it when provider capability changes", async () => {
     const f = await fixture(["card"]), other = await fixture(["card"]);

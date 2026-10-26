@@ -18,6 +18,12 @@ export type HostBookingActionState = {
   acceptanceMode: string | null;
   operationalStayStarted: boolean;
   hasPurchasedAddons: boolean;
+  /** Booked on the pricing-v2 booking page; bank transfer and PayPal there wait for the hotel to
+   * confirm the payment (VAY-2139). Optional for callers without it: false. */
+  pricingQuoteBooking?: boolean;
+  /** Stripe refunds can run, so a paid pricing-v2 card stay can be cancelled (VAY-2205). Optional
+   * for callers without it: false. */
+  cardRefunds?: boolean;
 };
 
 /** Eligibility is deliberately independent of the PMS route or a guest email. */
@@ -37,7 +43,9 @@ export function hostBookingActionConflict(
   if (
     action === "reject"
       ? booking.lifecycleStatus !== "pending_payment" ||
-        (booking.acceptanceMode !== "request" && booking.paymentMethod !== "bank_transfer")
+        (booking.acceptanceMode !== "request" &&
+          booking.paymentMethod !== "bank_transfer" &&
+          !(booking.paymentMethod === "paypal" && booking.pricingQuoteBooking === true))
       : booking.lifecycleStatus !== "confirmed"
   )
     return { code: "invalid_lifecycle", message: "The booking is not eligible for this action." };
@@ -45,10 +53,21 @@ export function hostBookingActionConflict(
     action === "reject" &&
     booking.paymentStatus === "authorized" &&
     booking.paymentMethod === "card";
+  const refundableCancel =
+    action === "cancel" &&
+    booking.cardRefunds === true &&
+    booking.pricingQuoteBooking === true &&
+    // A card deposit leaves the rest to pay at the property (VAY-2205).
+    (booking.paymentStatus === "paid" || booking.paymentStatus === "partially_paid") &&
+    booking.paymentMethod === "card";
   if (
     !voidableRequest &&
+    !refundableCancel &&
     (booking.paymentStatus !== "unpaid" ||
-      !["pay_at_property", "cash", "bank_transfer"].includes(booking.paymentMethod ?? ""))
+      !(
+        ["pay_at_property", "cash", "bank_transfer"].includes(booking.paymentMethod ?? "") ||
+        (booking.paymentMethod === "paypal" && booking.pricingQuoteBooking === true)
+      ))
   )
     return {
       code: "payment_adjustment_required",

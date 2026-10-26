@@ -15,10 +15,6 @@
     "appPath": "apps/booking-admin",
     "ecrRepository": "vayada-next-booking-admin-frontend"
   },
-  "next-marketplace-frontend": {
-    "appPath": "apps/marketplace-web",
-    "ecrRepository": "vayada-next-marketplace-frontend"
-  },
   "next-marketplace-admin": {
     "appPath": "apps/vayada-admin",
     "ecrRepository": "vayada-next-admin-frontend"

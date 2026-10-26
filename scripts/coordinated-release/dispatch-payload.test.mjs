@@ -29,8 +29,8 @@ test("dispatch uses a compact envelope with the exact published release identity
     publishedArtifactId: 123456,
     release: {
       manifestId: "vayada-release/v1/1111111111111111111111111111111111111111/41001/2",
-      manifestSha256: "6360c61c601c1c043ce032e2dd2fa22c709204fc45debd026417d09d0be84382",
-      publishedRecordSha256: "96882677caea9450ba1f94c55e3996f32a30098fa90876697c97a73a57bbe16a",
+      manifestSha256: "d4b12732362a7022b5d9778b0cecf8308c3a183f7c626da0574fb52edd5741d6",
+      publishedRecordSha256: "10cc9744f41be016b7127aa1284f0d113c0307e99dd634783efd924f8db3bf61",
       sourceSha: "1111111111111111111111111111111111111111",
       repository: "vayada-marketplace/vayada",
       build: {

@@ -489,6 +489,8 @@ async function recordFixedActivation(
     ],
   );
   if (updated.rowCount !== 1) throw new Error("The billing entitlement changed before activation.");
+  // Bookings need the 5% rule under every plan; a hotel can reach Fixed here without choosing first.
+  await ensureBookingCommissionRule(client, command.propertyId, command.audit.requestedAt);
   await insertAudit(client, operation, command, idempotency.id, {
     plan: "fixed",
     paymentMethod,

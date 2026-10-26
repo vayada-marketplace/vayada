@@ -210,8 +210,11 @@ caller transaction. The database clock supplies property-local lead days. Hotel
 off suppresses every room; room off opts out; nonempty room tiers override; empty
 or absent room tiers inherit. It returns exact basis-point decisions and the saved
 stacking choice, binding hotel/room heads/timezone/local date into source identity.
-Missing/malformed hotel state and active generalized promotions remain unavailable
-until their owner exists; this is not calendar/inventory or full quote approval.
+Missing/malformed hotel state (including malformed promotions) remains unavailable;
+this is not calendar/inventory or full quote approval. Generalized promotions have no
+evaluator yet (VAY-2333). Since VAY-2319 they change no price instead of refusing every
+stay. Once a hotel saves a promotions list, it replaces the hotel-wide tiers, so those
+stop discounting too.
 
 The existing replacement promotion input represents last-minute/code rules,
 not the full agreed early-bird/midweek/free-night feature set. Those need concrete
@@ -600,7 +603,7 @@ ready, provide a hotel editor, or create bookings. Those remain separate work.
 Database authorization uses the same transaction connection for reads and writes;
 it must not acquire another pooled connection while holding the guest-owner lock.
 
-The marketplace guest-rule client uses the authenticated target API, validates
+The Booking Admin guest-rule client uses the authenticated target API, validates
 saved choice/revision responses, sends explicit confirmation and a caller-retained
 retry key, and renders actionable conflict/permission errors. The editor must keep
 that key for an unchanged uncertain command and must not promote guest-rule saving
@@ -720,17 +723,54 @@ This client prerequisite does not activate the current count-only checkout UI:
 room selection must supply actual child ages and current replacement offer keys
 first. Legacy request payloads cannot be silently converted into those facts.
 
-GET /api/booking-web/hotels/:slug/pricing-offers exposes the current published
-replacement offer catalogue for explicit guest selection. It requires current
-public authority and the approved pricing owner in one READ COMMITTED transaction,
-then reads the active Distribution content and requires exact room/offer equality
-with the current mapper. Only published names/descriptions/occupancy/images and
-public offer keys/currency/meal plans are returned. Closing/inactive rooms, missing
-publication, old flat prices, changed pricing/terms/Finance or mismatched property
-fail closed; public access is checked again after reads. The catalogue has no
+GET /api/booking-web/hotels/:slug/pricing-offers exposes the current replacement
+offer catalogue for explicit guest selection. It requires current public authority
+and the approved pricing owner in one READ COMMITTED transaction. The hotel's first
+booking-page publication is its go-live (VAY-2129): before it, the catalogue is
+unavailable; after it, every save serves by itself and there is no "Publish
+reviewed changes" step. The catalogue lists operating (active, not closing) rooms
+that have a current offer, with each room's current name, description, occupancy
+and approved public photos, and the current offers keyed to the current pricing
+revision. Adding, deleting or re-mealing an offer, renaming a room or changing its
+content reaches guests at once; a deleted offer's old key no longer quotes. A room
+with unusable facts is left out without failing the hotel. Unpriced, inactive or
+closing rooms, a missing go-live, stale pricing, Finance or terms, and mismatched
+property fail closed; public access is checked again after reads. The catalogue has no
 amounts or availability promise. The existing date-specific /offers contract is
 not reinterpreted as this catalogue. Guest quoting and booking acceptance retain
 their own date, age, availability and current-evidence checks.
+
+Since VAY-2285 an offer can be kept off the booking page (`sale`: `channels_only` or
+`not_sold`; without it the offer is sold there and on channels). The catalogue, its
+stay prices and the booking page publication leave it out, and a guest quote or
+acceptance for it is refused, while the hotel's date change still reprices a booking
+already on it. A `not_sold` offer stays in the room as the price source of offers
+linked to it, and every room keeps at least one booking-page offer. In the PMS it keeps
+naming the bookings already on it but is not offered for new ones. Pricing-v2 offers
+are not delivered to channels yet; once they are, a `not_sold` offer must stay closed
+there.
+
+Since VAY-2188 each catalogue offer also carries a short cancellation summary from
+its current terms: non-refundable, free until a number of days before arrival, or a
+partial refund. It lets the room choice be named in plain words before a quote
+("Free cancellation", "Non-refundable"); penalties, refund steps, free text and
+payment terms stay with the quote. A page that knows the stay dates words the
+deadline as a date, and a stay that starts inside it has no free cancellation.
+
+Since VAY-2281 an offer whose meal has the hotel's own guest text (`meal.description`,
+one trimmed line of up to 200 characters) also carries it as `mealDescription`; other
+offers have no such key and the booking page keeps its own meal wording. It is shown
+as written (not translated), is not priced and is not sent to channels.
+
+Since VAY-2309 each catalogue offer also carries `paymentMethods`: the ways guests can
+pay that rate now (its terms' accepted methods that Finance and the booking page's
+switches take; a deposit only by card). It is read live, like the rest of the
+catalogue, and is not part of the booking page publication. Until the guest picks a
+way to pay, /book prices the stay with the first way, in the hotel's order, that
+every chosen rate takes, so a non-refundable or card-only rate is not priced at the
+hotel first. A quote whose rate doesn't take the chosen way is refused with 422
+`PAYMENT_METHOD_NOT_ACCEPTED`; any other unnamed refusal stays 404 "Quote
+unavailable." and its storage code and reason are logged with the request.
 
 The browser room-selection step reads the unpriced catalogue, requires an explicit
 current offer for every physical room, and collects adults and each child's age

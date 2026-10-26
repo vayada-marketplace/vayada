@@ -17,7 +17,7 @@ test("calendar matches Rooms & Rates across mixed types, saved room order and re
 }) => {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
-  const types = ["Double Room", "Twin Room", "Bungalow"].map((name) => ({
+  let types = ["Double Room", "Twin Room", "Bungalow"].map((name) => ({
     ...pmsWebRoomType,
     roomTypeId: name,
     name,
@@ -60,6 +60,7 @@ test("calendar matches Rooms & Rates across mixed types, saved room order and re
       expect(body.expectedVersion).toBe(version);
       expect(new Set(body.orderedRoomIds).size).toBe(rooms.length);
       rooms = body.orderedRoomIds.map((id: string) => rooms.find((room) => room.roomId === id)!);
+      types = deriveTypeOrder(types, rooms);
       version = "saved-order-version";
       return route.fulfill({
         json: { orderVersion: version, orderedRoomIds: body.orderedRoomIds },
@@ -92,13 +93,98 @@ test("calendar matches Rooms & Rates across mixed types, saved room order and re
     await expect(page.getByRole("button", { name: "Move up" }).nth(index)).toBeDisabled();
   for (const index of [1, 3, 5])
     await expect(page.getByRole("button", { name: "Move down" }).nth(index)).toBeDisabled();
+  await expect(page.getByText(/outer arrows move a whole room type/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Move Double Room up" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Move Bungalow down" })).toBeDisabled();
   await page.getByRole("button", { name: "Move down" }).first().click();
   [expected[0], expected[1]] = [expected[1], expected[0]];
+  // VAY-2294: a room type moves with all its rooms.
+  await page.getByRole("button", { name: "Move Bungalow up" }).click();
+  expected.splice(2, 4, expected[4]!, expected[5]!, expected[2]!, expected[3]!);
+  await expect(roomLabels()).toHaveText(expected.map((label) => `#${label}`));
   await page.getByRole("button", { name: "Save order" }).click();
   await expect(page.getByText("Reordering rooms")).not.toBeVisible();
+  expect(types.map(({ name }) => name)).toEqual(["Double Room", "Bungalow", "Twin Room"]);
   await page.reload();
   await expect(roomLabels()).toHaveText(expected.map((label) => `#${label}`));
   await checkRoomsAndRates();
+});
+
+test("one room per type: every row moves its room type and the order saves (VAY-2294)", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  let types = ["Coral House", "Palm Villa", "Lagoon Cottage"].map((name) => ({
+    ...pmsWebRoomType,
+    roomTypeId: name,
+    name,
+    roomCount: 1,
+  }));
+  let rooms = types.map(({ name }, sortOrder) => ({
+    roomId: `${name}-room`,
+    roomTypeId: name,
+    roomNumber: name,
+    sortOrder,
+    status: "available",
+    metadata: {},
+  }));
+  const saved: string[][] = [];
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
+    route.fulfill({ json: { items: types, propertyId: PMS_WEB_PROPERTY_ID } }),
+  );
+  await page.unroute(baseRoomRoute);
+  let version = "one-room-per-type-v1";
+  await page.route(roomRoute, async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "*",
+          "Access-Control-Allow-Methods": "GET,PATCH,OPTIONS",
+        },
+      });
+    }
+    if (route.request().method() === "PATCH") {
+      const body = route.request().postDataJSON();
+      expect(body.expectedVersion).toBe(version);
+      saved.push(body.orderedRoomIds);
+      rooms = body.orderedRoomIds.map((id: string) => rooms.find((room) => room.roomId === id)!);
+      types = deriveTypeOrder(types, rooms);
+      version = "one-room-per-type-v2";
+      return route.fulfill({
+        json: { orderVersion: version, orderedRoomIds: body.orderedRoomIds },
+      });
+    }
+    return route.fulfill({
+      json: { items: rooms, orderVersion: version, propertyId: PMS_WEB_PROPERTY_ID },
+    });
+  });
+  const roomLabels = () => page.getByText(/^#/);
+
+  await page.goto("/calendar");
+  await expect(roomLabels()).toHaveText(["#Coral House", "#Palm Villa", "#Lagoon Cottage"]);
+  await page.getByRole("button", { name: "Room view options" }).click();
+  await page.getByRole("button", { name: "Reorder rooms" }).click();
+  await expect(page.getByText("Use the arrows to reorder rooms.")).toBeVisible();
+  // No room-within-type arrows: each row's arrows move its type.
+  await expect(page.getByRole("button", { name: "Move up", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Move Coral House up" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Move Palm Villa up" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Move Palm Villa down" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Move Lagoon Cottage down" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save order" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Move Lagoon Cottage up" }).click();
+  await page.getByRole("button", { name: "Move Lagoon Cottage up" }).click();
+  await expect(roomLabels()).toHaveText(["#Lagoon Cottage", "#Coral House", "#Palm Villa"]);
+  await page.getByRole("button", { name: "Save order" }).click();
+  await expect(page.getByText("Reordering rooms")).not.toBeVisible();
+  expect(saved).toEqual([["Lagoon Cottage-room", "Coral House-room", "Palm Villa-room"]]);
+
+  await page.reload();
+  await expect(roomLabels()).toHaveText(["#Lagoon Cottage", "#Coral House", "#Palm Villa"]);
 });
 
 test("room order can be cancelled, saved, and restored after reload", async ({ page }) => {
@@ -191,7 +277,7 @@ test("room order can be cancelled, saved, and restored after reload", async ({ p
 
   await page.goto("/calendar");
   const menu = page.getByRole("button", { name: "Room view options" });
-  const roomCells = page.locator("table tbody > tr > td:first-child");
+  const roomCells = page.locator("table tbody > tr > td:first-child").filter({ hasText: "#" });
 
   await menu.click();
   await page.getByRole("button", { name: "Month", exact: true }).click();
@@ -235,3 +321,12 @@ test("room order can be cancelled, saved, and restored after reload", async ({ p
   await expect(roomCells.nth(0)).toContainText("#102");
   await expect(roomCells.nth(1)).toContainText("#101");
 });
+
+// The API saves each room type at the slot of its first room (VAY-2294).
+function deriveTypeOrder<T extends { roomTypeId: string }>(
+  types: T[],
+  rooms: readonly { roomTypeId: string }[],
+): T[] {
+  const order = [...new Set(rooms.map(({ roomTypeId }) => roomTypeId))];
+  return [...types].sort((a, b) => order.indexOf(a.roomTypeId) - order.indexOf(b.roomTypeId));
+}

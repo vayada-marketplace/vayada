@@ -6,7 +6,7 @@ import {
   sessionCookieName,
 } from "../support/firstPartyAuth";
 
-const marketplace = firstPartyAuthSurfaces.find(({ key }) => key === "marketplace")!;
+const bookingAdmin = firstPartyAuthSurfaces.find(({ key }) => key === "bookingAdmin")!;
 const pms = firstPartyAuthSurfaces.find(({ key }) => key === "pms")!;
 const handoffCode = "7_8FkqvJvK_vOS5Ke4iFAScHY6LmDsQUviRLKfS1dCk";
 
@@ -14,20 +14,20 @@ test("cross-app handoff replaces a stale target cookie without sending the sourc
   page,
 }) => {
   const destination = `${pms.baseURL}/handoff#code=${handoffCode}`;
-  const sourceRecords = await mockFirstPartyAuth(page, marketplace, async (route, record) => {
+  const sourceRecords = await mockFirstPartyAuth(page, bookingAdmin, async (route, record) => {
     if (new URL(record.url).pathname !== "/auth/handoff/create") return false;
     await route.fulfill({ status: 201, json: { destination } });
     return true;
   });
-  await page.route(`${marketplace.baseURL}/handoff**`, (route) =>
+  await page.route(`${bookingAdmin.baseURL}/handoff**`, (route) =>
     route.fulfill({
       contentType: "text/html",
       body: '<!doctype html><body data-source-e2e="complete">Source</body>',
     }),
   );
 
-  await page.goto(`${marketplace.baseURL}/login?returnTo=/handoff`);
-  await page.getByLabel(/email address/i).fill("marketplace@example.test");
+  await page.goto(`${bookingAdmin.baseURL}/login?returnTo=/handoff`);
+  await page.getByLabel(/email address/i).fill("booking-admin@example.test");
   await page.getByLabel(/^password$/i).fill("Regression123!");
   await page.getByRole("button", { name: /sign in/i }).click();
   await expect.poll(() => authRequests(sourceRecords, "/auth/password/login").length).toBe(1);
@@ -41,14 +41,14 @@ test("cross-app handoff replaces a stale target cookie without sending the sourc
         headers: { "content-type": "application/json", "x-vayada-csrf": csrf },
         body: JSON.stringify({
           routingHints: { propertyId: "property-e2e" },
-          sourceSurface: "marketplace-web",
+          sourceSurface: "booking-admin",
           targetPath: "/setup?entryProduct=pms",
           targetSurface: target,
         }),
       });
       return (await response.json()).destination as string;
     },
-    { csrf: "csrf-marketplace", target: "pms-web" },
+    { csrf: "csrf-bookingAdmin", target: "pms-web" },
   );
   expect(createdDestination).toBe(destination);
 
@@ -100,22 +100,22 @@ test("cross-app handoff replaces a stale target cookie without sending the sourc
   expect(page.url()).not.toContain(handoffCode);
 
   const create = authRequests(sourceRecords, "/auth/handoff/create")[0]!;
-  expect(create.csrf).toBe("csrf-marketplace");
-  expect(create.cookie).toContain(`${sessionCookieName(marketplace)}=sealed-marketplace`);
+  expect(create.csrf).toBe("csrf-bookingAdmin");
+  expect(create.cookie).toContain(`${sessionCookieName(bookingAdmin)}=sealed-bookingAdmin`);
   expect(create.body).toMatchObject({
-    sourceSurface: "marketplace-web",
+    sourceSurface: "booking-admin",
     targetSurface: "pms-web",
   });
   const redeem = authRequests(targetRecords, "/auth/handoff/redeem")[0]!;
   expect(redeem.cookie).toContain(`${sessionCookieName(pms)}=stale-pms-session`);
-  expect(redeem.cookie).not.toContain("sealed-marketplace");
+  expect(redeem.cookie).not.toContain("sealed-bookingAdmin");
   expect(redeem.body).toEqual({ code: handoffCode, targetSurface: "pms-web" });
   expect(authRequests(targetRecords, "/auth/handoff/redeem")).toHaveLength(1);
 
-  const sourceCookie = await page.context().cookies(`${marketplace.baseURL}/auth/session`);
+  const sourceCookie = await page.context().cookies(`${bookingAdmin.baseURL}/auth/session`);
   const targetCookie = await page.context().cookies(`${pms.baseURL}/auth/session`);
-  expect(sourceCookie.find(({ name }) => name === sessionCookieName(marketplace))?.value).toBe(
-    "sealed-marketplace",
+  expect(sourceCookie.find(({ name }) => name === sessionCookieName(bookingAdmin))?.value).toBe(
+    "sealed-bookingAdmin",
   );
   expect(targetCookie.find(({ name }) => name === sessionCookieName(pms))?.value).toBe(
     "sealed-pms",

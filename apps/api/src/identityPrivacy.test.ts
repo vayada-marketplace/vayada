@@ -18,7 +18,7 @@ import type {
 
 const session: VerifiedSession = {
   workosUserId: "user_workos_privacy",
-  workosOrgId: "org_workos_creator",
+  workosOrgId: "org_workos_hotel",
   sessionId: "session_privacy",
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
@@ -33,19 +33,19 @@ const identityRepository: IdentityRepository = {
   },
   async findOrganizationByWorkosOrgId() {
     return {
-      organizationId: "org_creator",
-      workosOrgId: "org_workos_creator",
-      kind: "creator_workspace",
+      organizationId: "org_hotel",
+      workosOrgId: "org_workos_hotel",
+      kind: "hotel_group",
       status: "active",
     };
   },
   async findActiveMembership() {
     return {
-      membershipId: "membership_creator",
+      membershipId: "membership_hotel_owner",
       status: "active",
-      roleKey: "creator_owner",
+      roleKey: "hotel_owner",
       workosMembershipId: null,
-      workosRoleSlugs: ["creator_owner"],
+      workosRoleSlugs: ["hotel_owner"],
     };
   },
   async findLinkedResources() {
@@ -220,7 +220,7 @@ function buildAuthedPrivacyApp(repository: IdentityPrivacyRepository): ReturnTyp
       propertyAccessRepository: agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole() {
-          return ["marketplace.profile.manage"];
+          return [];
         },
       },
     },

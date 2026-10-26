@@ -67,7 +67,7 @@ transitive helper calls must be added before the matrix is complete.
 | `replacementPricingOfferOwners.ts` and receipt helpers | `pms.channex_offer_targets`, target intents and versions, creation/ARI attempts and receipts; retained outcomes and replay reconciliation. |
 | `channexRoomAvailability*` and closed-upload helpers | Availability attempts/receipts, closed ARI receipts and pending reconciliation; verify every one-use dispatch and readback table. |
 | `pmsChannexManagementTargetState.ts` | Connection/sync status and mapping transitions, including failure paths. Limit this path to operations actually enabled for the selected-offer worker. |
-| `pmsChannexAriSchedule.ts` and `pms.enqueue_restriction_ari` | Scheduled-source upsert and Channex management job enqueue; verify function invoker rights and trigger effects. |
+| `pmsChannexAriSchedule.ts` | Scheduled-source upsert and Channex management job enqueue. `pms.enqueue_restriction_ari` keeps its worker grant, but no worker code calls it since VAY-2208. |
 
 `platform.jobs`, attempts, dead letters, audit, and idempotency are shared
 across product domains. The worker must be unable to claim, update, finish, or
@@ -110,8 +110,8 @@ worker-created scheduler jobs do not supply one.
    column, function, and sequence matrix and negative cases first.
 2. Land application credential routing and protected, non-owner role/secret
    provisioning in small PRs. Add a worker-role preflight that rejects owner,
-   migration/evidence, identity, booking, finance, marketplace, unrelated PMS,
-   and cross-queue writes. Preserve the general runtime preflight.
+   migration/evidence, identity, booking, finance, unrelated PMS, and
+   cross-queue writes. Preserve the general runtime preflight.
 3. Apply grants through a reviewed, bounded owner-only runner. Verify the
    actual ECS task definition's secret references and immutable image digest;
    testing an independently supplied URL does not verify deployed wiring.
@@ -140,7 +140,7 @@ column matrix. Provisioning and startup consume this same image-owned matrix;
 | Initial closed ARI and reconciliation | Current offer/source evidence and identified original creation | ARI attempts/receipts; receipt guard locks target version; reconciliation retains task and provider evidence. |
 | Availability preparation and readback | Operating calendars/periods/bindings, room types/units/closures, inventory days and materialization coverage, property profile and current lease | Availability attempts/receipts and reconciliation attestations. Guards derive property/binding/mapping and compare inventory/observation digests. No inventory source write. |
 | Activation and completion | All current owner sources, complete availability and closed-ARI evidence | Immutable sealed target versions, intent status, active version and external-rate claim. Connection permits only last ARI timestamp and updated timestamp changes; sync status only ARI/mapping. |
-| Scheduled source scan | Connection/location, pricing sources, room/rate mappings, inventory/coverage and same-day policy | Scoped ARI source fingerprint/revision and sync job enqueue, including invoker `pms.enqueue_restriction_ari`. |
+| Scheduled source scan | Connection/location, pricing sources, room/rate mappings, inventory/coverage and same-day policy | Scoped ARI source fingerprint/revision and sync job enqueue. |
 
 PostgreSQL requires UPDATE privilege for row locks. Source identity column
 UPDATE grants therefore pair with restrictive UPDATE WITH CHECK policies that

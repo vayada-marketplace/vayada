@@ -337,6 +337,46 @@ describe.skipIf(!url)("ordinary property profile writer (VAY-2056)", () => {
       await admin.query("COMMIT");
       expect((await race).map((result) => result.status).sort()).toEqual(["conflict", "updated"]);
       expect((await audits()).rows).toHaveLength(3);
+
+      // VAY-2322 F2: the area or village and arrival directions are saved, read back and cleared with "".
+      const located = (area: string, arrivalDirections: string) =>
+        profile("Race A", contacts, { area, arrivalDirections });
+      expect(
+        await write(
+          bound,
+          "arrival",
+          located("Kathaluwa", "Turn at the blue gate after the temple."),
+          4,
+        ),
+      ).toMatchObject({
+        status: "updated",
+        profile: {
+          profile: {
+            location: {
+              area: "Kathaluwa",
+              arrivalDirections: "Turn at the blue gate after the temple.",
+            },
+          },
+        },
+      });
+      const stored = () =>
+        admin
+          .query(
+            "SELECT area,arrival_directions FROM hotel_catalog.property_locations WHERE property_id=$1",
+            [property],
+          )
+          .then((result) => result.rows[0]);
+      expect(await stored()).toEqual({
+        area: "Kathaluwa",
+        arrival_directions: "Turn at the blue gate after the temple.",
+      });
+      const cleared = await write(bound, "arrival-cleared", located("", ""), 5);
+      expect(cleared).toMatchObject({ status: "updated" });
+      // Empty fields are left out of the profile, as clients from before them expect.
+      expect(
+        (cleared as { profile: { profile: { location: object } } }).profile.profile.location,
+      ).not.toHaveProperty("area");
+      expect(await stored()).toEqual({ area: null, arrival_directions: null });
     } finally {
       await admin.query("ROLLBACK").catch(() => undefined);
       await pool.end();

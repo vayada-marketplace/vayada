@@ -12,23 +12,12 @@ import {
   useState,
 } from "react";
 import {
-  ArrowLeftIcon,
   ArrowRightIcon,
-  BuildingOffice2Icon,
-  BuildingOfficeIcon,
-  BuildingStorefrontIcon,
-  CakeIcon,
   CheckIcon,
-  EllipsisHorizontalIcon,
   ExclamationCircleIcon,
-  HomeModernIcon,
-  KeyIcon,
+  MagnifyingGlassIcon,
   MapPinIcon,
-  PhotoIcon,
   PlusIcon,
-  SparklesIcon,
-  SunIcon,
-  UsersIcon,
 } from "@heroicons/react/24/outline";
 import type {
   AdaptiveHotelSetupStatus,
@@ -38,12 +27,10 @@ import type {
   PropertyProfilePatch,
   PropertyProfileResponse,
   PublicPropertyProfileResponse,
-  SetupComponentProduct,
-  SetupTask,
-  SetupTaskId,
   SetupTrack,
   UpdatePropertyProfileRequest,
 } from "@vayada/domain-hotels";
+import { SETUP_TRACKS } from "@vayada/domain-hotels";
 import {
   COUNTRY_OPTIONS,
   CURRENCY_OPTIONS,
@@ -51,21 +38,20 @@ import {
   POPULAR_CURRENCY_CODES,
   POPULAR_LANGUAGE_CODES,
 } from "@vayada/locale-constants";
-import {
-  getCountries,
-  getCountryCallingCode,
-  parsePhoneNumberFromString,
-  type CountryCode,
-} from "libphonenumber-js/min";
+import { type CountryCode } from "libphonenumber-js/min";
 
 import { HotelIcon } from "./HotelIcon";
 import { LocalizationMultiSelect } from "./LocalizationMultiSelect";
-import GoogleAddressMap from "./GoogleAddressMap";
+import GoogleAddressMap, {
+  coveredMapInsets,
+  type MapCoveredInsets,
+  type MapPosition,
+} from "./GoogleAddressMap";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
+import { findAddressOnMap } from "./googleMaps";
 import TimezoneField from "./TimezoneField";
 import { availableTimezones, defaultTimezoneForCountry, timezoneForCoordinates } from "./timezones";
 import {
-  isSetupTaskActionable,
   resolveSharedFirstRunSetupView,
   toggleSetupTrackSelection,
   type SharedFirstRunSetupViewModel,
@@ -73,6 +59,16 @@ import {
   type SharedSetupProperty,
 } from "./sharedFirstRunSetupFlow";
 import type { SharedHotelSetupApi, SharedPropertyTypeOption } from "./sharedHotelSetupApi";
+import {
+  isValidInternationalPhone,
+  normalizedPhoneNumber,
+  PhoneField,
+  PropertyLogoField,
+  PropertyTypeField,
+  SelectField,
+  SUPPORTED_PHONE_COUNTRIES,
+  TextField,
+} from "./setupProfileFields";
 import {
   clearPendingPropertyLogo,
   readPendingPropertyLogo,
@@ -87,15 +83,7 @@ import {
   type PropertyLaunchSettingsApi,
 } from "./propertyLaunchSettings";
 
-type ProductLabels = Record<SetupComponentProduct, string>;
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
-
-export type SharedFirstRunContinueInput = {
-  action: "enter_product";
-  product: SetupComponentProduct;
-  propertyId: string;
-  returnTo: string | null;
-};
 
 export type SharedFirstRunPropertySetupWizardProps = {
   initialProfileSuggestions?: PreparedHotelImport["property"];
@@ -103,27 +91,19 @@ export type SharedFirstRunPropertySetupWizardProps = {
   api: SharedHotelSetupApi;
   entryProduct: SharedHotelSetupEntryProduct;
   initialPropertyId?: string | null;
-  returnTo?: string | null;
   initialAddProperty?: boolean;
   embedded?: boolean;
-  productLabels?: Partial<ProductLabels>;
-  onContinue: (input: SharedFirstRunContinueInput) => void | Promise<void>;
-  renderTaskForm: (context: SharedSetupTaskFormContext) => ReactNode;
   propertyLaunchSettingsApi?: PropertyLaunchSettingsApi;
   onPropertySelected?: (propertyId: string) => void | Promise<void>;
-  renderAfterHotelDetails?: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
+  /** Renders the step-by-step setup once the selected hotel's basics are saved. */
+  renderAfterHotelDetails: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
   renderSetupActions?: (propertyId: string) => ReactNode;
-  onExit?: (propertyId: string | null) => void;
-};
-
-export type SharedSetupTaskFormContext = {
-  task: SetupTask;
-  propertyId: string;
-  selectedTracks: readonly SetupTrack[];
-  onBeforeSave: () => Promise<void>;
-  onComplete: () => Promise<void>;
-  onBack: (() => void) | null;
-  onDirty: () => void;
+  /** The tracks a new hotel can choose from; every setup track by default. */
+  availableTracks?: readonly SetupTrack[];
+  /** Opens the selected hotel's details on this field, e.g. from a Booking readiness item. */
+  editFocus?: "location";
+  /** Called after a save that `editFocus` opened, instead of returning to the setup plan. */
+  onEditFocusSaved?: (propertyId: string) => void;
 };
 
 type ProfileDraft = {
@@ -167,7 +147,6 @@ export function canConfirmLocation(
 ): boolean {
   return Boolean(
     location.streetAddress.trim() &&
-    location.postalCode.trim() &&
     location.city.trim() &&
     COUNTRY_OPTIONS.some((country) => country.code === location.countryCode) &&
     isValidIanaTimezone(location.timezone.trim()),
@@ -185,6 +164,24 @@ function isValidIanaTimezone(value: string): boolean {
   }
 }
 
+function parsedCoordinate(value: string): number | null {
+  const coordinate = value.trim() === "" ? Number.NaN : Number(value);
+  return Number.isFinite(coordinate) ? coordinate : null;
+}
+
+function locationAddressLine(
+  location: Pick<ProfileDraft, "streetAddress" | "postalCode" | "city" | "countryCode">,
+): string {
+  const country = COUNTRY_OPTIONS.find((option) => option.code === location.countryCode);
+  return [
+    location.streetAddress,
+    [location.postalCode, location.city].filter(Boolean).join(" "),
+    country?.name ?? location.countryCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "longitude">): boolean {
   return (
     typeof location.latitude === "number" &&
@@ -198,11 +195,7 @@ export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "lon
   );
 }
 
-const DEFAULT_PRODUCT_LABELS: ProductLabels = {
-  booking: "Booking Engine",
-  pms: "PMS",
-  marketplace: "Creator Marketplace",
-};
+const ALL_SETUP_TRACKS: readonly SetupTrack[] = SETUP_TRACKS;
 
 const TRACK_CONTENT: Record<
   SetupTrack,
@@ -214,80 +207,7 @@ const TRACK_CONTENT: Record<
     description: "Manage rooms, rates, reservations, and direct bookings.",
     icon: HotelIcon,
   },
-  creator_marketplace: {
-    title: "Creator Marketplace",
-    subtitle: null,
-    description: "Create your hotel profile and prepare a collaboration offer.",
-    icon: SparklesIcon,
-  },
 };
-
-const TASK_CONTENT: Record<
-  SetupTaskId,
-  {
-    title: string;
-    description: string;
-  }
-> = {
-  shared_identity: {
-    title: "Add your hotel basics",
-    description: "Confirm the hotel name, type, address, timezone, and contact details.",
-  },
-  public_profile: {
-    title: "Describe your hotel",
-    description: "Add one description and cover that guests and creators will see.",
-  },
-  creator_offer: {
-    title: "Prepare your collaboration offer",
-    description: "Choose deliverables, compensation, and creator requirements.",
-  },
-  rooms_rates_availability: {
-    title: "Add your first room type",
-    description:
-      "Just the basics to get started. You can add more rooms and fine-tune pricing anytime.",
-  },
-  guest_settings_policies: {
-    title: "Review guest settings and policies",
-    description: "Set check-in details, booking preferences, and cancellation terms.",
-  },
-  billing_plan: {
-    title: "Choose your plan",
-    description: "How you pay for vayada.",
-  },
-  payment: {
-    title: "How guests can pay",
-    description: "Choose which payment options to offer. You can enable multiple.",
-  },
-  direct_booking_publication: {
-    title: "Design your booking page",
-    description: "Set up the look and feel of your direct booking site.",
-  },
-};
-
-type TaskStateCopy = {
-  label: string;
-  description: string;
-  tone: "neutral" | "success" | "warning" | "danger";
-};
-
-export const INLINE_SETUP_STALE_SAVE_MESSAGE =
-  "Your setup changed in another session. We refreshed the latest step—review it before saving again.";
-export const INLINE_SETUP_UNSAVED_CHANGES_MESSAGE =
-  "You have unsaved changes. Leave this step and discard them?";
-
-export function canLeaveInlineSetupTask(
-  hasUnsavedChanges: boolean,
-  confirmDiscard: () => boolean,
-): boolean {
-  return !hasUnsavedChanges || confirmDiscard();
-}
-
-export function blockInlineSetupUnload(
-  event: Pick<BeforeUnloadEvent, "preventDefault" | "returnValue">,
-) {
-  event.preventDefault();
-  event.returnValue = "";
-}
 
 const BASE_PROFILE_STEP_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
   ["displayName", "propertyType", "logo"],
@@ -322,47 +242,31 @@ const PROFILE_STEP_TITLES_WITH_LAUNCH = [
   "Contact information",
 ] as const;
 
-const PROPERTY_TYPE_ICONS = new Map<string, IconComponent>([
-  ["hotel", HotelIcon],
-  ["resort", SunIcon],
-  ["hostel", UsersIcon],
-  ["apartment", BuildingOffice2Icon],
-  ["aparthotel", BuildingOfficeIcon],
-  ["guesthouse", BuildingStorefrontIcon],
-  ["bed_and_breakfast", CakeIcon],
-  ["villa", HomeModernIcon],
-  ["vacation_rental", KeyIcon],
-  ["motel", MapPinIcon],
-  ["other", EllipsisHorizontalIcon],
-]);
-
 const TIMEZONE_PICKER_OPTIONS = availableTimezones();
 
 export default function SharedFirstRunPropertySetupWizard({
   api,
   entryProduct,
   initialPropertyId = null,
-  returnTo = null,
   initialAddProperty = false,
   embedded = false,
-  productLabels,
-  onContinue,
-  renderTaskForm,
   propertyLaunchSettingsApi,
   onPropertySelected,
   renderAfterHotelDetails,
   renderSetupActions,
   initialProfileSuggestions,
   propertyCreateIdempotencyKey,
-  onExit,
+  availableTracks = ALL_SETUP_TRACKS,
+  editFocus,
+  onEditFocusSaved,
 }: SharedFirstRunPropertySetupWizardProps) {
-  const labels = { ...DEFAULT_PRODUCT_LABELS, ...productLabels };
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusReloadToken, setStatusReloadToken] = useState(0);
   const [forceCreateProperty, setForceCreateProperty] = useState(initialAddProperty);
-  const [forceTrackSelection, setForceTrackSelection] = useState(false);
   const [editPropertyProfile, setEditPropertyProfile] = useState(false);
+  // A "Fix in setup" link opens the location form directly and saves from there (VAY-2288).
+  const [pendingEditFocus, setPendingEditFocus] = useState(editFocus ?? null);
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [profileReloadToken, setProfileReloadToken] = useState(0);
   const [loadedProfile, setLoadedProfile] = useState<PropertyProfileResponse | null>(null);
@@ -380,7 +284,6 @@ export default function SharedFirstRunPropertySetupWizard({
   const [skipLaunchSettings, setSkipLaunchSettings] = useState(false);
   const [selectedTracks, setSelectedTracks] = useState<SetupTrack[]>([]);
   const [saving, setSaving] = useState(false);
-  const [selectedPlanTaskId, setSelectedPlanTaskId] = useState<SetupTaskId | null>(null);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [profileStep, setProfileStep] = useState(0);
@@ -404,28 +307,21 @@ export default function SharedFirstRunPropertySetupWizard({
     () =>
       resolveSharedFirstRunSetupView(status, {
         forceCreateProperty,
-        forceTrackSelection,
         editPropertyProfile,
       }),
-    [editPropertyProfile, forceCreateProperty, forceTrackSelection, status],
-  );
-  const entryContinueInput = useMemo(
-    () => buildEntryContinueInput(status, returnTo),
-    [returnTo, status],
+    [editPropertyProfile, forceCreateProperty, status],
   );
 
   useEffect(() => {
     setForceCreateProperty(initialAddProperty);
-    setEditPropertyProfile(false);
-  }, [initialAddProperty]);
+    setEditPropertyProfile(!initialAddProperty && Boolean(editFocus));
+    setPendingEditFocus(initialAddProperty ? null : (editFocus ?? null));
+  }, [editFocus, initialAddProperty]);
 
+  const focusedEdit = view.profileMode === "update" && pendingEditFocus === "location";
   useEffect(() => {
-    setProfileStep(0);
-  }, [view.profileMode, view.selectedPropertyId]);
-
-  useEffect(() => {
-    setSelectedPlanTaskId(status?.setupPlan?.recommendedTaskId ?? null);
-  }, [status?.setupPlan?.planRevision, status?.setupPlan?.recommendedTaskId]);
+    setProfileStep(focusedEdit ? 1 : 0);
+  }, [focusedEdit, view.profileMode, view.selectedPropertyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -545,6 +441,7 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setForceCreateProperty(false);
     setEditPropertyProfile(false);
+    setPendingEditFocus(null);
     setLoading(true);
     try {
       await reloadStatus(propertyId);
@@ -561,7 +458,8 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setFieldErrors({});
     const nextFieldErrors = validateProfileDraft(draft);
-    if (launchSettingsEnabled && !skipLaunchSettings) {
+    // A focused location edit never shows the guest preferences, so it leaves them as saved.
+    if (launchSettingsEnabled && !skipLaunchSettings && !focusedEdit) {
       Object.assign(nextFieldErrors, validatePropertyLaunchSettings(launchSettings));
     }
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -659,16 +557,24 @@ export default function SharedFirstRunPropertySetupWizard({
         view.profileMode === "update" &&
         launchSettingsEnabled &&
         propertyLaunchSettingsApi &&
-        !skipLaunchSettings
+        !skipLaunchSettings &&
+        !focusedEdit
       ) {
         await propertyLaunchSettingsApi.update(
           saved.propertyId,
           normalizedPropertyLaunchSettings(launchSettings),
         );
       }
+      if (focusedEdit && onEditFocusSaved) {
+        logoUploadKey.current = null;
+        logoAssignmentKey.current = null;
+        onEditFocusSaved(saved.propertyId);
+        return;
+      }
       await reloadStatus(saved.propertyId);
       setForceCreateProperty(false);
       setEditPropertyProfile(false);
+      setPendingEditFocus(null);
       if (view.profileMode === "create") {
         await onPropertySelected?.(saved.propertyId);
       }
@@ -717,7 +623,6 @@ export default function SharedFirstRunPropertySetupWizard({
         },
         (trackCommandKey.current = idempotencyKeyForRetry(trackCommandKey.current)),
       );
-      setForceTrackSelection(false);
       await reloadStatus(status.propertySelection.selectedPropertyId);
       trackCommandKey.current = null;
     } catch (err) {
@@ -731,7 +636,6 @@ export default function SharedFirstRunPropertySetupWizard({
           trackCommandKey.current = null;
           if (sameTrackSelection(selectedTracks, latestStatus.organization.selectedTracks)) {
             setSelectedTracks(latestStatus.organization.selectedTracks);
-            setForceTrackSelection(false);
           } else {
             setSelectedTracks(
               mergeTrackSelectionAfterConflict(
@@ -751,42 +655,6 @@ export default function SharedFirstRunPropertySetupWizard({
       }
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleCompleteTask = async (task: SetupTask) => {
-    setError("");
-    try {
-      const nextStatus = await reloadStatus(task.propertyId);
-      setSelectedPlanTaskId(recommendedInlineSetupTaskId(nextStatus));
-    } catch (err) {
-      setError(setupErrorMessage(err));
-      throw err;
-    }
-  };
-
-  const handleBeforeSaveTask = async (task: SetupTask, planRevision: string) => {
-    setError("");
-    try {
-      const nextStatus = await reloadStatus(task.propertyId);
-      if (
-        isInlineSetupTaskSaveCurrent(nextStatus, {
-          propertyId: task.propertyId,
-          taskId: task.taskId,
-          planRevision,
-        })
-      ) {
-        return;
-      }
-
-      setSelectedPlanTaskId(recommendedInlineSetupTaskId(nextStatus));
-      setError(INLINE_SETUP_STALE_SAVE_MESSAGE);
-      throw new Error(INLINE_SETUP_STALE_SAVE_MESSAGE);
-    } catch (err) {
-      if (setupErrorMessage(err) !== INLINE_SETUP_STALE_SAVE_MESSAGE) {
-        setError(setupErrorMessage(err));
-      }
-      throw err;
     }
   };
 
@@ -814,13 +682,16 @@ export default function SharedFirstRunPropertySetupWizard({
     return <WizardShell title="Setting up your property" view={view} loading embedded={embedded} />;
   }
 
-  if (view.screen === "setup_plan" && view.selectedPropertyId && renderAfterHotelDetails) {
+  if (view.screen === "setup_plan" && view.selectedPropertyId) {
     if (saving)
       return <WizardShell title="Saving hotel details" view={view} loading embedded={embedded} />;
     return (
       <>
         {renderSetupActions?.(view.selectedPropertyId)}
-        {renderAfterHotelDetails(view.selectedPropertyId, () => setEditPropertyProfile(true))}
+        {renderAfterHotelDetails(view.selectedPropertyId, () => {
+          setPendingEditFocus(null);
+          setEditPropertyProfile(true);
+        })}
       </>
     );
   }
@@ -833,9 +704,6 @@ export default function SharedFirstRunPropertySetupWizard({
       mapFirst={view.screen === "property_profile" && profileStep === 1}
       headingRef={view.screen === "property_profile" ? profileHeading : undefined}
     >
-      {view.screen === "setup_plan" &&
-        view.selectedPropertyId &&
-        renderSetupActions?.(view.selectedPropertyId)}
       {error && !(view.screen === "property_profile" && profileLoadFailed) && (
         <div
           className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
@@ -911,9 +779,14 @@ export default function SharedFirstRunPropertySetupWizard({
           onConfirmLaunchSettings={() => setSkipLaunchSettings(false)}
           onSkipLaunchSettings={() => setSkipLaunchSettings(true)}
           onStepChange={setProfileStep}
+          saveStep={focusedEdit ? 1 : undefined}
+          highlightLocality={focusedEdit}
           onCancel={
             editPropertyProfile
-              ? () => setEditPropertyProfile(false)
+              ? () => {
+                  setPendingEditFocus(null);
+                  setEditPropertyProfile(false);
+                }
               : status.propertySelection.availableProperties.length > 0 &&
                   view.profileMode === "create"
                 ? () => setForceCreateProperty(false)
@@ -926,8 +799,8 @@ export default function SharedFirstRunPropertySetupWizard({
 
       {view.screen === "track_selection" && (
         <TrackSelection
+          availableTracks={availableTracks}
           selectedTracks={selectedTracks}
-          lockedTracks={status.organization.selectedTracks}
           canManageTracks={status.organization.canManageTracks}
           saving={saving}
           onToggle={(track) => {
@@ -937,34 +810,6 @@ export default function SharedFirstRunPropertySetupWizard({
             );
           }}
           onSave={handleSaveTracks}
-          onCancel={
-            status.organization.selectedTracks.length > 0
-              ? () => {
-                  setSelectedTracks(status.organization.selectedTracks);
-                  setForceTrackSelection(false);
-                }
-              : undefined
-          }
-        />
-      )}
-
-      {view.screen === "setup_plan" && (
-        <SetupPlan
-          status={status}
-          labels={labels}
-          renderTaskForm={renderTaskForm}
-          onCompleteTask={handleCompleteTask}
-          onBeforeSaveTask={handleBeforeSaveTask}
-          selectedTaskId={selectedPlanTaskId}
-          onSelectTask={setSelectedPlanTaskId}
-          onEditHotelBasics={() => setEditPropertyProfile(true)}
-          onExit={onExit ? () => onExit(view.selectedPropertyId) : undefined}
-          onEnterProduct={entryContinueInput ? () => onContinue(entryContinueInput) : undefined}
-          onAddTrack={
-            status.organization.selectedTracks.length < 2 && status.organization.canManageTracks
-              ? () => setForceTrackSelection(true)
-              : undefined
-          }
         />
       )}
     </WizardShell>
@@ -1214,6 +1059,63 @@ function HotelFacadeIllustration() {
   );
 }
 
+/**
+ * On a phone the location card spans the screen width, at the bottom or (while focused) the top.
+ * Reports how much of the map it covers there; null from Tailwind's `sm` up, where the panels sit
+ * beside the pin.
+ */
+function useCoveredMapInsets(
+  active: boolean,
+  areaRef: RefObject<HTMLDivElement | null>,
+  cardRef: RefObject<HTMLDivElement | null>,
+): MapCoveredInsets | null {
+  const [insets, setInsets] = useState<MapCoveredInsets | null>(null);
+
+  useEffect(() => {
+    const area = areaRef.current;
+    const card = cardRef.current;
+    if (!active || !area || !card) return;
+    const narrow = window.matchMedia("(max-width: 639.98px)");
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      // Next frame: :focus-within has moved the card by then.
+      frame = requestAnimationFrame(() => {
+        const next = narrow.matches
+          ? coveredMapInsets(area.getBoundingClientRect(), card.getBoundingClientRect())
+          : null;
+        setInsets((current) =>
+          current?.top === next?.top && current?.bottom === next?.bottom ? current : next,
+        );
+      });
+    };
+    measure();
+    const resize = new ResizeObserver(measure);
+    resize.observe(area);
+    resize.observe(card);
+    // Focus can also leave without an event (a focused button turning disabled drops the card to
+    // the bottom), so any change inside the card re-measures too.
+    const changes = new MutationObserver(measure);
+    changes.observe(card, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    card.addEventListener("focusin", measure);
+    card.addEventListener("focusout", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      changes.disconnect();
+      card.removeEventListener("focusin", measure);
+      card.removeEventListener("focusout", measure);
+    };
+  }, [active, areaRef, cardRef]);
+
+  return insets;
+}
+
 function ProfileForm({
   draft,
   launchSettings,
@@ -1237,6 +1139,8 @@ function ProfileForm({
   onCancel,
   cancelLabel = "Back to properties",
   onSave,
+  saveStep,
+  highlightLocality = false,
 }: {
   draft: ProfileDraft;
   launchSettings: PropertyLaunchSettings | null;
@@ -1260,6 +1164,10 @@ function ProfileForm({
   onCancel?: () => void;
   cancelLabel?: string;
   onSave: () => void;
+  /** Saves from this step instead of the last one (a focused edit). */
+  saveStep?: number;
+  /** Points the hotel at "Show city and country publicly" while it is off. */
+  highlightLocality?: boolean;
 }) {
   const profileStepFields = launchSettings
     ? PROFILE_STEP_FIELDS_WITH_LAUNCH
@@ -1268,7 +1176,12 @@ function ProfileForm({
     ? PROFILE_STEP_TITLES_WITH_LAUNCH
     : BASE_PROFILE_STEP_TITLES;
   const contactStep = launchSettings ? 3 : 2;
-  const finalStep = profileStepFields.length - 1;
+  // A focused edit saves from its step, and from any later step a field error sends it to.
+  const savesHere =
+    saveStep === undefined ? step === profileStepFields.length - 1 : step >= saveStep;
+  // A focused edit doesn't save guest preferences, so Back doesn't offer them.
+  const previousStep =
+    saveStep !== undefined && launchSettings && step === contactStep ? saveStep : step - 1;
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
   const LocationHeading = embedded ? "h2" : "h1";
   const [showAddressFields, setShowAddressFields] = useState(
@@ -1277,6 +1190,29 @@ function ProfileForm({
       (mode === "update" && !(canConfirmLocation(draft) && hasMapCoordinates(draft))),
   );
   const [addressSearchUnavailable, setAddressSearchUnavailable] = useState(false);
+  // Without a map (blocked script, key failure) coordinates are typed in; text keeps partial input.
+  const [mapUnavailable, setMapUnavailable] = useState(false);
+  const [coordinateText, setCoordinateText] = useState({
+    latitude: draft.latitude?.toString() ?? "",
+    longitude: draft.longitude?.toString() ?? "",
+  });
+  const coordinateTyped = useRef(false);
+  // "Find on map" lookup of the typed address; `address` ties a result to the text it searched.
+  const [mapLookup, setMapLookup] = useState<{
+    status: "searching" | "not_found" | "area";
+    address: string;
+  } | null>(null);
+  const [mapFocus, setMapFocus] = useState<MapPosition | null>(null);
+  // The map keeps the pin in the strip the location card leaves visible on a phone.
+  const locationMapArea = useRef<HTMLDivElement>(null);
+  const locationCard = useRef<HTMLDivElement>(null);
+  const mapCoveredInsets = useCoveredMapInsets(step === 1, locationMapArea, locationCard);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const mounted = useRef(false);
+  // A keyboard path to a pin when the address search is down (the map itself needs a pointer).
+  const [coordinatesRequested, setCoordinatesRequested] = useState(false);
+  const coordinateFields = useRef<HTMLDivElement>(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState(draft.logoPublicUrl);
   const addressRevision = useRef(0);
   const addressFields = useRef<HTMLDivElement>(null);
@@ -1287,6 +1223,18 @@ function ProfileForm({
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const timezoneWasAutoDetected = useRef(false);
   const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState<boolean | null>(null);
+  const localityCheckbox = useRef<HTMLInputElement>(null);
+  const localityHighlighted = highlightLocality && step === 1 && !draft.localityPublic;
+  const localityShown = useRef(false);
+
+  useEffect(() => {
+    if (!localityHighlighted || loading || localityShown.current) return;
+    localityShown.current = true;
+    requestAnimationFrame(() => {
+      localityCheckbox.current?.scrollIntoView({ block: "center" });
+      localityCheckbox.current?.focus({ preventScroll: true });
+    });
+  }, [loading, localityHighlighted]);
 
   useEffect(() => {
     const errorStep = profileStepFields.findIndex((fields) =>
@@ -1316,6 +1264,25 @@ function ProfileForm({
       setShowAddressFields(!(canConfirmLocation(draft) && hasMapCoordinates(draft)));
     }
   }, [draft, googleMapsApiKey, loading, mode]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Typed coordinates keep their text (e.g. "48."); others (a pin, a cleared pin) replace it.
+    if (coordinateTyped.current) {
+      coordinateTyped.current = false;
+      return;
+    }
+    setCoordinateText({
+      latitude: draft.latitude?.toString() ?? "",
+      longitude: draft.longitude?.toString() ?? "",
+    });
+  }, [draft.latitude, draft.longitude]);
 
   useEffect(() => {
     if (showAddressFields && focusAddressFieldsWhenShown.current) {
@@ -1367,6 +1334,50 @@ function ProfileForm({
       ...locationReset,
     });
   };
+  const placePin = ({ lat, lng }: MapPosition) => {
+    // Read the latest draft: a "Find on map" result lands after other edits may have happened.
+    const current = latestDraft.current;
+    const followPin = timezoneWasAutoDetected.current || !current.timezone.trim();
+    if (followPin) timezoneWasAutoDetected.current = true;
+    onChange({
+      ...current,
+      latitude: lat,
+      longitude: lng,
+      ...(followPin ? { timezone: timezoneForCoordinates(lat, lng) } : {}),
+    });
+    // Like a picked suggestion: fold the fields away so the pin is in view to confirm.
+    if (canConfirmLocation(current)) setShowAddressFields(false);
+  };
+  const pickMapLocation = (position: MapPosition) => {
+    // The hotel's own pin wins over a Places selection still loading for the old address.
+    addressRevision.current += 1;
+    placePin(position);
+  };
+  const findTypedAddressOnMap = async (address: string) => {
+    if (!googleMapsApiKey) return;
+    setMapLookup({ status: "searching", address });
+    let result: Awaited<ReturnType<typeof findAddressOnMap>> = null;
+    try {
+      result = await findAddressOnMap(googleMapsApiKey, address);
+    } catch {
+      // A failed lookup reads like a miss: the hotel can still click its property on the map.
+    }
+    if (!mounted.current) return;
+    // Only the address it searched, still without a pin: a newer edit, suggestion or pin wins.
+    const current = latestDraft.current;
+    if (locationAddressLine(current) !== address || hasMapCoordinates(current)) {
+      setMapLookup(null);
+      return;
+    }
+    if (result?.precise) {
+      setMapLookup(null);
+      placePin(result.position);
+      return;
+    }
+    // An area match (street, postcode, town) shows the area; the hotel clicks its property there.
+    if (result) setMapFocus(result.position);
+    setMapLookup({ status: result ? "area" : "not_found", address });
+  };
   const changeStep = (nextStep: number) => {
     onFieldErrors({});
     onStepChange(nextStep);
@@ -1401,10 +1412,13 @@ function ProfileForm({
           ...propertyTypeOptions,
         ]
       : propertyTypeOptions;
-  const country = COUNTRY_OPTIONS.find((option) => option.code === draft.countryCode);
-  const countryName = country?.name ?? draft.countryCode;
   const hasCompleteLocation = canConfirmLocation(draft);
   const hasMappedLocation = hasCompleteLocation && hasMapCoordinates(draft);
+  // The pin can only be placed on a map, so without one there's nothing to prompt for.
+  const showLocationSummary = Boolean(googleMapsApiKey) && hasCompleteLocation;
+  const addressLine = locationAddressLine(draft);
+  const lookupForAddress = mapLookup?.address === addressLine ? mapLookup.status : null;
+  const showCoordinateFields = mapUnavailable || !googleMapsApiKey || coordinatesRequested;
   const profileProgress = (
     <div
       className={
@@ -1457,7 +1471,7 @@ function ProfileForm({
         <button
           type="button"
           disabled={saving}
-          onClick={() => (step > 0 ? changeStep(step - 1) : onCancel?.())}
+          onClick={() => (step > 0 ? changeStep(previousStep) : onCancel?.())}
           className={`w-full rounded-full border border-gray-200 bg-white px-5 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
             step === 1 ? "sm:min-w-32" : ""
           }`}
@@ -1467,23 +1481,19 @@ function ProfileForm({
       )}
       <button
         type="submit"
-        disabled={step === finalStep && saving}
+        disabled={savesHere && saving}
         className={`inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
           step === 1 ? "sm:min-w-32" : ""
         }`}
       >
-        {step === finalStep && saving && (
+        {savesHere && saving && (
           <span
             className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
             aria-hidden="true"
           />
         )}
-        <span>
-          {step === finalStep ? (saving ? "Saving..." : "Save and continue") : "Continue"}
-        </span>
-        {!(step === finalStep && saving) && (
-          <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-        )}
+        <span>{savesHere ? (saving ? "Saving..." : "Save and continue") : "Continue"}</span>
+        {!(savesHere && saving) && <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />}
       </button>
     </div>
   );
@@ -1494,7 +1504,7 @@ function ProfileForm({
       aria-busy={saving}
       onSubmit={(event) => {
         event.preventDefault();
-        if (step === finalStep) onSave();
+        if (savesHere) onSave();
         else continueToNextStep();
       }}
       className={`mx-auto ${step === 1 ? "max-w-none" : "max-w-7xl space-y-8"}`}
@@ -1764,7 +1774,7 @@ function ProfileForm({
             <div className="mt-6 rounded-2xl border border-gray-100 p-4 sm:p-5">
               <h4 className="text-base font-semibold text-gray-950">Social media</h4>
               <p className="mt-1 text-sm text-gray-500">
-                Optional links help guests and creators discover your hotel.
+                Optional links help guests discover your hotel.
               </p>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {(
@@ -1811,23 +1821,34 @@ function ProfileForm({
       )}
 
       <section aria-busy={saving} className={step === 1 ? "block" : "hidden"}>
-        <div className="relative isolate min-h-[100dvh] overflow-hidden bg-slate-100 text-left">
+        <div
+          ref={locationMapArea}
+          className="relative isolate min-h-[100dvh] overflow-hidden bg-slate-100 text-left"
+        >
           {googleMapsApiKey && (
             <GoogleAddressMap
               active={step === 1}
               apiKey={googleMapsApiKey}
               latitude={draft.latitude}
               longitude={draft.longitude}
+              focus={mapFocus}
+              coveredInsets={mapCoveredInsets}
+              onPick={pickMapLocation}
+              onUnavailable={() => setMapUnavailable(true)}
             />
           )}
 
           <div className="pointer-events-none absolute inset-0 z-10 flex items-end p-3 sm:block sm:p-0">
-            <div className="pointer-events-auto flex max-h-[calc(100dvh-1.5rem)] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents">
+            <div
+              ref={locationCard}
+              className="pointer-events-auto flex max-h-[70dvh] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents"
+            >
               <div
                 data-testid="location-search-panel"
                 className={`pointer-events-auto min-h-0 flex-1 p-4 sm:absolute sm:left-6 sm:top-6 sm:flex-none sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur lg:left-8 lg:top-8 ${
                   showAddressFields
-                    ? "overflow-y-auto sm:max-h-[calc(100dvh-10rem)] sm:w-[calc(100%-3rem)] sm:max-w-md"
+                    ? // Leaves room for the action bar, which asks for the pin while the fields are open.
+                      "overflow-y-auto sm:max-h-[calc(100dvh-13rem)] sm:w-[calc(100%-3rem)] sm:max-w-md"
                     : "sm:w-[calc(100%-3rem)] sm:max-w-lg"
                 }`}
               >
@@ -1842,10 +1863,12 @@ function ProfileForm({
                   {step === 1 && profileProgress}
                 </div>
 
-                {googleMapsApiKey && !showAddressFields && (
+                {/* Search stays visible next to the fields: they never set map coordinates. */}
+                {googleMapsApiKey && (
                   <GooglePlacesAddressField
                     addressRevision={addressRevision}
                     apiKey={googleMapsApiKey}
+                    label="Search for your address"
                     onUnavailable={(autocompleteWasFocused) => {
                       setAddressSearchUnavailable(true);
                       if (!showAddressFields) focusAddressFieldsWhenShown.current = true;
@@ -1880,6 +1903,14 @@ function ProfileForm({
                   />
                 )}
 
+                {googleMapsApiKey && showAddressFields && !addressSearchUnavailable && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    {mode === "update"
+                      ? "Or correct the address below, then place the pin."
+                      : "Or enter the address below, then place the pin."}
+                  </p>
+                )}
+
                 {!showAddressFields && (
                   <button
                     ref={editAddressButton}
@@ -1902,14 +1933,15 @@ function ProfileForm({
                   <div
                     ref={addressFields}
                     id={addressFieldsId}
-                    className="border-t border-gray-100 pt-4"
+                    className={`${googleMapsApiKey && !addressSearchUnavailable ? "mt-4 " : ""}border-t border-gray-100 pt-4`}
                   >
                     {addressSearchUnavailable && (
                       <p
                         className="mb-4 rounded-xl bg-gray-50 px-3 py-2.5 text-sm text-gray-600"
                         role="status"
                       >
-                        Address suggestions are unavailable. Enter the address manually.
+                        Address suggestions are unavailable. Enter the address, then click your
+                        property on the map.
                       </p>
                     )}
                     {googleMapsApiKey && hasCompleteLocation && (
@@ -1938,10 +1970,9 @@ function ProfileForm({
                         onChange={(value) => setField("streetAddress", value)}
                       />
                       <TextField
-                        label="Postal code"
+                        label="Postal code (optional)"
                         value={draft.postalCode}
                         placeholder="80331"
-                        required
                         error={fieldErrors["location.postalCode"]?.[0]}
                         onChange={(value) => setField("postalCode", value)}
                       />
@@ -1983,8 +2014,79 @@ function ProfileForm({
                     </div>
                   </div>
                 )}
-                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left">
+                {!showCoordinateFields && addressSearchUnavailable && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCoordinatesRequested(true);
+                      requestAnimationFrame(() =>
+                        coordinateFields.current?.querySelector<HTMLElement>("input")?.focus(),
+                      );
+                    }}
+                    className="mt-3 text-sm font-semibold text-primary-700 transition hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
+                  >
+                    Enter coordinates instead
+                  </button>
+                )}
+                {showCoordinateFields && (
+                  <div
+                    ref={coordinateFields}
+                    className="mt-4 rounded-xl border border-gray-200 p-3"
+                  >
+                    <p className="text-sm text-gray-600">
+                      {mapUnavailable ? "The map couldn’t load. " : ""}Enter your property’s
+                      coordinates, for example copied from Google Maps.
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      {(["latitude", "longitude"] as const).map((field) => (
+                        <TextField
+                          key={field}
+                          label={field === "latitude" ? "Latitude" : "Longitude"}
+                          value={coordinateText[field]}
+                          placeholder={field === "latitude" ? "48.137154" : "11.576124"}
+                          required
+                          onChange={(value) => {
+                            setCoordinateText((text) => ({ ...text, [field]: value }));
+                            const coordinate = parsedCoordinate(value);
+                            const limit = field === "latitude" ? 90 : 180;
+                            const next =
+                              coordinate !== null && Math.abs(coordinate) <= limit
+                                ? coordinate
+                                : null;
+                            if (next === draft[field]) return;
+                            coordinateTyped.current = true;
+                            const nextDraft = { ...draft, [field]: next };
+                            const { latitude, longitude } = nextDraft;
+                            // Like a pin: an auto-detected time zone follows complete coordinates.
+                            const followPin =
+                              latitude !== null &&
+                              longitude !== null &&
+                              hasMapCoordinates(nextDraft) &&
+                              (timezoneWasAutoDetected.current || !draft.timezone.trim());
+                            if (followPin) timezoneWasAutoDetected.current = true;
+                            onChange(
+                              followPin
+                                ? {
+                                    ...nextDraft,
+                                    timezone: timezoneForCoordinates(latitude, longitude),
+                                  }
+                                : nextDraft,
+                            );
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <label
+                  className={`mt-4 flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left ${
+                    localityHighlighted
+                      ? "border-amber-300 bg-amber-50 ring-2 ring-amber-300"
+                      : "border-gray-200 bg-gray-50"
+                  }`}
+                >
                   <input
+                    ref={localityCheckbox}
                     type="checkbox"
                     checked={draft.localityPublic}
                     onChange={(event) =>
@@ -1998,9 +2100,14 @@ function ProfileForm({
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
                       {mode === "update"
-                        ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
-                        : "Street address, postal code, and map coordinates stay private."}
+                        ? "Guests see your city and country on your booking page. Street address and postal code stay private, and changing the address turns off your guest map."
+                        : "Guests see your city and country on your booking page. Street address, postal code, and map pin stay private."}
                     </span>
+                    {localityHighlighted && (
+                      <span className="mt-1 block text-xs font-medium leading-5 text-amber-800">
+                        Your booking page needs this before it can go live.
+                      </span>
+                    )}
                   </span>
                 </label>
               </div>
@@ -2008,48 +2115,74 @@ function ProfileForm({
               <div
                 data-testid="location-action-bar"
                 className={`pointer-events-auto shrink-0 border-t border-gray-100 p-4 sm:absolute sm:bottom-8 sm:left-1/2 sm:flex sm:-translate-x-1/2 sm:items-center sm:justify-between sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur ${
-                  !showAddressFields && hasCompleteLocation
+                  showLocationSummary
                     ? "sm:w-[calc(100%-3rem)] sm:max-w-4xl"
                     : "sm:w-auto sm:min-w-[19rem]"
                 }`}
               >
-                {!showAddressFields && hasCompleteLocation && (
+                {showLocationSummary && (
                   <div
                     className="flex min-w-0 items-start gap-3 sm:flex-1 sm:items-center"
                     aria-live="polite"
                   >
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white sm:mt-0">
+                    <span
+                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full sm:mt-0 ${
+                        hasMappedLocation
+                          ? "bg-primary-600 text-white"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
                       <MapPinIcon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-gray-950">
+                        {hasMappedLocation ? "Is this the right location?" : "Add your map pin"}
+                      </p>
+                      <p className="mt-0.5 text-sm text-gray-700 sm:truncate">{addressLine}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
                         {hasMappedLocation
-                          ? "Is this the right location?"
-                          : "Address details entered"}
+                          ? [
+                              !mapUnavailable &&
+                                "Drag the pin if it isn’t exactly on your property",
+                              draft.timezone && `Time zone · ${draft.timezone}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : mapUnavailable
+                            ? "Needed for your booking page’s map. Enter your property’s coordinates above."
+                            : lookupForAddress === "not_found"
+                              ? "We couldn’t find this address on the map. Click your property on the map instead."
+                              : lookupForAddress === "area"
+                                ? "Google found the area, not the exact address. Click your property on the map."
+                                : addressSearchUnavailable
+                                  ? "Needed for your booking page’s map. Zoom in and click your property; drag the pin to adjust."
+                                  : "Needed for your booking page’s map. Click your property on the map."}
                       </p>
-                      <p className="mt-0.5 text-sm text-gray-700 sm:truncate">
-                        {[
-                          draft.streetAddress,
-                          [draft.postalCode, draft.city].filter(Boolean).join(" "),
-                          countryName,
-                        ]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </p>
-                      {draft.timezone && (
-                        <p className="mt-0.5 text-xs text-gray-500">Time zone · {draft.timezone}</p>
-                      )}
                     </div>
                   </div>
                 )}
 
                 <div
                   className={
-                    !showAddressFields && hasCompleteLocation
-                      ? "mt-4 sm:ml-6 sm:mt-0 sm:shrink-0"
+                    showLocationSummary
+                      ? "mt-4 flex flex-col gap-3 sm:ml-6 sm:mt-0 sm:shrink-0 sm:flex-row sm:items-center"
                       : ""
                   }
                 >
+                  {showLocationSummary &&
+                    !hasMappedLocation &&
+                    !addressSearchUnavailable &&
+                    !mapUnavailable && (
+                      <button
+                        type="button"
+                        disabled={saving || mapLookup?.status === "searching"}
+                        onClick={() => void findTypedAddressOnMap(addressLine)}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-5 py-3 text-sm font-semibold text-primary-700 transition hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                      >
+                        <MagnifyingGlassIcon className="h-4 w-4" aria-hidden="true" />
+                        {mapLookup?.status === "searching" ? "Finding…" : "Find on map"}
+                      </button>
+                    )}
                   {actions}
                 </div>
               </div>
@@ -2068,32 +2201,29 @@ function ProfileForm({
 }
 
 function TrackSelection({
+  availableTracks,
   selectedTracks,
-  lockedTracks,
   canManageTracks,
   saving,
   onToggle,
   onSave,
-  onCancel,
 }: {
+  availableTracks: readonly SetupTrack[];
   selectedTracks: SetupTrack[];
-  lockedTracks: SetupTrack[];
   canManageTracks: boolean;
   saving: boolean;
   onToggle: (track: SetupTrack) => void;
   onSave: () => void;
-  onCancel?: () => void;
 }) {
   const needsSelection = selectedTracks.length === 0;
 
   return (
     <section className="mx-auto max-w-5xl">
       <div className="grid gap-5 md:grid-cols-2">
-        {(["hotel_operations", "creator_marketplace"] as const).map((track) => {
+        {availableTracks.map((track) => {
           const content = TRACK_CONTENT[track];
           const checked = selectedTracks.includes(track);
-          const locked = lockedTracks.includes(track);
-          const disabled = locked || !canManageTracks;
+          const disabled = !canManageTracks;
           const Icon = content.icon;
           return (
             <label
@@ -2140,11 +2270,6 @@ function TrackSelection({
                 </span>
               )}
               <span className="mt-3 text-sm leading-6 text-gray-600">{content.description}</span>
-              {locked && (
-                <span className="mt-auto pt-5 text-xs font-medium text-gray-500">
-                  Already added. Remove or change this service from service management.
-                </span>
-              )}
             </label>
           );
         })}
@@ -2160,16 +2285,6 @@ function TrackSelection({
       )}
 
       <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-        {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={saving}
-            className="rounded-full px-6 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
-          >
-            Cancel
-          </button>
-        )}
         <button
           type="button"
           disabled={saving || needsSelection || !canManageTracks}
@@ -2188,604 +2303,6 @@ function TrackSelection({
       </div>
     </section>
   );
-}
-
-type InlineSetupTaskCandidate = Pick<
-  SetupTask,
-  "taskId" | "track" | "readiness" | "callerCapability"
->;
-
-export function isInlineSetupTaskEditable(
-  task: Pick<SetupTask, "taskId" | "track" | "readiness" | "callerCapability">,
-): boolean {
-  if (task.taskId === "shared_identity") {
-    return (
-      task.callerCapability === "allowed" &&
-      (task.readiness === "actionable" || task.readiness === "complete")
-    );
-  }
-  return (
-    isSetupTaskActionable(task) ||
-    (task.readiness === "complete" && task.callerCapability === "allowed")
-  );
-}
-
-export function isInlineSetupTaskSelectable(
-  task: InlineSetupTaskCandidate,
-  recommendedTaskId: SetupTaskId | null,
-): boolean {
-  if (!isInlineSetupTaskEditable(task)) return false;
-  return task.taskId === recommendedTaskId || task.readiness === "complete";
-}
-
-export function previousEditableSetupTaskId(
-  tasks: readonly InlineSetupTaskCandidate[],
-  currentTaskId: SetupTaskId,
-): SetupTaskId | null {
-  const currentIndex = tasks.findIndex(({ taskId }) => taskId === currentTaskId);
-  for (let index = currentIndex - 1; index >= 0; index -= 1) {
-    const task = tasks[index];
-    if (task && isInlineSetupTaskEditable(task)) return task.taskId;
-  }
-  return null;
-}
-
-export function recommendedInlineSetupTaskId(status: AdaptiveHotelSetupStatus): SetupTaskId | null {
-  const plan = status.setupPlan;
-  if (!plan?.recommendedTaskId) return null;
-  const recommendedTask = plan.tasks.find(({ taskId }) => taskId === plan.recommendedTaskId);
-  return recommendedTask &&
-    recommendedTask.taskId !== "shared_identity" &&
-    isInlineSetupTaskEditable(recommendedTask)
-    ? recommendedTask.taskId
-    : null;
-}
-
-export function isInlineSetupTaskSaveCurrent(
-  status: AdaptiveHotelSetupStatus,
-  expected: {
-    propertyId: string;
-    taskId: SetupTaskId;
-    planRevision: string;
-  },
-): boolean {
-  const plan = status.setupPlan;
-  if (
-    !plan ||
-    plan.propertyId !== expected.propertyId ||
-    plan.planRevision !== expected.planRevision
-  ) {
-    return false;
-  }
-  const task = plan.tasks.find(({ taskId }) => taskId === expected.taskId);
-  return Boolean(
-    task &&
-    task.taskId !== "shared_identity" &&
-    isInlineSetupTaskSelectable(task, plan.recommendedTaskId),
-  );
-}
-
-function SetupPlan({
-  status,
-  labels,
-  renderTaskForm,
-  onCompleteTask,
-  onBeforeSaveTask,
-  selectedTaskId,
-  onSelectTask,
-  onEditHotelBasics,
-  onExit,
-  onEnterProduct,
-  onAddTrack,
-}: {
-  status: AdaptiveHotelSetupStatus;
-  labels: ProductLabels;
-  renderTaskForm: (context: SharedSetupTaskFormContext) => ReactNode;
-  onCompleteTask: (task: SetupTask) => Promise<void>;
-  onBeforeSaveTask: (task: SetupTask, planRevision: string) => Promise<void>;
-  selectedTaskId: SetupTaskId | null;
-  onSelectTask: (taskId: SetupTaskId | null) => void;
-  onEditHotelBasics: () => void;
-  onExit?: () => void;
-  onEnterProduct?: () => void;
-  onAddTrack?: () => void;
-}) {
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-
-  useEffect(() => {
-    if (!hasUnsavedChanges) return;
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => blockInlineSetupUnload(event);
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [hasUnsavedChanges]);
-
-  const plan = status.setupPlan;
-  if (!plan) {
-    return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Choose a hotel to see its setup plan.
-      </div>
-    );
-  }
-
-  const entryDecision = status.entryDecision;
-  const requestedProduct = entryDecision?.requestedProduct;
-  const recommendedTask = plan.recommendedTaskId
-    ? (plan.tasks.find(
-        (task) =>
-          task.taskId === plan.recommendedTaskId &&
-          task.taskId !== "shared_identity" &&
-          isInlineSetupTaskEditable(task),
-      ) ?? null)
-    : null;
-  const selectedTask = selectedTaskId
-    ? (plan.tasks.find(
-        (task) =>
-          task.taskId === selectedTaskId &&
-          task.taskId !== "shared_identity" &&
-          isInlineSetupTaskSelectable(task, plan.recommendedTaskId),
-      ) ?? null)
-    : null;
-  const currentTask = selectedTask ?? recommendedTask;
-  const attentionTask =
-    currentTask === null && plan.ownerProgress.complete < plan.ownerProgress.total
-      ? (plan.tasks.find(({ ownerProgress }) => ownerProgress !== "owner_complete") ?? null)
-      : null;
-  const activeTask = currentTask ?? attentionTask;
-  const currentTaskIndex = activeTask
-    ? plan.tasks.findIndex(({ taskId }) => taskId === activeTask.taskId)
-    : -1;
-  const reviewActive = activeTask === null;
-  const totalSteps = plan.tasks.length + 1;
-  const currentStepNumber = reviewActive ? totalSteps : currentTaskIndex + 1;
-  const previousTaskId = activeTask
-    ? previousEditableSetupTaskId(plan.tasks, activeTask.taskId)
-    : null;
-  const reviewBackTaskId = reviewActive
-    ? ([...plan.tasks].reverse().find((task) => isInlineSetupTaskEditable(task))?.taskId ?? null)
-    : null;
-  const navigateFromTask = (navigate: () => void) => {
-    if (
-      !canLeaveInlineSetupTask(hasUnsavedChanges, () =>
-        window.confirm(INLINE_SETUP_UNSAVED_CHANGES_MESSAGE),
-      )
-    ) {
-      return;
-    }
-    setHasUnsavedChanges(false);
-    navigate();
-  };
-  const selectTask = (taskId: SetupTaskId) => {
-    navigateFromTask(() => {
-      if (taskId === "shared_identity") {
-        onEditHotelBasics();
-        return;
-      }
-      onSelectTask(taskId);
-    });
-  };
-  const currentStepTitle = activeTask
-    ? TASK_CONTENT[activeTask.taskId].title
-    : "Review and next steps";
-  const canReturnToReview =
-    plan.ownerProgress.complete === plan.ownerProgress.total &&
-    recommendedTask === null &&
-    selectedTask?.readiness === "complete";
-  const showReviewAddTrackHelp =
-    !onAddTrack &&
-    status.organization.selectedTracks.length < 2 &&
-    !status.organization.canManageTracks;
-
-  return (
-    <section className="mx-auto max-w-5xl">
-      <div className="mb-3 flex justify-center">
-        <img src="/vayada-logo.png" alt="vayada" width={120} height={40} className="h-7 w-auto" />
-      </div>
-      <div className="relative mx-auto mb-10 w-full" data-testid="hotel-setup-progress">
-        <div className="mx-auto w-full max-w-xl">
-          <div
-            className={`flex items-center ${
-              onExit ? "justify-between sm:justify-center" : "justify-center"
-            }`}
-          >
-            <p className="text-xs font-semibold text-gray-500">
-              Step {currentStepNumber} of {totalSteps}
-            </p>
-            {onExit && (
-              <button
-                type="button"
-                onClick={() => navigateFromTask(onExit)}
-                className="text-xs font-semibold text-gray-500 transition hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 sm:absolute sm:right-0 sm:top-0 sm:text-sm"
-              >
-                Exit setup
-              </button>
-            )}
-          </div>
-          <div
-            className="mt-3 flex w-full gap-2"
-            role="progressbar"
-            aria-label="Hotel setup progress"
-            aria-valuemin={1}
-            aria-valuemax={totalSteps}
-            aria-valuenow={currentStepNumber}
-            aria-valuetext={`Step ${currentStepNumber} of ${totalSteps}: ${currentStepTitle}`}
-          >
-            {Array.from({ length: totalSteps }, (_, index) => {
-              const reached = index < currentStepNumber;
-              return (
-                <span
-                  key={index}
-                  className={`h-2 flex-1 rounded-full transition-colors duration-300 motion-reduce:transition-none ${
-                    reached ? "bg-primary-600" : "bg-primary-100"
-                  }`}
-                  data-state={reached ? "reached" : "upcoming"}
-                  aria-hidden="true"
-                />
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {entryDecision?.decision === "unavailable" && requestedProduct && (
-        <div
-          className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
-          role="alert"
-        >
-          {labels[requestedProduct]} is not available for this hotel right now. You can continue any
-          setup task below or ask an owner or support for help.
-        </div>
-      )}
-
-      <div className="min-w-0" onChangeCapture={() => setHasUnsavedChanges(true)}>
-        <div
-          className={`mx-auto ${
-            currentTask?.taskId === "direct_booking_publication" ? "max-w-5xl" : "max-w-3xl"
-          }`}
-        >
-          {currentTask ? (
-            <InlineSetupTaskStep
-              key={currentTask.taskId}
-              task={currentTask}
-              onReturnToReview={
-                canReturnToReview ? () => navigateFromTask(() => onSelectTask(null)) : null
-              }
-              form={renderTaskForm({
-                task: currentTask,
-                propertyId: plan.propertyId,
-                selectedTracks: status.organization.selectedTracks,
-                onBeforeSave: () => onBeforeSaveTask(currentTask, plan.planRevision),
-                onComplete: () => {
-                  setHasUnsavedChanges(false);
-                  return onCompleteTask(currentTask);
-                },
-                onBack: previousTaskId ? () => selectTask(previousTaskId) : null,
-                onDirty: () => setHasUnsavedChanges(true),
-              })}
-            />
-          ) : attentionTask ? (
-            <SetupAttentionStep
-              key={attentionTask.taskId}
-              task={attentionTask}
-              onBack={previousTaskId ? () => selectTask(previousTaskId) : null}
-            />
-          ) : (
-            <>
-              <SetupReview
-                launchReadiness={plan.launchReadiness}
-                onBack={reviewBackTaskId ? () => selectTask(reviewBackTaskId) : null}
-              />
-              {(onEnterProduct || onAddTrack || showReviewAddTrackHelp) && (
-                <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-3">
-                  {onEnterProduct && requestedProduct && (
-                    <button
-                      type="button"
-                      onClick={onEnterProduct}
-                      className="inline-flex items-center justify-center gap-2 rounded-full bg-gray-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-950 focus-visible:ring-offset-2"
-                    >
-                      Open {labels[requestedProduct]}
-                      <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  )}
-                  {onAddTrack && (
-                    <button
-                      type="button"
-                      onClick={onAddTrack}
-                      className="text-sm font-semibold text-primary-700 transition hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
-                    >
-                      Add another service
-                    </button>
-                  )}
-                  {showReviewAddTrackHelp && (
-                    <p className="max-w-xs text-xs text-gray-500">
-                      Ask a hotel group owner if you want to add another service.
-                    </p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SetupAttentionStep({ task, onBack }: { task: SetupTask; onBack: (() => void) | null }) {
-  const headingRef = useSetupStepHeadingFocus();
-  const content = TASK_CONTENT[task.taskId];
-  const state = setupTaskStateCopy(task);
-  const toneClass = {
-    neutral: "border-gray-200 bg-gray-50 text-gray-700",
-    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    warning: "border-amber-200 bg-amber-50 text-amber-900",
-    danger: "border-red-200 bg-red-50 text-red-800",
-  }[state.tone];
-
-  return (
-    <section aria-labelledby="current-setup-step-title">
-      <h1
-        ref={headingRef}
-        id="current-setup-step-title"
-        tabIndex={-1}
-        className="text-2xl font-semibold tracking-tight text-gray-950 outline-none"
-      >
-        {content.title}
-      </h1>
-      <p className="mt-3 max-w-2xl text-base leading-7 text-gray-600">{content.description}</p>
-      {onBack && <SetupBackButton onClick={onBack} />}
-      <div className={`mt-7 rounded-2xl border px-4 py-3 text-sm ${toneClass}`} role="status">
-        <p className="font-semibold">{state.label}</p>
-        <p className="mt-1 leading-6">{state.description}</p>
-      </div>
-      <p className="mt-5 max-w-xl text-sm leading-6 text-gray-600">
-        Your saved work is safe. Return later or ask the indicated person to resolve this step.
-      </p>
-    </section>
-  );
-}
-
-function InlineSetupTaskStep({
-  task,
-  form,
-  onReturnToReview,
-}: {
-  task: SetupTask;
-  form: ReactNode;
-  onReturnToReview: (() => void) | null;
-}) {
-  const headingRef = useSetupStepHeadingFocus();
-  const content = TASK_CONTENT[task.taskId];
-
-  return (
-    <section aria-labelledby="current-setup-step-title">
-      <div className="text-center">
-        <h1
-          ref={headingRef}
-          id="current-setup-step-title"
-          tabIndex={-1}
-          className="text-2xl font-semibold tracking-tight text-gray-950 outline-none sm:text-3xl"
-        >
-          {content.title}
-        </h1>
-        <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-gray-600">
-          {content.description}
-        </p>
-        {onReturnToReview && (
-          <button
-            type="button"
-            onClick={onReturnToReview}
-            className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-primary-700 transition hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
-          >
-            Return to review
-            <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-          </button>
-        )}
-      </div>
-      <div
-        className="mt-8 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm sm:p-8"
-        data-testid="hotel-setup-form-card"
-      >
-        {form}
-      </div>
-    </section>
-  );
-}
-
-function SetupReview({
-  launchReadiness,
-  onBack,
-}: {
-  launchReadiness: NonNullable<AdaptiveHotelSetupStatus["setupPlan"]>["launchReadiness"];
-  onBack: (() => void) | null;
-}) {
-  const headingRef = useSetupStepHeadingFocus();
-  const readinessItems = [
-    {
-      label: "Creator Marketplace",
-      description: "Your public profile and creator collaboration offer.",
-      value: launchReadiness.marketplacePublish,
-    },
-    {
-      label: "Hotel operations",
-      description: "Your PMS rooms, rates, availability, and operating settings.",
-      value: launchReadiness.operationsUse,
-    },
-    {
-      label: "Direct booking",
-      description: "Your guest-facing booking page, policies, and payment setup.",
-      value: launchReadiness.directBookingPublish,
-    },
-  ] as const;
-
-  return (
-    <section aria-labelledby="setup-review-title">
-      <h1
-        ref={headingRef}
-        id="setup-review-title"
-        tabIndex={-1}
-        className="text-2xl font-semibold tracking-tight text-gray-950 outline-none"
-      >
-        Review and next steps
-      </h1>
-      <p className="mt-3 max-w-2xl text-base leading-7 text-gray-600">
-        Each vayada service has its own readiness status. You can use ready services while another
-        one is still being reviewed.
-      </p>
-      {onBack && <SetupBackButton onClick={onBack} />}
-
-      <dl className="mt-8 divide-y divide-gray-200 border-y border-gray-200">
-        {readinessItems.map((item) => {
-          const copy = launchReadinessCopy(item.value);
-          return (
-            <div
-              key={item.label}
-              className="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <dt className="text-sm font-semibold text-gray-950">{item.label}</dt>
-                <dd className="mt-1 text-sm leading-6 text-gray-600">{item.description}</dd>
-              </div>
-              <dd className={`shrink-0 text-sm font-semibold ${copy.className}`}>{copy.label}</dd>
-            </div>
-          );
-        })}
-      </dl>
-
-      <p className="mt-6 text-sm leading-6 text-gray-600">
-        Your saved progress is safe. You can leave setup and return whenever a pending service is
-        ready.
-      </p>
-    </section>
-  );
-}
-
-function SetupBackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gray-600 transition hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
-    >
-      <ArrowLeftIcon className="h-4 w-4" aria-hidden="true" />
-      Back
-    </button>
-  );
-}
-
-function useSetupStepHeadingFocus(): RefObject<HTMLHeadingElement> {
-  const headingRef = useRef<HTMLHeadingElement>(null);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => headingRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  return headingRef;
-}
-
-function launchReadinessCopy(
-  readiness: NonNullable<
-    AdaptiveHotelSetupStatus["setupPlan"]
-  >["launchReadiness"][keyof NonNullable<AdaptiveHotelSetupStatus["setupPlan"]>["launchReadiness"]],
-): { label: string; className: string } {
-  if (readiness === "ready") return { label: "Ready", className: "text-emerald-700" };
-  if (readiness === "pending") {
-    return { label: "Pending", className: "text-amber-800" };
-  }
-  if (readiness === "blocked") {
-    return { label: "Needs attention", className: "text-red-700" };
-  }
-  return { label: "Not selected", className: "text-gray-500" };
-}
-
-function setupTaskStateCopy(task: SetupTask): TaskStateCopy {
-  if (task.readiness === "complete") {
-    return {
-      label: "Complete",
-      description: "Nothing else is needed for this step.",
-      tone: "success",
-    };
-  }
-  if (task.readiness === "pending_sync") {
-    return {
-      label: "Syncing",
-      description: "vayada is checking the latest saved information. No action is needed yet.",
-      tone: "neutral",
-    };
-  }
-  if (task.readiness === "pending_review") {
-    return {
-      label: "Under review",
-      description: "This step is waiting for review. You can continue with another task.",
-      tone: "neutral",
-    };
-  }
-  if (task.readiness === "rejected") {
-    return {
-      label: "Needs changes",
-      description: "Review the feedback in this workspace before submitting again.",
-      tone: "danger",
-    };
-  }
-  if (task.callerCapability === "ask_owner") {
-    return {
-      label: "Ask an owner",
-      description: "A hotel group owner has permission to complete this step.",
-      tone: "warning",
-    };
-  }
-  if (task.callerCapability === "forbidden") {
-    return {
-      label: "Permission required",
-      description: "You do not have permission to complete this step.",
-      tone: "warning",
-    };
-  }
-  if (task.callerCapability === "waiting") {
-    return {
-      label: "Waiting",
-      description: "Another team or an automated process needs to finish this step.",
-      tone: "neutral",
-    };
-  }
-  if (task.readiness === "blocked") {
-    return {
-      label: "Blocked",
-      description:
-        "A prerequisite or service issue must be resolved before this step can continue.",
-      tone: "danger",
-    };
-  }
-  return {
-    label: "Ready",
-    description: recommendedActionDescription(task),
-    tone: "success",
-  };
-}
-
-function recommendedActionDescription(task: SetupTask): string {
-  if (task.actionableBy === "operator") return "You can complete this step now.";
-  if (task.actionableBy === "support") return "vayada support can complete this step.";
-  if (task.actionableBy === "system") return "vayada will complete this step automatically.";
-  return "A hotel group owner can complete this step now.";
-}
-
-function buildEntryContinueInput(
-  status: AdaptiveHotelSetupStatus | null,
-  returnTo: string | null,
-): SharedFirstRunContinueInput | null {
-  if (!status) return null;
-  const decision = status.entryDecision;
-  if (decision?.decision !== "enter" || !decision.propertyId) {
-    return null;
-  }
-  return {
-    product: decision.requestedProduct,
-    propertyId: decision.propertyId,
-    returnTo,
-    action: "enter_product",
-  };
 }
 
 export function idempotencyKeyForRetry(
@@ -2876,9 +2393,6 @@ export function validateProfileDraft(draft: ProfileDraft): Record<string, string
   if (!draft.streetAddress.trim()) {
     errors["location.streetAddress"] = ["Street address is required."];
   }
-  if (!draft.postalCode.trim()) {
-    errors["location.postalCode"] = ["Postal code is required."];
-  }
   if (!draft.city.trim()) {
     errors["location.city"] = ["City is required."];
   }
@@ -2915,449 +2429,7 @@ function focusFirstIncompleteAddressField(container: HTMLDivElement | null) {
   (fields.find((field) => !field.value.trim()) ?? fields[0])?.focus();
 }
 
-function TextField({
-  label,
-  value,
-  onChange,
-  error,
-  helper,
-  placeholder,
-  type = "text",
-  readOnly = false,
-  required = false,
-  listOptions,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  error?: string;
-  helper?: string;
-  placeholder?: string;
-  type?: string;
-  readOnly?: boolean;
-  required?: boolean;
-  listOptions?: string[];
-}) {
-  const generatedId = useId();
-  const inputId = `setup-${generatedId}`;
-  const helperId = helper ? `${inputId}-helper` : undefined;
-  const errorId = error ? `${inputId}-error` : undefined;
-  const describedBy = [helperId, errorId].filter(Boolean).join(" ") || undefined;
-
-  return (
-    <div>
-      <label
-        htmlFor={inputId}
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700"
-      >
-        <span>{label}</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </label>
-      {helper && (
-        <p id={helperId} className="mt-1 text-xs text-gray-500">
-          {helper}
-        </p>
-      )}
-      <input
-        id={inputId}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        aria-invalid={Boolean(error)}
-        aria-describedby={describedBy}
-        aria-required={required}
-        list={listOptions ? `${inputId}-options` : undefined}
-        onChange={(event) => onChange(event.target.value)}
-        className={`mt-2 w-full rounded-xl border px-4 py-2.5 text-base outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 sm:text-sm ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200"
-        } ${readOnly ? "bg-gray-50 text-gray-600" : ""}`}
-      />
-      {listOptions && (
-        <datalist id={`${inputId}-options`}>
-          {listOptions.map((option) => (
-            <option key={option} value={option} />
-          ))}
-        </datalist>
-      )}
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-const SUPPORTED_PHONE_COUNTRIES = new Set(getCountries());
-const PHONE_COUNTRY_OPTIONS = COUNTRY_OPTIONS.filter(({ code }) =>
-  SUPPORTED_PHONE_COUNTRIES.has(code as CountryCode),
-).map((country) => ({
-  ...country,
-  callingCode: `+${getCountryCallingCode(country.code as CountryCode)}`,
-}));
-
-function phoneCountry(value: string, fallback: string): CountryCode {
-  const parsed = parsePhoneNumberFromString(value);
-  if (parsed?.country) return parsed.country;
-  const normalizedFallback = fallback.trim().toUpperCase() as CountryCode;
-  return SUPPORTED_PHONE_COUNTRIES.has(normalizedFallback) ? normalizedFallback : "US";
-}
-
-export function normalizedPhoneNumber(value: string, countryCode?: CountryCode): string {
-  const parsed = parsePhoneNumberFromString(value, countryCode);
-  return parsed?.isValid() ? parsed.formatInternational() : value;
-}
-
-function isValidInternationalPhone(value: string): boolean {
-  return value.trim().startsWith("+") && Boolean(parsePhoneNumberFromString(value)?.isValid());
-}
-
-export function phoneWithCountryCallingCode(
-  value: string,
-  countryCode: CountryCode,
-  previousCountryCode?: CountryCode,
-): string {
-  const callingCode = `+${getCountryCallingCode(countryCode)}`;
-  const parsed = parsePhoneNumberFromString(value);
-  if (parsed?.nationalNumber) return `${callingCode} ${parsed.nationalNumber}`;
-
-  const digits = value.replace(/\D/g, "");
-  const previousCallingCode = previousCountryCode
-    ? getCountryCallingCode(previousCountryCode)
-    : undefined;
-  const nationalNumber =
-    previousCallingCode && digits.startsWith(previousCallingCode)
-      ? digits.slice(previousCallingCode.length)
-      : digits.replace(/^0+/, "");
-  return nationalNumber ? `${callingCode} ${nationalNumber}` : `${callingCode} `;
-}
-
-function PhoneField({
-  label,
-  value,
-  countryCode,
-  onChange,
-  error,
-  helper,
-  placeholder,
-  required = false,
-}: {
-  label: string;
-  value: string;
-  countryCode: string;
-  onChange: (value: string) => void;
-  error?: string;
-  helper?: string;
-  placeholder: string;
-  required?: boolean;
-}) {
-  const generatedId = useId();
-  const inputId = `setup-${generatedId}`;
-  const helperId = helper ? `${inputId}-helper` : undefined;
-  const errorId = error ? `${inputId}-error` : undefined;
-  const describedBy = [helperId, errorId].filter(Boolean).join(" ") || undefined;
-  const [selectedCountry, setSelectedCountry] = useState<CountryCode>(() =>
-    phoneCountry(value, countryCode),
-  );
-
-  useEffect(() => {
-    const parsedCountry = parsePhoneNumberFromString(value)?.country;
-    if (parsedCountry) {
-      setSelectedCountry((current) => (current === parsedCountry ? current : parsedCountry));
-    } else if (!value.trim()) {
-      const fallbackCountry = phoneCountry("", countryCode);
-      setSelectedCountry((current) => (current === fallbackCountry ? current : fallbackCountry));
-    }
-  }, [countryCode, value]);
-
-  return (
-    <div>
-      <label
-        htmlFor={inputId}
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700"
-      >
-        <span>{label}</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </label>
-      {helper && (
-        <p id={helperId} className="mt-1 text-xs text-gray-500">
-          {helper}
-        </p>
-      )}
-      <div
-        className={`mt-2 flex overflow-hidden rounded-xl border transition focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100 ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200 bg-white"
-        }`}
-      >
-        <select
-          aria-label={`${label} country code`}
-          value={selectedCountry}
-          onChange={(event) => {
-            const nextCountry = event.target.value as CountryCode;
-            const previousCountry = selectedCountry;
-            setSelectedCountry(nextCountry);
-            onChange(phoneWithCountryCallingCode(value, nextCountry, previousCountry));
-          }}
-          className="w-32 shrink-0 border-0 border-r border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none"
-        >
-          {PHONE_COUNTRY_OPTIONS.map((country) => (
-            <option key={country.code} value={country.code}>
-              {country.flag} {country.callingCode}
-            </option>
-          ))}
-        </select>
-        <input
-          id={inputId}
-          type="tel"
-          value={value}
-          placeholder={placeholder}
-          aria-invalid={Boolean(error)}
-          aria-describedby={describedBy}
-          aria-required={required}
-          onChange={(event) => onChange(normalizedPhoneNumber(event.target.value, selectedCountry))}
-          onBlur={() => {
-            const normalized = normalizedPhoneNumber(value, selectedCountry);
-            if (normalized !== value) onChange(normalized);
-          }}
-          className="min-w-0 flex-1 border-0 bg-transparent px-4 py-2.5 text-base outline-none sm:text-sm"
-        />
-      </div>
-      {error && (
-        <p id={errorId} role="alert" className="mt-1.5 text-xs text-red-600">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function PropertyLogoField({
-  previewUrl,
-  pending,
-  error,
-  onChange,
-}: {
-  previewUrl: string;
-  pending: boolean;
-  error?: string;
-  onChange: (file: File) => void;
-}) {
-  const inputId = `property-logo-${useId()}`;
-  const errorId = error ? `${inputId}-error` : undefined;
-
-  return (
-    <div>
-      <p className="text-sm font-medium text-gray-700">
-        Hotel logo
-        <span className="ml-1 text-red-500" aria-hidden="true">
-          *
-        </span>
-        <span className="sr-only"> (required)</span>
-      </p>
-      <label
-        htmlFor={inputId}
-        className={`mt-2 flex cursor-pointer items-center gap-4 rounded-xl border bg-white p-3 transition hover:border-primary-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200"
-        }`}
-      >
-        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gray-100 text-gray-500">
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="Hotel logo preview"
-              className="h-full w-full object-contain"
-            />
-          ) : pending ? (
-            <CheckIcon className="h-7 w-7 text-primary-700" aria-hidden="true" />
-          ) : (
-            <PhotoIcon className="h-7 w-7" aria-hidden="true" />
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-gray-900">
-            {previewUrl
-              ? "Change hotel logo"
-              : pending
-                ? "Logo ready to finish"
-                : "Choose hotel logo"}
-          </span>
-          <span className="mt-1 block text-xs leading-5 text-gray-500">
-            JPG, PNG, or WebP. Max 10 MB. The logo is published only after assignment.
-          </span>
-        </span>
-        <input
-          id={inputId}
-          type="file"
-          aria-label="Hotel logo file"
-          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-          aria-invalid={Boolean(error)}
-          aria-describedby={errorId}
-          className="sr-only"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) onChange(file);
-            event.target.value = "";
-          }}
-        />
-      </label>
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function PropertyTypeField({
-  value,
-  options,
-  onChange,
-  error,
-  required = false,
-}: {
-  value: string;
-  options: SharedPropertyTypeOption[];
-  onChange: (value: string) => void;
-  error?: string;
-  required?: boolean;
-}) {
-  const generatedId = useId();
-  const groupName = `property-type-${generatedId}`;
-  const errorId = error ? `${groupName}-error` : undefined;
-
-  return (
-    <fieldset aria-describedby={errorId} aria-invalid={Boolean(error)}>
-      <legend className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700">
-        <span>Property type</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </legend>
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-        {options.map((option) => {
-          const checked = value === option.value;
-          const Icon = PROPERTY_TYPE_ICONS.get(option.value) ?? EllipsisHorizontalIcon;
-
-          return (
-            <label key={option.value} className="relative block cursor-pointer">
-              <input
-                type="radio"
-                name={groupName}
-                value={option.value}
-                checked={checked}
-                required={required}
-                aria-invalid={Boolean(error)}
-                aria-describedby={errorId}
-                onChange={(event) => onChange(event.target.value)}
-                className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-              />
-              <span
-                className={`relative flex min-h-16 items-center gap-2 rounded-xl border p-2.5 transition peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-primary-600 peer-focus-visible:ring-offset-2 ${
-                  checked
-                    ? "border-primary-500 bg-primary-50 shadow-[0_12px_30px_-24px_rgba(30,62,219,0.8)]"
-                    : "border-gray-200 bg-white hover:border-primary-300 hover:bg-primary-50/40"
-                }`}
-              >
-                <span
-                  className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                    checked ? "bg-primary-600 text-white" : "bg-gray-100 text-gray-700"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {checked && (
-                    <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary-700 text-white ring-2 ring-white">
-                      <CheckIcon className="h-3 w-3" aria-hidden="true" />
-                    </span>
-                  )}
-                </span>
-                <span className="text-sm font-medium leading-5 text-gray-900">{option.label}</span>
-              </span>
-            </label>
-          );
-        })}
-      </div>
-      {error && (
-        <p id={errorId} className="mt-2 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </fieldset>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  placeholder,
-  options,
-  onChange,
-  error,
-  required = false,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-  error?: string;
-  required?: boolean;
-}) {
-  const generatedId = useId();
-  const inputId = `setup-${generatedId}`;
-  const errorId = error ? `${inputId}-error` : undefined;
-
-  return (
-    <div>
-      <label
-        htmlFor={inputId}
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-700"
-      >
-        <span>{label}</span>
-        {!required && (
-          <span aria-hidden="true" className="text-xs text-gray-400">
-            Optional
-          </span>
-        )}
-      </label>
-      <select
-        id={inputId}
-        value={value}
-        required={required}
-        aria-invalid={Boolean(error)}
-        aria-describedby={errorId}
-        aria-required={required}
-        onChange={(event) => onChange(event.target.value)}
-        className={`mt-2 w-full rounded-xl border bg-white px-4 py-2.5 text-base outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 sm:text-sm ${
-          error ? "border-red-300 bg-red-50" : "border-gray-200"
-        }`}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
+export { normalizedPhoneNumber, phoneWithCountryCallingCode } from "./setupProfileFields";
 
 export function draftFromProfile(
   response: PropertyProfileResponse,
@@ -3432,9 +2504,12 @@ export function profileUpdateFromDraft(
     ),
   ) as NonNullable<PropertyProfilePatch["location"]>;
   if (Object.keys(locationPatch).length > 0) {
-    // Consent for an existing location does not publish newly entered location details.
-    if (profile.location.geoPublic) locationPatch.geoPublic = false;
-    if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    // Consent for an existing location does not publish newly entered location details. The city
+    // and country box alone changes no address, so a public guest map stays on (VAY-2288).
+    if (Object.keys(locationPatch).some((key) => key !== "localityPublic")) {
+      if (profile.location.geoPublic) locationPatch.geoPublic = false;
+      if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    }
     patch.location = locationPatch;
   }
 
@@ -3462,7 +2537,9 @@ function newPropertyDraft(timezone = ""): ProfileDraft {
     contactEmail: "",
     phone: "",
     whatsapp: "",
-    localityPublic: false,
+    // A booking page needs a public city and country; street, postal code and pin stay private
+    // (VAY-2288). Existing hotels keep the choice they saved.
+    localityPublic: true,
     logoFile: null,
     logoMediaObjectId: null,
     logoPublicUrl: "",
@@ -3576,9 +2653,7 @@ export function mergeTrackSelectionAfterConflict(
   intended: readonly SetupTrack[],
   current: readonly SetupTrack[],
 ): SetupTrack[] {
-  return (["hotel_operations", "creator_marketplace"] as const).filter(
-    (track) => intended.includes(track) || current.includes(track),
-  );
+  return SETUP_TRACKS.filter((track) => intended.includes(track) || current.includes(track));
 }
 
 function sameTrackSelection(left: readonly SetupTrack[], right: readonly SetupTrack[]): boolean {

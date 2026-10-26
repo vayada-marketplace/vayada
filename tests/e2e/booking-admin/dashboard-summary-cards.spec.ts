@@ -83,7 +83,8 @@ test("summary cards show short labels, sparklines, per-metric comparisons and a 
     await expect(page.getByText(label, { exact: true })).toBeVisible();
   }
   await expect(page.getByText("Revenue Today")).toHaveCount(0);
-  await expect(page.getByText("€1,240")).toBeVisible();
+  // Scoped to the page: the header's Today strip shows the same revenue (VAY-2203).
+  await expect(page.locator("main").getByText("€1,240")).toBeVisible();
   await expect(page.getByText("↑ +18% vs same day last week")).toHaveClass(/text-green-600/);
   await expect(page.getByText("↑ +1 vs same day last week")).toBeVisible();
   await expect(page.getByText("↑ +€22 vs same day last week")).toBeVisible();
