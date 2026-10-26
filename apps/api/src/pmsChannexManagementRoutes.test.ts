@@ -494,7 +494,12 @@ describe("PMS Channex management command routes", () => {
       method: "PUT",
       url: `/properties/${propertyId}/channex/inventory-rules`,
       headers: { authorization: "Bearer valid" },
-      payload: { commandId: "c-rules", idempotencyKey: "k-rules", rules: [] },
+      payload: {
+        commandId: "c-rules",
+        idempotencyKey: "k-rules",
+        expectedOperationId: null,
+        rules: [],
+      },
     });
     expect(rules.statusCode).toBe(409);
     await app.close();
