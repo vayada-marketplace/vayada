@@ -44,6 +44,7 @@ describe("PMS Channex management target state", () => {
     const degraded = sql.indexOf("SET status = 'degraded', last_error_code = $3");
     expect(ok).toBeGreaterThan(-1);
     expect(degraded).toBeGreaterThan(ok);
+    // D6: a no-op run leaves the ARI status and timestamp alone.
     const unchanged = fakeClient();
     await createPmsChannexManagementTargetState().succeed(
       unchanged,
