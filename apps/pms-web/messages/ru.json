@@ -129,6 +129,7 @@
   "layout.sidebar.settings": "Настройки",
   "layout.sidebar.featureHub": "Центр функций",
   "layout.sidebar.collapse": "Свернуть",
+  "layout.sidebar.expand": "Развернуть",
   "search.placeholder": "Поиск бронирований, гостей, номеров, настроек, страниц...",
   "search.noResults": "Нет результатов для '{query}'",
   "search.startTyping": "Начните вводить для поиска...",

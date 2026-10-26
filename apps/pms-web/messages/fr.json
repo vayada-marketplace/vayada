@@ -129,6 +129,7 @@
   "layout.sidebar.settings": "Parametres",
   "layout.sidebar.featureHub": "Centre de fonctionnalités",
   "layout.sidebar.collapse": "Reduire",
+  "layout.sidebar.expand": "Développer",
   "search.placeholder": "Rechercher reservations, voyageurs, chambres, parametres, pages...",
   "search.noResults": "Aucun resultat pour '{query}'",
   "search.startTyping": "Commencez a taper pour rechercher...",

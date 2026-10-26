@@ -130,6 +130,7 @@
   "layout.sidebar.settings": "Configuracion",
   "layout.sidebar.featureHub": "Centro de funciones",
   "layout.sidebar.collapse": "Contraer",
+  "layout.sidebar.expand": "Expandir",
   "search.placeholder": "Buscar reservas, huespedes, habitaciones, configuracion, paginas...",
   "search.noResults": "Sin resultados para '{query}'",
   "search.startTyping": "Comience a escribir para buscar...",

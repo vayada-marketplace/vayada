@@ -129,6 +129,7 @@
   "layout.sidebar.settings": "Impostazioni",
   "layout.sidebar.featureHub": "Centro funzionalità",
   "layout.sidebar.collapse": "Comprimi",
+  "layout.sidebar.expand": "Espandi",
   "search.placeholder": "Cerca prenotazioni, ospiti, camere, impostazioni, pagine...",
   "search.noResults": "Nessun risultato per '{query}'",
   "search.startTyping": "Inizia a digitare per cercare...",

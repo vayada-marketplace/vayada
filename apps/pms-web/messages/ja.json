@@ -129,6 +129,7 @@
   "layout.sidebar.settings": "設定",
   "layout.sidebar.featureHub": "機能ハブ",
   "layout.sidebar.collapse": "折りたたむ",
+  "layout.sidebar.expand": "展開する",
   "search.placeholder": "予約、ゲスト、部屋、設定、ページを検索...",
   "search.noResults": "'{query}' の検索結果なし",
   "search.startTyping": "入力して検索...",

@@ -568,6 +568,8 @@ export default function Sidebar({
           onClick={() =>
             shrinkForCheckIn ? setOpenedOnCheckIn(collapsed) : setCollapsedByUser(!collapsed)
           }
+          aria-label={collapsed ? t("layout.sidebar.expand") : t("layout.sidebar.collapse")}
+          aria-expanded={!collapsed}
           className={cn(
             "flex items-center gap-2 w-full px-2.5 py-1.5 text-[13px] text-gray-500 hover:text-gray-700 rounded-md hover:bg-gray-50 transition-colors",
             collapsed && "justify-center px-0",

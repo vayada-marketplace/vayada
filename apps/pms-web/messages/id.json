@@ -130,6 +130,7 @@
   "layout.sidebar.settings": "Pengaturan",
   "layout.sidebar.featureHub": "Pusat Fitur",
   "layout.sidebar.collapse": "Perkecil",
+  "layout.sidebar.expand": "Perluas",
   "search.placeholder": "Cari reservasi, tamu, kamar, pengaturan, halaman...",
   "search.noResults": "Tidak ada hasil untuk '{query}'",
   "search.startTyping": "Mulai mengetik untuk mencari...",

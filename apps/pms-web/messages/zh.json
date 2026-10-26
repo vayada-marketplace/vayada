@@ -129,6 +129,7 @@
   "layout.sidebar.settings": "设置",
   "layout.sidebar.featureHub": "功能中心",
   "layout.sidebar.collapse": "收起",
+  "layout.sidebar.expand": "展开",
   "search.placeholder": "搜索预订、客人、房间、设置、页面...",
   "search.noResults": "'{query}' 无搜索结果",
   "search.startTyping": "开始输入以搜索...",

@@ -36,6 +36,9 @@ for (const [width, height] of [
       body: await page.screenshot(),
       contentType: "image/png",
     });
+    if (width === 1440)
+      // The sidebar shrinks to icons on the check-in; its toggle still says what it does.
+      await expect(page.getByRole("button", { name: "Expand", exact: true })).toBeVisible();
     await proceed.click();
 
     // Step 2: each room with its dates, the one leaving first flagged; guests grouped by room.
@@ -286,5 +289,44 @@ test("goes straight on when there is nothing to pay, and can leave the balance f
   await main(page).getByRole("button", { name: "Continue" }).click();
   await expect(main(page).getByText("Step 4 of 4")).toBeVisible();
   expect(writes.chargeWaived).toHaveLength(1);
+  await assertHealthy();
+});
+
+test("keeps a guest's recorded status when staff can't see ID details", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockCheckinFlow(page, { confirmSpecialRequest: false });
+  // Staff without guest-contact access: the ID values are hidden, but which fields are filled isn't.
+  await page.route(
+    `**/api/pms/properties/*/reservations/${PMS_WEB_RESERVATION_ID}/guest-registrations`,
+    (route) =>
+      route.fulfill({
+        json: {
+          guestBookingId: PMS_WEB_RESERVATION_ID,
+          canReadIdentity: false,
+          guests: ["guest_ada", "guest_grace"].map((guestId, index) => ({
+            guestId,
+            role: index === 0 ? "booker" : "additional_guest",
+            assignmentId: null,
+            dateOfBirth: null,
+            documentType: null,
+            documentNumber: null,
+            gender: null,
+            staffNotes: null,
+            filledFields: ["documentType", "documentNumber", "dateOfBirth"],
+            updatedAt: null,
+          })),
+        },
+      }),
+  );
+  await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  await main(page).getByRole("button", { name: "Continue" }).click();
+  await main(page)
+    .getByRole("button", { name: /^View Grace Hopper/ })
+    .click();
+  const form = main(page).getByRole("form", { name: "Grace Hopper" });
+  await expect(form.getByText(/ID details are only shown to staff/)).toBeVisible();
+  await expect(form.getByText(/^Still empty:/)).toHaveCount(0);
   await assertHealthy();
 });
