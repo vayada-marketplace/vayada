@@ -9507,7 +9507,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     /** Claims the next delivery and answers it with the given response (or a thrown POST). */
     const send = async (response: Response | null, lease = f.input) => {
       const prepared = await next(lease);
-      if (prepared.kind !== "prepared") throw new Error(`prepared required, got ${prepared.kind}`);
+      if (prepared.kind !== "prepared")
+        throw new Error(`prepared required, got ${JSON.stringify(prepared)}`);
       const posted: unknown[] = [];
       const result = await prepared.dispatch(async (req) => {
         posted.push(req.body);

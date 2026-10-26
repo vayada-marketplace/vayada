@@ -41,9 +41,11 @@ describe.skipIf(!url)("Channex ongoing offer ARI delivery scope", () => {
     const rls = (
       await pool.query<{ relation: string; enabled: boolean }>(
         `SELECT n.nspname||'.'||c.relname AS relation,c.relrowsecurity AS enabled FROM pg_class c
-         JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relname LIKE 'channex_offer_ari_deliver%'`,
+         JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE c.relkind='r' AND c.relname LIKE 'channex_offer_ari_deliver%'`,
       )
     ).rows;
+    expect(rls).toHaveLength(3);
     expect(rls.every((row) => row.enabled)).toBe(true);
     // Any other login passes the helper without reading worker tables; malformed input is false.
     const helper = (kind: string, resource: string | null) =>
