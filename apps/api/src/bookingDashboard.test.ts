@@ -659,8 +659,9 @@ describe("target Booking dashboard metrics read port", () => {
     expect(sparklines.points[0].avgNightlyRate.amountDecimal).toBe("100.00");
     expect(sparklines.points[0].pageViewCount).toBe(4);
     expect(pool.queries.join("\n")).toContain("booking.guest_bookings");
-    expect(pool.queries.join("\n")).toContain("platform.domain_events");
-    expect(pool.queries.join("\n")).toContain("trafficClass");
+    expect(pool.queries.join("\n")).toContain("distribution.booking_web_events");
+    expect(pool.queries.join("\n")).toContain("event.traffic_class = 'human'");
+    expect(pool.queries.join("\n")).not.toContain("platform.domain_events");
     expect(pool.queries.join("\n")).not.toContain("booking.booking_guests");
   });
 
@@ -719,9 +720,9 @@ describe("target Booking dashboard metrics read port", () => {
     expect(pool.queries[0]).toContain("AT TIME ZONE scope.time_zone");
     expect(pool.queries[0]).toContain("COUNT(DISTINCT event.id)");
     expect(pool.queries[0]).toContain("event.property_id = scope.property_id");
-    expect(pool.queries[0]).toContain("COUNT(DISTINCT slug_owner.property_id)");
-    expect(pool.queries[0]).toContain("NOT IN ('bot', 'test')");
-    expect(pool.queries[0]).toContain("hotel_catalog.property_slugs");
+    expect(pool.queries[0]).toContain("distribution.booking_web_events");
+    expect(pool.queries[0]).toContain("event.traffic_class = 'human'");
+    expect(pool.queries[0]).not.toContain("hotel_catalog.property_slugs");
   });
 
   it("returns null metrics when the target property cannot be resolved", async () => {

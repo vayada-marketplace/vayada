@@ -2,7 +2,7 @@
 import { formatTimezoneLabel } from "@/lib/timezoneLabel";
 
 import type { ReactNode } from "react";
-import { SettingsSection, SettingsCard } from "@vayada/settings-ui";
+import { SettingsCard } from "@vayada/settings-ui";
 import { useTranslation } from "@/lib/i18n";
 
 type Props = {
@@ -52,11 +52,7 @@ export function CalendarSection({
   const { t } = useTranslation();
 
   return (
-    <SettingsSection
-      id="calendar"
-      title={t("settings.calendar.title")}
-      description={t("settings.calendar.description")}
-    >
+    <div id="calendar" className="space-y-4">
       <SettingsCard>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -190,6 +186,6 @@ export function CalendarSection({
           </>
         )}
       </SettingsCard>
-    </SettingsSection>
+    </div>
   );
 }

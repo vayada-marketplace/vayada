@@ -5,21 +5,25 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0479), both checked on
-// PG16 and PG17. Accepting both lets this image start on either side of 0479, so it is released
-// before 0479 and stays a safe rollback target once 0479 ships.
+// Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0519), both checked on
+// PG16 and PG17. Accepting both lets this image start on either side of 0519, so it is released
+// before 0519 and stays a safe rollback target once 0519 ships.
 const POLICY_DIGESTS = new Set([
   "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323",
-  "0b52560d457b58b225d5d05f24041f6110d737db9f579148481d31a41048a099",
+  "POST_0519_POLICY_DIGEST",
 ]);
 // Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
 // (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
 // 0474, so it stays a safe rollback target when 0474 ships in a later release.
-// 0479 adds the claimed helper and changes pms.enqueue_restriction_ari (VAY-2108, PG16 and PG17).
+// The third value is the catalog after 0489 drops the restriction ARI triggers (VAY-2208, PG16
+// and PG17); it ships one release before 0489 for the same reason. The fourth is the catalog with
+// the claimed helper and the ownership-gated pms.enqueue_restriction_ari (VAY-2108 migration 0519,
+// PG16 and PG17), accepted one release ahead of 0519 in the same way.
 const CATALOG_DIGESTS = new Set([
   "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
   "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
-  "4da926f9b5374427a53f81b3c2f24e70265b1ecbfed7eba8a3c9c02687ef6f67",
+  "2d185251ef0a8949b140fe14469c65f5122b7df055f712ffe64e590f64e24ef2",
+  "POST_0519_CATALOG_DIGEST",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
@@ -30,7 +34,7 @@ export const channexManagementWorkerFunctions = [
   "pms.enqueue_restriction_ari(uuid,text)",
 ] as const;
 // Reads tolerated beyond the privilege map: the pricing scope view, and the claimed scope's owner
-// table (VAY-2108, 0479), whose read the claimed grant adds after 0479.
+// table (VAY-2108, 0519), whose read the claimed grant adds after 0519.
 const toleratedReads = new Set([
   "booking.pricing_runtime_effective_property_scopes",
   "platform.channex_management_worker_claimed_operations",

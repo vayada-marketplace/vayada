@@ -1,5 +1,9 @@
 import type { Page } from "@playwright/test";
+import { mockBookingPublication } from "./bookingPublicationMocks";
+import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
+import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
+import { mockBookingModules } from "./featureHubModuleMocks";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
@@ -26,6 +30,7 @@ export const BOOKING_ADMIN_DESIGN_SETTINGS_PATH = `/api/booking/hotels/${BOOKING
 export const BOOKING_ADMIN_CUSTOM_DOMAIN_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/custom-domain`;
 export const BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-settings`;
 export const BOOKING_ADMIN_FINANCE_PLAN_STATUS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/plan-status`;
+export const BOOKING_ADMIN_FINANCE_PAYMENT_WINDOWS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-windows`;
 
 export interface BookingAdminPropertySettingsFixture {
   id: string;
@@ -123,7 +128,6 @@ export interface BookingAdminDesignSettingsFixture {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
   showContactButton: boolean;
-  showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
   heroImage: string;
@@ -137,6 +141,20 @@ export interface BookingAdminDesignSettingsRequest {
   method: string;
   hotelId: string;
   body: Partial<BookingAdminDesignSettingsFixture> | null;
+}
+
+/** The booking design revision guests' colour and font come from (VAY-2318). */
+export interface BookingAdminBookingDesignFixture {
+  contractVersion: "booking-design.v1";
+  propertyId: string;
+  revision: number;
+  choices: { primaryColor: string; fontPairing: string };
+  createdAt: string;
+}
+
+export interface BookingAdminBookingDesignRequest {
+  method: string;
+  body: { expectedRevision: number; primaryColor: string; fontPairing: string } | null;
 }
 
 export interface BookingAdminLastMinuteSettingsFixture {
@@ -319,7 +337,6 @@ export const defaultBookingAdminDesignSettings: BookingAdminDesignSettingsFixtur
   headerLogo: "",
   headerLogoMediaObjectId: null,
   showContactButton: true,
-  showReferAGuestButton: false,
   showLanguageSelector: true,
   showCurrencySelector: true,
   heroImage: "/hotel-hero.JPG",
@@ -327,6 +344,16 @@ export const defaultBookingAdminDesignSettings: BookingAdminDesignSettingsFixtur
   heroSubtext: "An independent alpine escape made for memorable direct stays.",
   primaryColor: "#2563EB",
   fontPairing: "modern-minimalist",
+};
+
+export const BOOKING_ADMIN_BOOKING_DESIGN_PATH = `/api/booking/properties/${BOOKING_ADMIN_PROPERTY_ID}/booking-design`;
+
+export const defaultBookingAdminBookingDesign: BookingAdminBookingDesignFixture = {
+  contractVersion: "booking-design.v1",
+  propertyId: BOOKING_ADMIN_PROPERTY_ID,
+  revision: 1,
+  choices: { primaryColor: "#0077B6", fontPairing: "modern-minimalist" },
+  createdAt: "2026-09-01T10:00:00.000Z",
 };
 
 const defaultLastMinuteSettings: BookingAdminLastMinuteSettingsFixture = {
@@ -389,17 +416,23 @@ export async function mockBookingAdminShellRoutes(
   let bookingAcceptanceMode: "instant" | "request" = "instant";
   let sameDayEnabled = true;
   let sameDayCutoff: string | null = "18:00";
+  // The dashboard's booking page card; specs override it with their own state.
+  await mockBookingPublication(page, BOOKING_ADMIN_PROPERTY_ID);
+  await mockSetupChecklistUnavailable(page);
+  // VAY-2246: an account that accepted its terms and DPA at sign-up, so no banner.
+  await mockHotelAccountAgreements(page);
   await page.route("**/api/pms/properties/*/module-activations", (route) =>
     route.fulfill({
       json: {
         hotelId: BOOKING_ADMIN_PROPERTY_ID,
         canManage: true,
-        supportedModules: ["affiliates"],
+        supportedModules: [],
         activeModules: [],
         activations: [],
       },
     }),
   );
+  await mockBookingModules(page, BOOKING_ADMIN_PROPERTY_ID);
   await page.route(/\/api\/pms\/properties\/[^/]+\/navigation-modules$/, (route) =>
     route.fulfill({
       json: {
@@ -468,6 +501,9 @@ export async function mockBookingAdminShellRoutes(
   );
   await page.route("**/api/booking/hotels/*/settings/design", (route) =>
     route.fulfill({ json: defaultBookingAdminDesignSettings }),
+  );
+  await page.route(`**${BOOKING_ADMIN_BOOKING_DESIGN_PATH}`, (route) =>
+    route.fulfill({ json: defaultBookingAdminBookingDesign }),
   );
   await page.route("**/api/hotel-setup/status**", (route) =>
     route.fulfill({
@@ -554,6 +590,12 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // VAY-2348: no booking windows per way to pay saved yet.
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_WINDOWS_PATH}`, (route) =>
+    route.fulfill({
+      json: { propertyId: BOOKING_ADMIN_PROPERTY_ID, paymentDeadlineHours: 48, windows: {} },
+    }),
+  );
   await page.route(`**${BOOKING_ADMIN_PROPERTY_PROFILE_PATH}*`, (route) =>
     route.fulfill({ json: defaultBookingAdminPropertyProfile }),
   );
@@ -610,6 +652,21 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // The header's notifications bell (VAY-2349): nothing yet. Specs that need a feed route their own.
+  await page.route(/\/api\/booking\/properties\/[^/]+\/notifications(\/read(-all)?)?$/, (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({
+          json: {
+            generatedAt: new Date().toISOString(),
+            timeZone: "Europe/Berlin",
+            items: [],
+            syncAlert: null,
+            unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
+            badge: "none",
+          },
+        })
+      : route.fulfill({ status: 204 }),
+  );
   await page.route("**/api/booking/properties/*/dashboard/bookings-by-source**", (route) =>
     route.fulfill({
       json: {
@@ -643,14 +700,76 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // An unanswered dashboard read logs an error, and Next's dev overlay badge then covers the
+  // sidebar's Collapse button. dashboard-funnel.spec registers its own funnel after these mocks.
+  await page.route("**/api/booking/properties/*/dashboard/conversion-funnel**", (route) =>
+    route.fulfill({
+      json: {
+        funnel: {
+          steps: [
+            "page_visit",
+            "rate_selected",
+            "details_completed",
+            "complete_booking_clicked",
+            "payment_authorized",
+            "booking_completed",
+          ].map((stage) => ({
+            stage,
+            count: 0,
+            previousCount: 0,
+            percentOfVisits: null,
+            conversionPercent: null,
+          })),
+          paymentMethods: [],
+          biggestDrop: null,
+        },
+      },
+    }),
+  );
 }
 
 export async function mockBookingAdminDesignSettings(
   page: Page,
   initial: BookingAdminDesignSettingsFixture = defaultBookingAdminDesignSettings,
-): Promise<{ requests: BookingAdminDesignSettingsRequest[] }> {
+  /** null: the hotel has no booking design yet (the API answers 404 "not configured"). */
+  initialDesign: BookingAdminBookingDesignFixture | null = defaultBookingAdminBookingDesign,
+): Promise<{
+  requests: BookingAdminDesignSettingsRequest[];
+  bookingDesignRequests: BookingAdminBookingDesignRequest[];
+}> {
   const settings = { ...initial };
   const requests: BookingAdminDesignSettingsRequest[] = [];
+  let design = initialDesign;
+  const bookingDesignRequests: BookingAdminBookingDesignRequest[] = [];
+
+  await page.route(`**${BOOKING_ADMIN_BOOKING_DESIGN_PATH}`, (route) => {
+    const request = route.request();
+    if (request.method() !== "PUT") {
+      bookingDesignRequests.push({ method: request.method(), body: null });
+      return design
+        ? route.fulfill({ json: design })
+        : route.fulfill({ status: 404, json: { code: "booking_design_not_configured" } });
+    }
+    const body = request.postDataJSON() as NonNullable<BookingAdminBookingDesignRequest["body"]>;
+    bookingDesignRequests.push({ method: "PUT", body });
+    const currentRevision = design?.revision ?? 0;
+    if (body.expectedRevision !== currentRevision) {
+      return route.fulfill({
+        status: 409,
+        json: { code: "design_revision_conflict", currentRevision },
+      });
+    }
+    design = {
+      ...defaultBookingAdminBookingDesign,
+      revision: currentRevision + 1,
+      choices: { primaryColor: body.primaryColor, fontPairing: body.fontPairing },
+      createdAt: "2026-10-23T10:00:00.000Z",
+    };
+    return route.fulfill({
+      status: currentRevision === 0 ? 201 : 200,
+      json: { outcome: currentRevision === 0 ? "created" : "updated", design },
+    });
+  });
 
   await page.route("**/api/booking/hotels/*/settings/design", (route) => {
     const request = route.request();
@@ -667,7 +786,7 @@ export async function mockBookingAdminDesignSettings(
     return route.fulfill({ json: settings });
   });
 
-  return { requests };
+  return { requests, bookingDesignRequests };
 }
 
 function fakeBookingAdminJwt(hotelIds: string[] = [BOOKING_ADMIN_HOTEL_ID]): string {

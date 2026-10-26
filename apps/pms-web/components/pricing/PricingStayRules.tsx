@@ -6,6 +6,8 @@ type Offer = PricingConfiguration["offers"][number];
 import { useTranslation } from "@/lib/i18n";
 import { errorText, PricingError } from "./pricingAmounts";
 import { StayRuleFields, stayRuleInput, stayRules, type RuleInput } from "./StayRuleFields";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 export function changeStayRules(room: PricingConfiguration, offerId: string, input: RuleInput): PricingConfiguration {
   const offer = room.offers.find((value) => value.id === offerId);
   if (!offer || offer.restrictions.kind !== "own") throw new PricingError("pricing.stayRules.errorInherited");
@@ -20,22 +22,22 @@ export function PricingStayRules({ room, offer, label, disabled, onChange, onPen
   onChange: (room: PricingConfiguration) => void; onPending: (pending: boolean) => void }) {
   const [entry, setEntry] = useState<RuleInput | null>(null), [error, setError] = useState("");
   const { t } = useTranslation();
-  if (offer.restrictions.kind === "inherit") return <p className="sm:col-span-2 text-sm">{t("pricing.stayRules.inherited", { label })}</p>;
+  if (offer.restrictions.kind === "inherit") return <p className={ui.note}>{t("pricing.stayRules.inherited")}</p>;
   const rules = offer.restrictions.rules;
   const cancel = () => { setEntry(null); setError(""); onPending(false); };
-  return <details className="sm:col-span-2 text-sm"><summary className="cursor-pointer">{t("pricing.stayRules.title", { label })}</summary>
+  return <PricingSection title={t("pricing.stayRules.section")} label={t("pricing.stayRules.title", { label })} keepOpen={!!entry}>
     <p className="mt-2">{t("pricing.stayRules.summary", { min: rules.minArrivalNights, max: rules.maxStayNights ?? t("pricing.stay.unlimited"), arrivals: t(rules.closedToArrival ? "pricing.stay.closed" : "pricing.stay.open"), departures: t(rules.closedToDeparture ? "pricing.stay.closed" : "pricing.stay.open"), sales: t(rules.stopSell ? "pricing.stay.stopped" : "pricing.stay.open") })}</p>
-    <p className="mt-2 text-gray-600">{t("pricing.stayRules.description")}</p>
-    {!entry ? <button type="button" className="mt-3 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => {
+    <p className={ui.help}>{t("pricing.stayRules.description")}</p>
+    {!entry ? <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={() => {
       if (disabled) return; setEntry(stayRuleInput(rules)); setError(""); onPending(true);
     }}>{t("pricing.stayRules.edit")}</button> : <>
       <StayRuleFields entry={entry} label={label} disabled={disabled} onChange={(next) => { setEntry(next); setError(""); }} />
-      <div className="mt-3 flex gap-3"><button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => {
+      <div className="flex flex-wrap gap-2"><button type="button" className={ui.secondaryButton} disabled={disabled} onClick={() => {
         if (disabled) return;
         try { onChange(changeStayRules(room, offer.id, entry)); cancel(); } catch (cause) { setError(errorText(cause, t, "pricing.stayRules.changeFailed")); }
-      }}>{t("pricing.stayRules.apply")}</button><button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={cancel}>{t("pricing.stayRules.cancel")}</button></div>
+      }}>{t("pricing.stayRules.apply")}</button><button type="button" className={ui.secondaryButton} disabled={disabled} onClick={cancel}>{t("pricing.stayRules.cancel")}</button></div>
       <p className="mt-2">{t("pricing.applyOrCancelEdit")}</p>
     </>}
-    {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
-  </details>;
+    {error && <p role="alert" className={ui.errorText}>{error}</p>}
+  </PricingSection>;
 }

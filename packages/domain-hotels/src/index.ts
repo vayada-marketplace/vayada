@@ -13,9 +13,11 @@
  */
 
 export * from "./adaptiveHotelSetup.js";
+export * from "./hotelAccountAgreements.js";
 export * from "./hotelCatalogCurrentOwnerEvidence.js";
 export * from "./hotelCatalogStep1.js";
 export * from "./hotelMediaProjection.js";
+export * from "./hotelSetupChecklist.js";
 export * from "./onboardingLifecycle.js";
 export * from "./onboardingReadiness.js";
 export * from "./platformPropertyLifecycle.js";
@@ -283,11 +285,7 @@ export function hotelCatalogIdempotencyKey(
   return `${commandType}:property:${propertyId}:${trimmedSuffix}`;
 }
 
-export type {
-  PlatformMarketplaceAccount,
-  PlatformMarketplaceAccountsResponse,
-} from "./platformMarketplaceActivation.js";
-
 export * from "./nearbyView.js";
+export * from "./locationMap.js";
 
 export * from "./preparedHotelImport.js";

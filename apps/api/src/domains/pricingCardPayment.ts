@@ -26,18 +26,24 @@ const fail = (): never => {
   throw new Error("Pricing card payment is unavailable");
 };
 
-/** Card quotes this path can execute: instant and fully paid online. Quotes with an amount
- * due at the property stay pay-at-property until partially paid bookings are supported
- * downstream (balance collection, host cancel, PMS handoff). */
+/** Card quotes this path can execute: instant (captured at once) or a request (authorised now,
+ * captured when the hotel accepts), charging what is due now. The rest, if any, is paid at the
+ * property: a deposit's remainder or fees the hotel collects there (VAY-2205); new acceptances of
+ * those also need the deposits switch (`pricingCardQuoteSplit`). */
 export function pricingCardQuoteSupported(quote: Current["quote"]): boolean {
   const { totalMinor, dueNowMinor, dueLaterMinor } = quote.evidence;
   return (
     quote.paymentMethod === "card" &&
-    quote.acceptanceMode === "instant" &&
+    (quote.acceptanceMode === "instant" || quote.acceptanceMode === "request") &&
     /^[1-9][0-9]*$/.test(dueNowMinor) &&
-    dueNowMinor === totalMinor &&
-    dueLaterMinor === "0"
+    /^(0|[1-9][0-9]*)$/.test(dueLaterMinor) &&
+    BigInt(dueNowMinor) + BigInt(dueLaterMinor) === BigInt(totalMinor)
   );
+}
+
+/** A card quote that leaves part of the stay to pay at the property (VAY-2205). */
+export function pricingCardQuoteSplit(quote: Current["quote"]): boolean {
+  return pricingCardQuoteSupported(quote) && quote.evidence.dueLaterMinor !== "0";
 }
 
 /** Stable booking id for a card acceptance command: a retry after a rollback sends Stripe the
@@ -50,7 +56,7 @@ export function pricingCardBookingId(propertyId: string, requestId: string): str
 }
 
 /** Pricing minor units → two-decimal amount string, as the booking draft stores totals. */
-function pricingMinorDecimal(minor: string, currency: string): string {
+export function pricingMinorDecimal(minor: string, currency: string): string {
   const scale = pricingCurrencyScale(currency);
   if (scale === null) return fail();
   const numerator = BigInt(minor) * 100n,
@@ -123,6 +129,8 @@ export async function startPricingCardPayment(
     return fail();
   }
   const idempotencyKey = pricingCardPaymentIdempotencyKey(scope.propertyId, input.requestId);
+  // A request only authorises the card; the hotel's acceptance captures it.
+  const captureMethod = quote.acceptanceMode === "request" ? "manual" : "automatic";
   const intent = await provider.createPaymentIntent({
     propertyId: scope.propertyId,
     bookingReference: input.publicReference,
@@ -130,7 +138,7 @@ export async function startPricingCardPayment(
     amountMinor,
     applicationFeeAmountMinor: feeMinor,
     currency,
-    captureMethod: "automatic",
+    captureMethod,
     idempotencyKey,
   });
   if (
@@ -144,7 +152,7 @@ export async function startPricingCardPayment(
        property_id,guest_booking_id,provider_account_id,source_system,idempotency_key,payment_kind,
        payment_method,status,amount,fee_amount,net_amount,refunded_amount,currency,
        provider_payment_intent_id,processor_fee_breakdown,payment_metadata,visibility_class,created_at,updated_at
-     ) VALUES ($1,$2,$3,'finance',$4,'full','card','requires_action',$5::numeric,$6::numeric,$7::numeric,0,$8,
+     ) VALUES ($1,$2,$3,'finance',$4,$13,'card','requires_action',$5::numeric,$6::numeric,$7::numeric,0,$8,
        $9,$10::jsonb,$11::jsonb,'pms_finance',$12::timestamptz,$12::timestamptz)
      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`,
     [
@@ -160,8 +168,8 @@ export async function startPricingCardPayment(
       { contractVersion: "stripe-direct-charge.v1", status: "pending", currency },
       {
         providerStatus: intent.status,
-        captureMethod: "automatic",
-        acceptanceMode: "instant",
+        captureMethod,
+        acceptanceMode: quote.acceptanceMode,
         bookingReference: input.publicReference,
         pricingQuoteId: quote.quoteId,
         billingPlan: input.finance.billingPlanSnapshot,
@@ -175,6 +183,8 @@ export async function startPricingCardPayment(
         reconciliationStatus: "pending",
       },
       input.occurredAt,
+      // A deposit's share is recorded as a deposit; the rest is paid at the property (VAY-2205).
+      quote.evidence.terms.some((terms) => terms.payment.kind === "deposit") ? "deposit" : "full",
     ],
   );
   if (inserted.rowCount !== 1) return fail();
@@ -216,6 +226,7 @@ export async function readPricingCardReplay(
     await client.query(
       `SELECT booking.lifecycle_status,booking.payment_status,
         booking.booking_metadata->>'paymentMethod' AS method,
+        booking.booking_metadata->>'acceptanceMode' AS mode,
         booking.booking_metadata->>'pendingExpiresAt' AS deadline,
         payment.status AS payment_row_status,payment.provider_payment_intent_id AS intent,
         account.provider_account_id AS account
@@ -230,6 +241,9 @@ export async function readPricingCardReplay(
   ).rows[0];
   if (!row || row.method !== "card") return null;
   if (row.lifecycle_status === "confirmed" && row.payment_status !== "unpaid") return null;
+  // An authorised card request is waiting for the hotel: the plain replay is right.
+  if (row.lifecycle_status === "pending_payment" && row.payment_status === "authorized")
+    return null;
   if (
     !provider ||
     row.lifecycle_status !== "pending_payment" ||
@@ -240,6 +254,20 @@ export async function readPricingCardReplay(
   )
     throw new Error("Booking acceptance expired or unavailable");
   const intent = await provider.retrievePaymentIntent(row.intent, row.account);
+  // A card request the guest authorised before its confirmation was lost: the caller records
+  // the authorisation and answers with the plain replay (the request was sent).
+  if (
+    row.mode === "request" &&
+    intent.paymentIntentId === row.intent &&
+    intent.status === "requires_capture"
+  )
+    return {
+      kind: "authorize" as const,
+      propertyId: scope.propertyId,
+      paymentIntentId: row.intent as string,
+      amountMinor: intent.amountMinor,
+      currency: intent.currency,
+    };
   if (
     !intent.clientSecret ||
     intent.paymentIntentId !== row.intent ||

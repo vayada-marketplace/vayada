@@ -82,12 +82,15 @@ describe("createPricingPublicationFreshnessAlert", () => {
         idempotencyKey: expect.stringMatching(
           /^pricing-publication-freshness:2026-10-10:[0-9a-f]{32}$/,
         ),
+        emailProduct: "platform",
       }),
     );
     const { text } = send.mock.calls[0]![0];
     expect(text).toContain("- p-1: finance, terms");
     expect(text).toContain("Unreadable (property id):\n- p-2");
     expect(text).toContain('presses "Save prices"');
+    expect(text).toContain("every save reaches its booking page by itself");
+    expect(text).not.toContain("Publish reviewed changes");
   });
 
   it("sends nothing without problems", async () => {

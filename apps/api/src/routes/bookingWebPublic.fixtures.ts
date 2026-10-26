@@ -5,7 +5,6 @@ const rejectUnexpectedCall = (method: keyof BookingWebCheckoutAdapter) => (): ne
 };
 
 export const unusedBookingWebCheckoutAdapter = {
-  consumeLookupAttempt: rejectUnexpectedCall("consumeLookupAttempt"),
   getCheckoutConfig: rejectUnexpectedCall("getCheckoutConfig"),
   quoteBooking: rejectUnexpectedCall("quoteBooking"),
   createBooking: rejectUnexpectedCall("createBooking"),
@@ -19,6 +18,8 @@ export const unusedBookingWebCheckoutAdapter = {
   previewChangeRequest: rejectUnexpectedCall("previewChangeRequest"),
   submitChangeRequest: rejectUnexpectedCall("submitChangeRequest"),
   getChangeRequest: rejectUnexpectedCall("getChangeRequest"),
+  getStay: rejectUnexpectedCall("getStay"),
+  requestExtras: rejectUnexpectedCall("requestExtras"),
   getPaymentInstructions: rejectUnexpectedCall("getPaymentInstructions"),
   validatePromo: rejectUnexpectedCall("validatePromo"),
 } satisfies BookingWebCheckoutAdapter;

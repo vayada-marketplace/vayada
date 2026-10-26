@@ -2,7 +2,6 @@ import type { Hotel } from "@/lib/types";
 
 import { bookingWebPublic, type ApiRequestInit } from "./client";
 
-const FALLBACK_IMAGE = "/vayada-logo.png";
 export const PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS = 60;
 
 export type BookingWebPublicHotelResponse = {
@@ -32,6 +31,7 @@ export type BookingWebPublicHotelResponse = {
       showReferAGuestButton?: boolean;
       showLanguageSelector?: boolean;
       showCurrencySelector?: boolean;
+      displayCurrencies?: string[];
       heroImage: string | null;
       heroHeading: string | null;
       heroSubtext: string | null;
@@ -98,20 +98,6 @@ function serverBookingWebApiUrl(path: string): string {
 }
 
 export const bookingWebPublicApi = {
-  async admitAffiliateArrival(
-    input: { host: string; referenceToken: string; contextId?: string },
-    internalToken: string,
-  ): Promise<{ status: "admitted"; contextId: string } | { status: "unavailable" }> {
-    return bookingWebPublic.post(
-      serverBookingWebApiUrl("/api/booking-web/affiliate/arrivals"),
-      input,
-      {
-        headers: { "X-Vayada-Affiliate-Arrival-Token": internalToken },
-        cache: "no-store",
-      },
-    );
-  },
-
   async resolveHost(host: string, init?: ApiRequestInit): Promise<BookingWebPublicHostResponse> {
     const path = `/api/booking-web/hosts/${encodeURIComponent(host)}`;
     return bookingWebPublic.get<BookingWebPublicHostResponse>(
@@ -133,10 +119,20 @@ export const bookingWebPublicApi = {
   },
 };
 
+function publicMapPin(latitude: number | null, longitude: number | null) {
+  return typeof latitude === "number" &&
+    typeof longitude === "number" &&
+    Math.abs(latitude) <= 90 &&
+    Math.abs(longitude) <= 180
+    ? { latitude, longitude }
+    : undefined;
+}
+
 export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
   const hotel = data.hotel;
   const images = hotel.images.map((image) => image.url).filter(Boolean);
-  const heroImage = hotel.branding?.heroImage || FALLBACK_IMAGE;
+  // A hotel can publish before it has photos (VAY-2247): no Vayada logo as a stand-in, the pages draw a placeholder.
+  const heroImage = hotel.branding?.heroImage || images[0] || null;
   const contacts = publicContactValues(hotel.publicContacts);
   const address = uniqueNonEmpty([
     hotel.location.city,
@@ -156,7 +152,8 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     country: hotel.location.country,
     starRating: 0,
     currency: hotel.defaultCurrency,
-    supportedCurrencies: hotel.supportedCurrencies,
+    // Display only: quotes and charges stay in the hotel currency.
+    displayCurrencies: hotel.branding?.displayCurrencies ?? [hotel.defaultCurrency],
     heroImage,
     images,
     amenities: hotel.amenities,
@@ -165,6 +162,7 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     checkInUntil: hotel.policies.checkInUntil || undefined,
     checkOutFrom: hotel.policies.checkOutFrom || undefined,
     timezone: hotel.timezone,
+    mapPin: publicMapPin(hotel.location.latitude, hotel.location.longitude),
     contact: {
       address,
       phone: contacts.phone || "",
@@ -204,6 +202,7 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     // New public enrolment is retired; existing referral-code attribution remains supported.
     referAGuestEnabled: false,
     instantBook: hotel.capabilities.instantBook,
+    promoCodesEnabled: hotel.capabilities.promoCodes,
   };
 }
 

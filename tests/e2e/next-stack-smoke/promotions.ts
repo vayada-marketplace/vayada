@@ -66,8 +66,10 @@ export async function runPromotionAcceptance(input: {
         ),
       ).toBe(active);
       await expect(
-        guest.getByRole("heading", { name: "Booking Summary", exact: true }),
+        guest.getByRole("heading", { name: "Who’s staying?", exact: true }),
       ).toBeVisible();
+      // The heading shows before the price; the promotion checks wait for the priced summary.
+      await expect(guest.getByTestId("stay-total")).toBeVisible();
       const label = guest.getByText("Early bird", { exact: true });
       if (active) await expect(label.first()).toBeVisible();
       else await expect(label).toHaveCount(0);
@@ -77,14 +79,19 @@ export async function runPromotionAcceptance(input: {
   await test.step("create, edit and pause an automatic promotion in deployed Promos", async () => {
     await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/promo-codes`);
     await expect(page.getByRole("heading", { name: "Promos", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "+ New promotion", exact: true }).click();
-    await page.getByLabel("Promotion type").selectOption("EARLY_BIRD");
-    await page.getByLabel("Minimum days ahead").fill("1");
-    await page.getByRole("button", { name: "Save promotion", exact: true }).click();
+    await page.getByRole("button", { name: "New promotion", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Early bird", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "New early bird promotion" });
+    // The smoke stay starts 60 days out, so the 30+ days chip still applies to it.
+    await editor.getByRole("radio", { name: "30+ days", exact: true }).locator("..").click();
+    await editor.getByRole("button", { name: "Create promotion", exact: true }).click();
+    await expect(editor).toHaveCount(0);
     await expect(card).toContainText("10% off");
     await card.getByRole("button", { name: "Edit Early bird", exact: true }).click();
-    await page.getByLabel("Discount percentage").fill("20");
-    await page.getByRole("button", { name: "Save promotion", exact: true }).click();
+    const edit = page.getByRole("dialog", { name: "Edit early bird promotion" });
+    await edit.getByRole("spinbutton", { name: "Discount", exact: true }).fill("20");
+    await edit.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(edit).toHaveCount(0);
     await expect(card).toContainText("20% off");
     await card.getByRole("switch").click();
     await expect(card).toContainText("Paused");
@@ -96,14 +103,15 @@ export async function runPromotionAcceptance(input: {
         type: "EARLY_BIRD",
         active: false,
         discountPercent: 20,
-        threshold: 1,
+        threshold: 30,
       }),
     ]);
   });
 
   await waitForOffer(request, slug, stay, 2);
   await guest.goto(`${guestUrl}?${query}`);
-  await expect(guest.getByRole("heading", { name: "Booking Summary", exact: true })).toBeVisible();
+  await expect(guest.getByRole("heading", { name: "Who’s staying?", exact: true })).toBeVisible();
+  await expect(guest.getByTestId("stay-total")).toBeVisible();
   await expect(guest.getByText("Early bird", { exact: true })).toHaveCount(0);
   const baseline = await publicApi(request).json<Record<string, unknown>>(
     "POST",
@@ -190,10 +198,10 @@ export async function runPromotionAcceptance(input: {
 
   await test.step("delete the promotion and confirm it disappears for guests", async () => {
     page.once("dialog", (dialog) => dialog.accept());
-    await card.getByRole("button", { name: "Delete", exact: true }).click();
+    await card.getByRole("button", { name: "Delete Early bird", exact: true }).click();
     await expect(card).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole("button", { name: "+ New promotion", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "New promotion", exact: true })).toBeEnabled();
     await expect(card).toHaveCount(0);
     const saved = await api.json<Record<string, unknown>>("GET", settingsPath);
     expect(saved.promotions).toEqual([]);

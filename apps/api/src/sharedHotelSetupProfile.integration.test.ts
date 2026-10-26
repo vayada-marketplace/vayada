@@ -97,14 +97,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
          ($4::uuid, $2::uuid, $5::uuid, 'active', 'hotel_owner', 'agency')`,
       [membershipId, organizationId, actorUserId, secondMembershipId, secondActorUserId],
     );
-    await client.query(
-      `INSERT INTO hotel_catalog.organization_setup_track_intents (
-         organization_id,
-         selected_tracks
-       )
-       VALUES ($1::uuid, ARRAY['creator_marketplace']::text[])`,
-      [organizationId],
-    );
+    // No setup track is selected (VAY-2270: the retired Creator Marketplace-only selection this
+    // used to store reads the same way and cannot be stored any more).
   });
 
   it.each(["ordinary"] as const)(
@@ -125,20 +119,18 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
         const database = decodeURIComponent(login.pathname.slice(1)).replaceAll('"', '""');
         await client.query(`GRANT CONNECT ON DATABASE "${database}" TO ${role}`);
         await client.query(`GRANT USAGE ON SCHEMA
-        hotel_catalog, identity, finance, booking, marketplace, platform TO ${role}`);
+        hotel_catalog, identity, finance, booking, platform TO ${role}`);
         await client.query(`GRANT SELECT ON
         identity.organizations, identity.organization_resource_links,
         identity.product_entitlements, finance.billing_entitlements,
         hotel_catalog.properties, hotel_catalog.property_locations,
         hotel_catalog.property_contact_channels,
         hotel_catalog.organization_setup_track_intents,
-        booking.booking_settings, marketplace.marketplace_hotel_profiles,
-        platform.idempotency_keys TO ${role}`);
+        booking.booking_settings, platform.idempotency_keys TO ${role}`);
         await client.query(`GRANT INSERT ON
         hotel_catalog.properties, hotel_catalog.property_locations,
         hotel_catalog.property_contact_channels,
         identity.organization_resource_links, booking.booking_settings,
-        marketplace.marketplace_hotel_profiles,
         platform.idempotency_keys, platform.product_audit_events TO ${role}`);
         await client.query(`GRANT UPDATE ON platform.idempotency_keys TO ${role}`);
         // Existing location triggers record a separate canonical owner revision.
@@ -323,6 +315,11 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       correlationId: "profile-revision-integration-create",
       profile,
     });
+    // VAY-2247: complete from creation, because the basics are there (photos and a description are optional).
+    await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
+      profileStatus: "complete",
+      completenessReasons: [],
+    });
     expect(created).toMatchObject({
       profileRevision: 1,
       profile: {
@@ -422,8 +419,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
          'property.hero_image',
          $2::uuid,
          $3::uuid,
-         'marketplace',
-         'hotel_profile',
+         'hotel_catalog',
+         'property',
          $3,
          'active',
          'image/webp',
@@ -525,8 +522,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       },
     });
     await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
-      profileStatus: "incomplete",
-      completenessReasons: ["media"],
+      profileStatus: "complete",
+      completenessReasons: [],
     });
 
     await expect(
@@ -668,8 +665,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       },
     });
     await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
-      profileStatus: "incomplete",
-      completenessReasons: ["media"],
+      profileStatus: "complete",
+      completenessReasons: [],
     });
     await expect(
       repository.updatePublicPropertyProfile({

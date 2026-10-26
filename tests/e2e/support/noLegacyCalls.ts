@@ -20,33 +20,11 @@ const legacyLocalHosts = new Set([
 const legacyLocalPorts = new Set(["8000", "8001", "8002"]);
 
 const surfaceRules = {
-  "marketplace-web-offer-discovery": [
-    legacyProductionHostRule(),
-    legacyLocalServiceRule(),
-    pathRule("/api/marketplace/listings", "retired Marketplace listings route"),
-  ],
-  "vayada-admin-marketplace-preview": [
-    legacyProductionHostRule(),
-    legacyLocalServiceRule(),
-    pathRule("/admin", "legacy root admin route"),
-    pathPrefixRule("/admin/", "legacy root admin route"),
-    pathRule("/super-admin", "legacy PMS super-admin route"),
-    pathPrefixRule("/super-admin/", "legacy PMS super-admin route"),
-    headerRule("x-hotel-id", "legacy X-Hotel-Id routing header"),
-  ],
   "vayada-admin-hotel-invites": [
     legacyProductionHostRule(),
     legacyLocalServiceRule(),
     pathPrefixRule("/admin/invite-codes", "legacy Marketplace Admin invite route"),
     pathPrefixRule("/api/invite-codes", "legacy hotel invite lookup and redeem route"),
-  ],
-  "vayada-admin-affiliate-payouts": [
-    legacyProductionHostRule(),
-    legacyLocalServiceRule(),
-    pathPrefixRule(
-      "/super-admin/affiliate-payouts",
-      "legacy PMS Platform Admin affiliate payout route",
-    ),
   ],
   "vayada-admin-property-lifecycle": [
     legacyProductionHostRule(),
@@ -56,12 +34,6 @@ const surfaceRules = {
     pathRule("/super-admin", "legacy PMS super-admin route"),
     pathPrefixRule("/super-admin/", "legacy PMS super-admin route"),
     pathRule("/admin/hotels", "legacy Booking hotel management route"),
-  ],
-  "marketplace-web-hotel-invites": [
-    legacyProductionHostRule(),
-    legacyLocalServiceRule(),
-    pathPrefixRule("/admin/invite-codes", "legacy Marketplace Admin invite route"),
-    pathPrefixRule("/api/invite-codes", "legacy hotel invite lookup and redeem route"),
   ],
   "booking-admin-benefits-settings": [
     legacyProductionHostRule(),

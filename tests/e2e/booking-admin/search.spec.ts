@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
 test("searches from every main page and opens Domain directly with the keyboard", async ({
   page,
 }, testInfo) => {
-  for (const path of ["/", "/settings?section=localization", "/booking-flow", "/design-studio"]) {
+  for (const path of ["/", "/settings/general", "/settings/room-filters", "/design-studio"]) {
     await page.goto(path);
     const search = page.getByRole("combobox", { name: "Search pages and settings" });
     await expect(search).toBeVisible();
@@ -28,15 +28,20 @@ test("searches from every main page and opens Domain directly with the keyboard"
   }
   await page.keyboard.press("Meta+k");
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("domain");
-  await expect(page.getByRole("option", { name: "Domain Settings" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Domain Settings" })).toContainText(
+    "Your booking page address and custom domain",
+  );
   await page.screenshot({ path: testInfo.outputPath("search-desktop.png") });
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/design-studio\?tab=domain$/);
   await expect(page.getByRole("heading", { name: /custom domain/i })).toBeVisible();
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("payment");
   await page.getByRole("option", { name: "Payment Settings" }).click();
-  await expect(page).toHaveURL(/\/settings\?section=payments$/);
+  await expect(page).toHaveURL(/\/settings\/payments$/);
   await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
+  // The click above left the pointer over the results; hovering an option makes it active,
+  // so move it away before testing keyboard selection.
+  await page.mouse.move(0, 0);
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("");
   await expect(page.getByRole("option").first()).toBeVisible();
   await page.keyboard.press("ArrowDown");
@@ -77,17 +82,17 @@ test("shows empty results, hides denied settings and inactive affiliates, and su
   const search = page.getByRole("combobox", { name: "Search pages and settings" });
   for (const query of ["zzzzzz", "payment", "billing", "affiliates", "security", "notifications"]) {
     await search.fill(query);
-    await expect(page.getByText("No results found", { exact: true })).toBeVisible();
+    await expect(page.getByText(`No results for “${query}”`, { exact: true })).toBeVisible();
   }
   await search.fill("language");
   await expect(page.getByRole("option")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("search-mobile.png") });
   await page.getByRole("option").click();
-  await expect(page).toHaveURL(/\/settings\?section=localization$/);
+  await expect(page).toHaveURL(/\/settings\/general#localization$/);
   await expect(page.getByRole("heading", { name: "Localization", exact: true })).toBeVisible();
   await page.route(`**${BOOKING_ADMIN_DESIGN_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ status: 403, json: { detail: "Forbidden" } }),
   );
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("domain");
-  await expect(page.getByText("No results found", { exact: true })).toBeVisible();
+  await expect(page.getByText("No results for “domain”", { exact: true })).toBeVisible();
 });

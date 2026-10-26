@@ -1,0 +1,13 @@
+{
+  "name": "@vayada/fonts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-hosted web fonts for the Vayada Next.js apps, loaded with next/font/local.",
+  "exports": {
+    "./brand": "./src/brand.ts",
+    "./ui": "./src/ui.ts"
+  },
+  "peerDependencies": {
+    "next": "16.2.6"
+  }
+}

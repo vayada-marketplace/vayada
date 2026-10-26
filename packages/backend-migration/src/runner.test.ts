@@ -801,7 +801,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(tableRows.map((row) => row.table_name)).toEqual([
+        "active_booking_addon_selections",
         "addon_definitions",
+        "addon_revenue_evidence",
         "booking_addon_selection_items",
         "booking_addon_selections",
         "booking_change_requests",
@@ -816,17 +818,35 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "current_working_design_revisions",
         "current_working_guest_policy_revisions",
         "direct_booking_summary_read_model",
+        "edit_authorization_releases",
         "finance_addon_purchase_evidence",
+        "finance_addon_revenue_evidence",
         "finance_booking_attribution",
         "finance_nightly_revenue_evidence",
+        "fixed_charge_heads",
+        "fixed_charge_revisions",
         "guest_bookings",
+        "guest_choice_heads",
+        "guest_choice_revisions",
         "guest_policy_projection_receipts",
         "guest_policy_revisions",
+        "host_action_previews",
+        "host_notification_reads",
         "nightly_revenue_evidence",
         "nightly_revenue_room_scopes",
+        "pending_booking_edit_attempts",
+        "pricing_acceptance_amendments",
+        "pricing_quote_acceptances",
+        "pricing_quotes",
+        "pricing_runtime_effective_property_scopes",
+        "pricing_v2_offer_term_candidates",
+        "pricing_v2_offer_term_heads",
+        "pricing_v2_offer_terms",
         "promo_applications",
         "promo_definitions",
         "quote_sessions",
+        "room_last_minute_heads",
+        "room_last_minute_revisions",
         "same_day_booking_policies",
       ]);
 
@@ -906,6 +926,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(pmsTableRows.map((row) => row.table_name)).toEqual([
+        "active_inventory_reservation_receipts",
         "booking_checkin_records",
         "booking_checkout_charges",
         "booking_checkout_records",
@@ -915,15 +936,34 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "channel_booking_mappings",
         "channel_booking_revision_tombstones",
         "channel_connections",
+        "channel_date_prices",
+        "channel_operational_alert_occurrences",
+        "channel_operational_alerts",
         "channel_rate_plan_mappings",
         "channel_reviews",
         "channel_room_type_mappings",
         "channel_sync_status",
+        "channex_ari_schedule_sources",
+        "channex_external_rate_owners",
+        "channex_offer_ari_attempts",
+        "channex_offer_ari_receipts",
+        "channex_offer_create_attempts",
+        "channex_offer_create_receipts",
+        "channex_offer_target_intents",
+        "channex_offer_target_versions",
+        "channex_offer_targets",
+        "channex_room_availability_attempts",
+        "channex_room_availability_receipts",
+        "channex_room_availability_reconciliation_attestations",
+        "channex_staging_catalog_references",
         "checkin_checklist_templates",
+        "checkin_settings",
         "checkout_inspection_templates",
         "effective_calendar_auto_open_settings",
         "effective_room_assignment_optimization_settings",
         "flexible_rate_plan_cancellation_extensions",
+        "guest_registrations",
+        "guest_review_submissions",
         "inbox_email_routes",
         "inventory_coverage_validation_queue",
         "inventory_days",
@@ -931,6 +971,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "inventory_reservation_day_watermarks",
         "inventory_reservation_receipts",
         "inventory_reservation_statuses",
+        "inventory_reservation_successors",
         "linked_inventory_groups",
         "mandatory_charge_confirmation_revisions",
         "message_assistance_results",
@@ -946,6 +987,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "operating_calendar_revisions",
         "operating_calendar_room_bindings",
         "operational_booking_assignments",
+        "pending_booking_edit_receipts",
+        "pending_booking_edit_support",
+        "pricing_v2_charge_declarations",
+        "pricing_v2_drafts",
+        "pricing_v2_heads",
+        "pricing_v2_revisions",
+        "pricing_v2_rooms",
+        "property_navigation_modules",
         "property_pricing_settings",
         "rate_plans",
         "rate_rules",
@@ -954,8 +1003,10 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "recurring_pricing_materialized_rows",
         "recurring_pricing_source_room_values",
         "recurring_pricing_sources",
+        "review_reply_submissions",
         "room_assignment_optimization_settings",
         "room_blocks",
+        "room_type_closures",
         "room_type_media",
         "room_types",
         "rooms",
@@ -1282,11 +1333,13 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(financeTableRows.map((row) => row.table_name)).toEqual([
-        "affiliate_payout_payment_evidence",
-        "affiliate_payout_payment_evidence_items",
+        "airbnb_current_provider_amounts",
+        "airbnb_current_provider_nights",
+        "airbnb_provider_snapshots",
         "bank_transfer_bookings",
         "bank_transfer_destinations",
         "billing_entitlements",
+        "card_refund_commands",
         "commission_rate_changes",
         "commission_rules",
         "expense_categories",
@@ -1301,11 +1354,13 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "online_card_readiness",
         "ota_commission_evidence",
         "ota_commission_reporting_evidence",
+        "payment_method_booking_windows",
         "payment_provider_accounts",
         "payment_settings",
         "payments",
         "payout_settings",
         "payouts",
+        "pricing_v2_fx_observations",
         "provider_fee_evidence",
         "provider_fee_reporting_evidence",
         "recurring_expense_rules",
@@ -1617,7 +1672,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY tc.constraint_name`,
       );
 
-      expect(financeForeignKeySchemas).toHaveLength(0);
+      // 0498 dropped the affiliate earning tables that pointed at Marketplace rows.
+      expect(financeForeignKeySchemas).toEqual([]);
 
       const { rows: financePermissionKeys } = await verifyClient.query<{ key: string }>(
         `SELECT key
@@ -1631,9 +1687,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY key`,
       );
 
+      // 0501 deleted the affiliate and Marketplace finance keys.
       expect(financePermissionKeys.map((row) => row.key)).toEqual([
-        "affiliate.payout.manage",
-        "marketplace.finance.read",
         "platform.finance.read",
         "pms.finance.read",
       ]);
@@ -1784,50 +1839,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
 
       expect(financeVisibilitySensitiveColumns).toHaveLength(0);
 
-      const { rows: marketplaceTableRows } = await verifyClient.query<{ table_name: string }>(
-        `SELECT table_name
-         FROM information_schema.tables
-         WHERE table_schema = 'marketplace'
-         ORDER BY table_name`,
+      // 0499 dropped the marketplace schema. The staged legacy copies stay: the hotel import reads them.
+      const { rows: marketplaceSchemas } = await verifyClient.query<{ nspname: string }>(
+        `SELECT nspname
+         FROM pg_namespace
+         WHERE nspname IN ('marketplace', 'migration_source_marketplace')
+         ORDER BY nspname`,
       );
-
-      expect(marketplaceTableRows.map((row) => row.table_name)).toEqual([
-        "active_hotel_submission_revisions",
-        "affiliate_lifecycle_changes",
-        "collaboration_deliverables",
-        "collaborations",
-        "creator_matching_preferences",
-        "creator_platform_authorizations",
-        "creator_platform_connections",
-        "creator_platform_credential_cleanup_jobs",
-        "creator_platform_metric_snapshots",
-        "creator_platforms",
-        "creator_profiles",
-        "creator_ratings",
-        "current_matching_outcomes",
-        "external_collaborations",
-        "hotel_collaboration_preferences",
-        "hotel_submission_moderation",
-        "hotel_submission_revisions",
-        "invite_codes",
-        "marketplace_chat_messages",
-        "marketplace_hotel_profiles",
-        "marketplace_notifications",
-        "marketplace_offer_read_model",
-        "marketplace_offers",
-        "matching_event_projections",
-        "newsletter_preferences",
-        "offer_compensation_options",
-        "offer_creator_requirements",
-        "offer_deliverables",
-        "offer_matching_criteria",
-        "property_affiliates",
-        "trips",
-      ]);
-
-      await expect(
-        verifyClient.query(`TRUNCATE marketplace.hotel_submission_revisions CASCADE`),
-      ).rejects.toMatchObject({ code: "55000" });
+      expect(marketplaceSchemas).toEqual([{ nspname: "migration_source_marketplace" }]);
 
       const { rows: marketplaceTripGrants } = await verifyClient.query<{
         key: string;
@@ -1842,794 +1861,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY catalog.key`,
       );
 
-      expect(marketplaceTripGrants).toEqual([
-        {
-          key: "marketplace.trip.manage",
-          organization_kind: "creator_workspace",
-          role_key: "creator_owner",
-        },
-        {
-          key: "marketplace.trip.read",
-          organization_kind: "creator_workspace",
-          role_key: "creator_owner",
-        },
-      ]);
+      // VAY-2270 (0493): Marketplace grants are retired; 0501 deleted the catalog keys.
+      expect(marketplaceTripGrants).toEqual([]);
 
-      const { rows: creatorEngagementColumns } = await verifyClient.query<{
-        table_name: string;
-        numeric_precision: number;
-        numeric_scale: number;
-      }>(
-        `SELECT table_name, numeric_precision, numeric_scale
-         FROM information_schema.columns
-         WHERE table_schema = 'marketplace'
-           AND column_name = 'engagement_rate'
-           AND table_name IN ('creator_platforms', 'creator_platform_metric_snapshots')
-         ORDER BY table_name`,
-      );
-      expect(creatorEngagementColumns).toEqual([
-        {
-          table_name: "creator_platform_metric_snapshots",
-          numeric_precision: 24,
-          numeric_scale: 6,
-        },
-        { table_name: "creator_platforms", numeric_precision: 24, numeric_scale: 6 },
-      ]);
-
-      const { rows: creatorCompletionFunctions } = await verifyClient.query<{
-        argument_count: number;
-        default_count: number;
-        language: string;
-        result: string;
-        volatility: string;
-      }>(
-        `SELECT
-           procedure.pronargs AS argument_count,
-           procedure.pronargdefaults AS default_count,
-           language.lanname AS language,
-           pg_get_function_result(procedure.oid) AS result,
-           procedure.provolatile AS volatility
-         FROM pg_proc AS procedure
-         JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-         JOIN pg_language AS language ON language.oid = procedure.prolang
-         WHERE namespace.nspname = 'marketplace'
-           AND procedure.proname = 'creator_profile_is_complete'`,
-      );
-      expect(creatorCompletionFunctions).toEqual([
-        {
-          argument_count: 2,
-          default_count: 0,
-          language: "sql",
-          result: "boolean",
-          volatility: "s",
-        },
-      ]);
-
-      const { rows: marketplaceIntegrityConstraints } = await verifyClient.query<{
-        constraint_name: string;
-      }>(
-        `SELECT constraint_name
-         FROM information_schema.table_constraints
-         WHERE table_schema = 'marketplace'
-           AND constraint_name IN (
-             'collaborations_compensation_type_check',
-             'chk_marketplace_chat_sender_shape',
-             'chk_marketplace_collaborations_affiliate_link',
-             'chk_marketplace_collaborations_currency_upper',
-             'chk_marketplace_collaborations_preferred_dates',
-             'chk_marketplace_collaborations_source_id',
-             'chk_marketplace_collaborations_status',
-             'chk_marketplace_collaborations_travel_dates',
-             'chk_marketplace_collaborations_compensation_terms',
-             'chk_marketplace_creator_platform_engagement',
-             'chk_marketplace_creator_platform_followers',
-             'chk_marketplace_creator_platforms_source_id',
-             'chk_marketplace_creator_profiles_source_id',
-             'chk_marketplace_creator_ratings_score',
-             'chk_marketplace_deliverables_quantity',
-             'chk_marketplace_external_collaborations_date_order',
-             'chk_marketplace_external_collaborations_source_id',
-             'chk_marketplace_offers_source_id',
-             'chk_marketplace_offers_status',
-             'chk_marketplace_hotel_profiles_source_id',
-             'chk_marketplace_hotel_profiles_status',
-             'chk_marketplace_invite_codes_dates',
-             'chk_marketplace_invite_codes_status',
-             'chk_marketplace_offer_read_model_public_json',
-             'chk_marketplace_newsletter_preferences_source_id',
-             'chk_marketplace_offer_deliverables_quantity',
-             'chk_marketplace_compensation_options_currency_upper',
-             'chk_marketplace_compensation_options_source_id',
-             'chk_marketplace_compensation_options_terms',
-             'chk_marketplace_requirements_age_range',
-             'chk_marketplace_requirements_source_id',
-             'chk_marketplace_trips_date_order',
-             'chk_marketplace_trips_source_id',
-             'fk_marketplace_chat_collaboration_property',
-             'fk_marketplace_collaborations_commission_rule',
-             'fk_marketplace_collaborations_creator_org',
-             'fk_marketplace_collaborations_offer_org',
-             'fk_marketplace_creator_platforms_creator_org',
-             'fk_marketplace_deliverables_collaboration_property',
-             'fk_marketplace_external_collaborations_creator_org',
-             'fk_marketplace_external_collaborations_trip_creator',
-             'fk_marketplace_offer_deliverables_offer_org',
-             'fk_marketplace_offers_profile_org',
-             'fk_marketplace_invite_codes_creator_org',
-             'fk_marketplace_compensation_options_offer_org',
-             'fk_marketplace_ratings_collaboration_creator',
-             'fk_marketplace_ratings_creator_org',
-             'fk_marketplace_ratings_hotel_profile_org',
-             'fk_marketplace_read_model_offer_property',
-             'fk_marketplace_read_model_property',
-             'fk_marketplace_requirements_offer_org',
-             'fk_marketplace_trips_creator_org',
-             'uq_marketplace_collaborations_id_property',
-             'uq_marketplace_collaborations_id_property_creator',
-             'uq_marketplace_collaborations_source',
-             'uq_marketplace_creator_platforms_source',
-             'uq_marketplace_creator_profiles_id_org',
-             'uq_marketplace_creator_profiles_source',
-             'uq_marketplace_creator_ratings_collaboration',
-             'uq_marketplace_external_collaborations_source',
-             'uq_marketplace_offers_id_property',
-             'uq_marketplace_offers_id_property_org',
-             'uq_marketplace_offers_source',
-             'uq_marketplace_hotel_profiles_property_org',
-             'uq_marketplace_hotel_profiles_source',
-             'uq_marketplace_newsletter_preferences_source',
-             'uq_marketplace_compensation_options_source',
-             'uq_marketplace_requirements_offer',
-             'uq_marketplace_requirements_source',
-             'uq_marketplace_trips_id_creator',
-             'uq_marketplace_trips_source'
-           )
-         ORDER BY constraint_name`,
-      );
-
-      expect(marketplaceIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
-        "chk_marketplace_chat_sender_shape",
-        "chk_marketplace_collaborations_affiliate_link",
-        "chk_marketplace_collaborations_compensation_terms",
-        "chk_marketplace_collaborations_currency_upper",
-        "chk_marketplace_collaborations_preferred_dates",
-        "chk_marketplace_collaborations_source_id",
-        "chk_marketplace_collaborations_status",
-        "chk_marketplace_collaborations_travel_dates",
-        "chk_marketplace_compensation_options_currency_upper",
-        "chk_marketplace_compensation_options_source_id",
-        "chk_marketplace_compensation_options_terms",
-        "chk_marketplace_creator_platform_engagement",
-        "chk_marketplace_creator_platform_followers",
-        "chk_marketplace_creator_platforms_source_id",
-        "chk_marketplace_creator_profiles_source_id",
-        "chk_marketplace_creator_ratings_score",
-        "chk_marketplace_deliverables_quantity",
-        "chk_marketplace_external_collaborations_date_order",
-        "chk_marketplace_external_collaborations_source_id",
-        "chk_marketplace_hotel_profiles_source_id",
-        "chk_marketplace_hotel_profiles_status",
-        "chk_marketplace_invite_codes_dates",
-        "chk_marketplace_invite_codes_status",
-        "chk_marketplace_newsletter_preferences_source_id",
-        "chk_marketplace_offer_deliverables_quantity",
-        "chk_marketplace_offer_read_model_public_json",
-        "chk_marketplace_offers_source_id",
-        "chk_marketplace_offers_status",
-        "chk_marketplace_requirements_age_range",
-        "chk_marketplace_requirements_source_id",
-        "chk_marketplace_trips_date_order",
-        "chk_marketplace_trips_source_id",
-        "collaborations_compensation_type_check",
-        "fk_marketplace_chat_collaboration_property",
-        "fk_marketplace_collaborations_commission_rule",
-        "fk_marketplace_collaborations_creator_org",
-        "fk_marketplace_collaborations_offer_org",
-        "fk_marketplace_compensation_options_offer_org",
-        "fk_marketplace_creator_platforms_creator_org",
-        "fk_marketplace_deliverables_collaboration_property",
-        "fk_marketplace_external_collaborations_creator_org",
-        "fk_marketplace_external_collaborations_trip_creator",
-        "fk_marketplace_invite_codes_creator_org",
-        "fk_marketplace_offer_deliverables_offer_org",
-        "fk_marketplace_offers_profile_org",
-        "fk_marketplace_ratings_collaboration_creator",
-        "fk_marketplace_ratings_creator_org",
-        "fk_marketplace_ratings_hotel_profile_org",
-        "fk_marketplace_read_model_offer_property",
-        "fk_marketplace_read_model_property",
-        "fk_marketplace_requirements_offer_org",
-        "fk_marketplace_trips_creator_org",
-        "uq_marketplace_collaborations_id_property",
-        "uq_marketplace_collaborations_id_property_creator",
-        "uq_marketplace_collaborations_source",
-        "uq_marketplace_compensation_options_source",
-        "uq_marketplace_creator_platforms_source",
-        "uq_marketplace_creator_profiles_id_org",
-        "uq_marketplace_creator_profiles_source",
-        "uq_marketplace_creator_ratings_collaboration",
-        "uq_marketplace_external_collaborations_source",
-        "uq_marketplace_hotel_profiles_property_org",
-        "uq_marketplace_hotel_profiles_source",
-        "uq_marketplace_newsletter_preferences_source",
-        "uq_marketplace_offers_id_property",
-        "uq_marketplace_offers_id_property_org",
-        "uq_marketplace_offers_source",
-        "uq_marketplace_requirements_offer",
-        "uq_marketplace_requirements_source",
-        "uq_marketplace_trips_id_creator",
-        "uq_marketplace_trips_source",
-      ]);
-
-      const { rows: marketplaceForeignKeyShapes } = await verifyClient.query<{
-        constraint_name: string;
-        table_name: string;
-        columns: string;
-        referenced_schema: string;
-        referenced_table: string;
-        referenced_columns: string;
-      }>(
-        `SELECT
-           con.conname AS constraint_name,
-           src.relname AS table_name,
-           array_to_string(ARRAY(
-             SELECT att.attname
-             FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ord)
-             JOIN pg_attribute att
-               ON att.attrelid = con.conrelid
-              AND att.attnum = cols.attnum
-             ORDER BY cols.ord
-           ), ',') AS columns,
-           ref_ns.nspname AS referenced_schema,
-           ref.relname AS referenced_table,
-           array_to_string(ARRAY(
-             SELECT att.attname
-             FROM unnest(con.confkey) WITH ORDINALITY AS cols(attnum, ord)
-             JOIN pg_attribute att
-               ON att.attrelid = con.confrelid
-              AND att.attnum = cols.attnum
-             ORDER BY cols.ord
-           ), ',') AS referenced_columns
-         FROM pg_constraint con
-         JOIN pg_class src ON src.oid = con.conrelid
-         JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
-         JOIN pg_class ref ON ref.oid = con.confrelid
-         JOIN pg_namespace ref_ns ON ref_ns.oid = ref.relnamespace
-         WHERE src_ns.nspname = 'marketplace'
-           AND con.contype = 'f'
-           AND con.conname IN (
-             'fk_marketplace_chat_collaboration_property',
-             'fk_marketplace_collaborations_commission_rule',
-             'fk_marketplace_collaborations_creator_org',
-             'fk_marketplace_collaborations_offer_org',
-             'fk_marketplace_creator_platforms_creator_org',
-             'fk_marketplace_deliverables_collaboration_property',
-             'fk_marketplace_external_collaborations_trip_creator',
-             'fk_marketplace_offer_deliverables_offer_org',
-             'fk_marketplace_offers_profile_org',
-             'fk_marketplace_invite_codes_creator_org',
-             'fk_marketplace_compensation_options_offer_org',
-             'fk_marketplace_ratings_collaboration_creator',
-             'fk_marketplace_read_model_offer_property',
-             'fk_marketplace_requirements_offer_org',
-             'fk_marketplace_trips_creator_org'
-           )
-         ORDER BY con.conname`,
-      );
-
-      expect(marketplaceForeignKeyShapes).toEqual([
-        {
-          columns: "collaboration_id,property_id",
-          constraint_name: "fk_marketplace_chat_collaboration_property",
-          referenced_columns: "id,property_id",
-          referenced_schema: "marketplace",
-          referenced_table: "collaborations",
-          table_name: "marketplace_chat_messages",
-        },
-        {
-          columns: "commission_rule_id,hotel_organization_id",
-          constraint_name: "fk_marketplace_collaborations_commission_rule",
-          referenced_columns: "id,organization_id",
-          referenced_schema: "finance",
-          referenced_table: "commission_rules",
-          table_name: "collaborations",
-        },
-        {
-          columns: "creator_profile_id,creator_organization_id",
-          constraint_name: "fk_marketplace_collaborations_creator_org",
-          referenced_columns: "id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "creator_profiles",
-          table_name: "collaborations",
-        },
-        {
-          columns: "offer_id,property_id,hotel_organization_id",
-          constraint_name: "fk_marketplace_collaborations_offer_org",
-          referenced_columns: "id,property_id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "marketplace_offers",
-          table_name: "collaborations",
-        },
-        {
-          columns: "offer_id,property_id,organization_id",
-          constraint_name: "fk_marketplace_compensation_options_offer_org",
-          referenced_columns: "id,property_id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "marketplace_offers",
-          table_name: "offer_compensation_options",
-        },
-        {
-          columns: "creator_profile_id,organization_id",
-          constraint_name: "fk_marketplace_creator_platforms_creator_org",
-          referenced_columns: "id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "creator_profiles",
-          table_name: "creator_platforms",
-        },
-        {
-          columns: "collaboration_id,property_id",
-          constraint_name: "fk_marketplace_deliverables_collaboration_property",
-          referenced_columns: "id,property_id",
-          referenced_schema: "marketplace",
-          referenced_table: "collaborations",
-          table_name: "collaboration_deliverables",
-        },
-        {
-          columns: "trip_id,creator_profile_id",
-          constraint_name: "fk_marketplace_external_collaborations_trip_creator",
-          referenced_columns: "id,creator_profile_id",
-          referenced_schema: "marketplace",
-          referenced_table: "trips",
-          table_name: "external_collaborations",
-        },
-        {
-          columns: "creator_profile_id,creator_organization_id",
-          constraint_name: "fk_marketplace_invite_codes_creator_org",
-          referenced_columns: "id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "creator_profiles",
-          table_name: "invite_codes",
-        },
-        {
-          columns: "offer_id,property_id,organization_id",
-          constraint_name: "fk_marketplace_offer_deliverables_offer_org",
-          referenced_columns: "id,property_id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "marketplace_offers",
-          table_name: "offer_deliverables",
-        },
-        {
-          columns: "property_id,organization_id",
-          constraint_name: "fk_marketplace_offers_profile_org",
-          referenced_columns: "property_id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "marketplace_hotel_profiles",
-          table_name: "marketplace_offers",
-        },
-        {
-          columns: "collaboration_id,property_id,creator_profile_id",
-          constraint_name: "fk_marketplace_ratings_collaboration_creator",
-          referenced_columns: "id,property_id,creator_profile_id",
-          referenced_schema: "marketplace",
-          referenced_table: "collaborations",
-          table_name: "creator_ratings",
-        },
-        {
-          columns: "offer_id,property_id",
-          constraint_name: "fk_marketplace_read_model_offer_property",
-          referenced_columns: "id,property_id",
-          referenced_schema: "marketplace",
-          referenced_table: "marketplace_offers",
-          table_name: "marketplace_offer_read_model",
-        },
-        {
-          columns: "offer_id,property_id,organization_id",
-          constraint_name: "fk_marketplace_requirements_offer_org",
-          referenced_columns: "id,property_id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "marketplace_offers",
-          table_name: "offer_creator_requirements",
-        },
-        {
-          columns: "creator_profile_id,organization_id",
-          constraint_name: "fk_marketplace_trips_creator_org",
-          referenced_columns: "id,organization_id",
-          referenced_schema: "marketplace",
-          referenced_table: "creator_profiles",
-          table_name: "trips",
-        },
-      ]);
-
-      const { rows: marketplaceForeignKeySchemas } = await verifyClient.query<{
-        constraint_name: string;
-        referenced_schema: string;
-      }>(
-        `SELECT DISTINCT
-           tc.constraint_name,
-           ccu.table_schema AS referenced_schema
-         FROM information_schema.table_constraints tc
-         JOIN information_schema.constraint_column_usage ccu
-           ON ccu.constraint_schema = tc.constraint_schema
-          AND ccu.constraint_name = tc.constraint_name
-         WHERE tc.table_schema = 'marketplace'
-           AND tc.constraint_type = 'FOREIGN KEY'
-           AND ccu.table_schema NOT IN (
-             'finance', 'hotel_catalog', 'identity', 'marketplace', 'platform'
-           )
-         ORDER BY tc.constraint_name`,
-      );
-
-      expect(marketplaceForeignKeySchemas).toHaveLength(0);
-
-      const { rows: marketplaceReadModelSensitiveColumns } = await verifyClient.query<{
-        column_name: string;
-      }>(
-        `SELECT column_name
-           FROM information_schema.columns
-           WHERE table_schema = 'marketplace'
-             AND table_name = 'marketplace_offer_read_model'
-             AND column_name IN (
-               'email', 'phone', 'user_id', 'created_by_user_id', 'redeemed_by_user_id',
-               'body', 'content', 'message_body', 'message_metadata',
-               'application_message', 'negotiated_terms', 'affiliate_link',
-               'affiliate_referral_code', 'affiliate_commission_percentage', 'organization_id', 'private_notes',
-               'pii_retention_until'
-             )`,
-      );
-
-      expect(marketplaceReadModelSensitiveColumns).toHaveLength(0);
-
-      const creatorUserId = "99999999-1111-4111-8111-999999999991";
       const hotelUserId = "99999999-1111-4111-8111-999999999992";
-      const creatorOrganizationId = "99999999-2222-4222-8222-999999999991";
       const hotelOrganizationId = "99999999-2222-4222-8222-999999999992";
-      const wrongOrganizationId = "99999999-2222-4222-8222-999999999993";
-      const marketplacePropertyId = "99999999-3333-4333-8333-999999999991";
-      const creatorProfileId = "99999999-4444-4444-8444-999999999991";
-      const offerId = "99999999-5555-4555-8555-999999999991";
-      const offerDeliverableId = "99999999-5555-4555-8555-999999999992";
-      const commissionRuleId = "99999999-6666-4666-8666-999999999991";
-      const wrongCommissionRuleId = "99999999-6666-4666-8666-999999999992";
-      const marketplaceCollaborationId = "99999999-7777-4777-8777-999999999991";
 
       await verifyClient.query(
         `INSERT INTO identity.users (id, email, name, status)
-         VALUES
-           ($1, 'marketplace-creator@example.com', 'Marketplace Creator', 'active'),
-           ($2, 'marketplace-hotel@example.com', 'Marketplace Hotel', 'active')`,
-        [creatorUserId, hotelUserId],
+         VALUES ($1, 'runner-hotel@example.com', 'Runner Hotel', 'active')`,
+        [hotelUserId],
       );
       await verifyClient.query(
         `INSERT INTO identity.organizations (id, kind, name, slug)
-         VALUES
-           ($1, 'creator_workspace', 'Marketplace Creator Workspace', 'marketplace-creator-workspace'),
-           ($2, 'hotel_group', 'Marketplace Hotel Group', 'marketplace-hotel-group'),
-           ($3, 'hotel_group', 'Marketplace Wrong Hotel Group', 'marketplace-wrong-hotel-group')`,
-        [creatorOrganizationId, hotelOrganizationId, wrongOrganizationId],
+         VALUES ($1, 'hotel_group', 'Runner Hotel Group', 'runner-hotel-group')`,
+        [hotelOrganizationId],
       );
-      await verifyClient.query(
-        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
-         VALUES ($1, 'marketplace-property-one', 'Marketplace Property One')`,
-        [marketplacePropertyId],
-      );
-      await verifyClient.query(
-        `INSERT INTO marketplace.creator_profiles
-           (id, organization_id, owner_user_id, display_name, creator_type, profile_status)
-         VALUES ($1, $2, $3, 'Marketplace Creator', 'travel', 'active')`,
-        [creatorProfileId, creatorOrganizationId, creatorUserId],
-      );
-      await verifyClient.query(
-        `INSERT INTO marketplace.creator_platforms
-           (creator_profile_id, organization_id, platform, handle, follower_count, engagement_rate)
-         VALUES ($1, $2, 'instagram', '@marketplace_creator', 125000, 1000.123456)`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      const { rows: storedEngagementRates } = await verifyClient.query<{ engagement_rate: string }>(
-        `SELECT engagement_rate::text
-         FROM marketplace.creator_platforms
-         WHERE creator_profile_id = $1 AND organization_id = $2`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      expect(storedEngagementRates).toEqual([{ engagement_rate: "1000.123456" }]);
-
-      const { rows: incompleteProfiles } = await verifyClient.query<{ complete: boolean }>(
-        `SELECT marketplace.creator_profile_is_complete($1, $2) AS complete`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      expect(incompleteProfiles).toEqual([{ complete: false }]);
-
-      await verifyClient.query(
-        `UPDATE marketplace.creator_profiles
-         SET location_text = 'Berlin',
-             short_description = 'Independent travel creator',
-             phone = '+49123456789'
-         WHERE id = $1 AND organization_id = $2`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      const { rows: completedProfiles } = await verifyClient.query<{
-        complete: boolean;
-        wrong_organization_complete: boolean;
-      }>(
-        `SELECT
-           marketplace.creator_profile_is_complete($1, $2) AS complete,
-           marketplace.creator_profile_is_complete($1, $3) AS wrong_organization_complete`,
-        [creatorProfileId, creatorOrganizationId, wrongOrganizationId],
-      );
-      expect(completedProfiles).toEqual([{ complete: false, wrong_organization_complete: false }]);
-
-      await verifyClient.query(
-        `UPDATE marketplace.creator_profiles
-         SET profile_picture_url = 'https://images.example.test/creator.jpg',
-             profile_metadata = jsonb_build_object(
-               'profilePictureMediaObjectId',
-               '99999999-8888-4888-8888-999999999991'
-             )
-         WHERE id = $1 AND organization_id = $2`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      const { rows: unownedPhotoProfiles } = await verifyClient.query<{ complete: boolean }>(
-        `SELECT marketplace.creator_profile_is_complete($1, $2) AS complete`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      expect(unownedPhotoProfiles).toEqual([{ complete: false }]);
-
-      await verifyClient.query(
-        `INSERT INTO platform.media_objects (
-           id, bucket, storage_key, visibility, purpose, owner_organization_id,
-           resource_product, resource_type, resource_id, lifecycle_status,
-           content_type, public_approved, created_by_user_id
-         ) VALUES (
-           '99999999-8888-4888-8888-999999999991', 'creator-media',
-           'creator-profiles/owned.jpg', 'public', 'marketplace.creator.profile_image',
-           $1, 'marketplace', 'creator_profile', $2, 'active', 'image/jpeg', TRUE, $3
-         )`,
-        [creatorOrganizationId, creatorProfileId, creatorUserId],
-      );
-      await verifyClient.query(
-        `INSERT INTO platform.media_variants (
-           media_object_id, variant_name, visibility, storage_key, content_type,
-           public_cdn_url
-         ) VALUES (
-           '99999999-8888-4888-8888-999999999991', 'original_safe', 'public',
-           'creator-profiles/owned.jpg', 'image/jpeg',
-           'https://images.example.test/creator.jpg'
-         )`,
-      );
-      const { rows: photoCompleteProfiles } = await verifyClient.query<{ complete: boolean }>(
-        `SELECT marketplace.creator_profile_is_complete($1, $2) AS complete`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      expect(photoCompleteProfiles).toEqual([{ complete: true }]);
-
-      await verifyClient.query(
-        `INSERT INTO platform.media_objects (
-           id, bucket, storage_key, visibility, purpose, owner_organization_id,
-           resource_product, resource_type, resource_id, lifecycle_status,
-           content_type, public_approved, created_by_user_id
-         ) VALUES (
-           '99999999-8888-4888-8888-999999999992', 'creator-media',
-           'user-profiles/owned.jpg', 'public', 'identity.user.profile_image',
-           $1, 'platform', 'user_profile', $2::text, 'active', 'image/jpeg', TRUE, $2::uuid
-         )`,
-        [creatorOrganizationId, creatorUserId],
-      );
-      await verifyClient.query(
-        `INSERT INTO platform.media_variants (
-           media_object_id, variant_name, visibility, storage_key, content_type,
-           public_cdn_url
-         ) VALUES (
-           '99999999-8888-4888-8888-999999999992', 'original_safe', 'public',
-           'user-profiles/owned.jpg', 'image/jpeg',
-           'https://images.example.test/identity-owner.jpg'
-         )`,
-      );
-      await verifyClient.query(
-        `UPDATE identity.users
-         SET profile_picture_media_object_id = '99999999-8888-4888-8888-999999999992',
-             profile_picture_url = 'https://images.example.test/identity-owner.jpg'
-         WHERE id = $1`,
-        [creatorUserId],
-      );
-      await verifyClient.query(
-        `UPDATE marketplace.creator_profiles
-         SET profile_picture_url = 'https://images.example.test/identity-owner.jpg',
-             profile_metadata = jsonb_build_object(
-               'profilePictureMediaObjectId',
-               '99999999-8888-4888-8888-999999999992'
-             )
-         WHERE id = $1 AND organization_id = $2`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      const { rows: identityPhotoCompleteProfiles } = await verifyClient.query<{
-        complete: boolean;
-      }>(`SELECT marketplace.creator_profile_is_complete($1, $2) AS complete`, [
-        creatorProfileId,
-        creatorOrganizationId,
-      ]);
-      expect(identityPhotoCompleteProfiles).toEqual([{ complete: true }]);
-
-      await verifyClient.query(
-        `UPDATE marketplace.creator_platforms
-         SET platform = 'other', profile_url = NULL
-         WHERE creator_profile_id = $1 AND organization_id = $2`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      const { rows: otherPlatformWithoutUrls } = await verifyClient.query<{ complete: boolean }>(
-        `SELECT marketplace.creator_profile_is_complete($1, $2) AS complete`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      expect(otherPlatformWithoutUrls).toEqual([{ complete: false }]);
-      await verifyClient.query(
-        `UPDATE marketplace.creator_platforms
-         SET platform = 'instagram', profile_url = NULL
-         WHERE creator_profile_id = $1 AND organization_id = $2`,
-        [creatorProfileId, creatorOrganizationId],
-      );
-      await verifyClient.query(
-        `INSERT INTO marketplace.marketplace_hotel_profiles
-           (property_id, organization_id, marketplace_profile_status, profile_complete)
-         VALUES ($1, $2, 'verified', TRUE)`,
-        [marketplacePropertyId, hotelOrganizationId],
-      );
-      await verifyClient.query(
-        `INSERT INTO marketplace.marketplace_offers
-           (id, property_id, organization_id, title, offer_summary, accommodation_type, offer_status)
-         VALUES ($1, $2, $3, 'Creator Stay Offer', 'Public collaboration offer.', 'hotel', 'verified')`,
-        [offerId, marketplacePropertyId, hotelOrganizationId],
-      );
-      await verifyClient.query(
-        `INSERT INTO marketplace.offer_compensation_options
-           (offer_id, property_id, organization_id, compensation_type, commission_percentage, currency)
-         VALUES ($1, $2, $3, 'affiliate', 12.5, 'USD')`,
-        [offerId, marketplacePropertyId, hotelOrganizationId],
-      );
-      await expect(
-        verifyClient.query(
-          `INSERT INTO marketplace.offer_compensation_options
-             (offer_id, property_id, organization_id, compensation_type, commission_percentage, currency)
-           VALUES ($1, $2, $3, 'affiliate', 12.5, 'USD')`,
-          [offerId, marketplacePropertyId, wrongOrganizationId],
-        ),
-      ).rejects.toMatchObject({ code: "23503" });
-
-      await verifyClient.query(
-        `INSERT INTO marketplace.offer_deliverables
-           (id, offer_id, property_id, organization_id, platform, deliverable_type, quantity)
-         VALUES ($1, $2, $3, $4, 'instagram', 'reel', 2)`,
-        [offerDeliverableId, offerId, marketplacePropertyId, hotelOrganizationId],
-      );
-      await expect(
-        verifyClient.query(
-          `INSERT INTO marketplace.offer_deliverables
-             (offer_id, property_id, organization_id, platform, deliverable_type, quantity)
-           VALUES ($1, $2, $3, 'instagram', 'story', 1)`,
-          [offerId, marketplacePropertyId, wrongOrganizationId],
-        ),
-      ).rejects.toMatchObject({ code: "23503" });
-
-      await verifyClient.query(
-        `INSERT INTO finance.commission_rules
-           (id, organization_id, rule_scope, product, commission_type, percentage_rate)
-         VALUES
-           ($1, $2, 'marketplace', 'marketplace', 'percentage', 12.5),
-           ($3, $4, 'marketplace', 'marketplace', 'percentage', 12.5)`,
-        [commissionRuleId, hotelOrganizationId, wrongCommissionRuleId, wrongOrganizationId],
-      );
-      await verifyClient.query(
-        `INSERT INTO marketplace.collaborations
-           (
-             id, creator_profile_id, creator_organization_id, property_id,
-             hotel_organization_id, offer_id, commission_rule_id,
-             initiator_type, lifecycle_status, compensation_type, affiliate_enabled,
-             affiliate_commission_percentage, currency, creator_consent
-           )
-         VALUES (
-           $1, $2, $3, $4, $5, $6, $7,
-           'creator', 'pending', NULL, TRUE, 12.5, 'USD', TRUE
-         )`,
-        [
-          marketplaceCollaborationId,
-          creatorProfileId,
-          creatorOrganizationId,
-          marketplacePropertyId,
-          hotelOrganizationId,
-          offerId,
-          commissionRuleId,
-        ],
-      );
-      await expect(
-        verifyClient.query(
-          `INSERT INTO marketplace.collaborations
-             (
-               creator_profile_id, creator_organization_id, property_id,
-               hotel_organization_id, offer_id, initiator_type,
-               lifecycle_status, compensation_type, affiliate_enabled,
-               affiliate_commission_percentage, currency
-             )
-           VALUES ($1, $2, $3, $4, $5, 'creator', 'pending', NULL, TRUE, 12.5, 'USD')`,
-          [
-            creatorProfileId,
-            creatorOrganizationId,
-            marketplacePropertyId,
-            hotelOrganizationId,
-            offerId,
-          ],
-        ),
-      ).rejects.toMatchObject({ code: "23514" });
-      await expect(
-        verifyClient.query(
-          `INSERT INTO marketplace.collaborations
-             (
-               creator_profile_id, creator_organization_id, property_id,
-               hotel_organization_id, offer_id, initiator_type,
-               lifecycle_status, compensation_type, affiliate_enabled,
-               affiliate_commission_percentage, currency,
-               creator_consent
-             )
-           VALUES ($1, $2, $3, $4, $5, 'creator', 'declined', NULL, TRUE, 12.5, 'USD', TRUE)`,
-          [
-            creatorProfileId,
-            creatorOrganizationId,
-            marketplacePropertyId,
-            wrongOrganizationId,
-            offerId,
-          ],
-        ),
-      ).rejects.toMatchObject({ code: "23503" });
-      await expect(
-        verifyClient.query(
-          `INSERT INTO marketplace.collaborations
-             (
-               creator_profile_id, creator_organization_id, property_id,
-               hotel_organization_id, offer_id, commission_rule_id,
-               initiator_type, lifecycle_status, compensation_type, affiliate_enabled,
-               affiliate_commission_percentage, currency, creator_consent
-             )
-           VALUES (
-             $1, $2, $3, $4, $5, $6,
-             'creator', 'declined', NULL, TRUE, 12.5, 'USD', TRUE
-           )`,
-          [
-            creatorProfileId,
-            creatorOrganizationId,
-            marketplacePropertyId,
-            hotelOrganizationId,
-            offerId,
-            wrongCommissionRuleId,
-          ],
-        ),
-      ).rejects.toMatchObject({ code: "23503" });
-
-      await verifyClient.query(
-        `INSERT INTO marketplace.marketplace_offer_read_model
-           (
-             offer_id, property_id, public_id,
-             canonical_slug, display_name, offer_title, offer_summary,
-             accommodation_type, visibility_status
-           )
-         VALUES (
-           $1, $2, 'marketplace-property-one', 'marketplace-property-one',
-           'Marketplace Property One', 'Creator Stay Offer',
-           'Public collaboration offer.', 'hotel', 'public'
-         )`,
-        [offerId, marketplacePropertyId],
-      );
-      await expect(
-        verifyClient.query(
-          `UPDATE marketplace.marketplace_offer_read_model
-           SET public_compensation_summary = $1::jsonb
-           WHERE offer_id = $2`,
-          [
-            JSON.stringify([
-              {
-                type: "affiliate",
-                terms: { affiliateLink: "https://private.example/affiliate" },
-              },
-            ]),
-            offerId,
-          ],
-        ),
-      ).rejects.toMatchObject({ code: "23514" });
 
       const { rows: distributionTableRows } = await verifyClient.query<{ table_name: string }>(
         `SELECT table_name
@@ -2641,6 +1888,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       expect(distributionTableRows.map((row) => row.table_name)).toEqual([
         "active_public_booking_revision",
         "booking_deep_link_contexts",
+        "booking_web_events",
         "external_api_clients",
         "external_api_usage_events",
         "live_ari_watermarks",
@@ -2662,11 +1910,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         `SELECT table_schema, table_name, column_name
          FROM information_schema.columns
          WHERE column_name = 'readiness_contract_version'
-           AND (
-             (table_schema = 'marketplace' AND table_name = 'hotel_submission_revisions')
-             OR
-             (table_schema = 'distribution' AND table_name = 'public_booking_content_revisions')
-           )
+           AND table_schema = 'distribution'
+           AND table_name = 'public_booking_content_revisions'
          ORDER BY table_schema, table_name`,
       );
 
@@ -2674,11 +1919,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         {
           table_schema: "distribution",
           table_name: "public_booking_content_revisions",
-          column_name: "readiness_contract_version",
-        },
-        {
-          table_schema: "marketplace",
-          table_name: "hotel_submission_revisions",
           column_name: "readiness_contract_version",
         },
       ]);
@@ -3393,23 +2633,38 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(platformTableRows.map((row) => row.table_name)).toEqual([
+        "channex_adoption_approval_records",
+        "channex_adoption_approval_revocations",
+        "channex_adoption_manifest_consumptions",
+        "channex_adoption_rollback_approval_records",
+        "channex_adoption_rollback_approval_revocations",
+        "channex_adoption_rollbacks",
+        "channex_management_worker_operations",
+        "channex_management_worker_properties",
         "dead_letter_events",
         "domain_events",
         "external_webhook_events",
+        "finance_expense_worker_properties",
+        "finance_export_worker_properties",
         "idempotency_keys",
+        "identity_migration_provenance",
         "job_attempts",
         "jobs",
+        "legacy_historical_binding_transitions",
+        "legacy_owner_approval_records",
+        "legacy_owner_approval_revocations",
+        "legacy_owner_bootstrap_receipts",
         "media_objects",
         "media_upload_sessions",
         "media_variants",
         "outbox_events",
+        "pricing_runtime_property_scopes",
         "product_audit_events",
         "production_booking_migration_inferences",
         "production_booking_migration_quarantines",
         "production_cutover_runs",
         "production_cutover_steps",
         "production_finance_migration_dispositions",
-        "production_marketplace_migration_quarantines",
         "production_media_migration_items",
         "production_media_migration_quarantines",
         "production_media_migration_runs",
@@ -4023,7 +3278,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          ORDER BY tc.constraint_name`,
       );
 
-      expect(platformForeignKeySchemas).toHaveLength(0);
+      // Channex adoption and legacy binding evidence point at PMS channel binding claims
+      // (0181, 0186, 0432); these stay.
+      expect(platformForeignKeySchemas).toEqual([
+        {
+          constraint_name: "channex_adoption_manifest_consumptions_claim_id_fkey",
+          referenced_schema: "pms",
+        },
+        {
+          constraint_name: "channex_adoption_rollbacks_claim_id_fkey",
+          referenced_schema: "pms",
+        },
+        {
+          constraint_name: "legacy_historical_binding_transitions_claim_id_fkey",
+          referenced_schema: "pms",
+        },
+      ]);
 
       const { rows: platformAiDefaults } = await verifyClient.query<{
         table_name: string;

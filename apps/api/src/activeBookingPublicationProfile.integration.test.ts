@@ -5,11 +5,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
 import {
-  lockBookingAffiliateArrivalHostScope,
-  readBookingAffiliateArrivalHost,
-} from "./domains/bookingAffiliateArrivalHost.js";
-import { lockAffiliateDestinationSafety } from "./domains/bookingAffiliateDestinationSafetyLock.js";
-import { lockBookingPublication } from "./domains/bookingPublicationLock.js";
+  resolveTargetCheckoutProperty,
+  resolveTargetHistoricalBookingProperty,
+} from "./routes/bookingWebPublic.js";
+import {
+  configureActiveBookingPublicationGate,
+  lockActiveBookingPublication,
+} from "./domains/activeBookingPublicationGate.js";
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -20,8 +22,11 @@ const revisionA = "85858585-8585-4585-8585-858585858504";
 const revisionB = "85858585-8585-4585-8585-858585858505";
 const inactiveRevision = "85858585-8585-4585-8585-858585858506";
 const malformedRevision = "85858585-8585-4585-8585-858585858507";
-const lockProperty = "85858585-8585-4585-8585-858585858508";
+const legacyProperty = "85858585-8585-4585-8585-858585858509";
+const legacyRevision = "85858585-8585-4585-8585-858585858510";
+const brandedRevision = "85858585-8585-4585-8585-858585858511";
 const hostname = "book.alpenrose.example";
+const legacyHostname = "book.legacy-alpenrose.example";
 const fixture = PUBLIC_BOOKABILITY_FIXTURES.find(({ caseId }) => caseId === "custom_domain")!;
 
 describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in PostgreSQL", () => {
@@ -81,75 +86,98 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     });
   });
 
-  it("resolves the affiliate arrival property only from a current canonical host", async () => {
-    await expect(readBookingAffiliateArrivalHost(pool, hostname)).resolves.toEqual({
-      host: hostname,
-      propertyId: propertyA,
-    });
-    await admin.query("DELETE FROM hotel_catalog.property_domains WHERE hostname = $1", [hostname]);
-    await expect(readBookingAffiliateArrivalHost(pool, hostname)).resolves.toBeUndefined();
-    await assignDomain(propertyB);
-    await expect(readBookingAffiliateArrivalHost(pool, hostname)).resolves.toEqual({
-      host: hostname,
-      propertyId: propertyB,
-    });
-    for (const invalid of ["bad%2Fhost", "bad..example", `${hostname}:8443`]) {
-      await expect(readBookingAffiliateArrivalHost(pool, invalid)).resolves.toBeUndefined();
-    }
-  });
-
-  it("holds coordinated domain and publication writers until the arrival transaction ends", async () => {
-    const arrival = new pg.Client({ connectionString: TEST_DATABASE_URL! });
-    const writer = new pg.Client({ connectionString: TEST_DATABASE_URL! });
-    await arrival.connect();
-    await writer.connect();
-    try {
-      await arrival.query(
-        `INSERT INTO hotel_catalog.properties (id,public_id,display_name)
-         VALUES ($1::uuid,'affiliate-host-lock','Affiliate host lock')`,
-        [lockProperty],
-      );
-      await arrival.query("BEGIN");
-      expect(await lockBookingAffiliateArrivalHostScope(arrival as never, lockProperty)).toBe(true);
-
-      await writer.query("BEGIN");
-      const writerPid = (await writer.query<{ pid: number }>("SELECT pg_backend_pid() AS pid"))
-        .rows[0]!.pid;
-      const domainChange = (async () => {
-        await lockAffiliateDestinationSafety(writer as never, lockProperty);
-        await writer.query("DELETE FROM hotel_catalog.property_domains WHERE property_id=$1", [
-          lockProperty,
-        ]);
-      })();
-      await waitForLockWaiter(admin, writerPid);
-      await arrival.query("COMMIT");
-      await domainChange;
-      await writer.query("ROLLBACK");
-
-      await arrival.query("BEGIN");
-      expect(await lockBookingAffiliateArrivalHostScope(arrival as never, lockProperty)).toBe(true);
-      await writer.query("BEGIN");
-      const publicationChange = lockBookingPublication(writer as never, lockProperty);
-      await waitForLockWaiter(admin, writerPid);
-      await arrival.query("COMMIT");
-      await publicationChange;
-      await writer.query("ROLLBACK");
-    } finally {
-      await arrival.query("ROLLBACK").catch(() => undefined);
-      await writer.query("ROLLBACK").catch(() => undefined);
-      await arrival
-        .query("DELETE FROM hotel_catalog.properties WHERE id=$1::uuid", [lockProperty])
-        .catch(() => undefined);
-      await arrival.end();
-      await writer.end();
-    }
-  });
-
   it("resolves Catalog redirects only through the pointed active revision", async () => {
     await expect(repository.findProfileBySlug("former-alpenrose")).resolves.toMatchObject({
       hotel: { propertyId: propertyA, slug: "hotel-alpenrose" },
     });
     await expect(repository.findProfileBySlug("inactive-alpenrose")).resolves.toBeNull();
+  });
+
+  it("finds a hotel's bookings by its former address (VAY-2295)", async () => {
+    for (const slug of ["hotel-alpenrose", "former-alpenrose"]) {
+      await expect(resolveTargetHistoricalBookingProperty(pool, slug)).resolves.toMatchObject({
+        propertyId: propertyA,
+      });
+    }
+    // Another hotel's localized address with the same text never answers for it.
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_slugs
+         (property_id, slug, locale, purpose, status, redirects_to_id)
+       SELECT $1::uuid, 'former-alpenrose', 'de', 'redirect', 'redirected', id
+       FROM hotel_catalog.property_slugs WHERE slug = 'hotel-alpenrose'`,
+      [propertyB],
+    );
+    await expect(
+      resolveTargetHistoricalBookingProperty(pool, "former-alpenrose"),
+    ).resolves.toMatchObject({ propertyId: propertyA });
+    await admin.query(
+      `UPDATE hotel_catalog.property_slugs SET status = 'retired', redirects_to_id = NULL
+       WHERE slug = 'former-alpenrose'`,
+    );
+    await expect(
+      resolveTargetHistoricalBookingProperty(pool, "former-alpenrose"),
+    ).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it("keeps selling under former addresses across an address change (VAY-2295)", async () => {
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET lifecycle_status = 'active' WHERE id = $1::uuid",
+      [propertyA],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+       VALUES ($1::uuid, 'Europe/Vienna')`,
+      [propertyA],
+    );
+    const gate = (slug: string) =>
+      lockActiveBookingPublication(admin, slug, propertyA, { manualPayments: false });
+    const sells = async (slug: string) => {
+      await expect(gate(slug)).resolves.toBe("visible");
+      await expect(resolveTargetCheckoutProperty(pool, slug)).resolves.toMatchObject({
+        propertyId: propertyA,
+      });
+    };
+    const refuses = async (slug: string) => {
+      await expect(gate(slug)).resolves.toBe("hidden");
+      await expect(resolveTargetCheckoutProperty(pool, slug)).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    };
+    configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+    try {
+      await sells("hotel-alpenrose");
+      await sells("former-alpenrose");
+
+      // The address moves on before the page is rebuilt, so the page still carries the old one.
+      await admin.query(
+        "UPDATE hotel_catalog.property_slugs SET status = 'retired' WHERE slug = 'hotel-alpenrose'",
+      );
+      await admin.query(
+        `INSERT INTO hotel_catalog.property_slugs (property_id, slug, purpose, status)
+         VALUES ($1::uuid, 'alpenrose-lodge', 'canonical', 'active')`,
+        [propertyA],
+      );
+      await admin.query(
+        `UPDATE hotel_catalog.property_slugs
+         SET purpose = 'redirect', status = 'redirected',
+             redirects_to_id = (SELECT id FROM hotel_catalog.property_slugs WHERE slug = 'alpenrose-lodge')
+         WHERE slug IN ('hotel-alpenrose', 'former-alpenrose')`,
+      );
+      for (const slug of ["alpenrose-lodge", "hotel-alpenrose", "former-alpenrose"]) {
+        await sells(slug);
+      }
+
+      // A page whose own address was retired sells under none of them.
+      await admin.query(
+        `UPDATE hotel_catalog.property_slugs SET status = 'retired', redirects_to_id = NULL
+         WHERE slug = 'hotel-alpenrose'`,
+      );
+      for (const slug of ["alpenrose-lodge", "former-alpenrose", "hotel-alpenrose"]) {
+        await refuses(slug);
+      }
+    } finally {
+      configureActiveBookingPublicationGate({ servesPublications: false, manualPayments: false });
+    }
   });
 
   it("fails closed when the active revision omits required public content", async () => {
@@ -180,6 +208,128 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     await expect(repository.findProfileBySlug("hotel-alpenrose")).resolves.toBeNull();
   });
 
+  it("keeps a hotel that never published online from its legacy page (VAY-2186)", async () => {
+    await seedLegacyProperty(legacyProperty, "legacy-alpenrose");
+    configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+    try {
+      await expect(repository.findProfileBySlug("legacy-alpenrose")).resolves.toMatchObject({
+        hotel: { propertyId: legacyProperty, slug: "legacy-alpenrose" },
+      });
+      await expect(repository.findProfileByCustomDomain?.(legacyHostname)).resolves.toMatchObject({
+        hotel: { propertyId: legacyProperty },
+      });
+      // Checkout agrees with the page.
+      await expect(resolveTargetCheckoutProperty(pool, "legacy-alpenrose")).resolves.toMatchObject({
+        propertyId: legacyProperty,
+      });
+
+      // Once it publishes, only the publication counts, even one the legacy lookup can't reach: this
+      // one has another slug and names a custom domain the hotel hasn't verified, so it is hidden.
+      await seedRevision(legacyProperty, legacyRevision, "legacy-alpenrose-next", 1, true);
+      await expect(repository.findProfileBySlug("legacy-alpenrose")).resolves.toBeNull();
+      await expect(repository.findProfileByCustomDomain?.(legacyHostname)).resolves.toBeNull();
+      await expect(resolveTargetCheckoutProperty(pool, "legacy-alpenrose")).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    } finally {
+      configureActiveBookingPublicationGate({ servesPublications: false, manualPayments: false });
+    }
+  });
+
+  it("says guests can enter promo codes only while the Promos switch is on (VAY-2200)", async () => {
+    const promoCodes = async () =>
+      (await repository.findProfileBySlug("hotel-alpenrose"))?.hotel.capabilities.promoCodes;
+    // Read live, whatever the published revision said; no booking settings row keeps it on.
+    expect(await promoCodes()).toBe(true);
+    await admin.query(
+      "INSERT INTO booking.booking_settings (property_id, promo_codes_enabled) VALUES ($1::uuid, FALSE)",
+      [propertyA],
+    );
+    expect(await promoCodes()).toBe(false);
+    await admin.query(
+      "UPDATE booking.booking_settings SET promo_codes_enabled = TRUE WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect(await promoCodes()).toBe(true);
+  });
+
+  it("offers guests the display currencies Booking settings add, read live (VAY-2345)", async () => {
+    // A page as setup publishes it: with its header settings, never with display currencies.
+    await seedRevision(propertyA, brandedRevision, "hotel-alpenrose", 3, false, (profile) => {
+      profile.hotel.branding = {
+        showCurrencySelector: true,
+        heroImage: null,
+        heroHeading: null,
+        heroSubtext: null,
+        primaryColor: null,
+        fontPairing: null,
+      };
+    });
+    await admin.query(
+      "UPDATE distribution.active_public_booking_revision SET content_revision_id = $2::uuid WHERE property_id = $1::uuid",
+      [propertyA, brandedRevision],
+    );
+    const branding = async () =>
+      (await repository.findProfileBySlug("hotel-alpenrose"))?.hotel.branding;
+    // So a published page had only the hotel's currency and no currency switcher, whatever
+    // Design Studio showed.
+    expect(await branding()).toMatchObject({ showCurrencySelector: true });
+    expect((await branding())?.displayCurrencies).toBeUndefined();
+    await admin.query(
+      "INSERT INTO booking.booking_settings (property_id, supported_currencies) VALUES ($1::uuid, ARRAY['USD', 'usd', 'EUR'])",
+      [propertyA],
+    );
+    // The hotel's own currency first; the default once; anything malformed left out.
+    expect((await branding())?.displayCurrencies).toEqual(["EUR", "USD"]);
+    await admin.query(
+      "UPDATE booking.booking_settings SET supported_currencies = '{}' WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect((await branding())?.displayCurrencies).toBeUndefined();
+  });
+
+  async function seedLegacyProperty(propertyId: string, slug: string): Promise<void> {
+    await admin.query(
+      `INSERT INTO hotel_catalog.properties (id, public_id, display_name, lifecycle_status)
+       VALUES ($1::uuid, $2, 'Legacy Alpenrose', 'active')`,
+      [propertyId, slug],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_slugs (property_id, slug, purpose, status)
+       VALUES ($1::uuid, $2, 'canonical', 'active')`,
+      [propertyId, slug],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+       VALUES ($1::uuid, 'Europe/Vienna')`,
+      [propertyId],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_domains
+         (property_id, hostname, verification_status, canonical_when_verified, verified_at)
+       VALUES ($1::uuid, $2, 'verified', TRUE, now())`,
+      [propertyId, legacyHostname],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+         (property_id, public_id, display_name, canonical_slug, default_locale,
+          supported_locales, profile_status)
+       VALUES ($1::uuid, $2, 'Legacy Alpenrose', $2, 'en', ARRAY['en'], 'complete')`,
+      [propertyId, slug],
+    );
+    await admin.query(
+      `INSERT INTO distribution.public_hotel_bookability_profiles
+         (property_id, public_id, canonical_slug, canonical_url, booking_base_url,
+          custom_domain_url, timezone, default_currency, supported_currencies, profile_status,
+          freshness_status, public_identity, public_setup_completeness, capabilities)
+       VALUES ($1::uuid, $2, $2, $3 || '/en', $3, $3, 'Europe/Vienna', 'EUR', ARRAY['EUR'],
+               'public', 'fresh',
+               jsonb_build_object('propertyId', $1::text, 'slug', $2::text, 'name', 'Legacy Alpenrose'),
+               '{"status":"ready"}', '{"paymentMethods":["pay_at_property"]}')`,
+      [propertyId, slug, `https://${legacyHostname}`],
+    );
+  }
+
   async function seedProperty(propertyId: string, revisionId: string, slug: string): Promise<void> {
     await admin.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
@@ -195,11 +345,13 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     slug: string,
     revisionNumber: number,
     active: boolean,
+    edit?: (profile: (typeof fixture)["profile"]) => void,
   ): Promise<void> {
     const profile = structuredClone(fixture.profile);
     profile.hotel.propertyId = propertyId;
     profile.hotel.slug = slug;
     profile.hotel.name = `Active ${slug}`;
+    edit?.(profile);
     const sourceManifest = {
       contractVersion: "onboarding-source-manifest.v1",
       propertyId,
@@ -258,18 +410,6 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     );
   }
 });
-
-async function waitForLockWaiter(observer: pg.Client, pid: number): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const result = await observer.query<{ waiting: boolean }>(
-      `SELECT wait_event_type='Lock' AS waiting FROM pg_stat_activity WHERE pid=$1`,
-      [pid],
-    );
-    if (result.rows[0]?.waiting) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("Timed out waiting for affiliate host writer lock");
-}
 
 function publicContent(profile: (typeof fixture)["profile"]) {
   const result = buildBookingPublicContent({

@@ -62,6 +62,11 @@ export function addPropertyDays(date: string, days: number) {
   return new Date(parsed + days * 86_400_000).toISOString().slice(0, 10);
 }
 
+// Revenue and average daily rate are finance cards; desk roles see stays, not takings (VAY-2152).
+export function canSeeDashboardFinance(permissions: readonly string[]) {
+  return permissions.includes("pms.dashboard.finance.read");
+}
+
 export function isDashboardBooking(booking: Booking) {
   return DASHBOARD_BOOKING_STATUSES.has(booking.status);
 }

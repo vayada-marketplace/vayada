@@ -30,7 +30,6 @@ export async function assertChannexUnverifiedAlterationSupport(
        WHERE calendar.property_id=property.id
          AND calendar.calendar_revision=(SELECT max(calendar_revision)
            FROM pms.operating_calendar_revisions WHERE property_id=property.id)
-         AND calendar.property_profile_revision=property.profile_revision
          AND calendar.property_time_zone=location.timezone)
      FOR SHARE OF property,location`,
     [scope.propertyId],

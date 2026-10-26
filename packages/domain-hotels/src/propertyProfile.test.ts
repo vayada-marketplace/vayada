@@ -64,6 +64,26 @@ describe("canonical property profile wire contract", () => {
     expect(parseCreatePropertyProfileRequest(incomplete.profile)).toBeNull();
   });
 
+  it("accepts a hotel without a postal code (VAY-2289)", () => {
+    const withoutPostalCode = {
+      ...response.profile,
+      location: { ...response.profile.location, postalCode: "" },
+    };
+    expect(parseCreatePropertyProfileRequest(withoutPostalCode)).toEqual(withoutPostalCode);
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 2,
+        patch: { location: { postalCode: "" } },
+      }),
+    ).not.toBeNull();
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 2,
+        patch: { location: { streetAddress: "" } },
+      }),
+    ).toBeNull();
+  });
+
   it("parses only the exact nested create profile", () => {
     expect(parseCreatePropertyProfileRequest(response.profile)).toEqual(response.profile);
     expect(
@@ -137,6 +157,35 @@ describe("canonical property profile wire contract", () => {
         expectedProfileRevision: 3,
         patch: { displayName: "Alpenrose" },
         unexpected: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("reads and writes the area and arrival directions, both optional (VAY-2322)", () => {
+    const located = {
+      ...response,
+      profile: {
+        ...response.profile,
+        location: {
+          ...response.profile.location,
+          area: "Altstadt",
+          arrivalDirections: "Blue gate.",
+        },
+      },
+    };
+    expect(parsePropertyProfileResponse(located)).toEqual(located);
+    // Servers from before read back without them.
+    expect(parsePropertyProfileResponse(response)).toEqual(response);
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 3,
+        patch: { location: { area: "", arrivalDirections: "Turn at the temple." } },
+      }),
+    ).not.toBeNull();
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 3,
+        patch: { location: { area: 7 } },
       }),
     ).toBeNull();
   });

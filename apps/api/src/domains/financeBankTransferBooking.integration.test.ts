@@ -117,6 +117,35 @@ it.skipIf(!url)(
         ),
       ).toEqual({ processed: 1, failed: 0 });
       expect(send.mock.calls[0]?.[0]).toMatchObject({ text: expect.stringContaining(secret) });
+      // VAY-2348: the payment reminder carries the bank details too, while the booking is unpaid.
+      await pool.query(
+        "UPDATE booking.guest_bookings SET payment_status='unpaid',balance_amount=100 WHERE id=$1",
+        [bookingId],
+      );
+      await enqueueBookingLifecycleEmailJob(pool, {
+        kind: "payment_reminder",
+        occurredAt: new Date().toISOString(),
+        booking: {
+          propertyId,
+          guestBookingId: bookingId,
+          bookingReference: bookingId,
+          guestEmail: "guest@example.test",
+          paymentMethod: "bank_transfer",
+          checkIn: "2026-10-01",
+          checkOut: "2026-10-02",
+        },
+      });
+      expect(
+        await runBookingEmailDeliveryJobs(
+          url!,
+          { send },
+          { limit: 1, workerId: "bank-test", bankTransfers: operations },
+        ),
+      ).toEqual({ processed: 1, failed: 0 });
+      expect(send.mock.calls[1]?.[0]).toMatchObject({
+        subject: expect.stringContaining("Reminder: your bank transfer is due"),
+        text: expect.stringContaining(secret),
+      });
       for (const table of [
         "booking.guest_bookings",
         "platform.jobs",

@@ -559,6 +559,108 @@ describe("PMS AuthKit session refresh", () => {
   });
 });
 
+describe("PMS team invitations (VAY-2274)", () => {
+  beforeEach(() => {
+    clearAuthData();
+    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "false");
+  });
+
+  afterEach(() => {
+    clearAuthData();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("previews and accepts with the token in the body and stores the joined session", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/auth/invitations/preview") {
+        return jsonResponse({
+          state: "invitation_ready",
+          email: "maria.huber@example.com",
+          accountExists: false,
+          hotelNames: ["Hotel Alpenrose"],
+          inviterName: "Anna Keller",
+          inviteeName: null,
+          roleKey: "front_desk",
+          roleName: null,
+        });
+      }
+      if (url === "/auth/invitations/accept") {
+        return jsonResponse({
+          accessToken: "invitee-token",
+          csrfToken: "csrf-token",
+          organizationId: "org_hotel_group",
+          user: { id: "user_maria", email: "maria.huber@example.com", status: "active" },
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(authService.previewInvitation("invite-token")).resolves.toMatchObject({
+      accountExists: false,
+      hotelNames: ["Hotel Alpenrose"],
+    });
+    await expect(
+      authService.acceptInvitation({
+        invitationToken: "invite-token",
+        password: "long enough password",
+        name: "Maria Huber",
+      }),
+    ).resolves.toMatchObject({ accessToken: "invitee-token" });
+
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        "/auth/invitations/preview",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ invitationToken: "invite-token", surface: "pms-web" }),
+        }),
+      ],
+      [
+        "/auth/invitations/accept",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            invitationToken: "invite-token",
+            password: "long enough password",
+            name: "Maria Huber",
+            surface: "pms-web",
+          }),
+        }),
+      ],
+    ]);
+    expect(getAuthBearerToken()).toBe("invitee-token");
+  });
+
+  it("reports why an invitation link no longer works", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(
+          {
+            state: "invitation_unavailable",
+            reason: "expired",
+            message: "This invitation link no longer works.",
+          },
+          410,
+        ),
+      ),
+    );
+
+    const failure = await authService.previewInvitation("old-token").catch((error) => error);
+
+    expect(failure).toBeInstanceOf(AuthStateError);
+    expect(failure).toMatchObject({
+      status: 410,
+      state: "invitation_unavailable",
+      reason: "expired",
+    });
+  });
+});
+
 function mockBrowserStorage(): void {
   const storage = memoryStorage();
   vi.stubGlobal("localStorage", storage);

@@ -20,19 +20,63 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const inventoryText = readFileSync(new URL("../source-inventory.tsv", import.meta.url), "utf8");
 const inventory = parseSourceInventory(inventoryText);
 
-const migrationDirectories: Record<SourceDatabase, string> = {
+// VAY-2259: the old Marketplace API's source (apps/marketplace-api) is deleted with the
+// Marketplace, but its production database stays a migration source until VAY-1362/1363
+// retire it. These are the objects, writers, prefixes and media references the scanners
+// below found in that source on its last main (897d64c6e); they stay its contract.
+const FROZEN_MARKETPLACE_SOURCE = {
+  migrationObjects: [
+    "extension:uuid-ossp",
+    "sequence:public.schema_migrations_id_seq",
+    "table:public.chat_messages",
+    "table:public.collaboration_deliverables",
+    "table:public.collaborations",
+    "table:public.consent_history",
+    "table:public.cookie_consent",
+    "table:public.creator_platforms",
+    "table:public.creator_ratings",
+    "table:public.creators",
+    "table:public.email_verification_codes",
+    "table:public.email_verification_tokens",
+    "table:public.external_collaborations",
+    "table:public.gdpr_requests",
+    "table:public.hotel_listings",
+    "table:public.hotel_profiles",
+    "table:public.invite_codes",
+    "table:public.listing_collaboration_offerings",
+    "table:public.listing_creator_requirements",
+    "table:public.newsletter_preferences",
+    "table:public.notifications",
+    "table:public.password_reset_tokens",
+    "table:public.schema_migrations",
+    "table:public.trips",
+    "table:public.users",
+  ],
+  manualWriters: [
+    "marketplace:scripts/backfill_listing_status.py",
+    "marketplace:scripts/run_gdpr_migrations.py",
+  ],
+  objectPrefixes: ["chat", "client-supplied:*", "creators", "hotels", "images", "listings"],
+  hasObjectStore: true,
+  mediaReferences: [
+    "marketplace:public.chat_messages.content",
+    "marketplace:public.creators.profile_picture",
+    "marketplace:public.hotel_listings.images",
+    "marketplace:public.hotel_profiles.picture",
+    "marketplace:public.users.avatar",
+  ],
+};
+
+type ScannedSourceDatabase = Exclude<SourceDatabase, "marketplace">;
+
+const migrationDirectories: Record<ScannedSourceDatabase, string> = {
   auth: "auth-db/migrations",
   booking: "apps/booking-api/migrations",
-  marketplace: "apps/marketplace-api/migrations",
   pms: "apps/pms-api/migrations",
 };
-const migrationRuntimeFiles: Record<SourceDatabase, string[]> = {
+const migrationRuntimeFiles: Record<ScannedSourceDatabase, string[]> = {
   auth: ["auth-db/scripts/run_migrations.py"],
   booking: ["apps/booking-api/scripts/run_migrations.py"],
-  marketplace: [
-    "apps/marketplace-api/scripts/run_migrations.py",
-    "apps/marketplace-api/scripts/run_gdpr_migrations.py",
-  ],
   pms: ["apps/pms-api/scripts/run_migrations.py", "apps/pms-api/app/main.py"],
 };
 
@@ -40,7 +84,7 @@ function readFiles(...paths: string[]): string {
   return paths.map((path) => readFileSync(join(repoRoot, path), "utf8")).join("\n");
 }
 
-function readMigrationSql(sourceDatabase: SourceDatabase): string {
+function readMigrationSql(sourceDatabase: ScannedSourceDatabase): string {
   const directory = join(repoRoot, migrationDirectories[sourceDatabase]);
   return (
     readdirSync(directory)
@@ -128,9 +172,6 @@ function discoverMediaReferences(sourceDatabase: SourceDatabase, source: string)
 
   // These fields carry media identifiers conditionally, so their column names alone
   // do not reveal their role to the mechanical scanner above.
-  if (sourceDatabase === "marketplace" && /message_type[\s\S]*?'image'/i.test(sql)) {
-    references.add("marketplace:public.chat_messages.content");
-  }
   if (sourceDatabase === "pms" && /CREATE\s+TABLE[\s\S]*?platform\.media_objects/i.test(sql)) {
     references.add("pms:platform.media_objects.bucket");
   }
@@ -177,25 +218,33 @@ describe("legacy production source inventory", () => {
     }
   });
 
-  it.each(Object.entries(migrationDirectories) as Array<[SourceDatabase, string]>)(
+  const contractedMigrationObjects = (sourceDatabase: SourceDatabase) =>
+    inventory
+      .filter(
+        (entry) =>
+          entry.sourceDatabase === sourceDatabase &&
+          ["extension", "materialized_view", "sequence", "table", "view"].includes(
+            entry.objectType,
+          ),
+      )
+      .map(({ objectType, objectName }) => `${objectType}:${objectName}`)
+      .sort();
+
+  it.each(Object.entries(migrationDirectories) as Array<[ScannedSourceDatabase, string]>)(
     "covers every %s source migration object",
     (sourceDatabase, relativeDirectory) => {
       expect(relativeDirectory).toBe(migrationDirectories[sourceDatabase]);
-      const migrationSql = readMigrationSql(sourceDatabase);
-      const contracted = inventory
-        .filter(
-          (entry) =>
-            entry.sourceDatabase === sourceDatabase &&
-            ["extension", "materialized_view", "sequence", "table", "view"].includes(
-              entry.objectType,
-            ),
-        )
-        .map(({ objectType, objectName }) => `${objectType}:${objectName}`)
-        .sort();
-
-      expect(contracted).toEqual(discoverMigrationObjects(migrationSql));
+      expect(contractedMigrationObjects(sourceDatabase)).toEqual(
+        discoverMigrationObjects(readMigrationSql(sourceDatabase)),
+      );
     },
   );
+
+  it("covers every object of the retired marketplace source", () => {
+    expect(contractedMigrationObjects("marketplace")).toEqual(
+      FROZEN_MARKETPLACE_SOURCE.migrationObjects,
+    );
+  });
 
   it("covers every scheduled, background, and manual legacy writer", () => {
     const scheduler = readFiles("apps/pms-api/app/services/scheduler.py");
@@ -219,8 +268,8 @@ describe("legacy production source inventory", () => {
       ),
     );
     expect(scheduler).toContain("async def poll_channex_messages");
-    const manualWriters = ["pms:poll_channex_messages"];
-    for (const sourceDatabase of ["booking", "marketplace", "pms"] as const) {
+    const manualWriters = ["pms:poll_channex_messages", ...FROZEN_MARKETPLACE_SOURCE.manualWriters];
+    for (const sourceDatabase of ["booking", "pms"] as const) {
       for (const filename of readdirSync(join(repoRoot, `apps/${sourceDatabase}-api/scripts`))) {
         if (filename.endsWith(".py") && filename !== "run_migrations.py") {
           manualWriters.push(`${sourceDatabase}:scripts/${filename}`);
@@ -268,14 +317,15 @@ describe("legacy production source inventory", () => {
   });
 
   it("covers every managed legacy object-store prefix", () => {
-    const sources: Array<[SourceDatabase, string]> = [
-      [
-        "marketplace",
-        readFiles(
-          "apps/marketplace-api/app/routers/upload.py",
-          "apps/marketplace-api/app/routers/hotels.py",
-        ),
-      ],
+    expect(
+      inventory
+        .filter(
+          (entry) => entry.sourceDatabase === "marketplace" && entry.objectType === "object_prefix",
+        )
+        .map((entry) => entry.objectName)
+        .sort(),
+    ).toEqual(FROZEN_MARKETPLACE_SOURCE.objectPrefixes);
+    const sources: Array<[ScannedSourceDatabase, string]> = [
       [
         "pms",
         readFiles(
@@ -309,7 +359,11 @@ describe("legacy production source inventory", () => {
     }
 
     const objectStores = ["booking", "marketplace", "pms"]
-      .filter((source) => existsSync(join(repoRoot, `apps/${source}-api/app/s3_service.py`)))
+      .filter((source) =>
+        source === "marketplace"
+          ? FROZEN_MARKETPLACE_SOURCE.hasObjectStore
+          : existsSync(join(repoRoot, `apps/${source}-api/app/s3_service.py`)),
+      )
       .map((source) => `${source}:S3_BUCKET_NAME`);
     expect(
       inventory
@@ -317,8 +371,8 @@ describe("legacy production source inventory", () => {
         .map((entry) => `${entry.sourceDatabase}:${entry.objectName}`),
     ).toEqual(objectStores);
 
-    const discoveredReferences = new Set<string>();
-    for (const sourceDatabase of Object.keys(migrationDirectories) as SourceDatabase[]) {
+    const discoveredReferences = new Set<string>(FROZEN_MARKETPLACE_SOURCE.mediaReferences);
+    for (const sourceDatabase of Object.keys(migrationDirectories) as ScannedSourceDatabase[]) {
       for (const reference of discoverMediaReferences(
         sourceDatabase,
         readMigrationSql(sourceDatabase),

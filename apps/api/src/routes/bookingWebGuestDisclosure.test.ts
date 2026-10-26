@@ -2,7 +2,6 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { lockCurrentQuoteGuestDisclosure } from "../domains/currentQuoteGuestDisclosure.js";
-import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
   PricingAcceptanceError,
   writePricingAcceptance,
@@ -19,14 +18,12 @@ import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js"
 vi.mock("../domains/currentQuoteGuestDisclosure.js", () => ({
   lockCurrentQuoteGuestDisclosure: vi.fn(),
 }));
-vi.mock("../domains/bookingAffiliateContextForQuote.js", () => ({
-  readBookingAffiliateContextForQuote: vi.fn(),
-}));
 vi.mock("../domains/pricingAcceptanceWriter.js", () => ({
   PricingAcceptanceError: class PricingAcceptanceError extends Error {
     constructor(
-      readonly code: "conflict" | "storage" | "unexpected",
+      readonly code: "conflict" | "storage" | "unexpected" | "sold_out",
       _cause?: unknown,
+      readonly roomTypeIds: readonly string[] = [],
     ) {
       super("Pricing acceptance failed");
     }
@@ -81,7 +78,7 @@ afterEach(async () => {
   await app?.close();
 });
 const stripeProvider = { createPaymentIntent: vi.fn() } as never;
-async function mount(available = true, acceptance = false, affiliateBinding = false, card = false) {
+async function mount(available = true, acceptance = false, card = false, request = false) {
   app = Fastify({ logger: false });
   const checkoutAdapter = available
     ? createTargetBookingWebCheckoutAdapter({
@@ -90,6 +87,7 @@ async function mount(available = true, acceptance = false, affiliateBinding = fa
         inventoryReservationPort: {} as never,
         replacementPricingAcceptanceEnabled: acceptance,
         replacementPricingCardAcceptanceEnabled: card,
+        replacementPricingRequestAcceptanceEnabled: request,
         stripePaymentProvider: stripeProvider,
         pool: { query, connect: async () => ({ query, release }), end: async () => {} } as never,
       })
@@ -98,7 +96,6 @@ async function mount(available = true, acceptance = false, affiliateBinding = fa
     prefix: "/api/booking-web",
     checkoutAdapter,
     profileRepository: {} as never,
-    affiliateContextBindingEnabled: affiliateBinding,
   });
 }
 const get = (quoteId = id) =>
@@ -192,6 +189,7 @@ it("binds the path and idempotency key before invoking enabled acceptance", asyn
     expect.anything(),
     { slug: "hotel", command: payload },
     undefined,
+    false,
     undefined,
   );
   for (const [quoteId, requestId] of [
@@ -214,7 +212,7 @@ it("passes the Stripe provider to the writer only when card acceptance is switch
   const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
   for (const card of [false, true]) {
     vi.mocked(writePricingAcceptance).mockClear();
-    await mount(true, true, false, card);
+    await mount(true, true, card);
     const response = await app.inject({
       method: "POST",
       url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
@@ -225,11 +223,76 @@ it("passes the Stripe provider to the writer only when card acceptance is switch
     expect(writePricingAcceptance).toHaveBeenCalledWith(
       expect.anything(),
       { slug: "hotel", command: payload },
+      card ? { provider: stripeProvider, deposits: false } : undefined,
+      false,
       undefined,
-      card ? { provider: stripeProvider } : undefined,
     );
     await app.close();
   }
+});
+
+it("forwards the request switch and answers a refused request with 404", async () => {
+  const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
+  const accept = () =>
+    app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+      headers: { "idempotency-key": "accept-1" },
+      payload,
+    });
+  vi.mocked(writePricingAcceptance).mockResolvedValue({ kind: "requested" } as never);
+  await mount(true, true, false, true);
+  expect((await accept()).statusCode).toBe(200);
+  expect(writePricingAcceptance).toHaveBeenLastCalledWith(
+    expect.anything(),
+    { slug: "hotel", command: payload },
+    undefined,
+    true,
+    undefined,
+  );
+  await app.close();
+  vi.mocked(writePricingAcceptance).mockRejectedValue(
+    new PricingAcceptanceError("request_unavailable", null),
+  );
+  await mount(true, true);
+  const refused = await accept();
+  expect(refused.statusCode).toBe(404);
+  expect(refused.json()).toMatchObject({ code: "REQUEST_ACCEPTANCE_UNAVAILABLE" });
+});
+
+// VAY-2320: the guest's page can say which room went and keep the others.
+it("answers a room sold out at the last step with 409 ROOMS_SOLD_OUT naming the room types", async () => {
+  const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
+  const roomTypeId = "44444444-4444-4444-8444-444444444444";
+  vi.mocked(writePricingAcceptance).mockRejectedValue(
+    new PricingAcceptanceError("sold_out", null, [roomTypeId]),
+  );
+  await mount(true, true);
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+    headers: { "idempotency-key": "accept-1" },
+    payload,
+  });
+  expect(response.statusCode).toBe(409);
+  expect(response.headers["cache-control"]).toBe("no-store");
+  expect(response.json()).toEqual({
+    statusCode: 409,
+    error: "Conflict",
+    code: "ROOMS_SOLD_OUT",
+    message: "A room you chose is no longer available for these dates.",
+    roomTypeIds: [roomTypeId],
+  });
+  // Other conflicts keep the plain answer.
+  vi.mocked(writePricingAcceptance).mockRejectedValue(new PricingAcceptanceError("conflict", null));
+  const conflict = await app.inject({
+    method: "POST",
+    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+    headers: { "idempotency-key": "accept-1" },
+    payload,
+  });
+  expect(conflict.statusCode).toBe(409);
+  expect(conflict.json()).not.toHaveProperty("roomTypeIds");
 });
 
 it("completes a card payment only when card acceptance is switched on", async () => {
@@ -239,12 +302,12 @@ it("completes a card payment only when card acceptance is switched on", async ()
       url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept/payment`,
       headers: { "idempotency-key": "accept-1" },
     });
-  await mount(true, true, false, false);
+  await mount(true, true, false);
   expect((await pay()).statusCode).toBe(404);
   expect(completePricingCardPayment).not.toHaveBeenCalled();
   await app.close();
 
-  await mount(true, true, false, true);
+  await mount(true, true, true);
   vi.mocked(completePricingCardPayment).mockResolvedValueOnce({ kind: "accepted" } as never);
   const paid = await pay();
   expect(paid.statusCode).toBe(200);
@@ -266,108 +329,6 @@ it("completes a card payment only when card acceptance is switched on", async ()
   expect((await pay()).statusCode).toBe(404);
 });
 
-it("takes a valid affiliate handle only from the cookie and verifies it before the writer", async () => {
-  const contextId = "33333333-3333-4333-8333-333333333333";
-  const forged = "44444444-4444-4444-8444-444444444444";
-  vi.mocked(readBookingAffiliateContextForQuote).mockResolvedValue(contextId);
-  vi.mocked(writePricingAcceptance).mockResolvedValue({ kind: "accepted" } as never);
-  await mount(true, true, true);
-  const payload = {
-    version: "booking-quote-acceptance.v1",
-    requestId: "accept-affiliate",
-    quoteId: id,
-    affiliateContextId: forged,
-  };
-  const response = await app.inject({
-    method: "POST",
-    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
-    headers: {
-      "idempotency-key": "accept-affiliate",
-      cookie: `__Host-vayada_affiliate_context=${contextId}`,
-    },
-    payload,
-  });
-  expect(response.statusCode).toBe(200);
-  expect(readBookingAffiliateContextForQuote).toHaveBeenCalledWith(
-    expect.anything(),
-    "hotel",
-    contextId,
-  );
-  expect(writePricingAcceptance).toHaveBeenCalledWith(
-    expect.anything(),
-    { slug: "hotel", command: payload },
-    { affiliateContextId: contextId },
-    undefined,
-  );
-});
-
-it("keeps affiliate cookie binding off by default even when a cookie is supplied", async () => {
-  vi.mocked(writePricingAcceptance).mockResolvedValue({ kind: "accepted" } as never);
-  await mount(true, true);
-  const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
-  const response = await app.inject({
-    method: "POST",
-    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
-    headers: {
-      "idempotency-key": "accept-1",
-      cookie: "__Host-vayada_affiliate_context=33333333-3333-4333-8333-333333333333",
-    },
-    payload,
-  });
-  expect(response.statusCode).toBe(200);
-  expect(readBookingAffiliateContextForQuote).not.toHaveBeenCalled();
-  expect(writePricingAcceptance).toHaveBeenCalledWith(
-    expect.anything(),
-    { slug: "hotel", command: payload },
-    undefined,
-    undefined,
-  );
-});
-
-it("ignores duplicate, invalid, or unavailable affiliate cookies without blocking acceptance", async () => {
-  vi.mocked(writePricingAcceptance).mockResolvedValue({ kind: "accepted" } as never);
-  await mount(true, true, true);
-  const contextId = "33333333-3333-4333-8333-333333333333";
-  const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
-  for (const cookie of [
-    `__Host-vayada_affiliate_context=${contextId}; __Host-vayada_affiliate_context=${contextId}`,
-    "__Host-vayada_affiliate_context=not-a-uuid",
-  ]) {
-    const response = await app.inject({
-      method: "POST",
-      url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
-      headers: { "idempotency-key": "accept-1", cookie },
-      payload,
-    });
-    expect(response.statusCode).toBe(200);
-  }
-  expect(readBookingAffiliateContextForQuote).not.toHaveBeenCalled();
-  expect(writePricingAcceptance).toHaveBeenCalledWith(
-    expect.anything(),
-    { slug: "hotel", command: payload },
-    undefined,
-    undefined,
-  );
-  vi.mocked(readBookingAffiliateContextForQuote).mockRejectedValue(
-    new Error("storage unavailable"),
-  );
-  const fallback = await app.inject({
-    method: "POST",
-    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
-    headers: {
-      "idempotency-key": "accept-1",
-      cookie: `__Host-vayada_affiliate_context=${contextId}`,
-    },
-    payload,
-  });
-  expect(fallback.statusCode).toBe(200);
-  expect(writePricingAcceptance).toHaveBeenLastCalledWith(
-    expect.anything(),
-    { slug: "hotel", command: payload },
-    undefined,
-    undefined,
-  );
-});
 it.each([
   ["conflict", 409],
   ["storage", 503],

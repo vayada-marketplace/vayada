@@ -116,7 +116,6 @@ Examples:
 
 - `email.booking-confirmed:booking:book_123:guest-confirmation:v1`
 - `channex.push-availability:room_type:rt_123:2026-09-12_2026-09-15:v1`
-- `notification.affiliate-application:affiliate:aff_123:hotel-owner:v1`
 
 Rules:
 
@@ -187,14 +186,13 @@ must still write event, job, attempt, idempotency, and audit records.
 
 Candidate priority for implementation tickets:
 
-| Candidate                              | Current legacy shape                                                     | First target job(s)                                                          | Why first                                   |
-| -------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------- |
-| Booking status change side effects     | `asyncio.create_task` in `apps/pms-api/app/routers/admin_bookings.py`    | `email.booking-status-changed`, `channex.push-availability`                  | High customer impact and duplicate-risk.    |
-| Room block availability sync           | `asyncio.create_task` in `apps/pms-api/app/routers/admin_room_blocks.py` | `channex.push-ari`                                                           | Clear idempotency window by room/date.      |
-| Affiliate registration notifications   | `asyncio.create_task` in `apps/pms-api/app/routers/affiliates.py`        | `email.affiliate-application-received`, `notification.affiliate-application` | Email fan-out currently has no retry/audit. |
-| Listing image import                   | Retired with PMS listing import                                          | None                                                                         | Route and background work no longer exist.  |
-| Payout/payment reconciliation          | Synchronous/manual provider polling routes                               | `finance.reconcile-payout`, `payment.reconcile-status`                       | Needs strict audit and idempotency.         |
-| Cancellation/change request follow-ups | Mixed inline updates and background notifications                        | `booking.cancellation-follow-up`, `booking.change-request-follow-up`         | Multi-step side effects need visibility.    |
+| Candidate                              | Current legacy shape                                                     | First target job(s)                                                  | Why first                                  |
+| -------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------ |
+| Booking status change side effects     | `asyncio.create_task` in `apps/pms-api/app/routers/admin_bookings.py`    | `email.booking-status-changed`, `channex.push-availability`          | High customer impact and duplicate-risk.   |
+| Room block availability sync           | `asyncio.create_task` in `apps/pms-api/app/routers/admin_room_blocks.py` | `channex.push-ari`                                                   | Clear idempotency window by room/date.     |
+| Listing image import                   | Retired with PMS listing import                                          | None                                                                 | Route and background work no longer exist. |
+| Payout/payment reconciliation          | Synchronous/manual provider polling routes                               | `finance.reconcile-payout`, `payment.reconcile-status`               | Needs strict audit and idempotency.        |
+| Cancellation/change request follow-ups | Mixed inline updates and background notifications                        | `booking.cancellation-follow-up`, `booking.change-request-follow-up` | Multi-step side effects need visibility.   |
 
 Recommended first implementation ticket:
 

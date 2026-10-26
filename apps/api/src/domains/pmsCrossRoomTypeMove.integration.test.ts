@@ -1,6 +1,7 @@
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
 import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
@@ -8,6 +9,7 @@ import {
   createTargetPmsOperationsReadRepository,
   type PmsOperationsReadRepository,
 } from "./pmsOperationsReadModel.js";
+import { assignFirstFreeRoomUnits } from "./pmsRoomUnitAssignment.js";
 
 const DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const id = (suffix: number) => `13390000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -736,6 +738,184 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
       DELETE FROM pms.linked_inventory_groups WHERE property_id='${I.property}';
       DELETE FROM hotel_catalog.property_locations WHERE property_id='${I.property}';
       DELETE FROM hotel_catalog.properties WHERE id='${I.property}';
+    `);
+  }
+});
+
+// VAY-2361: a booking-page room takes the first free unit of its type by the Assign button's rule,
+// so these cases share that rule's suite.
+const unitId = (suffix: number) => `23610000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
+const U = {
+  property: unitId(1),
+  organization: unitId(2),
+  user: unitId(3),
+  type: unitId(10),
+  first: unitId(11),
+  second: unitId(12),
+  third: unitId(13),
+  booking: unitId(20),
+};
+
+describe.skipIf(!DATABASE_URL)("PostgreSQL first free unit for booked rooms", () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL ?? "postgresql://disabled" });
+  let others = 0;
+
+  // prettier-ignore
+  beforeAll(async () => { const database = new URL(DATABASE_URL!).pathname.replace(/^\//, ""); if (!/(^|[_-])(test|verify)([_-]|$)/i.test(database)) throw new Error("Unsafe test database"); });
+  beforeEach(async () => {
+    await cleanup();
+    await seed();
+  });
+  // prettier-ignore
+  afterAll(async () => { await cleanup(); await pool.end(); });
+
+  it("takes the first unit in calendar order, and a second room the next one", async () => {
+    await addRoom(2);
+    await expect(assign()).resolves.toEqual([
+      { position: 1, status: "assigned", room: "101" },
+      { position: 2, status: "assigned", room: "102" },
+    ]);
+  });
+
+  it("skips a unit another booking holds on an overlapping night", async () => {
+    await other(U.first, "2026-09-03", "2026-09-05");
+    await expect(assign()).resolves.toEqual([{ position: 1, status: "assigned", room: "102" }]);
+  });
+
+  it("takes a unit whose guest leaves on the arrival day", async () => {
+    await other(U.first, "2026-09-01", "2026-09-02");
+    await expect(assign()).resolves.toEqual([{ position: 1, status: "assigned", room: "101" }]);
+  });
+
+  it("skips a unit blocked on one of the nights", async () => {
+    await fixture(`INSERT INTO pms.room_blocks (property_id,room_type_id,room_id,starts_on,ends_on,reason)
+      VALUES ('${U.property}','${U.type}','${U.first}','2026-09-03','2026-09-03','Repairs');`);
+    await expect(assign()).resolves.toEqual([{ position: 1, status: "assigned", room: "102" }]);
+  });
+
+  it("leaves the room unassigned when no unit is free", async () => {
+    // Two units hold other stays and the third is blocked; occupancy stays within the 3 units.
+    await other(U.first, "2026-09-03", "2026-09-04");
+    await other(U.second, "2026-09-02", "2026-09-03");
+    await fixture(`INSERT INTO pms.room_blocks (property_id,room_type_id,room_id,starts_on,ends_on,reason)
+      VALUES ('${U.property}','${U.type}','${U.third}','2026-09-02','2026-09-02','Repairs');`);
+    await expect(assign()).resolves.toEqual([{ position: 1, status: "pending", room: null }]);
+  });
+
+  it("leaves the room unassigned on a closed night", async () => {
+    await fixture(`UPDATE pms.inventory_days SET status='closed',available_count=0
+      WHERE property_id='${U.property}' AND stay_date='2026-09-03';`);
+    await expect(assign()).resolves.toEqual([{ position: 1, status: "pending", room: null }]);
+  });
+
+  async function seed() {
+    others = 0;
+    await fixture(`
+      INSERT INTO hotel_catalog.properties (id,public_id,display_name)
+        VALUES ('${U.property}','vay-2361-units','VAY-2361 units');
+      INSERT INTO pms.room_types (id,property_id,name,occupancy_limits,base_rate_amount,currency)
+        VALUES ('${U.type}','${U.property}','Double','{"total":2}',100,'EUR');
+      INSERT INTO pms.rooms (id,property_id,room_type_id,room_number,operational_label_status,sort_order)
+        VALUES ('${U.third}','${U.property}','${U.type}','103','verified',2),
+               ('${U.first}','${U.property}','${U.type}','101','verified',0),
+               ('${U.second}','${U.property}','${U.type}','102','verified',1);
+      INSERT INTO pms.operating_calendar_revisions
+        (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,
+         property_time_zone,schedule_mode,recurring_period_count,room_binding_count,
+         default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,
+         created_by_user_id,created_at,updated_at)
+        VALUES ('${U.organization}','${U.property}',1,'pms-operating-calendar.v1',1,'Europe/Berlin',
+          'year_round',0,1,1,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),
+          '${U.user}','${acceptedAt}','${acceptedAt}');
+      INSERT INTO pms.operating_calendar_room_bindings
+        (property_id,calendar_revision,room_type_id,source_room_facts_revision,
+         source_room_units_revision,physical_capacity_count,starting_sellable_limit_count)
+        VALUES ('${U.property}',1,'${U.type}',1,1,3,3);
+      INSERT INTO pms.inventory_days
+        (property_id,room_type_id,stay_date,total_count,assigned_count,blocked_count,
+         available_count,status,calendar_revision,inventory_revision,
+         generated_sellable_limit_count,effective_sellable_limit_count,
+         generated_source_revision,channel_source_revision,manual_source_revision,
+         block_source_revision,booking_source_revision,linked_source_revision,linked_stop_sell)
+      SELECT '${U.property}','${U.type}',day,3,0,0,3,'open',1,1,3,3,1,0,0,0,1,0,false
+      FROM generate_series('2026-09-01'::date,'2026-09-06','1 day') day;
+      INSERT INTO booking.guest_bookings
+        (id,property_id,public_reference,source_system,source_booking_id,lifecycle_status,
+         check_in,check_out,room_count,currency,booking_metadata)
+        VALUES ('${U.booking}','${U.property}','UNIT-1','pms','unit-source','confirmed',
+          '2026-09-02','2026-09-04',1,'EUR','{}');
+    `);
+    await addRoom(1);
+  }
+
+  async function addRoom(position: number) {
+    await fixture(`INSERT INTO pms.operational_booking_assignments
+      (property_id,guest_booking_id,room_type_id,position,assignment_status,source,
+       stay_evidence_kind,check_in,check_out,adults,children)
+      VALUES ('${U.property}','${U.booking}','${U.type}',${position},'pending','manual','exact',
+        '2026-09-02','2026-09-04',2,0);
+      UPDATE booking.guest_bookings SET room_count=${position} WHERE id='${U.booking}';`);
+  }
+
+  async function other(roomId: string, checkIn: string, checkOut: string) {
+    const booking = unitId(100 + ++others);
+    await fixture(`INSERT INTO booking.guest_bookings
+        (id,property_id,public_reference,source_system,source_booking_id,lifecycle_status,
+         check_in,check_out,room_count,currency,booking_metadata)
+      VALUES ('${booking}','${U.property}','UNIT-OTHER-${others}','pms','other-${others}',
+        'confirmed','${checkIn}','${checkOut}',1,'EUR','{}');
+      INSERT INTO pms.operational_booking_assignments
+        (property_id,guest_booking_id,room_type_id,room_id,position,assignment_status,source,
+         stay_evidence_kind,check_in,check_out,adults,children)
+      VALUES ('${U.property}','${booking}','${U.type}','${roomId}',1,'assigned','manual','exact',
+        '${checkIn}','${checkOut}',1,0);`);
+  }
+
+  async function assign() {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await reconcilePmsOccupiedInventory(
+        client,
+        U.property,
+        [{ roomTypeId: U.type, checkIn: "2026-09-01", checkOut: "2026-09-07" }],
+        acceptedAt,
+      );
+      await lockPmsInventoryMutationScope(client, U.property);
+      await assignFirstFreeRoomUnits(client, { propertyId: U.property, guestBookingId: U.booking });
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    const result = await pool.query(
+      `SELECT assignment.position,assignment.assignment_status AS status,room.room_number AS room
+       FROM pms.operational_booking_assignments assignment
+       LEFT JOIN pms.rooms room ON room.id=assignment.room_id
+       WHERE assignment.guest_booking_id=$1 ORDER BY assignment.position`,
+      [U.booking],
+    );
+    return result.rows;
+  }
+
+  // prettier-ignore
+  async function fixture(sql: string) { const client = await pool.connect(); try { await client.query("BEGIN"); await client.query("SET LOCAL session_replication_role=replica"); await client.query(sql); await client.query("COMMIT"); } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); } }
+
+  async function cleanup() {
+    await fixture(`
+      DELETE FROM platform.outbox_events WHERE property_id='${U.property}';
+      DELETE FROM platform.domain_events WHERE property_id='${U.property}';
+      DELETE FROM pms.room_blocks WHERE property_id='${U.property}';
+      DELETE FROM pms.operational_booking_assignments WHERE property_id='${U.property}';
+      DELETE FROM booking.guest_bookings WHERE property_id='${U.property}';
+      DELETE FROM pms.inventory_days WHERE property_id='${U.property}';
+      DELETE FROM pms.operating_calendar_room_bindings WHERE property_id='${U.property}';
+      DELETE FROM pms.operating_calendar_revisions WHERE property_id='${U.property}';
+      DELETE FROM pms.rooms WHERE property_id='${U.property}';
+      DELETE FROM pms.room_types WHERE property_id='${U.property}';
+      DELETE FROM hotel_catalog.properties WHERE id='${U.property}';
     `);
   }
 });

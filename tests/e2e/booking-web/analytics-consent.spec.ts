@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
 test("accepts, reopens and withdraws optional analytics without blocking rooms", async ({
   page,
@@ -17,6 +18,14 @@ test("accepts, reopens and withdraws optional analytics without blocking rooms",
   await expect(
     page.getByRole("heading", { name: "Optional analytics", exact: true }),
   ).toBeVisible();
+  // VAY-2213: the panel names the hotel as responsible and links the privacy notice.
+  await expect(
+    page.getByText("We, Hotel Alpenrose, are responsible for this data.", { exact: false }),
+  ).toBeVisible();
+  const notice = page.getByRole("link", { name: "Privacy notice", exact: true });
+  await expect(notice).toHaveAttribute("href", "https://vayada.com/privacy#booking-guests");
+  await expect(notice).toHaveAttribute("target", "_blank");
+  await expect(notice).toHaveAttribute("rel", "noopener noreferrer");
   expect(events).toEqual([]);
   expect(await identifiers()).toEqual([]);
   await page.keyboard.press("Escape");
@@ -32,7 +41,7 @@ test("accepts, reopens and withdraws optional analytics without blocking rooms",
   await expect(page.getByRole("button", { name: "Privacy choices", exact: true })).toBeFocused();
   await page.reload();
   await expect.poll(() => events.length).toBeGreaterThan(0);
-  expect(events[0]).toMatchObject({ analyticsConsent: true, consentVersion: 1 });
+  expect(events[0]).toMatchObject({ analyticsConsent: true, consentVersion: CONSENT });
   expect(await identifiers()).toEqual([`vayada_sid:${SEEDED_BOOKING_SLUG}`]);
   await page.getByRole("button", { name: "Privacy choices", exact: true }).click();
   await page.getByRole("button", { name: "Reject analytics", exact: true }).click();
@@ -42,4 +51,40 @@ test("accepts, reopens and withdraws optional analytics without blocking rooms",
   await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
   expect(events.length).toBe(count);
   expect(await identifiers()).toEqual([]);
+});
+
+test("asks again when the saved choice was made under the earlier consent text", async ({
+  page,
+}) => {
+  await mockBookingApis(page);
+  const events: unknown[] = [];
+  await page.route("**/api/booking-web/events", (route) => {
+    events.push(route.request().postDataJSON());
+    return route.fulfill({ status: 204 });
+  });
+  // A version-1 "Allow" and the analytics session it started.
+  await page.addInitScript((slug) => {
+    if (sessionStorage.getItem("vay2213-seeded")) return;
+    sessionStorage.setItem("vay2213-seeded", "1");
+    localStorage.setItem(
+      `vayada_booking_analytics:${slug}`,
+      JSON.stringify({ version: 1, analytics: true }),
+    );
+    sessionStorage.setItem(`vayada_sid:${slug}`, "old-session");
+    sessionStorage.setItem("vayada_funnel_sequence:old-session", "3");
+  }, SEEDED_BOOKING_SLUG);
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Optional analytics", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Analytics is on.", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      Object.keys(sessionStorage).filter((key) => key.startsWith("vayada_")),
+    ),
+  ).toEqual([]);
+  // Nothing to wait for when all is well: give a late page_visit a moment to show up.
+  await page.waitForTimeout(1500);
+  expect(events).toEqual([]);
 });

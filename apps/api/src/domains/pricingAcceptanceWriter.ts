@@ -8,6 +8,7 @@ import { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
+import { QuoteRoomsSoldOutError } from "./pmsInventoryReservationLifecycleRepository.js";
 import {
   pricingCardQuoteSupported,
   pricingCardBookingId,
@@ -15,11 +16,30 @@ import {
   startPricingCardPayment,
 } from "./pricingCardPayment.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { authorizePricingCardRequest } from "./pricingCardPaymentCompletion.js";
+import type { BankTransferBookingOperations } from "./financeBankTransferBooking.js";
+import {
+  lockPricingManualPaymentTerms,
+  pricingManualQuoteSupported,
+  readPricingManualReplay,
+  type PricingManualPaymentTerms,
+} from "./pricingManualPayment.js";
+import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
+import { pricingPaymentWindowAllows } from "./pricingPaymentWindows.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
-    readonly code: "conflict" | "storage" | "unexpected" | "card_unavailable",
+    readonly code:
+      | "conflict"
+      | "storage"
+      | "unexpected"
+      | "card_unavailable"
+      | "request_unavailable"
+      | "manual_unavailable"
+      | "sold_out",
     cause: unknown,
+    /** sold_out: the room types with no free room left (VAY-2320). */
+    readonly roomTypeIds: readonly string[] = [],
   ) {
     super("Pricing acceptance failed", { cause });
   }
@@ -43,11 +63,15 @@ export async function writePricingAcceptance(
     slug: unknown;
     command: unknown;
   },
-  internal?:
-    | { syntheticAffiliateContextId: string; affiliateContextId?: never }
-    | { affiliateContextId: string; syntheticAffiliateContextId?: never },
-  /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED). */
-  cardPayments?: { provider: StripeBookingPaymentProvider },
+  /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED);
+   * those leaving the rest to pay at the property also need `deposits`
+   * (REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED, VAY-2205). */
+  cardPayments?: { provider: StripeBookingPaymentProvider; deposits?: boolean },
+  /** Request-mode pay-at-property quotes (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED). */
+  requests = false,
+  /** Bank-transfer and PayPal quotes (REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED). Bank
+   * transfer also needs the bank-details binding, which exists only with the KMS settings. */
+  manualPayments?: { bankTransfers?: Pick<BankTransferBookingOperations, "bind"> },
 ) {
   let client: pg.PoolClient | undefined;
   try {
@@ -59,6 +83,9 @@ export async function writePricingAcceptance(
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const prepared = await preparePricingAcceptance(client, input.slug, input.command, {
       card: cardPayments !== undefined,
+      deposits: cardPayments?.deposits === true,
+      request: requests,
+      ...(manualPayments ? { manual: true } : {}),
     });
     if (prepared.kind === "replayed") {
       // A card acceptance that still awaits payment answers with the same payment; an
@@ -69,9 +96,55 @@ export async function writePricingAcceptance(
         input.slug,
         prepared,
       );
+      if (card?.kind === "authorize") {
+        await authorizePricingCardRequest(client, card.propertyId, {
+          paymentIntentId: card.paymentIntentId,
+          amountMinor: card.amountMinor,
+          currency: card.currency,
+        });
+        await client.query("COMMIT");
+        return prepared;
+      }
+      // Checked with the switch off too: a booking made before it was turned off still replays.
+      const manual = card ? null : await readPricingManualReplay(client, prepared);
       await client.query("COMMIT");
-      return card || prepared;
+      return card || manual || prepared;
     }
+    const quote = prepared.current.quote;
+    let manualTerms: PricingManualPaymentTerms | undefined;
+    if (manualPayments && pricingManualQuoteSupported(quote)) {
+      if (quote.paymentMethod === "bank_transfer" && !manualPayments.bankTransfers)
+        throw new Error("Manual payment acceptance unavailable");
+      // The hotel removed its bank details or PayPal email since the quote: offer a new quote.
+      manualTerms =
+        (await lockPricingManualPaymentTerms(
+          client,
+          prepared.current.scope.propertyId,
+          quote.paymentMethod,
+        )) ?? undefined;
+      if (!manualTerms) throw new Error("Booking acceptance unavailable");
+      // VAY-2145: time passed since the quote; the deadline must still fall before check-in.
+      if (
+        !(await pricingManualLeadTimeAllows(
+          client,
+          prepared.current.scope.propertyId,
+          manualTerms,
+          quote.stay.checkIn,
+        ))
+      )
+        throw new Error("Manual payment acceptance unavailable");
+    }
+    // VAY-2348: time passed since the quote; the method's booking window must still allow it. A
+    // new quote then names the reason.
+    if (
+      !(await pricingPaymentWindowAllows(
+        client,
+        prepared.current.scope.propertyId,
+        quote.paymentMethod,
+        quote.stay.checkIn,
+      ))
+    )
+      throw new Error("Booking acceptance unavailable");
     const bookingId =
       cardPayments && pricingCardQuoteSupported(prepared.current.quote)
         ? pricingCardBookingId(prepared.current.scope.propertyId, prepared.command.requestId)
@@ -81,15 +154,47 @@ export async function writePricingAcceptance(
       ...prepared,
       bookingId,
       publicReference,
-      syntheticAffiliateContextId: internal?.syntheticAffiliateContextId,
-      affiliateContextId: internal?.affiliateContextId,
     });
     const lifecycle = await stagePricingBookingLifecycle(
       client,
       input.slug,
       prepared.current,
       bookingId,
+      manualTerms,
     );
+    if (manualTerms) {
+      // Bank transfer and PayPal: the rooms stay held with the booking `pending_payment` until the
+      // hotel confirms the payment; the guest gets the instructions and the hotel is told.
+      // Revenue and the PMS job follow the payment; decline or expiry release the rooms.
+      const accepted = await storePricingAcceptance(client, input.slug, prepared, lifecycle, null);
+      if (manualTerms.method === "bank_transfer")
+        await manualPayments!.bankTransfers!.bind(
+          client,
+          prepared.current.scope.propertyId,
+          bookingId,
+        );
+      await stagePricingAcceptanceNotifications(client, input.slug, accepted);
+      const checkedAt = await finishPricingAcceptance(
+        client,
+        input.slug,
+        prepared.current,
+        prepared.finance,
+      );
+      await client.query("COMMIT");
+      return {
+        kind: "payment_pending" as const,
+        ...accepted,
+        bookingReference: publicReference,
+        propertyId: prepared.current.scope.propertyId,
+        payment: {
+          method: manualTerms.method,
+          amountMinor: quote.evidence.totalMinor,
+          currency: quote.stay.currency,
+          deadlineAt: lifecycle.paymentDeadlineAt!,
+        },
+        checkedAt,
+      };
+    }
     if (cardPayments && pricingCardQuoteSupported(prepared.current.quote)) {
       // Card: the quote is accepted now, while it is valid, and the rooms stay held with the
       // booking `pending_payment`. Revenue, notifications and the PMS job follow the
@@ -119,6 +224,26 @@ export async function writePricingAcceptance(
         },
       };
     }
+    if (prepared.current.quote.acceptanceMode === "request") {
+      // Request: the rooms stay held with the booking `pending_payment` until the hotel
+      // answers. Revenue and the PMS job follow its acceptance; decline or expiry release.
+      const accepted = await storePricingAcceptance(client, input.slug, prepared, lifecycle, null);
+      await stagePricingAcceptanceNotifications(client, input.slug, accepted);
+      const checkedAt = await finishPricingAcceptance(
+        client,
+        input.slug,
+        prepared.current,
+        prepared.finance,
+      );
+      await client.query("COMMIT");
+      return {
+        kind: "requested" as const,
+        ...accepted,
+        bookingReference: publicReference,
+        hostResponseDeadlineAt: lifecycle.hostResponseDeadlineAt,
+        checkedAt,
+      };
+    }
     const revenue = await stagePricingBookingRevenue(
       client,
       input.slug,
@@ -144,8 +269,14 @@ export async function writePricingAcceptance(
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     if (error instanceof PricingAcceptanceError) throw error;
+    if (error instanceof QuoteRoomsSoldOutError)
+      throw new PricingAcceptanceError("sold_out", error, error.roomTypeIds);
     if (error instanceof Error && error.message === "Card acceptance unavailable")
       throw new PricingAcceptanceError("card_unavailable", error);
+    if (error instanceof Error && error.message === "Request acceptance unavailable")
+      throw new PricingAcceptanceError("request_unavailable", error);
+    if (error instanceof Error && error.message === "Manual payment acceptance unavailable")
+      throw new PricingAcceptanceError("manual_unavailable", error);
     if (error instanceof Error && conflictMessages.has(error.message))
       throw new PricingAcceptanceError("conflict", error);
     if (

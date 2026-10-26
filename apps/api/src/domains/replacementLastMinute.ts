@@ -66,10 +66,16 @@ export async function lockReplacementLastMinute(
   const tiers = parseLastMinuteTiers(hotel.tiers);
   if (!tiers || (hotel.enabled ? tiers.length === 0 : tiers.length > 0 || hotel.stackWithPromo))
     return null;
-  if (Object.hasOwn(hotel, "promotions")) {
-    const promotions = parseBookingPromotions(hotel.promotions);
-    if (!promotions || promotions.some((p) => p.active)) return null; // Generalized promotions require their own evaluator.
-  }
+  // Booking Admin's automatic promotions have no evaluator yet, so even active ones change no
+  // price. They used to refuse every stay, which stopped the whole booking page selling (VAY-2319).
+  // Once a hotel saves promotions, they replace the hotel-wide tiers (bookingPromotionsFromSettings)
+  // and Booking Admin can no longer show or change those, so they stop discounting too. Malformed
+  // promotions still fail closed; they stay in the source revision, so a change re-quotes.
+  const promotions = Object.hasOwn(hotel, "promotions")
+    ? parseBookingPromotions(hotel.promotions)
+    : undefined;
+  if (promotions === null) return null;
+  const hotelWide = hotel.enabled && promotions === undefined;
   if (
     !(await client.query("SELECT name FROM pg_timezone_names WHERE name=$1", [row.timezone]))
       .rowCount
@@ -102,7 +108,7 @@ export async function lockReplacementLastMinute(
     const policy = policies.get(roomTypeId),
       effective = policy?.tiers.length ? policy.tiers : tiers;
     const match =
-      hotel.enabled && policy?.enabled !== false
+      hotelWide && policy?.enabled !== false
         ? effective.find(
             (t) =>
               daysBeforeArrival >= t.daysBeforeMin &&

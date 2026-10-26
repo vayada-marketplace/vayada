@@ -12,7 +12,6 @@ const EXPECTED_TARGET_KEYS = new Set([
   "bookingCheckoutChecks",
   "financeChecks",
   "pmsOperationsChecks",
-  "marketplaceChecks",
   "distributionBookabilityChecks",
   "platformMediaChecks",
   "mediaUrlMigrationChecks",
@@ -31,74 +30,8 @@ const CATALOG_PUBLIC_PROFILE_CHECK_KEYS = new Set([
   "forbiddenPublicProfileKeys",
 ]);
 const BOOKING_CHECKOUT_CHECK_KEYS = new Set(["flows", "settings", "forbiddenSummaryKeys"]);
-const FINANCE_CHECK_KEYS = new Set([
-  "propertyFlows",
-  "affiliatePayouts",
-  "forbiddenVisibilityKeys",
-]);
+const FINANCE_CHECK_KEYS = new Set(["propertyFlows", "forbiddenVisibilityKeys"]);
 const PMS_OPERATIONS_CHECK_KEYS = new Set(["properties", "forbiddenOperationalSummaryKeys"]);
-const MARKETPLACE_CHECK_KEYS = new Set(["slices", "forbiddenPublicReadModelValues"]);
-const MARKETPLACE_SLICE_STRING_FIELDS = [
-  "propertyId",
-  "hotelOrganizationId",
-  "hotelOwnerUserId",
-  "hotelOwnerRoleKey",
-  "creatorProfileId",
-  "creatorOrganizationId",
-  "creatorOwnerUserId",
-  "creatorOwnerRoleKey",
-  "offerId",
-  "commissionRuleId",
-  "creatorPlatformId",
-  "creatorRatingId",
-  "compensationOptionFreeStayId",
-  "compensationOptionAffiliateId",
-  "compensationOptionPaidId",
-  "compensationOptionDiscountId",
-  "requirementId",
-  "collaborationId",
-  "paidCollaborationId",
-  "discountCollaborationId",
-  "deliverableApprovedId",
-  "deliverableSubmittedId",
-  "creatorChatMessageId",
-  "hotelChatMessageId",
-  "tripId",
-  "externalCollaborationId",
-  "unreadNotificationId",
-  "readNotificationId",
-  "pendingInviteCodeId",
-  "redeemedInviteCodeId",
-  "creatorNewsletterPreferenceId",
-  "hotelNewsletterPreferenceId",
-  "sourceCreatorId",
-  "sourceHotelProfileId",
-  "sourceOfferId",
-  "sourceCollaborationId",
-  "creatorDisplayName",
-  "platform",
-  "offerPublicId",
-  "offerSlug",
-  "visibilityStatus",
-  "lifecycleStatus",
-  "affiliateReferralCode",
-  "creatorChatBody",
-  "hotelChatBody",
-  "tripName",
-  "externalCollaborationTitle",
-  "pendingInviteCode",
-  "redeemedInviteCode",
-];
-const MARKETPLACE_SLICE_INTEGER_FIELDS = [
-  "compensationOptionCount",
-  "deliverableCount",
-  "chatMessageCount",
-  "notificationCount",
-  "inviteCodeCount",
-  "newsletterPreferenceCount",
-  "rating",
-  "platformFollowerCount",
-];
 const DISTRIBUTION_BOOKABILITY_CHECK_KEYS = new Set(["properties", "forbiddenPublicOutputValues"]);
 const PLATFORM_MEDIA_CHECK_KEYS = new Set([
   "legacyUrlInventory",
@@ -117,7 +50,6 @@ const PLATFORM_MEDIA_INVENTORY_KEYS = new Set([
 const MEDIA_URL_MIGRATION_CHECK_KEYS = new Set([
   "bookingPropertyMedia",
   "propertyPublicProfiles",
-  "marketplace",
   "pms",
   "forbiddenPublicReferenceValues",
 ]);
@@ -402,7 +334,6 @@ export function validateExpectedTargetConfig(
     "bookingCheckoutChecks",
     "financeChecks",
     "pmsOperationsChecks",
-    "marketplaceChecks",
     "distributionBookabilityChecks",
     "platformMediaChecks",
     "mediaUrlMigrationChecks",
@@ -604,29 +535,6 @@ export function validateExpectedTargetConfig(
         findings,
       );
     }
-    if (financeChecks["affiliatePayouts"] !== undefined) {
-      validateObjectArray(
-        financeChecks["affiliatePayouts"],
-        "expected-target.json.financeChecks.affiliatePayouts",
-        [
-          "organizationId",
-          "affiliateResourceId",
-          "providerAccountId",
-          "payoutSettingsId",
-          "payoutId",
-          "identityEntitlementId",
-          "billingEntitlementId",
-          "visibilityReadModelId",
-          "providerAccountRef",
-          "providerPayoutId",
-          "payoutAmount",
-          "currency",
-          "visibilityScope",
-          "requiredPermissionKey",
-        ],
-        findings,
-      );
-    }
     if (financeChecks["forbiddenVisibilityKeys"] !== undefined) {
       validateStringArray(
         financeChecks["forbiddenVisibilityKeys"],
@@ -701,31 +609,6 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         pmsOperationsChecks["forbiddenOperationalSummaryKeys"],
         "expected-target.json.pmsOperationsChecks.forbiddenOperationalSummaryKeys",
-        findings,
-      );
-    }
-  }
-
-  const marketplaceChecks = expected["marketplaceChecks"];
-  if (isRecord(marketplaceChecks)) {
-    validateKnownKeys(
-      marketplaceChecks,
-      MARKETPLACE_CHECK_KEYS,
-      "expected-target.json.marketplaceChecks",
-      findings,
-    );
-    validateObjectArray(
-      marketplaceChecks["slices"],
-      "expected-target.json.marketplaceChecks.slices",
-      MARKETPLACE_SLICE_STRING_FIELDS,
-      findings,
-      ["compensationType"],
-      MARKETPLACE_SLICE_INTEGER_FIELDS,
-    );
-    if (marketplaceChecks["forbiddenPublicReadModelValues"] !== undefined) {
-      validateStringArray(
-        marketplaceChecks["forbiddenPublicReadModelValues"],
-        "expected-target.json.marketplaceChecks.forbiddenPublicReadModelValues",
         findings,
       );
     }

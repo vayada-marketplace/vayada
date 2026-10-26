@@ -1,14 +1,11 @@
-import {
-  parseStaffPermissionOverrides,
-  validateStaffPermissionOverrides,
-  type RequestContext,
-} from "@vayada/backend-auth";
+import type { RequestContext } from "@vayada/backend-auth";
 import {
   hasActiveEntitlement,
   hasActiveLinkedResource,
   hasPermission,
 } from "@vayada/backend-authorization";
 import type { PoolClient } from "pg";
+import { lockMemberPermissions } from "./memberPermissions.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import type { PricingStorageScope } from "./replacementPricingStore.js";
 
@@ -67,7 +64,7 @@ export async function lockReplacementPricingAuthorization(
   );
   if (!organization.rowCount) return false;
   const result = await client.query(
-    `SELECT m.role_key,m.property_access_mode,m.permission_overrides
+    `SELECT m.role_key,m.property_access_mode
     FROM identity.organization_memberships m
     JOIN identity.users u ON u.id=m.user_id AND u.status='active'
     JOIN hotel_catalog.properties p ON p.id=$4 AND p.profile_status<>'disabled'
@@ -103,29 +100,8 @@ export async function lockReplacementPricingAuthorization(
     );
     if (!assignment.rowCount) return false;
   }
-  const rolePermissions = (
-    await client.query(
-      `SELECT permission_key FROM identity.role_permission_grants
-    WHERE organization_kind='hotel_group' AND role_key=$1 FOR SHARE`,
-      [membership.role_key],
-    )
-  ).rows.map((r) => r.permission_key as string);
-  const permissions = new Set(rolePermissions);
-  if (membership.permission_overrides !== null) {
-    const overrides = parseStaffPermissionOverrides(membership.permission_overrides);
-    if (
-      !overrides ||
-      validateStaffPermissionOverrides({
-        roleKey: membership.role_key,
-        rolePermissions,
-        permissionOverrides: overrides,
-      }).length
-    )
-      return false;
-    for (const key of overrides.grant) permissions.add(key);
-    for (const key of overrides.deny) permissions.delete(key);
-  }
-  if (!required.every((permission) => permissions.has(permission))) return false;
+  const permissions = await lockMemberPermissions(client, scope);
+  if (!required.every((permission) => permissions?.includes(permission))) return false;
   return lockCurrentPmsPricingEntitlement(client, scope.organizationId, propertyId);
 }
 

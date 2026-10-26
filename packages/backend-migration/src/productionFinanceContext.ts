@@ -22,8 +22,6 @@ export function createProductionFinanceContext(input: {
     organizationByResource: new Map(),
     guestBookingByPmsId: new Map(),
     pmsBookingById: new Map(),
-    pmsAffiliateById: new Map(),
-    pmsAffiliatesByUserId: new Map(),
     pmsSettingsByProperty: new Map(),
     plannedTargetIdsByTable: new Map(),
     quarantinedSourceRows: new Set(),
@@ -37,23 +35,6 @@ export function createProductionFinanceContext(input: {
     "booking.guest_bookings",
   );
   context.pmsBookingById = indexRows(context, "pms", "bookings");
-  context.pmsAffiliateById = indexRows(context, "pms", "affiliates");
-  for (const row of context.pmsAffiliateById.values()) {
-    if (!row.data["user_id"]) continue;
-    try {
-      const userId = uuid(row.data["user_id"], "user_id");
-      const affiliates = context.pmsAffiliatesByUserId.get(userId);
-      if (affiliates) affiliates.push(row);
-      else context.pmsAffiliatesByUserId.set(userId, [row]);
-    } catch {
-      disposition(context, row, {
-        sourceField: "user_id",
-        sourceValue: row.data["user_id"] ?? null,
-        reasonCode: "INVALID_FINANCE_SOURCE_ROW",
-        disposition: "omitted_field",
-      });
-    }
-  }
   for (const row of context.rowsBySource.get("pms:hotel_payment_settings") ?? []) {
     try {
       const propertyId = propertyFor(context, "pms", "hotels", row.data["hotel_id"]);
@@ -153,8 +134,8 @@ export function propertyFor(
 
 export function organizationFor(
   context: FinanceBuildContext,
-  product: "booking" | "pms" | "affiliate",
-  resourceType: "booking_hotel" | "pms_hotel" | "affiliate",
+  product: "booking" | "pms",
+  resourceType: "booking_hotel" | "pms_hotel",
   value: unknown,
 ): string {
   const id = uuid(value, `${resourceType}_id`);
@@ -166,8 +147,8 @@ export function organizationFor(
 
 export function resourceStatusFor(
   context: FinanceBuildContext,
-  product: "booking" | "pms" | "affiliate",
-  resourceType: "booking_hotel" | "pms_hotel" | "affiliate",
+  product: "booking" | "pms",
+  resourceType: "booking_hotel" | "pms_hotel",
   value: unknown,
 ): string {
   const id = uuid(value, `${resourceType}_id`);
@@ -187,7 +168,6 @@ export function resourceStatusFor(
 function expectedRelationship(product: string, resourceType: string): string | null {
   if (product === "booking" && resourceType === "booking_hotel") return "owner";
   if (product === "pms" && resourceType === "pms_hotel") return "operator";
-  if (product === "affiliate" && resourceType === "affiliate") return "owner";
   return null;
 }
 
@@ -220,14 +200,7 @@ export function blockRow(
 ): void {
   let id: string;
   try {
-    id = sourceId(
-      row,
-      row.sourceTable === "affiliate_payout_settings"
-        ? "user_id"
-        : row.sourceTable === "stripe_billing_webhook_events"
-          ? "event_id"
-          : "id",
-    );
+    id = sourceId(row, row.sourceTable === "stripe_billing_webhook_events" ? "event_id" : "id");
   } catch {
     id = String(row.rowOrdinal);
   }

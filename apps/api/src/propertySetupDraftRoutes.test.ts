@@ -27,9 +27,9 @@ const propertyId = "f6853000-0000-4000-8000-000000000001";
 const otherPropertyId = "f6853000-0000-4000-8000-000000000002";
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const actorUserId = "22222222-2222-4222-8222-222222222222";
-type SetupProduct = "marketplace" | "booking" | "pms";
+type SetupProduct = "booking" | "pms";
 type Options = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -39,10 +39,6 @@ type FakeRepository = PropertySetupDraftCommandRepository & {
   resetCalls: PropertySetupDraftResetCommand[];
 };
 const ACCESS_BY_PRODUCT = {
-  marketplace: {
-    key: "marketplace-hotel-profile",
-    resourceType: "hotel_profile",
-  },
   booking: {
     key: "booking-engine",
     resourceType: "booking_hotel",
@@ -237,7 +233,6 @@ describe("property setup draft save route", () => {
 
   it.each([
     ["present_hotel", "hotel_catalog.setup.manage", "pms"],
-    ["marketplace_preferences", "marketplace.profile.manage", "marketplace"],
     ["booking_design", "booking.settings.manage", "booking"],
     ["rooms", "pms.operations.manage", "pms"],
   ] as const)(
@@ -310,7 +305,7 @@ describe("property setup draft save route", () => {
   it.each([
     ["missing authentication", null, {}],
     ["invalid authentication", "bad-token", {}],
-    ["non-hotel organization", "valid-token", { kind: "creator_workspace" }],
+    ["non-hotel organization", "valid-token", { kind: "platform" }],
     ["missing step permission", "valid-token", { permissions: ["hotel_catalog.setup.read"] }],
     ["missing entitlement", "valid-token", { entitlements: [] }],
     ["inactive entitlement", "valid-token", { entitlements: [entitlement("pms", "suspended")] }],
@@ -343,7 +338,6 @@ describe("property setup draft save route", () => {
   );
 
   it.each([
-    ["marketplace_preferences", "marketplace.profile.manage", "marketplace"],
     ["booking_design", "booking.settings.manage", "booking"],
     ["rooms", "pms.operations.manage", "pms"],
   ] as const)(
@@ -502,7 +496,7 @@ describe("property setup draft save route", () => {
   it.each([
     ["missing authentication", null, {}],
     ["invalid authentication", "bad-token", {}],
-    ["non-hotel organization", "valid-token", { kind: "creator_workspace" }],
+    ["non-hotel organization", "valid-token", { kind: "platform" }],
     ["missing step permission", "valid-token", { permissions: ["hotel_catalog.setup.read"] }],
     ["missing entitlement", "valid-token", { entitlements: [] }],
     ["inactive entitlement", "valid-token", { entitlements: [entitlement("pms", "suspended")] }],

@@ -32,7 +32,7 @@ const actorUserId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const now = "2026-08-03T12:00:00.000Z";
 
 type AuthOptions = {
-  kind?: "hotel_group" | "creator_workspace";
+  kind?: "hotel_group" | "platform";
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
@@ -177,7 +177,7 @@ describe("PMS room publication routes", () => {
 
   it.each([
     ["missing authentication", {}, null],
-    ["non-hotel organization", { kind: "creator_workspace" }, "valid-token"],
+    ["non-hotel organization", { kind: "platform" }, "valid-token"],
     ["missing read permission", { permissions: ["pms.operations.manage"] }, "valid-token"],
     ["missing entitlement", { entitlements: [] }, "valid-token"],
     ["suspended entitlement", { entitlements: [entitlement("suspended")] }, "valid-token"],
@@ -391,22 +391,12 @@ describe("PMS room publication routes", () => {
           sourceRevision: roomSourceRevision,
         },
         {
-          code: "room_photo_required",
+          code: "room_media_unavailable",
           product: "pms",
           ownerDomain: "pms",
           owningStepId: "rooms",
           affectedEntity: { entityType: "room_type", entityId: roomTypeId },
-          message: "Add at least one room photo before publishing.",
-          kind: "user_fixable",
-          sourceRevision: roomSourceRevision,
-        },
-        {
-          code: "room_amenities_review_required",
-          product: "pms",
-          ownerDomain: "pms",
-          owningStepId: "rooms",
-          affectedEntity: { entityType: "room_type", entityId: roomTypeId },
-          message: "Review this room's amenities before publishing.",
+          message: "Review this room's photos before publishing.",
           kind: "user_fixable",
           sourceRevision: roomSourceRevision,
         },
@@ -414,6 +404,25 @@ describe("PMS room publication routes", () => {
       sourceRevision: JSON.stringify([[roomTypeId, roomSourceRevision]]),
     } as unknown as RoomPublicationSnapshot;
     app = await testApp(fakePorts({ snapshotResult: reversedBlockers }));
+    expect((await snapshotRequest(app)).statusCode).toBe(500);
+    await app.close();
+
+    // VAY-2247: in canonical order the same room is accepted; no photos and unreviewed amenities
+    // carry no blocker of their own, and a snapshot that still claims one is refused.
+    const canonical = structuredClone(reversedBlockers) as unknown as {
+      blockers: Array<{ code: string }>;
+    } & RoomPublicationSnapshot;
+    canonical.blockers.reverse();
+    app = await testApp(fakePorts({ snapshotResult: canonical }));
+    expect((await snapshotRequest(app)).statusCode).toBe(200);
+    await app.close();
+    const claimsPhoto = structuredClone(canonical);
+    claimsPhoto.blockers[0] = {
+      ...claimsPhoto.blockers[0]!,
+      code: "room_photo_required",
+      message: "Add at least one room photo before publishing.",
+    } as never;
+    app = await testApp(fakePorts({ snapshotResult: claimsPhoto }));
     expect((await snapshotRequest(app)).statusCode).toBe(500);
   });
 });

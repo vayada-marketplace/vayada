@@ -1,6 +1,7 @@
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import type { Translate } from "./firstPricingSetupMessages";
 import { decimalAmount, parseMinorInput, PricingError } from "./pricingSetupAmounts";
+import { defaultPricingFormLook, type PricingFormLook } from "./pricingFormLook";
 type IncludedBase = Extract<
   Extract<
     PricingConfiguration["offers"][number]["price"],
@@ -79,6 +80,7 @@ export function IncludedPricing({
   onChange,
   label = "",
   t,
+  look = defaultPricingFormLook,
 }: {
   label?: string;
   value: IncludedInput;
@@ -86,19 +88,19 @@ export function IncludedPricing({
   disabled: boolean;
   onChange: (value: IncludedInput) => void;
   t: Translate;
+  look?: PricingFormLook;
 }) {
-  const inputClass = "mt-1 block w-full rounded-lg border px-3 py-2";
   const forLabel = (text: string) =>
     label ? t("pricing.included.forLabel", { text, label }) : text;
   const adults = (index: number, one: string, other: string) =>
     t(index ? other : one, { count: index + 1 });
   return (
     <div className="space-y-3 sm:col-span-2">
-      <label className="block text-sm">
+      <label className={look.label}>
         {t("pricing.included.adults")}
         <select
           aria-label={forLabel(t("pricing.included.adults"))}
-          className={inputClass}
+          className={look.input}
           disabled={disabled}
           value={value.adults}
           onChange={(event) => onChange({ adults: event.target.value, adjustments: [] })}
@@ -111,12 +113,12 @@ export function IncludedPricing({
           ))}
         </select>
       </label>
-      <p className="text-sm text-gray-600">{t("pricing.included.hint")}</p>
+      <p className={look.hint}>{t("pricing.included.hint")}</p>
       {value.adults &&
         Array.from({ length: capacity }, (_, index) => {
           if (index + 1 === Number(value.adults))
             return (
-              <p key={index} className="text-sm">
+              <p key={index} className={look.text}>
                 {adults(index, "pricing.included.baseRow.one", "pricing.included.baseRow.other")}
               </p>
             );
@@ -132,13 +134,13 @@ export function IncludedPricing({
             });
           return (
             <div key={index} className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm">
+              <label className={look.label}>
                 {adults(index, "pricing.included.type.one", "pricing.included.type.other")}
                 <select
                   aria-label={forLabel(
                     adults(index, "pricing.included.type.one", "pricing.included.type.other"),
                   )}
-                  className={inputClass}
+                  className={look.input}
                   disabled={disabled}
                   value={row.kind}
                   onChange={(event) => update({ kind: event.target.value, value: "" })}
@@ -148,14 +150,14 @@ export function IncludedPricing({
                   <option value="percentage">{t("pricing.included.percentage")}</option>
                 </select>
               </label>
-              <label className="text-sm">
+              <label className={look.label}>
                 {adults(index, "pricing.included.amount.one", "pricing.included.amount.other")}
                 {row.kind === "percentage" ? " (%)" : ""}
                 <input
                   aria-label={forLabel(
                     adults(index, "pricing.included.amount.one", "pricing.included.amount.other"),
                   )}
-                  className={inputClass}
+                  className={look.input}
                   disabled={disabled}
                   value={row.value}
                   onChange={(event) => update({ value: event.target.value })}

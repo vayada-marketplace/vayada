@@ -44,6 +44,18 @@ describe("financeBillingClient", () => {
     ]);
   });
 
+  it("chooses the Commission plan through select-commission (VAY-2171)", async () => {
+    api.post.mockResolvedValue({ planStatus: { plan: "commission" } });
+    const client = await import("./financeBillingClient");
+
+    await client.selectCommissionPlan();
+
+    const [url, body] = api.post.mock.calls[0]!;
+    expect(url).toBe("/api/finance/properties/property-1/select-commission");
+    expect(body).toMatchObject({ commandId: expect.stringMatching(/^commission-select-/) });
+    expect(body.idempotencyKey).toBe(body.commandId);
+  });
+
   it("pins hosted Stripe returns to the PMS surface", async () => {
     api.post
       .mockResolvedValueOnce({ checkout: { checkoutUrl: "https://checkout.stripe.test/fixed" } })

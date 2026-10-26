@@ -13,7 +13,6 @@ os.environ.setdefault(
     "AUTH_DATABASE_URL",
     "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db",
 )
-os.environ.setdefault("MARKETPLACE_DATABASE_URL", "")
 os.environ.setdefault(
     "CORS_ORIGINS",
     "http://localhost:3000,http://localhost:3002,http://localhost:3003,https://booking.tigalombok.com",

@@ -1,6 +1,6 @@
 import {
   PROPERTY_SETUP_STEP_DEFINITIONS,
-  isPropertySetupBaseRevisionManifest,
+  getPropertySetupBaseRevisionKeys,
   type PropertySetupFieldId,
   type SavePropertySetupDraftRequest,
 } from "./propertySetupDraft.js";
@@ -116,6 +116,7 @@ export function parseSavePropertySetupDraftRequest(
 
   if (!isRecord(baseRevisions)) return invalidRequest();
   if (Object.keys(baseRevisions).some(isForbiddenKey)) return unsafePayload();
+  const baseRevisionKeys = getPropertySetupBaseRevisionKeys(definition.stepId, baseRevisions);
   if (
     !Array.isArray(dirtyFields) ||
     dirtyFields.length > definition.fields.length ||
@@ -124,7 +125,7 @@ export function parseSavePropertySetupDraftRequest(
         typeof field === "string" && allowedFields.has(field) && Object.hasOwn(payload, field),
     ) ||
     new Set(dirtyFields).size !== dirtyFields.length ||
-    !isPropertySetupBaseRevisionManifest(definition.stepId, baseRevisions) ||
+    !baseRevisionKeys ||
     !isRevision(snapshot["expectedTrackRevision"]) ||
     !isRevision(snapshot["expectedSessionRevision"]) ||
     !isRevision(snapshot["expectedDraftRevision"])
@@ -144,7 +145,7 @@ export function parseSavePropertySetupDraftRequest(
       ),
       dirtyFields: definition.fields.filter((field) => dirtyFieldSet.has(field)),
       expectedBaseRevisions: Object.fromEntries(
-        definition.baseRevisionKeys.map((key) => [key, baseRevisions[key]]),
+        baseRevisionKeys.map((key) => [key, baseRevisions[key]]),
       ),
       expectedTrackRevision: snapshot["expectedTrackRevision"],
       expectedSessionRevision: snapshot["expectedSessionRevision"],
