@@ -771,6 +771,13 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   if (offerAriDeliveryEnabled && capabilityModes.ariSync !== "mutating") {
     throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires a mutating ARI sync");
   }
+  // Delivery only runs after activation, which needs the published-offer bundle; without it the
+  // switch would be inert while the worker boundary demanded the delivery grants.
+  if (offerAriDeliveryEnabled && !stagingInventoryEnabled) {
+    throw new Error(
+      "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires the published-offer activation bundle",
+    );
+  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )

@@ -9644,34 +9644,70 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
     }
     expect(await f.next()).toMatchObject({ kind: "offer_ari_current", skipped: [] });
-    // Publication 2 drops the other offer: its target's offer vanished, so every night of its
-    // rate plan is closed; the still-published target is unchanged (D5) and stays current.
-    const other = (
+    // An active target whose offer is not in the publication any more (sealed earlier for an
+    // offer "ghost" on the same room and binding): every night of its rate plan is closed; the
+    // published targets stay current.
+    const binding = (
+      await pool.query<{ connectionId: string; generation: string; external: string; room: string }>(
+        `SELECT c.id::text AS "connectionId",c.binding_generation::text AS generation,
+           c.external_property_id AS external,m.external_room_type_id AS room
+         FROM pms.channel_connections c
+         JOIN pms.channel_room_type_mappings m ON m.connection_id=c.id AND m.room_type_id=$2
+         WHERE c.property_id=$1 AND c.provider='channex'`,
+        [f.scope.propertyId, f.selection.roomTypeId],
+      )
+    ).rows[0]!;
+    const ghost = (
       await pool.query<{ id: string }>(
-        "SELECT id::text AS id FROM pms.channex_offer_targets WHERE property_id=$1 AND offer_id='other'",
-        [f.scope.propertyId],
+        "INSERT INTO pms.channex_offer_targets(property_id,connection_id,room_type_id,offer_id) VALUES($1,$2,$3,'ghost') RETURNING id::text AS id",
+        [f.scope.propertyId, binding.connectionId, f.selection.roomTypeId],
       )
     ).rows[0]!.id;
-    await publishRevisionTwo(f, (room) => ({
-      ...room,
-      offers: room.offers.filter((offer) => offer.id !== "other"),
-    }));
+    const ghostIntent = (
+      await pool.query<{ id: string; version: string }>(
+        `INSERT INTO pms.channex_offer_target_intents(target_id,operation_key,proposal)
+         VALUES($1,'ghost-create','{"currency":"EUR"}') RETURNING id,version::text AS version`,
+        [ghost],
+      )
+    ).rows[0]!;
+    const ghostRate = randomUUID();
+    await pool.query(
+      `INSERT INTO pms.channex_offer_target_versions
+         (target_id,version,intent_id,binding_generation,external_property_id,external_room_type_id,
+          external_rate_plan_id,configuration,readback_evidence)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'{"currency":"EUR"}','{"verified":true}')`,
+      [ghost, ghostIntent.version, ghostIntent.id, binding.generation, binding.external, binding.room, ghostRate],
+    );
+    await pool.query("UPDATE pms.channex_offer_targets SET active_version=$2 WHERE id=$1", [
+      ghost,
+      ghostIntent.version,
+    ]);
     const closed = await f.send(f.accepted());
-    expect(closed.targetId).toBe(other);
+    expect(closed.targetId).toBe(ghost);
     expect((closed.posted[0] as { values: unknown[] }).values).toEqual([
-      { property_id: expect.any(String), rate_plan_id: expect.any(String), date_from: f.today, date_to: f.horizon, stop_sell: true },
+      {
+        property_id: binding.external,
+        rate_plan_id: ghostRate,
+        date_from: f.today,
+        date_to: f.horizon,
+        stop_sell: true,
+      },
     ]);
     expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
-    expect(await f.next()).toMatchObject({ kind: "offer_ari_current", skipped: [] });
-    // A room mapping that moved to another external room makes both targets not current.
+    expect(await f.next()).toMatchObject({ kind: "offer_ari_current", targetCount: 3, skipped: [] });
+    // A room mapping that moved to another external room makes every target not current.
     await pool.query(
       "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1 AND room_type_id=$3",
       [f.scope.propertyId, randomUUID(), f.selection.roomTypeId],
     );
     const result = await f.next();
-    expect(result).toMatchObject({ kind: "offer_ari_current", targetCount: 2 });
+    expect(result).toMatchObject({ kind: "offer_ari_current", targetCount: 3 });
     expect(
       (result as { skipped: { reason: string }[] }).skipped.map((item) => item.reason),
-    ).toEqual(["active_offer_binding_changed", "active_offer_binding_changed"]);
+    ).toEqual([
+      "active_offer_binding_changed",
+      "active_offer_binding_changed",
+      "active_offer_binding_changed",
+    ]);
   });
 });
