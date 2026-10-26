@@ -252,6 +252,11 @@ async function bookingChangeDecisionEndpoint(
   return `${await bookingChangeRequestEndpoint(guestBookingId)}/${encodeURIComponent(changeRequestId)}/${decision}`;
 }
 
+async function bookingExtrasRequestEndpoint(guestBookingId: string, suffix = ""): Promise<string> {
+  const propertyId = await resolveSelectedPmsPropertyId("reviewing extras requests");
+  return `/api/pms/properties/${encodeURIComponent(propertyId)}/reservations/${encodeURIComponent(guestBookingId)}/extras-request${suffix}`;
+}
+
 type BookingChangeRequestApi = Omit<BookingChangeRequest, "status"> & {
   status: BookingChangeRequest["status"] | "accepted" | "canceled";
 };
@@ -633,6 +638,29 @@ export interface BookingChangeRequest {
   createdAt: string;
 }
 
+/** VAY-2360 part 3: extras a guest asked for after booking (amounts in minor units, for the whole stay). The
+ * hotel accepts or declines; accepting doesn't change the booking's total, the hotel charges them at
+ * check-in. */
+export interface BookingExtrasRequest {
+  id: string;
+  status: "pending" | "accepted" | "declined" | "canceled" | "expired";
+  items: Array<{
+    addonId: string;
+    name: string;
+    pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night";
+    unitMinor: string;
+    amountMinor: string;
+    currency: string;
+    guests: number;
+    nights: number;
+  }>;
+  totalMinor: string;
+  currency: string;
+  createdAt: string;
+  decidedAt: string | null;
+  note: string | null;
+}
+
 export interface CheckinStepResult {
   stepId: string;
   label: string;
@@ -1003,6 +1031,35 @@ export const bookingsService = {
       },
     );
     return normalizeBookingChangeRequest(response)!;
+  },
+
+  // VAY-2360 part 3: every extras request a guest made after booking, newest first.
+  getExtrasRequests: async (id: string): Promise<BookingExtrasRequest[]> => {
+    const response = await pmsOperationsClient.get<{ items?: BookingExtrasRequest[] } | null>(
+      await bookingExtrasRequestEndpoint(id),
+      pmsOperationsRequestOptions,
+    );
+    return Array.isArray(response?.items) ? response.items : [];
+  },
+
+  decideExtrasRequest: async (
+    id: string,
+    requestId: string,
+    decision: "accept" | "decline",
+    reason?: string,
+  ): Promise<BookingExtrasRequest> => {
+    const key = `booking.extras:${decision}:${encodeURIComponent(id)}:${encodeURIComponent(requestId)}`;
+    return pmsOperationsClient.post<BookingExtrasRequest>(
+      await bookingExtrasRequestEndpoint(id, `/${encodeURIComponent(requestId)}/${decision}`),
+      decision === "decline" ? { reason } : {},
+      {
+        ...pmsOperationsRequestOptions,
+        headers: {
+          ...(pmsOperationsRequestOptions.headers as Record<string, string>),
+          "Idempotency-Key": key,
+        },
+      },
+    );
   },
 
   // VAY-495 booking detail — internal notes, additional guests, cancel-with-reason.

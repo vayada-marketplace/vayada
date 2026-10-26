@@ -618,6 +618,11 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       },
     });
   });
+  // VAY-2360 part 3: no extras asked for after booking.
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/*/extras-request`,
+    (route) => route.fulfill({ json: { version: "booking-extras-requests.v1", items: [] } }),
+  );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/profile`, async (route) => {
     if (route.request().method() === "PATCH") {
       return route.fulfill({ json: { ...propertyProfile, ...readJson(route) } });
