@@ -503,4 +503,50 @@ describe("closed upload worker gates", () => {
     }).execute(job, { workerId: "worker" });
     expect(result).toEqual({ ok: true });
   });
+
+  // VAY-2108 D6: no sync_ari job reaches the legacy plan once the published bundle delivers.
+  const delivering = {
+    reconcileOfferDeliveries: async () => ({
+      kind: "pending_deliveries_reconciled" as const,
+      count: 0,
+    }),
+    prepareOfferDelivery: async () => ({
+      kind: "offer_ari_current" as const,
+      targetCount: 0,
+      skipped: [],
+    }),
+  };
+  it("completes a restriction-only job without provider work when the bundle delivers", async () => {
+    const f = setup();
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      ...delivering,
+    }).execute({ ...job, input: { ...job.input, restrictionsOnly: true } }, { workerId: "worker" });
+    expect(result).toEqual({ ok: true });
+    expect(f.reconcileClosedUploads).not.toHaveBeenCalled();
+    expect(f.plan).not.toHaveBeenCalled();
+  });
+  it("still fails a restriction-only job closed without the delivery hooks", async () => {
+    const f = setup();
+    f.plan.mockRejectedValue(
+      Object.assign(new Error("Pricing is unavailable"), { code: "PRICING_UNAVAILABLE" }),
+    );
+    const result = await createChannexManagementProvider(f.config).execute(
+      { ...job, input: { ...job.input, restrictionsOnly: true } },
+      { workerId: "worker" },
+    );
+    expect(result).toMatchObject({ ok: false });
+    expect(f.plan).toHaveBeenCalledOnce();
+  });
+  it("finishes a hotel without published targets after its availability, not in the legacy plan", async () => {
+    const f = setup();
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      ...current,
+      ...delivering,
+      activatePublishedOffers: async () => ({ kind: "no_targets" as const }),
+    }).execute(job, { workerId: "worker" });
+    expect(result).toEqual({ ok: true });
+    expect(f.plan).not.toHaveBeenCalled();
+  });
 });

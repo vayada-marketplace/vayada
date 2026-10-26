@@ -10,6 +10,8 @@ const sourceTables = [
   "pms.channel_date_prices",
   "pms.pricing_v2_heads",
   "pms.room_types",
+  // VAY-2108 D6: a closed room leaves the delivery scope, so its rate plans close on the next run.
+  "pms.room_type_closures",
   "pms.channel_room_type_mappings",
   "pms.channel_rate_plan_mappings",
   "pms.inventory_days",

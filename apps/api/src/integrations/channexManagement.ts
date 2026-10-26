@@ -231,6 +231,18 @@ export function createChannexManagementProvider(config: {
         config.reconcileRoomAvailability,
         config.prepareRoomAvailability,
       ];
+      // VAY-2108 D6: restrictions live in the published configuration and reach Channex through
+      // the ongoing offer delivery of a full sync. A restriction-only job (the retired 0167/0177
+      // trigger shape, VAY-2208) has nothing of its own to send once that bundle exists; it must
+      // never reach the legacy plan, which has no pricing.
+      if (
+        job.input.operationType === "sync_ari" &&
+        job.input.restrictionsOnly &&
+        ariContinuationHooks.every(Boolean) &&
+        config.reconcileOfferDeliveries &&
+        config.prepareOfferDelivery
+      )
+        return { ok: true };
       if (
         job.input.publishedOffer &&
         (job.input.operationType !== "provision" ||
@@ -461,6 +473,10 @@ export function createChannexManagementProvider(config: {
                       : "invalid_state",
                     new Error("Verified Channex offer activation is unavailable."),
                   );
+                // VAY-2108 D6: a hotel without published offer targets yet has sent its room
+                // availability and has no rates to deliver; the legacy plan has nothing for it.
+                if (config.reconcileOfferDeliveries && config.prepareOfferDelivery)
+                  return { ok: true };
               }
             } else if (prepared.kind === "prepared") {
               const result = await prepared.dispatch(async (request, signal) => {
