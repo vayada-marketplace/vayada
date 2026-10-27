@@ -134,11 +134,18 @@ export const RULES = [
     test: /^tests\/e2e\/booking-admin\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_admin_e2e"],
   },
+  // The live smoke's first-run click helpers also run in Booking Admin's mocked first-run spec
+  // (VAY-2357), so a change to them runs that browser project too.
+  {
+    name: "next-stack-smoke",
+    test: /^tests\/e2e\/next-stack-smoke\//,
+    jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_admin_e2e"],
+  },
   // frontend_build runs the landing Playwright suite; first_party_auth runs the auth suite. The
   // other projects here are not PR-gated. A new folder under tests/e2e/ matches no rule (every job).
   {
     name: "e2e",
-    test: /^tests\/e2e\/(landing|first-party-auth|vayada-admin|next-stack-smoke|booking-public-canary)\//,
+    test: /^tests\/e2e\/(landing|first-party-auth|vayada-admin|booking-public-canary)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   ...Object.entries(FRONTEND_ONLY_PACKAGES).map(([name, jobs]) => ({
