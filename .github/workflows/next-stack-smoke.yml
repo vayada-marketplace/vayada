@@ -1,6 +1,17 @@
 name: Next-stack onboarding and checkout smoke
 
+# Trigger (VAY-2357, Flamur 2026-10-27, option B): after each release train, as a non-blocking
+# check. vayada-platform's "Release train deploy" workflow sends the `next-stack-smoke`
+# repository_dispatch once its deploy-verify job has verified the release (never on a dry run);
+# a failed smoke changes nothing about the release. A manual dispatch stays for a repair or a
+# recovery. Every run deploys to the `next-smoke` environment, which requires a reviewer's
+# approval and allows only main, so a run waits in "Review deployments" until someone approves it.
+# The smoke uses live WorkOS and creates and retires a synthetic property, so it never runs for a
+# pull request.
+
 on:
+  repository_dispatch:
+    types: [next-stack-smoke]
   workflow_dispatch:
     inputs:
       recovery_run_id:
