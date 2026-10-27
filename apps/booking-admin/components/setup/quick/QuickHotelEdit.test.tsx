@@ -104,6 +104,7 @@ describe("QuickHotelEdit", () => {
     }));
     const saveCurrency = vi.fn(async () => undefined);
     const onDone = vi.fn();
+    const onSaveAndExit = vi.fn();
     let renderer: ReactTestRenderer | undefined;
     await act(async () => {
       renderer = create(
@@ -125,17 +126,21 @@ describe("QuickHotelEdit", () => {
           readCurrency={async () => null}
           saveCurrency={saveCurrency}
           onDone={onDone}
-          onSaveAndExit={vi.fn()}
+          onSaveAndExit={onSaveAndExit}
         />,
       );
     });
     await act(async () => undefined);
-    return { renderer: renderer!, updatePropertyProfile, saveCurrency, onDone };
+    return { renderer: renderer!, updatePropertyProfile, saveCurrency, onDone, onSaveAndExit };
   }
 
   /** The first Back (the footer renders once for desktop and once for phones). */
   const back = (renderer: ReactTestRenderer) =>
     renderer.root.findAll((node) => node.type === "button" && textOf(node) === "Back")[0]!;
+  const saveAndExit = (renderer: ReactTestRenderer) =>
+    renderer.root.find((node) => node.type === "button" && textOf(node) === "Save & exit");
+  const nameField = (renderer: ReactTestRenderer) =>
+    renderer.root.findAllByType("input").find((input) => input.props.value === "Hotel Alpenrose")!;
 
   it("opens filled in on its last screen, saves the change to the profile and goes back to step 5", async () => {
     const { renderer, updatePropertyProfile, saveCurrency, onDone } = await mount();
@@ -166,6 +171,61 @@ describe("QuickHotelEdit", () => {
     expect(saveCurrency).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalledTimes(1);
     renderer.unmount();
+  });
+
+  it("saves an edit through Save & exit with the same save as Continue, then leaves (VAY-2383)", async () => {
+    const { renderer, updatePropertyProfile, onDone, onSaveAndExit } = await mount();
+    // The footer never says the edits are saved as you type.
+    expect(textOf(renderer.root)).toContain(
+      "Not saved yet: finish with Continue, or use Save & exit",
+    );
+    expect(textOf(renderer.root)).not.toContain("Saved as you type");
+    await act(async () => back(renderer).props.onClick());
+    await act(async () => back(renderer).props.onClick());
+    await act(async () =>
+      nameField(renderer).props.onChange({ target: { value: "Hotel Alpenrose Munich" } }),
+    );
+    await act(async () => saveAndExit(renderer).props.onClick());
+    expect(updatePropertyProfile).toHaveBeenCalledWith(
+      PROPERTY,
+      {
+        expectedProfileRevision: 4,
+        patch: expect.objectContaining({ displayName: "Hotel Alpenrose Munich" }),
+      },
+      `quick-setup:edit:${PROPERTY}:4`,
+    );
+    expect(onSaveAndExit).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
+  it("stays with the reason when Save & exit can't save the edit, and leaves without a write when nothing changed", async () => {
+    const { renderer, updatePropertyProfile, onSaveAndExit } = await mount();
+    updatePropertyProfile.mockRejectedValueOnce(new Error("Someone else changed this hotel."));
+    await act(async () => back(renderer).props.onClick());
+    await act(async () => back(renderer).props.onClick());
+    await act(async () =>
+      nameField(renderer).props.onChange({ target: { value: "Hotel Alpenrose Munich" } }),
+    );
+    await act(async () => saveAndExit(renderer).props.onClick());
+    expect(updatePropertyProfile).toHaveBeenCalledTimes(1);
+    expect(onSaveAndExit).not.toHaveBeenCalled();
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
+      "Someone else changed this hotel.",
+    );
+    // The edit is still on the screen.
+    expect(
+      renderer.root
+        .findAllByType("input")
+        .some((input) => input.props.value === "Hotel Alpenrose Munich"),
+    ).toBe(true);
+    renderer.unmount();
+
+    const untouched = await mount();
+    await act(async () => saveAndExit(untouched.renderer).props.onClick());
+    expect(untouched.updatePropertyProfile).not.toHaveBeenCalled();
+    expect(untouched.onSaveAndExit).toHaveBeenCalledTimes(1);
+    untouched.renderer.unmount();
   });
 
   it("goes back to step 5 without saving on Back from its first screen", async () => {

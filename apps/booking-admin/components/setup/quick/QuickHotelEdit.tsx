@@ -4,6 +4,8 @@ import type { PropertyProfileResponse } from "@vayada/domain-hotels";
 import type { SharedHotelSetupApi, SharedPropertyTypeOption } from "@vayada/product-onboarding";
 import { useEffect, useMemo, useState } from "react";
 
+import { ApiErrorResponse } from "@/services/api/client";
+
 import { QuickHotelAddress } from "./QuickHotelAddress";
 import { QuickHotelStep } from "./QuickHotelStep";
 import { QuickSetupShell } from "./QuickSetupShell";
@@ -94,6 +96,58 @@ export function QuickHotelEdit({
 
   const change = (patch: Partial<QuickHotelDraft>) =>
     setDraft((current) => (current ? { ...current, ...patch } : current));
+  // Whether the screen differs from the hotel as loaded (or last saved): Save & exit without an edit leaves
+  // without a write, and typing a value back to what it was counts as no edit.
+  const dirty =
+    logo !== null ||
+    JSON.stringify(draft) !==
+      JSON.stringify(quickHotelDraftFromProfile(loaded.profile.profile, loaded.savedCurrency));
+
+  /** The one save of this screen, for Continue and for Save & exit alike: the profile, a new logo, the currency. */
+  const save = async (next: QuickHotelDraft) => {
+    if (!currency) throw new Error("Choose your address from the list, or enter it manually.");
+    const { profile, savedCurrency } = loaded;
+    let saved: PropertyProfileResponse;
+    try {
+      saved = await setup.updatePropertyProfile(
+        propertyId,
+        {
+          expectedProfileRevision: profile.profileRevision,
+          patch: quickHotelProfilePatch(next, profile.profile),
+        },
+        `quick-setup:edit:${propertyId}:${profile.profileRevision}`,
+      );
+    } catch (error) {
+      if (error instanceof ApiErrorResponse && error.status === 409)
+        throw new Error(
+          "Someone else changed this hotel meanwhile. Reload the page, then try again.",
+        );
+      throw error;
+    }
+    // A later save (after a failed logo or currency step) continues from the saved revision.
+    setLoaded((current) => (current ? { ...current, profile: saved } : current));
+    if (logo) {
+      try {
+        const mediaObjectId = await setup.uploadPropertyLogo(
+          propertyId,
+          logo.file,
+          `quick-setup:edit-logo:${propertyId}:${saved.profileRevision}`,
+        );
+        await setup.assignPropertyLogo(
+          propertyId,
+          { expectedProfileRevision: saved.profileRevision, mediaObjectId, altText: null },
+          `quick-setup:edit-logo-assign:${propertyId}:${saved.profileRevision}`,
+        );
+      } catch {
+        // The logo is optional: it can be added in Design Studio.
+      }
+    }
+    const currencyToSave = quickHotelCurrencyToSave(currency, savedCurrency);
+    if (currencyToSave) {
+      await saveCurrency(propertyId, currencyToSave);
+      setLoaded((current) => (current ? { ...current, savedCurrency: currencyToSave } : current));
+    }
+  };
 
   return (
     <QuickHotelStep
@@ -116,36 +170,13 @@ export function QuickHotelEdit({
       // Back from the rooms step lands on the last of the three hotel screens.
       initialPart="contacts"
       onBack={onDone}
+      // The edits live in this screen only (VAY-2383): Continue on the last screen or Save & exit saves them.
+      footerNote="Not saved yet: finish with Continue, or use Save & exit"
       onSaveAndExit={onSaveAndExit}
+      // Nothing edited: leave at once, without a write.
+      onExitSave={dirty ? save : null}
       onSubmit={async (next) => {
-        if (!currency) throw new Error("Choose your address from the list, or enter it manually.");
-        const { profile, savedCurrency } = loaded;
-        const saved = await setup.updatePropertyProfile(
-          propertyId,
-          {
-            expectedProfileRevision: profile.profileRevision,
-            patch: quickHotelProfilePatch(next, profile.profile),
-          },
-          `quick-setup:edit:${propertyId}:${profile.profileRevision}`,
-        );
-        if (logo) {
-          try {
-            const mediaObjectId = await setup.uploadPropertyLogo(
-              propertyId,
-              logo.file,
-              `quick-setup:edit-logo:${propertyId}:${saved.profileRevision}`,
-            );
-            await setup.assignPropertyLogo(
-              propertyId,
-              { expectedProfileRevision: saved.profileRevision, mediaObjectId, altText: null },
-              `quick-setup:edit-logo-assign:${propertyId}:${saved.profileRevision}`,
-            );
-          } catch {
-            // The logo is optional: it can be added in Design Studio.
-          }
-        }
-        const currencyToSave = quickHotelCurrencyToSave(currency, savedCurrency);
-        if (currencyToSave) await saveCurrency(propertyId, currencyToSave);
+        await save(next);
         onDone();
       }}
     />

@@ -198,7 +198,7 @@ it("explains a Finance denial without reloading so it can be saved again after f
   const denied = { code: "denied", reason: "payments_disabled" };
   client.prepare.mockRejectedValueOnce(new ApiErrorResponse(403, denied));
   await act(async () => button("Save prices again")!.props.onClick());
-  expect(text()).toContain("Payments are switched off for this property");
+  expect(text()).toContain("payments are switched off for this property");
   expect(reload).not.toHaveBeenCalled();
   expect(button("Save prices again")!.props.disabled).toBe(false);
 });

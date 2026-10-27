@@ -51,14 +51,17 @@ const financeReasons = {
   method_unavailable: "pricing.editor.financeMethodUnavailable",
   deposit_execution_unavailable: "pricing.editor.financeDepositUnavailable",
 } as const satisfies Record<string, MessageKey>;
-/** Prepare's denial when Finance is not ready: fixable in payment settings without losing edits. */
+/** Prepare's denial when Finance is not ready: nothing was saved; fixable in Booking Admin's payment settings, but the
+ * edits live only on this page meanwhile (VAY-2383). */
 function financeReason(error: unknown) {
   const reason = error instanceof ApiErrorResponse && error.status === 403 ? (error.data as { reason?: unknown }).reason : undefined;
   return typeof reason === "string" && Object.hasOwn(financeReasons, reason) ? financeReasons[reason as keyof typeof financeReasons] : null;
 }
 export const financeNotReady = (error: unknown) => financeReason(error) !== null;
-export function pricingSaveError(error: unknown, t: Translate) {
+/** `paymentCurrency`: the currency Payment settings take, when the page has read it; a refused currency names it. */
+export function pricingSaveError(error: unknown, t: Translate, { paymentCurrency = null }: { paymentCurrency?: string | null } = {}) {
   const finance = financeReason(error);
+  if (finance === "pricing.editor.financeCurrencyMismatch" && paymentCurrency) return t("pricing.editor.financeCurrencyMismatchExpected", { currency: paymentCurrency });
   if (finance) return t(finance);
   if (nonRefundablePayAtProperty(error)) return t("pricing.error.nonRefundablePayAtProperty");
   const paymentRule = paymentRuleKey(error);

@@ -44,7 +44,7 @@ import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepOpening } from "./StepOpening";
 import { StepFirstPrices, type FirstPrices, type FirstThen } from "./StepFirstPrices";
-import { paymentSettingsMethods } from "./pricingPaymentDefaults";
+import { paymentSettingsDefaults, type PaymentSettingsDefaults } from "./pricingPaymentDefaults";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 import { GuestPreview } from "./GuestPreview";
 import { ArrowPathIcon, CalendarDaysIcon, CheckIcon } from "@heroicons/react/24/outline";
@@ -83,9 +83,10 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [stayStart, setStayStart] = useState<string | null>(null), [shownMonth, setShownMonth] = useState<string | null>(null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
   const [calendarAdults, setCalendarAdults] = useState<number | null>(null), [selection, setSelection] = useState<NightSelection | null>(null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
-  // A first price's ways to pay from Payment settings (undefined: loading; null: unknown), and a season window to open
-  // once "Add a season" has added the first prices (VAY-2188).
-  const [defaultMethods, setDefaultMethods] = useState<readonly PaymentMethod[] | null | undefined>(undefined), [seasonOnStart, setSeasonOnStart] = useState(false);
+  // A first price's ways to pay and currency from Payment settings (undefined: loading; methods null: unknown), and a
+  // season window to open once "Add a season" has added the first prices (VAY-2188).
+  const [paymentDefaults, setPaymentDefaults] = useState<PaymentSettingsDefaults | undefined>(undefined), [seasonOnStart, setSeasonOnStart] = useState(false);
+  const defaultMethods: readonly PaymentMethod[] | null | undefined = paymentDefaults?.methods;
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
   const exclusiveEditPending = addingOfferRoom !== null || preset !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
   const hasPendingEntries = addingOfferRoom !== null || preset !== null || Object.values(pendingEntries).some(Boolean);
@@ -327,7 +328,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   useEffect(() => {
     if (!firstTime) return;
     let live = true;
-    void paymentSettingsMethods(client).then((methods) => { if (live) setDefaultMethods(methods); });
+    void paymentSettingsDefaults(client).then((defaults) => { if (live) setPaymentDefaults(defaults); });
     return () => { live = false; };
   }, [firstTime, client]);
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
@@ -366,7 +367,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // No prices yet (VAY-2280): the first-price form shows the calendar of nights waiting for one, beside "Start with one price".
   // Laid out as the editor's numbered steps (VAY-2305); the other editors sit under More options. Save is in the bar.
   return <PricingManualMethodsProvider value={manualMethods}><PricingCardReadinessProvider value={cardReadiness}><PricingNotSellingProvider value={notSelling}><section className="space-y-4">
-    {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
+    {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t, { paymentCurrency: paymentDefaults?.currency })}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}{financeNotReady(error) && dirty && <p className="mt-2">{t("pricing.editor.financeUnsavedHint")}</p>}</div>}
+    {/* Before any typing (VAY-2383): Payment settings already say the server would refuse the first prices. */}
+    {error === null && firstForm && paymentDefaults?.notReady && <p role="status" className={ui.warningBanner}>{t("pricing.editor.financeNotReadyBefore")}</p>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>
