@@ -1,6 +1,6 @@
 import type { APIRequestContext } from "@playwright/test";
 
-import { waitForNoPublicOffer, type BookingResource, type Stay } from "./booking-lifecycle";
+import type { BookingResource } from "./booking-lifecycle";
 import {
   arrayField,
   authenticateSyntheticPmsUser,
@@ -25,11 +25,8 @@ import {
 
 export type HotelResource = {
   api: JsonApi;
-  addonItemIds?: string[];
   ownerWorkosUserId?: string;
   propertyId: string;
-  slug?: string;
-  stay?: Stay;
   workosOrganizationId?: string;
 };
 
@@ -90,36 +87,7 @@ export async function cleanupSmokeResources(
     }
   }
 
-  if (hotel) {
-    const api = hotelApi ?? hotel.api;
-    for (const addonItemId of hotel.addonItemIds ?? []) {
-      try {
-        await api.json(
-          "DELETE",
-          `/api/booking/hotels/${hotel.propertyId}/addon-items/${addonItemId}`,
-        );
-      } catch (error) {
-        errors.push(error);
-      }
-    }
-    try {
-      await api.json("PATCH", `/api/finance/properties/${hotel.propertyId}/payment-settings`, {
-        commandId: `next-smoke:${environment.runId}:cleanup-payment`,
-        idempotencyKey: `next-smoke:${environment.runId}:cleanup-payment`,
-        paymentSettings: {
-          paymentsEnabled: true,
-          paymentProvider: "manual",
-          acceptedMethods: ["other"],
-        },
-      });
-      if (hotel.slug && hotel.stay) {
-        await waitForNoPublicOffer(request, hotel.slug, hotel.stay);
-      }
-    } catch (error) {
-      errors.push(error);
-    }
-  }
-
+  // Retiring the property stops its sales: public pricing serves active hotels only.
   for (const propertyId of new Set(retirementPropertyIds)) {
     try {
       if (!platformAdmin) throw new Error("Synthetic Platform Admin was not created.");
