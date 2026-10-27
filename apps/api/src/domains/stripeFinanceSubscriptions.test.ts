@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { createStripeFinanceSubscriptionProvider } from "./stripeFinanceSubscriptions.js";
+import { STRIPE_REQUEST_TIMEOUT_MS } from "./stripeRequestTimeout.js";
+
+/** A Stripe that never answers unless the request's own signal aborts it. */
+function hangingFetch() {
+  const signals: (AbortSignal | null | undefined)[] = [];
+  const fetchImpl = (_input: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      signals.push(init?.signal);
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    });
+  return { fetch: fetchImpl as typeof fetch, signals };
+}
 
 describe("Stripe fixed-plan provider", () => {
   it("creates one exact monthly graduated EUR price and a hosted subscription checkout", async () => {
@@ -498,6 +510,39 @@ describe("Stripe fixed-plan provider", () => {
     );
     expect(calls).toHaveLength(2);
     expect(calls[1]).toContain("/prices/price_fixed_30d?expand%5B%5D=tiers");
+  });
+
+  it("gives up on a Stripe call that hangs, within the request timeout (VAY-2297)", async () => {
+    const hung = hangingFetch();
+    const provider = createStripeFinanceSubscriptionProvider({
+      secretKey: "sk_test_secret",
+      fetch: hung.fetch,
+      timeoutMs: 20,
+    });
+
+    await expect(provider.getCustomerBilling("cus_1")).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+    expect(hung.signals).toHaveLength(1);
+    expect(hung.signals[0]?.aborted).toBe(true);
+  });
+
+  it("caps every call at 30 s with the request's own signal (VAY-2297)", async () => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const provider = createStripeFinanceSubscriptionProvider({
+      secretKey: "sk_test_secret",
+      fetch: async (_input, init) => {
+        signals.push(init?.signal);
+        return response(subscription());
+      },
+    });
+
+    await provider.retrieveSubscription("sub_1");
+
+    expect(STRIPE_REQUEST_TIMEOUT_MS).toBe(30_000);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]?.aborted).toBe(false);
   });
 });
 

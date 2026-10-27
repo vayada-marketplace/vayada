@@ -1,5 +1,7 @@
 import { Buffer } from "node:buffer";
 
+import { STRIPE_REQUEST_TIMEOUT_MS } from "./stripeRequestTimeout.js";
+
 type StripeFetch = typeof globalThis.fetch;
 type StripeObject = Record<string, unknown>;
 
@@ -85,15 +87,18 @@ export type StripeBookingPaymentProvider = {
   retrieveRefund(refundId: string, providerAccountRef: string): Promise<StripeBookingRefund>;
 };
 
-const REFUND_TIMEOUT_MS = 30_000;
+const REFUND_TIMEOUT_MS = STRIPE_REQUEST_TIMEOUT_MS;
 
 export function createStripeBookingPaymentProvider(config: {
   secretKey: string;
   endpoint?: string;
   fetch?: StripeFetch;
+  /** Tests only: production keeps STRIPE_REQUEST_TIMEOUT_MS. */
+  timeoutMs?: number;
 }): StripeBookingPaymentProvider {
   const endpoint = config.endpoint ?? "https://api.stripe.com/v1";
   const fetchImpl = config.fetch ?? globalThis.fetch;
+  const defaultTimeoutMs = config.timeoutMs ?? STRIPE_REQUEST_TIMEOUT_MS;
 
   const request = async (
     method: "GET" | "POST",
@@ -101,7 +106,8 @@ export function createStripeBookingPaymentProvider(config: {
     fields: ReadonlyArray<readonly [string, string]> = [],
     idempotencyKey?: string,
     providerAccountRef?: string | null,
-    /** Refund calls hold a refund row lock while they wait (VAY-2205): give up after this long. */
+    /** Refund calls hold a refund row lock while they wait (VAY-2205). Every other call waits at
+     * most STRIPE_REQUEST_TIMEOUT_MS: checkout, capture and cancel hold payment rows too (VAY-2297). */
     timeoutMs?: number,
   ): Promise<StripeObject> => {
     const form = new URLSearchParams(fields.map(([key, value]): [string, string] => [key, value]));
@@ -116,7 +122,7 @@ export function createStripeBookingPaymentProvider(config: {
           ...(providerAccountRef ? { "Stripe-Account": providerAccountRef } : {}),
         },
         ...(method === "POST" ? { body: form.toString() } : {}),
-        ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+        signal: AbortSignal.timeout(timeoutMs ?? defaultTimeoutMs),
       },
     );
     const payload = object(await response.json());

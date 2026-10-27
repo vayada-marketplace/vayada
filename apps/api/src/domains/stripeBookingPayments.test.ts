@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { createStripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { STRIPE_REQUEST_TIMEOUT_MS } from "./stripeRequestTimeout.js";
+
+/** A Stripe that never answers unless the request's own signal aborts it. */
+function hangingFetch() {
+  const signals: (AbortSignal | null | undefined)[] = [];
+  const fetchImpl = (_input: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      signals.push(init?.signal);
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    });
+  return { fetch: fetchImpl as typeof fetch, signals };
+}
 
 describe("Stripe booking payments", () => {
   it("creates a connected-account PaymentIntent with stable metadata", async () => {
@@ -227,6 +239,65 @@ describe("Stripe booking payments", () => {
     });
 
     expect(new URLSearchParams(body).has("application_fee_amount")).toBe(false);
+  });
+
+  describe("request timeouts (VAY-2297)", () => {
+    it("gives up on a Stripe call that hangs, within the request timeout", async () => {
+      const hung = hangingFetch();
+      const provider = createStripeBookingPaymentProvider({
+        secretKey: "sk_test",
+        fetch: hung.fetch,
+        timeoutMs: 20,
+      });
+
+      await expect(
+        provider.createPaymentIntent({
+          propertyId: "property-1",
+          bookingReference: "B-001",
+          providerAccountRef: "acct_1",
+          amountMinor: 6050,
+          applicationFeeAmountMinor: 303,
+          currency: "EUR",
+          captureMethod: "automatic",
+          idempotencyKey: "intent-1",
+        }),
+      ).rejects.toMatchObject({ name: "TimeoutError" });
+      await expect(provider.retrievePaymentIntent("pi_1", "acct_1")).rejects.toMatchObject({
+        name: "TimeoutError",
+      });
+      expect(hung.signals).toHaveLength(2);
+      expect(hung.signals.every((signal) => signal?.aborted)).toBe(true);
+    });
+
+    it("caps every call at 30 s with the request's own signal", async () => {
+      const signals: (AbortSignal | null | undefined)[] = [];
+      const provider = createStripeBookingPaymentProvider({
+        secretKey: "sk_test",
+        fetch: async (_input, init) => {
+          signals.push(init?.signal);
+          return new Response(
+            JSON.stringify({
+              id: "pi_1",
+              status: "requires_capture",
+              amount: 100,
+              currency: "eur",
+              metadata: {},
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        },
+      });
+
+      await provider.retrievePaymentIntent("pi_1", "acct_1");
+      await provider.capturePaymentIntent("pi_1", "acct_1", "capture-1");
+      await provider.cancelPaymentIntent("pi_1", "acct_1", "cancel-1");
+
+      expect(STRIPE_REQUEST_TIMEOUT_MS).toBe(30_000);
+      expect(signals).toHaveLength(3);
+      expect(signals.every((signal) => signal instanceof AbortSignal && !signal.aborted)).toBe(
+        true,
+      );
+    });
   });
 
   describe("refunds (VAY-2205)", () => {

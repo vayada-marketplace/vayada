@@ -320,7 +320,7 @@ export async function executePricingCardRefund(
     ).rows.map((row) => row.id);
     let refund: StripeBookingRefund | undefined;
     try {
-      refund = await findOrCreateRefund(provider, command, lookup, earlier);
+      refund = await findOrCreateRefund(client, provider, command, lookup, earlier);
     } catch (error) {
       // Once Stripe has the refund, it is followed to the end. One Stripe confirms it never made
       // (the list answered without it, then Stripe refused the create) is given up after
@@ -457,6 +457,7 @@ const definiteRefusal = (error: unknown) => {
 class RefundAlreadyAtStripe extends Error {}
 
 async function findOrCreateRefund(
+  client: PoolClient,
   provider: StripeBookingPaymentProvider,
   command: Command,
   lookup: { listed: boolean; refused: boolean },
@@ -476,6 +477,13 @@ async function findOrCreateRefund(
       command.provider_account_ref,
     );
     lookup.listed = true;
+    // The command row records that Stripe's list answered before the create is asked. This
+    // statement also keeps the open transaction from sitting idle across two Stripe calls in a
+    // row (up to 60 s), which a 60 s idle-in-transaction limit would cut (VAY-2297).
+    await client.query(
+      "UPDATE finance.card_refund_commands SET updated_at=clock_timestamp() WHERE id=$1",
+      [command.id],
+    );
     // This command's own refund first. Otherwise the one live refund an earlier command made after
     // all (its answer was lost) is this retry's refund, when it is for the same amount. Any other
     // live refund, one made in Stripe's dashboard too, stops this one: the guest is never refunded

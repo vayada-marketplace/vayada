@@ -636,4 +636,50 @@ describe.skipIf(!url)("pricing card refunds (VAY-2205)", () => {
     expect(await first).toBe("succeeded");
     expect(stripe.provider.createRefund).toHaveBeenCalledOnce();
   });
+
+  it("never leaves the refund transaction idle across the two Stripe calls (VAY-2297)", async () => {
+    // A session that PostgreSQL cuts after 1.5 s idle inside a transaction, as the API login
+    // will be at 60 s. Each slow Stripe call takes 1 s: list then create back to back would be
+    // 2 s idle without the write in between.
+    const strict = new pg.Pool({ connectionString: url, max: 2 });
+    strict.on("connect", (client) => {
+      void client.query("SET idle_in_transaction_session_timeout='1500ms'");
+    });
+    strict.on("error", () => undefined);
+    try {
+      // PostgreSQL pushes the FATAL as a client error event; the next query then fails too.
+      const cut = await strict.connect();
+      const cutErrors: (Error & { code?: string })[] = [];
+      cut.on("error", (error: Error & { code?: string }) => {
+        cutErrors.push(error);
+      });
+      try {
+        await cut.query("BEGIN");
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await expect(cut.query("SELECT 1")).rejects.toThrow();
+        expect(cutErrors[0]).toMatchObject({ code: "25P03" });
+      } finally {
+        cut.release(true);
+      }
+
+      const f = await paidCardStay(),
+        stripe = fakeStripe();
+      const slow = <T>(value: T) =>
+        new Promise<T>((resolve) => setTimeout(() => resolve(value), 1_000));
+      const listRefunds = stripe.provider.listRefunds.getMockImplementation()!;
+      const createRefund = stripe.provider.createRefund.getMockImplementation()!;
+      stripe.provider.listRefunds.mockImplementation(async () => slow(await listRefunds()));
+      stripe.provider.createRefund.mockImplementation(async (input) =>
+        slow(await createRefund(input)),
+      );
+      const { commandId } = (await f.stage("0"))!;
+
+      expect(await executePricingCardRefund(strict, stripe.provider, commandId)).toBe("succeeded");
+      expect(stripe.provider.listRefunds).toHaveBeenCalledOnce();
+      expect(stripe.provider.createRefund).toHaveBeenCalledOnce();
+      expect((await f.state()).payment).toMatchObject({ status: "refunded" });
+    } finally {
+      await strict.end();
+    }
+  }, 20_000);
 });
