@@ -943,18 +943,12 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/replacementPricingOfferOwners.integration.test.ts
 
-      - name: Verify canonical setup payment readiness
-        if: matrix.shard == 'hotel-setup'
-        run: >-
-          npm --workspace vayada-api run test --
-          src/sharedHotelSetupProfile.integration.test.ts -t 'evaluates payment readiness'
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
-
-      - name: Verify concurrent property provisioning
+      # The whole file, including the INSERT-only privilege proof (VAY-2342) that the former
+      # `-t` filtered steps (payment readiness, concurrent provisioning) left out.
+      - name: Verify the canonical setup profile repository
         if: matrix.shard == 'hotel-setup'
         run: |
-          npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts -t 'provisions one canonical property for concurrent stable-reference commands'
+          npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1402,6 +1396,165 @@ jobs:
           '
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/domains/bookingGuestTermsStore.integration.test.ts
+
+      # VAY-2111: the integration files no step named before. Each batch in its own migrated
+      # database, like the cloud run that proved them; the nightly run (main-integration-suites.yml)
+      # covers whatever a later file adds without a step here (scripts/ci/integration-suites.mjs).
+      - name: Verify finance facts and revenue evidence on PostgreSQL (VAY-2111)
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_finance_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_finance_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/bookingAddonRevenueEvidence.integration.test.ts \
+            src/domains/bookingExternalNightlyRevenueEvidence.integration.test.ts \
+            src/domains/financeBankTransferRepository.integration.test.ts \
+            src/domains/financeDashboardExpenseFacts.integration.test.ts \
+            src/domains/financeDashboardFacts.integration.test.ts \
+            src/domains/financeManualBookingSettlement.integration.test.ts \
+            src/domains/financePaymentReadinessCommandRepository.integration.test.ts \
+            src/domains/financeProfitLossFacts.integration.test.ts \
+            src/domains/financeReplacementPricingReadiness.integration.test.ts \
+            src/domains/financeRevenueAddonFacts.integration.test.ts \
+            src/domains/financeRevenueRoomFacts.integration.test.ts \
+            src/domains/propertySetupFinanceOwnerScope.integration.test.ts \
+            src/jobs/financeOtaCommissionPreactivation.integration.test.ts \
+            src/platform/financeOnlineCardExecutionEvidenceRepository.integration.test.ts \
+            src/routes/bookingNightlyRevenueCapture.integration.test.ts
+
+      - name: Verify PMS Inbox commands and workers on PostgreSQL (VAY-2111)
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_inbox_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_inbox_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/channexOfferPreviewReader.integration.test.ts \
+            src/domains/pmsInboxAssistance.integration.test.ts \
+            src/domains/pmsInboxMarkReadCommand.integration.test.ts \
+            src/domains/pmsInboxQuickReply.integration.test.ts \
+            src/domains/pmsInboxReplyCommand.integration.test.ts \
+            src/domains/pmsInboxStaffCommand.integration.test.ts \
+            src/domains/pmsInboxStartDirectEmailCommand.integration.test.ts \
+            src/domains/pmsInboxTriageCommand.integration.test.ts \
+            src/jobs/pmsInboxAssignmentReconciliation.integration.test.ts \
+            src/jobs/pmsInboxFollowUpRelease.integration.test.ts
+
+      - name: Verify PMS operations, calendar and inventory on PostgreSQL (VAY-2111)
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_pms_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_pms_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/bookingGuestChoiceStore.integration.test.ts \
+            src/domains/pmsInventoryMaterializationAuthorization.integration.test.ts \
+            src/domains/pmsInventoryReservationLifecycleRepository.integration.test.ts \
+            src/domains/pmsLinkedInventoryReconciler.integration.test.ts \
+            src/domains/pmsManualBookingAvailability.integration.test.ts \
+            src/domains/pmsOperatingCalendarReadModel.integration.test.ts \
+            src/domains/pmsOperationsCalendarOccupancy.integration.test.ts \
+            src/domains/propertySetupPmsOwnerRepository.integration.test.ts \
+            src/domains/sameDayBookingSettings.integration.test.ts \
+            src/jobs/pmsNoShowReporting.integration.test.ts \
+            src/pmsRoomFactsActiveList.integration.test.ts
+
+      - name: Verify pricing sources, snapshots and Channex pricing jobs on PostgreSQL (VAY-2111)
+        if: matrix.shard == 'pricing'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_pricing_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_pricing_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/channexPricingPropertyAuthority.integration.test.ts \
+            src/domains/pmsAcceptedPricingOwner.integration.test.ts \
+            src/domains/pmsChannexInventoryRules.integration.test.ts \
+            src/domains/pmsPricingCommandRepository.integration.test.ts \
+            src/domains/pmsReplacementPricingRoomSource.integration.test.ts \
+            src/domains/replacementChargeDeclarations.integration.test.ts \
+            src/domains/replacementPricingFxStore.integration.test.ts \
+            src/domains/replacementPricingSnapshot.integration.test.ts \
+            src/domains/replacementPricingStorageGuard.integration.test.ts \
+            src/jobs/channexUnverifiedAlterations.integration.test.ts \
+            src/jobs/pmsChannexPricingJobLease.integration.test.ts
+
+      - name: Verify hotel catalog, setup lifecycle, media and sessions on PostgreSQL (VAY-2111)
+        if: matrix.shard == 'platform'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_platform_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_platform_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/hotelCatalogCurrentOwnerEvidence.integration.test.ts \
+            src/domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.integration.test.ts \
+            src/domains/hotelCatalogStep1Repository.integration.test.ts \
+            src/domains/platformPropertyLifecycleCommandRepository.integration.test.ts \
+            src/identityCookieConsent.integration.test.ts \
+            src/platform/authSessionHandoffs.integration.test.ts \
+            src/platform/hotelMediaResolver.integration.test.ts \
+            src/platform/platformMediaRepository.integration.test.ts \
+            src/preparedHotelImportRepository.integration.test.ts \
+            src/propertySetupLifecycleStatusRepository.integration.test.ts
+
+      # Both suites drop and rebuild the pms, identity, hotel_catalog and platform schemas themselves,
+      # so nothing else may share their database.
+      - name: Verify guest reviews and review replies in their own database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_reviews_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_reviews_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/pmsGuestReviews.integration.test.ts \
+            src/domains/pmsReviewReplies.integration.test.ts
+
+      # Shares the email queue with every other suite in its database (VAY-2239).
+      - name: Verify bank transfer bookings in their own database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_bank_transfer_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_bank_transfer_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/financeBankTransferBooking.integration.test.ts
+
+      # The suite accepts only a database named vay1009_import_test.
+      - name: Verify the durable Airbnb import source in its own database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1009_import_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay1009_import_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/airbnbImportSourceRepository.integration.test.ts
+
+      # Builds its own tables inside a rolled-back transaction, so no migrations.
+      - name: Verify platform growth aggregates in an empty database
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          GROWTH_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2111_growth_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_growth_test"); await client.end();'
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/platform/growthTelemetry.integration.test.ts
 
   setup_draft_reset_postgres:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration
