@@ -39,8 +39,9 @@ describe.skipIf(!url)("durable Airbnb source", () => {
   const applications = createPgAirbnbImportApplicationRepository(url ?? "postgresql://disabled");
   let connected = false;
   beforeAll(async () => {
-    if (url !== "postgresql://postgres@127.0.0.1:59709/vay1009_import_test")
-      throw new Error("Requires the reserved local VAY-1009 test database");
+    // Its own database (the nightly integration run names it this way too, VAY-2111).
+    if (!url?.endsWith("/vay1009_import_test"))
+      throw new Error("Requires a test database named vay1009_import_test");
     await db.connect();
     connected = true;
     await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
