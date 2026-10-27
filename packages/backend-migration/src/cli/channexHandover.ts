@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import pg from "pg";
 
 import {
   applyChannexHandover,
   ChannexHandoverRefused,
+  planChannexAttach,
   planChannexHandover,
   planChannexSales,
   type ChannexHandoverInput,
 } from "../channexHandover.js";
 import { normalizePgConnectionString } from "../pgConnection.js";
 
-// VAY-2108: target:channex:handover activate|revoke|open-sales|close-sales --property UUID
+// VAY-2108: target:channex:handover activate|attach|revoke|open-sales|close-sales --property UUID
 //   --approval-ref TEXT; activate: --legacy-disabled-at ISO --legacy-readback-sha256 HEX;
+//   attach: the activate arguments plus --external-property UUID --manifest FILE (JSON);
 //   revoke: --reason TEXT. Without --apply it prints the plan and its sha256 (read only).
 //   --apply SHA applies that plan once; re-running it reports replayed=true.
 const [command, ...rawArgs] = process.argv.slice(2);
@@ -36,11 +39,12 @@ function line(value: object) {
 try {
   if (
     command !== "activate" &&
+    command !== "attach" &&
     command !== "revoke" &&
     command !== "open-sales" &&
     command !== "close-sales"
   )
-    throw new Error("Command must be activate, revoke, open-sales or close-sales");
+    throw new Error("Command must be activate, attach, revoke, open-sales or close-sales");
   const args = new Map<string, string>();
   for (let index = 0; index < rawArgs.length; index += 2) {
     const [key, value] = [rawArgs[index], rawArgs[index + 1]];
@@ -56,12 +60,36 @@ try {
   const allowed =
     command === "activate"
       ? ["property", "approval-ref", "legacy-disabled-at", "legacy-readback-sha256", "apply"]
-      : command === "revoke"
-        ? ["property", "approval-ref", "reason", "apply"]
-        : ["property", "approval-ref", "apply"];
+      : command === "attach"
+        ? [
+            "property",
+            "external-property",
+            "approval-ref",
+            "legacy-disabled-at",
+            "legacy-readback-sha256",
+            "manifest",
+            "apply",
+          ]
+        : command === "revoke"
+          ? ["property", "approval-ref", "reason", "apply"]
+          : ["property", "approval-ref", "apply"];
   for (const name of args.keys())
     if (!allowed.includes(name)) throw new Error(`Unknown argument --${name}`);
   const value = (name: string) => args.get(name) ?? "";
+  /** The manifest is a small reviewed file; its bytes, not its parse, are what the plan binds. */
+  const manifest = () => {
+    const path = value("manifest");
+    if (!path || statSync(path).size > 256 * 1024)
+      throw new Error("--manifest must be a file under 256 KB");
+    const raw = readFileSync(path);
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(raw.toString("utf8"));
+    } catch {
+      throw new ChannexHandoverRefused("manifest_invalid");
+    }
+    return { manifest, manifestSha256: createHash("sha256").update(raw).digest("hex") };
+  };
   const input: ChannexHandoverInput =
     command === "activate"
       ? {
@@ -71,14 +99,24 @@ try {
           legacyDisabledAt: value("legacy-disabled-at"),
           legacyReadbackSha256: value("legacy-readback-sha256"),
         }
-      : command === "revoke"
+      : command === "attach"
         ? {
             command,
             propertyId: value("property"),
+            externalPropertyId: value("external-property"),
             approvalRef: value("approval-ref"),
-            reason: value("reason"),
+            legacyDisabledAt: value("legacy-disabled-at"),
+            legacyReadbackSha256: value("legacy-readback-sha256"),
+            ...manifest(),
           }
-        : { command, propertyId: value("property"), approvalRef: value("approval-ref") };
+        : command === "revoke"
+          ? {
+              command,
+              propertyId: value("property"),
+              approvalRef: value("approval-ref"),
+              reason: value("reason"),
+            }
+          : { command, propertyId: value("property"), approvalRef: value("approval-ref") };
   const connectionString = process.env["TARGET_DATABASE_URL"];
   if (!connectionString) throw new Error("TARGET_DATABASE_URL is required");
   const pool = new pg.Pool({
@@ -99,7 +137,9 @@ try {
         const plan =
           input.command === "open-sales" || input.command === "close-sales"
             ? await planChannexSales(client, input)
-            : await planChannexHandover(client, input);
+            : input.command === "attach"
+              ? await planChannexAttach(client, input)
+              : await planChannexHandover(client, input);
         console.log(line({ applied: false, ...plan }));
       } finally {
         await client.query("ROLLBACK");
