@@ -551,6 +551,22 @@
         "noRefund": "{rooms}: keine Erstattung mehr.",
         "nonRefundable": "{rooms}: nicht erstattbar."
       }
+    },
+    "extras": {
+      "title": "Zu Ihrem Aufenthalt hinzufügen",
+      "requested": "angefragt",
+      "send": "Anfrage senden",
+      "sending": "Wird gesendet…",
+      "hint": "Wir bestätigen per E-Mail. Sie zahlen im Hotel; jetzt wird nichts berechnet.",
+      "pending": "Gesendet am {date}. Wir bestätigen per E-Mail; Sie zahlen im Hotel.",
+      "accepted": "Bestätigt: {names}. Sie zahlen {amount} im Hotel.",
+      "declined": "{names} können wir für diesen Aufenthalt leider nicht anbieten.",
+      "failed": "Ihre Anfrage konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+      "unit": {
+        "per_night": "{amount} pro Nacht",
+        "per_guest": "{amount} pro Gast",
+        "per_guest_night": "{amount} pro Gast und Nacht"
+      }
     }
   },
   "refer": {

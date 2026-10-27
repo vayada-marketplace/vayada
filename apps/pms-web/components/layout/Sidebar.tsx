@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useRef, useEffect } from "react";
+import { Fragment, useState, useRef, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -124,6 +124,21 @@ export function visiblePmsNavigation(
   });
 }
 
+const WIDE_SCREEN = "(min-width: 1024px)";
+
+/** True on a laptop, where the sidebar sits beside the page rather than over it. */
+function useWideScreen() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(WIDE_SCREEN);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(WIDE_SCREEN).matches,
+    () => false,
+  );
+}
+
 export default function Sidebar({
   onNavigate,
   permissions,
@@ -132,7 +147,12 @@ export default function Sidebar({
   permissions: readonly string[];
 }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedByUser, setCollapsedByUser] = useState(false);
+  // The check-in steps need the width: on a laptop the sidebar shrinks to icons there (VAY-2373),
+  // and staff can still open it.
+  const shrinkForCheckIn = useWideScreen() && pathname.startsWith("/check-in/");
+  const [openedOnCheckIn, setOpenedOnCheckIn] = useState(false);
+  const collapsed = shrinkForCheckIn ? !openedOnCheckIn : collapsedByUser;
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [enabledProducts, setEnabledProducts] = useState<Set<Product>>(
@@ -545,7 +565,11 @@ export default function Sidebar({
       {/* Collapse toggle */}
       <div className="px-2 pb-2">
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() =>
+            shrinkForCheckIn ? setOpenedOnCheckIn(collapsed) : setCollapsedByUser(!collapsed)
+          }
+          aria-label={collapsed ? t("layout.sidebar.expand") : t("layout.sidebar.collapse")}
+          aria-expanded={!collapsed}
           className={cn(
             "flex items-center gap-2 w-full px-2.5 py-1.5 text-[13px] text-gray-500 hover:text-gray-700 rounded-md hover:bg-gray-50 transition-colors",
             collapsed && "justify-center px-0",
