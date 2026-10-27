@@ -794,9 +794,12 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       await expect(boundary(true)).rejects.toThrow("channex_worker_claimed_scope_mismatch");
       await denied(`INSERT INTO ${claimedTable} VALUES('sync_ari')`);
       await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
-      // An image that does not ask for the claimed scope still starts after the grant.
+      // An image that does not ask for the claimed scope still starts after the grant. One that
+      // asks for it also needs the D7b mapping insert grant, which the fixture gives only with
+      // migration 0522's policy.
       await boundary(false);
-      await boundary(true);
+      if (await mappingInsertPolicy()) await boundary(true);
+      else await expect(boundary(true)).rejects.toThrow("channex_worker_grant_missing");
       await scans();
       // Queue rows follow the admitted operation (as 0473's enable jobs); sources, connections and
       // evidence follow the claim, so the other hotel's job stays inert.
@@ -926,7 +929,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     };
     // Migration 0522 adds the insert policy and the plain provisioning queue shape.
     const secured = await mappingInsertPolicy();
-    const mappingGrant = `INSERT(${privileges["pms.channel_room_type_mappings"]!.INSERT!.join(",")}) ON pms.channel_room_type_mappings`;
+    const mappingGrant = `INSERT(${(privileges["pms.channel_room_type_mappings"]!.INSERT as string[]).join(",")}) ON pms.channel_room_type_mappings`;
     const boundary = async (claimedScope: boolean) => {
       const client = await pool.connect();
       try {
