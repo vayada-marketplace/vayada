@@ -112,7 +112,7 @@ describe("QuickSetupFlow (VAY-2247, ONBOARDING_V2)", () => {
     });
     const resumed = await mount(props({ storage: saved }));
     expect(text(resumed)).toContain(
-      "Welcome back, Clara. Everything you entered is saved — you're on step 2 of 7.",
+      "Welcome back, Clara. Everything you entered is still here — you're on step 2 of 7.",
     );
     expect(text(resumed)).toContain("hotel-alpenrose.booking.vayada.com");
     resumed.unmount();

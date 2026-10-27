@@ -4,7 +4,7 @@ import { ArrowRightIcon } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 
 export type QuickSetupFooterProps = {
-  /** Desktop only, left of the buttons: "Saved as you type". */
+  /** Desktop only, left of the buttons: where the answers are kept, e.g. "Kept on this device until …". */
   note?: string | null;
   onBack?: (() => void) | null;
   backDisabled?: boolean;

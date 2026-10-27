@@ -49,6 +49,7 @@ function props(overrides: Partial<QuickHotelStepProps> = {}): QuickHotelStepProp
     address: (error) => <p>address slot {error}</p>,
     onLogoSelected: vi.fn(),
     onSubmit: vi.fn(async () => undefined),
+    footerNote: "Kept on this device until you finish “How guests reach you”",
     onSaveAndExit: vi.fn(),
     ...overrides,
   };
@@ -81,7 +82,9 @@ describe("QuickHotelStep (VAY-2247 steps 2–4, the approved split)", () => {
     expect(markup).toContain("Choose file");
     expect(markup).toContain("Your booking page, live as you type");
     expect(markup).toContain("hotel-alpenrose.booking.vayada.com");
-    expect(markup).toContain("Saved as you type");
+    // The footer says where the answers are (VAY-2383); it never claims they are saved as you type.
+    expect(markup).toContain("Kept on this device until you finish “How guests reach you”");
+    expect(markup).not.toContain("Saved as you type");
     // The other two screens come after it.
     expect(markup).not.toContain("address slot");
     expect(markup).not.toContain("Reception email");
@@ -176,6 +179,58 @@ describe("QuickHotelStep (VAY-2247 steps 2–4, the approved split)", () => {
     expect(onSubmit).toHaveBeenLastCalledWith(FILLED);
     expect(renderer.root.findAll((node) => node.props.role === "alert")).toHaveLength(0);
     renderer.unmount();
+  });
+
+  it("leaves at once on Save & exit when the host keeps the answers itself", async () => {
+    const onSaveAndExit = vi.fn();
+    const renderer = create(<QuickHotelStep {...props({ draft: FILLED, onSaveAndExit })} />);
+    await act(async () => button(renderer, "Save & exit").props.onClick());
+    expect(onSaveAndExit).toHaveBeenCalledOnce();
+    renderer.unmount();
+  });
+
+  it("saves through Save & exit like Continue does, then leaves; stays with why when it can't (VAY-2383)", async () => {
+    const onSaveAndExit = vi.fn();
+    const onExitSave = vi
+      .fn<(draft: QuickHotelDraft) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("That hotel name is already taken."))
+      .mockResolvedValueOnce(undefined);
+    const renderer = create(
+      <QuickHotelStep
+        {...props({ draft: FILLED, onSaveAndExit, onExitSave, initialPart: "contacts" })}
+      />,
+    );
+    // A refused save: the edit stays on this screen with the reason.
+    await act(async () => button(renderer, "Save & exit").props.onClick());
+    expect(onExitSave).toHaveBeenCalledWith(FILLED);
+    expect(onSaveAndExit).not.toHaveBeenCalled();
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
+      "That hotel name is already taken.",
+    );
+    // Then it saves and leaves.
+    await act(async () => button(renderer, "Save & exit").props.onClick());
+    expect(onExitSave).toHaveBeenCalledTimes(2);
+    expect(onSaveAndExit).toHaveBeenCalledOnce();
+    renderer.unmount();
+
+    // A hotel with a gap can't be saved yet: the screen with the gap opens and says so, nothing leaves.
+    const gap = create(
+      <QuickHotelStep
+        {...props({
+          draft: { ...FILLED, displayName: "" },
+          onSaveAndExit,
+          onExitSave,
+          initialPart: "contacts",
+        })}
+      />,
+    );
+    await act(async () => button(gap, "Save & exit").props.onClick());
+    expect(text(gap)).toContain("Step 2 of 7");
+    expect(text(gap)).toContain("Enter your hotel's name.");
+    expect(text(gap)).toContain("Your hotel can't be saved yet");
+    expect(onExitSave).toHaveBeenCalledTimes(2);
+    expect(onSaveAndExit).toHaveBeenCalledOnce();
+    gap.unmount();
   });
 
   it("passes the chosen logo file on", async () => {
