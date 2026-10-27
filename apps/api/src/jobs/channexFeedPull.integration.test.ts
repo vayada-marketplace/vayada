@@ -207,7 +207,7 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
         status: "new",
       },
     });
-    const run = (extra: Partial<typeof options> = {}) =>
+    const run = (extra: Partial<Parameters<typeof runChannexFeedPulls>[1]> = {}) =>
       runChannexFeedPulls(URL!, {
         ...options,
         ownedPropertyIds: [OWNED],
