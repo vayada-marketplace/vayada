@@ -297,18 +297,11 @@ export async function signUpSyntheticHotelOwner(
   await fillSecret(page.getByLabel("Verification code"), stringField(verification, "code"));
   await page.getByRole("button", { name: "Verify email", exact: true }).click();
 
-  await page.getByLabel("First name").fill(identity.firstName, { timeout: 60_000 });
-  await page.getByLabel("Last name").fill(identity.lastName);
   // The first run asks for the same details on its own first step, then opens "Your hotel"
   // instead of the wizard's track choice. Either way the hotel is provisioned through the API below.
-  if (await page.getByRole("heading", { name: "Hi! Who's setting up the hotel?" }).isVisible()) {
-    // Exact: the phone's country button is labelled "Your phone country: …" (VAY-2247 redesign).
-    await page.getByLabel("Your phone", { exact: true }).fill(phone);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+  if ((await submitAccountDetails(page, identity, phone)) === "first_run") {
     await page.getByRole("heading", { name: "Your hotel", level: 1 }).waitFor({ timeout: 45_000 });
   } else {
-    await page.getByLabel("Phone number").fill(phone);
-    await page.getByRole("button", { name: "Continue to hotel setup" }).click();
     await page
       .getByRole("heading", { name: "Choose how you’ll use vayada" })
       .waitFor({ timeout: 45_000 });
@@ -322,6 +315,30 @@ export async function signUpSyntheticHotelOwner(
     );
   }
   return { user: { ...identity, id: userIds[0]!, role: "hotel" }, session };
+}
+
+/**
+ * Fills the account details a new hotel owner gives after the email code and submits them: the
+ * first run's "Hi! Who's setting up the hotel?" step (VAY-2247), or the older setup wizard's form.
+ * Returns which one it was, so the caller waits for that flow's next step.
+ */
+export async function submitAccountDetails(
+  page: Page,
+  identity: Pick<SyntheticUser, "firstName" | "lastName">,
+  phone: string,
+): Promise<"first_run" | "wizard"> {
+  await page.getByLabel("First name").fill(identity.firstName, { timeout: 60_000 });
+  await page.getByLabel("Last name").fill(identity.lastName);
+  if (await page.getByRole("heading", { name: "Hi! Who's setting up the hotel?" }).isVisible()) {
+    // By role: the label's text is "Your phone*" (a hidden required mark), so an exact label match
+    // finds nothing, and the country button next to it is named "Your phone country: …".
+    await page.getByRole("textbox", { name: "Your phone", exact: true }).fill(phone);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    return "first_run";
+  }
+  await page.getByLabel("Phone number").fill(phone);
+  await page.getByRole("button", { name: "Continue to hotel setup" }).click();
+  return "wizard";
 }
 
 export async function createSyntheticUser(
