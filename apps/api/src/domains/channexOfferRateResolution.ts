@@ -18,9 +18,10 @@ export type ChannexOfferLink = {
  * A new stay needs the plan of the target's active version on the connection's current binding.
  * A plan of a superseded version, a target without an active version or a version from an older
  * binding resolves to nothing, and the caller refuses with operational_mapping_unavailable.
- * A revision of a stay that already landed on this target (`priorTargetId`) also accepts the
- * target's earlier versions and bindings, so OTA changes to an accepted booking keep arriving
- * after the offer moves on. The 0314 registry gives a plan one owner per connection and the
+ * A revision of a booking that already has a stay on this target (`priorTargetIds`, any room, so
+ * reordered rooms still match) also accepts the target's earlier versions and bindings, so OTA
+ * changes to an accepted booking keep arriving after the offer moves on. The owner still fixes
+ * the target, so a prior id of another target never widens anything. The 0314 registry gives a plan one owner per connection and the
  * target's room type never changes, so a plan never resolves to two room types.
  *
  * The rate plan stays null: pms.rate_plans holds legacy plans only (as for manual offer bookings
@@ -34,7 +35,7 @@ export async function resolveChannexOfferRatePlan(
     connectionId: string;
     externalRoomTypeId: string;
     externalRatePlanId: string;
-    priorTargetId: string | null;
+    priorTargetIds: readonly string[];
   },
 ) {
   return (
@@ -51,7 +52,7 @@ export async function resolveChannexOfferRatePlan(
        WHERE version.target_id=t.id AND version.external_rate_plan_id=$4 AND version.external_room_type_id=$3
          AND ((version.version=t.active_version AND version.binding_generation=c.binding_generation
              AND version.external_property_id=c.external_property_id)
-           OR t.id=$5::uuid)
+           OR t.id=ANY($5::uuid[]))
        ORDER BY version.version DESC LIMIT 1
      ) v ON TRUE
      JOIN pms.channel_room_type_mappings rm ON rm.connection_id=t.connection_id
@@ -68,7 +69,7 @@ export async function resolveChannexOfferRatePlan(
         scope.connectionId,
         scope.externalRoomTypeId,
         scope.externalRatePlanId,
-        scope.priorTargetId,
+        [...scope.priorTargetIds],
       ],
     )
   ).rows;

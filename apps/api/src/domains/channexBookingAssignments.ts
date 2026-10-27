@@ -100,7 +100,10 @@ export async function persistChannexAssignments(
     );
   } else {
     const stays: Stay[] = [];
-    for (const [index, room] of input.rooms.entries()) {
+    const priorOfferTargetIds = existing.flatMap((row) =>
+      row.channexOfferTargetId ? [row.channexOfferTargetId] : [],
+    );
+    for (const room of input.rooms) {
       let mapped: {
         roomTypeId: string;
         ratePlanId: string | null;
@@ -140,8 +143,7 @@ export async function persistChannexAssignments(
           connectionId: input.connectionId,
           externalRoomTypeId: room.externalRoomTypeId,
           externalRatePlanId: room.externalRatePlanId,
-          priorTargetId:
-            existing.find((row) => row.position === index + 1)?.channexOfferTargetId ?? null,
+          priorTargetIds: priorOfferTargetIds,
         });
       if (mapped.length !== 1)
         throw new ChannexAssignmentConflict("operational_mapping_unavailable");

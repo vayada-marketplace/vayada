@@ -31,7 +31,6 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
   let roomA = "";
   let legacyRate = "";
   const targets: Record<string, string> = {};
-  const jobs: Record<string, string> = {};
   const fetcher: typeof fetch = async (_input, init) =>
     (init?.method ?? "GET") === "GET"
       ? Response.json({ data: [] })
@@ -158,7 +157,7 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
   });
 
   it("lands a new booking on an offer-owned plan on the offer's room type", async () => {
-    jobs["offer-new"] = await job(
+    await job(
       "offer-new",
       revision("offer-new-1", "offer-new", [["provider-room-b", "offer-rate-b"]]),
     );
@@ -169,11 +168,15 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
     // The hotel sees the offer as the booking's rate (pms-web names it from the room's offers).
     expect(await rateNames("offer-new")).toEqual([{ ratePlanId: null, pricingOfferId: "flex" }]);
 
-    // Replaying the unchanged revision keeps the stay and its offer link.
-    await db.query(
-      "UPDATE platform.jobs SET status='pending',finished_at=NULL,run_after=now() WHERE id=$1",
-      [jobs["offer-new"]],
+    // A new revision that changes only the guest keeps the stay and its offer link unwritten.
+    const guestOnly = revision(
+      "offer-new-2",
+      "offer-new",
+      [["provider-room-b", "offer-rate-b"]],
+      "modified",
     );
+    guestOnly.attributes.customer.name = "Grace";
+    await job("offer-new", guestOnly);
     expect((await run()).succeeded).toBe(1);
     expect(await assignments("offer-new")).toEqual([
       { roomTypeId: B, ratePlanId: null, channexOffer: link("b", "1", "flex", B, "offer-rate-b") },
@@ -265,6 +268,15 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
       revision("accepted-1", "accepted", [["provider-room-b", "offer-rate-later-1"]]),
     );
     expect((await run()).succeeded).toBe(1);
+    // A second booking with two rooms, one on the offer and one on the adopted plan.
+    await job(
+      "accepted-multi",
+      revision("accepted-multi-1", "accepted-multi", [
+        ["provider-room-b", "offer-rate-later-1"],
+        ["provider-room", "provider-rate"],
+      ]),
+    );
+    expect((await run()).succeeded).toBe(1);
     // A new version with a new Channex plan becomes active, and the old plan is superseded.
     await addVersion(
       targets["later"]!,
@@ -287,6 +299,29 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
     expect((await run()).succeeded).toBe(1);
     expect(await stay("accepted")).toEqual({ checkIn: "2026-09-05", checkOut: "2026-09-07" });
     expect(await assignments("accepted")).toEqual([
+      {
+        roomTypeId: B,
+        ratePlanId: null,
+        channexOffer: link("later", "1", "later", B, "offer-rate-later-1"),
+      },
+    ]);
+
+    // The OTA reorders the rooms of the two-room booking: the offer room still resolves.
+    await job(
+      "accepted-multi",
+      revision(
+        "accepted-multi-2",
+        "accepted-multi",
+        [
+          ["provider-room", "provider-rate"],
+          ["provider-room-b", "offer-rate-later-1"],
+        ],
+        "modified",
+      ),
+    );
+    expect((await run()).succeeded).toBe(1);
+    expect(await assignments("accepted-multi")).toEqual([
+      { roomTypeId: roomA, ratePlanId: legacyRate, channexOffer: null },
       {
         roomTypeId: B,
         ratePlanId: null,
@@ -404,7 +439,7 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
           connectionId: C,
           externalRoomTypeId: "provider-room-b",
           externalRatePlanId: "offer-rate-b",
-          priorTargetId: null,
+          priorTargetIds: [],
         });
         expect(rows).toEqual([
           {
