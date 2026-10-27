@@ -353,6 +353,7 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       [paused],
     );
     // A run a crashed task left behind gets its next attempt (taken in the same tick here).
+    resyncPages = [[booking("booking-limited", "rev-limited")]];
     await db.query(
       "UPDATE platform.jobs SET status = 'running', locked_at = now() - interval '3 hours', locked_by = 'crashed' WHERE id = $1",
       [retry],
