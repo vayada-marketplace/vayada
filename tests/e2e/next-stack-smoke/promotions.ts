@@ -1,18 +1,17 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 import {
+  findPricingOffer,
+  guestMoney,
+  issueGuestQuote,
+  parseGuestQuote,
   runQuoteLifecycle,
   waitForOffer,
   type BookingResource,
+  type GuestQuote,
   type Stay,
 } from "./booking-lifecycle";
-import {
-  NEXT_STACK_ORIGINS,
-  numberField,
-  publicApi,
-  type JsonApi,
-  type SmokeEnvironment,
-} from "./support";
+import { NEXT_STACK_ORIGINS, record, type JsonApi, type SmokeEnvironment } from "./support";
 
 export async function runPromotionAcceptance(input: {
   api: JsonApi;
@@ -28,52 +27,72 @@ export async function runPromotionAcceptance(input: {
   const { api, bookings, environment, page, propertyId, request, roomTypeId, slug, stay } = input;
   const settingsPath = `/api/booking/hotels/${propertyId}/settings/last-minute`;
   const codesPath = `/api/booking/hotels/${propertyId}/promo-codes`;
+  const acceptancePath = `/api/pms/properties/${propertyId}/booking-acceptance`;
   const card = page
     .locator("article")
     .filter({ has: page.getByRole("heading", { name: "Early bird", exact: true }) });
-  const guest = await page.context().newPage();
-  const query = new URLSearchParams({
-    room: roomTypeId,
-    checkIn: stay.checkIn,
-    checkOut: stay.checkOut,
-    adults: "2",
-    children: "0",
-    rooms: "1",
-    rateType: "flexible",
-  });
+  // The offer a guest books: the room card hands its key to /book, and the quote prices it.
+  const offer = await findPricingOffer(request, slug, roomTypeId);
   const guestUrl = `https://${slug}.next-booking.vayada.com/en/book`;
+  const guestQuery = (promoCode?: string) =>
+    new URLSearchParams({
+      offer: offer.publicOfferKey,
+      checkIn: stay.checkIn,
+      checkOut: stay.checkOut,
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      ...(promoCode ? { promoCode } : {}),
+    });
 
-  async function waitForGuestPromotion(active: boolean) {
-    // Offers allow 15s freshness + 60s stale-while-revalidate. Reload so a
-    // cached pre-edit response cannot remain in the mounted page indefinitely.
-    await expect(async () => {
+  /**
+   * Opens /book the way a room card does (offer hand-off), which lands on the details step and
+   * prices the stay. Returns that price and checks the summary shows it: the total, and a
+   * Discount row only when something is taken off. Each visit gets its own tab, so no draft from
+   * an earlier visit (sessionStorage) carries over.
+   */
+  async function readGuestCheckout(promoCode?: string): Promise<GuestQuote> {
+    const guest = await page.context().newPage();
+    try {
       const [response] = await Promise.all([
-        guest.waitForResponse((response) => {
-          const url = new URL(response.url());
-          return (
-            url.pathname.endsWith(`/hotels/${slug}/offers`) &&
-            url.searchParams.get("check_in") === stay.checkIn
-          );
-        }),
-        guest.goto(`${guestUrl}?${query}`),
-      ]);
-      expect(response.ok()).toBe(true);
-      const body = await response.json();
-      expect(
-        body.quote.offers.some(
-          (offer: { totals: { promotion?: { name: string } } }) =>
-            offer.totals.promotion?.name === "Early bird",
+        guest.waitForResponse(
+          (candidate) =>
+            candidate.request().method() === "POST" &&
+            new URL(candidate.url()).pathname.endsWith(`/hotels/${slug}/bookings/quote`) &&
+            candidate.ok(),
+          { timeout: 45_000 },
         ),
-      ).toBe(active);
+        guest.goto(`${guestUrl}?${guestQuery(promoCode)}`),
+      ]);
+      const quote = parseGuestQuote(record(await response.json()));
+      // Step 2 of the checkout (VAY-2347): the heading the hand-off lands on.
       await expect(
         guest.getByRole("heading", { name: "Who’s staying?", exact: true }),
       ).toBeVisible();
-      // The heading shows before the price; the promotion checks wait for the priced summary.
-      await expect(guest.getByTestId("stay-total")).toBeVisible();
-      const label = guest.getByText("Early bird", { exact: true });
-      if (active) await expect(label.first()).toBeVisible();
-      else await expect(label).toHaveCount(0);
-    }).toPass({ timeout: 90_000, intervals: [1_000, 3_000, 5_000] });
+      await expect(guest.getByTestId("stay-total")).toContainText(
+        guestMoney(quote.totalMinor, quote.currency),
+      );
+      const discount = guest.getByText("Discount", { exact: true });
+      if (quote.discountMinor > BigInt(0)) {
+        await expect(discount).toBeVisible();
+        await expect(discount.locator("..")).toContainText(
+          `−${guestMoney(quote.discountMinor, quote.currency)}`,
+        );
+      } else {
+        await expect(discount).toHaveCount(0);
+      }
+      return quote;
+    } finally {
+      await guest.close();
+    }
+  }
+
+  /** The guest pays exactly `totalMinor` with nothing taken off: in the API quote and on /book. */
+  async function expectGuestPrice(totalMinor: string, key: string): Promise<void> {
+    const quote = await issueGuestQuote(request, environment, slug, stay, offer, key);
+    expect(quote.totalMinor).toBe(totalMinor);
+    expect(quote.discountMinor).toBe(BigInt(0));
+    expect((await readGuestCheckout()).totalMinor).toBe(totalMinor);
   }
 
   await test.step("create, edit and pause an automatic promotion in deployed Promos", async () => {
@@ -109,30 +128,28 @@ export async function runPromotionAcceptance(input: {
   });
 
   await waitForOffer(request, slug, stay, 2);
-  await guest.goto(`${guestUrl}?${query}`);
-  await expect(guest.getByRole("heading", { name: "Who’s staying?", exact: true })).toBeVisible();
-  await expect(guest.getByTestId("stay-total")).toBeVisible();
-  await expect(guest.getByText("Early bird", { exact: true })).toHaveCount(0);
-  const baseline = await publicApi(request).json<Record<string, unknown>>(
-    "POST",
-    `/api/booking-web/hotels/${slug}/bookings/quote`,
-    {
-      roomTypeId,
-      ...stay,
-      adults: 2,
-      children: 0,
-      numberOfRooms: 1,
-      paymentMethod: "pay_at_property",
-      rateType: "flexible",
-    },
-    { "Idempotency-Key": `next-smoke:${environment.runId}:promotion-baseline` },
+  // The price without a code while the promotion is paused: what every later check compares to.
+  const baseline = await issueGuestQuote(
+    request,
+    environment,
+    slug,
+    stay,
+    offer,
+    "promotion-baseline",
   );
-  expect(baseline.promotion).toBeUndefined();
+  expect(baseline.discountMinor).toBe(BigInt(0));
+  expect(BigInt(baseline.totalMinor)).toBe(baseline.roomMinor);
+  expect((await readGuestCheckout()).totalMinor).toBe(baseline.totalMinor);
   await card.getByRole("switch").click();
   await expect(card).toContainText("Active");
 
-  await test.step("show the named promotion and persist the better deal without stacking", async () => {
-    await waitForGuestPromotion(true);
+  await test.step("an active promotion changes no guest price yet; promo codes still discount", async () => {
+    // VAY-2319 (2026-10-23): the new pricing has no evaluator for Booking Admin's automatic
+    // promotions, so an active Early bird changes no guest price, and the Promos page says so.
+    // VAY-2333 builds the evaluator. When it ships, flip these checks in the same PR: an active
+    // promotion then prices the stay below `baseline`, a paused one changes nothing, and
+    // promotions and promo codes never stack (the highest single discount wins).
+    await expectGuestPrice(baseline.totalMinor, "promotion-active");
     for (const [mode, percent] of [
       ["instant", 10],
       ["request", 30],
@@ -145,58 +162,33 @@ export async function runPromotionAcceptance(input: {
         maxUses: 10,
         isActive: true,
       });
-      await api.json("PUT", `/api/pms/properties/${propertyId}/booking-acceptance`, {
-        acceptanceMode: mode,
-      });
-      const validation = guest.waitForResponse(
-        (response) =>
-          response.url().includes("/promo/validate") && response.request().method() === "POST",
+      await api.json("PUT", acceptancePath, { acceptanceMode: mode });
+      // The code takes its share of the room price; the smoke's amounts divide evenly.
+      const expectedDiscount = (baseline.roomMinor * BigInt(percent)) / BigInt(100);
+      const assertQuote = (quote: GuestQuote) => {
+        expect(quote.discountMinor).toBe(expectedDiscount);
+        expect(BigInt(quote.totalMinor)).toBe(BigInt(baseline.totalMinor) - expectedDiscount);
+      };
+      assertQuote(await readGuestCheckout(code));
+      const availability = await waitForOffer(request, slug, stay, 2);
+      await runQuoteLifecycle(
+        request,
+        environment,
+        slug,
+        stay,
+        offer,
+        availability.availableRooms,
+        mode,
+        bookings,
+        { key: `promotion-${mode}`, promoCode: code, assertQuote },
       );
-      await guest.goto(`${guestUrl}?${query}&promoCode=${code}`);
-      expect((await validation).ok()).toBe(true);
-      if (percent < 20) {
-        await expect(guest.getByText("Early bird", { exact: true }).first()).toBeVisible();
-        await expect(guest.getByText(`Promo ${code}: -${percent}%`, { exact: true })).toHaveCount(
-          0,
-        );
-      } else {
-        await expect(
-          guest.getByText(`Promo ${code}: -${percent}%`, { exact: true }).first(),
-        ).toBeVisible();
-        await expect(guest.getByText("Early bird", { exact: true })).toHaveCount(0);
-      }
-      const offer = await waitForOffer(request, slug, stay, 2);
-      await runQuoteLifecycle(request, environment, slug, stay, offer, mode, bookings, {
-        key: `promotion-${mode}`,
-        promoCode: code,
-        assertQuote(quote) {
-          const discount =
-            Math.round(numberField(baseline, "roomTotal") * Math.max(20, percent)) / 100;
-          expect(numberField(quote, "totalAmount")).toBeCloseTo(
-            numberField(baseline, "totalAmount") - discount,
-            2,
-          );
-          if (percent < 20) {
-            expect(quote.promotion).toMatchObject({ name: "Early bird", discountAmount: discount });
-            expect(quote.promotionDiscount).toBe(discount);
-            expect(quote.promoCode).toBeNull();
-            expect(quote.promoDiscount).toBe(0);
-          } else {
-            expect(quote.promotion).toBeUndefined();
-            expect(quote.promoCode).toBe(code);
-            expect(quote.promoDiscount).toBe(discount);
-          }
-        },
-      });
       await waitForOffer(request, slug, stay, 2);
     }
   });
 
-  await api.json("PUT", `/api/pms/properties/${propertyId}/booking-acceptance`, {
-    acceptanceMode: "instant",
-  });
+  await api.json("PUT", acceptancePath, { acceptanceMode: "instant" });
 
-  await test.step("delete the promotion and confirm it disappears for guests", async () => {
+  await test.step("delete the promotion and confirm guests still pay the same", async () => {
     page.once("dialog", (dialog) => dialog.accept());
     await card.getByRole("button", { name: "Delete Early bird", exact: true }).click();
     await expect(card).toHaveCount(0);
@@ -205,7 +197,6 @@ export async function runPromotionAcceptance(input: {
     await expect(card).toHaveCount(0);
     const saved = await api.json<Record<string, unknown>>("GET", settingsPath);
     expect(saved.promotions).toEqual([]);
-    await waitForGuestPromotion(false);
+    await expectGuestPrice(baseline.totalMinor, "promotion-deleted");
   });
-  await guest.close();
 }

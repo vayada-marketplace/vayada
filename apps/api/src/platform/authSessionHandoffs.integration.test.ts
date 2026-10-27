@@ -88,7 +88,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL auth session handoffs", () => {
     const now = new Date();
     await createHandoff(codeDigest, new Date(now.getTime() + 1_000));
     const redemptionId = "66666666-6666-4666-8666-666666666666";
-    await expect(claim(codeDigest, redemptionId, now)).resolves.not.toBeNull();
+    // created_at is the database clock: claim a moment later so the row's dates stay ordered.
+    await expect(
+      claim(codeDigest, redemptionId, new Date(now.getTime() + 500)),
+    ).resolves.not.toBeNull();
 
     await repository.scrubExpired({
       now: new Date(now.getTime() + 2_000),

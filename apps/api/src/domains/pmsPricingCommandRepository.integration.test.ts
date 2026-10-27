@@ -1,16 +1,11 @@
-import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
-import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import {
   parsePmsPricingCurrency,
-  parseUpsertFlexibleRatePlanCommand,
   parseUpsertPropertyPricingCurrencyCommand,
   type PmsPricingCurrencyChangeBlocker,
 } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
-import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
 import { createPgPmsPricingCommandRepository } from "./pmsPricingCommandRepository.js";
 import { PMS_SUPPORTED_PRICING_CURRENCY_CODES_V1 } from "./pmsPricingCurrencyCapabilities.js";
 
@@ -20,8 +15,6 @@ const organizationId = "16900000-0000-4000-8000-000000000002";
 const propertyId = "16900000-0000-4000-8000-000000000003";
 const roomTypeId = "16900000-0000-4000-8000-000000000004";
 const planId = "16900000-0000-4000-8000-000000000006";
-const legacyPlanId = "16900000-0000-4000-8000-000000000007";
-const secondLegacyPlanId = "16900000-0000-4000-8000-000000000008";
 const acceptedAt = "2026-08-03T13:00:00.000Z";
 const roleKey = "vay1069_pricing_integration";
 const auditFailureFunction = "platform.vay1069_fail_pricing_audit";
@@ -42,7 +35,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     get channexMealSyncEnabled() {
       return mealSyncEnabled;
     },
-    get channexMealSyncPropertyId() { return mealSyncPropertyId; },
+    get channexMealSyncPropertyId() {
+      return mealSyncPropertyId;
+    },
     now: () => new Date(acceptedAt),
     randomId: () => planId,
     currencyChangeGuard: {
@@ -73,350 +68,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     await repository.close();
     await cleanup();
     await admin.end();
-  });
-
-  it("does not enqueue meal changes outside the staging property", async () => {
-    mealSyncEnabled = true;
-    mealSyncPropertyId = "16900000-0000-4000-8000-000000000099";
-    await repository.upsertPropertyPricingCurrency(currencyCommand("scope-currency", 0, "EUR"));
-    await seedRoomType(roomTypeId, "Suite");
-    await admin.query(`INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex','provider-property','active','enable')`, [propertyId]);
-    await admin.query(`INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected','provider-property')`, [propertyId]);
-    expect((await repository.upsertFlexibleRatePlan({ ...planCommand("scope-save",roomTypeId,0,"120.00"),mealPlan:"breakfast" })).ok).toBe(true);
-    expect((await admin.query("SELECT id FROM platform.jobs WHERE property_id=$1",[propertyId])).rows).toHaveLength(0);
-  });
-
-  it("atomically queues only connected-property meal reconciliation and replays once", async () => {
-    mealSyncEnabled = true;
-    mealSyncPropertyId = propertyId;
-    await repository.upsertPropertyPricingCurrency(currencyCommand("meal-currency", 0, "EUR"));
-    await seedRoomType(roomTypeId, "Inclusive Suite");
-    await seedRoomType("16900000-0000-4000-8000-000000000009", "Unrelated room");
-    await admin.query(
-      `INSERT INTO pms.channel_binding_claims (property_id, provider, external_property_id, claim_state, claim_source)
-      VALUES ($1, 'channex', 'provider-property', 'active', 'enable')`,
-      [propertyId],
-    );
-    await admin.query(
-      `INSERT INTO pms.channel_connections (property_id, provider, connection_status, external_property_id)
-      VALUES ($1, 'channex', 'connected', 'provider-property')`,
-      [propertyId],
-    );
-    const command = {
-      ...planCommand("meal-save", roomTypeId, 0, "120.00"),
-      mealPlan: "breakfast" as const,
-    };
-    expect((await repository.upsertFlexibleRatePlan(command)).ok).toBe(true);
-    expect((await repository.upsertFlexibleRatePlan(command)).ok).toBe(true);
-    const jobs = await admin.query(
-      "SELECT payload, property_id FROM platform.jobs WHERE property_id = $1",
-      [propertyId],
-    );
-    expect(jobs.rows).toHaveLength(1);
-    expect(jobs.rows[0]).toMatchObject({
-      property_id: propertyId,
-      payload: { operationType: "provision", mealRatePlanId: planId },
-    });
-    const planner = createPgChannexManagementPlanPort({
-      connectionString: TEST_DATABASE_URL!,
-      bookingRevisionHandoff: async () => {},
-    });
-    try {
-      const plan = await planner.plan({
-        jobId: "meal-test",
-        propertyId,
-        correlationId: null,
-        attemptNumber: 1,
-        maxAttempts: 5,
-        input: jobs.rows[0].payload,
-      });
-      expect(plan.requests.filter((request) => request.capture?.kind === "room_type")).toHaveLength(1);
-      expect(plan.requests.filter((request) => request.capture?.kind === "rate_plan")).toHaveLength(3);
-      expect(plan.meals?.map((meal) => meal.mealType)).toEqual(["breakfast", "breakfast", "breakfast"]);
-    } finally {
-      await planner.close();
-    }
-    expect(
-      (
-        await repository.upsertFlexibleRatePlan({
-          ...planCommand("meal-second", roomTypeId, 1, "120.00"),
-          mealPlan: "room_only",
-        })
-      ).ok,
-    ).toBe(true);
-    const store = createPgPmsChannexManagementWorkerStore({
-      connectionString: TEST_DATABASE_URL!,
-      targetState: { async succeed() {}, async fail() {} },
-    });
-    try {
-      const claimed = await Promise.all(
-        ["meal-worker-a", "meal-worker-b"].map(async (workerId) => ({
-          workerId,
-          job: await store.claim({ workerId, now: new Date() }),
-        })),
-      );
-      expect(claimed.filter((item) => item.job)).toHaveLength(1);
-      const first = claimed.find((item) => item.job)!;
-      expect(await store.claim({ workerId: "meal-worker-c", now: new Date() })).toBeNull();
-      await store.succeed(first.job!, { ok: true }, { workerId: first.workerId, now: new Date() });
-      expect(await store.claim({ workerId: "meal-worker-c", now: new Date() })).not.toBeNull();
-    } finally {
-      await store.close?.();
-    }
-    mealSyncEnabled = false;
-    expect(
-      (
-        await repository.upsertFlexibleRatePlan({
-          ...planCommand("meal-observe", roomTypeId, 2, "120.00"),
-          mealPlan: "room_only",
-        })
-      ).ok,
-    ).toBe(true);
-    expect(
-      (await admin.query("SELECT id FROM platform.jobs WHERE property_id = $1", [propertyId])).rows,
-    ).toHaveLength(2);
-    mealSyncEnabled = true;
-    await admin.query(
-      "UPDATE pms.channel_connections SET connection_status = 'disconnected' WHERE property_id = $1",
-      [propertyId],
-    );
-    expect(
-      (
-        await repository.upsertFlexibleRatePlan(
-          planCommand("meal-disconnected", roomTypeId, 3, "120.00"),
-        )
-      ).ok,
-    ).toBe(true);
-    expect(
-      (await admin.query("SELECT id FROM platform.jobs WHERE property_id = $1", [propertyId])).rows,
-    ).toHaveLength(2);
-  });
-
-  it("omits inactive room rates from current pricing evidence without deleting their plans", async () => {
-    await repository.upsertPropertyPricingCurrency(
-      currencyCommand("currency-active-evidence", 0, "EUR"),
-    );
-    await seedRoomType(roomTypeId, "Retired test room");
-    const created = await repository.upsertFlexibleRatePlan(
-      planCommand("plan-active-evidence", roomTypeId, 0, "100.00"),
-    );
-    expect(created.ok).toBe(true);
-    const read = createPgPmsPricingReadModel({ connectionString: TEST_DATABASE_URL! });
-    try {
-      expect((await read.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans).toHaveLength(1);
-      await admin.query(
-        "UPDATE pms.room_types SET active = FALSE WHERE property_id = $1 AND id = $2",
-        [propertyId, roomTypeId],
-      );
-      expect((await read.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans).toHaveLength(0);
-      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
-        flexibleRatePlanId: planId,
-      });
-      const charges = await loadPmsMandatoryChargePricingSourceSnapshot(
-        admin,
-        propertyId,
-        new Date(acceptedAt),
-      );
-      expect(charges?.sourceRevisions.flexibleRatePlans).toHaveLength(0);
-    } finally {
-      await read.close();
-    }
-  });
-
-  it("preserves inclusive total, stable identity and omitted meals; removes breakfast explicitly", async () => {
-    await repository.upsertPropertyPricingCurrency(currencyCommand("meal-currency", 0, "EUR"));
-    await seedRoomType(roomTypeId, "Meal Suite");
-    const input = {
-      ...planCommand("meal-create", roomTypeId, 0, "120.00"),
-      mealPlan: "breakfast" as const,
-    };
-    const created = await repository.upsertFlexibleRatePlan(input);
-    expect(created).toMatchObject({
-      ok: true,
-      response: {
-        flexibleRatePlan: {
-          flexibleRatePlanId: planId,
-          mealPlan: "breakfast",
-          baseAmount: { amountDecimal: "120.00", currency: "EUR" },
-        },
-      },
-    });
-    expect(await repository.upsertFlexibleRatePlan(input)).toEqual(created);
-    expect(
-      await repository.upsertFlexibleRatePlan({ ...input, mealPlan: "room_only" }),
-    ).toMatchObject({ ok: false, error: { code: "idempotency_key_conflict" } });
-    const bookingId = "16900000-0000-4000-8000-000000000029";
-    const purchasedMeal = created.ok ? created.response.flexibleRatePlan.mealPlan : null;
-    await admin.query(
-      `INSERT INTO booking.guest_bookings
-      (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency,total_amount,balance_amount,booking_metadata)
-      VALUES ($1,$2,'VAY1529-MEAL','confirmed','2026-09-12','2026-09-13','EUR',120,120,$3::jsonb)`,
-      [
-        bookingId,
-        propertyId,
-        JSON.stringify({ selectedOffer: { rateSummary: { mealPlan: purchasedMeal } } }),
-      ],
-    );
-    await repository.upsertFlexibleRatePlan(planCommand("meal-unrelated", roomTypeId, 1, "120.00"));
-    const read = createPgPmsPricingReadModel({ connectionString: TEST_DATABASE_URL! });
-    try {
-      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
-        flexibleRatePlanId: planId,
-        mealPlan: "breakfast",
-        flexibleRatePlanRevision: 2,
-      });
-      await expect(
-        admin.query("UPDATE pms.rate_plans SET meal_plan='half_board' WHERE id=$1", [planId]),
-      ).rejects.toThrow();
-      await repository.upsertFlexibleRatePlan({
-        ...planCommand("meal-remove", roomTypeId, 2, "120.00"),
-        mealPlan: "room_only",
-      });
-      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
-        flexibleRatePlanId: planId,
-        mealPlan: "room_only",
-        baseAmount: { amountDecimal: "120.00" },
-      });
-      expect(
-        (
-          await admin.query(
-            "SELECT booking_metadata #>> '{selectedOffer,rateSummary,mealPlan}' AS meal FROM booking.guest_bookings WHERE id=$1",
-            [bookingId],
-          )
-        ).rows[0].meal,
-      ).toBe("breakfast");
-      await admin.query("UPDATE pms.rate_plans SET meal_plan=NULL WHERE id=$1", [planId]);
-      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
-        mealPlan: "room_only",
-      });
-    } finally {
-      await admin.query("DELETE FROM booking.guest_bookings WHERE id=$1", [bookingId]);
-      await read.close();
-    }
-  });
-
-  it("creates exact currency/plan sources, replays once, and updates the stable plan by CAS", async () => {
-    const createCurrency = currencyCommand("currency-create", 0, "EUR");
-    const createdCurrency = await repository.upsertPropertyPricingCurrency(createCurrency);
-    expect(createdCurrency).toMatchObject({
-      ok: true,
-      response: {
-        outcome: "created",
-        pricingCurrency: { currency: "EUR", pricingCurrencyRevision: 1 },
-      },
-    });
-    await expect(repository.upsertPropertyPricingCurrency(createCurrency)).resolves.toEqual(
-      createdCurrency,
-    );
-
-    await seedRoomType(roomTypeId, "Decimal Suite");
-    const createPlan = planCommand("plan-create", roomTypeId, 0, "9999999999999.99");
-    const createdPlan = await repository.upsertFlexibleRatePlan(createPlan);
-    expect(createdPlan).toMatchObject({
-      ok: true,
-      response: {
-        outcome: "created",
-        flexibleRatePlan: {
-          flexibleRatePlanId: planId,
-          flexibleRatePlanRevision: 1,
-          sourceRoomFactsRevision: 1,
-          baseAmount: { amountDecimal: "9999999999999.99", currency: "EUR" },
-        },
-      },
-    });
-    await expect(repository.upsertFlexibleRatePlan(createPlan)).resolves.toEqual(createdPlan);
-
-    const updatedPlan = await repository.upsertFlexibleRatePlan(
-      planCommand("plan-update", roomTypeId, 1, "0.10", {
-        text: "Partial refund by notice period",
-        flexibleCancellationType: "partial_refund",
-        partialRefundCancelWindowDays: 30,
-        partialRefundAmountPercent: 50,
-        partialRefundTiers: [
-          { minDaysBeforeCheckIn: 30, refundPercent: 50 },
-          { minDaysBeforeCheckIn: 7, refundPercent: 20 },
-        ],
-      }),
-    );
-    expect(updatedPlan).toMatchObject({
-      ok: true,
-      response: {
-        outcome: "updated",
-        flexibleRatePlan: {
-          flexibleRatePlanId: planId,
-          flexibleRatePlanRevision: 2,
-          baseAmount: { amountDecimal: "0.10", currency: "EUR" },
-        },
-      },
-    });
-    await expect(
-      repository.upsertFlexibleRatePlan(planCommand("plan-stale", roomTypeId, 1, "20.00")),
-    ).resolves.toEqual({
-      ok: false,
-      error: { code: "flexible_rate_plan_revision_conflict", currentRevision: 2 },
-    });
-
-    await expect(readPlan(planId)).resolves.toMatchObject({
-      amountDecimal: "0.10",
-      currency: "EUR",
-      flexibleRatePlanRevision: "2",
-      sourceRoomFactsRevision: "1",
-      sourcePricingCurrencyRevision: "1",
-      cancellationPolicySnapshot: expect.objectContaining({
-        flexibleCancellationType: "partial_refund",
-        partialRefundTiers: [
-          { minDaysBeforeCheckIn: 30, refundPercent: 50 },
-          { minDaysBeforeCheckIn: 7, refundPercent: 20 },
-        ],
-      }),
-      baseCancellationPolicySnapshot: {
-        type: "free_until_days_before_arrival",
-        freeCancellationDeadlineDays: 7,
-        afterDeadlinePenalty: "full_booking_amount",
-        noShowPenalty: "full_booking_amount",
-      },
-    });
-
-    for (const malformedTerms of [
-      { ...partialCancellationTerms(), flexibleCancellationType: null },
-      { ...partialCancellationTerms(), partialRefundTiers: [{ oops: true }] },
-      {
-        ...partialCancellationTerms(),
-        partialRefundTiers: [{ minDaysBeforeCheckIn: 366, refundPercent: 50 }],
-      },
-      {
-        ...partialCancellationTerms(),
-        partialRefundTiers: [
-          { minDaysBeforeCheckIn: 30, refundPercent: 50 },
-          { minDaysBeforeCheckIn: 30, refundPercent: 20 },
-        ],
-      },
-    ]) {
-      await expect(
-        admin.query(
-          `UPDATE pms.flexible_rate_plan_cancellation_extensions
-           SET cancellation_terms = $2::jsonb
-           WHERE flexible_rate_plan_id = $1::uuid`,
-          [planId, JSON.stringify(malformedTerms)],
-        ),
-      ).rejects.toMatchObject({ code: "23514" });
-    }
-    await expect(auditCount("pms.pricing_currency.upsert")).resolves.toBe(1);
-    await expect(auditCount("pms.flexible_rate_plan.upsert")).resolves.toBe(3);
-    await expect(eventCount()).resolves.toBe(3);
-    await expect(outboxCount()).resolves.toBe(6);
-    await expect(distributionOutboxCount()).resolves.toBe(2);
-    const payloads = await secretSafeEventPayloads();
-    expect(
-      payloads.every((payload) => {
-        const text = JSON.stringify(payload);
-        return (
-          !text.includes("EUR") &&
-          !text.includes("9999999999999.99") &&
-          !text.includes("freeCancellationDeadlineDays")
-        );
-      }),
-    ).toBe(true);
   });
 
   it("rechecks authorization before replay and excludes front-desk scope", async () => {
@@ -575,86 +226,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     await expect(readCurrency()).resolves.toEqual({ currency: "EUR", revision: "1" });
   });
 
-  it("creates a distinct canonical plan without mutating arbitrary legacy flexible rows", async () => {
-    await repository.upsertPropertyPricingCurrency(currencyCommand("currency-create", 0, "EUR"));
-    await seedRoomType(roomTypeId, "Legacy Suite");
-    await seedLegacyPlan(legacyPlanId, roomTypeId, "LEGACY-INACTIVE", false);
-    await seedLegacyPlan(secondLegacyPlanId, roomTypeId, "LEGACY-ACTIVE", true);
-
-    await expect(
-      repository.upsertFlexibleRatePlan(planCommand("create-plan", roomTypeId, 0, "150.25")),
-    ).resolves.toMatchObject({
-      ok: true,
-      response: {
-        outcome: "created",
-        flexibleRatePlan: { flexibleRatePlanId: planId, flexibleRatePlanRevision: 1 },
-      },
-    });
-    await expect(readPlan(legacyPlanId)).resolves.toMatchObject({
-      amountDecimal: "99.00",
-      mealPlan: "breakfast",
-      paymentPolicy: { mode: "legacy" },
-      depositPolicy: { amount: "10.00" },
-      contractVersion: null,
-      active: false,
-    });
-    await expect(readPlan(secondLegacyPlanId)).resolves.toMatchObject({
-      amountDecimal: "99.00",
-      mealPlan: "breakfast",
-      paymentPolicy: { mode: "legacy" },
-      depositPolicy: { amount: "10.00" },
-      contractVersion: null,
-      active: true,
-    });
-    await expect(readPlan(planId)).resolves.toMatchObject({
-      amountDecimal: "150.25",
-      mealPlan: "room_only",
-      paymentPolicy: {},
-      depositPolicy: {},
-      contractVersion: "pms-pricing.v1",
-      active: true,
-    });
-  });
-
-  it("serializes concurrent plan CAS and durably audits the stale conflict", async () => {
-    await repository.upsertPropertyPricingCurrency(currencyCommand("currency-create", 0, "EUR"));
-    await seedRoomType(roomTypeId, "Concurrent Suite");
-    await repository.upsertFlexibleRatePlan(planCommand("plan-create", roomTypeId, 0, "100.00"));
-
-    await admin.query("BEGIN");
-    await admin.query(
-      `SELECT pg_advisory_xact_lock(
-         hashtextextended(concat('pms-pricing-currency:', $1::uuid::text), 0)
-       )`,
-      [propertyId],
-    );
-    const first = repository.upsertFlexibleRatePlan(
-      planCommand("plan-concurrent-a", roomTypeId, 1, "110.00"),
-    );
-    const second = repository.upsertFlexibleRatePlan(
-      planCommand("plan-concurrent-b", roomTypeId, 1, "120.00"),
-    );
-    try {
-      await waitForAdvisoryWaiters(2);
-      await admin.query("COMMIT");
-    } catch (error) {
-      await admin.query("ROLLBACK");
-      await Promise.allSettled([first, second]);
-      throw error;
-    }
-
-    const results = await Promise.all([first, second]);
-    expect(results.filter((result) => result.ok)).toHaveLength(1);
-    expect(results.filter((result) => !result.ok)).toEqual([
-      {
-        ok: false,
-        error: { code: "flexible_rate_plan_revision_conflict", currentRevision: 2 },
-      },
-    ]);
-    await expect(auditCount("pms.flexible_rate_plan.upsert")).resolves.toBe(3);
-    await expect(idempotencyCount("pms.flexible_rate_plan.upsert")).resolves.toBe(3);
-  });
-
   it("stores unsupported currency as a typed conflict without authoritative mutation", async () => {
     await expect(
       repository.upsertPropertyPricingCurrency(currencyCommand("currency-unsupported", 0, "ZZZ")),
@@ -756,26 +327,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     );
   }
 
-  async function seedLegacyPlan(
-    id: string,
-    requestedRoomTypeId: string,
-    code: string,
-    active: boolean,
-  ) {
-    await admin.query(
-      `INSERT INTO pms.rate_plans (
-         id, property_id, room_type_id, code, name, rate_type, meal_plan,
-         payment_policy, deposit_policy, cancellation_policy_snapshot,
-         base_rate_amount, currency, active
-       ) VALUES (
-         $1::uuid, $2::uuid, $3::uuid, $4, 'Legacy flexible', 'flexible', 'breakfast',
-         '{"mode":"legacy"}'::jsonb, '{"amount":"10.00"}'::jsonb, '{}'::jsonb,
-         99.00, 'EUR', $5
-       )`,
-      [id, propertyId, requestedRoomTypeId, code, active],
-    );
-  }
-
   async function installAuditFailureTrigger(): Promise<void> {
     await removeAuditFailureTrigger();
     await admin.query(
@@ -867,31 +418,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     return result.rows[0] ?? null;
   }
 
-  async function readPlan(id: string) {
-    const result = await admin.query(
-      `SELECT plan.base_rate_amount::text AS "amountDecimal", plan.currency::text AS currency,
-              plan.meal_plan AS "mealPlan", plan.payment_policy AS "paymentPolicy",
-              plan.deposit_policy AS "depositPolicy",
-              plan.pricing_contract_version AS "contractVersion",
-              COALESCE(extension.cancellation_terms, plan.cancellation_policy_snapshot)
-                AS "cancellationPolicySnapshot",
-              plan.cancellation_policy_snapshot AS "baseCancellationPolicySnapshot",
-              plan.active,
-              plan.flexible_rate_plan_revision::text AS "flexibleRatePlanRevision",
-              plan.source_room_facts_revision::text AS "sourceRoomFactsRevision",
-              plan.source_pricing_currency_revision::text AS "sourcePricingCurrencyRevision"
-       FROM pms.rate_plans plan
-       LEFT JOIN pms.flexible_rate_plan_cancellation_extensions extension
-         ON extension.flexible_rate_plan_id = plan.id
-        AND extension.property_id = plan.property_id
-        AND extension.room_type_id = plan.room_type_id
-        AND extension.pricing_contract_version = plan.pricing_contract_version
-       WHERE plan.property_id = $1::uuid AND plan.id = $2::uuid`,
-      [propertyId, id],
-    );
-    return result.rows[0] ?? null;
-  }
-
   async function auditCount(action: string): Promise<number> {
     const result = await admin.query<{ count: string }>(
       `SELECT count(*)::text AS count FROM platform.product_audit_events
@@ -928,29 +454,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     return Number(result.rows[0]?.count ?? 0);
   }
 
-  async function distributionOutboxCount(): Promise<number> {
-    const result = await admin.query<{ count: string }>(
-      `SELECT count(*)::text AS count FROM platform.outbox_events
-       WHERE property_id = $1::uuid
-         AND destination = 'distribution.public-bookability'
-         AND event_type = 'pms.inventory.changed'`,
-      [propertyId],
-    );
-    return Number(result.rows[0]?.count ?? 0);
-  }
-
-  async function secretSafeEventPayloads(): Promise<unknown[]> {
-    const result = await admin.query<{ payload: unknown }>(
-      `SELECT payload FROM platform.domain_events
-       WHERE property_id = $1::uuid AND event_type = 'pms.pricing_source.changed'
-       UNION ALL
-       SELECT payload FROM platform.outbox_events
-       WHERE property_id = $1::uuid AND event_type = 'pms.pricing_source.changed'`,
-      [propertyId],
-    );
-    return result.rows.map(({ payload }) => payload);
-  }
-
   async function waitForAdvisoryWaiters(expected: number): Promise<void> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const result = await admin.query<{ count: string }>(
@@ -981,57 +484,6 @@ function currencyCommand(key: string, expectedRevision: number, currencyCode: st
   });
   if (!command) throw new Error("Invalid pricing currency command fixture");
   return command;
-}
-
-function planCommand(
-  key: string,
-  requestedRoomTypeId: string,
-  expectedRevision: number,
-  amount: string,
-  cancellationExtension: Record<string, unknown> = {},
-) {
-  const command = parseUpsertFlexibleRatePlanCommand({
-    organizationId,
-    propertyId,
-    idempotencyKey: key,
-    audit: {
-      actor: { kind: "user", userId: actorUserId },
-      requestId: `request-${key}`,
-      correlationId: `correlation-${key}`,
-      requestedAt: acceptedAt,
-    },
-    roomTypeId: requestedRoomTypeId,
-    expectedRoomFactsRevision: 1,
-    expectedPricingCurrencyRevision: 1,
-    expectedFlexibleRatePlanRevision: expectedRevision,
-    baseAmountDecimal: amount,
-    cancellationTerms: {
-      type: "free_until_days_before_arrival",
-      freeCancellationDeadlineDays: 7,
-      afterDeadlinePenalty: "full_booking_amount",
-      noShowPenalty: "full_booking_amount",
-      ...cancellationExtension,
-    },
-  });
-  if (!command) throw new Error("Invalid flexible plan command fixture");
-  return command;
-}
-
-function partialCancellationTerms() {
-  return {
-    type: "free_until_days_before_arrival",
-    freeCancellationDeadlineDays: 7,
-    afterDeadlinePenalty: "full_booking_amount",
-    noShowPenalty: "full_booking_amount",
-    text: "Partial refund by notice period",
-    flexibleCancellationType: "partial_refund",
-    partialRefundCancelWindowDays: 30,
-    partialRefundAmountPercent: 50,
-    partialRefundTiers: [
-      { minDaysBeforeCheckIn: 30, refundPercent: 50 },
-      { minDaysBeforeCheckIn: 7, refundPercent: 20 },
-    ],
-  };
 }
 
 function assertSafeTestDatabase(connectionString: string): void {

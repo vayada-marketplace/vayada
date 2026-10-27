@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { lockReplacementAddonAmounts } from "./replacementAddonAmounts.js";
 import type { ReplacementStay } from "@vayada/domain-booking";
 import { lockReplacementAddons } from "./replacementAddons.js";
+import { pricingLeadTimeTestZone } from "./pricingLeadTimeTestZone.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("current Booking add-on owner", () => {
   const pool = new pg.Pool({ connectionString: url, max: 4 });
@@ -317,55 +318,46 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
   });
   it("adds an extra with a lead time only when check-in is that far away (VAY-2232)", async () => {
     const f = await amountFixture();
-    // The test reads the live clock and checks in at 23:59: stay clear of the property's midnight.
-    await pool.query(
-      `SELECT pg_sleep(CASE WHEN local >= time '23:58'
-         THEN extract(epoch FROM time '24:00' - local) + 1 ELSE 0 END)
-       FROM (SELECT (clock_timestamp() AT TIME ZONE 'Asia/Colombo')::time AS local) clock`,
-    );
-    // Property-local dates from the database clock, as the quote reads them.
-    const stayFrom = async (days: number) => {
-      const row = (
-        await pool.query(
-          `SELECT (today + $1::int)::text AS arrival, (today + $1::int + 2)::text AS departure
-           FROM (SELECT (clock_timestamp() AT TIME ZONE 'Asia/Colombo')::date AS today) local`,
-          [days],
-        )
-      ).rows[0];
-      return { ...f.stay, checkIn: row.arrival, checkOut: row.departure };
-    };
+    // The notice is checked against the database clock in the hotel's zone. The hotel sits where
+    // that clock reads noon, so its midnight stays hours away from every read (VAY-2382).
+    const zone = await pricingLeadTimeTestZone(pool);
+    const stayFrom = (days: number) => ({
+      ...f.stay,
+      checkIn: zone.plusDays(days),
+      checkOut: zone.plusDays(days + 2),
+    });
     await pool.query(
       `UPDATE booking.addon_definitions SET metadata='{"leadTimeHours":168,"leadTime":"2 days"}'
        WHERE id=$1`,
       [f.id],
     );
     // Without the hotel's time zone the notice can't be checked.
-    expect(await f.amounts(await stayFrom(30))).toBeNull();
+    expect(await f.amounts(stayFrom(30))).toBeNull();
     await pool.query(
-      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Asia/Colombo')",
-      [f.input.propertyId],
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,$2)",
+      [f.input.propertyId, zone.timeZone],
     );
-    expect((await f.amounts(await stayFrom(30)))?.lines[0].definition).toMatchObject({
+    expect((await f.amounts(stayFrom(30)))?.lines[0].definition).toMatchObject({
       leadTimeHours: 168,
       legacyLeadTime: false,
     });
-    expect((await f.amounts(await stayFrom(8)))?.totalMinor).toBe("1250");
+    expect((await f.amounts(stayFrom(8)))?.totalMinor).toBe("1250");
     // Arriving in 7 days counts from 00:00 without a check-in time: less than a week away.
-    expect(await f.amounts(await stayFrom(7))).toBeNull();
+    expect(await f.amounts(stayFrom(7))).toBeNull();
     // The hotel's check-in time moves the arrival to 23:59, a week away again.
     await pool.query(
       "INSERT INTO hotel_catalog.property_policy_summaries(property_id,check_in_time) VALUES($1,'23:59')",
       [f.input.propertyId],
     );
-    expect((await f.amounts(await stayFrom(7)))?.totalMinor).toBe("1250");
-    expect(await f.amounts(await stayFrom(6))).toBeNull();
+    expect((await f.amounts(stayFrom(7)))?.totalMinor).toBe("1250");
+    expect(await f.amounts(stayFrom(6))).toBeNull();
     // A saved "no lead time" choice ignores the old text next to it.
     await pool.query(
       `UPDATE booking.addon_definitions SET metadata='{"leadTimeHours":null,"leadTime":"2 days"}'
        WHERE id=$1`,
       [f.id],
     );
-    expect((await f.amounts(await stayFrom(0)))?.totalMinor).toBe("1250");
+    expect((await f.amounts(stayFrom(0)))?.totalMinor).toBe("1250");
   });
   it("bounds aggregate arithmetic and uses exact saved KWD unit prices", async () => {
     const f = await amountFixture();

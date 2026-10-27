@@ -12,12 +12,12 @@ import {
 // in its privilege matrix, so it needs 0519 and 0520 (cloud job 6dc8de37 computed both values on
 // that base); accepting both lets it start on either side of 0521, so it is released before 0521
 // and stays a safe rollback target once 0521 ships. VAY-2108 D7b adds the value after 0522
-// (claimed room-type provisioning: jobs shape and mapping insert policy; cloud job 7edc57a2 on
+// (claimed room-type provisioning: jobs shape and mapping insert policy; cloud job 25364544 on
 // 0521 + 0522, PG16 = PG17), so this image also starts once 0522 is applied.
 const POLICY_DIGESTS = new Set([
   "f9a53a613884875be8387bfb59bf5772038eda202d0f213c32854585d247b7be",
   "4b14279a210c9f240ea9fefbc8c78dd3886dcccd5e42c1f7f67a436fe6685e3a",
-  "07ed8b6e9df38dcd14b5bde0dc8a5e162792ce7585d35222fb86ad5809743802",
+  "0c5495ae7663bb77912a9928395df91c47aa25e1d0c0f9f19d952ab8c982c33c",
 ]);
 // Shared trigger catalog over the privilege-matrix relations plus the pinned helpers: with 0519
 // and 0520 (the delivery tables' guard triggers are attested through the matrix), and with 0521's
