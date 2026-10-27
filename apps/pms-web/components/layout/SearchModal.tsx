@@ -132,7 +132,7 @@ const SETTINGS: SettingEntry[] = [
     id: "checkin-checklist",
     labelKey: "search.settingCheckinChecklist",
     sublabelKey: "search.settingCheckinChecklistHint",
-    href: "/settings/guest-flows#check-in",
+    href: "/settings/check-in#extra-checks",
     keywords: [
       "checklist",
       "check-in checklist",

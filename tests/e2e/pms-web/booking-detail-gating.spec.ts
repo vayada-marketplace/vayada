@@ -396,11 +396,12 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await assertHealthy();
 });
 
-test("keeps check-in guest CRUD active without presenting unsupported identity fields", async ({
+test("saves check-in guests to the guest list and their ID to the registration (VAY-2373)", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   const guestWrites: Record<string, unknown>[] = [];
+  const registrationWrites: Record<string, unknown>[] = [];
   let checkIns = 0;
 
   await mockPmsWebAuthenticatedSession(page);
@@ -477,32 +478,62 @@ test("keeps check-in guest CRUD active without presenting unsupported identity f
     },
   );
 
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/guest-registrations/*`,
+    (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      registrationWrites.push(body);
+      return route.fulfill({
+        json: {
+          guestId: "guest_grace",
+          role: "additional_guest",
+          ...body,
+          filledFields: Object.keys(body).filter((key) => body[key] !== null),
+          updatedAt: "2026-08-15T12:00:00Z",
+        },
+      });
+    },
+  );
+
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  const main = page.locator("main").first();
+  await main.getByRole("button", { name: "Continue" }).click();
 
-  await expect(
-    page.getByText(/gender, date of birth, and passport details are not stored/i),
-  ).toHaveCount(2);
-  await expect(page.getByLabel("Gender")).toHaveCount(0);
-  await expect(page.getByLabel("Date of birth")).toHaveCount(0);
-  await expect(page.getByLabel(/passport/i)).toHaveCount(0);
-  await expect(page.getByLabel("First name").first()).toBeDisabled();
-  await expect(page.getByLabel("First name").nth(1)).toBeDisabled();
-  await expect(page.getByLabel("Nationality").nth(1)).toHaveValue("United States");
-  await expect(page.getByLabel("Nationality").nth(1)).toBeDisabled();
-  // The booker's contact comes from the booking; only the nationality is correctable.
-  await expect(page.getByRole("button", { name: "Save nationality" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Save guest" })).toBeEnabled();
+  // Grace came with the OTA import: her name and nationality stay as supplied.
+  await main.getByRole("button", { name: /^Complete Grace Hopper/ }).click();
+  const form = main.getByRole("form", { name: "Grace Hopper" });
+  await expect(form.getByRole("textbox", { name: /First name/ })).toBeDisabled();
+  await expect(form.getByRole("combobox", { name: /Nationality/ })).toHaveValue("United States");
+  await expect(form.getByRole("combobox", { name: /Nationality/ })).toBeDisabled();
+  await form.getByRole("textbox", { name: "Phone" }).fill("+1 555 0100");
+  await form.getByLabel(/Date of birth/).fill("1986-12-09");
+  await form.getByRole("combobox", { name: /Document type/ }).selectOption("passport");
+  await form.getByRole("textbox", { name: /Document number/ }).fill("C01X00T47");
+  await form.getByRole("button", { name: "Save guest" }).click();
+  await expect(main.getByRole("button", { name: /^View Grace Hopper/ })).toBeVisible();
+
+  // Names and contact go to the guest list; the ID only to the staff-only registration.
+  expect(guestWrites).toHaveLength(1);
+  expect(guestWrites[0]).toMatchObject({ phone: "+1 555 0100" });
+  for (const field of ["gender", "dateOfBirth", "passportNumber", "documentNumber"])
+    expect(guestWrites[0]).not.toHaveProperty(field);
+  expect(registrationWrites).toEqual([
+    {
+      assignmentId: "assignment_ada",
+      dateOfBirth: "1986-12-09",
+      documentType: "passport",
+      documentNumber: "C01X00T47",
+      gender: null,
+      staffNotes: null,
+    },
+  ]);
+
   // An OTA stay has no hotel-collected payment to record here.
-  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
-
-  await page.getByLabel("Phone").nth(1).fill("+1 555 0100");
-  await page.getByRole("button", { name: "Save guest" }).click();
-  await expect.poll(() => guestWrites.length).toBeGreaterThan(0);
-  expect(guestWrites[0]).not.toHaveProperty("gender");
-  expect(guestWrites[0]).not.toHaveProperty("dateOfBirth");
-  expect(guestWrites[0]).not.toHaveProperty("passportNumber");
-
-  await page.getByRole("button", { name: "Complete check-in" }).click();
+  const steps = page.getByRole("navigation", { name: "Check-in steps" });
+  await steps.getByRole("button", { name: /^Add-ons & payment/ }).click();
+  await expect(page.getByRole("radio")).toHaveCount(0);
+  await steps.getByRole("button", { name: /^Keys & check-in/ }).click();
+  await page.getByRole("button", { name: "Check in 2 guests" }).click();
   await expect.poll(() => checkIns).toBe(1);
   await assertHealthy();
 });

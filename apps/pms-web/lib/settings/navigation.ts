@@ -3,6 +3,7 @@ import {
   CalendarDaysIcon,
   ClipboardDocumentCheckIcon,
   CreditCardIcon,
+  KeyIcon,
   ReceiptPercentIcon,
   UserCircleIcon,
   UserGroupIcon,
@@ -28,6 +29,7 @@ export function getPmsSettingsCards(
   const cards: PmsSettingsCard[] = [
     card("property", "settings.navigation.property", HotelIcon, "/settings/property"),
     card("calendar", "settings.navigation.calendar", CalendarDaysIcon, "/settings/calendar"),
+    card("checkIn", "settings.navigation.checkIn", KeyIcon, "/settings/check-in"),
     card(
       "guestFlows",
       "settings.navigation.guestFlows",
@@ -76,7 +78,7 @@ const LEGACY_ANCHORS: Record<string, string> = {
   "booking-engine": "/settings/property#arrival-times",
   calendar: "/settings/calendar",
   "ota-commissions": "/settings/ota-commissions",
-  "checkin-checklist": "/settings/guest-flows#check-in",
+  "checkin-checklist": "/settings/check-in#extra-checks",
   "checkout-inspection": "/settings/guest-flows#check-out",
 };
 

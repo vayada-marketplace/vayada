@@ -362,6 +362,7 @@ test.describe("pms-web smoke", () => {
     for (const [card, href] of [
       ["Property", "/settings/property"],
       ["Calendar", "/settings/calendar"],
+      ["Check-in", "/settings/check-in"],
       ["Guest flows", "/settings/guest-flows"],
       ["OTA commissions", "/settings/ota-commissions"],
       ["Team & roles", "/settings/team"],

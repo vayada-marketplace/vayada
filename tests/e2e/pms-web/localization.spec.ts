@@ -7,6 +7,7 @@ import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
 } from "../support/pmsWebMocks";
+import { checkinSettingsResponse } from "../support/checkinSettingsMocks";
 
 test("applies German to login", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
@@ -94,13 +95,25 @@ test("applies German across settings and room setup", async ({ page }) => {
     route.fulfill({ json: templateResponse }),
   );
 
-  await page.goto("/settings/guest-flows");
-  const checkIn = page.locator("#check-in");
-  const checkOut = page.locator("#check-out");
-  await checkIn.getByRole("button", { name: "Standardwerte wiederherstellen" }).click();
-  await expect(page.getByText("Ausweise oder Reisepässe der Gäste prüfen").first()).toBeVisible();
-  await expect(page.getByText("Verify guest IDs / passports", { exact: true })).toHaveCount(0);
+  // Settings → Check-in (VAY-2374) holds the check-in checklist as its extra checks.
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/check-in-settings`, (route) =>
+    route.fulfill({ json: checkinSettingsResponse() }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/manual-bookings/addons`, (route) =>
+    route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: [] } }),
+  );
+  await page.goto("/settings/check-in");
+  const main = page.locator("main");
+  await expect(main.getByRole("heading", { level: 2, name: "Zimmer & Gäste" })).toBeVisible();
+  await expect(main.getByText("Dokumentnummer", { exact: true })).toBeVisible();
+  await expect(main.getByText("Zusätzliche Prüfungen vor dem Check-in")).toBeVisible();
+  await expect(main.getByRole("button", { name: "Änderungen speichern" })).toBeVisible();
+  for (const englishCopy of ["Rooms & guests", "Document number", "Save changes"]) {
+    await expect(main.getByText(englishCopy, { exact: true })).toHaveCount(0);
+  }
 
+  await page.goto("/settings/guest-flows");
+  const checkOut = page.locator("#check-out");
   await checkOut.getByRole("button", { name: "Schritt hinzufügen" }).click();
   await expect(page.getByText("Problem", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Details hinzufügen…", { exact: true }).first()).toBeVisible();
