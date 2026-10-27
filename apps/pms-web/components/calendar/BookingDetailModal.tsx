@@ -5,7 +5,8 @@ import { bookingsService, Booking, type AssignmentSelector } from "@/services/bo
 import { calendarService } from "@/services/calendar";
 import type { PmsManualBookingPreviewInput } from "@/services/api/pmsManualBookingClient";
 import { formatCurrency } from "@/lib/formatCurrency";
-import { CHANNEL_COLORS, getChannelLabel, normalizeChannelKey } from "@/lib/constants/statusStyles";
+import { CHANNEL_COLORS, normalizeChannelKey } from "@/lib/constants/statusStyles";
+import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
 import Modal from "@/components/Modal";
 import BookingStaySummary, {
   bookingSettlementLabel,
@@ -92,19 +93,6 @@ function bookingStatusLabel(status: string, t: Translate): string {
     expired: "bookings.statusExpired",
   };
   return keys[status] ? t(keys[status]) : status;
-}
-
-function channelLabel(channel: string | null | undefined, t: Translate): string {
-  const keys: Record<string, string> = {
-    direct: "calendar.channelDirect",
-    manual: "calendar.channelDirect",
-    airbnb: "calendar.channelAirbnb",
-    "booking.com": "calendar.channelBookingCom",
-    expedia: "calendar.channelExpedia",
-    other: "calendar.channelOther",
-  };
-  const normalized = normalizeChannelKey(channel);
-  return keys[normalized] ? t(keys[normalized]) : getChannelLabel(channel ?? "");
 }
 
 export default function BookingDetailModal({
@@ -1374,7 +1362,7 @@ export default function BookingDetailModal({
               <span
                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${channelStyle.bg} ${channelStyle.text}`}
               >
-                {channelLabel(booking.channel, t)}
+                {bookingChannelLabel(booking.channel, t)}
               </span>
               <span
                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
