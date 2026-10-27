@@ -24,6 +24,21 @@ export const settlementLabel = (paid: boolean, amount: number, currency: string,
     : t?.("bookings.detail.amountOutstanding", { amount: formatCurrency(amount, currency) }) ||
       `${formatCurrency(amount, currency)} outstanding`;
 
+/** Whether the booking counts as paid, and what is still owed if not. */
+export const bookingAmountDue = (
+  booking: Pick<Booking, "balanceAmount" | "depositRequired" | "paymentStatus" | "totalAmount">,
+) => {
+  const paid = booking.depositRequired
+    ? booking.balanceAmount <= 0
+    : ["captured", "paid", "refunded", "partially_refunded"].includes(booking.paymentStatus || "");
+  // A card deposit (partially_paid, VAY-2205) already lowered what is still owed.
+  const due =
+    booking.depositRequired || booking.paymentStatus === "partially_paid"
+      ? booking.balanceAmount
+      : booking.totalAmount;
+  return { paid, due: paid ? 0 : due };
+};
+
 export const bookingSettlementLabel = (
   booking: Pick<
     Booking,
@@ -35,22 +50,12 @@ export const bookingSettlementLabel = (
     | "totalAmount"
   >,
   t?: Translate,
-) =>
-  booking.amountStatus === "unverified"
-    ? t?.("bookings.detail.amountUnverified") || "Amount unverified"
-    : settlementLabel(
-        booking.depositRequired
-          ? booking.balanceAmount <= 0
-          : ["captured", "paid", "refunded", "partially_refunded"].includes(
-              booking.paymentStatus || "",
-            ),
-        // A card deposit (partially_paid, VAY-2205) already lowered what is still owed.
-        booking.depositRequired || booking.paymentStatus === "partially_paid"
-          ? booking.balanceAmount
-          : booking.totalAmount,
-        booking.currency,
-        t,
-      );
+) => {
+  if (booking.amountStatus === "unverified")
+    return t?.("bookings.detail.amountUnverified") || "Amount unverified";
+  const { paid, due } = bookingAmountDue(booking);
+  return settlementLabel(paid, due, booking.currency, t);
+};
 
 export const stayRatePlanLabel = (stay: BookingStay, t: Translate) =>
   stay.ratePlanName ||

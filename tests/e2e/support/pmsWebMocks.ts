@@ -4,6 +4,7 @@ import { mockBookingModules } from "./featureHubModuleMocks";
 import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
 import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
 import { mockGoogleMaps } from "./googleMapsFake";
+import { checkinSettingsResponse } from "./checkinSettingsMocks";
 
 export const PMS_WEB_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
 export const PMS_WEB_ROOM_TYPE_ID = "room_type_alpine_suite";
@@ -298,6 +299,36 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
   // The room Location box loads Google Maps when the dev server has a key (CI's is a fake, VAY-2126): never the
   // real script. A context route, so a spec's own mockGoogleMaps(page, ...) wins.
   await mockGoogleMaps(page.context());
+  // The arrival popup and the check-in read Settings → Check-in and the guests' registrations
+  // (VAY-2372-2374): the defaults and nothing recorded yet. Context routes, so a spec's own wins.
+  await page
+    .context()
+    .route("**/api/pms/properties/*/check-in-settings", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: checkinSettingsResponse() })
+        : route.fallback(),
+    );
+  // The check-in offers desk add-ons from the catalog (VAY-2373 D3): none unless a spec says so.
+  await page
+    .context()
+    .route("**/api/pms/properties/*/manual-bookings/addons", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: [] } })
+        : route.fallback(),
+    );
+  await page
+    .context()
+    .route("**/api/pms/properties/*/reservations/*/guest-registrations", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({
+            json: {
+              guestBookingId: new URL(route.request().url()).pathname.split("/").at(-2),
+              canReadIdentity: true,
+              guests: [],
+            },
+          })
+        : route.fallback(),
+    );
 
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({
@@ -618,6 +649,11 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       },
     });
   });
+  // VAY-2360 part 3: no extras asked for after booking.
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/*/extras-request`,
+    (route) => route.fulfill({ json: { version: "booking-extras-requests.v1", items: [] } }),
+  );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/profile`, async (route) => {
     if (route.request().method() === "PATCH") {
       return route.fulfill({ json: { ...propertyProfile, ...readJson(route) } });

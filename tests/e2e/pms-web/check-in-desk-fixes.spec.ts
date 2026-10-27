@@ -40,6 +40,14 @@ async function mockReservation(page: Page, reservation: () => Record<string, unk
   await page.route(base, (route) => route.fulfill({ json: { item: reservation() } }));
 }
 
+/** The 4-step check-in (VAY-2373): jump to a step from the step bar. */
+async function openCheckinStep(page: Page, title: string) {
+  await page
+    .getByRole("navigation", { name: "Check-in steps" })
+    .getByRole("button", { name: new RegExp(`^${title}`) })
+    .click();
+}
+
 test("records a pay-at-hotel payment at check-in and shows the special request", async ({
   page,
 }, testInfo) => {
@@ -65,7 +73,11 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
   });
   await mockReservation(page, reservation);
   await page.route(`${base}/mark-paid`, (route) => {
-    expect(route.request().postDataJSON()).toMatchObject({ commandId: expect.any(String) });
+    // VAY-2374 D2: the desk records how it took the money.
+    expect(route.request().postDataJSON()).toMatchObject({
+      commandId: expect.any(String),
+      settlementMethod: "cash",
+    });
     paid = true;
     return route.fulfill({ json: { reservation: reservation() } });
   });
@@ -77,32 +89,72 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
     });
   });
 
+  const registrations: Record<string, unknown>[] = [];
+  await page.route(`${base}/guest-registrations/*`, (route) => {
+    registrations.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: {
+        guestId: "guest_ada",
+        role: "booker",
+        ...route.request().postDataJSON(),
+        filledFields: [],
+        updatedAt: null,
+      },
+    });
+  });
+  await page.route(`${base}/guest-registrations`, (route) =>
+    route.fulfill({
+      json: {
+        guestBookingId: PMS_WEB_RESERVATION_ID,
+        canReadIdentity: true,
+        guests: [
+          {
+            guestId: "guest_ada",
+            role: "booker",
+            assignmentId: null,
+            dateOfBirth: null,
+            documentType: null,
+            documentNumber: null,
+            gender: null,
+            staffNotes: null,
+            filledFields: [],
+            updatedAt: null,
+          },
+        ],
+      },
+    }),
+  );
+
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
   const main = page.locator("main").first();
   await expect(
     main.getByText("Late arrival around 11 pm, please leave the key at the bar."),
   ).toBeVisible();
+  // Settings → Check-in asks staff to confirm they read it before going on.
+  const proceed = main.getByRole("button", { name: "Continue" });
+  await expect(proceed).toBeDisabled();
+  await main.getByRole("checkbox", { name: "I have read the request" }).check();
+  await proceed.click();
 
   // The booker's contact comes from the booking; the nationality can be corrected here.
-  const bookerNationality = page.getByRole("combobox", { name: "Nationality" }).first();
+  await main.getByRole("button", { name: /^Complete Ada Lovelace/ }).click();
+  const bookerNationality = main.getByRole("combobox", { name: /Nationality/ });
   await expect(bookerNationality).toHaveValue("Austria");
   await expect(bookerNationality).toBeEnabled();
-  const saveNationality = page.getByRole("button", { name: "Save nationality" });
-  await expect(saveNationality).toBeDisabled();
+  await expect(main.getByRole("textbox", { name: /First name/ })).toBeDisabled();
   await bookerNationality.fill("Netherlands");
-  await saveNationality.click();
+  await main.getByRole("button", { name: "Save guest" }).click();
   await expect.poll(() => countryCode).toBe("NL");
-  await expect(saveNationality).toBeDisabled();
+  await expect.poll(() => registrations.length).toBe(1);
 
-  await page.getByRole("button", { name: "Mark pay-at-hotel payment received" }).click();
-  await expect(
-    page.getByText("Confirm that the pay-at-hotel payment has been received?"),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Mark as paid" }).click();
+  await openCheckinStep(page, "Add-ons & payment");
+  await expect(main.getByText("Due now").locator("..")).toContainText("€240");
+  await main.getByRole("radio", { name: /Collect now/ }).click();
+  await main.getByRole("button", { name: "Cash", exact: true }).click();
+  await main.getByRole("button", { name: "Continue" }).click();
   await expect.poll(() => paid).toBe(true);
-  await expect(
-    page.getByRole("button", { name: "Mark pay-at-hotel payment received" }),
-  ).toHaveCount(0);
+  await expect(main.getByText("Step 4 of 4")).toBeVisible();
+  await expect(main.getByText(/€240(\.00)? · Cash, recorded/)).toBeVisible();
   await assertHealthy();
 });
 
@@ -124,16 +176,18 @@ test("shows and records the rest of a card deposit at check-in", async ({ page }
   });
 
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
-  await expect(page.getByText("€168 outstanding", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Mark the rest paid (€168.00)" }).click();
+  await openCheckinStep(page, "Add-ons & payment");
+  const main = page.locator("main").first();
+  // The card deposit already paid €72; the rest is due at the desk.
   await expect(
-    page.getByText(
-      "Mark the rest, €168.00, as paid at the hotel? The booking is then paid in full.",
-    ),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Mark as paid" }).click();
+    main.locator("dl").getByText("Already paid", { exact: true }).locator(".."),
+  ).toContainText("€72");
+  await expect(main.getByText("Due now").locator("..")).toContainText("€168");
+  await main.getByRole("radio", { name: /Collect now/ }).click();
+  await main.getByRole("button", { name: "Card · own terminal", exact: true }).click();
+  await main.getByRole("button", { name: "Continue" }).click();
   await expect.poll(() => paid).toBe(true);
-  await expect(page.getByText("Payment recorded", { exact: true })).toBeVisible();
+  await expect(main.getByText(/€168(\.00)? · Card · own terminal, recorded/)).toBeVisible();
   await assertHealthy();
 });
 
@@ -150,8 +204,11 @@ test("offers no payment record for a cancelled card-deposit stay", async ({ page
   }));
 
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
-  await expect(page.getByText("€168 outstanding", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
+  await openCheckinStep(page, "Add-ons & payment");
+  // Not a balance the desk can take: nothing to choose, nothing recorded.
+  await expect(page.getByText("Settled outside the desk").locator("..")).toContainText("€168");
+  await expect(page.getByText("Nothing to collect at the desk.")).toBeVisible();
+  await expect(page.getByRole("radio")).toHaveCount(0);
   await assertHealthy();
 });
 
@@ -165,7 +222,9 @@ test("offers no payment record for an OTA-collected stay", async ({ page }, test
 
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
   await expect(page.getByRole("heading", { name: /Ada Lovelace/ }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Mark / })).toHaveCount(0);
+  await openCheckinStep(page, "Add-ons & payment");
+  await expect(page.getByRole("heading", { name: "Add-ons & payment" })).toBeVisible();
+  await expect(page.getByRole("radio")).toHaveCount(0);
   await assertHealthy();
 });
 
@@ -188,6 +247,29 @@ test.describe("arrival popup", () => {
       payment: { method: "card", expectedMethod: "card", status: "partially_paid" },
     };
     await mockReservation(page, () => arrival);
+    // Ada and Grace have their ID and date of birth recorded (VAY-2373); the third adult is unnamed.
+    const documented = ["documentType", "documentNumber", "dateOfBirth"];
+    await page.route(`${base}/guest-registrations`, (route) =>
+      route.fulfill({
+        json: {
+          guestBookingId: PMS_WEB_RESERVATION_ID,
+          canReadIdentity: true,
+          guests: [
+            { guestId: "guest_ada", role: "booker", filledFields: documented },
+            { guestId: grace.guestId, role: "additional_guest", filledFields: documented },
+          ].map((guest) => ({
+            ...guest,
+            assignmentId: null,
+            dateOfBirth: null,
+            documentType: null,
+            documentNumber: null,
+            gender: null,
+            staffNotes: null,
+            updatedAt: null,
+          })),
+        },
+      }),
+    );
     const reservations = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations*`;
     await page.unroute(reservations);
     await page.route(reservations, (route) =>
@@ -209,7 +291,9 @@ test.describe("arrival popup", () => {
       .click();
     const popup = page.getByRole("dialog");
     await expect(popup.getByText("2 of 3 guests registered")).toBeVisible();
+    await expect(popup.getByText("Guest 3 has no details yet")).toBeVisible();
     await expect(popup.getByText(/€168(\.00)? due/)).toBeVisible();
+    await expect(popup.getByText(/Card · €72(\.00)? paid so far/)).toBeVisible();
     await expect(popup.getByText(/€240/)).toHaveCount(0);
     await assertHealthy();
   });
