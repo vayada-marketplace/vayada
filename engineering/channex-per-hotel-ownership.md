@@ -57,8 +57,11 @@ An audited executor, run through a reviewed platform runner mode with Flamur's g
   type is neither mapped nor named as deliberately unmapped. The adopted rate plans are what
   booking intake needs: every OTA booking references the rate plans the old system created in
   Channex. The rate-owner registry (0314) allows one owner per Channex rate plan, a legacy
-  mapping or an offer target, so ongoing ARI either targets these adopted plans or creates its
-  own and the OTA rate mapping is moved inside Channex.
+  mapping or an offer target, so the adopted plans stay legacy mappings for booking intake
+  only (decided 2026-10-27). Our published offers create **new** Channex rate plans under the
+  same rooms; on switch day the Booking.com and Airbnb rate mapping inside Channex moves from
+  the old plans to the new ones before full ARI goes out. The old Channex rate plans stay:
+  never delete them, bookings made under them keep arriving through the adopted mappings.
 - `target:channex:handover revoke` is the inverse of both, also in one transaction: the connection goes back to `disconnected`
   with a `NULL` external id, mappings are disabled, then the claim becomes `released`. A second
   `attach` reuses the retained rows. Every command writes an audit row; re-running an applied
@@ -103,7 +106,8 @@ and message jobs that retry and then dead-letter.
    This setting exists only on next-api. The legacy variable of the same name freezes legacy
    polling for every hotel and is never set during a wave.
 3. Per hotel: legacy disable and readback, then `attach` (or `activate` for an imported row),
-   then the booking copy and the first pull within minutes.
+   then the booking copy and the first pull within minutes. Then the offers create their rate
+   plans, the OTA rate mapping in Channex moves to them, and only then full ARI.
 4. ARI and published offers: a claimed worker scope (new RLS helper, the pinned scope functions
    untouched, digests re-pinned) plus platform grant/preflight. Then the initial offer ARI with
    `stop_sell=true`, and activation at a quiet time.
