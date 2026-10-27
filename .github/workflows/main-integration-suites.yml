@@ -1,0 +1,116 @@
+name: Main Integration Suites
+
+# Runs the apps/api PostgreSQL integration files that PR Checks does not name, on PG16 and PG17
+# (VAY-2111). The groups come from scripts/ci/integration-suites.mjs: isolated suites get their
+# own database; the rest runs in alphabetical chunks, one database each. Every merge to main and
+# a nightly run, queued rather than cancelled, so each merge keeps its own result.
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: main-integration-suites-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: TypeScript API PostgreSQL Integration, nightly groups (PG${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [16, 17]
+
+    services:
+      postgres:
+        image: ghcr.io/vayada-marketplace/ci-postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: vayada_test
+          POSTGRES_PASSWORD: vayada_test
+          POSTGRES_DB: vayada_api_test
+        options: >-
+          --health-cmd "pg_isready -U vayada_test -d vayada_api_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Every `npm run test` in vayada-api has a pretest that rebuilds all backend packages.
+      # Build once, then skip pre/post scripts.
+      - name: Build backend packages once
+        run: |
+          npm --workspace vayada-api run build:backend-packages
+          echo "npm_config_ignore_scripts=true" >> "$GITHUB_ENV"
+
+      - name: List the nightly groups
+        run: node scripts/ci/integration-suites.mjs nightly | tee "$RUNNER_TEMP/groups.json"
+
+      # One database per group. A failing group does not stop the others; the step fails at the
+      # end when any group failed, and the summary names them.
+      - name: Run each group in its own migrated database
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_api_test
+        run: |
+          set -u
+          failed=()
+          count=$(jq 'length' "$RUNNER_TEMP/groups.json")
+          for index in $(seq 0 $((count - 1))); do
+            group=$(jq -c ".[$index]" "$RUNNER_TEMP/groups.json")
+            name=$(jq -r '.name' <<<"$group")
+            database=$(jq -r '.database // ("vayada_nightly_" + (.name | gsub("-"; "_")) + "_test")' <<<"$group")
+            # `//` would turn an explicit false into true.
+            migrate=$(jq -r 'if has("migrate") then .migrate else true end' <<<"$group")
+            env_name=$(jq -r '.envName // "TEST_DATABASE_URL"' <<<"$group")
+            mapfile -t files < <(jq -r '.files[]' <<<"$group")
+            url="postgresql://vayada_test:vayada_test@127.0.0.1:5432/$database"
+            echo "::group::$name ($database, ${#files[@]} files)"
+            node --input-type=module -e '
+              import pg from "pg";
+              const client = new pg.Client({ connectionString: process.env.ADMIN_URL });
+              await client.connect();
+              await client.query(`CREATE DATABASE ${process.argv[1]}`);
+              await client.end();
+            ' "$database"
+            ok=1
+            if [ "$migrate" = "true" ]; then
+              TARGET_DATABASE_URL="$url" npm --workspace @vayada/backend-migration run target:migrate -- --env local || ok=0
+            fi
+            if [ "$ok" = 1 ]; then
+              env "$env_name=$url" npm --workspace vayada-api run test -- --no-file-parallelism "${files[@]}" || ok=0
+            fi
+            echo "::endgroup::"
+            if [ "$ok" = 1 ]; then
+              echo "- $name: passed" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- $name: FAILED" >> "$GITHUB_STEP_SUMMARY"
+              failed+=("$name")
+            fi
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::failed groups: ${failed[*]}"
+            exit 1
+          fi
