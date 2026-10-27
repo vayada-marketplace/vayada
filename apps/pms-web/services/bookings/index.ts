@@ -252,6 +252,11 @@ async function bookingChangeDecisionEndpoint(
   return `${await bookingChangeRequestEndpoint(guestBookingId)}/${encodeURIComponent(changeRequestId)}/${decision}`;
 }
 
+async function bookingExtrasRequestEndpoint(guestBookingId: string, suffix = ""): Promise<string> {
+  const propertyId = await resolveSelectedPmsPropertyId("reviewing extras requests");
+  return `/api/pms/properties/${encodeURIComponent(propertyId)}/reservations/${encodeURIComponent(guestBookingId)}/extras-request${suffix}`;
+}
+
 type BookingChangeRequestApi = Omit<BookingChangeRequest, "status"> & {
   status: BookingChangeRequest["status"] | "accepted" | "canceled";
 };
@@ -578,6 +583,31 @@ export interface BookingAdditionalGuest {
   updatedAt: string;
 }
 
+/** What staff record per guest at check-in (VAY-2373); the API's shape, field for field. */
+export type GuestDocumentType = "passport" | "national_id" | "driving_licence" | "other";
+export type GuestGender = "female" | "male" | "other" | "prefer_not_to_say";
+export interface GuestRegistrationFields {
+  /** The booked room's assignment the guest sleeps in. */
+  assignmentId: string | null;
+  dateOfBirth: string | null;
+  documentType: GuestDocumentType | null;
+  documentNumber: string | null;
+  gender: GuestGender | null;
+  staffNotes: string | null;
+}
+export interface GuestRegistration extends GuestRegistrationFields {
+  guestId: string;
+  role: "booker" | "primary_guest" | "additional_guest";
+  /** Filled fields, also when the reader may not see the ID values. */
+  filledFields: Array<keyof GuestRegistrationFields>;
+  updatedAt: string | null;
+}
+export interface GuestRegistrationsResponse {
+  guestBookingId: string;
+  canReadIdentity: boolean;
+  guests: GuestRegistration[];
+}
+
 export type BookingAdditionalGuestPayload = Partial<
   Omit<
     BookingAdditionalGuest,
@@ -633,6 +663,29 @@ export interface BookingChangeRequest {
   createdAt: string;
 }
 
+/** VAY-2360 part 3: extras a guest asked for after booking (amounts in minor units, for the whole stay). The
+ * hotel accepts or declines; accepting doesn't change the booking's total, the hotel charges them at
+ * check-in. */
+export interface BookingExtrasRequest {
+  id: string;
+  status: "pending" | "accepted" | "declined" | "canceled" | "expired";
+  items: Array<{
+    addonId: string;
+    name: string;
+    pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night";
+    unitMinor: string;
+    amountMinor: string;
+    currency: string;
+    guests: number;
+    nights: number;
+  }>;
+  totalMinor: string;
+  currency: string;
+  createdAt: string;
+  decidedAt: string | null;
+  note: string | null;
+}
+
 export interface CheckinStepResult {
   stepId: string;
   label: string;
@@ -655,6 +708,9 @@ export interface CheckoutInspectionResult {
   note: string | null;
   completedAt: string | null;
 }
+
+/** How staff took a payment at the desk; the API's PMS_DESK_SETTLEMENT_METHODS. */
+export type DeskSettlementMethod = "cash" | "manual_card" | "bank_transfer" | "other";
 
 export interface CheckoutCharge {
   id: string;
@@ -848,10 +904,14 @@ export const bookingsService = {
     return refreshBooking(id);
   },
 
-  markPaid: async (id: string) => {
+  /** With a settlement method, records how the desk took the money (VAY-2374 D2); nothing is charged. */
+  markPaid: async (id: string, settlementMethod?: DeskSettlementMethod) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(
       await reservationEndpoint(id, "/mark-paid"),
-      bookingLifecycleCommand("mark-paid", id),
+      {
+        ...bookingLifecycleCommand("mark-paid", id),
+        ...(settlementMethod && { settlementMethod }),
+      },
       pmsOperationsRequestOptions,
     );
     return refreshBooking(id);
@@ -1005,6 +1065,35 @@ export const bookingsService = {
     return normalizeBookingChangeRequest(response)!;
   },
 
+  // VAY-2360 part 3: every extras request a guest made after booking, newest first.
+  getExtrasRequests: async (id: string): Promise<BookingExtrasRequest[]> => {
+    const response = await pmsOperationsClient.get<{ items?: BookingExtrasRequest[] } | null>(
+      await bookingExtrasRequestEndpoint(id),
+      pmsOperationsRequestOptions,
+    );
+    return Array.isArray(response?.items) ? response.items : [];
+  },
+
+  decideExtrasRequest: async (
+    id: string,
+    requestId: string,
+    decision: "accept" | "decline",
+    reason?: string,
+  ): Promise<BookingExtrasRequest> => {
+    const key = `booking.extras:${decision}:${encodeURIComponent(id)}:${encodeURIComponent(requestId)}`;
+    return pmsOperationsClient.post<BookingExtrasRequest>(
+      await bookingExtrasRequestEndpoint(id, `/${encodeURIComponent(requestId)}/${decision}`),
+      decision === "decline" ? { reason } : {},
+      {
+        ...pmsOperationsRequestOptions,
+        headers: {
+          ...(pmsOperationsRequestOptions.headers as Record<string, string>),
+          "Idempotency-Key": key,
+        },
+      },
+    );
+  },
+
   // VAY-495 booking detail — internal notes, additional guests, cancel-with-reason.
   listNotes: async (id: string) => {
     const response = await pmsOperationsClient.get<PmsPrivateNotesResponse>(
@@ -1046,6 +1135,20 @@ export const bookingsService = {
     );
     return { guests: response.items.map(toAdditionalGuest) };
   },
+
+  listGuestRegistrations: async (id: string) =>
+    pmsOperationsClient.get<GuestRegistrationsResponse>(
+      await reservationEndpoint(id, "/guest-registrations"),
+      pmsOperationsRequestOptions,
+    ),
+
+  /** Saves the whole registration; null clears a field. */
+  saveGuestRegistration: async (id: string, guestId: string, fields: GuestRegistrationFields) =>
+    pmsOperationsClient.put<GuestRegistration>(
+      await reservationEndpoint(id, `/guest-registrations/${encodeURIComponent(guestId)}`),
+      fields,
+      pmsOperationsRequestOptions,
+    ),
 
   listAvailableAddons: (_id: string) =>
     unsupportedPmsNextStackFeature<BookingAddon[]>("Booking add-ons"),

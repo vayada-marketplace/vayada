@@ -224,9 +224,9 @@ test("browses arrivals and departures independently across property-local dates"
   }
   await arrivals.getByRole("button", { name: /Arrival3 Navigation/ }).click();
   const preview = page.getByRole("dialog");
-  await expect(preview).toContainText("Arrivals • Apr 1, 2026");
+  await expect(preview).toContainText("Arrives Apr 1, 2026");
   await expect(preview.getByRole("link", { name: "Start check-in" })).toHaveCount(0);
-  await expect(preview.getByRole("link", { name: "View full booking" })).toBeVisible();
+  await expect(preview.getByRole("link", { name: "View booking" })).toBeVisible();
   await preview.getByRole("button", { name: "Close", exact: true }).click();
   await departures.getByRole("button", { name: "Next day" }).click();
   await expect(departures).toContainText("Departure1 Navigation");

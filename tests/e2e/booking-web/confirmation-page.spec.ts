@@ -41,7 +41,8 @@ const booking = {
   balanceAmount: 200,
   createdAt: new Date().toISOString(),
 };
-const stay = (places: boolean) => ({
+const stay = (places: boolean, extras: unknown = null) => ({
+  extras,
   version: "booking-stay.v1",
   cancellation: {
     checkIn,
@@ -83,6 +84,7 @@ async function openConfirmation(
   width: number,
   fields: Record<string, unknown> = {},
   nearby?: unknown,
+  extras?: unknown,
 ) {
   await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
   // Analytics choice already made, so the consent banner doesn't cover the page.
@@ -110,7 +112,7 @@ async function openConfirmation(
   const stayRequests: unknown[] = [];
   await page.route(`${hotelApi}/bookings/${id}/stay`, (route) => {
     stayRequests.push(route.request().postDataJSON());
-    return route.fulfill({ json: stay(!pending) });
+    return route.fulfill({ json: stay(!pending, extras ?? null) });
   });
   await page.route(`${hotelApi}/bookings/confirmation`, (route) =>
     route.fulfill({ json: { ...booking, ...fields } }),
@@ -286,3 +288,161 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("confirmation-hotel")).toBeVisible();
   });
 }
+
+// VAY-2360 part 3: extras the guest asks us for after booking; we confirm by email.
+const offer = (
+  addonId: string,
+  name: string,
+  pricingModel: string,
+  unit: string,
+  amount: string,
+) => ({
+  addonId,
+  name,
+  pricingModel,
+  unitMinor: unit,
+  amountMinor: amount,
+  currency: "EUR",
+});
+const OFFERED = [
+  offer("a1000000-0000-4000-8000-000000000001", "Airport transfer", "per_stay", "2500", "2500"),
+  offer("a1000000-0000-4000-8000-000000000002", "Breakfast", "per_guest_night", "1200", "2400"),
+  offer("a1000000-0000-4000-8000-000000000003", "Late check-out", "per_stay", "1000", "1000"),
+];
+
+for (const width of [1440, 390]) {
+  test(`asks us for extras after booking (${width})`, async ({ page }, testInfo) => {
+    const sent: Array<{ body: unknown; key: string | undefined }> = [];
+    await openConfirmation(page, width, {}, undefined, { offered: OFFERED, request: null });
+    // After openConfirmation: the shared mocks answer everything under the hotel's API with its profile.
+    await page.route(`${hotelApi}/bookings/${id}/extras-request`, (route) => {
+      sent.push({
+        body: route.request().postDataJSON(),
+        key: route.request().headers()["idempotency-key"],
+      });
+      return route.fulfill({
+        json: {
+          version: "booking-extras-request.v1",
+          request: {
+            id: "e1000000-0000-4000-8000-000000000001",
+            status: "pending",
+            items: OFFERED.slice(0, 2),
+            totalMinor: "4900",
+            currency: "EUR",
+            createdAt: new Date().toISOString(),
+          },
+        },
+      });
+    });
+    const extras = page.getByTestId("confirmation-extras");
+    await extras.getByRole("button", { name: "Airport transfer" }).click();
+    await extras.getByRole("button", { name: "Breakfast" }).click();
+    await expect(extras).toContainText(
+      "Airport transfer €25 · Breakfast €24 (€12 per guest per night)",
+    );
+    await expect(extras).toContainText("nothing is charged now");
+    await page.screenshot({
+      path: testInfo.outputPath(`extras-picked-${width}.png`),
+      fullPage: width < 600,
+      // The chips fade between colours; the shot shows where they end.
+      animations: "disabled",
+    });
+    await extras.getByRole("button", { name: "Send request" }).click();
+    await expect(extras).toContainText("We'll confirm by email; you pay at the hotel.");
+    await expect(
+      extras.getByRole("button", { name: "Airport transfer · requested" }),
+    ).toBeDisabled();
+    // Nothing else can be asked for while one request waits.
+    await expect(extras.getByRole("button", { name: "Late check-out" })).toBeDisabled();
+    expect(sent).toEqual([
+      {
+        body: {
+          guestEmail: "maya@example.test",
+          addonIds: [OFFERED[0]!.addonId, OFFERED[1]!.addonId],
+        },
+        key: expect.stringMatching(/^booking\.extras:/),
+      },
+    ]);
+    await page.screenshot({
+      path: testInfo.outputPath(`extras-requested-${width}.png`),
+      fullPage: width < 600,
+      // The chips fade between colours; the shot shows where they end.
+      animations: "disabled",
+    });
+  });
+}
+
+const waitingFor = (item: (typeof OFFERED)[number]) => ({
+  id: "e1000000-0000-4000-8000-000000000002",
+  status: "pending",
+  items: [item],
+  totalMinor: item.amountMinor,
+  currency: "EUR",
+  createdAt: new Date().toISOString(),
+});
+
+test("shows the extras we confirmed and offers the rest", async ({ page }) => {
+  await openConfirmation(page, 1440, {}, undefined, {
+    offered: OFFERED.slice(1),
+    request: {
+      id: "e1000000-0000-4000-8000-000000000001",
+      status: "accepted",
+      items: OFFERED.slice(0, 1),
+      totalMinor: "2500",
+      currency: "EUR",
+      createdAt: new Date().toISOString(),
+    },
+    accepted: OFFERED.slice(0, 1),
+  });
+  const extras = page.getByTestId("confirmation-extras");
+  await expect(extras).toContainText("Confirmed: Airport transfer. You pay €25 at the hotel.");
+  await expect(extras.getByRole("button", { name: "Airport transfer" })).toHaveCount(0);
+  await expect(extras.getByRole("button", { name: "Breakfast" })).toBeEnabled();
+});
+
+test("keeps what we confirmed listed while a new request waits", async ({ page }) => {
+  await openConfirmation(page, 1440, {}, undefined, {
+    offered: OFFERED.slice(1, 2),
+    request: waitingFor(OFFERED[2]!),
+    accepted: OFFERED.slice(0, 1),
+  });
+  const extras = page.getByTestId("confirmation-extras");
+  await expect(extras).toContainText("Confirmed: Airport transfer. You pay €25 at the hotel.");
+  await expect(extras).toContainText("We'll confirm by email; you pay at the hotel.");
+  await expect(extras.getByRole("button", { name: "Late check-out · requested" })).toBeDisabled();
+  await expect(extras.getByRole("button", { name: "Breakfast" })).toBeDisabled();
+  await expect(extras.getByRole("button", { name: "Airport transfer" })).toHaveCount(0);
+});
+
+test("reads the stay again when another tab asked first", async ({ page }) => {
+  await openConfirmation(page, 1440, {}, undefined, {
+    offered: OFFERED,
+    request: null,
+    accepted: [],
+  });
+  const extras = page.getByTestId("confirmation-extras");
+  await extras.getByRole("button", { name: "Late check-out" }).click();
+  // Meanwhile another tab asked for it: the API refuses this one, and the stay now has that request.
+  await page.route(`${hotelApi}/bookings/${id}/extras-request`, (route) =>
+    route.fulfill({
+      status: 409,
+      json: {
+        code: "EXTRAS_REQUEST_PENDING",
+        message: "An extras request is already waiting for an answer.",
+      },
+    }),
+  );
+  await page.route(`${hotelApi}/bookings/${id}/stay`, (route) =>
+    route.fulfill({
+      json: stay(true, {
+        offered: OFFERED.slice(0, 2),
+        request: waitingFor(OFFERED[2]!),
+        accepted: [],
+      }),
+    }),
+  );
+  await extras.getByRole("button", { name: "Send request" }).click();
+  await expect(extras.getByRole("button", { name: "Late check-out · requested" })).toBeDisabled();
+  await expect(extras).toContainText("We'll confirm by email; you pay at the hotel.");
+  await expect(extras).not.toContainText("Please try again");
+});
