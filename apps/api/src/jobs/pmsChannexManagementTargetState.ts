@@ -166,7 +166,8 @@ async function applyConnectedSuccess(
       );
     }
   }
-  const domain = syncDomain(job.input.operationType);
+  // D6: a no-op ARI run neither stamps last_ari_sync_at nor rewrites a degraded status.
+  const domain = result.ariStatusUnchanged ? null : syncDomain(job.input.operationType);
   await client.query(
     `UPDATE pms.channel_connections SET
        external_property_id = COALESCE($2, external_property_id),

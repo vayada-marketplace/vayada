@@ -21,6 +21,8 @@ export type ChannexManagementProviderSuccess = {
   alertRecoveryVerified?: boolean;
   /** VAY-2108 D3: active offer targets left out of this delivery run, with the reason. */
   skippedOfferTargets?: readonly { targetId: string; reason: string }[];
+  /** VAY-2108 D6: the job sent nothing, so the ARI sync status and timestamp stay as they are. */
+  ariStatusUnchanged?: boolean;
   createdProperty?: { environment: "staging" | "production"; externalPropertyId: string };
   providerRequestId?: string;
   externalPropertyId?: string;
