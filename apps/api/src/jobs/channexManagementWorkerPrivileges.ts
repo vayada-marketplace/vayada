@@ -59,7 +59,22 @@ export const channexManagementWorkerPrivileges: Record<string, Record<string, tr
   "pms.channex_offer_create_receipts": { SELECT: true, INSERT: ["id", "attempt_id", "job_attempt_id", "worker_id", "outcome", "http_status", "provider_request_id", "identity_evidence", "has_warnings"] },
   "pms.channex_offer_ari_attempts": { SELECT: true, INSERT: ["creation_attempt_id", "job_attempt_id", "worker_id", "service_date", "request_body"], UPDATE: ["state", "reconciliation_evidence"] },
   "pms.channex_offer_ari_receipts": { SELECT: true, INSERT: ["id", "attempt_id", "job_attempt_id", "worker_id", "outcome", "http_status", "provider_request_id", "task_ids", "has_warnings", "warning_reason"] },
+  // VAY-2108 D3 (0520 tables): the worker records one delivery per POST, its per-date values and
+  // the provider receipt, and settles deliveries by state. The grants arrive with the platform's
+  // delivery grant mode; until then the boundary tolerates their absence (optionalDeliveryRelations).
+  "pms.channex_offer_ari_deliveries": { SELECT: true, INSERT: ["target_id", "version", "binding_generation", "external_property_id", "external_room_type_id", "external_rate_plan_id", "job_attempt_id", "worker_id", "request_body"], UPDATE: ["state", "reconciliation_evidence"] },
+  "pms.channex_offer_ari_delivery_dates": { SELECT: true, INSERT: ["delivery_id", "service_date", "binding_generation", "external_property_id", "external_rate_plan_id", "delivered_at", "value", "value_sha256"] },
+  "pms.channex_offer_ari_delivery_receipts": { SELECT: true, INSERT: ["id", "delivery_id", "job_attempt_id", "worker_id", "outcome", "http_status", "provider_request_id", "task_ids", "has_warnings", "warning_reason"] },
   "pms.channex_room_availability_attempts": { SELECT: true, INSERT: ["mapping_id", "job_attempt_id", "worker_id", "service_date", "available_count", "inventory_evidence", "request_body", "inventory_evidence_sha256"], UPDATE: ["state", "reconciliation_evidence"] },
   "pms.channex_room_availability_receipts": { SELECT: true, INSERT: ["id", "attempt_id", "job_attempt_id", "worker_id", "outcome", "http_status", "provider_request_id", "task_ids", "has_warnings", "warning_reason"] },
   "pms.channex_room_availability_reconciliation_attestations": { SELECT: true, INSERT: ["attempt_id", "receipt_id", "inventory_evidence_sha256", "observations_sha256", "reconciliation_evidence"] },
 };
+
+/** VAY-2108 D3: relations whose grants and row security arrive after the image that lists them
+ * (migration D3a plus the platform's delivery grant mode). The boundary requires them only when
+ * ongoing offer delivery is switched on. */
+export const optionalChannexDeliveryRelations: ReadonlySet<string> = new Set([
+  "pms.channex_offer_ari_deliveries",
+  "pms.channex_offer_ari_delivery_dates",
+  "pms.channex_offer_ari_delivery_receipts",
+]);

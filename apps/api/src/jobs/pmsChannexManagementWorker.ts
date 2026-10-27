@@ -19,6 +19,8 @@ export type ChannexManagementJob = {
 export type ChannexManagementProviderSuccess = {
   ok: true;
   alertRecoveryVerified?: boolean;
+  /** VAY-2108 D3: active offer targets left out of this delivery run, with the reason. */
+  skippedOfferTargets?: readonly { targetId: string; reason: string }[];
   createdProperty?: { environment: "staging" | "production"; externalPropertyId: string };
   providerRequestId?: string;
   externalPropertyId?: string;
@@ -48,7 +50,8 @@ export type ChannexManagementProviderProgress =
   | { ok: false; code: "offer_create_retained"; attemptId: string }
   | { ok: false; code: "offer_creation_retained"; attemptId: string }
   | { ok: false; code: "initial_upload_retained"; attemptId: string }
-  | { ok: false; code: "availability_upload_retained"; attemptId: string };
+  | { ok: false; code: "availability_upload_retained"; attemptId: string }
+  | { ok: false; code: "offer_delivery_retained"; attemptId: string };
 
 export type ChannexManagementProvider = {
   execute(
@@ -129,7 +132,8 @@ export async function runPmsChannexManagementWorkerOnce(input: {
     result.code === "offer_create_retained" ||
     result.code === "offer_creation_retained" ||
     result.code === "initial_upload_retained" ||
-    result.code === "availability_upload_retained"
+    result.code === "availability_upload_retained" ||
+    result.code === "offer_delivery_retained"
   ) {
     await input.store.continueUpload(job, result, { workerId: input.workerId, now: clock() });
     return { outcome: "continued", jobId: job.jobId, operationType: job.input.operationType };

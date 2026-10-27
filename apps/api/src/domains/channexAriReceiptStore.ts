@@ -11,6 +11,9 @@ type Correlation = {
   connectionId: string;
 };
 
+/** The same correlation for an ongoing delivery (VAY-2108 D3), keyed by its delivery row. */
+type DeliveryCorrelation = Omit<Correlation, "attemptId"> & { deliveryId: string };
+
 /** Consume once, then retry only persistence with the same immutable observation.
  * The pool must bound connection acquisition. No current pricing authority is granted.
  */
@@ -19,7 +22,7 @@ export function prepareChannexAriReceiptPersistence(
   correlation: Correlation,
   response: Response,
 ) {
-  return prepareReceiptPersistence(pool, correlation, response);
+  return prepareReceiptPersistence(pool, { kind: "attempt", ...correlation }, response);
 }
 
 /** Fixed ambiguous-transport evidence only; never persist exception text. */
@@ -27,15 +30,48 @@ export function prepareChannexAriTransportFailurePersistence(
   pool: Pick<Pool, "connect">,
   correlation: Correlation,
 ) {
-  return prepareReceiptPersistence(pool, correlation, null);
+  return prepareReceiptPersistence(pool, { kind: "attempt", ...correlation }, null);
 }
+
+/** Receipt of one ongoing offer ARI delivery POST (pms.channex_offer_ari_delivery_receipts). */
+export function prepareChannexOfferDeliveryReceiptPersistence(
+  pool: Pick<Pool, "connect">,
+  correlation: DeliveryCorrelation,
+  response: Response,
+) {
+  const { deliveryId, ...rest } = correlation;
+  return prepareReceiptPersistence(pool, { kind: "delivery", attemptId: deliveryId, ...rest }, response);
+}
+
+/** Transport-failure receipt of one ongoing offer ARI delivery POST. */
+export function prepareChannexOfferDeliveryTransportFailurePersistence(
+  pool: Pick<Pool, "connect">,
+  correlation: DeliveryCorrelation,
+) {
+  const { deliveryId, ...rest } = correlation;
+  return prepareReceiptPersistence(pool, { kind: "delivery", attemptId: deliveryId, ...rest }, null);
+}
+
+const tables = {
+  attempt: {
+    attempts: "pms.channex_offer_ari_attempts",
+    receipts: "pms.channex_offer_ari_receipts",
+    column: "attempt_id",
+  },
+  delivery: {
+    attempts: "pms.channex_offer_ari_deliveries",
+    receipts: "pms.channex_offer_ari_delivery_receipts",
+    column: "delivery_id",
+  },
+} as const;
 
 async function prepareReceiptPersistence(
   pool: Pick<Pool, "connect">,
-  correlation: Correlation,
+  correlation: Correlation & { kind: keyof typeof tables },
   response: Response | null,
 ) {
-  const scope = { ...correlation };
+  const { kind, ...scope } = correlation;
+  const names = tables[kind];
   for (const key of [
     "receiptId",
     "attemptId",
@@ -87,7 +123,7 @@ async function prepareReceiptPersistence(
       await client.query("SET LOCAL lock_timeout='150ms'");
       const target = await client.query(
         `SELECT t.id FROM pms.channex_offer_targets t
-         JOIN pms.channex_offer_ari_attempts a ON a.target_id=t.id
+         JOIN ${names.attempts} a ON a.target_id=t.id
          WHERE a.id=$1 AND a.job_attempt_id=$2 AND a.worker_id=$3
            AND a.state='unresolved'
            AND t.property_id=$4 AND t.connection_id=$5
@@ -96,14 +132,14 @@ async function prepareReceiptPersistence(
       );
       if (!target.rows.length) throw new Error("Channex receipt correlation unavailable");
       await client.query(
-        `INSERT INTO pms.channex_offer_ari_receipts
-         (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,provider_request_id,task_ids,has_warnings,warning_reason)
+        `INSERT INTO ${names.receipts}
+         (id,${names.column},job_attempt_id,worker_id,outcome,http_status,provider_request_id,task_ids,has_warnings,warning_reason)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9,$10) ON CONFLICT(id) DO NOTHING`,
         values,
       );
       const receipt = await client.query(
-        `SELECT id FROM pms.channex_offer_ari_receipts
-         WHERE id=$1 AND attempt_id=$2 AND job_attempt_id=$3 AND worker_id=$4
+        `SELECT id FROM ${names.receipts}
+         WHERE id=$1 AND ${names.column}=$2 AND job_attempt_id=$3 AND worker_id=$4
            AND outcome=$5 AND http_status IS NOT DISTINCT FROM $6::integer
            AND provider_request_id IS NOT DISTINCT FROM $7::text
            AND task_ids=$8::uuid[] AND has_warnings=$9

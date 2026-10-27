@@ -24,6 +24,7 @@ import {
 } from "@vayada/domain-distribution/booking-publication";
 import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
+import { pricingLeadTimeTestZone } from "./pricingLeadTimeTestZone.js";
 import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import {
@@ -110,6 +111,10 @@ import {
   activatePublishedChannexOffers,
   readChannexOfferDesiredAri,
 } from "./replacementPricingOfferOwners.js";
+import {
+  prepareNextChannexOfferAriDelivery,
+  reconcilePendingChannexOfferAriDeliveries,
+} from "./channexOfferAriDelivery.js";
 import {
   createReplacementChargeDeclarationStore,
   replacementChargeFingerprint,
@@ -8754,18 +8759,18 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("enforces an extra's lead time in the catalog, the quote and acceptance", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       store = createCurrentPricingQuoteStore(pool, 300);
-    // The test reads the live clock and checks in at 23:59: stay clear of the property's midnight.
+    // The notice is checked against the database clock in the hotel's zone. The hotel moves to
+    // where that clock reads noon, so its midnight stays hours away from every read (VAY-2382).
+    const zone = await pricingLeadTimeTestZone(pool);
     await pool.query(
-      `SELECT pg_sleep(CASE WHEN local >= time '23:58'
-         THEN extract(epoch FROM time '24:00' - local) + 1 ELSE 0 END)
-       FROM (SELECT (clock_timestamp() AT TIME ZONE 'Etc/UTC')::time AS local) clock`,
+      "UPDATE hotel_catalog.property_locations SET timezone=$2 WHERE property_id=$1",
+      [f.scope.propertyId, zone.timeZone],
     );
-    const dates = (
-      await pool.query(
-        `SELECT (today+1)::text AS arrival,(today+2)::text AS departure,(today+2)::text AS bookable
-         FROM (SELECT (clock_timestamp() AT TIME ZONE 'Etc/UTC')::date AS today) dates`,
-      )
-    ).rows[0];
+    const dates = {
+      arrival: zone.plusDays(1),
+      departure: zone.plusDays(2),
+      bookable: zone.plusDays(2),
+    };
     await pool.query(
       `UPDATE booking.addon_definitions SET metadata='{"maxQuantity":2,"leadTimeHours":24}'
        WHERE id=$1`,
@@ -9424,5 +9429,290 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       [f.scope.propertyId, randomUUID(), f.selection.roomTypeId],
     );
     expect(await readDesired(f)).toEqual(unavailable("active_offer_binding_changed"));
+  });
+
+  // VAY-2108 D3: ongoing offer ARI delivery after activation.
+  async function deliveryFixture() {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    const today = new Date().toISOString().slice(0, 10); // the fixture hotel is on Etc/UTC
+    const horizon = new Date(`${today}T00:00:00.000Z`);
+    horizon.setUTCDate(horizon.getUTCDate() + 499);
+    const accepted = (taskId = randomUUID()) =>
+      new Response(
+        JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+        { status: 200, headers: { "x-request-id": "req-1" } },
+      );
+    const deliveries = () =>
+      pool.query<{
+        id: string;
+        targetId: string;
+        state: string;
+        basis: string | null;
+        entries: number;
+        dates: number;
+        receipts: number;
+      }>(
+        `SELECT d.id::text AS id,d.target_id::text AS "targetId",d.state,
+           d.reconciliation_evidence->>'completionBasis' AS basis,
+           jsonb_array_length(d.request_body->'values')::int AS entries,
+           (SELECT count(*)::int FROM pms.channex_offer_ari_delivery_dates x WHERE x.delivery_id=d.id) AS dates,
+           (SELECT count(*)::int FROM pms.channex_offer_ari_delivery_receipts r WHERE r.delivery_id=d.id) AS receipts
+         FROM pms.channex_offer_ari_deliveries d
+         JOIN pms.channex_offer_targets t ON t.id=d.target_id
+         WHERE t.property_id=$1 ORDER BY d.created_at,d.id`,
+        [f.scope.propertyId],
+      );
+    const request = async (deliveryId: string) =>
+      (
+        await pool.query<{ request: unknown }>(
+          "SELECT request_body AS request FROM pms.channex_offer_ari_deliveries WHERE id=$1",
+          [deliveryId],
+        )
+      ).rows[0]!.request;
+    /** Task readback: every task finished with exactly the posted body. */
+    const taskRead = async (path: string) => {
+      const id = path.slice("/api/v1/tasks/".length);
+      const row = (
+        await pool.query<{ request: unknown }>(
+          `SELECT d.request_body AS request FROM pms.channex_offer_ari_delivery_receipts r
+           JOIN pms.channex_offer_ari_deliveries d ON d.id=r.delivery_id WHERE $1=ANY(r.task_ids)`,
+          [id],
+        )
+      ).rows[0];
+      if (!row) throw new Error(`unknown task ${id}`);
+      return {
+        data: {
+          type: "task",
+          id,
+          attributes: {
+            id,
+            task: "Property.UpdateRestrictions",
+            payload: row.request,
+            success: true,
+            errors: [],
+            received_at: "2026-09-14T00:00:00.000001",
+            executed_at: "2026-09-14T00:00:00.000002",
+            finished_at: "2026-09-14T00:00:00.000003",
+          },
+        },
+      };
+    };
+    const reconcile = (lease = f.input) =>
+      reconcilePendingChannexOfferAriDeliveries(pool, lease, taskRead);
+    const next = (lease = f.input) => prepareNextChannexOfferAriDelivery(pool, lease);
+    /** Claims the next delivery and answers it with the given response (or a thrown POST). */
+    const send = async (response: Response | null, lease = f.input) => {
+      const prepared = await next(lease);
+      if (prepared.kind !== "prepared")
+        throw new Error(`prepared required, got ${JSON.stringify(prepared)}`);
+      const posted: unknown[] = [];
+      const result = await prepared.dispatch(async (req) => {
+        posted.push(req.body);
+        if (!response) throw new Error("transport");
+        return response;
+      });
+      return { ...prepared, result, posted };
+    };
+    return {
+      ...f,
+      today,
+      horizon: horizon.toISOString().slice(0, 10),
+      accepted,
+      deliveries,
+      request,
+      reconcile,
+      next,
+      send,
+    };
+  }
+  it("delivers each active target's changed nights as ranges, then is current after task readback", async () => {
+    const f = await deliveryFixture();
+    // The seeded initial values are placeholders, so every night of both targets differs.
+    const first = await f.send(f.accepted());
+    expect(first.result).toMatchObject({ kind: "retained", deliveryId: first.deliveryId });
+    expect(first.posted).toHaveLength(1);
+    const body = first.posted[0] as { values: Record<string, unknown>[] };
+    expect(body.values).toHaveLength(1);
+    expect(body.values[0]).toMatchObject({
+      date_from: f.today,
+      date_to: f.horizon,
+      stop_sell: true, // sales are closed until the audited open-sales command
+      rates: [
+        { occupancy: 1, rate: "100.00" },
+        { occupancy: 2, rate: "100.00" },
+      ],
+    });
+    expect(await f.request(first.deliveryId)).toEqual(body);
+    let rows = (await f.deliveries()).rows;
+    expect(rows).toMatchObject([
+      { id: first.deliveryId, state: "unresolved", entries: 1, dates: 500, receipts: 1 },
+    ]);
+    // The unresolved delivery blocks only its target; the whole run waits for reconciliation.
+    expect(await f.next()).toEqual({
+      kind: "unavailable",
+      reason: "delivery_reconciliation_required",
+    });
+    expect(await f.reconcile()).toEqual({ kind: "pending_deliveries_reconciled", count: 1 });
+    rows = (await f.deliveries()).rows;
+    expect(rows[0]).toMatchObject({ state: "reconciled", basis: "finished_task_fifo" });
+    // The second target gets its delivery on the next turn, then everything is current.
+    const second = await f.send(f.accepted());
+    expect(second.targetId).not.toBe(first.targetId);
+    expect(await f.reconcile()).toEqual({ kind: "pending_deliveries_reconciled", count: 1 });
+    expect(await f.next()).toEqual({ kind: "offer_ari_current", targetCount: 2, skipped: [] });
+    expect(await f.reconcile()).toEqual({ kind: "pending_deliveries_reconciled", count: 0 });
+    // Opening sales changes every night of that target once; the other stays current.
+    await pool.query(
+      "UPDATE pms.channex_offer_targets SET sales_state='open',sales_state_changed_at=now() WHERE id=$1",
+      [first.targetId],
+    );
+    const opened = await f.send(f.accepted());
+    expect(opened.targetId).toBe(first.targetId);
+    expect((opened.posted[0] as { values: unknown[] }).values).toEqual([
+      expect.objectContaining({ date_from: f.today, date_to: f.horizon, stop_sell: false }),
+    ]);
+    expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
+    expect(await f.next()).toMatchObject({ kind: "offer_ari_current", skipped: [] });
+  });
+  it("resends after a transport failure, stops on a provider rejection and releases a lost claim", async () => {
+    const f = await deliveryFixture();
+    // Transport failure: the receipt is retained but the turn fails (the worker retries with
+    // backoff); the delivery closes as unverified, and the same body goes out again next time.
+    const lost = await f.send(null);
+    expect(lost.result).toEqual({
+      kind: "delivery_failed",
+      deliveryId: lost.deliveryId,
+      reason: "transport",
+    });
+    expect(await f.reconcile()).toEqual({ kind: "pending_deliveries_reconciled", count: 1 });
+    expect((await f.deliveries()).rows[0]).toMatchObject({
+      state: "reconciled",
+      basis: "unverified",
+      receipts: 1,
+    });
+    const again = await f.send(
+      new Response(JSON.stringify({ errors: { title: "Unprocessable" } }), { status: 422 }),
+    );
+    expect(again.targetId).toBe(lost.targetId);
+    expect(again.posted[0]).toEqual(lost.posted[0]);
+    // A provider rejection of the same body is not retried until the inputs change.
+    expect(await f.reconcile()).toEqual({ kind: "pending_deliveries_reconciled", count: 1 });
+    expect((await f.deliveries()).rows[1]).toMatchObject({ basis: "provider_rejected" });
+    const third = await f.next();
+    expect(third.kind).toBe("prepared");
+    if (third.kind !== "prepared") throw new Error("prepared required");
+    expect(third.targetId).not.toBe(lost.targetId);
+    // The other target's claim is left without a POST under a job attempt that then ends: the
+    // next run releases it (no receipt, attempt gone) and claims afresh.
+    await pool.query(
+      "UPDATE platform.job_attempts SET status='failed',finished_at=now() WHERE job_id=$1 AND attempt_number=1",
+      [f.input.jobId],
+    );
+    await pool.query(
+      `UPDATE platform.jobs SET attempts_count=2,locked_at=clock_timestamp() WHERE id=$1`,
+      [f.input.jobId],
+    );
+    await pool.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,2,'reader-test')",
+      [f.input.jobId],
+    );
+    const lease = { ...f.input, attemptNumber: 2 };
+    expect(await f.reconcile(lease)).toEqual({ kind: "pending_deliveries_reconciled", count: 1 });
+    expect((await f.deliveries()).rows[2]).toMatchObject({
+      id: third.deliveryId,
+      state: "released",
+      receipts: 0,
+    });
+    const run = await f.next(lease);
+    expect(run).toMatchObject({ kind: "prepared", targetId: third.targetId });
+    // With the rejected target still skipped, a current run reports it.
+    const prepared = run as Extract<typeof run, { kind: "prepared" }>;
+    expect(
+      await prepared.dispatch(async () => f.accepted()),
+    ).toMatchObject({ kind: "retained" });
+    expect(await f.reconcile(lease)).toMatchObject({ kind: "pending_deliveries_reconciled" });
+    expect(await f.next(lease)).toEqual({
+      kind: "offer_ari_current",
+      targetCount: 2,
+      skipped: [{ targetId: lost.targetId, reason: "provider_rejected" }],
+    });
+  });
+  it("skips a target whose binding changed and closes a target whose offer vanished", async () => {
+    const f = await deliveryFixture();
+    for (let i = 0; i < 2; i++) {
+      await f.send(f.accepted());
+      expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
+    }
+    expect(await f.next()).toMatchObject({ kind: "offer_ari_current", skipped: [] });
+    // An active target whose offer is not in the publication any more (sealed earlier for an
+    // offer "ghost" on the same room and binding): every night of its rate plan is closed; the
+    // published targets stay current.
+    const binding = (
+      await pool.query<{ connectionId: string; generation: string; external: string; room: string }>(
+        `SELECT c.id::text AS "connectionId",c.binding_generation::text AS generation,
+           c.external_property_id AS external,m.external_room_type_id AS room
+         FROM pms.channel_connections c
+         JOIN pms.channel_room_type_mappings m ON m.connection_id=c.id AND m.room_type_id=$2
+         WHERE c.property_id=$1 AND c.provider='channex'`,
+        [f.scope.propertyId, f.selection.roomTypeId],
+      )
+    ).rows[0]!;
+    const ghost = (
+      await pool.query<{ id: string }>(
+        "INSERT INTO pms.channex_offer_targets(property_id,connection_id,room_type_id,offer_id) VALUES($1,$2,$3,'ghost') RETURNING id::text AS id",
+        [f.scope.propertyId, binding.connectionId, f.selection.roomTypeId],
+      )
+    ).rows[0]!.id;
+    const ghostIntent = (
+      await pool.query<{ id: string; version: string }>(
+        `INSERT INTO pms.channex_offer_target_intents(target_id,operation_key,proposal)
+         VALUES($1,'ghost-create','{"currency":"EUR"}') RETURNING id,version::text AS version`,
+        [ghost],
+      )
+    ).rows[0]!;
+    const ghostRate = randomUUID();
+    await pool.query(
+      `INSERT INTO pms.channex_offer_target_versions
+         (target_id,version,intent_id,binding_generation,external_property_id,external_room_type_id,
+          external_rate_plan_id,configuration,readback_evidence)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'{"currency":"EUR"}','{"verified":true}')`,
+      [ghost, ghostIntent.version, ghostIntent.id, binding.generation, binding.external, binding.room, ghostRate],
+    );
+    await pool.query("UPDATE pms.channex_offer_targets SET active_version=$2 WHERE id=$1", [
+      ghost,
+      ghostIntent.version,
+    ]);
+    const closed = await f.send(f.accepted());
+    expect(closed.targetId).toBe(ghost);
+    expect((closed.posted[0] as { values: unknown[] }).values).toEqual([
+      {
+        property_id: binding.external,
+        rate_plan_id: ghostRate,
+        date_from: f.today,
+        date_to: f.horizon,
+        stop_sell: true,
+      },
+    ]);
+    expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
+    expect(await f.next()).toMatchObject({ kind: "offer_ari_current", targetCount: 3, skipped: [] });
+    // A room mapping that moved to another external room makes every target not current.
+    await pool.query(
+      "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1 AND room_type_id=$3",
+      [f.scope.propertyId, randomUUID(), f.selection.roomTypeId],
+    );
+    const result = await f.next();
+    expect(result).toMatchObject({ kind: "offer_ari_current", targetCount: 3 });
+    expect(
+      (result as { skipped: { reason: string }[] }).skipped.map((item) => item.reason),
+    ).toEqual([
+      "active_offer_binding_changed",
+      "active_offer_binding_changed",
+      "active_offer_binding_changed",
+    ]);
   });
 });

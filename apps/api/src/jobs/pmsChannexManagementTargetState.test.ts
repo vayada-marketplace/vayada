@@ -25,6 +25,27 @@ describe("PMS Channex management target state", () => {
     expect(client.sql()).not.toMatch(/webhook|callback|legacy/i);
   });
 
+  it("records skipped offer targets as a degraded ARI status after its own ok upsert (VAY-2108 D3)", async () => {
+    const client = fakeClient();
+    await createPmsChannexManagementTargetState().succeed(
+      client,
+      job("sync_ari"),
+      {
+        ok: true,
+        skippedOfferTargets: [
+          { targetId: "a", reason: "active_offer_configuration_changed" },
+          { targetId: "b", reason: "provider_rejected" },
+        ],
+      },
+      now,
+    );
+    const sql = client.sql();
+    const ok = sql.indexOf("ON CONFLICT (connection_id, sync_domain) DO UPDATE SET status = 'ok'");
+    const degraded = sql.indexOf("SET status = 'degraded', last_error_code = $3");
+    expect(ok).toBeGreaterThan(-1);
+    expect(degraded).toBeGreaterThan(ok);
+  });
+
   it("persists provider-confirmed mappings, markups, and failure health", async () => {
     const client = fakeClient();
     const state = createPmsChannexManagementTargetState();
