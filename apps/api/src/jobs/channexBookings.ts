@@ -1,5 +1,6 @@
 import { assertChannexUnverifiedAlterationSupport } from "../domains/channexUnverifiedAlterationSupport.js";
 import { resolveVerifiedChannexAlert } from "../domains/channexOperationalAlerts.js";
+import { CHANNEX_RESERVED_TEST_IDS, channexExcludedIds } from "../domains/channexOwnershipGate.js";
 import {
   captureChannexAlterationFinance,
   type ChannexAirbnbFinanceSettingsPort,
@@ -49,7 +50,7 @@ class LeaseLost extends Error{constructor(){super("lease_lost")}}
 // prettier-ignore
 export async function runChannexBookingJobs(
   connectionString: string,
-  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbAlterationPropertyIds?:readonly string[];airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
+  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;ownedPropertyIds?:readonly string[];fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbAlterationPropertyIds?:readonly string[];airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
 ): Promise<Counters> {
   if (options.stagingImport && options.apiBaseUrl !== "https://staging.channex.io") throw new Error("staging_import_required");
   const pool = new pg.Pool({ connectionString, max: 2, connectionTimeoutMillis: 5_000 }),
@@ -57,7 +58,7 @@ export async function runChannexBookingJobs(
   try {
     for (let index = 0; index < (options.limit ?? 25); index += 1) {
       if(options.signal?.aborted)break;
-      const claimed = await claim(pool, options.workerId ?? `channex-bookings:${process.pid}`, options.stagingImport);
+      const claimed = await claim(pool, options.workerId ?? `channex-bookings:${process.pid}`, options.stagingImport, options.ownedPropertyIds);
       if (!claimed) break;
       if ("expired" in claimed) {
         counters.deadLettered += 1;
@@ -78,7 +79,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
+    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false,channexExcludedIds(options.apiBaseUrl));await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
@@ -89,7 +90,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
 }
 
 // prettier-ignore
-async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope):Promise<Job|{expired:true}|null>{
+async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope,owned?:readonly string[]):Promise<Job|{expired:true}|null>{
   return transaction(pool, async (client) => {
     const row = (
       await client.query<{id:string;propertyId:string|null;resourceId:string;correlationId:string|null;status:"pending"|"running";attemptsCount:number;maxAttempts:number;handledRevisions:unknown;payload:unknown}>(
@@ -102,10 +103,11 @@ async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope):Pro
             AND job_metadata->'stagingImport'->>'bindingGeneration'=$9
             AND job_metadata#>>'{stagingImport,catalogHash}' IS NOT DISTINCT FROM $10::text
             AND job_metadata->'stagingAlertRecovery' IS NOT DISTINCT FROM $11::jsonb)) AND
+          ($12::text[] IS NULL OR payload->>'propertyId' = ANY($12::text[])) AND
           ((status='pending' AND run_after<=now() AND attempts_count<max_attempts) OR
            (status='running' AND locked_at<=now()-($3::bigint*interval '1 millisecond')))
          ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
-        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null, scope?.catalogHash??null,scope?.alertRecovery?JSON.stringify(scope.alertRecovery):null],
+        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null, scope?.catalogHash??null,scope?.alertRecovery?JSON.stringify(scope.alertRecovery):null,owned?[...owned]:null],
       )
     ).rows[0];
     if (!row) return null;
@@ -153,16 +155,21 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
 }
 
 // prettier-ignore
-async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknown,applyAlterations:boolean,assertActive:()=>void,scope?:StagingImportScope,financeSettings?:ChannexAirbnbFinanceSettingsPort,allowUnverifiedAirbnbAlterations=false):Promise<boolean>{
+async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknown,applyAlterations:boolean,assertActive:()=>void,scope?:StagingImportScope,financeSettings?:ChannexAirbnbFinanceSettingsPort,allowUnverifiedAirbnbAlterations=false,excludedIds:readonly string[]=CHANNEX_RESERVED_TEST_IDS):Promise<boolean>{
   return transaction(pool, async (client) => {
     await fence(client,job);
     await lockPmsInventoryMutationScope(client,job.propertyId);
     if(scope)await stagingBinding(client,scope);
+    // VAY-2108: write only for a hotel the target owns (active claim on the connected binding).
     const connection = (
       await client.query<{id:string;bindingGeneration:string}>(
-        `SELECT id::text,binding_generation::text AS "bindingGeneration" FROM pms.channel_connections WHERE property_id=$1::uuid
-           AND provider='channex' AND external_property_id=$2 AND connection_status='connected' FOR UPDATE`,
-        [job.propertyId, job.providerPropertyId],
+        `SELECT c.id::text,c.binding_generation::text AS "bindingGeneration" FROM pms.channel_connections c
+         JOIN pms.channel_binding_claims claim ON claim.property_id=c.property_id AND claim.provider=c.provider
+           AND claim.external_property_id=c.external_property_id AND claim.claim_state='active'
+         WHERE c.property_id=$1::uuid AND c.provider='channex' AND c.external_property_id=$2 AND c.connection_status='connected'
+           AND NOT (c.property_id::text=ANY($3::text[]) OR lower(c.external_property_id)=ANY($3::text[]))
+         FOR UPDATE OF c FOR SHARE OF claim`,
+        [job.propertyId, job.providerPropertyId, excludedIds],
       )
     ).rows;
     if (connection.length !== 1) throw new Failure("connection_not_owned", true);
