@@ -118,7 +118,7 @@ describe("published Channex offer bootstrap", () => {
 
   it("recognizes an already activated matching offer after worker completion crashes", async () => {
     const pool = {
-      query: vi.fn().mockResolvedValue({ rows: [{ matches: true }] }),
+      query: vi.fn().mockResolvedValue({ rows: [{ sealed: true, bound: true, configured: true }] }),
     } as unknown as Pool;
     await expect(bootstrapPublishedChannexOffer(pool, job, "worker", ports)).resolves.toEqual({
       kind: "ready",
@@ -127,6 +127,23 @@ describe("published Channex offer bootstrap", () => {
     expect(primitives.configure).not.toHaveBeenCalled();
     expect(ports.create).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [{ sealed: false, bound: true, configured: true }, "active_offer_conflict"],
+    [{ sealed: true, bound: false, configured: true }, "active_offer_binding_changed"],
+    [{ sealed: true, bound: true, configured: false }, "active_offer_configuration_changed"],
+  ])(
+    "never re-creates an active offer that is pending or no longer current: %j",
+    async (row, reason) => {
+      const pool = { query: vi.fn().mockResolvedValue({ rows: [row] }) } as unknown as Pool;
+      await expect(bootstrapPublishedChannexOffer(pool, job, "worker", ports)).resolves.toEqual({
+        kind: "unavailable",
+        reason,
+      });
+      expect(primitives.prepare).not.toHaveBeenCalled();
+      expect(ports.create).not.toHaveBeenCalled();
+    },
+  );
 
   it("holds a stale publication before looking for or creating a rate", async () => {
     const pool = { query: vi.fn() } as unknown as Pool;
