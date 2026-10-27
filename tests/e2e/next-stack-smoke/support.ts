@@ -1,6 +1,4 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
@@ -46,10 +44,6 @@ export type SyntheticPlatformAdmin = {
   email: string;
   membershipId: string;
   userId: string;
-};
-
-export type UploadedMedia = {
-  mediaObjectId: string;
 };
 
 export class JsonApi {
@@ -243,8 +237,8 @@ function syntheticIdentity(
 /**
  * Signs a hotel owner up the way a new hotel does (VAY-2270): Booking Admin /signup, the email
  * code (read from WorkOS, which sent it), then the account details step of /setup. The signup
- * creates the owner's hotel group. Stops on the setup wizard's track choice, or, where Booking
- * Admin runs the new first run (VAY-2247, ONBOARDING_V2_ENABLED), on its "Your hotel" step.
+ * creates the owner's hotel group. Stops on the first run's "Your hotel" step (VAY-2247,
+ * ONBOARDING_V2_ENABLED), or on the older setup wizard's track choice, and says which.
  */
 export async function signUpSyntheticHotelOwner(
   page: Page,
@@ -252,7 +246,7 @@ export async function signUpSyntheticHotelOwner(
   environment: SmokeEnvironment,
   qualifier = "",
   phone = "+49 30 5550102",
-): Promise<{ user: SyntheticUser; session: AuthSession }> {
+): Promise<{ user: SyntheticUser; session: AuthSession; flow: "first_run" | "wizard" }> {
   const identity = syntheticIdentity(environment, "hotel", qualifier);
   await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/signup`);
   await page.getByLabel("Email address").fill(identity.email);
@@ -298,8 +292,9 @@ export async function signUpSyntheticHotelOwner(
   await page.getByRole("button", { name: "Verify email", exact: true }).click();
 
   // The first run asks for the same details on its own first step, then opens "Your hotel"
-  // instead of the wizard's track choice. Either way the hotel is provisioned through the API below.
-  if ((await submitAccountDetails(page, identity, phone)) === "first_run") {
+  // instead of the wizard's track choice.
+  const flow = await submitAccountDetails(page, identity, phone);
+  if (flow === "first_run") {
     await page.getByRole("heading", { name: "Your hotel", level: 1 }).waitFor({ timeout: 45_000 });
   } else {
     await page
@@ -314,7 +309,7 @@ export async function signUpSyntheticHotelOwner(
       `Expected one WorkOS user for the synthetic hotel owner, found ${userIds.length}.`,
     );
   }
-  return { user: { ...identity, id: userIds[0]!, role: "hotel" }, session };
+  return { user: { ...identity, id: userIds[0]!, role: "hotel" }, session, flow };
 }
 
 /**
@@ -566,65 +561,6 @@ export async function workosUserIdsForEmail(
     .map((user) => stringField(user, "id"));
 }
 
-export async function uploadPropertyCover(
-  request: APIRequestContext,
-  api: JsonApi,
-  propertyId: string,
-  runId: string,
-): Promise<UploadedMedia> {
-  const bytes = await readFile(
-    path.resolve("tests/e2e/next-stack-smoke/fixtures/property-cover.jpg"),
-  );
-  const created = await api.json<Record<string, unknown>>("POST", "/api/media/upload-sessions", {
-    idempotencyKey: `next-smoke:${runId}:cover`,
-    purpose: "property.hero_image",
-    visibility: "private",
-    resource: {
-      product: "hotel_catalog",
-      resourceType: "property",
-      resourceId: propertyId,
-      propertyId,
-    },
-    files: [
-      {
-        clientFileId: "file_1",
-        filename: `next-smoke-${runId}.jpg`,
-        contentType: "image/jpeg",
-        sizeBytes: bytes.length,
-      },
-    ],
-  });
-  const uploadSession = recordField(created, "uploadSession");
-  const sessionId = stringField(uploadSession, "sessionId");
-  if (uploadSession.status === "completed") {
-    return mediaFrom(created);
-  }
-  const targets = arrayField(created, "uploadTargets");
-  const target = record(targets[0]);
-  const response = await request.fetch(stringField(target, "uploadUrl"), {
-    method: "PUT",
-    headers: stringRecord(target.headers),
-    data: bytes,
-  });
-  if (!response.ok()) {
-    throw new Error(`Property cover upload returned ${response.status()}.`);
-  }
-  const finalized = await api.json<Record<string, unknown>>(
-    "POST",
-    `/api/media/upload-sessions/${encodeURIComponent(sessionId)}/finalize`,
-    {
-      files: [
-        {
-          uploadTargetId: stringField(target, "uploadTargetId"),
-          contentType: "image/jpeg",
-          sizeBytes: bytes.length,
-        },
-      ],
-    },
-  );
-  return mediaFrom(finalized);
-}
-
 export function futureStay(): { checkIn: string; checkOut: string } {
   const checkIn = new Date();
   checkIn.setUTCDate(checkIn.getUTCDate() + 60);
@@ -667,12 +603,6 @@ export function arrayField(value: Record<string, unknown>, field: string): unkno
   return result;
 }
 
-function mediaFrom(value: Record<string, unknown>): UploadedMedia {
-  return {
-    mediaObjectId: stringField(record(arrayField(value, "mediaObjects")[0]), "mediaObjectId"),
-  };
-}
-
 async function waitForPlatformAdminLogin(
   request: APIRequestContext,
   email: string,
@@ -709,14 +639,6 @@ async function primePlatformIdentity(
       `Expected first platform login to fail closed with 403, received ${response.status()}: ${safeError(await response.text())}`,
     );
   }
-}
-
-function stringRecord(value: unknown): Record<string, string> {
-  const object = record(value);
-  if (!Object.values(object).every((entry) => typeof entry === "string")) {
-    throw new Error("Upload target headers are invalid.");
-  }
-  return object as Record<string, string>;
 }
 
 function required(name: string): string {

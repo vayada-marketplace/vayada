@@ -1,7 +1,6 @@
-import { expect, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
 
 import {
-  NEXT_STACK_ORIGINS,
   arrayField,
   futureStay,
   publicApi,
@@ -18,311 +17,194 @@ export type BookingResource = {
   resolved: boolean;
   slug: string;
 };
-/** One room's row of the legacy public offers read model: the availability the smoke watches. */
-export type Offer = Record<string, unknown> & {
-  availableRooms: number;
-  roomTypeId: string;
-};
-/** The pricing offer guests book: the key the room card hands to /book and the quote takes. */
-export type PricingOffer = { currency: string; publicOfferKey: string; roomTypeId: string };
-/** The price a guest sees and accepts (public-booking-quote.v1), with its lines summed. */
-export type GuestQuote = {
-  acceptanceMode: "instant" | "request";
-  currency: string;
-  discountMinor: bigint;
-  expiresAt: string;
-  lines: { amountMinor: string; kind: string; selectionId: string | null }[];
-  quoteId: string;
-  roomMinor: bigint;
-  totalMinor: string;
-};
+export type GuestBooking = { bookingId: string; bookingReference: string; email: string };
 
-/** Whether a request-mode booking went through: online booking requests are an operator switch
- * (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED), off in production on 2026-10-27. */
-export type QuoteLifecycleOutcome = "booked" | "requests_unavailable";
+const GUEST = { firstName: "Taylor", lastName: "Smoke", phone: "+49 30 5550104" };
 
-const GUEST = { firstName: "Taylor", lastName: "Smoke", phone: "+49305550104", countryCode: "DE" };
-const ROOM_SELECTION_ID = "room-1";
+/** The analytics prompt opens on every page until it's answered and can sit over the page's
+ * buttons; a guest who declines isn't asked again on that hotel's pages. */
+async function declineAnalytics(page: Page): Promise<void> {
+  const reject = page.getByRole("button", { name: "Reject analytics" });
+  if (await reject.isVisible()) await reject.click();
+}
 
-/** The one offer of the smoke's room type from the pricing catalogue booking-web reads. */
-export async function findPricingOffer(
+/** The guest's name as PMS shows it. */
+export const GUEST_NAME = `${GUEST.firstName} ${GUEST.lastName}`;
+
+export function guestEmail(environment: SmokeEnvironment): string {
+  return `qa-next-guest-${environment.runId}@${environment.emailDomain}`;
+}
+
+/** One room type's row of the room cards' read-only stay prices (VAY-2190), for two adults. */
+export async function stayRoom(
   request: APIRequestContext,
   slug: string,
   roomTypeId: string,
-): Promise<PricingOffer> {
-  const catalog = await publicApi(request).json<Record<string, unknown>>(
+  stay: Stay,
+): Promise<Record<string, unknown>> {
+  const query = new URLSearchParams({ ...stay, adults: "2", children: "0" });
+  const prices = await publicApi(request).json<Record<string, unknown>>(
     "GET",
-    `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
+    `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers/stay-prices?${query}`,
   );
-  expect(catalog.version).toBe("public-pricing-offers.v1");
-  const room = arrayField(catalog, "rooms")
+  expect(prices.version).toBe("public-pricing-stay-prices.v1");
+  const room = arrayField(prices, "rooms")
     .map(record)
     .find((candidate) => candidate.roomTypeId === roomTypeId);
-  if (!room) throw new Error(`Pricing offers do not list room type ${roomTypeId}.`);
-  const offers = arrayField(room, "offers").map(record);
-  // The smoke publishes one flexible rate plan, so the room has exactly one offer.
-  expect(offers).toHaveLength(1);
-  const offer = offers[0]!;
-  return {
-    currency: stringField(offer, "currency"),
-    publicOfferKey: stringField(offer, "publicOfferKey"),
-    roomTypeId,
-  };
+  if (!room) throw new Error(`Stay prices do not list room type ${roomTypeId}.`);
+  return room;
 }
 
-/** The quote request booking-web sends for two adults in this offer, paid at the property. */
-export function guestQuoteRequest(
-  offer: PricingOffer,
-  stay: Stay,
-  promoCode: string | null = null,
-): Record<string, unknown> {
-  return {
-    version: "public-booking-quote-request.v1",
-    paymentMethod: "pay_at_property",
-    selection: {
-      version: "public-pricing-selection.v1",
-      checkIn: stay.checkIn,
-      checkOut: stay.checkOut,
-      currency: offer.currency,
-      addons: [],
-      promoCode,
-      rooms: [
-        {
-          selectionId: ROOM_SELECTION_ID,
-          publicOfferKey: offer.publicOfferKey,
-          guests: { adults: 2, childAgesAtCheckIn: [] },
-        },
-      ],
-    },
-  };
-}
-
-export async function issueGuestQuote(
+/** The rooms a guest can still book for the stay; stay prices name the count once three or
+ * fewer are left. */
+export async function roomsLeft(
   request: APIRequestContext,
-  environment: SmokeEnvironment,
   slug: string,
+  roomTypeId: string,
   stay: Stay,
-  offer: PricingOffer,
-  key: string,
-  promoCode: string | null = null,
-): Promise<GuestQuote> {
-  const body = await publicApi(request).json<Record<string, unknown>>(
-    "POST",
-    `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/quote`,
-    guestQuoteRequest(offer, stay, promoCode),
-    { "Idempotency-Key": `next-smoke:${environment.runId}:${key}:quote` },
-  );
-  return parseGuestQuote(body);
+): Promise<number | null> {
+  const room = await stayRoom(request, slug, roomTypeId, stay);
+  if (room.availability === "sold_out") return 0;
+  return typeof room.roomsLeft === "number" ? room.roomsLeft : null;
 }
 
-export function parseGuestQuote(body: Record<string, unknown>): GuestQuote {
-  expect(body.version).toBe("public-booking-quote.v1");
-  const lines = arrayField(body, "lines")
-    .map(record)
-    .map((line) => ({
-      amountMinor: stringField(line, "amountMinor"),
-      kind: stringField(line, "kind"),
-      selectionId: typeof line.selectionId === "string" ? line.selectionId : null,
-    }));
-  const sum = (kinds: string[]) =>
-    lines
-      .filter((line) => kinds.includes(line.kind))
-      .reduce((total, line) => total + BigInt(line.amountMinor), BigInt(0));
-  const acceptanceMode = stringField(body, "acceptanceMode");
-  if (acceptanceMode !== "instant" && acceptanceMode !== "request") {
-    throw new Error(`Guest quote has an unexpected acceptance mode: ${acceptanceMode}`);
-  }
-  return {
-    acceptanceMode,
-    currency: stringField(body, "currency"),
-    discountMinor: sum(["discount"]),
-    expiresAt: stringField(body, "expiresAt"),
-    lines,
-    quoteId: stringField(body, "quoteId"),
-    roomMinor: sum(["room", "meal"]),
-    totalMinor: stringField(body, "totalMinor"),
-  };
-}
-
-/** A quote amount as booking-web's summary prints it (en-GB, no forced decimals). The smoke
- * hotel sells in EUR, a two-decimal currency. */
-export function guestMoney(minor: string | bigint, currency: string): string {
-  if (currency !== "EUR") throw new Error(`guestMoney expects EUR, received ${currency}.`);
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 0,
-  }).format(Number(minor) / 100);
+export async function waitForRoomsLeft(
+  request: APIRequestContext,
+  slug: string,
+  roomTypeId: string,
+  stay: Stay,
+  expected: number,
+): Promise<void> {
+  await expect
+    .poll(() => roomsLeft(request, slug, roomTypeId, stay), {
+      timeout: 60_000,
+      intervals: [1_000, 2_000, 5_000],
+    })
+    .toBe(expected);
 }
 
 /**
- * Books the smoke stay the way booking-web does since the new pricing: quote, guest disclosure,
- * acceptance; then withdraws or cancels it and waits for the room to come back.
+ * A guest books the stay on the hotel's live booking page, as guests do: the hotel page with the
+ * dates, the room card's rate, /book's details and review, paying at the hotel. The booking is
+ * registered for cleanup as soon as the API accepts it.
  */
-export async function runQuoteLifecycle(
-  request: APIRequestContext,
-  environment: SmokeEnvironment,
-  slug: string,
-  stay: Stay,
-  offer: PricingOffer,
-  availableRooms: number,
-  mode: "instant" | "request",
-  bookings: BookingResource[],
-  checkout?: {
-    key: string;
-    promoCode: string;
-    assertQuote: (quote: GuestQuote) => void;
-  },
-): Promise<QuoteLifecycleOutcome> {
-  const api = publicApi(request);
-  const key = checkout?.key ?? mode;
-  const guestEmail = `qa-next-guest-${environment.runId}@${environment.emailDomain}`;
-  const hotelPath = `/api/booking-web/hotels/${encodeURIComponent(slug)}`;
-  const quote = await issueGuestQuote(
-    request,
-    environment,
-    slug,
-    stay,
-    offer,
-    key,
-    checkout?.promoCode ?? null,
-  );
-  expect(quote.acceptanceMode).toBe(mode);
-  checkout?.assertQuote(quote);
-  const disclosure = await api.json<Record<string, unknown>>(
-    "GET",
-    `${hotelPath}/bookings/quotes/${encodeURIComponent(quote.quoteId)}/guest-disclosure`,
-  );
-  expect(disclosure.version).toBe("public-quote-guest-disclosure.v1");
-  const requestId = `next-smoke:${environment.runId}:${key}:accept`;
-  const response = await request.post(
-    `${NEXT_STACK_ORIGINS.api}${hotelPath}/bookings/quotes/${encodeURIComponent(quote.quoteId)}/accept`,
-    {
-      headers: { "Idempotency-Key": requestId },
-      data: {
-        version: "booking-quote-acceptance.v1",
-        requestId,
-        quoteId: quote.quoteId,
-        acceptance: {
-          accepted: true,
-          quoteEvidenceId: stringField(disclosure, "quoteEvidenceId"),
-          guestPolicyEvidenceId: stringField(disclosure, "guestPolicyEvidenceId"),
-        },
-        guest: { ...GUEST, email: guestEmail, arrivalTime: null, specialRequests: null },
-      },
-    },
-  );
-  const accepted = record(await response.json());
-  if (
-    mode === "request" &&
-    response.status() === 404 &&
-    accepted.code === "REQUEST_ACCEPTANCE_UNAVAILABLE"
-  ) {
-    // The hotel confirms each booking, but online requests are switched off: the API refuses
-    // and stores nothing, which is what booking-web tells the guest.
-    return "requests_unavailable";
-  }
-  expect(response.ok(), JSON.stringify(accepted)).toBe(true);
-  expect(accepted.kind).toBe(mode === "request" ? "requested" : "accepted");
-  const resource: BookingResource = {
-    bookingId: stringField(accepted, "bookingId"),
-    email: guestEmail,
-    mode,
-    resolved: false,
-    slug,
-  };
-  bookings.push(resource);
-  stringField(accepted, "bookingReference");
-  await waitForAvailability(request, slug, stay, availableRooms - 1);
-  if (mode === "request") {
-    await api.json("POST", `${hotelPath}/bookings/${resource.bookingId}/withdraw`, { guestEmail });
-  } else {
-    await api.json("POST", `${hotelPath}/bookings/${resource.bookingId}/cancel-preview`, {
-      guestEmail,
+export async function bookOnLivePage(input: {
+  browser: Browser;
+  bookingUrl: string;
+  bookings: BookingResource[];
+  environment: SmokeEnvironment;
+  roomName: string;
+  roomTypeId: string;
+  slug: string;
+  stay: Stay;
+}): Promise<GuestBooking> {
+  const { bookings, roomTypeId, slug, stay } = input;
+  const email = guestEmail(input.environment);
+  const context = await input.browser.newContext();
+  try {
+    const page = await context.newPage();
+    const hotelPage = new URL(input.bookingUrl);
+    for (const [key, value] of Object.entries({ ...stay, adults: "2" }))
+      hotelPage.searchParams.set(key, value);
+    await page.goto(hotelPage.toString());
+    const card = page.getByTestId(`room-card-${roomTypeId}`);
+    await expect(card.getByRole("heading", { name: input.roomName })).toBeVisible({
+      timeout: 45_000,
     });
-    await api.json("POST", `${hotelPath}/bookings/${resource.bookingId}/cancel`, { guestEmail });
+    await declineAnalytics(page);
+    await page.getByTestId(`select-rate-${roomTypeId}`).click();
+    await expect(page).toHaveURL(/\/book\?.*offer=/);
+
+    // A hotel without extras opens on the guest's details; with extras, Extras comes first.
+    const details = page.getByRole("heading", { name: "Who’s staying?" });
+    const extras = page.getByRole("button", { name: "Continue to your details" });
+    await expect(details.or(extras)).toBeVisible({ timeout: 45_000 });
+    if (await extras.isVisible()) await extras.click();
+    await expect(details).toBeVisible();
+    await page.getByLabel("First name").fill(GUEST.firstName);
+    await page.getByLabel("Last name").fill(GUEST.lastName);
+    await page.getByLabel("Email", { exact: true }).fill(email);
+    // "Phone", or "Phone (optional)" when the hotel's guest rules don't ask for one.
+    await page.getByRole("textbox", { name: /^Phone( \(optional\))?$/ }).fill(GUEST.phone);
+    await page.getByRole("button", { name: "Continue to review" }).click();
+
+    await expect(page.getByRole("heading", { name: "Review & pay" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("radiogroup", { name: "Payment preference" })
+        .getByRole("radio", { name: /^Pay at the hotel/ }),
+    ).toHaveAttribute("aria-checked", "true");
+    await page.getByLabel(/^I agree to the cancellation policy/).check();
+    const accepted = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname.endsWith("/accept") &&
+        new URL(response.url()).pathname.includes(`/hotels/${slug}/bookings/quotes/`),
+      { timeout: 45_000 },
+    );
+    await page.getByRole("button", { name: "Confirm booking" }).click();
+    const response = await accepted;
+    const body = record(await response.json());
+    expect(response.ok(), JSON.stringify(body)).toBe(true);
+    const booking = {
+      bookingId: stringField(body, "bookingId"),
+      bookingReference: stringField(body, "bookingReference"),
+      email,
+    };
+    bookings.push({ bookingId: booking.bookingId, email, mode: "instant", resolved: false, slug });
+    // Online booking requests are off in production, so the hotel books instantly.
+    expect(body.kind).toBe("accepted");
+    await expect(page).toHaveURL(new RegExp(`/booking/${booking.bookingReference}$`), {
+      timeout: 45_000,
+    });
+    await expect(page.getByText(input.roomName, { exact: true }).first()).toBeVisible();
+    return booking;
+  } finally {
+    await context.close();
   }
-  resource.resolved = true;
-  return "booked";
 }
 
-export async function waitForOffer(
-  request: APIRequestContext,
-  slug: string,
-  stay: Stay,
-  availableRooms: number,
-): Promise<Offer> {
-  let latest: Offer | null = null;
-  await expect
-    .poll(
-      async () => {
-        latest = await firstOffer(request, slug, stay);
-        return latest?.availableRooms ?? 0;
+/** The guest looks the booking up on the hotel's page and cancels it there (free until 3 days
+ * before arrival, so nothing is charged). */
+export async function cancelOnLivePage(input: {
+  browser: Browser;
+  bookingUrl: string;
+  booking: GuestBooking;
+  resource: BookingResource;
+}): Promise<void> {
+  const context = await input.browser.newContext();
+  try {
+    const page = await context.newPage();
+    const lookup = new URL("/en/my-booking", input.bookingUrl);
+    lookup.searchParams.set("reference", input.booking.bookingReference);
+    lookup.searchParams.set("email", input.booking.email);
+    await test.step("open the booking from its reference and email", async () => {
+      await page.goto(lookup.toString());
+      const cancel = page.getByRole("button", { name: "Cancel Booking" });
+      await expect(cancel).toBeVisible({ timeout: 45_000 });
+      await declineAnalytics(page);
+      await cancel.click();
+    });
+    const dialog = page.getByText("Cancel This Booking?").locator("..");
+    await expect(dialog).toContainText("Free cancellation");
+    // The page cancels by the id its lookup returned.
+    const cancelled = page.waitForResponse(
+      (response) => {
+        const path = new URL(response.url()).pathname;
+        return (
+          response.request().method() === "POST" &&
+          path.includes(`/hotels/${input.resource.slug}/bookings/`) &&
+          path.endsWith("/cancel")
+        );
       },
-      { timeout: 45_000, intervals: [500, 1_000, 2_000] },
-    )
-    .toBe(availableRooms);
-  return latest!;
-}
-
-export async function waitForNoPublicOffer(
-  request: APIRequestContext,
-  slug: string,
-  stay: Stay,
-): Promise<void> {
-  await expect
-    .poll(async () => (await firstOffer(request, slug, stay)) === null, {
-      timeout: 45_000,
-      intervals: [500, 1_000, 2_000],
-    })
-    .toBe(true);
-}
-
-async function waitForAvailability(
-  request: APIRequestContext,
-  slug: string,
-  stay: Stay,
-  availableRooms: number,
-): Promise<void> {
-  await expect
-    .poll(async () => (await firstOffer(request, slug, stay))?.availableRooms ?? 0, {
-      timeout: 45_000,
-      intervals: [500, 1_000, 2_000],
-    })
-    .toBe(availableRooms);
-}
-
-async function firstOffer(
-  request: APIRequestContext,
-  slug: string,
-  stay: Stay,
-): Promise<Offer | null> {
-  const query = new URLSearchParams({
-    check_in: stay.checkIn,
-    check_out: stay.checkOut,
-    rooms: "1",
-    adults: "2",
-    children: "0",
-    currency: "EUR",
-    locale: "en",
-  });
-  const response = await request.get(
-    `${NEXT_STACK_ORIGINS.api}/api/booking-web/hotels/${encodeURIComponent(slug)}/offers?${query}`,
-  );
-  if (response.status() === 404 || response.status() === 409) return null;
-  if (!response.ok()) throw new Error(`Public offers returned ${response.status()}.`);
-  const body = record(await response.json());
-  if (body.quote == null) return null;
-  const offers = arrayField(record(body.quote), "offers");
-  if (!offers.length) return null;
-  const offer = record(offers[0]);
-  const availableRooms = Number(offer.availableRooms);
-  if (!Number.isInteger(availableRooms) || availableRooms < 0) {
-    throw new Error("Public offer has invalid availableRooms.");
+      { timeout: 45_000 },
+    );
+    await page.getByRole("button", { name: "Yes, Cancel" }).click();
+    const response = await cancelled;
+    expect(response.ok(), await response.text()).toBe(true);
+    input.resource.resolved = true;
+    await expect(page.getByText("Your booking has been cancelled.")).toBeVisible();
+  } finally {
+    await context.close();
   }
-  return {
-    ...offer,
-    availableRooms,
-    roomTypeId: stringField(offer, "roomTypeId"),
-  };
 }
