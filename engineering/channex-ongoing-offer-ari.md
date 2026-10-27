@@ -31,18 +31,10 @@ service_date)`. A new binding generation never compares against the old binding'
 other stop-sell path. The state changes only through the audited `target:channex:handover
 open-sales|close-sales` commands, which run through the reviewed platform runner and touch the
 database only. Opening re-sends every date once, because the initial values carry `stop_sell: true`.
-A revoke closes every open target in its own transaction and records them in its audit. It cannot
-reach Channex afterwards, because the worker no longer serves the hotel: to stop sales on Channex
-before a revoke, run close-sales and wait for its delivery to reconcile first. A reviewed plan applies
-once; re-running it reports the recorded result unless a later handover command ran since
-(`plan_superseded`) or the inputs differ (`replay_mismatch`).
 An open state always has `sales_state_changed_at`. Moving `active_version` (a new version or binding)
-resets the state to `closed`, so a new provider configuration never opens without a new command. That
-reset is a trigger in the delivery PR's migration (it changes the worker's pinned trigger catalog, so it
-lands with that boundary re-pin), and it must be live before any delivery is sent; until then nothing
-reads `sales_state`.
+resets the state to `closed`, so a new provider configuration never opens without a new command.
 The database does not stop the API login from writing the column; no API code does. On the delivery
-tables 0481 leaves the API login only SELECT (a guarded revoke of the VAY-2054 default writes); the
+tables 0520 leaves the API login only SELECT (a guarded revoke of the VAY-2054 default writes); the
 platform's protected-table pattern for them ships first, so its product-DML preflight expects that.
 
 ## Delivery
@@ -71,5 +63,5 @@ current, and the next delivery pushes the difference. A changed configuration is
 
 | Part                                                                         | Owner            |
 | ---------------------------------------------------------------------------- | ---------------- |
-| Schema (0481), delivery, reconciliation, open/close commands, claimed wiring | VAY-2108         |
+| Schema (0520), delivery, reconciliation, open/close commands, claimed wiring | VAY-2108         |
 | Desired values, shared builder, publication bumps                            | VAY-1543 pricing |

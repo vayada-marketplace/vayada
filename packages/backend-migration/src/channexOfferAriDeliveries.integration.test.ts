@@ -4,7 +4,7 @@ import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
-// VAY-2108 (0481): ongoing offer ARI storage (engineering/channex-ongoing-offer-ari.md).
+// VAY-2108 (0520): ongoing offer ARI storage (engineering/channex-ongoing-offer-ari.md).
 const url = process.env.TEST_DATABASE_URL;
 describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
   const pool = new pg.Pool({ connectionString: url });
@@ -201,10 +201,10 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
 
   it("leaves the API login only SELECT on the delivery tables", async () => {
     assertSafeTestDatabase(url!);
-    // CI creates no runtime role before migrating, so run 0481's block as written against a role
+    // CI creates no runtime role before migrating, so run 0520's block as written against a role
     // holding the VAY-2054 default DML, inside a transaction that rolls the role and grants back.
     const migration = readFileSync(
-      new URL("../migrations/0481_channex_offer_ari_deliveries.sql", import.meta.url),
+      new URL("../migrations/0520_channex_offer_ari_deliveries.sql", import.meta.url),
       "utf8",
     );
     const revoke = migration.match(

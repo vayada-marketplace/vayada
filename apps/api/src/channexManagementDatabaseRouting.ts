@@ -15,10 +15,16 @@ export function resolveChannexManagementDatabaseRouting(input: {
 }): ChannexManagementDatabaseRouting {
   const connectionString = input.config.workerDatabaseUrl;
   if (!input.config.workerEnabled || !connectionString) return Object.freeze({});
-  const managementEnabled = input.commandsMutating;
+  // VAY-2108: the claimed scope pulls bookings on the API login and runs the management worker
+  // only for connection (enable); it never routes booking revisions through the worker login.
+  const claimed = input.config.scope === "claimed";
+  const managementEnabled =
+    input.commandsMutating && (!claimed || input.config.capabilityModes.connection === "mutating");
   return Object.freeze({
     bookingRevisionStore:
-      input.config.capabilityModes.bookingSync === "mutating" ? connectionString : undefined,
+      input.config.capabilityModes.bookingSync === "mutating" && !claimed
+        ? connectionString
+        : undefined,
     plans: managementEnabled ? connectionString : undefined,
     reconciliation:
       managementEnabled && input.config.capabilityModes.ariSync === "mutating"

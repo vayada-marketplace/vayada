@@ -62,17 +62,21 @@ export async function bootstrapPublishedChannexOffer(
   if (!room) return { kind: "unavailable", reason: "published_offer_missing" };
   const plan = planChannexOfferConfiguration(room, saved.offerId, saved.primaryOccupancy);
   if (plan.kind !== "planned") return plan;
+  // VAY-2108 D5: an active offer stays current across publications while its provider
+  // configuration, binding and Channex room are unchanged (ongoing ARI sends the new prices);
+  // a changed configuration or binding needs an audited reconfiguration, not a new version.
   const active = (
-    await pool.query<{ matches: boolean }>(
+    await pool.query<{ sealed: boolean; bound: boolean; configured: boolean }>(
       `SELECT (intent.status='sealed' AND version.intent_id=intent.id
-         AND version.binding_generation=connection.binding_generation
-         AND version.external_property_id=$5
-         AND intent.proposal->>'publicationRevision'=$6
-         AND intent.proposal->>'primaryOccupancy'=$7
-         AND intent.proposal->'room'=$8::jsonb
-         AND version.configuration=$9::jsonb
          AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_target_intents pending
-           WHERE pending.target_id=target.id AND pending.status='pending')) AS matches
+           WHERE pending.target_id=target.id AND pending.status='pending')) AS sealed,
+         (version.binding_generation=connection.binding_generation
+           AND version.external_property_id=$5
+           AND EXISTS (SELECT 1 FROM pms.channel_room_type_mappings mapping
+             WHERE mapping.property_id=target.property_id AND mapping.connection_id=target.connection_id
+               AND mapping.room_type_id=target.room_type_id AND mapping.status='active'
+               AND mapping.external_room_type_id=version.external_room_type_id)) AS bound,
+         (intent.proposal->>'primaryOccupancy'=$6 AND version.configuration=$7::jsonb) AS configured
        FROM pms.channex_offer_targets target
        JOIN pms.channel_connections connection ON connection.id=target.connection_id
        JOIN pms.channex_offer_target_versions version
@@ -86,17 +90,18 @@ export async function bootstrapPublishedChannexOffer(
         saved.roomTypeId,
         saved.offerId,
         current.authority.externalPropertyId,
-        String(saved.publicationRevision),
         String(saved.primaryOccupancy),
-        JSON.stringify(room),
         JSON.stringify(plan.configuration),
       ],
     )
   ).rows[0];
-  if (active)
-    return active.matches
-      ? { kind: "ready" }
-      : { kind: "unavailable", reason: "active_offer_conflict" };
+  if (active) {
+    if (!active.sealed) return { kind: "unavailable", reason: "active_offer_conflict" };
+    if (!active.bound) return { kind: "unavailable", reason: "active_offer_binding_changed" };
+    if (!active.configured)
+      return { kind: "unavailable", reason: "active_offer_configuration_changed" };
+    return { kind: "ready" };
+  }
   const attempt = (
     await pool.query<{ attemptId: string; state: "unresolved" | "identified"; completed: boolean }>(
       `SELECT attempt.id::text AS "attemptId",attempt.state,
