@@ -166,7 +166,8 @@ async function applyConnectedSuccess(
       );
     }
   }
-  const domain = syncDomain(job.input.operationType);
+  // D6: a no-op ARI run neither stamps last_ari_sync_at nor rewrites a degraded status.
+  const domain = result.ariStatusUnchanged ? null : syncDomain(job.input.operationType);
   await client.query(
     `UPDATE pms.channel_connections SET
        external_property_id = COALESCE($2, external_property_id),
@@ -189,6 +190,26 @@ async function applyConnectedSuccess(
     ],
   );
   if (domain) await upsertSyncSuccess(client, job.propertyId, domain, now);
+  // VAY-2108 D3: a successful run that left active offer targets behind is visible as a degraded
+  // ARI status on the channel manager page, with the reasons, until a run delivers them all. It
+  // is written after the ok upsert above, so it survives the job's own success.
+  if (domain === "ari" && result.skippedOfferTargets?.length) {
+    const reasons = [...new Set(result.skippedOfferTargets.map((item) => item.reason))].sort();
+    await client.query(
+      `UPDATE pms.channel_sync_status SET status = 'degraded', last_error_code = $3,
+         last_error_message = $4, updated_at = $2::timestamptz
+       WHERE property_id = $1::uuid AND sync_domain = 'ari'`,
+      [
+        job.propertyId,
+        now.toISOString(),
+        "offer_targets_skipped",
+        `${result.skippedOfferTargets.length} offer target(s) not delivered: ${reasons.join(", ")}`.slice(
+          0,
+          500,
+        ),
+      ],
+    );
+  }
 }
 
 async function applyMappings(

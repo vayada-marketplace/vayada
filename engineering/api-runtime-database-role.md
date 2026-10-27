@@ -116,7 +116,8 @@ either (table or column level, including PUBLIC or inherited grants).
 
 Name patterns are a safety net for future tables: in `platform`, anything
 matching `^(production_|source_extraction_|legacy_|channex_adoption_|channex_management_worker_|identity_migration_)`
-is write-protected, and `^(identity_migration_|legacy_historical_binding_)`
+is write-protected (`channex_management_worker_` covers the owner-managed Channex worker scope
+tables, including the claimed operations from 0519), and `^(identity_migration_|legacy_historical_binding_)`
 or `^finance_.*_worker_properties$` is also read-protected (the Channex worker
 allowlist stays readable: the API reads it today). Outside `platform`,
 `^pms\.channex_room_availability_`, `^pms\.channex_ari_schedule_`,

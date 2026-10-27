@@ -2,6 +2,7 @@ import pg from "pg";
 
 import { applyPmsChannexManagementProgress } from "../jobs/pmsChannexManagementTargetState.js";
 import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
+import { CHANNEX_RESERVED_TEST_IDS } from "../domains/channexOwnershipGate.js";
 import {
   channexRequests,
   type ChannexManagementActionPlan,
@@ -44,6 +45,8 @@ export function createPgChannexManagementPlanPort(config: {
   connectionString: string;
   bookingRevisionHandoff: ChannexBookingRevisionHandoff;
   stagingMealsPropertyId?: string;
+  /** VAY-2108: bindings never planned for; defaults to the reserved staging/test ids. */
+  excludedIds?: readonly string[];
   pool?: Pool;
   now?: () => Date;
 }): ChannexManagementPlanPort & { close(): Promise<void> } {
@@ -56,6 +59,13 @@ export function createPgChannexManagementPlanPort(config: {
       job,
       config.now?.() ?? new Date(),
     );
+    const excluded = config.excludedIds ?? CHANNEX_RESERVED_TEST_IDS;
+    if (
+      job.input.operationType !== "enable" &&
+      (excluded.includes(job.propertyId) ||
+        excluded.includes(result.externalPropertyId?.toLowerCase() ?? ""))
+    )
+      throw new Error("Channex binding is reserved for staging and tests");
     if (
       config.stagingMealsPropertyId === job.propertyId &&
       job.input.operationType === "provision" &&
@@ -239,11 +249,18 @@ async function enablePlan(
   };
 }
 
+/** VAY-2108 D7 leaves this stub for a plain provisioning job: creating a hotel's Channex room
+ * types from the worker needs an INSERT right on pms.channel_room_type_mappings that the worker
+ * login does not have (its matrix allows locks only), so that part is the D7b follow-up with its
+ * own migration and platform grant. Rate plans come from published offers (the pricing bundle). */
 async function provisioningPlan(
   pool: Pool,
   job: ChannexManagementJob,
   externalPropertyId: string,
 ): Promise<ChannexManagementActionPlan> {
+  void pool;
+  void job;
+  void externalPropertyId;
   throw Object.assign(
     new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
     { statusCode: 503, code: "PRICING_UNAVAILABLE" },
