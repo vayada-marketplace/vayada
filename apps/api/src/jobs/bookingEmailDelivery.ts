@@ -37,12 +37,20 @@ type BookingEmailPool = {
   end?(): Promise<void>;
 };
 
+/** VAY-2297: the worker holds the booking row FOR SHARE while Resend answers. A hung call must
+ * give up before a 60 s idle-in-transaction limit cuts the connection; the job then retries with
+ * the same Idempotency-Key, so Resend never sends the email twice. */
+export const BOOKING_EMAIL_SEND_TIMEOUT_MS = 30_000;
+
 export function createResendBookingEmailDelivery(config: {
   apiKey: string;
   from: string;
   fetch?: typeof fetch;
+  /** Tests only: production keeps BOOKING_EMAIL_SEND_TIMEOUT_MS. */
+  timeoutMs?: number;
 }): BookingEmailDelivery {
   const request = config.fetch ?? fetch;
+  const timeoutMs = config.timeoutMs ?? BOOKING_EMAIL_SEND_TIMEOUT_MS;
   return {
     async send(input) {
       const response = await request("https://api.resend.com/emails", {
@@ -52,6 +60,7 @@ export function createResendBookingEmailDelivery(config: {
           "Content-Type": "application/json",
           "Idempotency-Key": input.idempotencyKey,
         },
+        signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
           from: config.from,
           to: [input.to],
