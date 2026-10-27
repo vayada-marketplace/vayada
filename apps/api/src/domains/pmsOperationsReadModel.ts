@@ -1142,9 +1142,15 @@ LEFT JOIN LATERAL (
              'assignmentId', assignment.id::text,
              'roomTypeId', assignment.room_type_id::text,
              'ratePlanId', assignment.rate_plan_id::text,
-             -- Manual bookings keep the offer in pricingOffer, booking-engine ones in pricingAcceptance.
+             -- Manual bookings keep the offer in pricingOffer, booking-engine ones in pricingAcceptance,
+             -- Channex ones on an offer-owned rate plan in channexOffer (VAY-2108), which names the
+             -- offer only while the stay keeps that offer's room type and Channex rate plan.
              'pricingOfferId', COALESCE(assignment.assignment_payload->'pricingOffer'->>'offerId',
-               assignment.assignment_payload->'pricingAcceptance'->>'offerId'),
+               assignment.assignment_payload->'pricingAcceptance'->>'offerId',
+               CASE WHEN assignment.assignment_payload->'channexOffer'->>'roomTypeId' = assignment.room_type_id::text
+                 AND assignment.assignment_payload->'channexOffer'->>'externalRatePlanId'
+                   = assignment.assignment_payload->'channexStay'->>'externalRatePlanId'
+                 THEN assignment.assignment_payload->'channexOffer'->>'offerId' END),
              'childAgesAtCheckIn', COALESCE(assignment.assignment_payload->'childAgesAtCheckIn',
                assignment.assignment_payload->'pricingOffer'->'childAgesAtCheckIn',
                assignment.assignment_payload->'pricingAcceptance'->'childAgesAtCheckIn'),
