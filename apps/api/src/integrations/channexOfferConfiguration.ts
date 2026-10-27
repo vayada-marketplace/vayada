@@ -1,6 +1,30 @@
 import { isDeepStrictEqual } from "node:util";
-import { parsePricingConfiguration, pricingObject } from "@vayada/domain-pms";
+import {
+  parsePricingConfiguration,
+  pricingObject,
+  type PricingConfiguration,
+  type PricingOffer,
+} from "@vayada/domain-pms";
 import { ChannexMealSyncError, verifyChannexMealReadback } from "./channexMealSync.js";
+
+const zero = (amount: string) => BigInt(amount) === 0n;
+/** Channex options stay adults-only, so a room with children is offered only when children never
+ * change the price, as legacy never priced them: every band is free and the adult age is 18 (a
+ * guest priced as an adult is never an OTA child). With an offer, its per-person meal child
+ * amounts must be free too. An OTA stay with children is then priced as its adults. */
+export function channexChildrenPriceNeutral(
+  configuration: PricingConfiguration,
+  offer?: PricingOffer,
+): boolean {
+  if (configuration.capacity.children === 0) return true;
+  return (
+    configuration.children.adultFromAge === 18 &&
+    configuration.children.bands.every((band) => zero(band.nightlyMinor)) &&
+    (!offer ||
+      offer.meal.charge.kind === "room" ||
+      offer.meal.charge.childBandAmountsMinor.every(zero))
+  );
+}
 
 /** Closed configuration fragment, not an HTTP request or a capability/send permit.
  * Daily prices and restrictions must be verified separately before opening sales.
@@ -22,7 +46,9 @@ export function planChannexOfferConfiguration(
     primaryOccupancy > capacity
   )
     return unavailable("invalid_primary_occupancy");
-  if (configuration.capacity.children > 0) return unavailable("child_representation_unavailable");
+  // Priced children are not representable on Channex yet.
+  if (!channexChildrenPriceNeutral(configuration, offer))
+    return unavailable("child_representation_unavailable");
   // Same local work ceiling as the nightly candidate adapter, not provider capability.
   if (capacity > 100) return unavailable("candidate_limit");
   return {
@@ -149,13 +175,20 @@ export async function verifyChannexOfferRoom(
   request: (method: "GET", path: string) => Promise<unknown>,
 ) {
   const configuration = parsePricingConfiguration(room);
-  if (!configuration || configuration.capacity.children !== 0)
+  if (!configuration || !channexChildrenPriceNeutral(configuration))
     throw new ChannexMealSyncError("Channex adult room configuration unavailable");
   const expected = {
     externalPropertyId: identity?.externalPropertyId,
     externalRoomTypeId: identity?.externalRoomTypeId,
     adults: configuration.capacity.adults,
   };
+  // Legacy created Channex room types with every guest as an adult (occ_adults = the total);
+  // with price-neutral children that room type still carries the adults-only offer.
+  const channexAdults = new Set(
+    configuration.capacity.children > 0
+      ? [expected.adults, configuration.capacity.total]
+      : [expected.adults],
+  );
   if (
     ![expected.externalPropertyId, expected.externalRoomTypeId].every(
       (id) => typeof id === "string" && id.length > 0 && id === id.trim(),
@@ -181,7 +214,7 @@ export async function verifyChannexOfferRoom(
     (propertyRelationship !== undefined && relatedProperty !== expected.externalPropertyId) ||
     attributes.room_kind !== "room" ||
     attributes.capacity !== null ||
-    attributes.occ_adults !== expected.adults ||
+    !channexAdults.has(attributes.occ_adults as number) ||
     attributes.occ_children !== 0 ||
     attributes.occ_infants !== 0
   )
