@@ -433,6 +433,24 @@ jobs:
             sleep 1
           done
           curl --silent --fail --max-time 10 http://127.0.0.1:3003/login >/dev/null || { tail -50 "$server_log"; exit 1; }
+          # The first run (VAY-2247) is a per-request server switch: a second server from the same
+          # build has it on for the quick-setup specs, which include the live next-stack smoke's
+          # click helpers (VAY-2357). The first shard runs them before its share of the rest.
+          if [ "${{ matrix.shard }}" = 1 ]; then
+            first_run_log="$RUNNER_TEMP/booking-admin-first-run-server.log"
+            ONBOARDING_V2_ENABLED=true npm --workspace vayada-booking-engine-frontend-admin exec -- \
+              next start -p 3013 > "$first_run_log" 2>&1 &
+            first_run_pid=$!
+            trap 'kill "$server_pid" "$first_run_pid" 2>/dev/null || true' EXIT
+            for attempt in $(seq 1 60); do
+              kill -0 "$first_run_pid" 2>/dev/null || break
+              if curl --silent --fail --max-time 5 http://127.0.0.1:3013/login >/dev/null; then break; fi
+              sleep 1
+            done
+            curl --silent --fail --max-time 10 http://127.0.0.1:3013/login >/dev/null || { tail -50 "$first_run_log"; exit 1; }
+            E2E_ONBOARDING_V2=1 E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3013 \
+              npm run e2e:booking-admin -- tests/e2e/booking-admin/setup-quick-*.spec.ts --workers=1 --retries=1
+          fi
           npm run e2e:booking-admin -- --workers=1 --retries=1 --shard=${{ matrix.shard }}/2
         env:
           # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from

@@ -821,6 +821,31 @@ test("PR checks build no Docker image, so Dockerfiles cannot change what they te
   assert.doesNotMatch(WORKFLOW, /docker\s+(?:build|buildx|compose)|docker\/build-push-action/);
 });
 
+// A spec that imports another e2e folder's code (Booking Admin's first-run spec runs the live
+// smoke's click helpers, VAY-2357) must run whenever that folder changes.
+test("browser specs import other e2e folders only when those folders run their project", () => {
+  const problems = [];
+  for (const file of FILES.filter((name) => CODE_FILE.test(name))) {
+    const project = file.match(/^tests\/e2e\/([\w-]+)\//)?.[1];
+    const job = project && APP_BROWSER_JOB[`apps/${project}`];
+    if (!job) continue;
+    for (const [, specifier] of read(file).matchAll(IMPORT_SPECIFIER)) {
+      if (!specifier.startsWith(".")) continue;
+      const target = relative(ROOT, resolve(dirname(join(ROOT, file)), specifier));
+      const folder = target.match(/^tests\/e2e\/([\w-]+)\//)?.[1];
+      if (!folder || folder === project) continue;
+      if (!jobsOf(`tests/e2e/${folder}/any.ts`).includes(job))
+        problems.push(`${file} imports ${target}, whose changes skip ${job}`);
+    }
+  }
+  assert.deepEqual(problems, []);
+  assert.deepEqual(jobsOf("tests/e2e/next-stack-smoke/first-run.ts"), [
+    ...FRONTEND,
+    "first_party_auth",
+    "booking_admin_e2e",
+  ]);
+});
+
 test("only the Playwright jobs run Playwright, and nothing imports the root config", () => {
   const rule = selectJobs(["playwright.config.ts"]).jobs;
   const projects = new Set();
