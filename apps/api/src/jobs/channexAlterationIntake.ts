@@ -13,6 +13,8 @@ const scopeSchema = z.object({
 type Scope = z.infer<typeof scopeSchema>;
 const queue = "pms.channex.webhooks",
   type = "channex.scan-alterations";
+/** A page is one Channex list plus up to 20 reads of 30 s each: a lease older than this is dead. */
+const LEASE_MINUTES = 15;
 
 /** Default-off runtime integration must supply its explicit rollout property allowlist. */
 export async function scheduleChannexAlterationScans(options: {
@@ -96,7 +98,18 @@ export async function scheduleChannexAlterationScans(options: {
   }
 }
 
-async function assertBinding(client: pg.PoolClient, scope: Scope) {
+/** Persist only our bounded diagnostic vocabulary, never upstream bodies or SQL. */
+function scanFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return /^alteration_[a-z_]+$/.test(message) ? message : "alteration_scan_failed";
+}
+
+async function assertBinding(
+  client: Pick<pg.Pool, "query">,
+  scope: Scope,
+  /** Inside a transaction, the share lock fences the binding until commit. */
+  lock: "" | "FOR SHARE OF connection,claim" = "",
+) {
   const result = await client.query(
     `SELECT connection.id FROM pms.channel_connections connection
      JOIN pms.channel_binding_claims claim ON claim.property_id=connection.property_id
@@ -104,7 +117,7 @@ async function assertBinding(client: pg.PoolClient, scope: Scope) {
        AND claim.claim_state='active'
      WHERE connection.id=$1 AND connection.property_id=$2 AND connection.provider='channex'
        AND connection.connection_status='connected' AND connection.external_property_id=$3
-       AND connection.binding_generation=$4 FOR SHARE OF connection,claim`,
+       AND connection.binding_generation=$4 ${lock}`,
     [scope.connectionId, scope.propertyId, scope.providerPropertyId, scope.bindingGeneration],
   );
   if (result.rowCount !== 1) throw new Error("alteration_scan_binding_changed");
@@ -117,7 +130,7 @@ export async function enqueueChannexAlterationScan(pool: pg.Pool, value: Scope, 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await assertBinding(client, scope);
+    await assertBinding(client, scope, "FOR SHARE OF connection,claim");
     const jobKey = `${type}:${scope.connectionId}:${scope.bindingGeneration}:${scanId}`;
     await client.query(
       `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,property_id,
@@ -162,62 +175,92 @@ export async function runChannexAlterationIntake(options: {
     .parse(options.limit ?? 10);
   const active = () => !options.signal?.aborted && options.ownsMutation();
   for (let index = 0; index < limit && active(); index++) {
+    // The Channex calls run with no transaction open (VAY-2297). A lease marks the job running
+    // while its page is fetched (the scheduler already counts a running job as in flight), and a
+    // short transaction then fences the binding, persists the page and moves the cursor. A
+    // worker that dies mid-fetch leaves a lease another worker takes over after LEASE_MINUTES.
+    const workerId = `channex-alterations:${randomUUID()}`;
+    const job = (
+      await options.pool.query<{
+        id: string;
+        payload: unknown;
+        page: unknown;
+        propertyId: string;
+        attempts: number;
+        maxAttempts: number;
+      }>(
+        `UPDATE platform.jobs job SET status='running',locked_at=now(),locked_by=$4,updated_at=now()
+         FROM (SELECT id FROM platform.jobs WHERE queue_name=$1 AND job_type=$2
+             AND (status='pending' OR (status='running' AND locked_at<now()-make_interval(mins=>$5)))
+             AND run_after<=now() AND attempts_count<max_attempts
+             AND ($3::uuid[] IS NULL OR property_id=ANY($3::uuid[]))
+           ORDER BY run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1) candidate
+         WHERE job.id=candidate.id
+         RETURNING job.id,job.payload,job.job_metadata->'page' AS page,job.property_id AS "propertyId",
+           job.attempts_count AS attempts,job.max_attempts AS "maxAttempts"`,
+        [queue, type, properties, workerId, LEASE_MINUTES],
+      )
+    ).rows[0];
+    if (!job) break;
+    const releaseLease = () =>
+      options.pool.query(
+        `UPDATE platform.jobs SET status='pending',locked_at=NULL,locked_by=NULL,updated_at=now()
+         WHERE id=$1 AND status='running' AND locked_by=$2`,
+        [job.id, workerId],
+      );
+    let failure: string | null = null,
+      hasMore = false,
+      page = 1,
+      scope: Scope | null = null;
+    const events: { eventId: string; event: unknown }[] = [];
+    try {
+      scope = scopeSchema.parse(job.payload);
+      page = z.number().int().min(1).max(10_000).parse(job.page);
+      if (
+        scope.propertyId !== job.propertyId ||
+        (properties && !properties.includes(scope.propertyId.toLowerCase()))
+      )
+        throw new Error("alteration_scan_scope_mismatch");
+      await assertBinding(options.pool, scope);
+      if (!active()) break;
+      const result = await options.provider.list(scope.providerPropertyId, page, options.signal);
+      hasMore = result.hasMore;
+      for (const eventId of result.eventIds) {
+        if (!active()) break;
+        const event = await options.provider.read(
+          scope.providerPropertyId,
+          eventId,
+          options.signal,
+        );
+        if (event) events.push({ eventId, event });
+      }
+    } catch (error) {
+      failure = scanFailure(error);
+    }
+    if (!active()) {
+      await releaseLease();
+      break;
+    }
     const client = await options.pool.connect();
     try {
       await client.query("BEGIN");
-      const job = (
-        await client.query<{
-          id: string;
-          payload: unknown;
-          page: unknown;
-          propertyId: string;
-          attempts: number;
-          maxAttempts: number;
-        }>(
-          `SELECT id,payload,job_metadata->'page' AS page,property_id AS "propertyId",
-           attempts_count AS attempts,max_attempts AS "maxAttempts"
-         FROM platform.jobs WHERE queue_name=$1 AND job_type=$2 AND status='pending'
-           AND run_after<=now() AND attempts_count<max_attempts
-           AND ($3::uuid[] IS NULL OR property_id=ANY($3::uuid[]))
-         ORDER BY run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
-          [queue, type, properties],
-        )
-      ).rows[0];
-      if (!job) break;
-      await client.query("SAVEPOINT intake_page");
-      let failure: string | null = null,
-        hasMore = false,
-        page = 1;
-      try {
-        const scope = scopeSchema.parse(job.payload);
-        page = z.number().int().min(1).max(10_000).parse(job.page);
-        if (
-          scope.propertyId !== job.propertyId ||
-          (properties && !properties.includes(scope.propertyId.toLowerCase()))
-        )
-          throw new Error("alteration_scan_scope_mismatch");
-        await assertBinding(client, scope);
-        if (!active()) break;
-        const result = await options.provider.list(scope.providerPropertyId, page, options.signal);
-        hasMore = result.hasMore;
-        for (const eventId of result.eventIds) {
-          if (!active()) break;
-          const event = await options.provider.read(
-            scope.providerPropertyId,
-            eventId,
-            options.signal,
-          );
-          if (!active()) break;
-          if (event)
+      const leased = await client.query(
+        "SELECT id FROM platform.jobs WHERE id=$1 AND status='running' AND locked_by=$2 FOR UPDATE",
+        [job.id, workerId],
+      );
+      // Another worker took the lease over: its page, not this one, is the job's.
+      if (leased.rowCount !== 1) break;
+      if (!failure && scope) {
+        await client.query("SAVEPOINT intake_page");
+        try {
+          await assertBinding(client, scope, "FOR SHARE OF connection,claim");
+          for (const { eventId, event } of events)
             await persistChannexAlterationInTransaction(client, { ...scope, eventId }, event);
+        } catch (error) {
+          await client.query("ROLLBACK TO SAVEPOINT intake_page");
+          failure = scanFailure(error);
         }
-      } catch (error) {
-        await client.query("ROLLBACK TO SAVEPOINT intake_page");
-        const message = error instanceof Error ? error.message : "";
-        // Persist only our bounded diagnostic vocabulary, never upstream bodies or SQL.
-        failure = /^alteration_[a-z_]+$/.test(message) ? message : "alteration_scan_failed";
       }
-      if (!active()) break;
       const exhausted = Boolean(failure && job.attempts + 1 >= job.maxAttempts);
       const status = exhausted ? "dead_lettered" : failure || hasMore ? "pending" : "succeeded";
       await client.query(
@@ -225,7 +268,8 @@ export async function runChannexAlterationIntake(options: {
            job_metadata=job_metadata || jsonb_build_object('failure',$3::text)
              || CASE WHEN $3::text IS NULL THEN jsonb_build_object('page',$4::int) ELSE '{}'::jsonb END,
            run_after=now()+CASE WHEN $3::text IS NULL THEN interval '1 second' ELSE interval '5 minutes' END,
-           finished_at=CASE WHEN $2 IN ('succeeded','dead_lettered') THEN now() ELSE NULL END,updated_at=now()
+           finished_at=CASE WHEN $2 IN ('succeeded','dead_lettered') THEN now() ELSE NULL END,
+           locked_at=NULL,locked_by=NULL,updated_at=now()
          WHERE id=$1`,
         [job.id, status, failure, failure ? page : page + 1],
       );
@@ -233,9 +277,13 @@ export async function runChannexAlterationIntake(options: {
         `INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,finished_at,error_type)
          SELECT $1,COALESCE(MAX(attempt_number),0)+1,$2,$3,now(),$4
          FROM platform.job_attempts WHERE job_id=$1`,
-        [job.id, failure ? "failed" : "succeeded", `channex-alterations:${randomUUID()}`, failure],
+        [job.id, failure ? "failed" : "succeeded", workerId, failure],
       );
-      if (!active()) break;
+      if (!active()) {
+        await client.query("ROLLBACK");
+        await releaseLease();
+        break;
+      }
       await client.query("COMMIT");
       counts[exhausted ? "deadLettered" : failure ? "retried" : "processed"]++;
     } finally {

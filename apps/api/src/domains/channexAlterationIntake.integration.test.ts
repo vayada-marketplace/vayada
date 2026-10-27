@@ -641,6 +641,80 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     expect(config.provider.list).toHaveBeenLastCalledWith(externalProperty, 2, undefined);
     expect((await scanRow()).status).toBe("succeeded");
   });
+  /** A pool PostgreSQL cuts after 1.5 s idle inside a transaction, as the API login will be at
+   * 60 s (VAY-2297); the control proves the limit bites. `slow` is one 2 s provider answer. */
+  async function strictPool() {
+    const strict = new pg.Pool({ connectionString: url, max: 2 });
+    strict.on("connect", (client) => {
+      void client.query("SET idle_in_transaction_session_timeout='1500ms'");
+    });
+    strict.on("error", () => undefined);
+    // PostgreSQL pushes the FATAL as a client error event; the next query then fails too.
+    const cut = await strict.connect();
+    const cutErrors: (Error & { code?: string })[] = [];
+    cut.on("error", (error: Error & { code?: string }) => {
+      cutErrors.push(error);
+    });
+    try {
+      await cut.query("BEGIN");
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      await expect(cut.query("SELECT 1")).rejects.toThrow();
+      expect(cutErrors[0]).toMatchObject({ code: "25P03" });
+    } finally {
+      cut.release(true);
+    }
+    return strict;
+  }
+  const slow = <T>(value: T) =>
+    new Promise<T>((resolve) => setTimeout(() => resolve(value), 2_000));
+  it("fetches the Channex page with no transaction open (VAY-2297)", async () => {
+    const strict = await strictPool();
+    try {
+      await enqueueChannexAlterationScan(pool, scope, randomUUID());
+      const config = scanPorts();
+      config.provider.list.mockImplementation(() =>
+        slow({ eventIds: [scope.eventId], hasMore: false }),
+      );
+      config.provider.read.mockImplementation(() => slow(event()));
+      expect(await runChannexAlterationIntake({ ...config, pool: strict })).toMatchObject({
+        processed: 1,
+      });
+      expect((await scanRow()).status).toBe("succeeded");
+      expect(
+        (
+          await pool.query(
+            `SELECT id FROM booking.booking_change_requests WHERE guest_booking_id=$1`,
+            [booking],
+          )
+        ).rows,
+      ).toHaveLength(1);
+    } finally {
+      await strict.end();
+    }
+  }, 20_000);
+  it("keeps the decision transaction alive while Channex answers slowly (VAY-2297)", async () => {
+    const strict = await strictPool();
+    try {
+      const { requestId } = await persistChannexAlteration(pool, scope, event());
+      const config = ports();
+      config.provider.read.mockImplementation(() =>
+        slow({ ok: true as const, state: "pending" as const }),
+      );
+      config.provider.resolve.mockImplementation(() =>
+        slow({ ok: true as const, state: "accepted" as const }),
+      );
+      expect(
+        await decideChannexAlteration({ ...config, pool: strict }, input(requestId)),
+      ).toMatchObject({
+        providerState: "accepted",
+        deliveryState: "resolved",
+      });
+      expect(config.provider.read).toHaveBeenCalledTimes(1);
+      expect(config.provider.resolve).toHaveBeenCalledTimes(1);
+    } finally {
+      await strict.end();
+    }
+  }, 20_000);
   it("quarantines a replaced binding after bounded retries without provider reads", async () => {
     await enqueueChannexAlterationScan(pool, scope, randomUUID());
     await pool.query(

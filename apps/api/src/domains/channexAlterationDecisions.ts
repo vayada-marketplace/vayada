@@ -118,6 +118,10 @@ export async function decideChannexAlteration(
 
     await client.query("BEGIN");
     inTransaction = true;
+    // Up to two Channex calls (30 s each) answer while this transaction fences the binding and,
+    // on accept, the inventory. The session stays alive for that long whatever the login's
+    // idle-in-transaction default is (VAY-2297).
+    await client.query("SET LOCAL idle_in_transaction_session_timeout='3min'");
     if (!decision.sendStartedAt && input.action === "accept")
       await lockPmsInventoryMutationScope(client, input.propertyId);
     const owned = await client.query<{
