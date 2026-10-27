@@ -28,7 +28,12 @@ import {
   type SyntheticPlatformAdmin,
   type SyntheticUser,
 } from "./support";
-import { runQuoteLifecycle, waitForOffer, type BookingResource } from "./booking-lifecycle";
+import {
+  findPricingOffer,
+  runQuoteLifecycle,
+  waitForOffer,
+  type BookingResource,
+} from "./booking-lifecycle";
 import { runPromotionAcceptance } from "./promotions";
 import { cleanupSmokeResources, recoverSmokeProperty, type HotelResource } from "./cleanup";
 import { configureGuestPolicyForManualBooking } from "./guest-policy";
@@ -751,27 +756,22 @@ async function runHotelFlow(
         primaryColor: "#2946E8",
         fontPairing: "modern-minimalist",
       });
+      // VAY-2140: a hotel goes live by itself once its profile is complete (the basics, a
+      // description and an approved public image); Vayada approves nothing. The temporary
+      // platform admin only reads the lifecycle here and retires the property at the end.
       const platformAdminApi = targetApi(request, platformAdmin.accessToken);
-      const impact = await platformAdminApi.json<Record<string, unknown>>(
-        "GET",
-        `/api/platform/admin/properties/${setup.propertyId}/retirement-impact`,
-      );
-      expect(impact.lifecycleStatus).toBe("provisioning");
-      const expectedLifecycleRevision = numberField(impact, "lifecycleRevision");
-      const activation = await platformAdminApi.json<Record<string, unknown>>(
-        "PATCH",
-        `/api/platform/admin/properties/${setup.propertyId}/status`,
-        {
-          expectedLifecycleRevision,
-          status: "active",
-          reason: "Approve the isolated next-stack smoke property",
-        },
-        { "Idempotency-Key": `next-smoke:${environment.runId}:property-active` },
-      );
-      expect(activation).toMatchObject({
-        lifecycleStatus: "active",
-        lifecycleRevision: expectedLifecycleRevision + 1,
-      });
+      await expect
+        .poll(
+          async () =>
+            (
+              await platformAdminApi.json<Record<string, unknown>>(
+                "GET",
+                `/api/platform/admin/properties/${setup.propertyId}/retirement-impact`,
+              )
+            ).lifecycleStatus,
+          { timeout: 90_000, intervals: [1_000, 2_000, 5_000] },
+        )
+        .toBe("active");
       const result = await api.json<Record<string, unknown>>(
         "POST",
         `/api/booking/hotels/${setup.propertyId}/public-bookability`,
@@ -896,13 +896,23 @@ async function runHotelFlow(
     addonItemIds: resource.addonItemIds,
   });
   await test.step("exercise instant and request checkout with inventory restoration", async () => {
+    const pricingOffer = await findPricingOffer(request, publication.slug, setup.roomTypeId);
     for (const mode of ["instant", "request"] as const) {
       await api.json("PUT", `/api/pms/properties/${setup.propertyId}/booking-acceptance`, {
         acceptanceMode: mode,
       });
       const offer = await waitForOffer(request, publication.slug, stay, 2);
       expect(offer.roomTypeId).toBe(setup.roomTypeId);
-      await runQuoteLifecycle(request, environment, publication.slug, stay, offer, mode, bookings);
+      await runQuoteLifecycle(
+        request,
+        environment,
+        publication.slug,
+        stay,
+        pricingOffer,
+        offer.availableRooms,
+        mode,
+        bookings,
+      );
       await waitForOffer(request, publication.slug, stay, 2);
     }
   });
