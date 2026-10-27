@@ -161,19 +161,26 @@ export async function raiseChannexBookingAlert(
     )
   ).rows[0];
   if (!binding) return "unbound";
-  const inserted = input.impact.revisionInsertedAt;
+  // A hint job that never loaded its revision knows only the revision id, not its time.
   if (
     input.eventType === "booking_not_imported" &&
-    inserted &&
+    (input.impact.revisionInsertedAt || input.impact.revisionId) &&
     (
       await client.query(
         `SELECT 1 FROM pms.channel_booking_mappings WHERE connection_id=$1::uuid AND external_booking_id=$2
-           AND mapping_metadata->>'providerInsertedAt'>=$3
+           AND (mapping_metadata->>'providerInsertedAt'>=$3 OR external_revision_id=$5)
          UNION ALL
          SELECT 1 FROM pms.channel_booking_revision_tombstones WHERE connection_id=$1::uuid
-           AND binding_generation=$4::uuid AND external_booking_id=$2 AND inserted_at>=$3::timestamptz
+           AND binding_generation=$4::uuid AND external_booking_id=$2
+           AND (inserted_at>=$3::timestamptz OR authoritative_revision_id=$5)
          LIMIT 1`,
-        [binding.id, input.impact.bookingId, inserted, binding.generation],
+        [
+          binding.id,
+          input.impact.bookingId,
+          input.impact.revisionInsertedAt,
+          binding.generation,
+          input.impact.revisionId,
+        ],
       )
     ).rows.length
   )

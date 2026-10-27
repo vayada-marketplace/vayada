@@ -373,8 +373,8 @@ it("keeps Retry import off when the alert names no revision, and says a closed a
       view.root.findAllByType("button").find((b) => b.children.join("") === "Retry import")!.props
         .disabled,
     ).toBe(true);
-    expect(text).toContain("can't be retried from here");
-    expect(text).toContain("Closed: a later update moved or cancelled this booking.");
+    expect(text).toContain("cannot be retried from here");
+    expect(text).toContain("Closed: a later update of this booking replaced this alert.");
     expect(text).not.toContain("Marked checked.");
   } finally {
     if (view) act(() => view.unmount());

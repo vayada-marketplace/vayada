@@ -34,6 +34,7 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
     audit: { requestId: "vay2108-w1d", correlationId: "vay2108-w1d" },
   } as RequestContext;
   let sequence = 0;
+  let jobCount = 0;
   let feed: Revision[] = [];
   let upcoming: Array<{ id: string; revisionId: string }> = [];
   const revisions = new Map<string, Revision>();
@@ -236,6 +237,28 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
     expect(await run()).toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
     expect(reported.at(-1)).toMatchObject({ reason: "invalid_revision", alert: "superseded" });
     expect(await alerts("bk-newer")).toEqual([]);
+  });
+
+  it("raises no alert when a hint job's lease runs out after its revision was saved", async () => {
+    const saved = revision("bk-hinted");
+    await job(saved);
+    expect((await run()).succeeded).toBe(1);
+    const hint = await job(saved, { pullRequired: true, maxAttempts: 1 });
+    await db.query(
+      "UPDATE platform.jobs SET status='running',attempts_count=1,locked_at=now()-interval '6 minutes',locked_by='gone' WHERE id=$1",
+      [hint],
+    );
+    await db.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id) VALUES($1,1,'running','gone')",
+      [hint],
+    );
+    expect(await run()).toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
+    expect(reported.at(-1)).toMatchObject({
+      channelBookingId: "bk-hinted",
+      reason: "worker_lease_expired",
+      alert: "superseded",
+    });
+    expect(await alerts("bk-hinted")).toEqual([]);
   });
 
   it("reports a feed longer than one read covers", async () => {
@@ -487,7 +510,7 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
         `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,resource_product,resource_type,resource_id,correlation_id,max_attempts,payload)
          VALUES($1,'pms.channex.webhooks','channex.ingest-booking','external','pms','channel_booking',$2,'vay2108-w1d',$3,$4) RETURNING id::text`,
         [
-          `vay2108-w1d:${sequence}:${value.id}`,
+          `vay2108-w1d:${(jobCount += 1)}:${value.id}`,
           bookingId,
           options.maxAttempts ?? 5,
           {

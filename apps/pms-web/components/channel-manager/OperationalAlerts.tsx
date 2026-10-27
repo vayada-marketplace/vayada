@@ -218,7 +218,7 @@ export function OperationalAlerts({
                 ? closedNight
                   ? alert.acknowledgedAt
                     ? "Marked checked."
-                    : "Closed: a later update moved or cancelled this booking."
+                    : "Closed: a later update of this booking replaced this alert."
                   : notImported
                     ? "Closed: the booking reached your PMS, or the guest cancelled it."
                     : "Recovery completed and provider evidence was checked."
@@ -334,7 +334,7 @@ export function OperationalAlerts({
                 </div>
                 {notImported && !alert.impact.revisionId && (
                   <p className="mt-2 text-sm text-amber-800">
-                    This booking can't be retried from here. Contact support with alert reference{" "}
+                    This booking cannot be retried from here. Contact support with alert reference{" "}
                     {alert.id}.
                   </p>
                 )}
