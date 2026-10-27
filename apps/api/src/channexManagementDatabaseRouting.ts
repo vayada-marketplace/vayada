@@ -6,13 +6,7 @@ export type ChannexManagementDatabaseRouting = Readonly<{
   reconciliation?: string;
   availabilityInventory?: string;
   workerStore?: string;
-  scheduler?: Readonly<{
-    connectionString: string;
-    /** The staging canary's single property. */
-    propertyId?: string;
-    /** VAY-2108 D7: the claimed scope's owned hotels (exact list, may be empty). */
-    propertyIds?: readonly string[];
-  }>;
+  scheduler?: Readonly<{ connectionString: string; propertyId: string }>;
 }>;
 
 export function resolveChannexManagementDatabaseRouting(input: {
@@ -21,22 +15,10 @@ export function resolveChannexManagementDatabaseRouting(input: {
 }): ChannexManagementDatabaseRouting {
   const connectionString = input.config.workerDatabaseUrl;
   if (!input.config.workerEnabled || !connectionString) return Object.freeze({});
-  // VAY-2108: the claimed scope pulls bookings on the API login and runs the management worker
-  // only for connection (enable); it never routes booking revisions through the worker login.
-  const claimed = input.config.scope === "claimed";
-  // D7: with ARI and provisioning on, the worker also serves the owned hotels' ARI and offers.
-  const claimedAri =
-    claimed &&
-    input.config.capabilityModes.ariSync === "mutating" &&
-    input.config.capabilityModes.provisioning === "mutating";
-  const managementEnabled =
-    input.commandsMutating &&
-    (!claimed || input.config.capabilityModes.connection === "mutating" || claimedAri);
+  const managementEnabled = input.commandsMutating;
   return Object.freeze({
     bookingRevisionStore:
-      input.config.capabilityModes.bookingSync === "mutating" && !claimed
-        ? connectionString
-        : undefined,
+      input.config.capabilityModes.bookingSync === "mutating" ? connectionString : undefined,
     plans: managementEnabled ? connectionString : undefined,
     reconciliation:
       managementEnabled && input.config.capabilityModes.ariSync === "mutating"
@@ -55,11 +37,6 @@ export function resolveChannexManagementDatabaseRouting(input: {
             connectionString,
             propertyId: input.config.stagingRestrictionsPropertyId,
           })
-        : managementEnabled && claimedAri
-          ? Object.freeze({
-              connectionString,
-              propertyIds: Object.freeze([...(input.config.ownedPropertyIds ?? [])]),
-            })
-          : undefined,
+        : undefined,
   });
 }

@@ -1,5 +1,4 @@
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
-import { CHANNEX_RESERVED_TEST_IDS } from "./domains/channexOwnershipGate.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
 import { z } from "zod";
@@ -75,12 +74,6 @@ export type ChannexManagementConfig = {
   stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
   stagingNoShowEnabled?: boolean;
-  /** VAY-2108 D3: ongoing offer ARI deliveries after activation (needs the delivery grants). */
-  offerAriDeliveryEnabled?: boolean;
-  /** VAY-2108: the per-hotel claimed scope (engineering/channex-per-hotel-ownership.md). */
-  scope?: "claimed";
-  /** Target properties the claimed scope may own, on top of their active claims. */
-  ownedPropertyIds?: readonly string[];
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -111,34 +104,7 @@ export function channexConnectionOnlyScope(config: ChannexManagementConfig): boo
     !config.stagingPublishedOffersEnabled &&
     !config.stagingInventoryEnabled &&
     !config.stagingNoShowEnabled &&
-    !config.offerAriDeliveryEnabled &&
     ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
-  );
-}
-
-/**
- * VAY-2108: the claimed scope. Booking sync runs on the API login next to the connection scope;
- * ARI and provisioning (D7) run together on the claimed worker scope (0519) for the owned hotels.
- * Markups and messaging stay observe_only.
- */
-export function channexClaimedScope(config: ChannexManagementConfig): boolean {
-  const modes = config.capabilityModes;
-  return (
-    config.scope === "claimed" &&
-    modes.provisioning === modes.ariSync &&
-    modes.markups === "observe_only" &&
-    modes.messaging === "observe_only" &&
-    !config.stagingRestrictionsPropertyId &&
-    ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
-  );
-}
-
-/** VAY-2108 D7: the claimed scope with ARI and provisioning on (the worker's claimed DB scope). */
-export function channexClaimedAriScope(config: ChannexManagementConfig): boolean {
-  return (
-    channexClaimedScope(config) &&
-    config.capabilityModes.ariSync === "mutating" &&
-    config.capabilityModes.provisioning === "mutating"
   );
 }
 
@@ -791,72 +757,6 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       "Scoped Channex restrictions require a property UUID, staging URL, disabled background workers, and only ARI mutations",
     );
   }
-  // VAY-2108 D3: ongoing offer ARI delivery is its own switch, off by default. It only has an
-  // effect inside a mutating full ARI sync, and the worker boundary then requires the delivery
-  // table grants (the platform's delivery grant mode).
-  const offerAriDeliveryEnabled = readBooleanEnv(
-    env,
-    "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED",
-    false,
-  );
-  if (offerAriDeliveryEnabled && capabilityModes.ariSync !== "mutating") {
-    throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires a mutating ARI sync");
-  }
-  const scope = readOptionalEnv(env, "PMS_CHANNEX_SCOPE");
-  if (scope !== undefined && scope !== "claimed")
-    throw new Error("PMS_CHANNEX_SCOPE must be claimed when set");
-  // Unset and empty differ: claimed needs the list, and an empty list owns no hotel.
-  const ownedRaw = env["PMS_CHANNEX_OWNED_PROPERTY_IDS"];
-  if ((scope === "claimed") !== (ownedRaw !== undefined))
-    throw new Error(
-      "PMS_CHANNEX_OWNED_PROPERTY_IDS is required with, and only with, PMS_CHANNEX_SCOPE=claimed",
-    );
-  const ownedPropertyIds = ownedRaw ? ownedRaw.split(",") : [];
-  if (
-    ownedPropertyIds.some(
-      (id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id),
-    ) ||
-    new Set(ownedPropertyIds).size !== ownedPropertyIds.length
-  )
-    throw new Error(
-      "PMS_CHANNEX_OWNED_PROPERTY_IDS must be distinct lowercase UUIDs, comma-separated",
-    );
-  if (
-    apiBaseUrl !== "https://staging.channex.io" &&
-    ownedPropertyIds.some((id) => CHANNEX_RESERVED_TEST_IDS.includes(id))
-  )
-    throw new Error("PMS_CHANNEX_OWNED_PROPERTY_IDS names a reserved staging/test property");
-  // D7: ARI and provisioning come on together, on top of booking sync, for the owned hotels.
-  const claimedAri =
-    scope === "claimed" &&
-    capabilityModes.ariSync === "mutating" &&
-    capabilityModes.provisioning === "mutating";
-  if (
-    scope === "claimed" &&
-    (stagingRestrictionsPropertyId ||
-      stagingNoShowEnabled ||
-      stagingInventoryEnabled ||
-      stagingMealsEnabled ||
-      stagingPublishedOffersEnabled ||
-      !["https://app.channex.io", "https://staging.channex.io"].includes(apiBaseUrl ?? "") ||
-      (["markups", "messaging", "iframe"] as const).some(
-        (capability) => capabilityModes[capability] === "mutating",
-      ) ||
-      (capabilityModes.ariSync === "mutating") !== (capabilityModes.provisioning === "mutating") ||
-      (claimedAri && capabilityModes.bookingSync !== "mutating"))
-  )
-    throw new Error(
-      "The claimed Channex scope allows only connection, booking sync and reviews on Channex, plus ARI together with provisioning on top of booking sync, without staging scopes",
-    );
-  if (offerAriDeliveryEnabled && scope === "claimed" && !claimedAri)
-    throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED needs the claimed ARI scope");
-  // Delivery only runs after activation, which needs the published-offer bundle; without it the
-  // switch would be inert while the worker boundary demanded the delivery grants.
-  if (offerAriDeliveryEnabled && !stagingInventoryEnabled && !claimedAri) {
-    throw new Error(
-      "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires the published-offer activation bundle",
-    );
-  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )
@@ -879,22 +779,10 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       "Mutating PMS Channex capabilities require CHANNEX_API_BASE_URL and CHANNEX_API_KEY",
     );
   }
-  // VAY-2108: claimed booking sync runs on the API login, so it needs no management worker.
-  const claimedWithoutWorker =
-    scope === "claimed" && capabilityModes.connection !== "mutating" && !claimedAri;
-  const workerEnabled = readBooleanEnv(
-    env,
-    "PMS_CHANNEX_WORKER_ENABLED",
-    durableCommandsMutating && !claimedWithoutWorker,
-  );
+  const workerEnabled = readBooleanEnv(env, "PMS_CHANNEX_WORKER_ENABLED", durableCommandsMutating);
   const workerDatabaseUrl = readOptionalPgConnectionEnv(env, "PMS_CHANNEX_MANAGEMENT_DATABASE_URL");
   // A validated isolated staging scope may retain queued commands while its worker is paused.
-  if (
-    durableCommandsMutating &&
-    !workerEnabled &&
-    !stagingRestrictionsPropertyId &&
-    !claimedWithoutWorker
-  ) {
+  if (durableCommandsMutating && !workerEnabled && !stagingRestrictionsPropertyId) {
     throw new Error("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
   }
   if (
@@ -939,10 +827,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     stagingPublishedOffersEnabled,
     stagingInventoryEnabled,
     stagingNoShowEnabled,
-    offerAriDeliveryEnabled,
     workerEnabled,
     capabilityModes,
-    ...(scope === "claimed" ? { scope, ownedPropertyIds } : {}),
   };
 }
 
@@ -1089,14 +975,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource !== "target"
   ) {
     throw new Error("Mutating PMS Channex capabilities require PMS_OPERATIONS_SOURCE=target");
-  }
-  // VAY-2108: claimed hotels take bookings by pull only (wave 1); mutating webhook intake would
-  // queue booking and alteration work for every claimed hotel, outside the owned list.
-  if (
-    channexManagement.scope === "claimed" &&
-    prospectiveConfig.providerWebhooks.channexMode === "mutating"
-  ) {
-    throw new Error("The claimed Channex scope requires CHANNEX_WEBHOOK_INTAKE_MODE observe_only");
   }
   if (env.NODE_ENV === "production" && !stripeSubscriptionRuntimeEnabled(prospectiveConfig)) {
     throw new Error(

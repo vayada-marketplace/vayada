@@ -1,10 +1,5 @@
 import pg from "pg";
-import {
-  channexClaimedAriScope,
-  channexClaimedScope,
-  channexConnectionOnlyScope,
-  type ChannexManagementConfig,
-} from "../config.js";
+import { channexConnectionOnlyScope, type ChannexManagementConfig } from "../config.js";
 import { assertChannexManagementWorkerBoundary } from "./channexManagementWorkerBoundary.js";
 import { CHANNEX_MANAGEMENT_WORKER_ROLE } from "./channexManagementWorkerPrivileges.js";
 
@@ -14,17 +9,8 @@ export async function preflightChannexManagementWorker(
   commandsMutating: boolean,
 ) {
   if (!config.workerEnabled || !commandsMutating) return;
-  // VAY-2108: claimed booking sync needs no worker; with connection it keeps the connection scope.
-  // D7: with ARI and provisioning the worker runs under the claimed DB scope (0519), with or
-  // without the connection scope.
-  const claimed = channexClaimedScope(config);
-  const claimedAri = channexClaimedAriScope(config);
-  if (claimed && !claimedAri && config.capabilityModes.connection !== "mutating") return;
-  const connectionOnly = channexConnectionOnlyScope(config) || (claimed && !claimedAri);
-  if (
-    !config.workerDatabaseUrl ||
-    !(connectionOnly || claimedAri || stagingCanaryScope(config))
-  )
+  const connectionOnly = channexConnectionOnlyScope(config);
+  if (!config.workerDatabaseUrl || !(connectionOnly || stagingCanaryScope(config)))
     throw new Error("channex_worker_scope_unsupported");
   const client = new pg.Client({
     connectionString: config.workerDatabaseUrl,
@@ -40,17 +26,12 @@ export async function preflightChannexManagementWorker(
       login.session_user !== CHANNEX_MANAGEMENT_WORKER_ROLE
     )
       throw new Error("channex_worker_login_mismatch");
-    await assertChannexManagementWorkerBoundary(client, {
-      ...(claimedAri
-        ? {
-            claimedScope: true,
-            ...(config.capabilityModes.connection === "mutating" ? { connectionScope: true } : {}),
-          }
-        : connectionOnly
-          ? { connectionScope: true }
-          : { propertyId: config.stagingRestrictionsPropertyId }),
-      ...(config.offerAriDeliveryEnabled ? { offerDelivery: true } : {}),
-    });
+    await assertChannexManagementWorkerBoundary(
+      client,
+      connectionOnly
+        ? { connectionScope: true }
+        : { propertyId: config.stagingRestrictionsPropertyId },
+    );
   } finally {
     await client.end();
   }

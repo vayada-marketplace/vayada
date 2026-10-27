@@ -2,13 +2,6 @@ import pg from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChannexManagementConfig } from "../config.js";
 import { preflightChannexManagementWorker } from "./channexManagementWorkerStartup.js";
-import { assertChannexManagementWorkerBoundary } from "./channexManagementWorkerBoundary.js";
-import { CHANNEX_MANAGEMENT_WORKER_ROLE } from "./channexManagementWorkerPrivileges.js";
-
-vi.mock("./channexManagementWorkerBoundary.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./channexManagementWorkerBoundary.js")>()),
-  assertChannexManagementWorkerBoundary: vi.fn(),
-}));
 
 const config: ChannexManagementConfig = {
   apiBaseUrl: "https://staging.channex.io",
@@ -85,75 +78,6 @@ describe("Channex worker startup", () => {
     ).rejects.toThrow("channex_worker_scope_unsupported");
     expect(connect).not.toHaveBeenCalled();
   });
-  // VAY-2108: claimed booking sync runs on the API login; only its connection part needs the worker.
-  const claimed: ChannexManagementConfig = {
-    ...connectionOnly,
-    scope: "claimed",
-    ownedPropertyIds: [],
-    bookingMutationOwner: "target",
-    capabilityModes: { ...connectionOnly.capabilityModes, bookingSync: "mutating" },
-  };
-  it("opens no worker credential for claimed booking sync without connection", async () => {
-    const connect = vi.spyOn(pg.Client.prototype, "connect");
-    await preflightChannexManagementWorker(
-      { ...claimed, capabilityModes: { ...claimed.capabilityModes, connection: "observe_only" } },
-      true,
-    );
-    expect(connect).not.toHaveBeenCalled();
-  });
-  // D7: ARI and provisioning together run on the claimed worker scope.
-  const claimedAri: ChannexManagementConfig = {
-    ...claimed,
-    capabilityModes: {
-      ...claimed.capabilityModes,
-      ariSync: "mutating",
-      provisioning: "mutating",
-    },
-  };
-  it.each([
-    [claimedAri, { claimedScope: true, connectionScope: true }],
-    [
-      { ...claimedAri, capabilityModes: { ...claimedAri.capabilityModes, connection: "observe_only" } },
-      { claimedScope: true },
-    ],
-    [{ ...claimedAri, offerAriDeliveryEnabled: true }, { claimedScope: true, connectionScope: true, offerDelivery: true }],
-  ] as const)("asserts the claimed worker boundary for the claimed ARI scope (%#)", async (scope, expected) => {
-    const connect = vi.spyOn(pg.Client.prototype, "connect").mockResolvedValue(undefined);
-    vi.spyOn(pg.Client.prototype, "query").mockResolvedValue({
-      rows: [
-        { current_user: CHANNEX_MANAGEMENT_WORKER_ROLE, session_user: CHANNEX_MANAGEMENT_WORKER_ROLE },
-      ],
-    } as never);
-    vi.spyOn(pg.Client.prototype, "end").mockResolvedValue(undefined);
-    const boundary = vi.mocked(assertChannexManagementWorkerBoundary).mockResolvedValue(undefined);
-    await preflightChannexManagementWorker(scope, true);
-    expect(connect).toHaveBeenCalledTimes(1);
-    expect(boundary).toHaveBeenCalledWith(expect.anything(), expected);
-  });
-  it.each([
-    { capabilityModes: { ...claimed.capabilityModes, ariSync: "mutating" as const } },
-    { capabilityModes: { ...claimed.capabilityModes, provisioning: "mutating" as const } },
-    { capabilityModes: { ...claimed.capabilityModes, messaging: "mutating" as const } },
-    { stagingRestrictionsPropertyId: "fixture" },
-  ])("rejects a widened claimed scope before connecting: %j", async (override) => {
-    const connect = vi.spyOn(pg.Client.prototype, "connect");
-    await expect(
-      preflightChannexManagementWorker({ ...claimed, ...override }, true),
-    ).rejects.toThrow("channex_worker_scope_unsupported");
-    expect(connect).not.toHaveBeenCalled();
-  });
-  it.each([connectionOnly, claimed])(
-    "connects with the worker credential for the connection scope (%#)",
-    async (scope) => {
-      const connect = vi
-        .spyOn(pg.Client.prototype, "connect")
-        .mockRejectedValue(new Error("fixture_connect"));
-      await expect(preflightChannexManagementWorker(scope, true)).rejects.toThrow(
-        "fixture_connect",
-      );
-      expect(connect).toHaveBeenCalledTimes(1);
-    },
-  );
   it("connects with the worker credential for the connection-only scope", async () => {
     const connect = vi
       .spyOn(pg.Client.prototype, "connect")

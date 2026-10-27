@@ -143,17 +143,6 @@ export function projectReplacementRoomNight(
     }),
   );
 }
-/** projectReplacementRoomNight over a configuration returned by parsePricingConfiguration, for
- * callers that project one configuration many times with varying requests (parsing dominates a
- * night's cost; VAY-2108 ongoing ARI projects every adult occupancy per night). */
-export function projectParsedReplacementRoomNight(
-  config: PricingConfiguration,
-  request: RoomNightProjectionRequest,
-): RoomNightProjectionResult {
-  return nightProjection(
-    evaluateRoomPricing(config, request, { kind: "night", date: request?.date }),
-  );
-}
 /** projectReplacementRoomNight for many dates of one offer, parsing the configuration once. */
 export function projectReplacementRoomNights(
   configuration: unknown,

@@ -1,5 +1,4 @@
 import { recordChannexAlert } from "../domains/channexOperationalAlerts.js";
-import { CHANNEX_RESERVED_TEST_IDS } from "../domains/channexOwnershipGate.js";
 import { createHash } from "node:crypto";
 import type { FinanceStripeConnectProvider } from "@vayada/domain-finance";
 import pg from "pg";
@@ -26,8 +25,6 @@ type PgProviderWebhookStoreConfig = {
   max?: number;
   stripeConnectProvider?: Pick<FinanceStripeConnectProvider, "retrieveAccount">;
   stripePaymentProvider?: Pick<StripeBookingPaymentProvider, "retrievePaymentIntent">;
-  /** Ids never routed to a target property; defaults to the reserved staging/test ids. */
-  channexExcludedIds?: readonly string[];
   /** VAY-2304: runs after a Stripe account update has committed, to re-publish the hotel's prices. */
   afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
 };
@@ -41,18 +38,20 @@ export function createPgProviderWebhookStore(
     max: config.max,
   });
 
-  const excludedIds = [...(config.channexExcludedIds ?? CHANNEX_RESERVED_TEST_IDS)];
-
   return {
-    // VAY-2108: events follow ownership, the active claim. A claimed hotel whose connection is
-    // temporarily degraded or disconnected keeps its receipts; jobs re-check the connection.
     async resolveChannexPropertyId(externalPropertyId) {
       const result = await pool.query<{ propertyId: string }>(
-        `SELECT DISTINCT property_id::text AS "propertyId" FROM pms.channel_binding_claims
-         WHERE provider = 'channex' AND external_property_id = $1 AND claim_state = 'active'
-           AND NOT (property_id::text = ANY($2::text[]) OR lower(external_property_id) = ANY($2::text[]))
+        `SELECT DISTINCT property_id::text AS "propertyId"
+         FROM (
+           SELECT property_id FROM pms.channel_binding_claims
+           WHERE provider = 'channex' AND external_property_id = $1 AND claim_state = 'active'
+           UNION
+           SELECT property_id FROM pms.channel_connections
+           WHERE provider = 'channex' AND external_property_id = $1
+             AND connection_status IN ('connected', 'degraded')
+         ) ownership
          ORDER BY "propertyId" LIMIT 2`,
-        [externalPropertyId, excludedIds],
+        [externalPropertyId],
       );
       if (result.rows.length > 1) throw new Error("Ambiguous Channex property ownership");
       return result.rows[0]?.propertyId ?? null;

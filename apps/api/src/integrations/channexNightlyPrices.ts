@@ -1,8 +1,7 @@
 import {
   parsePricingConfiguration,
   pricingCurrencyScale,
-  projectParsedReplacementRoomNight,
-  type PricingConfiguration,
+  projectReplacementRoomNight,
   type RoomNightProjectionRequest,
   type RoomNightProjectionResult,
 } from "@vayada/domain-pms";
@@ -38,15 +37,6 @@ export function prepareChannexAdultNightPrices(
 ): ChannexAdultNightPrices {
   const config = parsePricingConfiguration(configuration);
   if (!config) return { kind: "unavailable", reason: "invalid_configuration" };
-  return prepareParsedChannexAdultNightPrices(config, request);
-}
-
-/** prepareChannexAdultNightPrices over a configuration returned by parsePricingConfiguration,
- * for callers that prepare many nights of one configuration (VAY-2108 ongoing ARI). */
-export function prepareParsedChannexAdultNightPrices(
-  config: PricingConfiguration,
-  request: Omit<RoomNightProjectionRequest, "guests">,
-): ChannexAdultNightPrices {
   const candidates: Array<{
     occupancy: number;
     rate: string;
@@ -57,7 +47,7 @@ export function prepareParsedChannexAdultNightPrices(
   // Bound local work, not provider capability; never truncate the occupancy set.
   if (capacity > 100) return { kind: "unavailable", reason: "candidate_limit" };
   for (let occupancy = 1; occupancy <= capacity; occupancy++) {
-    const projection = projectParsedReplacementRoomNight(config, {
+    const projection = projectReplacementRoomNight(config, {
       ...request,
       guests: { adults: occupancy, childAgesAtCheckIn: [] },
     });

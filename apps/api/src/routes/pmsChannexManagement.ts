@@ -30,12 +30,6 @@ export type PmsChannexManagementRoutesOptions = {
   datePrices?: ChannelDatePricesPort;
   publishedOfferProvisioningEnabled?: boolean;
   publishedOfferProvisioningPropertyId?: string;
-  /** VAY-2108 D7: the claimed scope's owned hotels may provision their published offers. */
-  publishedOfferProvisioningPropertyIds?: readonly string[];
-  /** VAY-2108 D7: under the claimed ARI scope only these hotels get ARI commands; plain
-   * provisioning, inventory rules and ARI alert recovery are refused for everyone (the claimed
-   * worker never claims those jobs). */
-  claimedOwnedPropertyIds?: readonly string[];
 };
 
 export async function registerPmsChannexManagementRoutes(
@@ -222,11 +216,9 @@ export async function registerPmsChannexManagementRoutes(
         booking && !ari && options.capabilityModes.bookingSync === "observe_only"
           ? options.commandPort?.recoverStagingAlert
           : undefined;
-      // VAY-2108 D7: the claimed worker never claims recovery jobs (0519 excludes them), so an
-      // ARI alert recovery under the claimed scope would queue forever.
       if (
         (booking && options.capabilityModes.bookingSync !== "mutating" && !scoped) ||
-        (ari && (options.capabilityModes.ariSync !== "mutating" || options.claimedOwnedPropertyIds))
+        (ari && options.capabilityModes.ariSync !== "mutating")
       )
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       if (
@@ -262,17 +254,10 @@ export async function registerPmsChannexManagementRoutes(
       );
       const input = parseCommand(request.body);
       if (!input) return reply.code(400).send({ code: "invalid_channex_command" });
-      // VAY-2055: the connection-only worker never claims disable jobs. VAY-2108 D7: the claimed
-      // worker claims ARI and provisioning only for the owned hotels, and no inventory rules.
+      // VAY-2055: the connection-only worker never claims disable jobs.
       if (
         !isMutating(options.capabilityModes, input.operationType) ||
-        (options.connectionOnly && input.operationType === "disable") ||
-        (options.claimedOwnedPropertyIds &&
-          ((input.operationType === "sync_ari" &&
-            !options.claimedOwnedPropertyIds.includes(request.params.propertyId)) ||
-            // Plain provisioning (room types) is D7b; only the published-offer route provisions.
-            input.operationType === "provision" ||
-            input.operationType === "update_inventory_rules"))
+        (options.connectionOnly && input.operationType === "disable")
       ) {
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       }
@@ -299,10 +284,7 @@ export async function registerPmsChannexManagementRoutes(
       if (
         options.capabilityModes.provisioning !== "mutating" ||
         !options.publishedOfferProvisioningEnabled ||
-        !(
-          request.params.propertyId === options.publishedOfferProvisioningPropertyId ||
-          options.publishedOfferProvisioningPropertyIds?.includes(request.params.propertyId)
-        )
+        request.params.propertyId !== options.publishedOfferProvisioningPropertyId
       )
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       if (!options.commandPort)
@@ -357,7 +339,7 @@ export async function registerPmsChannexManagementRoutes(
       const inventoryRules = parseInventoryRules(body);
       if (!body || !inventoryRules || !isCommandIdentity(body.commandId, body.idempotencyKey))
         return reply.code(400).send({ code: "invalid_inventory_rules" });
-      if (options.capabilityModes.ariSync !== "mutating" || options.claimedOwnedPropertyIds)
+      if (options.capabilityModes.ariSync !== "mutating")
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       if (!options.commandPort)
         return reply.code(503).send({ code: "channex_commands_unavailable" });
