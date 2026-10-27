@@ -78,6 +78,45 @@ describe("Channex worker startup", () => {
     ).rejects.toThrow("channex_worker_scope_unsupported");
     expect(connect).not.toHaveBeenCalled();
   });
+  // VAY-2108: claimed booking sync runs on the API login; only its connection part needs the worker.
+  const claimed: ChannexManagementConfig = {
+    ...connectionOnly,
+    scope: "claimed",
+    ownedPropertyIds: [],
+    bookingMutationOwner: "target",
+    capabilityModes: { ...connectionOnly.capabilityModes, bookingSync: "mutating" },
+  };
+  it("opens no worker credential for claimed booking sync without connection", async () => {
+    const connect = vi.spyOn(pg.Client.prototype, "connect");
+    await preflightChannexManagementWorker(
+      { ...claimed, capabilityModes: { ...claimed.capabilityModes, connection: "observe_only" } },
+      true,
+    );
+    expect(connect).not.toHaveBeenCalled();
+  });
+  it.each([
+    { capabilityModes: { ...claimed.capabilityModes, ariSync: "mutating" as const } },
+    { capabilityModes: { ...claimed.capabilityModes, messaging: "mutating" as const } },
+    { stagingRestrictionsPropertyId: "fixture" },
+  ])("rejects a widened claimed scope before connecting: %j", async (override) => {
+    const connect = vi.spyOn(pg.Client.prototype, "connect");
+    await expect(
+      preflightChannexManagementWorker({ ...claimed, ...override }, true),
+    ).rejects.toThrow("channex_worker_scope_unsupported");
+    expect(connect).not.toHaveBeenCalled();
+  });
+  it.each([connectionOnly, claimed])(
+    "connects with the worker credential for the connection scope (%#)",
+    async (scope) => {
+      const connect = vi
+        .spyOn(pg.Client.prototype, "connect")
+        .mockRejectedValue(new Error("fixture_connect"));
+      await expect(preflightChannexManagementWorker(scope, true)).rejects.toThrow(
+        "fixture_connect",
+      );
+      expect(connect).toHaveBeenCalledTimes(1);
+    },
+  );
   it("connects with the worker credential for the connection-only scope", async () => {
     const connect = vi
       .spyOn(pg.Client.prototype, "connect")
