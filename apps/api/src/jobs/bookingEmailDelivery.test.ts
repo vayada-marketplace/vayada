@@ -1,9 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  BOOKING_EMAIL_SEND_TIMEOUT_MS,
   createResendBookingEmailDelivery,
   runBookingEmailDeliveryJobs,
 } from "./bookingEmailDelivery.js";
+
+/** A provider that never answers unless the request's own signal aborts it. */
+function hangingFetch() {
+  const signals: (AbortSignal | null | undefined)[] = [];
+  const request = vi.fn(
+    (_url: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        signals.push(init?.signal);
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      }),
+  );
+  return { request: request as unknown as typeof fetch, signals };
+}
 
 describe("booking email delivery", () => {
   it.each([undefined, "booking", "unknown"])(
@@ -320,4 +334,97 @@ describe("booking email delivery", () => {
       );
     },
   );
+
+  it("gives up on a Resend call that hangs, within the send timeout (VAY-2297)", async () => {
+    const { request, signals } = hangingFetch();
+    const delivery = createResendBookingEmailDelivery({
+      apiKey: "re_test",
+      from: "Vayada <booking@example.test>",
+      fetch: request,
+      timeoutMs: 20,
+    });
+
+    await expect(
+      delivery.send({
+        to: "guest@example.test",
+        subject: "Booking confirmed",
+        text: "Your booking is confirmed.",
+        idempotencyKey: "booking-email-1",
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it("caps every production send at 30 s with the request's own signal", async () => {
+    const request = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
+    const delivery = createResendBookingEmailDelivery({
+      apiKey: "re_test",
+      from: "Vayada <booking@example.test>",
+      fetch: request,
+    });
+
+    await delivery.send({
+      to: "guest@example.test",
+      subject: "Booking confirmed",
+      text: "Your booking is confirmed.",
+      idempotencyKey: "booking-email-1",
+    });
+
+    expect(BOOKING_EMAIL_SEND_TIMEOUT_MS).toBe(30_000);
+    const init = request.mock.calls[0]?.[1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal?.aborted).toBe(false);
+  });
+
+  it("releases the booking row and retries the job when the send hangs (VAY-2297)", async () => {
+    const queries: string[] = [];
+    const pool = {
+      query: vi.fn(async (text: string) => {
+        queries.push(text);
+        if (text.includes("RETURNING job.id::text AS id")) {
+          return {
+            rows: [
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                jobKey: "email.booking:booking-1:v1",
+                attemptsCount: 1,
+                workerId: "worker-1",
+                payload: { to: "guest@example.test", subject: "Booking", text: "Instructions" },
+              },
+            ],
+          };
+        }
+        if (text.includes("FOR SHARE OF booking"))
+          return { rows: [{ unverified: false, due: true }] };
+        if (text.includes("RETURNING id::text AS id")) return { rows: [{ id: "audit-1" }] };
+        return { rows: [] };
+      }),
+    };
+    const release = vi.fn();
+    const { request } = hangingFetch();
+    const delivery = createResendBookingEmailDelivery({
+      apiKey: "re_test",
+      from: "Vayada <booking@example.test>",
+      fetch: request,
+      timeoutMs: 20,
+    });
+
+    await expect(
+      runBookingEmailDeliveryJobs("postgres://unused", delivery, {
+        pool: { ...pool, connect: async () => ({ query: pool.query, release }) } as never,
+        limit: 1,
+        workerId: "worker-1",
+      }),
+    ).resolves.toEqual({ processed: 0, failed: 1 });
+
+    const begin = queries.indexOf("BEGIN");
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(queries.indexOf("ROLLBACK")).toBeGreaterThan(begin);
+    expect(queries).not.toContain("COMMIT");
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(queries.some((sql) => sql.includes("delivery_failed"))).toBe(true);
+    expect(queries.some((sql) => sql.includes("delivery_succeeded"))).toBe(false);
+  });
 });
