@@ -1,6 +1,7 @@
 import pg from "pg";
 import { createPgProviderWebhookStore } from "../platform/providerWebhooks.js";
 import { promotePulledChannexBookingRevision } from "../routes/providerWebhooks.js";
+import { readChannexFeed } from "./channexRevisionFeed.js";
 
 // VAY-2108: the scheduled Channex booking-feed pull for hotels the target owns under the claimed
 // scope (engineering/channex-per-hotel-ownership.md). Legacy acknowledges what it pulls, so a hotel
@@ -111,7 +112,7 @@ export async function enqueueChannexFeedPulls(
   return result.rowCount ?? 0;
 }
 
-/** Queues due pulls, then runs them: one feed read per job, no acknowledgement here. */
+/** Queues due pulls, then runs them: the whole feed per job (paged), no acknowledgement here. */
 export async function runChannexFeedPulls(connectionString: string, options: Options) {
   const pool = new pg.Pool({ connectionString, max: 2, connectionTimeoutMillis: 5_000 });
   const store = createPgProviderWebhookStore({
@@ -121,6 +122,8 @@ export async function runChannexFeedPulls(connectionString: string, options: Opt
   });
   const counters = { queued: 0, pulled: 0, failed: 0, revisions: 0, resynced: 0, resyncFailed: 0 };
   const failures: Array<{ propertyId: string; code: string }> = [];
+  /** Hotels whose feed held more revisions than one run reads (the rest wait for later runs). */
+  const truncated: Array<{ propertyId: string; total: number | null }> = [];
   try {
     counters.queued = await enqueueChannexFeedPulls(pool, {
       ...options,
@@ -130,7 +133,9 @@ export async function runChannexFeedPulls(connectionString: string, options: Opt
       const job = await claim(pool, options);
       if (!job) break;
       try {
-        const revisions = await readFeed(pool, job, options);
+        const feed = await readFeed(pool, job, options);
+        if (feed.truncated) truncated.push({ propertyId: job.propertyId, total: feed.total });
+        const revisions = feed.revisions;
         // One revision that cannot be queued must not hold back the rest of the hotel's feed.
         const failedRevisionIds: string[] = [];
         for (const revision of revisions)
@@ -175,7 +180,7 @@ export async function runChannexFeedPulls(connectionString: string, options: Opt
         counters.resyncFailed += 1;
       }
     }
-    return { ...counters, failures };
+    return { ...counters, failures, truncated };
   } finally {
     await Promise.all([pool.end(), store.close?.()]);
   }
@@ -409,35 +414,10 @@ function record(value: unknown): Record<string, unknown> | null {
 
 async function readFeed(pool: pg.Pool, job: PullJob, options: Options) {
   await assertOwned(pool, job, options);
-  const url = new URL("/api/v1/booking_revisions/feed", `${options.apiBaseUrl}/`);
-  url.searchParams.set("filter[property_id]", job.providerPropertyId);
-  url.searchParams.set("order[inserted_at]", "asc");
-  url.searchParams.set("pagination[limit]", String(PAGE_SIZE));
-  let response: Response;
-  try {
-    const timeout = AbortSignal.timeout(30_000);
-    response = await (options.fetch ?? fetch)(url, {
-      method: "GET",
-      headers: { "user-api-key": options.apiKey },
-      signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
-    });
-  } catch {
-    throw new PullFailure("provider_unavailable");
-  }
-  if (!response.ok)
-    throw new PullFailure(
-      response.status === 429
-        ? "rate_limited"
-        : response.status >= 500
-          ? "provider_unavailable"
-          : "provider_rejected",
-    );
-  const data = ((await response.json().catch(() => null)) as { data?: unknown } | null)?.data;
-  if (!Array.isArray(data)) throw new PullFailure("invalid_feed");
-  return data.filter(
-    (item): item is Record<string, unknown> =>
-      Boolean(item) && typeof item === "object" && !Array.isArray(item),
-  );
+  return readChannexFeed((url) => read(url, options), {
+    apiBaseUrl: options.apiBaseUrl,
+    providerPropertyId: job.providerPropertyId,
+  });
 }
 
 async function finish(

@@ -2501,10 +2501,11 @@ const runChannexBookings = () => {
     ownsMutation: () =>
       config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.channexManagement.bookingMutationOwner === "target",
+    // VAY-2108 W1d: each dead letter names its hotel and reason; the hotel sees a PMS alert.
+    onDeadLetter: (deadLetter) =>
+      app.log.error(deadLetter, "Channex booking was dead-lettered and not imported"),
   })
-    .then(({ deadLettered }) => {
-      if (deadLettered) app.log.error({ deadLettered }, "Channex bookings were dead-lettered");
-    })
+    .then(() => undefined)
     .catch((error: unknown) => app.log.warn({ err: error }, "Channex booking ingestion failed"))
     .finally(() => {
       activeChannexBookingBatch = undefined;
@@ -2530,8 +2531,10 @@ const runChannexFeedPull = () => {
     workerId: channexFeedPullWorkerId,
     signal: channexFeedPullAbort.signal,
   })
-    .then(({ failures }) => {
+    .then(({ failures, truncated }) => {
       if (failures.length) app.log.warn({ failures }, "Channex booking feed pulls failed");
+      if (truncated.length)
+        app.log.warn({ truncated }, "Channex booking feed is longer than one pull reads");
     })
     .catch((error: unknown) => app.log.warn({ err: error }, "Channex booking feed pull failed"))
     .finally(() => {

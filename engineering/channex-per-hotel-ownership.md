@@ -99,6 +99,25 @@ webhook (runbook P17) comes later. Before it does, `CHANNEX_WEBHOOK_INTAKE_MODE`
 `observe_only`: in `mutating` mode, a claimed hotel whose connection is down would get booking
 and message jobs that retry and then dead-letter.
 
+### When intake refuses a booking
+
+The OTA has already confirmed the booking, so a refusal must never be silent (VAY-2108 W1d):
+
+- Every dead-lettered ingest job writes a `booking_not_imported` alert in the same transaction
+  (PMS → Channel manager → Channel alerts), with the OTA, its reservation code, the stay, the
+  Channex room and rate ids and the reason. The worker logs each one with the property id and
+  reason. "Retry import" re-ingests the revision once the cause is fixed. An applied later
+  revision of the same booking, or its cancellation, closes the alert.
+- A refused revision is **not** acknowledged, so Channex keeps flagging it too. Both feed readers
+  (the scheduled pull and the webhook-hint load) page through the whole feed, at most 20 pages of
+  100 per run; a longer feed is logged with the hotel. Refused revisions never hide newer ones.
+- A booking on `closed` or `linked_stop_sell` nights is saved (VAY-1981 refused it): its rooms get
+  `inventoryWarning` in the assignment payload, and the hotel gets a `booking_on_closed_night`
+  alert to check it can host the guest. The switch-day booking copy uses the same path.
+- Still refused, now with the alert: more rooms than physically exist, nights beyond the open
+  calendar (no inventory day yet), unmapped rooms or rates, and a stay change on a room the host
+  chose by hand (VAY-2385).
+
 ## Rollout
 
 1. Gate and executor ship inert. Production next-api keeps booking sync, ARI and provisioning
@@ -110,6 +129,16 @@ and message jobs that retry and then dead-letter.
 3. Per hotel: legacy disable and readback, then `attach` (or `activate` for an imported row),
    then the booking copy and the first pull within minutes. Then the offers create their rate
    plans, the OTA rate mapping in Channex moves to them, and only then full ARI.
+   - **Before attach, check the hotel's calendar**, so its OTA bookings land without warnings:
+     the operating calendar is year-round, or its seasons match what the OTAs sell; calendar
+     auto-open is On (rolling 12 months); no mapped room type is retired; room types share a
+     linked inventory group only if the OTAs sell them the same way; and a read-only count shows
+     0 `closed` and 0 `linked_stop_sell` inventory days for every mapped room type over the open
+     calendar, including the nights of the bookings the copy brings in.
+   - **Before full ARI, make sure Booking.com and Airbnb cannot sell beyond our open calendar.**
+     Legacy's last push may reach further than our 12 months: read the hotel's furthest open
+     night in Channex, and if it lies past our last inventory day, close those nights in Channex
+     (a Channex write, so Flamur's go). A booking there is refused, with the alert.
 4. ARI and published offers (D7): `PMS_CHANNEX_ARI_SYNC_MODE` and `PMS_CHANNEX_PROVISIONING_MODE`
    turn `mutating` together under the claimed scope, on top of booking sync. The worker then runs
    under the claimed DB scope (0519: new RLS helper, the pinned scope functions untouched, digests

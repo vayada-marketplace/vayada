@@ -263,6 +263,54 @@ describe("PMS Channex management command routes", () => {
     expect(blocked.recoverAlert).not.toHaveBeenCalled();
   });
 
+  // VAY-2108 W1d: our own booking intake alerts.
+  it("re-imports a booking that was not imported, never one that landed on a closed night", async () => {
+    const recover = (target: NonNullable<typeof app>) =>
+      target.inject({
+        method: "POST",
+        url: `/properties/${propertyId}/channex/alerts/${operationId}/recover`,
+        headers: { authorization: "Bearer valid" },
+        payload: { round: 0 },
+      });
+    const harness = (eventType: string, modes = mutating) =>
+      testApp(
+        {},
+        modes,
+        undefined,
+        false,
+        false,
+        propertyId,
+        false,
+        undefined,
+        [propertyId],
+        eventType,
+      );
+    const missing = await harness("booking_not_imported");
+    app = missing.app;
+    expect((await recover(app)).statusCode).toBe(202);
+    expect(missing.recoverAlert).toHaveBeenCalledWith(
+      expect.anything(),
+      propertyId,
+      operationId,
+      0,
+    );
+    await app.close();
+    const observing = await harness("booking_not_imported", {
+      ...mutating,
+      bookingSync: "observe_only",
+    });
+    app = observing.app;
+    expect((await recover(app)).json()).toEqual({ code: "channex_capability_not_mutating" });
+    expect(observing.recoverAlert).not.toHaveBeenCalled();
+    await app.close();
+    const landed = await harness("booking_on_closed_night");
+    app = landed.app;
+    const refused = await recover(app);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({ code: "alert_not_recoverable" });
+    expect(landed.recoverAlert).not.toHaveBeenCalled();
+  });
+
   it("keeps PMS authorization and approval checks on the scoped observe-only path", async () => {
     for (const access of [
       { authenticated: false },
@@ -463,9 +511,17 @@ describe("PMS Channex management command routes", () => {
   });
 
   it("queues ARI only for owned hotels in the claimed scope, never provisioning, inventory rules or ARI recovery", async () => {
-    const owned = await testApp({}, mutating, undefined, false, false, propertyId, false, undefined, [
+    const owned = await testApp(
+      {},
+      mutating,
+      undefined,
+      false,
+      false,
       propertyId,
-    ]);
+      false,
+      undefined,
+      [propertyId],
+    );
     app = owned.app;
     const accepted = await app.inject({
       method: "POST",
@@ -503,16 +559,28 @@ describe("PMS Channex management command routes", () => {
     });
     expect(rules.statusCode).toBe(409);
     await app.close();
-    const foreign = await testApp({}, mutating, undefined, false, false, propertyId, false, undefined, [
-      "29f39aae-0000-4000-8000-000000000001",
-    ]);
+    const foreign = await testApp(
+      {},
+      mutating,
+      undefined,
+      false,
+      false,
+      propertyId,
+      false,
+      undefined,
+      ["29f39aae-0000-4000-8000-000000000001"],
+    );
     app = foreign.app;
     for (const operationType of ["sync_ari", "provision"] as const) {
       const refused = await app.inject({
         method: "POST",
         url: `/properties/${propertyId}/channex/commands`,
         headers: { authorization: "Bearer valid" },
-        payload: { commandId: `c-${operationType}`, idempotencyKey: `k-${operationType}`, operationType },
+        payload: {
+          commandId: `c-${operationType}`,
+          idempotencyKey: `k-${operationType}`,
+          operationType,
+        },
       });
       expect(refused.statusCode).toBe(409);
       expect(refused.json()).toEqual({ code: "channex_capability_not_mutating" });
@@ -694,6 +762,7 @@ async function testApp(
   connectionOnly = false,
   publishedOfferProvisioningPropertyIds?: readonly string[],
   claimedOwnedPropertyIds?: readonly string[],
+  alertEventType?: string,
 ) {
   const app = Fastify({ logger: false });
   const getAlertDiagnostics = vi.fn().mockResolvedValue(null);
@@ -727,7 +796,7 @@ async function testApp(
       getAlerts: async () => [
         {
           id: operationId,
-          eventType: stagingRecovery ? "non_acked_booking" : "sync_error",
+          eventType: alertEventType ?? (stagingRecovery ? "non_acked_booking" : "sync_error"),
           impact: {
             bookingId: null,
             revisionId: null,

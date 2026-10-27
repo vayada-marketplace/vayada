@@ -36,6 +36,41 @@ const descriptions: Record<string, [string, string]> = {
   ],
 };
 
+// VAY-2108: alerts our own booking intake raises. The reason picks the second sentence.
+const notImportedReasons: Record<string, string> = {
+  operational_mapping_unavailable:
+    "The room or rate it was booked on is not linked to one of your rooms. Fix the mapping in channel settings, then retry the import.",
+  operational_inventory_unavailable:
+    "No room was free for these nights. Free a room by moving another booking or removing a block, then retry the import.",
+  inventory_not_open:
+    "These nights are after the end of your open calendar. Open the calendar further, then retry the import.",
+  operational_assignment_conflict:
+    "The guest changed the stay, but a room you chose by hand is in the way. Change or clear that room on the booking, then retry the import.",
+  operational_booking_terminal:
+    "The guest changed a stay that is already checked in or out here. Update the booking by hand.",
+};
+const otaNames: Record<string, string> = { BookingCom: "Booking.com", Airbnb: "Airbnb" };
+
+function bookingAlertText(alert: ChannexAlert): [string, string] | null {
+  const channel = otaNames[alert.impact.channel ?? ""] ?? alert.impact.channel ?? "The channel";
+  if (alert.eventType === "booking_not_imported")
+    return [
+      "A booking is missing from your PMS",
+      `${channel} confirmed this booking, but it is not in your PMS, so the guest is not on your calendar. Find it in your ${channel} extranet with the reference below. ${
+        notImportedReasons[alert.impact.errorType ?? ""] ??
+        "Something stopped the import. Retry it; if it fails again, contact support with the alert reference."
+      }`,
+    ];
+  if (alert.eventType === "booking_on_closed_night")
+    return [
+      "A booking arrived on closed nights",
+      alert.impact.errorType === "inventory_linked_stop_sell"
+        ? `${channel} sold nights when a room sharing the same space is already booked. The booking is saved. Check you can host both guests, then mark it checked.`
+        : `${channel} sold nights that are closed in your calendar. The booking is saved. Check you can host the guest, then mark it checked.`,
+    ];
+  return null;
+}
+
 export function OperationalAlerts({
   snapshot,
   openSettings,
@@ -106,13 +141,18 @@ export function OperationalAlerts({
         <p className="text-sm text-gray-500">No channel alerts recorded.</p>
       )}
       {alerts.map((alert) => {
-        const [title, guidance] = descriptions[alert.eventType] ?? [
-          "Channel event",
-          "Review channel settings.",
-        ];
+        const [title, guidance] = bookingAlertText(alert) ??
+          descriptions[alert.eventType] ?? ["Channel event", "Review channel settings."];
         const mapping = alert.eventType.startsWith("booking_unmapped");
         const disconnected = alert.eventType === "disconnected_channel";
-        const booking = mapping || disconnected || alert.eventType === "non_acked_booking";
+        const notImported = alert.eventType === "booking_not_imported";
+        const closedNight = alert.eventType === "booking_on_closed_night";
+        const booking =
+          mapping ||
+          disconnected ||
+          notImported ||
+          closedNight ||
+          alert.eventType === "non_acked_booking";
         const ari = !booking || disconnected;
         const pending = alert.recovery.some((job) => ["pending", "running"].includes(job.status));
         const allowed =
@@ -128,7 +168,11 @@ export function OperationalAlerts({
               <h3 className="font-semibold text-gray-900">{title}</h3>
               <span className="text-sm">
                 {resolved
-                  ? "Recovery verified"
+                  ? closedNight
+                    ? "Checked"
+                    : notImported
+                      ? "Resolved"
+                      : "Recovery verified"
                   : alert.eventType === "sync_warning"
                     ? "Warning"
                     : "Needs attention"}
@@ -136,14 +180,26 @@ export function OperationalAlerts({
             </div>
             <p className="mt-2 text-sm text-gray-700">{guidance}</p>
             <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-              {[
-                ["Channel", alert.impact.channel ?? alert.impact.channelId],
-                ["Booking", alert.impact.bookingId],
-                ["Room type", alert.impact.roomTypeId],
-                ["Rate plan", alert.impact.ratePlanId],
-                ["From", alert.impact.dateFrom],
-                ["To", alert.impact.dateTo],
-              ].map(([label, value]) => (
+              {(notImported || closedNight
+                ? [
+                    ["Channel", otaNames[alert.impact.channel ?? ""] ?? alert.impact.channel],
+                    ["Reference", alert.impact.reference],
+                    ["Arrival", alert.impact.dateFrom],
+                    ["Departure", alert.impact.dateTo],
+                    closedNight
+                      ? ["Room type", alert.impact.roomTypeNames]
+                      : ["Channex room type", alert.impact.roomTypeId],
+                    ["Channex booking", alert.impact.bookingId],
+                  ]
+                : [
+                    ["Channel", alert.impact.channel ?? alert.impact.channelId],
+                    ["Booking", alert.impact.bookingId],
+                    ["Room type", alert.impact.roomTypeId],
+                    ["Rate plan", alert.impact.ratePlanId],
+                    ["From", alert.impact.dateFrom],
+                    ["To", alert.impact.dateTo],
+                  ]
+              ).map(([label, value]) => (
                 <div key={label} className="flex gap-2">
                   <dt className="text-gray-500">{label}:</dt>
                   <dd className="break-all">{value ?? "Unknown"}</dd>
@@ -152,18 +208,25 @@ export function OperationalAlerts({
             </dl>
             <p className="mt-3 text-xs text-gray-500">
               First: {new Date(alert.firstOccurredAt).toLocaleString()} · Latest:{" "}
-              {new Date(alert.lastOccurredAt).toLocaleString()} · {alert.occurrences} occurrence(s)
+              {new Date(alert.lastOccurredAt).toLocaleString()}
+              {alert.occurrences > 0 ? ` · ${alert.occurrences} occurrence(s)` : ""}
             </p>
             <p className="mt-2 text-sm" role="status">
               {resolved
-                ? "Recovery completed and provider evidence was checked."
-                : pending
-                  ? "Recovery is running; this alert remains open."
-                  : alert.recovery.length
-                    ? "Review the recovery result below. The alert stays open until all checks pass."
-                    : "No recovery queued."}
+                ? closedNight
+                  ? "Marked checked."
+                  : notImported
+                    ? "Resolved: the booking's latest update reached your PMS."
+                    : "Recovery completed and provider evidence was checked."
+                : closedNight
+                  ? "Open until you mark it checked."
+                  : pending
+                    ? "Recovery is running; this alert remains open."
+                    : alert.recovery.length
+                      ? "Review the recovery result below. The alert stays open until all checks pass."
+                      : "No recovery queued."}
             </p>
-            {!alert.recovery.length && automaticRetry && (
+            {!alert.recovery.length && automaticRetry && !closedNight && (
               <p className="text-sm text-gray-600">
                 Property sync is retrying automatically at{" "}
                 {new Date(automaticRetry).toLocaleString()}. This alert remains open until recovery
@@ -193,7 +256,22 @@ export function OperationalAlerts({
                   {alert.id}.
                 </p>
               )}
-            {!resolved && (
+            {!resolved && closedNight && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a href="/calendar" className={buttonClass}>
+                  Open calendar
+                </a>
+                <button
+                  type="button"
+                  className={`${buttonClass} bg-gray-950 text-white`}
+                  onClick={() => void act(alert, "acknowledge")}
+                  disabled={Boolean(busy)}
+                >
+                  Mark checked
+                </button>
+              </div>
+            )}
+            {!resolved && !closedNight && (
               <>
                 {(mapping || disconnected) && (
                   <label className="mt-3 flex gap-2 text-sm">
@@ -246,7 +324,7 @@ export function OperationalAlerts({
                       ((mapping || disconnected) && !corrected[alert.id])
                     }
                   >
-                    Retry recovery
+                    {notImported ? "Retry import" : "Retry recovery"}
                   </button>
                 </div>
                 {alert.recoveryRound >= 3 && !pending && (

@@ -320,18 +320,13 @@ describe.skipIf(!url)("Channex operational handoff and repair", () => {
     expect(await assignments(missing.input.channelBookingId)).toEqual([]);
     expect(missing.acks()).toBe(0);
   });
-  it("rejects mapping and closed inventory failures without partial bookings or ACKs", async () => {
-    for (const invalid of ["missing", "stale", "closed", "inactive", "capacity"]) {
+  it("rejects mapping and capacity failures without partial bookings or ACKs", async () => {
+    for (const invalid of ["missing", "stale", "inactive", "capacity"]) {
       const f = fixture(2);
       if (invalid === "missing") f.revision.attributes.rooms[1]!.rate_plan_id = "unmapped";
       if (invalid === "stale")
         await db.query(
           "UPDATE pms.channel_rate_plan_mappings SET status='stale' WHERE property_id=$1",
-          [propertyId],
-        );
-      if (invalid === "closed")
-        await fixtureSql(
-          "UPDATE pms.inventory_days SET status='closed',available_count=0 WHERE property_id=$1 AND stay_date='2026-09-12'",
           [propertyId],
         );
       if (invalid === "inactive")
@@ -365,6 +360,30 @@ describe.skipIf(!url)("Channex operational handoff and repair", () => {
         [propertyId],
       );
     }
+  });
+  // VAY-2108 W1d: the OTA already sold a closed night, so it lands with a marker (VAY-1981 refused it).
+  it("saves a booking on a closed night with the inventory warning", async () => {
+    await fixtureSql(
+      "UPDATE pms.inventory_days SET status='closed',available_count=0 WHERE property_id=$1 AND stay_date='2026-09-12'",
+      [propertyId],
+    );
+    const f = fixture(2);
+    expect(await importChannexStagingReservation(config, f.input, f.request)).toMatchObject({
+      status: "succeeded",
+    });
+    expect(
+      (await assignments(f.input.channelBookingId)).map(
+        (a) => a.assignment_payload.inventoryWarning,
+      ),
+    ).toEqual(["closed", "closed"]);
+    expect((await inventory()).find((d) => d.stay_date === "2026-09-12")).toMatchObject({
+      available_count: 0,
+    });
+    await update(f, "cancelled");
+    await fixtureSql(
+      "UPDATE pms.inventory_days SET status='open',blocked_count=0,available_count=total_count-assigned_count WHERE property_id=$1",
+      [propertyId],
+    );
   });
   it("moves untouched stays and releases cancellation occupancy; rejects staff-conflicting changes", async () => {
     const f = fixture(2);
