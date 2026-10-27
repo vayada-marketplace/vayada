@@ -32,6 +32,8 @@ type Options = {
   signal?: AbortSignal;
   /** Delay between the resync's revision reads (Channex rate limits); tests pass 0. */
   resyncPaceMs?: number;
+  /** How long one resync run may take before it pauses and keeps its progress; tests shorten it. */
+  resyncBudgetMs?: number;
 };
 type PullJob = {
   id: string;
@@ -41,6 +43,8 @@ type PullJob = {
   bindingGeneration: string;
   attempt: number;
   maxAttempts: number;
+  /** Booking ids an earlier, paused run of this resync already queued. */
+  done: string[];
 };
 
 /**
@@ -204,6 +208,7 @@ async function claim(pool: pg.Pool, options: Options, type = TYPE): Promise<Pull
       payload: Record<string, unknown>;
       attempt: number;
       maxAttempts: number;
+      done: unknown;
     }>(
       `UPDATE platform.jobs SET status = 'running', attempts_count = attempts_count + 1,
          locked_at = now(), locked_by = $3, updated_at = now(),
@@ -213,7 +218,8 @@ async function claim(pool: pg.Pool, options: Options, type = TYPE): Promise<Pull
          AND (payload->>'channexHost' = $5::text
            OR ($2::text = $6::text AND payload->>'channexHost' IS NULL AND $5::text = $7::text))
          ORDER BY run_after DESC, created_at DESC FOR UPDATE SKIP LOCKED LIMIT 1)
-       RETURNING id::text, payload, attempts_count::int AS attempt, max_attempts::int AS "maxAttempts"`,
+       RETURNING id::text, payload, attempts_count::int AS attempt, max_attempts::int AS "maxAttempts",
+         COALESCE(job_metadata->'resyncDone', '[]'::jsonb) AS done`,
       [
         QUEUE,
         type,
@@ -234,7 +240,20 @@ async function claim(pool: pg.Pool, options: Options, type = TYPE): Promise<Pull
     bindingGeneration: String(row.payload["bindingGeneration"]),
     attempt: row.attempt,
     maxAttempts: row.maxAttempts,
+    done: Array.isArray(row.done) ? row.done.map(String) : [],
   };
+}
+
+/** A provider pause or outage is not the hotel's fault: the attempt goes back, the run returns. */
+function deferrable(
+  error: unknown,
+  metadata: Record<string, unknown>,
+  details: Array<{ id: string; code: string }> = [],
+) {
+  return error instanceof PullFailure &&
+    ["rate_limited", "provider_unavailable"].includes(error.message)
+    ? new PullFailure(error.message, [], "deferred", details, metadata)
+    : error;
 }
 
 async function assertOwned(pool: pg.Pool, job: PullJob, options: Options) {
@@ -264,8 +283,8 @@ async function resyncBookings(
 ) {
   await assertOwned(pool, job, options);
   const started = Date.now();
-  // Yesterday in UTC covers every hotel timezone for in-house stays.
-  const since = new Date((options.now?.() ?? new Date()).getTime() - 24 * 60 * 60_000)
+  // Two days back in UTC covers yesterday's local departures in every hotel timezone.
+  const since = new Date((options.now?.() ?? new Date()).getTime() - 48 * 60 * 60_000)
     .toISOString()
     .slice(0, 10);
   const external = job.providerPropertyId.toLowerCase();
@@ -279,7 +298,9 @@ async function resyncBookings(
     url.searchParams.set("filter[departure_date][gte]", since);
     url.searchParams.set("pagination[page]", String(page));
     url.searchParams.set("pagination[limit]", String(PAGE_SIZE));
-    const { data, meta } = await read(url, options);
+    const { data, meta } = await read(url, options).catch((error: unknown) => {
+      throw deferrable(error, { seen });
+    });
     seen += data.length;
     for (const item of data) {
       const attributes = record(item["attributes"]) ?? {};
@@ -301,11 +322,16 @@ async function resyncBookings(
       throw new PullFailure("resync_truncated", [], "terminal", [], { total: total ?? seen });
     if (total !== null ? seen >= total || data.length === 0 : data.length < limit) break;
   }
+  // A paused or interrupted run keeps the ids it queued, so the next run skips them.
+  const done = new Set(job.done);
+  const pending = bookings.filter((booking) => !done.has(booking.id));
   let promoted = 0;
-  for (const booking of bookings) {
-    if (options.signal?.aborted) throw new PullFailure("worker_shutdown", [], "deferred");
-    if (Date.now() - started > RESYNC_BUDGET_MS)
-      throw new PullFailure("resync_paused", [], "deferred", [], { promoted, seen });
+  const progress = () => ({ promoted, seen, resyncDone: [...done] });
+  for (const [index, booking] of pending.entries()) {
+    if (options.signal?.aborted)
+      throw new PullFailure("worker_shutdown", [], "deferred", [], progress());
+    if (index > 0 && Date.now() - started > (options.resyncBudgetMs ?? RESYNC_BUDGET_MS))
+      throw new PullFailure("resync_paused", [], "deferred", [], progress());
     try {
       const url = new URL(
         `/api/v1/booking_revisions/${encodeURIComponent(booking.revisionId)}`,
@@ -320,14 +346,15 @@ async function resyncBookings(
         revision,
       });
       promoted += 1;
+      done.add(booking.id);
     } catch (error) {
-      // The provider pausing us is not the hotel's fault: give the attempt back and come back.
-      if (
-        error instanceof PullFailure &&
-        ["rate_limited", "provider_unavailable"].includes(error.message)
-      )
-        throw new PullFailure(error.message, [], "deferred", details, { promoted, seen });
-      details.push({ id: booking.id, code: error instanceof Error ? error.message : "failed" });
+      const deferred = deferrable(error, progress(), details);
+      if (deferred !== error) throw deferred;
+      // Only our own codes reach the job row; a store or pg message stays out of it.
+      details.push({
+        id: booking.id,
+        code: error instanceof PullFailure ? error.message : "promotion_failed",
+      });
     }
     if (options.resyncPaceMs ?? 100)
       await new Promise((resolve) => setTimeout(resolve, options.resyncPaceMs ?? 100));
@@ -337,8 +364,9 @@ async function resyncBookings(
       bookings: bookings.length,
       promoted,
       skipped,
+      resyncDone: [...done],
     });
-  return { bookings: bookings.length, promoted, skipped };
+  return { bookings: bookings.length, promoted: done.size, skipped, resyncDone: [] };
 }
 
 /** One Channex GET; `data` is a list (collections) or one object (a single revision). */
