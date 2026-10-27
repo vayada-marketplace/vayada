@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CHANNEX_MANAGEMENT_WORKER_ROLE as role,
   channexManagementWorkerPrivileges as privileges,
+  optionalChannexClaimedGrants,
 } from "./channexManagementWorkerPrivileges.js";
 import { preflightChannexManagementWorker } from "./channexManagementWorkerStartup.js";
 import {
@@ -34,6 +35,13 @@ const key = randomUUID(),
 
 describe.skipIf(!url)("Channex worker effective permissions", () => {
   const owner = new pg.Client({ connectionString: url });
+  /** Migration 0522's insert policy on the mapping table (VAY-2108 D7b). */
+  const mappingInsertPolicy = async () =>
+    (
+      await owner.query<{ present: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='pms' AND tablename='channel_room_type_mappings' AND policyname='channex_management_worker_insert') AS present",
+      )
+    ).rows[0]!.present;
   let pool: pg.Pool, store: ReturnType<typeof createPgPmsChannexManagementWorkerStore>;
   let createdRole = false,
     job: ChannexManagementJob,
@@ -62,11 +70,15 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     await owner.query(
       `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
     );
+    // The claimed-only grants (D7b) follow their insert policy (0522), as the platform does.
+    const claimedPolicies = await mappingInsertPolicy();
     for (const [table, grants] of Object.entries(privileges))
-      for (const [kind, columns] of Object.entries(grants))
+      for (const [kind, columns] of Object.entries(grants)) {
+        if (!claimedPolicies && optionalChannexClaimedGrants.get(table)?.includes(kind)) continue;
         await owner.query(
           `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
         );
+      }
     const login = new URL(url!);
     login.username = role;
     login.password = "fixture";
@@ -824,6 +836,185 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       await owner.query(
         "UPDATE platform.jobs SET status='canceled',finished_at=now() WHERE id=$1::uuid",
         [enableJob],
+      );
+      for (const id of allowlist)
+        await owner.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [
+          id,
+        ]);
+    }
+  });
+
+  it("admits plain room-type provisioning and the mapping insert for owned hotels only (VAY-2108 D7b)", async () => {
+    const owned = randomUUID(),
+      unowned = randomUUID(),
+      ownedJob = randomUUID(),
+      unownedJob = randomUUID(),
+      ownedConnection = randomUUID(),
+      unownedConnection = randomUUID(),
+      ownedRoom = randomUUID(),
+      retiredRoom = randomUUID(),
+      unownedRoom = randomUUID(),
+      ownedExternal = randomUUID(),
+      unownedExternal = randomUUID();
+    await owner.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Owned'),($2::uuid,$2::text,'Unowned')",
+      [owned, unowned],
+    );
+    await owner.query(
+      "INSERT INTO pms.room_types(id,property_id,name,active) VALUES($1,$2,'Owned room',true),($3,$2,'Retired room',false),($4,$5,'Unowned room',true)",
+      [ownedRoom, owned, retiredRoom, unownedRoom, unowned],
+    );
+    await owner.query(
+      "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','repair'),($3,'channex',$4,'active','repair')",
+      [owned, ownedExternal, unowned, unownedExternal],
+    );
+    await owner.query(
+      "INSERT INTO pms.channel_connections(id,property_id,provider,connection_status,external_property_id) VALUES($1,$2,'channex','connected',$3),($4,$5,'channex','connected',$6)",
+      [ownedConnection, owned, ownedExternal, unownedConnection, unowned, unownedExternal],
+    );
+    await owner.query(
+      "UPDATE pms.channel_binding_claims SET claim_state='released' WHERE property_id=$1",
+      [unowned],
+    );
+    for (const [id, propertyId] of [
+      [ownedJob, owned],
+      [unownedJob, unowned],
+    ])
+      await owner.query(
+        `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+        VALUES($1::uuid,$1::text,'pms.channex.management','channex.provision','property',$2::uuid,'pms','channex_connection',$2::text,$3)`,
+        [id, propertyId, JSON.stringify({ operationType: "provision", commandId: randomUUID(), idempotencyKey: id })],
+      );
+    const claimedTable = "platform.channex_management_worker_claimed_operations";
+    const allowlist = (
+      await owner.query<{ id: string }>(
+        "DELETE FROM platform.channex_management_worker_properties RETURNING property_id::text AS id",
+      )
+    ).rows.map((row) => row.id);
+    const jobs = async () =>
+      (
+        await pool.query<{ id: string }>(
+          "SELECT id::text FROM platform.jobs WHERE id = ANY($1::uuid[]) ORDER BY id",
+          [[ownedJob, unownedJob]],
+        )
+      ).rows.map((row) => row.id);
+    const attempt = async (sql: string, values: unknown[] = []) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await client.query(sql, values).then(
+          () => "allowed",
+          (error: Error) => error.message,
+        );
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    const insertMapping = (
+      propertyId: string,
+      connectionId: string,
+      roomTypeId: string,
+      extra: Record<string, string> = {},
+    ) => {
+      const columns = ["property_id", "connection_id", "room_type_id", "external_room_type_id", ...Object.keys(extra)];
+      const values = [propertyId, connectionId, roomTypeId, randomUUID(), ...Object.values(extra)];
+      return attempt(
+        `INSERT INTO pms.channel_room_type_mappings(${columns.join(",")}) VALUES(${values.map((_, index) => `$${index + 1}`).join(",")})`,
+        values,
+      );
+    };
+    // Migration 0522 adds the insert policy and the plain provisioning queue shape.
+    const secured = await mappingInsertPolicy();
+    const mappingGrant = `INSERT(${privileges["pms.channel_room_type_mappings"]!.INSERT!.join(",")}) ON pms.channel_room_type_mappings`;
+    const boundary = async (claimedScope: boolean) => {
+      const client = await pool.connect();
+      try {
+        await assertChannexManagementWorkerBoundary(client, { claimedScope });
+      } finally {
+        client.release();
+      }
+    };
+    try {
+      await owner.query(`GRANT SELECT ON ${claimedTable} TO ${role}`);
+      await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
+      if (!secured) {
+        // Before 0522 a plain provisioning job is not a claimed queue shape, and the mapping
+        // insert grant must not arrive before the policy: the preflight refuses it.
+        expect(await jobs()).toEqual([]);
+        await boundary(false);
+        await owner.query(`GRANT ${mappingGrant} TO ${role}`);
+        try {
+          await expect(boundary(false)).rejects.toThrow("channex_worker_claimed_grant_before_policy");
+        } finally {
+          await owner.query(`REVOKE INSERT ON pms.channel_room_type_mappings FROM ${role}`);
+        }
+        return;
+      }
+      // With the policy, the grant is required only once the claimed scope is asserted.
+      await boundary(false);
+      await boundary(true);
+      await owner.query(`REVOKE INSERT ON pms.channel_room_type_mappings FROM ${role}`);
+      try {
+        await boundary(false);
+        await expect(boundary(true)).rejects.toThrow("channex_worker_grant_missing");
+      } finally {
+        await owner.query(`GRANT ${mappingGrant} TO ${role}`);
+      }
+      // Like 0519's ARI jobs: admitted by operation; the unowned hotel's job stays inert because
+      // its rooms, binding and connection are invisible.
+      expect(await jobs()).toEqual([ownedJob, unownedJob].sort());
+      expect(
+        (
+          await pool.query("SELECT id FROM pms.room_types WHERE id = ANY($1::uuid[])", [
+            [ownedRoom, unownedRoom],
+          ])
+        ).rows.map((row) => row.id),
+      ).toEqual([ownedRoom]);
+      expect(await insertMapping(owned, ownedConnection, ownedRoom)).toBe("allowed");
+      // A second insert of the same room is the ON CONFLICT DO NOTHING case, not a policy case.
+      expect(await insertMapping(unowned, unownedConnection, unownedRoom)).toMatch(/row-level security/);
+      expect(await insertMapping(owned, ownedConnection, retiredRoom)).toMatch(/row-level security/);
+      expect(await insertMapping(owned, unownedConnection, ownedRoom)).toMatch(/row-level security/);
+      for (const status of ["disabled", "stale"])
+        expect(await insertMapping(owned, ownedConnection, ownedRoom, { status })).toMatch(
+          /row-level security/,
+        );
+      // The connection must be connected or degraded (claimed_scope 'property').
+      await owner.query(
+        "UPDATE pms.channel_connections SET connection_status='disconnected' WHERE id=$1",
+        [ownedConnection],
+      );
+      try {
+        expect(await insertMapping(owned, ownedConnection, ownedRoom)).toMatch(/row-level security/);
+      } finally {
+        await owner.query(
+          "UPDATE pms.channel_connections SET connection_status='connected' WHERE id=$1",
+          [ownedConnection],
+        );
+      }
+      // Metadata is not even a granted column (the policy's empty-metadata check is defence in
+      // depth behind it).
+      expect(
+        await insertMapping(owned, ownedConnection, ownedRoom, { mapping_metadata: '{"x":1}' }),
+      ).toMatch(/permission denied/);
+      // Edits of an existing mapping stay impossible: the matrix grants UPDATE on id only (a
+      // lock column), and 0408's lock-only policy refuses even that write.
+      expect(
+        await attempt(
+          "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE id=$1",
+          [mapping, randomUUID()],
+        ),
+      ).toMatch(/permission denied/);
+      expect(
+        await attempt("UPDATE pms.channel_room_type_mappings SET id=id WHERE id=$1", [mapping]),
+      ).toMatch(/row-level security/);
+    } finally {
+      await owner.query(`DELETE FROM ${claimedTable}`);
+      await owner.query(`REVOKE SELECT ON ${claimedTable} FROM ${role}`);
+      await owner.query(
+        "UPDATE platform.jobs SET status='canceled',finished_at=now() WHERE id = ANY($1::uuid[])",
+        [[ownedJob, unownedJob]],
       );
       for (const id of allowlist)
         await owner.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [

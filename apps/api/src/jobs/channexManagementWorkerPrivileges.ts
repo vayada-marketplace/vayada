@@ -47,7 +47,8 @@ export const channexManagementWorkerPrivileges: Record<string, Record<string, tr
   "pms.inventory_materialization_coverage": { SELECT: true, UPDATE: ["property_id"] },
   "pms.channel_binding_claims": { SELECT: true, INSERT: ["property_id", "provider", "external_property_id", "claim_state", "claim_source", "updated_at"], UPDATE: ["id"] },
   "pms.channel_connections": { SELECT: true, INSERT: ["property_id", "provider", "connection_status", "external_property_id"], UPDATE: ["connection_status", "external_property_id", "messaging_app_installed", "last_booking_sync_at", "last_ari_sync_at", "connection_metadata", "updated_at"] },
-  "pms.channel_room_type_mappings": { SELECT: true, UPDATE: ["id"] },
+  // VAY-2108 D7b: provisioning records the room types it created (insert only, 0522 policy).
+  "pms.channel_room_type_mappings": { SELECT: true, INSERT: ["property_id", "connection_id", "room_type_id", "external_room_type_id", "status"], UPDATE: ["id"] },
   "pms.channel_rate_plan_mappings": { SELECT: true },
   "pms.channel_sync_status": { SELECT: true, INSERT: ["property_id", "connection_id", "sync_domain", "status", "last_attempt_at", "last_success_at", "last_error_code", "last_error_message", "retry_after"], UPDATE: ["status", "last_attempt_at", "last_success_at", "last_error_code", "last_error_message", "retry_after", "updated_at"] },
   "pms.channex_ari_schedule_sources": { SELECT: true, INSERT: ["property_id", "fingerprint"], UPDATE: ["fingerprint", "revision"] },
@@ -77,4 +78,10 @@ export const optionalChannexDeliveryRelations: ReadonlySet<string> = new Set([
   "pms.channex_offer_ari_deliveries",
   "pms.channex_offer_ari_delivery_dates",
   "pms.channex_offer_ari_delivery_receipts",
+]);
+
+/** VAY-2108 D7b: grants that arrive with the platform's claimed grant mode. The boundary requires
+ * them only under the claimed scope; an image may list them before the grant exists. */
+export const optionalChannexClaimedGrants: ReadonlyMap<string, readonly string[]> = new Map([
+  ["pms.channel_room_type_mappings", ["INSERT"]],
 ]);

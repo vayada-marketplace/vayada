@@ -217,6 +217,10 @@ async function applyMappings(
   job: ChannexManagementJob,
   result: ChannexManagementProviderSuccess,
 ) {
+  // VAY-2108 D7b: the worker may insert a room mapping (0522 policy) but never edit one (0408
+  // lock-only), so a provisioning job only adds rows; a room that already has a mapping was
+  // left out of its plan.
+  const insertOnly = job.input.operationType === "provision";
   for (const mapping of result.roomTypeMappings ?? []) {
     await client.query(
       `INSERT INTO pms.channel_room_type_mappings (
@@ -224,9 +228,13 @@ async function applyMappings(
        ) SELECT $1::uuid, connection.id, $2::uuid, $3, $4
          FROM pms.channel_connections connection
          WHERE connection.property_id = $1::uuid AND connection.provider = 'channex'
-       ON CONFLICT (connection_id, room_type_id) DO UPDATE SET
+       ON CONFLICT (connection_id, room_type_id) ${
+         insertOnly
+           ? "DO NOTHING"
+           : `DO UPDATE SET
          external_room_type_id = EXCLUDED.external_room_type_id,
-         status = EXCLUDED.status, updated_at = now()`,
+         status = EXCLUDED.status, updated_at = now()`
+       }`,
       [job.propertyId, mapping.roomTypeId, mapping.externalRoomTypeId, mapping.status],
     );
   }
