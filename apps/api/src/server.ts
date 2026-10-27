@@ -5,6 +5,7 @@ import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore
 import { createBookingGuestTermsStore } from "./domains/bookingGuestTermsStore.js";
 import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
 import { advancePublishedChannexOfferCreates } from "./domains/channexPublishedOfferCreate.js";
+import { channexExcludedIds } from "./domains/channexOwnershipGate.js";
 import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
 import { activatePublishedChannexOffers } from "./domains/replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
@@ -58,7 +59,7 @@ import {
 } from "@vayada/domain-booking";
 import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
 import pg from "pg";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
@@ -70,6 +71,7 @@ import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunc
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
   type ApiConfig,
+  channexClaimedScope,
   channexConnectionOnlyScope,
   loadConfig,
   stripeSubscriptionRuntimeEnabled,
@@ -253,6 +255,7 @@ import {
 } from "./jobs/bookingEmailDelivery.js";
 import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
+import { runChannexFeedPulls } from "./jobs/channexFeedPull.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
 import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
@@ -551,6 +554,7 @@ const noShowReportingEnabled =
   config.channexManagement.workerEnabled &&
   (config.channexManagement.stagingNoShowEnabled ||
     (config.channexManagement.capabilityModes.bookingSync === "mutating" &&
+      config.channexManagement.scope !== "claimed" &&
       config.backgroundWorkersEnabled));
 const pmsChannexManagementCommandPort =
   channexCommandsMutating || stagingAlertProperty(config)
@@ -927,6 +931,7 @@ const channexManagementPlans = channexManagementDatabase.plans
       stagingMealsPropertyId: config.channexManagement.stagingMealsEnabled
         ? config.channexManagement.stagingRestrictionsPropertyId
         : undefined,
+      excludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
       bookingRevisionHandoff: async ({ propertyId, providerPropertyId, revisions }) => {
         if (!channexBookingRevisionStore) {
           if (revisions.length > 0) throw new Error("Channex booking intake is unavailable");
@@ -1319,7 +1324,9 @@ const channexManagementWorkerStore =
         stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
         stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
         stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
-        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
+        connectionOnly:
+          channexConnectionOnlyScope(config.channexManagement) ||
+          channexClaimedScope(config.channexManagement),
       })
     : undefined;
 const channexOfferSchedule = channexManagementDatabase.scheduler
@@ -1818,6 +1825,7 @@ const app = buildApp({
           connectionString: targetDatabaseUrl,
           stripeConnectProvider,
           stripePaymentProvider: stripeBookingPaymentProvider,
+          channexExcludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
           afterPaymentChange,
         }),
         pmsInboxDeliveryReceipts,
@@ -1895,8 +1903,15 @@ const app = buildApp({
           ? config.channexManagement.stagingRestrictionsPropertyId
           : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
-        capabilityModes: config.channexManagement.capabilityModes,
-        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
+        // VAY-2108: under the claimed scope booking sync is per hotel and pull-driven, so the routes
+        // offer no sync_bookings command or booking-alert recovery nobody would ever process.
+        capabilityModes:
+          config.channexManagement.scope === "claimed"
+            ? { ...config.channexManagement.capabilityModes, bookingSync: "observe_only" }
+            : config.channexManagement.capabilityModes,
+        connectionOnly:
+          channexConnectionOnlyScope(config.channexManagement) ||
+          channexClaimedScope(config.channexManagement),
         publishedOfferProvisioningEnabled:
           config.channexManagement.stagingPublishedOffersEnabled === true,
         publishedOfferProvisioningPropertyId:
@@ -2428,13 +2443,20 @@ const channexBookingWorkerEnabled =
   config.channexManagement.capabilityModes.bookingSync === "mutating" &&
   config.channexManagement.bookingMutationOwner === "target" &&
   Boolean(config.channexManagement.apiBaseUrl && config.channexManagement.apiKey);
+// VAY-2108: the claimed scope ingests only its allowlisted hotels, even on a canary without
+// background workers (it shares the production database).
+const channexOwnedPropertyIds =
+  config.channexManagement.scope === "claimed"
+    ? (config.channexManagement.ownedPropertyIds ?? [])
+    : undefined;
 const runChannexBookings = () => {
-  if (!config.backgroundWorkersEnabled) return;
+  if (!config.backgroundWorkersEnabled && !channexOwnedPropertyIds) return;
   if (activeChannexBookingBatch || !channexBookingWorkerEnabled) return;
   activeChannexBookingBatch = runChannexBookingJobs(targetDatabaseUrl, {
     apiBaseUrl: config.channexManagement.apiBaseUrl!,
     apiKey: config.channexManagement.apiKey!,
     signal: channexBookingAbort.signal,
+    ownedPropertyIds: channexOwnedPropertyIds,
     ...airbnbAlterationRuntime?.bookingWorkerOptions,
     ownsMutation: () =>
       config.channexManagement.capabilityModes.bookingSync === "mutating" &&
@@ -2451,6 +2473,36 @@ const runChannexBookings = () => {
 const channexBookingTimer = channexBookingWorkerEnabled
   ? setInterval(runChannexBookings, 2_000)
   : undefined;
+
+// VAY-2108: the claimed scope pulls each owned hotel's booking feed every 5 minutes (wave 1 is
+// pull-only); the booking worker above persists and acknowledges what the pull queues.
+let activeChannexFeedPull: Promise<void> | undefined;
+const channexFeedPullAbort = new AbortController();
+const channexFeedPullWorkerId = `channex-feed-pull:${process.pid}:${randomUUID().slice(0, 8)}`;
+const channexFeedPullEnabled = channexBookingWorkerEnabled && Boolean(channexOwnedPropertyIds);
+const runChannexFeedPull = () => {
+  if (activeChannexFeedPull || !channexFeedPullEnabled) return;
+  activeChannexFeedPull = runChannexFeedPulls(targetDatabaseUrl, {
+    apiBaseUrl: config.channexManagement.apiBaseUrl!,
+    apiKey: config.channexManagement.apiKey!,
+    ownedPropertyIds: channexOwnedPropertyIds ?? [],
+    excludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
+    workerId: channexFeedPullWorkerId,
+    signal: channexFeedPullAbort.signal,
+  })
+    .then(({ failures }) => {
+      if (failures.length) app.log.warn({ failures }, "Channex booking feed pulls failed");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Channex booking feed pull failed"))
+    .finally(() => {
+      activeChannexFeedPull = undefined;
+    });
+};
+const channexFeedPullTimer = channexFeedPullEnabled
+  ? setInterval(runChannexFeedPull, 60_000)
+  : undefined;
+channexFeedPullTimer?.unref();
+if (channexFeedPullEnabled) runChannexFeedPull();
 
 let activeChannexMessageBatch: Promise<void> | undefined;
 const channexMessageAbort = new AbortController();
@@ -2506,12 +2558,15 @@ if (channexMessageWorkerEnabled) runChannexMessages();
 app.addHook("onClose", async () => {
   if (channexReviewTimer) clearInterval(channexReviewTimer);
   if (channexBookingTimer) clearInterval(channexBookingTimer);
+  if (channexFeedPullTimer) clearInterval(channexFeedPullTimer);
+  channexFeedPullAbort.abort();
   if (channexMessageTimer) clearInterval(channexMessageTimer);
   channexBookingAbort.abort();
   channexMessageAbort.abort();
   await Promise.all([
     activeChannexReviewBatch,
     activeChannexBookingBatch,
+    activeChannexFeedPull,
     activeChannexMessageBatch,
   ]);
 });
