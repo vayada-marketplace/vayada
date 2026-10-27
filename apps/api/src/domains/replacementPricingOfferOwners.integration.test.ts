@@ -24,6 +24,7 @@ import {
 } from "@vayada/domain-distribution/booking-publication";
 import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
+import { pricingLeadTimeTestZone } from "./pricingLeadTimeTestZone.js";
 import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import {
@@ -8758,18 +8759,18 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("enforces an extra's lead time in the catalog, the quote and acceptance", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       store = createCurrentPricingQuoteStore(pool, 300);
-    // The test reads the live clock and checks in at 23:59: stay clear of the property's midnight.
+    // The notice is checked against the database clock in the hotel's zone. The hotel moves to
+    // where that clock reads noon, so its midnight stays hours away from every read (VAY-2382).
+    const zone = await pricingLeadTimeTestZone(pool);
     await pool.query(
-      `SELECT pg_sleep(CASE WHEN local >= time '23:58'
-         THEN extract(epoch FROM time '24:00' - local) + 1 ELSE 0 END)
-       FROM (SELECT (clock_timestamp() AT TIME ZONE 'Etc/UTC')::time AS local) clock`,
+      "UPDATE hotel_catalog.property_locations SET timezone=$2 WHERE property_id=$1",
+      [f.scope.propertyId, zone.timeZone],
     );
-    const dates = (
-      await pool.query(
-        `SELECT (today+1)::text AS arrival,(today+2)::text AS departure,(today+2)::text AS bookable
-         FROM (SELECT (clock_timestamp() AT TIME ZONE 'Etc/UTC')::date AS today) dates`,
-      )
-    ).rows[0];
+    const dates = {
+      arrival: zone.plusDays(1),
+      departure: zone.plusDays(2),
+      bookable: zone.plusDays(2),
+    };
     await pool.query(
       `UPDATE booking.addon_definitions SET metadata='{"maxQuantity":2,"leadTimeHours":24}'
        WHERE id=$1`,

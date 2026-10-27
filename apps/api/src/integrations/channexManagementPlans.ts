@@ -249,11 +249,18 @@ async function enablePlan(
   };
 }
 
+/** VAY-2108 D7 leaves this stub for a plain provisioning job: creating a hotel's Channex room
+ * types from the worker needs an INSERT right on pms.channel_room_type_mappings that the worker
+ * login does not have (its matrix allows locks only), so that part is the D7b follow-up with its
+ * own migration and platform grant. Rate plans come from published offers (the pricing bundle). */
 async function provisioningPlan(
   pool: Pool,
   job: ChannexManagementJob,
   externalPropertyId: string,
 ): Promise<ChannexManagementActionPlan> {
+  void pool;
+  void job;
+  void externalPropertyId;
   throw Object.assign(
     new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
     { statusCode: 503, code: "PRICING_UNAVAILABLE" },

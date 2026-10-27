@@ -1165,6 +1165,17 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # VAY-2108: the audited per-hotel Channex handover executor (activate, attach, revoke, sales).
+      - name: Verify the Channex handover executor
+        if: matrix.shard == 'pms-migrations'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          --no-file-parallelism
+          src/channexHandover.integration.test.ts
+          src/channexAttach.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify Booking add-on economics migration
         if: matrix.shard == 'pms-migrations'
         run: >-

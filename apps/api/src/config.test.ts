@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { channexClaimedScope, loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
+import {
+  channexClaimedAriScope,
+  channexClaimedScope,
+  loadConfig,
+  stripeSubscriptionRuntimeEnabled,
+} from "./config.js";
 
 const completeCreatorMarketplaceEnv = {
   TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
@@ -173,6 +178,27 @@ describe("api config", () => {
         PMS_CHANNEX_MANAGEMENT_DATABASE_URL: undefined,
       }).channexManagement.workerEnabled,
     ).toBe(false);
+    // D7: ARI and provisioning together, on the worker, on top of booking sync.
+    const ari = loadConfig({
+      ...production,
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_PROVISIONING_MODE: "mutating",
+      PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED: "true",
+    }).channexManagement;
+    expect(ari).toMatchObject({ scope: "claimed", workerEnabled: true, offerAriDeliveryEnabled: true });
+    expect(channexClaimedScope(ari)).toBe(true);
+    expect(channexClaimedAriScope(ari)).toBe(true);
+    expect(channexClaimedAriScope(config)).toBe(false);
+    // The ARI scope needs the worker even without the connection scope.
+    expect(() =>
+      loadConfig({
+        ...production,
+        PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+        PMS_CHANNEX_PROVISIONING_MODE: "mutating",
+        PMS_CHANNEX_CONNECTION_MODE: undefined,
+        PMS_CHANNEX_WORKER_ENABLED: "false",
+      }),
+    ).toThrow(/PMS_CHANNEX_WORKER_ENABLED=true/);
     const only = /requires PMS_CHANNEX_OWNED_PROPERTY_IDS|required with, and only with/;
     const format = /distinct lowercase UUIDs/;
     const scope = /allows only connection, booking sync and reviews/;
@@ -187,6 +213,15 @@ describe("api config", () => {
       [{ PMS_CHANNEX_OWNED_PROPERTY_IDS: "65f6b2fc-c783-4963-9d6b-a85f82319769" }, /reserved/],
       [{ PMS_CHANNEX_ARI_SYNC_MODE: "mutating" }, scope],
       [{ PMS_CHANNEX_PROVISIONING_MODE: "mutating" }, scope],
+      [
+        {
+          PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+          PMS_CHANNEX_PROVISIONING_MODE: "mutating",
+          PMS_CHANNEX_BOOKING_SYNC_MODE: "observe_only",
+        },
+        scope,
+      ],
+      [{ PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED: "true" }, /requires a mutating ARI sync/],
       [{ PMS_CHANNEX_MESSAGING_MODE: "mutating" }, scope],
       [{ PMS_CHANNEX_IFRAME_MODE: "mutating" }, scope],
       [{ CHANNEX_API_BASE_URL: "https://example.channex.test" }, scope],

@@ -47,8 +47,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL hotel media resolver", () => {
       [organizationId, propertyId],
     );
     await admin.query(
-      `INSERT INTO pms.room_types (id, property_id, name, currency)
-       VALUES ($1::uuid, $2::uuid, 'Resolver Room', 'EUR')`,
+      `INSERT INTO pms.room_types (id, property_id, name)
+       VALUES ($1::uuid, $2::uuid, 'Resolver Room')`,
       [roomTypeId, propertyId],
     );
     await admin.query(
