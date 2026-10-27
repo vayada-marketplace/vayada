@@ -290,7 +290,7 @@ describe.skipIf(!url)("channel preview published reader", () => {
     expect(performance.now() - start).toBeGreaterThan(4500);
     expect(performance.now() - start).toBeLessThan(7000);
     expect(await f.read()).toMatchObject({ stale: false });
-  });
+  }, 10_000);
   it("requires bounded acquisition and expires a saturated pool without leaking a waiter", async () => {
     const f = await fixture(),
       unbounded = new pg.Pool({ connectionString: url });

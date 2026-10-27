@@ -79,7 +79,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false,channexExcludedIds(options.apiBaseUrl));await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
+    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job);await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false,channexExcludedIds(options.apiBaseUrl));await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",true)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
