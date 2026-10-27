@@ -3,27 +3,25 @@ import type pg from "pg";
 import {
   CHANNEX_MANAGEMENT_WORKER_ROLE,
   channexManagementWorkerPrivileges,
+  optionalChannexDeliveryRelations,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0519), both checked on
-// PG16 and PG17. Accepting both lets this image start on either side of 0519, so it is released
-// before 0519 and stays a safe rollback target once 0519 ships.
+// Worker policy catalog with the VAY-2108 claimed scope (0519), and with the ongoing offer ARI
+// delivery scope (0521), both checked on PG16 and PG17. This image lists the 0520 delivery tables
+// in its privilege matrix, so it needs 0519 and 0520 (cloud job 6dc8de37 computed both values on
+// that base); accepting both lets it start on either side of 0521, so it is released before 0521
+// and stays a safe rollback target once 0521 ships.
 const POLICY_DIGESTS = new Set([
-  "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323",
   "f9a53a613884875be8387bfb59bf5772038eda202d0f213c32854585d247b7be",
+  "4b14279a210c9f240ea9fefbc8c78dd3886dcccd5e42c1f7f67a436fe6685e3a",
 ]);
-// Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
-// (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
-// 0474, so it stays a safe rollback target when 0474 ships in a later release.
-// The third value is the catalog after 0489 drops the restriction ARI triggers (VAY-2208, PG16
-// and PG17); it ships one release before 0489 for the same reason. The fourth is the catalog with
-// the claimed helper and the ownership-gated pms.enqueue_restriction_ari (VAY-2108 migration 0519,
-// PG16 and PG17), accepted one release ahead of 0519 in the same way.
+// Shared trigger catalog over the privilege-matrix relations plus the pinned helpers: with 0519
+// and 0520 (the delivery tables' guard triggers are attested through the matrix), and with 0521's
+// delivery helper and sales reset trigger. Earlier catalogs are unreachable for this image, which
+// refuses a database without the delivery tables (relation_missing).
 const CATALOG_DIGESTS = new Set([
-  "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
-  "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
-  "2d185251ef0a8949b140fe14469c65f5122b7df055f712ffe64e590f64e24ef2",
-  "48270709c6e36bc4d4c8c1716c8bfa636026bce462fdbc855cf54e410cd4538f",
+  "64b538202053714d7a486cbdfd8940ce55a063db5618e6eef123859f9e0e1139",
+  "3ffdd1b6dcb578a87c62bdcc7b04828fbaee45596cfaa1601a73f15f95f294bb",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
@@ -46,6 +44,10 @@ export async function assertChannexManagementWorkerBoundary(
     propertyId?: string;
     connectionScope?: boolean;
     claimedScope?: boolean;
+    /** VAY-2108 D3: ongoing offer delivery is on, so the delivery tables must be granted and
+     * row-secured (migration D3a plus the platform's delivery grant). Off: they may still be
+     * ungranted and without policies. */
+    offerDelivery?: boolean;
   } = {},
 ): Promise<void> {
   const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
@@ -166,14 +168,16 @@ export async function assertChannexManagementWorkerBoundary(
       fail("column_privileges");
   }
   for (const [name, privileges] of Object.entries(channexManagementWorkerPrivileges)) {
+    const deliveryPending = optionalChannexDeliveryRelations.has(name) && !options.offerDelivery;
     if (
       name !== "platform.channex_management_worker_properties" &&
       name !== "platform.channex_management_worker_operations" &&
       name !== "finance.online_card_readiness" &&
+      !deliveryPending &&
       !relations.find((row) => row.name === name)?.rls
     )
       fail("rls_disabled");
-    if (options.allowMissingGrants) continue;
+    if (options.allowMissingGrants || deliveryPending) continue;
     for (const [privilege, columns] of Object.entries(privileges)) {
       if (
         columns === true
@@ -254,6 +258,7 @@ functions AS (
     'platform.channex_management_worker_scope(text,text,uuid)',
     'platform.channex_management_worker_connection_scope(text,text)',
     'platform.channex_management_worker_claimed_scope(text,text)',
+    'platform.channex_management_worker_delivery_source(text,text)',
     'platform.channex_management_worker_source(text,text,uuid)',
     'platform.tenant_scope_key(text,uuid,uuid)',
     'platform.valid_tenant_scope(text,uuid,uuid)',

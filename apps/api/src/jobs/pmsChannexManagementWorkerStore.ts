@@ -247,6 +247,14 @@ async function retainedUpload(
        JOIN platform.jobs j ON j.id=ja.job_id AND j.property_id=a.property_id
        WHERE j.id=$1::uuid AND ja.attempt_number=$2
          AND (SELECT count(*) FROM pms.channex_room_availability_receipts r WHERE r.attempt_id=a.id)=1
+       UNION ALL
+       SELECT d.id,'offer_delivery_retained'::text AS progress_code
+       FROM pms.channex_offer_ari_deliveries d
+       JOIN platform.job_attempts ja ON ja.id=d.job_attempt_id AND ja.worker_id=d.worker_id
+       JOIN platform.jobs j ON j.id=ja.job_id
+       JOIN pms.channex_offer_targets t ON t.id=d.target_id AND t.property_id=j.property_id
+       WHERE j.id=$1::uuid AND ja.attempt_number=$2
+         AND (SELECT count(*) FROM pms.channex_offer_ari_delivery_receipts r WHERE r.delivery_id=d.id)=1
      ) retained JOIN platform.jobs j ON j.id=$1::uuid
      WHERE ($3::uuid IS NULL OR retained.id=$3::uuid)
        AND ($5::text IS NULL OR retained.progress_code=$5::text)

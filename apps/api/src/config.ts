@@ -75,6 +75,8 @@ export type ChannexManagementConfig = {
   stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
   stagingNoShowEnabled?: boolean;
+  /** VAY-2108 D3: ongoing offer ARI deliveries after activation (needs the delivery grants). */
+  offerAriDeliveryEnabled?: boolean;
   /** VAY-2108: the per-hotel claimed scope (engineering/channex-per-hotel-ownership.md). */
   scope?: "claimed";
   /** Target properties the claimed scope may own, on top of their active claims. */
@@ -109,6 +111,7 @@ export function channexConnectionOnlyScope(config: ChannexManagementConfig): boo
     !config.stagingPublishedOffersEnabled &&
     !config.stagingInventoryEnabled &&
     !config.stagingNoShowEnabled &&
+    !config.offerAriDeliveryEnabled &&
     ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
   );
 }
@@ -779,6 +782,24 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       "Scoped Channex restrictions require a property UUID, staging URL, disabled background workers, and only ARI mutations",
     );
   }
+  // VAY-2108 D3: ongoing offer ARI delivery is its own switch, off by default. It only has an
+  // effect inside a mutating full ARI sync, and the worker boundary then requires the delivery
+  // table grants (the platform's delivery grant mode).
+  const offerAriDeliveryEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED",
+    false,
+  );
+  if (offerAriDeliveryEnabled && capabilityModes.ariSync !== "mutating") {
+    throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires a mutating ARI sync");
+  }
+  // Delivery only runs after activation, which needs the published-offer bundle; without it the
+  // switch would be inert while the worker boundary demanded the delivery grants.
+  if (offerAriDeliveryEnabled && !stagingInventoryEnabled) {
+    throw new Error(
+      "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires the published-offer activation bundle",
+    );
+  }
   const scope = readOptionalEnv(env, "PMS_CHANNEX_SCOPE");
   if (scope !== undefined && scope !== "claimed")
     throw new Error("PMS_CHANNEX_SCOPE must be claimed when set");
@@ -899,6 +920,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     stagingPublishedOffersEnabled,
     stagingInventoryEnabled,
     stagingNoShowEnabled,
+    offerAriDeliveryEnabled,
     workerEnabled,
     capabilityModes,
     ...(scope === "claimed" ? { scope, ownedPropertyIds } : {}),

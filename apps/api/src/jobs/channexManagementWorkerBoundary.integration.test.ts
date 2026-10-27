@@ -831,4 +831,47 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
         ]);
     }
   });
+
+  it("requires the delivery table grants only once ongoing offer delivery is on (VAY-2108 D3)", async () => {
+    const tables = [
+      "pms.channex_offer_ari_deliveries",
+      "pms.channex_offer_ari_delivery_dates",
+      "pms.channex_offer_ari_delivery_receipts",
+    ];
+    const boundary = async (offerDelivery: boolean) => {
+      const client = await pool.connect();
+      try {
+        await assertChannexManagementWorkerBoundary(client, { propertyId: property, offerDelivery });
+      } finally {
+        client.release();
+      }
+    };
+    // Row security on the delivery tables arrives with migration 0521 (D3a); until then an image
+    // with delivery on refuses to start, with delivery off it starts.
+    const secured = (
+      await owner.query<{ all: boolean }>(
+        `SELECT bool_and(c.relrowsecurity) AS all FROM pg_class c
+         JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE c.relkind='r' AND n.nspname='pms' AND c.relname LIKE 'channex_offer_ari_deliver%'`,
+      )
+    ).rows[0]!.all;
+    await boundary(false);
+    if (secured) await boundary(true);
+    else await expect(boundary(true)).rejects.toThrow("channex_worker_rls_disabled");
+    await owner.query(`REVOKE ALL ON ${tables.join(",")} FROM ${role}`);
+    try {
+      // Before the platform's delivery grant mode: an image with delivery off still starts.
+      await boundary(false);
+      await expect(boundary(true)).rejects.toThrow(
+        secured ? "channex_worker_grant_missing" : "channex_worker_rls_disabled",
+      );
+    } finally {
+      for (const table of tables)
+        for (const [kind, columns] of Object.entries(privileges[table]!))
+          await owner.query(
+            `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
+          );
+    }
+    await boundary(false);
+  });
 });
