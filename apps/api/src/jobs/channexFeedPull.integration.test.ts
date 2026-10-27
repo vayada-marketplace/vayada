@@ -22,11 +22,13 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
   const calls: string[] = [];
   let resyncPages: Array<Record<string, unknown>[]> = [];
   let resyncTotal: number | null = null;
+  let resyncListStatus: number | null = null;
   const fetcher: typeof fetch = async (input, init) => {
     calls.push(`${init?.method ?? "GET"} ${String(input)}`);
     const url = new globalThis.URL(String(input));
     const property = url.searchParams.get("filter[property_id]");
     if (url.pathname === "/api/v1/bookings") {
+      if (resyncListStatus) return new Response(null, { status: resyncListStatus });
       const page = Number(url.searchParams.get("pagination[page]"));
       const total = resyncTotal ?? resyncPages.reduce((sum, rows) => sum + rows.length, 0);
       return Response.json({
@@ -38,6 +40,8 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       const id = url.pathname.split("/").at(-1)!;
       if (id === "rev-gone") return new Response(null, { status: 404 });
       if (id === "rev-limited") return new Response(null, { status: 429 });
+      if (id === "rev-broken")
+        return Response.json({ data: { id, attributes: { property_id: "elsewhere" } } });
       return Response.json({ data: revision(id, `booking-${id.slice(4)}`) });
     }
     return Response.json({
@@ -232,8 +236,8 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
     expect(await run()).toMatchObject({ resynced: 1, resyncFailed: 0 });
     const listed = calls.filter((call) => call.includes("/api/v1/bookings?"));
     expect(listed).toEqual([
-      `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-09&pagination%5Bpage%5D=1&pagination%5Blimit%5D=100`,
-      `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-09&pagination%5Bpage%5D=2&pagination%5Blimit%5D=100`,
+      `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-08&pagination%5Bpage%5D=1&pagination%5Blimit%5D=100`,
+      `GET ${BOOKINGS}?filter%5Bproperty_id%5D=${external(OWNED)}&filter%5Bdeparture_date%5D%5Bgte%5D=2026-10-08&pagination%5Bpage%5D=2&pagination%5Blimit%5D=100`,
     ]);
     expect(calls.filter((call) => call.includes("/booking_revisions/rev-")).length).toBe(100);
     expect(await jobRow(job)).toMatchObject({
@@ -275,9 +279,21 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
         ],
       },
     });
-    // Channex pausing us gives the attempt back.
+    // Channex pausing us, on the list or on a revision, gives the attempt back.
     resyncPages = [[booking("booking-limited", "rev-limited")]];
     const limited = await resyncJob(OWNED, generation, ":limited");
+    resyncListStatus = 429;
+    expect(await run()).toMatchObject({
+      resyncFailed: 1,
+      failures: [{ propertyId: OWNED, code: "rate_limited" }],
+    });
+    expect(await jobRow(limited)).toMatchObject({
+      status: "pending",
+      attempts: 0,
+      code: "rate_limited",
+    });
+    resyncListStatus = null;
+    await db.query("UPDATE platform.jobs SET run_after = now() WHERE id = $1", [limited]);
     expect(await run()).toMatchObject({
       resyncFailed: 1,
       failures: [{ propertyId: OWNED, code: "rate_limited" }],
@@ -291,6 +307,50 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
     await db.query(
       "UPDATE platform.jobs SET status = 'succeeded', finished_at = now() WHERE id = $1",
       [limited],
+    );
+    // A run that exceeds its budget pauses, keeps what it queued, and the next runs finish the
+    // rest without reading those revisions again; a revision the store refuses gets a fixed code.
+    resyncPages = [
+      [
+        booking("booking-p1", "rev-p1"),
+        booking("booking-p2", "rev-p2"),
+        booking("booking-p3", "rev-broken"),
+      ],
+    ];
+    const paused = await resyncJob(OWNED, generation, ":paused");
+    expect(await run({ resyncBudgetMs: 0 })).toMatchObject({
+      failures: [{ propertyId: OWNED, code: "resync_paused" }],
+    });
+    expect(await jobRow(paused)).toMatchObject({
+      status: "pending",
+      attempts: 0,
+      metadata: { promoted: 1, resyncDone: ["booking-p1"] },
+    });
+    await db.query("UPDATE platform.jobs SET run_after = now() WHERE id = $1", [paused]);
+    calls.length = 0;
+    expect(await run({ resyncBudgetMs: 0 })).toMatchObject({
+      failures: [{ propertyId: OWNED, code: "resync_paused" }],
+    });
+    expect(calls.filter((call) => call.includes("/booking_revisions/rev-p"))).toEqual([
+      "GET https://app.channex.io/api/v1/booking_revisions/rev-p2",
+    ]);
+    await db.query("UPDATE platform.jobs SET run_after = now() WHERE id = $1", [paused]);
+    expect(await run({ resyncBudgetMs: 0 })).toMatchObject({
+      failures: [{ propertyId: OWNED, code: "booking_failed" }],
+    });
+    expect(await jobRow(paused)).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      metadata: {
+        bookings: 3,
+        promoted: 0,
+        resyncDone: ["booking-p1", "booking-p2"],
+        failedBookings: [{ id: "booking-p3", code: "promotion_failed" }],
+      },
+    });
+    await db.query(
+      "UPDATE platform.jobs SET status = 'succeeded', finished_at = now() WHERE id = $1",
+      [paused],
     );
     // A run a crashed task left behind gets its next attempt (taken in the same tick here).
     await db.query(

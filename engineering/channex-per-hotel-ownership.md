@@ -81,7 +81,9 @@ minutes apart); Channex rate limiting or a worker shutdown gives the attempt bac
 that changed since the attach, or a hotel with more than 2,000 upcoming bookings, fails the
 job at once and needs its own plan. A crashed run gets its next attempt after two hours. Only
 the production worker takes the job (the payload carries no host until the claim stamps it).
-Stays that departed yesterday local time are copied too and show as past stays. Full ARI must
+The list starts two UTC days back, so stays that departed yesterday in any hotel timezone are
+copied too and show as past stays. A run that exceeds its eight-minute budget pauses with the
+ids it queued and the next run continues from there. Full ARI must
 wait until the resync job succeeded (`job_metadata.bookings` = `promoted`), or the rooms look
 free. Direct bookings from the old booking engine are
 re-entered as manual bookings in the new PMS (they block the units the same way).
