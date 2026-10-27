@@ -164,8 +164,11 @@ export async function applyChannexAlterationRevision(
   }>(
     `SELECT assignment.id,assignment.position,assignment.room_type_id AS "roomTypeId",assignment.room_id AS "roomId",
        assignment.assignment_status AS status,assignment.assignment_payload->>'version' AS version,assignment.source,
-       (assignment.source='channel' AND assignment.assignment_status='pending' AND assignment.room_id IS NULL
-         AND assignment.assignment_payload->>'version'=assignment.assignment_payload->>'channexRevision') AS untouched,
+       (assignment.source='channel'
+         AND assignment.assignment_payload->>'version'=assignment.assignment_payload->>'channexRevision'
+         AND ((assignment.assignment_status='pending' AND assignment.room_id IS NULL)
+           OR (assignment.assignment_status='assigned' AND assignment.room_id IS NOT NULL
+             AND assignment.assignment_payload @> '{"autoAssigned":true}'::jsonb))) AS untouched,
        assignment.assignment_payload @> '{"channexAlterationReleased":true}'::jsonb AS "releasedByAlteration"
      FROM pms.operational_booking_assignments assignment
      WHERE assignment.property_id=$1 AND assignment.guest_booking_id=$2
