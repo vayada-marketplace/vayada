@@ -2,6 +2,7 @@ import {
   expect,
   test,
   type APIRequestContext,
+  type Browser,
   type BrowserContext,
   type TestInfo,
 } from "@playwright/test";
@@ -10,40 +11,41 @@ import {
   JsonApi,
   NEXT_STACK_ORIGINS,
   arrayField,
+  authenticateSyntheticPlatformAdmin,
   authenticateSyntheticPmsUser,
   createSyntheticPlatformAdmin,
   createSyntheticUser,
   fillSecret,
   futureStay,
   loadSmokeEnvironment,
-  numberField,
+  loginPms,
+  publicApi,
+  readAuthSession,
   record,
   recordField,
   signUpSyntheticHotelOwner,
   smokeRecoveryReceipt,
   stringField,
   targetApi,
-  uploadPropertyCover,
   type SmokeEnvironment,
   type SyntheticPlatformAdmin,
   type SyntheticUser,
 } from "./support";
 import {
-  findPricingOffer,
-  runQuoteLifecycle,
-  waitForOffer,
+  GUEST_NAME,
+  bookOnLivePage,
+  cancelOnLivePage,
+  stayRoom,
+  waitForRoomsLeft,
   type BookingResource,
 } from "./booking-lifecycle";
-import { runPromotionAcceptance } from "./promotions";
 import { cleanupSmokeResources, recoverSmokeProperty, type HotelResource } from "./cleanup";
-import { configureGuestPolicyForManualBooking } from "./guest-policy";
-import { replayAmbiguousManualBooking, runManualBookingAcceptance } from "./manual-booking";
+import { completeFirstRun } from "./first-run";
 import {
   confirmStaffInvitationDelivery,
   expectPms,
   runRestrictedStaffAcceptance,
 } from "./restricted-staff";
-import { replayAmbiguousUiBooking, runRoomShuffleAcceptance } from "./room-shuffle";
 
 type ForeignHotelResource = { accessToken: string; propertyId: string };
 type HotelFlowResource = HotelResource & {
@@ -155,62 +157,6 @@ test("secret input avoids value-bearing Playwright steps", async ({ page }) => {
   expect(await page.locator("output").textContent()).toBe(String(secret.length));
 });
 
-test("ambiguous UI booking replay registers the exact request for cleanup", async () => {
-  const originalError = new Error("browser response timed out"),
-    body = { commandId: "same-command", idempotencyKey: "same-key" },
-    bookings: BookingResource[] = [];
-  let replayedBody: unknown;
-  const api = {
-    async json(_method: string, _path: string, requestBody: unknown) {
-      replayedBody = requestBody;
-      return { guestBookingId: "booking-1" };
-    },
-  } as unknown as JsonApi;
-
-  await expect(
-    replayAmbiguousUiBooking(
-      { api, bookings, slug: "synthetic-hotel" },
-      "/api/pms/properties/property-1/manual-bookings",
-      body,
-      "synthetic@example.test",
-      originalError,
-    ),
-  ).rejects.toBe(originalError);
-  expect(replayedBody).toBe(body);
-  expect(bookings).toEqual([
-    {
-      bookingId: "booking-1",
-      email: "synthetic@example.test",
-      mode: "instant",
-      resolved: false,
-      slug: "synthetic-hotel",
-    },
-  ]);
-});
-
-test("ambiguous UI booking replay exposes recovery failure without false registration", async () => {
-  const originalError = new Error("browser response timed out"),
-    replayError = new Error("idempotent replay failed"),
-    bookings: BookingResource[] = [],
-    api = {
-      async json() {
-        throw replayError;
-      },
-    } as unknown as JsonApi;
-
-  const failure = await replayAmbiguousUiBooking(
-    { api, bookings, slug: "synthetic-hotel" },
-    "/api/pms/properties/property-1/manual-bookings",
-    { commandId: "same-command", idempotencyKey: "same-key" },
-    "synthetic@example.test",
-    originalError,
-  ).catch((error: unknown) => error);
-
-  expect(failure).toBeInstanceOf(AggregateError);
-  expect((failure as AggregateError).errors).toEqual([originalError, replayError]);
-  expect(bookings).toEqual([]);
-});
-
 test("staff delivery accepts an exact provider-confirmed delivered invitation", () => {
   expect(
     confirmStaffInvitationDelivery({
@@ -254,47 +200,6 @@ test("staff delivery rejects non-delivery outcomes", () => {
       providerInvitationId: "invitation_exact",
     }),
   ).toThrow("Unexpected staff invitation delivery outcome: not_ready");
-});
-
-test("ambiguous primary manual booking returns the exact idempotent replay", async () => {
-  const body = { commandId: "same-command", idempotencyKey: "same-key" };
-  let replayedBody: unknown;
-  const api = {
-    async json(_method: string, _path: string, requestBody: unknown) {
-      replayedBody = requestBody;
-      return { guestBookingId: "booking-1", outcome: "replayed" };
-    },
-  } as unknown as JsonApi;
-
-  await expect(
-    replayAmbiguousManualBooking(
-      api,
-      "/api/pms/properties/property-1/manual-bookings",
-      body,
-      new Error("browser response timed out"),
-    ),
-  ).resolves.toEqual({ guestBookingId: "booking-1", outcome: "replayed" });
-  expect(replayedBody).toBe(body);
-});
-
-test("ambiguous primary manual booking exposes replay failure", async () => {
-  const originalError = new Error("browser response timed out");
-  const replayError = new Error("idempotent replay failed");
-  const api = {
-    async json() {
-      throw replayError;
-    },
-  } as unknown as JsonApi;
-
-  const failure = await replayAmbiguousManualBooking(
-    api,
-    "/api/pms/properties/property-1/manual-bookings",
-    { commandId: "same-command", idempotencyKey: "same-key" },
-    originalError,
-  ).catch((error: unknown) => error);
-
-  expect(failure).toBeInstanceOf(AggregateError);
-  expect((failure as AggregateError).errors).toEqual([originalError, replayError]);
 });
 
 test("cleanup refreshes hotel authentication before PMS fallback", async () => {
@@ -392,10 +297,9 @@ test("cleanup refreshes hotel authentication before PMS fallback", async () => {
   }
 
   expect(booking.resolved).toBe(true);
-  expect(calls.slice(0, 4)).toEqual(["login", "public", "target", "target"]);
+  expect(calls).toEqual(["login", "public", "target"]);
   expect(targetCalls).toEqual([
     "POST /api/pms/properties/property-1/reservations/booking-1/cancel",
-    "PATCH /api/finance/properties/property-1/payment-settings",
   ]);
 });
 
@@ -464,19 +368,6 @@ test("ordinary cleanup reconciles an untracked synthetic booking before retireme
   } as unknown as APIRequestContext;
 
   try {
-    const replayFailure = await replayAmbiguousManualBooking(
-      {
-        async json() {
-          throw new Error("replay response also timed out");
-        },
-      } as unknown as JsonApi,
-      `/api/pms/properties/${propertyId}/manual-bookings`,
-      { commandId: "same-command", idempotencyKey: "same-key" },
-      new Error("browser response timed out after commit"),
-    ).catch((error: unknown) => error);
-    expect(replayFailure).toBeInstanceOf(AggregateError);
-    expect(bookings).toEqual([]);
-
     const errors = await cleanupSmokeResources(
       request,
       environment,
@@ -505,7 +396,7 @@ test("ordinary cleanup reconciles an untracked synthetic booking before retireme
 });
 
 smokeTest(
-  "fresh hotel onboarding reaches every next-stack handoff and safe checkout",
+  "a new hotel's first run goes live, takes a guest booking and hands off to PMS and staff",
   async ({ browser, request, smokeResources }, testInfo) => {
     smokeTest.skip(
       process.env.E2E_NEXT_STACK_SMOKE !== "1",
@@ -543,11 +434,11 @@ smokeTest(
     try {
       const completedHotel = await runHotelFlow(
         hotelContext,
+        browser,
         request,
         environment,
         users,
         bookings,
-        foreignHotel.accessToken,
         platformAdmin,
         testInfo,
         registerHotel,
@@ -577,252 +468,93 @@ smokeTest(
 
 async function runHotelFlow(
   context: BrowserContext,
+  browser: Browser,
   request: APIRequestContext,
   environment: SmokeEnvironment,
   users: SyntheticUser[],
   bookings: BookingResource[],
-  foreignAccessToken: string,
   platformAdmin: SyntheticPlatformAdmin,
   testInfo: TestInfo,
   registerHotel: (resource: HotelResource, retirementPropertyId?: string) => void,
 ): Promise<HotelFlowResource> {
   const page = await context.newPage();
-  const { user, session } =
+  const { user, session, flow } =
     await test.step("sign a new hotel owner up in Booking Admin", async () => {
       const result = await signUpSyntheticHotelOwner(page, request, environment);
       users.push(result.user);
       expect(result.session.organizationKind).toBe("hotel_group");
       return result;
     });
+  // New hotels set up through Booking Admin's first run (VAY-2247, ONBOARDING_V2_ENABLED).
+  expect(flow, "Booking Admin opened the old setup wizard instead of the first run.").toBe(
+    "first_run",
+  );
 
-  let api = targetApi(request, session.accessToken);
+  const owner = {
+    api: targetApi(request, session.accessToken),
+    ownerWorkosUserId: user.id,
+    workosOrganizationId: session.workosOrganizationId,
+  };
   const hotelName = `QA Next Hotel ${environment.runId}`;
-  const setup =
-    await test.step("provision tracks, hotel profile, commission, payment and room", async () => {
-      await api.json(
-        "PUT",
-        "/api/hotel-setup/tracks",
-        {
-          selectedTracks: ["hotel_operations"],
-          expectedRevision: 0,
-        },
-        { "Idempotency-Key": `next-smoke:${environment.runId}:tracks` },
-      );
+  const room = { name: "QA Double Room", numberOfRooms: 2, maxGuests: 2, pricePerNight: "150" };
+  const { propertyId, bookingUrl } = await completeFirstRun(
+    page,
+    {
+      name: hotelName,
+      streetAddress: "Alexanderplatz 1",
+      postalCode: "10178",
+      city: "Berlin",
+      countryCode: "DE",
+      receptionEmail: user.email,
+      receptionPhone: "+49 30 5550102",
+      room,
+    },
+    (id) => registerHotel({ ...owner, propertyId: id }),
+  );
+  await page.screenshot({ path: testInfo.outputPath("first-run-live.png"), fullPage: true });
 
-      const property = await api.json<Record<string, unknown>>(
-        "POST",
-        "/api/hotel-setup/properties",
-        {
-          displayName: hotelName,
-          propertyType: "hotel",
-          location: {
-            streetAddress: "Alexanderplatz 1",
-            postalCode: "10178",
-            city: "Berlin",
-            countryCode: "DE",
-            timezone: "Europe/Berlin",
-            latitude: null,
-            longitude: null,
-            localityPublic: true,
-            geoPublic: false,
-            mapDisplayMode: "hidden",
-          },
-          contacts: [
-            { channelType: "email", value: user.email, purpose: "general", isPublic: false },
-            { channelType: "phone", value: "+49 30 5550102", purpose: "general", isPublic: false },
-          ],
-        },
-        { "Idempotency-Key": `next-smoke:${environment.runId}:property` },
+  const slug =
+    await test.step("the hotel is active and served at its booking address", async () => {
+      // The first run makes the hotel active itself (VAY-2247, VAY-2140); Vayada approves nothing.
+      // The temporary platform admin only reads the lifecycle here and retires the hotel at the end.
+      const platformAdminApi = targetApi(
+        request,
+        await authenticateSyntheticPlatformAdmin(request, platformAdmin, environment.password),
       );
-      const propertyId = stringField(property, "propertyId");
-      registerHotel({
-        api,
-        ownerWorkosUserId: user.id,
-        propertyId,
-        workosOrganizationId: session.workosOrganizationId,
-      });
-
-      await api.json("PUT", `/api/hotel-setup/properties/${propertyId}/launch-settings`, {
-        defaultCurrency: "EUR",
-        supportedCurrencies: ["EUR"],
-        defaultLanguage: "en",
-        supportedLanguages: ["en"],
-        instagram: "",
-        facebook: "",
-        tiktok: "",
-        youtube: "",
-      });
-      await api.json("POST", `/api/finance/properties/${propertyId}/select-commission`, {
-        commandId: `next-smoke:${environment.runId}:commission`,
-        idempotencyKey: `next-smoke:${environment.runId}:commission`,
-      });
-      await api.json("PATCH", `/api/finance/properties/${propertyId}/payment-settings`, {
-        commandId: `next-smoke:${environment.runId}:payment`,
-        idempotencyKey: `next-smoke:${environment.runId}:payment`,
-        paymentSettings: {
-          paymentsEnabled: true,
-          paymentProvider: "manual",
-          acceptedMethods: ["pay_at_property", "cash"],
-          depositPolicy: {
-            bankName: "",
-            accountHolder: "",
-            accountNumber: "",
-            bicSwift: "",
-            paypalEmail: "",
-            paypalPaymentWindowHours: 24,
-            bankTransferInstructions: "",
-          },
-          refundPolicy: { freeCancellationDays: 7 },
-          requiresManualReview: false,
-        },
-      });
-      const room = await api.json<Record<string, unknown>>(
-        "POST",
-        `/api/pms/properties/${propertyId}/room-types`,
-        {
-          onboardingSetup: true,
-          initialSetupOnly: true,
-          name: "QA Double Room",
-          totalRooms: 2,
-          maxOccupancy: 2,
-          maxAdults: 2,
-          maxChildren: 0,
-          bedType: "1 King Bed",
-          bedrooms: 1,
-          bathrooms: 1,
-          bathroomType: "private",
-          size: 24,
-          baseRate: "150.00",
-          currency: "EUR",
-          isActive: true,
-          operatingPeriods: [{ from: "01-01", to: "12-31" }],
-          seasons: [
-            {
-              name: "Year-round",
-              tier: "standard",
-              from: "01-01",
-              to: "12-31",
-              rate: "150.00",
-              minStay: 1,
-            },
-          ],
-          commandId: `next-smoke:${environment.runId}:room`,
-          idempotencyKey: `next-smoke:${environment.runId}:room`,
-        },
-      );
-      const roomTypeId = stringField(recordField(room, "item"), "roomTypeId");
-      await api.json("PATCH", `/api/booking/hotels/${propertyId}/settings/property`, {
-        check_in_time: "15:00",
-        check_out_time: "12:00",
-        terms_text: "Guests agree to the QA smoke terms. No real payment is collected.",
-        cancellation_policy_text: "Free cancellation follows the selected flexible rate terms.",
-      });
-      return { propertyId, roomTypeId };
-    });
-
-  const stay = futureStay();
-  const publication =
-    await test.step("publish presentation and direct booking readiness", async () => {
-      const uploaded = await uploadPropertyCover(request, api, setup.propertyId, environment.runId);
-      const presentation = await api.json<Record<string, unknown>>(
-        "GET",
-        `/api/hotel-setup/properties/${setup.propertyId}/steps/present-hotel`,
-      );
-      await api.json(
-        "PUT",
-        `/api/hotel-setup/properties/${setup.propertyId}/steps/present-hotel`,
-        {
-          expectedProfileRevision: numberField(presentation, "profileRevision"),
-          locale: "en",
-          shortDescription:
-            "A synthetic Berlin hotel used only to verify the deployed Vayada next-stack flow.",
-          amenities: { reviewed: true, keys: ["wifi"] },
-          media: { coverMediaObjectId: uploaded.mediaObjectId, galleryMediaObjectIds: [] },
-        },
-        { "Idempotency-Key": `next-smoke:${environment.runId}:presentation` },
-      );
-      const publicProfile = await api.json<Record<string, unknown>>(
-        "GET",
-        `/api/hotel-setup/properties/${setup.propertyId}/public-profile`,
-      );
-      const media = arrayField(recordField(publicProfile, "publicProfile"), "media").map(record);
-      const hero = media.find((item) => item.mediaObjectId === uploaded.mediaObjectId);
-      if (!hero) throw new Error("Published hotel presentation is missing its cover image.");
-      const heroImage = stringField(hero, "url");
-      await api.json("PATCH", `/api/booking/hotels/${setup.propertyId}/settings/design`, {
-        heroImage,
-        heroHeading: hotelName,
-        heroSubtext: "Book this synthetic room without a card charge.",
-        primaryColor: "#2946E8",
-        fontPairing: "modern-minimalist",
-      });
-      // VAY-2140: a hotel goes live by itself once its profile is complete (the basics, a
-      // description and an approved public image); Vayada approves nothing. The temporary
-      // platform admin only reads the lifecycle here and retires the property at the end.
-      const platformAdminApi = targetApi(request, platformAdmin.accessToken);
       await expect
         .poll(
           async () =>
             (
               await platformAdminApi.json<Record<string, unknown>>(
                 "GET",
-                `/api/platform/admin/properties/${setup.propertyId}/retirement-impact`,
+                `/api/platform/admin/properties/${propertyId}/retirement-impact`,
               )
             ).lifecycleStatus,
           { timeout: 90_000, intervals: [1_000, 2_000, 5_000] },
         )
         .toBe("active");
-      const result = await api.json<Record<string, unknown>>(
-        "POST",
-        `/api/booking/hotels/${setup.propertyId}/public-bookability`,
+      const host = new URL(bookingUrl).hostname;
+      const hostResponse = await request.get(
+        `${NEXT_STACK_ORIGINS.api}/api/booking-web/hosts/${encodeURIComponent(host)}`,
       );
-      expect(result.profileStatus).toBe("public");
-      expect(result.freshnessStatus).toBe("fresh");
-      expect(arrayField(result, "missingReadiness")).toEqual([]);
-      const published = {
-        bookingBaseUrl: stringField(result, "bookingBaseUrl"),
-        canonicalUrl: stringField(result, "canonicalUrl"),
-        slug: stringField(result, "canonicalSlug"),
-      };
-      registerHotel({
-        api,
-        ownerWorkosUserId: user.id,
-        propertyId: setup.propertyId,
-        slug: published.slug,
-        stay,
-        workosOrganizationId: session.workosOrganizationId,
-      });
-      return published;
+      expect(hostResponse).toBeOK();
+      const hosted = record(await hostResponse.json());
+      expect(hosted).toMatchObject({ hotel: { name: hotelName } });
+      const hostedSlug = stringField(hosted, "slug");
+      expect(host).toBe(`${hostedSlug}.next-booking.vayada.com`);
+      const publicPage = await context.newPage();
+      await publicPage.goto(bookingUrl);
+      await expect(publicPage.getByRole("heading", { name: hotelName }).first()).toBeVisible();
+      await expect(
+        publicPage.getByRole("heading", { name: /Unable to Load Hotel|isn't online/ }),
+      ).toHaveCount(0);
+      await publicPage.close();
+      return hostedSlug;
     });
 
-  await test.step("open the published hotel and hand off to PMS and Booking Admin", async () => {
-    const publishedHost = new URL(publication.bookingBaseUrl).hostname;
-    expect(publishedHost).toBe(`${publication.slug}.next-booking.vayada.com`);
-    const hostResponse = await request.get(
-      `${NEXT_STACK_ORIGINS.api}/api/booking-web/hosts/${encodeURIComponent(publishedHost)}`,
-    );
-    expect(hostResponse).toBeOK();
-    await expect(hostResponse.json()).resolves.toMatchObject({
-      slug: publication.slug,
-      hotel: { name: hotelName },
-    });
-    const profileResponse = await request.get(
-      `${NEXT_STACK_ORIGINS.api}/api/booking-web/hotels/${encodeURIComponent(publication.slug)}`,
-    );
-    expect(profileResponse).toBeOK();
-    await expect(profileResponse.json()).resolves.toMatchObject({
-      hotel: { name: hotelName, slug: publication.slug },
-    });
-    const publicPage = await context.newPage();
-    await publicPage.goto(publication.canonicalUrl);
-    await expect(publicPage.getByRole("heading", { name: hotelName }).first()).toBeVisible();
-    await expect(
-      publicPage.getByRole("heading", { name: /Unable to Load Hotel|isn't online/ }),
-    ).toHaveCount(0);
-    await publicPage.close();
-
-    // The owner signed up in Booking Admin, so its dashboard opens on the new hotel.
-    await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/dashboard`);
+  await test.step("the owner's dashboard opens on the new hotel", async () => {
+    // Before any booking exists, so no new-booking notice covers the page.
+    await page.getByRole("button", { name: "Go to my dashboard" }).click();
     await page.waitForURL(
       (url) => url.origin === NEXT_STACK_ORIGINS.bookingAdmin && url.pathname === "/dashboard",
       { timeout: 45_000 },
@@ -833,123 +565,112 @@ async function runHotelFlow(
     });
   });
 
-  const resource = {
-    api,
-    addonItemIds: [] as string[],
-    ownerWorkosUserId: user.id,
-    propertyId: setup.propertyId,
-    slug: publication.slug,
-    stay,
-    workosOrganizationId: session.workosOrganizationId,
-  };
-  registerHotel(resource);
-  await configureGuestPolicyForManualBooking({
-    api,
-    accessToken: session.accessToken,
-    propertyId: setup.propertyId,
-    request,
-    roomTypeId: setup.roomTypeId,
-  });
-  // Direct checkout needs the materialized inventory initialized by policy setup.
-  await runPromotionAcceptance({
-    api,
-    bookings,
-    environment,
-    page,
-    propertyId: setup.propertyId,
-    request,
-    roomTypeId: setup.roomTypeId,
-    slug: publication.slug,
-    stay,
-  });
-  await runRoomShuffleAcceptance({
-    api,
-    bookings,
-    environment,
-    page,
-    propertyId: setup.propertyId,
-    roomTypeId: setup.roomTypeId,
-    slug: publication.slug,
-    testInfo,
-  });
-  await runManualBookingAcceptance({
-    api,
-    accessToken: session.accessToken,
-    bookings,
-    environment,
-    foreignAccessToken,
-    page,
-    propertyId: setup.propertyId,
-    request,
-    refreshAuthentication: async () => {
-      const accessToken = await authenticateSyntheticPmsUser(
-        page.context().request,
-        user,
-        environment.password,
-      );
-      api = targetApi(request, accessToken);
-      resource.api = api;
-      return { accessToken, api };
-    },
-    slug: publication.slug,
-    testInfo,
-    addonItemIds: resource.addonItemIds,
-  });
-  await test.step("exercise instant and request checkout with inventory restoration", async () => {
-    const pricingOffer = await findPricingOffer(request, publication.slug, setup.roomTypeId);
-    for (const mode of ["instant", "request"] as const) {
-      await api.json("PUT", `/api/pms/properties/${setup.propertyId}/booking-acceptance`, {
-        acceptanceMode: mode,
-      });
-      const offer = await waitForOffer(request, publication.slug, stay, 2);
-      expect(offer.roomTypeId).toBe(setup.roomTypeId);
-      await runQuoteLifecycle(
-        request,
-        environment,
-        publication.slug,
-        stay,
-        pricingOffer,
-        offer.availableRooms,
-        mode,
-        bookings,
-      );
-      await waitForOffer(request, publication.slug, stay, 2);
-    }
+  const stay = futureStay();
+  const roomTypeId = await test.step("guests see the first run's room and price", async () => {
+    const catalog = await publicApi(request).json<Record<string, unknown>>(
+      "GET",
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
+    );
+    expect(catalog.version).toBe("public-pricing-offers.v1");
+    const rooms = arrayField(catalog, "rooms").map(record);
+    expect(rooms.map((candidate) => candidate.name)).toEqual([room.name]);
+    const id = stringField(rooms[0]!, "roomTypeId");
+    // Two nights at the owner's 150 a night, paid at the hotel.
+    expect(arrayField(await stayRoom(request, slug, id, stay), "offers")).toContainEqual(
+      expect.objectContaining({ status: "priced", totalMinor: "30000", currency: "EUR" }),
+    );
+    await waitForRoomsLeft(request, slug, id, stay, room.numberOfRooms);
+    return id;
   });
 
-  const completedResource =
-    await test.step("create a replacement property for restricted staff", async () => {
-      const property = await api.json<Record<string, unknown>>(
-        "POST",
-        "/api/hotel-setup/properties",
-        {
-          displayName: `QA Restricted Hotel ${environment.runId}`,
-          propertyType: "hotel",
-          location: {
-            streetAddress: "Unter den Linden 1",
-            postalCode: "10117",
-            city: "Berlin",
-            countryCode: "DE",
-            timezone: "Europe/Berlin",
-            latitude: null,
-            longitude: null,
-            localityPublic: false,
-            geoPublic: false,
-            mapDisplayMode: "hidden",
-          },
-          contacts: [
-            { channelType: "email", value: user.email, purpose: "general", isPublic: false },
-            { channelType: "phone", value: "+49 30 5550104", purpose: "general", isPublic: false },
-          ],
-        },
-        { "Idempotency-Key": `next-smoke:${environment.runId}:restricted-property` },
+  const guestBooking = await test.step("a guest books the room on the live booking page", () =>
+    bookOnLivePage({
+      browser,
+      bookingUrl,
+      bookings,
+      environment,
+      roomName: room.name,
+      roomTypeId,
+      slug,
+      stay,
+    }));
+  await waitForRoomsLeft(request, slug, roomTypeId, stay, room.numberOfRooms - 1);
+
+  await test.step("the owner sees the guest's booking in PMS", async () => {
+    const pmsApi = targetApi(
+      request,
+      await authenticateSyntheticPmsUser(request, user, environment.password),
+    );
+    const read = async () =>
+      recordField(
+        await pmsApi.json(
+          "GET",
+          `/api/pms/properties/${propertyId}/reservations/${guestBooking.bookingId}`,
+        ),
+        "item",
       );
-      const secondaryPropertyId = stringField(property, "propertyId");
-      const completed = { ...resource, secondaryPropertyId };
-      registerHotel(completed, secondaryPropertyId);
-      return completed;
-    });
-  return completedResource;
+    // An accepted booking reaches PMS through a background job.
+    await expect
+      .poll(
+        () =>
+          read().then(
+            () => "found",
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          ),
+        { timeout: 90_000, intervals: [2_000, 5_000] },
+      )
+      .toBe("found");
+    expect(recordField(await read(), "primaryGuest").email).toBe(guestBooking.email);
+    await loginPms(page, user, environment.password);
+    await page.goto(`${NEXT_STACK_ORIGINS.pms}/bookings/${guestBooking.bookingId}`);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(
+      guestBooking.bookingReference,
+      { timeout: 45_000 },
+    );
+    await expect(page.getByText(GUEST_NAME, { exact: true }).first()).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("pms-guest-booking.png"), fullPage: true });
+  });
+
+  await test.step("the guest cancels on the live booking page", async () => {
+    const resource = bookings.find(({ bookingId }) => bookingId === guestBooking.bookingId)!;
+    await cancelOnLivePage({ browser, bookingUrl, booking: guestBooking, resource });
+    await waitForRoomsLeft(request, slug, roomTypeId, stay, room.numberOfRooms);
+  });
+
+  return test.step("create a replacement property for restricted staff", async () => {
+    // The sign-up token may have expired by now: read the owner's current Booking Admin session.
+    await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/dashboard`);
+    const api = targetApi(request, (await readAuthSession(page, "booking-admin")).accessToken);
+    const property = await api.json<Record<string, unknown>>(
+      "POST",
+      "/api/hotel-setup/properties",
+      {
+        displayName: `QA Restricted Hotel ${environment.runId}`,
+        propertyType: "hotel",
+        location: {
+          streetAddress: "Unter den Linden 1",
+          postalCode: "10117",
+          city: "Berlin",
+          countryCode: "DE",
+          timezone: "Europe/Berlin",
+          latitude: null,
+          longitude: null,
+          localityPublic: false,
+          geoPublic: false,
+          mapDisplayMode: "hidden",
+        },
+        contacts: [
+          { channelType: "email", value: user.email, purpose: "general", isPublic: false },
+          { channelType: "phone", value: "+49 30 5550104", purpose: "general", isPublic: false },
+        ],
+      },
+      { "Idempotency-Key": `next-smoke:${environment.runId}:restricted-property` },
+    );
+    const secondaryPropertyId = stringField(property, "propertyId");
+    const completed = { ...owner, api, propertyId, secondaryPropertyId };
+    registerHotel(completed, secondaryPropertyId);
+    return completed;
+  });
 }
 
 async function runForeignHotelFlow(
