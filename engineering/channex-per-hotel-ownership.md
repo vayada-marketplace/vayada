@@ -110,8 +110,20 @@ and message jobs that retry and then dead-letter.
 3. Per hotel: legacy disable and readback, then `attach` (or `activate` for an imported row),
    then the booking copy and the first pull within minutes. Then the offers create their rate
    plans, the OTA rate mapping in Channex moves to them, and only then full ARI.
-4. ARI and published offers: a claimed worker scope (new RLS helper, the pinned scope functions
-   untouched, digests re-pinned) plus platform grant/preflight. Then the initial offer ARI with
-   `stop_sell=true`, and activation at a quiet time.
+4. ARI and published offers (D7): `PMS_CHANNEX_ARI_SYNC_MODE` and `PMS_CHANNEX_PROVISIONING_MODE`
+   turn `mutating` together under the claimed scope, on top of booking sync. The worker then runs
+   under the claimed DB scope (0519: new RLS helper, the pinned scope functions untouched, digests
+   re-pinned) after the platform's claimed grant and preflight. It claims `sync_ari` and
+   `provision` jobs only for the owned hotels that pass the gate, plus unbound `enable` jobs.
+   Creating the missing Channex room types of a hotel that pressed "Enable connection" is the
+   D7b follow-up: the worker login may lock but not insert `pms.channel_room_type_mappings`, so
+   it needs a migration (restrictive insert policy on the claimed gate) and a platform grant
+   first; a taken-over hotel adopts its existing rooms through the attach step and needs none of
+   that. Rate plans come only from published offers, which the owned hotels may provision through
+   the published-offer route. The
+   ARI schedule enqueues a full sync for each owned, claimed hotel whenever its pricing, rooms,
+   mappings, inventory or closures change, or the local date moves. Then the initial offer ARI
+   with `stop_sell=true`, activation, and ongoing delivery
+   (`engineering/channex-ongoing-offer-ari.md`) once `PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED` is on.
 
 Kill switches: modes back to `observe_only` stop every hotel; `revoke` stops one.

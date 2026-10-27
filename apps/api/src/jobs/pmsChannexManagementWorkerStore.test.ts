@@ -28,7 +28,7 @@ describe("PMS Channex management worker store", () => {
     const harness = setup({ withJob: true, connectionOnly: true });
     await expect(harness.store.claim({ workerId: "worker-1", now })).resolves.toEqual(job);
     const claim = harness.db.calls.find(({ text }) => text.includes("FOR UPDATE SKIP LOCKED"));
-    expect(claim?.values?.at(-1)).toBe(true);
+    expect(claim?.values?.[7]).toBe(true);
     expect(claim?.text).toContain("payload->>'operationType' = 'enable'");
     // A pending job needs an unbound hotel; a running job may finish its own binding.
     expect(claim?.text).toMatch(
@@ -37,6 +37,30 @@ describe("PMS Channex management worker store", () => {
     expect(harness.db.sql()).not.toContain("pms.enqueue_restriction_ari");
   });
 
+  it("claims ARI and provisioning only for owned, claimed hotels in the claimed scope", async () => {
+    const owned = ["29f39aae-0000-4000-8000-000000000001"];
+    const harness = setup({ withJob: true, claimedOwnedPropertyIds: owned });
+    await expect(harness.store.claim({ workerId: "worker-1", now })).resolves.toEqual(job);
+    const claim = harness.db.calls.find(({ text }) => text.includes("max_attempts AS"))!;
+    expect(claim.values?.[8]).toEqual(owned);
+    expect(claim.values?.[9]).toBe(true);
+    expect(claim.text).toContain("property_id = ANY($9::uuid[])");
+    expect(claim.text).toContain("$10::boolean AND payload->>'operationType' = 'enable'");
+    // Without a mutating connection the claimed worker never takes an enable job.
+    const noEnable = setup({ withJob: true, claimedOwnedPropertyIds: owned, claimedEnableJobs: false });
+    await noEnable.store.claim({ workerId: "worker-1", now });
+    expect(
+      noEnable.db.calls.find(({ text }) => text.includes("max_attempts AS"))!.values?.[9],
+    ).toBe(false);
+    expect(claim.text).toContain("claim.claim_state = 'active'");
+    expect(claim.text).toContain("connection.connection_status IN ('connected', 'degraded')");
+    // Outside the claimed scope the list is null and the filter is inert.
+    const plain = setup({ withJob: true });
+    await plain.store.claim({ workerId: "worker-1", now });
+    expect(
+      plain.db.calls.find(({ text }) => text.includes("max_attempts AS"))!.values?.[8],
+    ).toBeNull();
+  });
   it("persists completion", async () => {
     const harness = setup();
     await harness.store.succeed(
@@ -183,6 +207,8 @@ type FakeDbOptions = Partial<FakeJobRow> & {
   attemptUpdateRowCount?: number;
   rollbackError?: Error;
   connectionOnly?: boolean;
+  claimedOwnedPropertyIds?: readonly string[];
+  claimedEnableJobs?: boolean;
 };
 
 function setup(options: FakeDbOptions = {}) {
@@ -193,6 +219,8 @@ function setup(options: FakeDbOptions = {}) {
     pool: db.pool(),
     targetState: state,
     connectionOnly: options.connectionOnly,
+    claimedOwnedPropertyIds: options.claimedOwnedPropertyIds,
+    claimedEnableJobs: options.claimedEnableJobs,
   });
   return { db, state, store };
 }

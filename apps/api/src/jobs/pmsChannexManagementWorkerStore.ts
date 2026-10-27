@@ -58,6 +58,13 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   stagingInventoryEnabled?: boolean;
   /** VAY-2055: claim only `enable` jobs for hotels without a Channex binding. */
   connectionOnly?: boolean;
+  /** VAY-2108 D7: the claimed scope's owned hotels. ARI and provisioning jobs are claimed only
+   * for these, and only while the target owns them (active claim on the connected binding);
+   * `enable` jobs keep the connection-scope rule. */
+  claimedOwnedPropertyIds?: readonly string[];
+  /** With the claimed list: whether unbound `enable` jobs are claimed at all (the connection
+   * capability is mutating). Off, the worker never creates a Channex property. */
+  claimedEnableJobs?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -73,6 +80,8 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.stagingPublishedOffersEnabled ?? false,
         config.stagingInventoryEnabled ?? false,
         config.connectionOnly ?? false,
+        config.claimedOwnedPropertyIds ?? null,
+        config.claimedEnableJobs ?? true,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
     continueUpload: (job, progress, input) => continueUpload(pool, job, progress, input),
@@ -94,6 +103,8 @@ async function claim(
   stagingPublishedOffersEnabled: boolean,
   stagingInventoryEnabled: boolean,
   connectionOnly: boolean,
+  claimedOwnedPropertyIds: readonly string[] | null,
+  claimedEnableJobs: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
     const result = await client.query<JobRow>(
@@ -117,6 +128,21 @@ async function claim(
              WHERE claim.property_id = platform.jobs.property_id AND claim.provider = 'channex'
                AND NOT (platform.jobs.status = 'running' AND claim.claim_source = 'enable'
                  AND claim.claim_state = 'active' AND claim.created_at >= platform.jobs.created_at))))
+         AND ($9::uuid[] IS NULL
+           OR ($10::boolean AND payload->>'operationType' = 'enable'
+             AND NOT EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
+               WHERE claim.property_id = platform.jobs.property_id AND claim.provider = 'channex'
+                 AND NOT (platform.jobs.status = 'running' AND claim.claim_source = 'enable'
+                   AND claim.claim_state = 'active' AND claim.created_at >= platform.jobs.created_at)))
+           OR (payload->>'operationType' IN ('sync_ari', 'provision')
+             AND property_id = ANY($9::uuid[])
+             AND EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
+               JOIN pms.channel_connections connection ON connection.property_id = claim.property_id
+                 AND connection.provider = claim.provider
+                 AND connection.external_property_id = claim.external_property_id
+               WHERE claim.property_id = platform.jobs.property_id AND claim.provider = 'channex'
+                 AND claim.claim_state = 'active'
+                 AND connection.connection_status IN ('connected', 'degraded'))))
          AND NOT EXISTS (
          SELECT 1 FROM platform.jobs active
          WHERE active.queue_name = $1 AND active.property_id = platform.jobs.property_id
@@ -137,6 +163,8 @@ async function claim(
         stagingInventoryEnabled,
         stagingPublishedOffersEnabled,
         connectionOnly,
+        claimedOwnedPropertyIds,
+        claimedEnableJobs,
       ],
     );
     const row = result.rows[0];

@@ -75,6 +75,7 @@ import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunc
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
   type ApiConfig,
+  channexClaimedAriScope,
   channexClaimedScope,
   channexConnectionOnlyScope,
   loadConfig,
@@ -1263,6 +1264,8 @@ const channexAvailabilityInventory = channexManagementDatabase.availabilityInven
       });
     })()
   : undefined;
+// VAY-2108 D7: the claimed ARI scope runs the published-offer bundle for the owned hotels.
+const channexClaimedAri = channexClaimedAriScope(config.channexManagement);
 const channexManagementProvider =
   channexManagementPlans && config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
     ? createChannexManagementProvider({
@@ -1275,7 +1278,8 @@ const channexManagementProvider =
               dispatchNextChannexClosedUpload(channexUploadReconciliationPool, lease, ports)
           : undefined,
         advancePublishedOffers:
-          channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
+          channexUploadReconciliationPool &&
+          (config.channexManagement.stagingInventoryEnabled || channexClaimedAri)
             ? (lease, ports) =>
                 advancePublishedChannexOfferCreates(channexUploadReconciliationPool, lease, ports)
             : undefined,
@@ -1303,7 +1307,8 @@ const channexManagementProvider =
                 )
             : undefined,
         activatePublishedOffers:
-          channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
+          channexUploadReconciliationPool &&
+          (config.channexManagement.stagingInventoryEnabled || channexClaimedAri)
             ? (lease) => activatePublishedChannexOffers(channexUploadReconciliationPool, lease)
             : undefined,
         reconcileOfferDeliveries:
@@ -1320,7 +1325,8 @@ const channexManagementProvider =
             ? (lease) => prepareNextChannexOfferAriDelivery(channexUploadReconciliationPool, lease)
             : undefined,
         bootstrapPublishedOffer:
-          channexUploadReconciliationPool && config.channexManagement.stagingPublishedOffersEnabled
+          channexUploadReconciliationPool &&
+          (config.channexManagement.stagingPublishedOffersEnabled || channexClaimedAri)
             ? (job, workerId, ports) =>
                 bootstrapPublishedChannexOffer(
                   channexUploadReconciliationPool,
@@ -1341,15 +1347,23 @@ const channexManagementWorkerStore =
         stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
         stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
         stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
+        // VAY-2108 D7: under the claimed ARI scope the worker claims ARI and provisioning for the
+        // owned hotels (plus unbound enable jobs); booking-only claimed keeps the connection rule.
         connectionOnly:
           channexConnectionOnlyScope(config.channexManagement) ||
-          channexClaimedScope(config.channexManagement),
+          (channexClaimedScope(config.channexManagement) && !channexClaimedAri),
+        claimedOwnedPropertyIds: channexClaimedAri
+          ? (config.channexManagement.ownedPropertyIds ?? [])
+          : undefined,
+        claimedEnableJobs: config.channexManagement.capabilityModes.connection === "mutating",
       })
     : undefined;
 const channexOfferSchedule = channexManagementDatabase.scheduler
   ? createPgChannexAriSchedule(
       channexManagementDatabase.scheduler.connectionString,
-      channexManagementDatabase.scheduler.propertyId,
+      channexManagementDatabase.scheduler.propertyIds
+        ? { propertyIds: channexManagementDatabase.scheduler.propertyIds }
+        : channexManagementDatabase.scheduler.propertyId,
     )
   : undefined;
 const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
@@ -1369,8 +1383,11 @@ const pmsGuestPolicySetupCommands =
         pricing: createPgPmsPricingCommandRepository({
           connectionString: targetDatabaseUrl,
           currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+          // VAY-2108 D7: meal-plan provisioning has no pricing under the claimed scope (offers
+          // carry their meals), so a meal change must not queue provisioning jobs there.
           channexMealSyncEnabled:
-            config.channexManagement.capabilityModes.provisioning === "mutating",
+            config.channexManagement.capabilityModes.provisioning === "mutating" &&
+            config.channexManagement.scope !== "claimed",
         }),
         recurringPricing: createPgPmsRecurringPricingCommandRepository({
           connectionString: targetDatabaseUrl,
@@ -1930,7 +1947,13 @@ const app = buildApp({
           channexConnectionOnlyScope(config.channexManagement) ||
           channexClaimedScope(config.channexManagement),
         publishedOfferProvisioningEnabled:
-          config.channexManagement.stagingPublishedOffersEnabled === true,
+          config.channexManagement.stagingPublishedOffersEnabled === true || channexClaimedAri,
+        publishedOfferProvisioningPropertyIds: channexClaimedAri
+          ? config.channexManagement.ownedPropertyIds
+          : undefined,
+        claimedOwnedPropertyIds: channexClaimedAri
+          ? (config.channexManagement.ownedPropertyIds ?? [])
+          : undefined,
         publishedOfferProvisioningPropertyId:
           config.channexManagement.stagingRestrictionsPropertyId,
         commandPort: pmsChannexManagementCommandPort,

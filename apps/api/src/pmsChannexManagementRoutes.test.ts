@@ -365,6 +365,36 @@ describe("PMS Channex management command routes", () => {
         })
       ).statusCode,
     ).toBe(202);
+    // VAY-2108 D7: the claimed scope's owned hotels may provision, others may not.
+    const owned = await testApp({}, mutating, undefined, false, true, "other-property", false, [
+      propertyId,
+    ]);
+    expect(
+      (
+        await owned.app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/channex/published-offers/provision`,
+          headers: { authorization: "Bearer valid" },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(202);
+    await owned.app.close();
+    const foreign = await testApp({}, mutating, undefined, false, true, "other-property", false, [
+      "29f39aae-0000-4000-8000-000000000001",
+    ]);
+    expect(
+      (
+        await foreign.app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/channex/published-offers/provision`,
+          headers: { authorization: "Bearer valid" },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(foreign.enqueue).not.toHaveBeenCalled();
+    await foreign.app.close();
     expect(enabled.enqueue).toHaveBeenCalledWith(expect.anything(), propertyId, {
       commandId: payload.commandId,
       idempotencyKey: payload.idempotencyKey,
@@ -430,6 +460,64 @@ describe("PMS Channex management command routes", () => {
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect((await command(app)).statusCode).toBe(202);
     expect(harness.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues ARI only for owned hotels in the claimed scope, never provisioning, inventory rules or ARI recovery", async () => {
+    const owned = await testApp({}, mutating, undefined, false, false, propertyId, false, undefined, [
+      propertyId,
+    ]);
+    app = owned.app;
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/commands`,
+      headers: { authorization: "Bearer valid" },
+      payload: { commandId: "c-sync", idempotencyKey: "k-sync", operationType: "sync_ari" },
+    });
+    expect(accepted.statusCode).toBe(202);
+    const plain = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/commands`,
+      headers: { authorization: "Bearer valid" },
+      payload: { commandId: "c-prov", idempotencyKey: "k-prov", operationType: "provision" },
+    });
+    expect(plain.statusCode).toBe(409);
+    expect(owned.enqueue).toHaveBeenCalledTimes(1);
+    const recovery = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/alerts/${operationId}/recover`,
+      headers: { authorization: "Bearer valid" },
+      payload: { round: 0 },
+    });
+    expect(recovery.statusCode).toBe(409);
+    expect(owned.recoverAlert).not.toHaveBeenCalled();
+    const rules = await app.inject({
+      method: "PUT",
+      url: `/properties/${propertyId}/channex/inventory-rules`,
+      headers: { authorization: "Bearer valid" },
+      payload: {
+        commandId: "c-rules",
+        idempotencyKey: "k-rules",
+        expectedOperationId: null,
+        rules: [],
+      },
+    });
+    expect(rules.statusCode).toBe(409);
+    await app.close();
+    const foreign = await testApp({}, mutating, undefined, false, false, propertyId, false, undefined, [
+      "29f39aae-0000-4000-8000-000000000001",
+    ]);
+    app = foreign.app;
+    for (const operationType of ["sync_ari", "provision"] as const) {
+      const refused = await app.inject({
+        method: "POST",
+        url: `/properties/${propertyId}/channex/commands`,
+        headers: { authorization: "Bearer valid" },
+        payload: { commandId: `c-${operationType}`, idempotencyKey: `k-${operationType}`, operationType },
+      });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json()).toEqual({ code: "channex_capability_not_mutating" });
+    }
+    expect(foreign.enqueue).not.toHaveBeenCalled();
   });
 
   it("fails closed for observe-only capabilities and invalid payloads", async () => {
@@ -604,6 +692,8 @@ async function testApp(
   publishedOfferProvisioningEnabled = false,
   publishedOfferProvisioningPropertyId = propertyId,
   connectionOnly = false,
+  publishedOfferProvisioningPropertyIds?: readonly string[],
+  claimedOwnedPropertyIds?: readonly string[],
 ) {
   const app = Fastify({ logger: false });
   const getAlertDiagnostics = vi.fn().mockResolvedValue(null);
@@ -669,6 +759,8 @@ async function testApp(
     noShowReportingPropertyId: reportScope,
     publishedOfferProvisioningEnabled,
     publishedOfferProvisioningPropertyId,
+    publishedOfferProvisioningPropertyIds,
+    claimedOwnedPropertyIds,
     connectionOnly,
   });
   return {

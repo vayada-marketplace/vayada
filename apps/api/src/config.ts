@@ -117,19 +117,28 @@ export function channexConnectionOnlyScope(config: ChannexManagementConfig): boo
 }
 
 /**
- * VAY-2108: the claimed scope. Until the claimed worker scope exists it adds booking sync, on the
- * API login, to the connection scope; every other durable capability stays observe_only.
+ * VAY-2108: the claimed scope. Booking sync runs on the API login next to the connection scope;
+ * ARI and provisioning (D7) run together on the claimed worker scope (0519) for the owned hotels.
+ * Markups and messaging stay observe_only.
  */
 export function channexClaimedScope(config: ChannexManagementConfig): boolean {
   const modes = config.capabilityModes;
   return (
     config.scope === "claimed" &&
-    modes.provisioning === "observe_only" &&
-    modes.ariSync === "observe_only" &&
+    modes.provisioning === modes.ariSync &&
     modes.markups === "observe_only" &&
     modes.messaging === "observe_only" &&
     !config.stagingRestrictionsPropertyId &&
     ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
+  );
+}
+
+/** VAY-2108 D7: the claimed scope with ARI and provisioning on (the worker's claimed DB scope). */
+export function channexClaimedAriScope(config: ChannexManagementConfig): boolean {
+  return (
+    channexClaimedScope(config) &&
+    config.capabilityModes.ariSync === "mutating" &&
+    config.capabilityModes.provisioning === "mutating"
   );
 }
 
@@ -793,13 +802,6 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   if (offerAriDeliveryEnabled && capabilityModes.ariSync !== "mutating") {
     throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires a mutating ARI sync");
   }
-  // Delivery only runs after activation, which needs the published-offer bundle; without it the
-  // switch would be inert while the worker boundary demanded the delivery grants.
-  if (offerAriDeliveryEnabled && !stagingInventoryEnabled) {
-    throw new Error(
-      "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires the published-offer activation bundle",
-    );
-  }
   const scope = readOptionalEnv(env, "PMS_CHANNEX_SCOPE");
   if (scope !== undefined && scope !== "claimed")
     throw new Error("PMS_CHANNEX_SCOPE must be claimed when set");
@@ -824,6 +826,11 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     ownedPropertyIds.some((id) => CHANNEX_RESERVED_TEST_IDS.includes(id))
   )
     throw new Error("PMS_CHANNEX_OWNED_PROPERTY_IDS names a reserved staging/test property");
+  // D7: ARI and provisioning come on together, on top of booking sync, for the owned hotels.
+  const claimedAri =
+    scope === "claimed" &&
+    capabilityModes.ariSync === "mutating" &&
+    capabilityModes.provisioning === "mutating";
   if (
     scope === "claimed" &&
     (stagingRestrictionsPropertyId ||
@@ -832,13 +839,24 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       stagingMealsEnabled ||
       stagingPublishedOffersEnabled ||
       !["https://app.channex.io", "https://staging.channex.io"].includes(apiBaseUrl ?? "") ||
-      (["provisioning", "ariSync", "markups", "messaging", "iframe"] as const).some(
+      (["markups", "messaging", "iframe"] as const).some(
         (capability) => capabilityModes[capability] === "mutating",
-      ))
+      ) ||
+      (capabilityModes.ariSync === "mutating") !== (capabilityModes.provisioning === "mutating") ||
+      (claimedAri && capabilityModes.bookingSync !== "mutating"))
   )
     throw new Error(
-      "The claimed Channex scope allows only connection, booking sync and reviews on Channex, without staging scopes",
+      "The claimed Channex scope allows only connection, booking sync and reviews on Channex, plus ARI together with provisioning on top of booking sync, without staging scopes",
     );
+  if (offerAriDeliveryEnabled && scope === "claimed" && !claimedAri)
+    throw new Error("PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED needs the claimed ARI scope");
+  // Delivery only runs after activation, which needs the published-offer bundle; without it the
+  // switch would be inert while the worker boundary demanded the delivery grants.
+  if (offerAriDeliveryEnabled && !stagingInventoryEnabled && !claimedAri) {
+    throw new Error(
+      "PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED requires the published-offer activation bundle",
+    );
+  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )
@@ -862,7 +880,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     );
   }
   // VAY-2108: claimed booking sync runs on the API login, so it needs no management worker.
-  const claimedWithoutWorker = scope === "claimed" && capabilityModes.connection !== "mutating";
+  const claimedWithoutWorker =
+    scope === "claimed" && capabilityModes.connection !== "mutating" && !claimedAri;
   const workerEnabled = readBooleanEnv(
     env,
     "PMS_CHANNEX_WORKER_ENABLED",
