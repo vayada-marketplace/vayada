@@ -62,6 +62,21 @@ An audited executor, run through a reviewed platform runner mode with Flamur's g
   same rooms; on switch day the Booking.com and Airbnb rate mapping inside Channex moves from
   the old plans to the new ones before full ARI goes out. The old Channex rate plans stay:
   never delete them, bookings made under them keep arriving through the adopted mappings.
+  Booking intake also resolves the offer-owned plans (VAY-2108 W2c). When no active legacy
+  mapping matches a stay's Channex room and rate plan, and the 0314 registry names an offer
+  target as the plan's owner, the stay lands on the target's room type if the booking's Channex
+  room maps to that room type (active mapping, active and not closed room type) and the plan is
+  the target's active version on the connection's current binding. A modification of a stay that
+  already landed on that target also accepts the target's earlier versions and bindings, so OTA
+  changes to accepted bookings keep arriving after an offer moves to a new Channex plan. The
+  stay's rate plan stays empty (`pms.rate_plans` holds legacy plans only); the assignment keeps
+  `channexOffer` (target, version, offer, Channex plan). The reservation page names the offer
+  while the stay keeps that room type and plan and the offer is still published. Everything else
+  still refuses with `operational_mapping_unavailable`: an unknown plan, a plan of a disabled
+  legacy mapping (the registry keeps it legacy-owned), a new booking on a superseded version's
+  plan, a target without an active version, a version from an earlier binding, a retired or
+  closed room type, or a Channex room that maps to another room type. So remap the OTAs only to
+  published, active offer plans, and remap them again when an offer gets a new Channex plan.
 - `target:channex:handover revoke` is the inverse of both, also in one transaction: the connection goes back to `disconnected`
   with a `NULL` external id, mappings are disabled, then the claim becomes `released`. A second
   `attach` reuses the retained rows. Every command writes an audit row; re-running an applied

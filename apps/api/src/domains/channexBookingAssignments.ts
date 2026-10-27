@@ -1,4 +1,8 @@
 import type { PoolClient } from "pg";
+import {
+  resolveChannexOfferRatePlan,
+  type ChannexOfferLink,
+} from "./channexOfferRateResolution.js";
 import { resolveStagingCatalogReference } from "./channexStagingCatalogReference.js";
 import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
@@ -23,6 +27,7 @@ type Stay = ChannexRoomStay & {
   roomTypeId: string;
   ratePlanId: string | null;
   stagingCatalogReferenceId?: string;
+  channexOffer?: ChannexOfferLink;
 };
 type Assignment = Stay & {
   id: string;
@@ -31,6 +36,7 @@ type Assignment = Stay & {
   untouched: boolean;
   cancelable: boolean;
   providerStay: ChannexRoomStay | null;
+  channexOfferTargetId: string | null;
 };
 export class ChannexAssignmentConflict extends Error {}
 const conflict = () => new ChannexAssignmentConflict("operational_assignment_conflict");
@@ -58,6 +64,7 @@ export async function persistChannexAssignments(
       `SELECT id::text,position,room_type_id::text AS "roomTypeId",rate_plan_id::text AS "ratePlanId",
        room_id::text AS "roomId",check_in::text AS "checkIn",check_out::text AS "checkOut",adults,children,
        assignment_payload->'channexStay' AS "providerStay",
+       assignment_payload->'channexOffer'->>'targetId' AS "channexOfferTargetId",
        (source='channel' AND assignment_payload->>'version'=assignment_payload->>'channexRevision'
          AND ((assignment_status='pending' AND room_id IS NULL)
            OR (assignment_status='assigned' AND room_id IS NOT NULL
@@ -93,11 +100,12 @@ export async function persistChannexAssignments(
     );
   } else {
     const stays: Stay[] = [];
-    for (const room of input.rooms) {
+    for (const [index, room] of input.rooms.entries()) {
       let mapped: {
         roomTypeId: string;
         ratePlanId: string | null;
         stagingCatalogReferenceId?: string;
+        channexOffer?: ChannexOfferLink;
       }[] = (
         await client.query<{ roomTypeId: string; ratePlanId: string }>(
           `SELECT r.id::text AS "roomTypeId",rate.id::text AS "ratePlanId"
@@ -123,6 +131,17 @@ export async function persistChannexAssignments(
           ...input,
           ...room,
           bindingGeneration: input.stagingCatalogBindingGeneration,
+        });
+      // VAY-2108: a plan with no legacy mapping may be one our published offers own.
+      // The staging import and repair keep their own catalog evidence.
+      if (mapped.length === 0 && !input.bootstrapHash && !input.repair)
+        mapped = await resolveChannexOfferRatePlan(client, {
+          propertyId,
+          connectionId: input.connectionId,
+          externalRoomTypeId: room.externalRoomTypeId,
+          externalRatePlanId: room.externalRatePlanId,
+          priorTargetId:
+            existing.find((row) => row.position === index + 1)?.channexOfferTargetId ?? null,
         });
       if (mapped.length !== 1)
         throw new ChannexAssignmentConflict("operational_mapping_unavailable");
@@ -167,6 +186,7 @@ export async function persistChannexAssignments(
         contractVersion: "channex-operational-assignment.v1",
         channexStay: input.rooms[index],
         channexRevision: input.revisionId,
+        ...(stay.channexOffer ? { channexOffer: stay.channexOffer } : {}),
         ...(stay.stagingCatalogReferenceId
           ? { stagingCatalogReferenceId: stay.stagingCatalogReferenceId }
           : {}),
@@ -177,7 +197,7 @@ export async function persistChannexAssignments(
           position,assignment_status,channel,source,assignment_payload,stay_evidence_kind,check_in,check_out,adults,children,external_reservation_id)
          VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,'pending',$6,'channel',$7::jsonb,'exact',$8::date,$9::date,$10,$11,$12)
          ON CONFLICT(guest_booking_id,position) DO UPDATE SET room_type_id=EXCLUDED.room_type_id,rate_plan_id=EXCLUDED.rate_plan_id,
-          assignment_payload=((pms.operational_booking_assignments.assignment_payload-'channexAlterationReleased')
+          assignment_payload=((pms.operational_booking_assignments.assignment_payload-'channexAlterationReleased'-'channexOffer')
             -CASE WHEN $13::boolean THEN ARRAY[]::text[] ELSE ARRAY['autoAssigned'] END)||EXCLUDED.assignment_payload,
           assignment_status=CASE WHEN $13::boolean THEN 'assigned' ELSE 'pending' END,
           room_id=CASE WHEN $13::boolean THEN pms.operational_booking_assignments.room_id ELSE NULL END,

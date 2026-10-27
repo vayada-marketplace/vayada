@@ -867,6 +867,7 @@ jobs:
           src/domains/channexStagingCatalogEvidence.test.ts
           src/domains/channexStagingCatalogScope.test.ts
           src/jobs/channexBookings.integration.test.ts
+          src/jobs/channexOfferRateIntake.integration.test.ts
           src/jobs/channexOwnershipGate.integration.test.ts
           src/jobs/channexFeedPull.integration.test.ts
           src/domains/channexAlterationIntake.integration.test.ts
