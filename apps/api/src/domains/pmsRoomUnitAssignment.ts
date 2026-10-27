@@ -26,11 +26,13 @@ type PendingAssignmentRow = {
  * unassigned. Give each one the first free unit of its type in calendar order, by the same
  * rule as the PMS "Assign" button; a room with no free unit stays unassigned. The caller holds
  * the property's inventory mutation lock and, before writing rows that reference the room types,
- * lockRoomTypesForUnitAssignment (the locks are re-entrant).
+ * lockRoomTypesForUnitAssignment (the locks are re-entrant). `options.payload` is merged into each
+ * assigned row's assignment_payload (VAY-2368 marks OTA rooms `autoAssigned`).
  */
 export async function assignFirstFreeRoomUnits(
   client: PmsRoomUnitAssignmentClient,
   booking: Readonly<{ propertyId: string; guestBookingId: string }>,
+  options: Readonly<{ payload?: Readonly<Record<string, unknown>> }> = {},
 ): Promise<readonly Readonly<{ assignmentId: string; roomId: string }>[]> {
   const pending = (
     await client.query<PendingAssignmentRow>(
@@ -65,6 +67,7 @@ export async function assignFirstFreeRoomUnits(
       [booking.propertyId, roomTypeIds],
     )
   ).rows;
+  const payload = options.payload ?? {};
   const assigned: { assignmentId: string; roomId: string }[] = [];
   for (const assignment of pending) {
     for (const room of rooms) {
@@ -84,10 +87,11 @@ export async function assignFirstFreeRoomUnits(
          SET room_id = $1::uuid,
              assignment_status = 'assigned',
              assigned_at = COALESCE(assigned_at, now()),
+             assignment_payload = COALESCE(assignment_payload, '{}'::jsonb) || $4::jsonb,
              updated_at = now()
          WHERE id = $2::uuid AND property_id = $3::uuid
            AND assignment_status = 'pending' AND room_id IS NULL`,
-        [room.roomId, assignment.assignmentId, booking.propertyId],
+        [room.roomId, assignment.assignmentId, booking.propertyId, JSON.stringify(payload)],
       );
       assigned.push({ assignmentId: assignment.assignmentId, roomId: room.roomId });
       break;

@@ -97,6 +97,76 @@ describe.skipIf(!URL)("Channex booking worker (PostgreSQL)",()=>{
     expect(await commissions("booking-legacy")).toBe(0);
   });
 
+  // VAY-2368: OTA rooms take the first free unit of their type by the Assign button's rule.
+  const UNIT={first:"11890000-0000-4000-8000-000000000011",second:"11890000-0000-4000-8000-000000000012",unverified:"11890000-0000-4000-8000-000000000013"};
+
+  it("assigns a new OTA booking to the first verified free unit of its room type",async()=>{
+    const type=(await db.query<{id:string}>("SELECT id::text FROM pms.room_types WHERE property_id=$1 AND name='Channel room'",[P])).rows[0]!.id;
+    await fixture(`INSERT INTO pms.rooms(id,property_id,room_type_id,room_number,operational_label_status,sort_order)
+      VALUES($2,$1,$5,'201','verified',1),($3,$1,$5,'202','verified',2),($4,$1,$5,'200','unverified',0)`,[P,UNIT.first,UNIT.second,UNIT.unverified,type]);
+    await job("booking-auto","auto-create",false,stay(revision("auto-create","booking-auto","BookingCom"),"2026-09-10","2026-09-12"));
+    expect(await run()).toEqual({succeeded:1,retryScheduled:0,deadLettered:0});
+    expect(await units("booking-auto")).toEqual([{position:1,status:"assigned",room:"201",checkIn:"2026-09-10",auto:"true"}]);
+  });
+
+  it("keeps the auto-assigned unit through an alteration it still fits",async()=>{
+    const moved=stay(revision("auto-move","booking-auto","BookingCom"),"2026-09-11","2026-09-13");moved.attributes.status="modified";
+    await job("booking-auto","auto-move",false,moved);
+    expect(await run()).toEqual({succeeded:1,retryScheduled:0,deadLettered:0});
+    expect(await units("booking-auto")).toEqual([{position:1,status:"assigned",room:"201",checkIn:"2026-09-11",auto:"true"}]);
+  });
+
+  it("picks the next free unit when an alteration moves the stay onto a taken unit",async()=>{
+    await job("booking-next","next-create",false,stay(revision("next-create","booking-next","BookingCom"),"2026-09-14","2026-09-16"));
+    expect((await run()).succeeded).toBe(1);
+    expect(await units("booking-next")).toEqual([{position:1,status:"assigned",room:"201",checkIn:"2026-09-14",auto:"true"}]);
+    const clash=stay(revision("auto-clash","booking-auto","BookingCom"),"2026-09-14","2026-09-16");clash.attributes.status="modified";
+    await job("booking-auto","auto-clash",false,clash);
+    expect(await run()).toEqual({succeeded:1,retryScheduled:0,deadLettered:0});
+    expect(await units("booking-auto")).toEqual([{position:1,status:"assigned",room:"202",checkIn:"2026-09-14",auto:"true"}]);
+    expect(await units("booking-next")).toEqual([{position:1,status:"assigned",room:"201",checkIn:"2026-09-14",auto:"true"}]);
+  });
+
+  it("skips a blocked unit and leaves a room unassigned when no unit is free",async()=>{
+    await fixture(`INSERT INTO pms.room_blocks(property_id,room_type_id,room_id,starts_on,ends_on,reason)
+      SELECT $1,room_type_id,id,'2026-09-20','2026-09-20','Repairs' FROM pms.rooms WHERE id=$2`,[P,UNIT.first]);
+    await job("booking-blocked","blocked-create",false,stay(revision("blocked-create","booking-blocked","BookingCom"),"2026-09-20","2026-09-22"));
+    expect((await run()).succeeded).toBe(1);
+    expect(await units("booking-blocked")).toEqual([{position:1,status:"assigned",room:"202",checkIn:"2026-09-20",auto:"true"}]);
+    await job("booking-full","full-create",false,stay(revision("full-create","booking-full","BookingCom"),"2026-09-20","2026-09-22"));
+    expect(await run()).toEqual({succeeded:1,retryScheduled:0,deadLettered:0});
+    expect(await units("booking-full")).toEqual([{position:1,status:"pending",room:null,checkIn:"2026-09-20",auto:null}]);
+  });
+
+  it("gives each room of a two-room booking its own unit and frees both on cancellation",async()=>{
+    await job("booking-pair","pair-create",false,stay(revision("pair-create","booking-pair","BookingCom",2),"2026-09-24","2026-09-26"));
+    expect((await run()).succeeded).toBe(1);
+    expect(await units("booking-pair")).toEqual([
+      {position:1,status:"assigned",room:"201",checkIn:"2026-09-24",auto:"true"},
+      {position:2,status:"assigned",room:"202",checkIn:"2026-09-24",auto:"true"},
+    ]);
+    const canceled=revision("pair-cancel","booking-pair","BookingCom",0);canceled.attributes.status="cancelled";
+    await job("booking-pair","pair-cancel",false,canceled);
+    expect((await run()).succeeded).toBe(1);
+    expect((await units("booking-pair")).map(({status,room})=>[status,room])).toEqual([["canceled",null],["canceled",null]]);
+  });
+
+  it("still refuses a stay change on a unit the host chose by hand",async()=>{
+    await job("booking-host","host-create",false,stay(revision("host-create","booking-host","BookingCom"),"2026-09-27","2026-09-29"));
+    expect((await run()).succeeded).toBe(1);
+    expect(await units("booking-host")).toEqual([{position:1,status:"assigned",room:"201",checkIn:"2026-09-27",auto:"true"}]);
+    // The Assign button moves the room and bumps the row's version past the Channex revision.
+    await db.query(`UPDATE pms.operational_booking_assignments a SET room_id=$2,assignment_payload=a.assignment_payload||'{"version":"reservation-v1"}'::jsonb
+      FROM booking.guest_bookings b WHERE b.id=a.guest_booking_id AND b.source_booking_id=$1`,[`channex:${P}:booking-host`,UNIT.second]);
+    const moved=stay(revision("host-move","booking-host","BookingCom"),"2026-09-28","2026-09-30");moved.attributes.status="modified";
+    await job("booking-host","host-move",false,moved);
+    expect(await run()).toEqual({succeeded:0,retryScheduled:0,deadLettered:1});
+    expect(await units("booking-host")).toEqual([{position:1,status:"assigned",room:"202",checkIn:"2026-09-27",auto:"true"}]);
+  });
+
+  function stay(value:ReturnType<typeof revision>,checkIn:string,checkOut:string){const a=value.attributes;a.arrival_date=checkIn;a.departure_date=checkOut;const nights:string[]=[];for(const day=new Date(`${checkIn}T00:00:00Z`);day.toISOString().slice(0,10)<checkOut;day.setUTCDate(day.getUTCDate()+1))nights.push(day.toISOString().slice(0,10));for(const room of a.rooms)room.days=Object.fromEntries(nights.map(night=>[night,"60.00"])) as typeof room.days;return value;}
+  async function units(bookingId:string){return (await db.query<{position:number;status:string;room:string|null;checkIn:string;auto:string|null}>(`SELECT a.position,a.assignment_status AS status,room.room_number AS room,a.check_in::text AS "checkIn",a.assignment_payload->>'autoAssigned' AS auto FROM pms.operational_booking_assignments a JOIN booking.guest_bookings b ON b.id=a.guest_booking_id LEFT JOIN pms.rooms room ON room.id=a.room_id WHERE b.source_booking_id=$1 ORDER BY a.position`,[`channex:${P}:${bookingId}`])).rows;}
+  async function fixture(sql:string,params:unknown[]=[]){const client=await db.connect();try{await client.query("BEGIN");await client.query("SET LOCAL session_replication_role=replica");await client.query(sql,params);await client.query("COMMIT");}catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}}
   function run(){return runWith(fetcher,"vay-1189")}function runWith(request:typeof fetch,workerId:string,signal?:AbortSignal){return runChannexBookingJobs(URL!,{apiBaseUrl:"https://app.channex.io",apiKey:"secret",ownsMutation:()=>owns,fetch:request,workerId,limit:1,signal})}
   async function commissions(bookingId:string){return (await db.query<{n:number}>(`SELECT count(*)::int n FROM finance.ota_commission_evidence WHERE guest_booking_id=(SELECT id FROM booking.guest_bookings WHERE source_booking_id=$1)`,[`channex:${P}:${bookingId}`])).rows[0]!.n;}
   function revenue(bookingId:string){return db.query(`SELECT count(*)::int lines,SUM(occupied_room_nights)::int occupied,SUM(gross_room_amount)::text amount,bool_and(source_kind='ota') ota,bool_and(evidence_quality='exact') exact,count(*) FILTER(WHERE economic_event='correction')::int corrections,count(*) FILTER(WHERE economic_event='occupancy_adjustment')::int adjustments,count(*) FILTER(WHERE economic_event='retained_charge')::int retained,count(*) FILTER(WHERE economic_event='refund')::int refunds FROM booking.nightly_revenue_evidence evidence JOIN booking.guest_bookings booking ON booking.id=evidence.guest_booking_id WHERE booking.source_booking_id=$1`,[`channex:${P}:${bookingId}`])}
@@ -104,5 +174,5 @@ describe.skipIf(!URL)("Channex booking worker (PostgreSQL)",()=>{
     VALUES($1,'pms.channex.webhooks','channex.ingest-booking','external','pms','channel_booking',$2,'vay-1189',$3,$4) RETURNING id::text`,[`vay-1189:${++sequence}`,bookingId,maxAttempts,{propertyId:P,providerPropertyId:EXTERNAL,channelBookingId:bookingId,revision:revisionId,revisionSource:pullRequired?"webhook_hint":"revision_feed",pullRequired,rawPayload:pullRequired?{event:"booking"}:{event:"booking",payload:value}}]);return row.rows[0]!.id;}
   function revision(id:string|number,bookingId:string,source:string|null,rooms=1){return {id,type:"booking_revision",attributes:{property_id:EXTERNAL,booking_id:bookingId,status:"new",arrival_date:"2026-09-01",departure_date:"2026-09-03",amount:`${rooms*120}.00`,currency:"EUR",inserted_at:new Date(Date.UTC(2026,7,20,12,0,sequence)).toISOString(),...(source?{ota_name:source}:{}),customer:{name:"Ada",surname:"Guest",mail:"guest@example.test",phone:"+100"},rooms:Array.from({length:rooms},()=>({room_type_id:"provider-room",rate_plan_id:"provider-rate",occupancy:{adults:1,children:0},days:{"2026-09-01":"60.00","2026-09-02":"60.00"}}))}};}
   function v2Fingerprint(value:ReturnType<typeof revision>){const a=value.attributes,parsed={rooms:a.rooms.map(room=>({externalRoomTypeId:room.room_type_id,externalRatePlanId:room.rate_plan_id,checkIn:a.arrival_date,checkOut:a.departure_date,adults:room.occupancy.adults,children:room.occupancy.children})),id:String(value.id),semanticRevision:null,providerPropertyId:a.property_id,bookingId:a.booking_id,status:"confirmed",checkIn:a.arrival_date,checkOut:a.departure_date,adults:a.rooms.length,children:0,roomCount:a.rooms.length,currency:a.currency,amount:a.amount,providerSource:a.ota_name??null,channel:"agoda",hasCustomer:true,hasEmail:true,hasPhone:true,firstName:"Ada",lastName:"Guest",email:"guest@example.test",phone:"+100",insertedAt:`${a.inserted_at.slice(0,19)}.${a.inserted_at.slice(20,23).padEnd(6,"0")}Z`};return createHash("sha256").update(JSON.stringify(parsed)).digest("hex")}
-  async function cleanup(){await db.query("BEGIN;SET LOCAL session_replication_role=replica");await clearChannexAssignmentFixture(db,P);await db.query(`DROP TRIGGER IF EXISTS vay1189_fail ON pms.channel_booking_mappings;DROP FUNCTION IF EXISTS pms.vay1189_fail();BEGIN;SET LOCAL session_replication_role=replica;DELETE FROM platform.product_audit_events WHERE redacted_payload->>'propertyId'='${P}' OR target_resource_id='malformed';DELETE FROM platform.dead_letter_events WHERE job_id IN(SELECT id FROM platform.jobs WHERE payload->>'propertyId'='${P}' OR job_key LIKE 'vay-1189:%');DELETE FROM platform.job_attempts WHERE job_id IN(SELECT id FROM platform.jobs WHERE payload->>'propertyId'='${P}' OR job_key LIKE 'vay-1189:%');DELETE FROM platform.jobs WHERE payload->>'propertyId'='${P}' OR job_key LIKE 'vay-1189:%';DELETE FROM pms.channel_booking_revision_tombstones WHERE property_id='${P}';DELETE FROM pms.channel_booking_mappings WHERE property_id='${P}';DELETE FROM finance.ota_commission_evidence WHERE property_id='${P}';DELETE FROM booking.guest_bookings WHERE property_id='${P}';DELETE FROM pms.channel_connections WHERE property_id='${P}';DELETE FROM pms.channel_binding_claims WHERE property_id='${P}';DELETE FROM hotel_catalog.property_locations WHERE property_id='${P}';DELETE FROM hotel_catalog.properties WHERE id='${P}';COMMIT`);}
+  async function cleanup(){await db.query("BEGIN;SET LOCAL session_replication_role=replica");await clearChannexAssignmentFixture(db,P);await db.query(`DROP TRIGGER IF EXISTS vay1189_fail ON pms.channel_booking_mappings;DROP FUNCTION IF EXISTS pms.vay1189_fail();BEGIN;SET LOCAL session_replication_role=replica;DELETE FROM platform.product_audit_events WHERE redacted_payload->>'propertyId'='${P}' OR target_resource_id='malformed';DELETE FROM platform.dead_letter_events WHERE job_id IN(SELECT id FROM platform.jobs WHERE payload->>'propertyId'='${P}' OR job_key LIKE 'vay-1189:%');DELETE FROM platform.job_attempts WHERE job_id IN(SELECT id FROM platform.jobs WHERE payload->>'propertyId'='${P}' OR job_key LIKE 'vay-1189:%');DELETE FROM platform.jobs WHERE payload->>'propertyId'='${P}' OR job_key LIKE 'vay-1189:%';DELETE FROM pms.room_blocks WHERE property_id='${P}';DELETE FROM pms.channel_booking_revision_tombstones WHERE property_id='${P}';DELETE FROM pms.channel_booking_mappings WHERE property_id='${P}';DELETE FROM finance.ota_commission_evidence WHERE property_id='${P}';DELETE FROM booking.guest_bookings WHERE property_id='${P}';DELETE FROM pms.channel_connections WHERE property_id='${P}';DELETE FROM pms.channel_binding_claims WHERE property_id='${P}';DELETE FROM hotel_catalog.property_locations WHERE property_id='${P}';DELETE FROM hotel_catalog.properties WHERE id='${P}';COMMIT`);}
 });
