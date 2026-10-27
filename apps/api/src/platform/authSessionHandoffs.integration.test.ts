@@ -34,7 +34,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL auth session handoffs", () => {
 
   it("allows only one concurrent claim and permits an explicit release", async () => {
     await createHandoff(digests[0]!, new Date(Date.now() + 60_000));
-    const now = new Date();
+    // created_at is the database clock (microseconds): claim a moment later so the row's dates
+    // stay ordered even when this millisecond Date truncates below it.
+    const now = new Date(Date.now() + 500);
 
     const [first, second] = await Promise.all([
       claim(digests[0]!, "11111111-1111-4111-8111-111111111111", now),
@@ -53,7 +55,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL auth session handoffs", () => {
 
   it("recovers an abandoned claim after the bounded lease", async () => {
     await createHandoff(digests[1]!, new Date(Date.now() + 60_000));
-    const now = new Date();
+    const now = new Date(Date.now() + 500);
     await expect(
       claim(digests[1]!, "44444444-4444-4444-8444-444444444444", now),
     ).resolves.not.toBeNull();
