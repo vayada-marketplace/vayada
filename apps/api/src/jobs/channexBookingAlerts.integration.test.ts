@@ -2,11 +2,12 @@ import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPgPmsChannexManagementCommandPort } from "../domains/pmsChannexManagementCommandStore.js";
+import { createHotelSetupOrdinaryLoginFixture } from "../hotelSetupOrdinaryLogin.fixture.js";
 import {
   clearChannexAssignmentFixture,
   seedChannexAssignmentFixture,
 } from "./channexAssignmentTestFixture.js";
-import { runChannexBookingJobs, type ChannexBookingDeadLetter } from "./channexBookings.js";
+import { runChannexBookingJobs, type ChannexBookingWorkerEvent } from "./channexBookings.js";
 import { runChannexFeedPulls } from "./channexFeedPull.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
@@ -37,7 +38,7 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
   let upcoming: Array<{ id: string; revisionId: string }> = [];
   const revisions = new Map<string, Revision>();
   const calls: string[] = [];
-  const reported: ChannexBookingDeadLetter[] = [];
+  const reported: ChannexBookingWorkerEvent[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const method = init?.method ?? "GET";
     calls.push(`${method} ${String(input)}`);
@@ -63,15 +64,15 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
     const found = revisions.get(url.pathname.split("/").at(-1)!);
     return found ? Response.json({ data: found }) : new Response(null, { status: 404 });
   };
-  const run = () =>
-    runChannexBookingJobs(URL!, {
+  const run = (connectionString = URL!) =>
+    runChannexBookingJobs(connectionString, {
       apiBaseUrl: API,
       apiKey: "secret",
       ownsMutation: () => true,
       fetch: fetcher,
       workerId: "vay2108-w1d",
       limit: 1,
-      onDeadLetter: (deadLetter) => reported.push(deadLetter),
+      onEvent: (event) => reported.push(event),
     });
 
   beforeAll(async () => {
@@ -129,11 +130,12 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
       },
     ]);
     expect(reported.at(-1)).toEqual({
+      kind: "dead_lettered",
       propertyId: P,
       channelBookingId: "bk-unmapped",
       code: "operational_mapping_unavailable",
       reason: "operational_mapping_unavailable",
-      alerted: true,
+      alert: "raised",
     });
     // A refused revision is never acknowledged: Channex keeps flagging it as well.
     expect(calls.filter((call) => call.startsWith("POST"))).toEqual([]);
@@ -167,7 +169,7 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
       propertyId: P,
       channelBookingId: "bk-rollback",
       reason: "worker_lease_expired",
-      alerted: true,
+      alert: "raised",
     });
   });
 
@@ -204,6 +206,59 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
     feed = [];
   });
 
+  it("keeps the alert's details when a retry fails", async () => {
+    const refused = revision("bk-gone", { rate: "provider-rate-gone", reference: "BDC-2002" });
+    await job(refused);
+    expect((await run()).deadLettered).toBe(1);
+    const before = (await alerts("bk-gone"))[0]!.impact;
+    // The retry cannot read the revision any more: it dead-letters with its own reason.
+    revisions.delete(refused.id);
+    expect(await commands.recoverAlert!(context, P, await alertId("bk-gone"), 0)).toEqual({
+      ok: true,
+    });
+    expect(await run()).toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
+    expect(await alerts("bk-gone")).toEqual([
+      {
+        type: "booking_not_imported",
+        resolved: false,
+        impact: { ...before, errorType: "provider_rejected" },
+      },
+    ]);
+  });
+
+  it("raises no alert for an older refused revision of a booking the PMS already holds", async () => {
+    const older = revision("bk-newer");
+    Reflect.deleteProperty(older.attributes, "rooms");
+    const newer = revision("bk-newer");
+    await job(newer);
+    expect((await run()).succeeded).toBe(1);
+    await job(older, { maxAttempts: 1 });
+    expect(await run()).toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
+    expect(reported.at(-1)).toMatchObject({ reason: "invalid_revision", alert: "superseded" });
+    expect(await alerts("bk-newer")).toEqual([]);
+  });
+
+  it("reports a feed longer than one read covers", async () => {
+    feed = Array.from({ length: 2_100 }, (_, index) => ({
+      id: `21084000-0000-4000-a000-${String(index).padStart(12, "0")}`,
+      type: "booking_revision",
+      attributes: { property_id: EXTERNAL, booking_id: `bk-other-${index}` },
+    }));
+    calls.length = 0;
+    await job(revision("bk-capped"), { pullRequired: true, revision: "unknown", maxAttempts: 1 });
+    expect(await run()).toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
+    expect(calls.filter((call) => call.includes("/feed?"))).toHaveLength(20);
+    expect(reported.slice(-2)).toEqual([
+      { kind: "feed_truncated", propertyId: P, total: 2_100, unpaged: false },
+      expect.objectContaining({
+        kind: "dead_lettered",
+        channelBookingId: "bk-capped",
+        reason: "feed_truncated",
+      }),
+    ]);
+    feed = [];
+  });
+
   it("pages past more than 100 refused revisions to reach the hinted one", async () => {
     const wanted = revision("bk-behind");
     feed = [...Array.from({ length: 150 }, (_, index) => revision(`bk-refused-${index}`)), wanted];
@@ -237,6 +292,19 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
     ]);
     // Counted against the room without selling the closed night: available stays 0.
     expect(await night("2026-09-05")).toEqual({ status: "closed", available: 0, assigned: 1 });
+    // A later revision that leaves the stay as it was (a new price) keeps the alert open.
+    const repriced = revision("bk-closed", {
+      checkIn: "2026-09-04",
+      checkOut: "2026-09-06",
+      status: "modified",
+    });
+    repriced.attributes["amount"] = "150.00";
+    await job(repriced);
+    expect(await run()).toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(await warnings("bk-closed")).toEqual(["closed"]);
+    expect(await alerts("bk-closed")).toEqual([
+      expect.objectContaining({ type: "booking_on_closed_night", resolved: false }),
+    ]);
 
     await fixture(
       "UPDATE pms.inventory_days SET linked_stop_sell=true,linked_source_revision=1,available_count=0 WHERE property_id=$1 AND stay_date='2026-09-08'",
@@ -341,8 +409,30 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
       channelBookingId: "bk-unopened",
       code: "operational_inventory_unavailable",
       reason: "inventory_not_open",
-      alerted: true,
+      alert: "raised",
     });
+  });
+
+  // Production runs intake on the ordinary API login (VAY-2054 product-DML posture).
+  it("raises the alert on the production-shaped API login too", async () => {
+    const login = await createHotelSetupOrdinaryLoginFixture(db, URL!);
+    try {
+      await job(revision("bk-ordinary", { rate: "provider-rate-missing" }), { maxAttempts: 1 });
+      expect(await run(login.connectionString)).toEqual({
+        succeeded: 0,
+        retryScheduled: 0,
+        deadLettered: 1,
+      });
+      expect(await alerts("bk-ordinary")).toEqual([
+        expect.objectContaining({
+          type: "booking_not_imported",
+          impact: expect.objectContaining({ errorType: "operational_mapping_unavailable" }),
+        }),
+      ]);
+      expect(reported.at(-1)).toMatchObject({ channelBookingId: "bk-ordinary", alert: "raised" });
+    } finally {
+      await login.drop();
+    }
   });
 
   function revision(
@@ -388,7 +478,7 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
 
   async function job(
     value: Revision,
-    options: { pullRequired?: boolean; maxAttempts?: number } = {},
+    options: { pullRequired?: boolean; maxAttempts?: number; revision?: string } = {},
   ) {
     const pullRequired = options.pullRequired ?? false;
     const bookingId = String(value.attributes["booking_id"]);
@@ -404,7 +494,7 @@ describe.skipIf(!URL)("Channex booking alerts (PostgreSQL)", () => {
             propertyId: P,
             providerPropertyId: EXTERNAL,
             channelBookingId: bookingId,
-            revision: value.id,
+            revision: options.revision ?? value.id,
             revisionSource: pullRequired ? "webhook_hint" : "revision_feed",
             pullRequired,
             rawPayload: pullRequired

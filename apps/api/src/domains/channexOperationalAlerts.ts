@@ -139,7 +139,11 @@ export type ChannexBookingAlertImpact = ReturnType<typeof alertImpact> & {
   roomTypeNames?: string | null;
 };
 
-/** Raises (or refreshes) the open alert for one booking revision. False when no binding matches. */
+/**
+ * Raises (or refreshes) the open alert for one booking revision. `unbound` when no binding has the
+ * provider id; `superseded` when a not-imported revision is older than one the PMS already holds
+ * (a dead letter that waited on the connection lock while a newer revision was applied).
+ */
 export async function raiseChannexBookingAlert(
   client: Pick<pg.PoolClient, "query">,
   input: {
@@ -148,7 +152,7 @@ export async function raiseChannexBookingAlert(
     eventType: ChannexBookingAlertEvent;
     impact: ChannexBookingAlertImpact;
   },
-): Promise<boolean> {
+): Promise<"raised" | "superseded" | "unbound"> {
   const binding = (
     await client.query<{ id: string; generation: string }>(
       `SELECT id::text,binding_generation::text AS generation FROM pms.channel_connections
@@ -156,7 +160,24 @@ export async function raiseChannexBookingAlert(
       [input.propertyId, input.providerPropertyId],
     )
   ).rows[0];
-  if (!binding) return false;
+  if (!binding) return "unbound";
+  const inserted = input.impact.revisionInsertedAt;
+  if (
+    input.eventType === "booking_not_imported" &&
+    inserted &&
+    (
+      await client.query(
+        `SELECT 1 FROM pms.channel_booking_mappings WHERE connection_id=$1::uuid AND external_booking_id=$2
+           AND mapping_metadata->>'providerInsertedAt'>=$3
+         UNION ALL
+         SELECT 1 FROM pms.channel_booking_revision_tombstones WHERE connection_id=$1::uuid
+           AND binding_generation=$4::uuid AND external_booking_id=$2 AND inserted_at>=$3::timestamptz
+         LIMIT 1`,
+        [binding.id, input.impact.bookingId, inserted, binding.generation],
+      )
+    ).rows.length
+  )
+    return "superseded";
   const problemKey = createHash("sha256")
     .update(JSON.stringify([input.eventType, input.impact.bookingId, input.impact.revisionId]))
     .digest("hex");
@@ -167,7 +188,8 @@ export async function raiseChannexBookingAlert(
     `INSERT INTO pms.channel_operational_alerts(property_id,connection_id,binding_generation,problem_key,event_type,impact,first_occurred_at,last_occurred_at)
      VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::jsonb,now(),now())
      ON CONFLICT(connection_id,binding_generation,problem_key) WHERE resolved_at IS NULL DO UPDATE
-     SET impact=EXCLUDED.impact,last_occurred_at=EXCLUDED.last_occurred_at`,
+     SET impact=pms.channel_operational_alerts.impact||jsonb_strip_nulls(EXCLUDED.impact),
+         last_occurred_at=EXCLUDED.last_occurred_at`,
     [
       input.propertyId,
       binding.id,
@@ -177,19 +199,28 @@ export async function raiseChannexBookingAlert(
       JSON.stringify(input.impact),
     ],
   );
-  return true;
+  return "raised";
 }
 
-/** A revision of the booking was applied: earlier booking alerts for it no longer apply. */
+/**
+ * A revision of the booking reached the PMS: its earlier alerts of these types no longer apply.
+ * Not-imported alerts close on any applied revision; closed-night alerts only when the stay was
+ * rewritten or cancelled (an unchanged stay still sits on the closed nights).
+ */
 export async function resolveSupersededChannexBookingAlerts(
   client: Pick<pg.PoolClient, "query">,
-  input: { connectionId: string; bookingId: string; revisionInsertedAt: string },
+  input: {
+    connectionId: string;
+    bookingId: string;
+    revisionInsertedAt: string;
+    eventTypes: readonly ChannexBookingAlertEvent[];
+  },
 ): Promise<void> {
   await client.query(
     `UPDATE pms.channel_operational_alerts SET resolved_at=now()
      WHERE connection_id=$1::uuid AND resolved_at IS NULL AND event_type=ANY($4::text[])
        AND impact->>'bookingId'=$2 AND impact->>'revisionInsertedAt'<=$3`,
-    [input.connectionId, input.bookingId, input.revisionInsertedAt, CHANNEX_BOOKING_ALERT_EVENTS],
+    [input.connectionId, input.bookingId, input.revisionInsertedAt, input.eventTypes],
   );
 }
 

@@ -26,7 +26,8 @@ export function channexFeedUrl(apiBaseUrl: string, providerPropertyId: string, p
 /**
  * Reads the feed page by page until it ends, `found` says the caller has what it needs, or the
  * page cap is reached (`truncated`). Revisions acknowledged while it pages shift later rows
- * forward, so a row can be missed until the next run; a row seen twice is returned once.
+ * forward, so a row can be missed until the next run; a row seen twice is returned once. A later
+ * page with nothing new means Channex ignored the page number: the read stops as truncated.
  */
 export async function readChannexFeed(
   readPage: (url: URL) => Promise<ChannexFeedPage>,
@@ -35,7 +36,13 @@ export async function readChannexFeed(
     providerPropertyId: string;
     found?: (revisions: readonly Record<string, unknown>[]) => boolean;
   },
-): Promise<{ revisions: Record<string, unknown>[]; truncated: boolean; total: number | null }> {
+): Promise<{
+  revisions: Record<string, unknown>[];
+  truncated: boolean;
+  total: number | null;
+  /** A later page repeated the earlier ones: Channex ignored the page number. */
+  unpaged: boolean;
+}> {
   const revisions: Record<string, unknown>[] = [];
   const ids = new Set<string>();
   let seen = 0;
@@ -45,6 +52,7 @@ export async function readChannexFeed(
       channexFeedUrl(input.apiBaseUrl, input.providerPropertyId, page),
     );
     seen += data.length;
+    const before = revisions.length;
     for (const item of data) {
       const id = typeof item["id"] === "string" ? item["id"] : null;
       if (id && ids.has(id)) continue;
@@ -52,9 +60,12 @@ export async function readChannexFeed(
       revisions.push(item);
     }
     total = typeof meta?.["total"] === "number" ? meta["total"] : null;
+    if (page > 1 && data.length > 0 && revisions.length === before)
+      return { revisions, truncated: true, total, unpaged: true };
     const limit = typeof meta?.["limit"] === "number" ? meta["limit"] : CHANNEX_FEED_PAGE_SIZE;
     const ended = total !== null ? seen >= total || data.length === 0 : data.length < limit;
-    if (ended || input.found?.(revisions)) return { revisions, truncated: false, total };
+    if (ended || input.found?.(revisions))
+      return { revisions, truncated: false, total, unpaged: false };
   }
-  return { revisions, truncated: true, total };
+  return { revisions, truncated: true, total, unpaged: false };
 }

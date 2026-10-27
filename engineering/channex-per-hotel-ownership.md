@@ -113,7 +113,9 @@ The OTA has already confirmed the booking, so a refusal must never be silent (VA
   100 per run; a longer feed is logged with the hotel. Refused revisions never hide newer ones.
 - A booking on `closed` or `linked_stop_sell` nights is saved (VAY-1981 refused it): its rooms get
   `inventoryWarning` in the assignment payload, and the hotel gets a `booking_on_closed_night`
-  alert to check it can host the guest. The switch-day booking copy uses the same path.
+  alert to check it can host the guest ("Mark checked" closes it; so does a later revision that
+  moves the stay or cancels it). The switch-day booking copy uses the same path. The
+  property-scoped Airbnb alteration runtime (off in production) still refuses closed nights.
 - Still refused, now with the alert: more rooms than physically exist, nights beyond the open
   calendar (no inventory day yet), unmapped rooms or rates, and a stay change on a room the host
   chose by hand (VAY-2385).
@@ -134,7 +136,9 @@ The OTA has already confirmed the booking, so a refusal must never be silent (VA
      auto-open is On (rolling 12 months); no mapped room type is retired; room types share a
      linked inventory group only if the OTAs sell them the same way; and a read-only count shows
      0 `closed` and 0 `linked_stop_sell` inventory days for every mapped room type over the open
-     calendar, including the nights of the bookings the copy brings in.
+     calendar, including the nights of the bookings the copy brings in. Every one of those nights
+     must have an inventory day, past nights of guests already in house included, or the copy
+     refuses that booking (with the alert).
    - **Before full ARI, make sure Booking.com and Airbnb cannot sell beyond our open calendar.**
      Legacy's last push may reach further than our 12 months: read the hotel's furthest open
      night in Channex, and if it lies past our last inventory day, close those nights in Channex

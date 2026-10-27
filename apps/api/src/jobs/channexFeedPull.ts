@@ -123,7 +123,7 @@ export async function runChannexFeedPulls(connectionString: string, options: Opt
   const counters = { queued: 0, pulled: 0, failed: 0, revisions: 0, resynced: 0, resyncFailed: 0 };
   const failures: Array<{ propertyId: string; code: string }> = [];
   /** Hotels whose feed held more revisions than one run reads (the rest wait for later runs). */
-  const truncated: Array<{ propertyId: string; total: number | null }> = [];
+  const truncated: Array<{ propertyId: string; total: number | null; unpaged: boolean }> = [];
   try {
     counters.queued = await enqueueChannexFeedPulls(pool, {
       ...options,
@@ -134,7 +134,8 @@ export async function runChannexFeedPulls(connectionString: string, options: Opt
       if (!job) break;
       try {
         const feed = await readFeed(pool, job, options);
-        if (feed.truncated) truncated.push({ propertyId: job.propertyId, total: feed.total });
+        if (feed.truncated)
+          truncated.push({ propertyId: job.propertyId, total: feed.total, unpaged: feed.unpaged });
         const revisions = feed.revisions;
         // One revision that cannot be queued must not hold back the rest of the hotel's feed.
         const failedRevisionIds: string[] = [];

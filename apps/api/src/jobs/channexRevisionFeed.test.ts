@@ -64,6 +64,16 @@ describe("readChannexFeed (VAY-2108 W1d)", () => {
     expect(result.revisions).toHaveLength(CHANNEX_FEED_MAX_PAGES * 100);
   });
 
+  it("stops when Channex ignores the page number and repeats the first page", async () => {
+    const pages: string[] = [];
+    const read = async (url: URL): Promise<ChannexFeedPage> => {
+      pages.push(url.searchParams.get("pagination[page]")!);
+      return { data: rows(0, 100), meta: { total: 300, limit: 100 } };
+    };
+    expect(await readChannexFeed(read, input)).toMatchObject({ truncated: true, unpaged: true });
+    expect(pages).toEqual(["1", "2"]);
+  });
+
   it("returns a revision once when acknowledgements shift it onto the next page", async () => {
     const read = async (url: URL): Promise<ChannexFeedPage> =>
       url.searchParams.get("pagination[page]") === "1"

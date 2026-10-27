@@ -46,20 +46,27 @@ const QUEUE = "pms.channex.webhooks",
 // prettier-ignore
 type Payload={recoveryAlertId?:string;propertyId:string;providerPropertyId:string;channelBookingId:string;revision:string;revisionSource:"webhook_hint"|"revision_feed";pullRequired:boolean;rawPayload:Record<string,unknown>};
 // prettier-ignore
-type Job=Payload&{id:string;correlationId:string|null;attempt:number;maxAttempts:number;workerId:string;handledRevisions:Record<string,unknown>;invalidPayload?:true};
+type Job=Payload&{id:string;correlationId:string|null;attempt:number;maxAttempts:number;workerId:string;handledRevisions:Record<string,unknown>;invalidPayload?:true;alertError?:string};
 // prettier-ignore
 type RevisionRoom=ChannexRoomStay&ChannexRevenueRoom;
 // prettier-ignore
 type Revision={rooms:RevisionRoom[];id:string;semanticRevision:string|null;providerPropertyId:string;bookingId:string;status:"confirmed"|"canceled";checkIn:string;checkOut:string;adults:number;children:number;roomCount:number;currency:string;amount:string|null;retainedCharges:{roomIndex:number|null;amount:string}[];providerSource:string|null;channel:BookingChannel;hasCustomer:boolean;hasEmail:boolean;hasPhone:boolean;firstName:string|null;lastName:string|null;email:string|null;phone:string|null;insertedAt:string|null};
 type Counters = { succeeded: number; retryScheduled: number; deadLettered: number };
-/** VAY-2108 W1d: one dead-lettered booking, for the worker's log line (hotel and reason). */
-export type ChannexBookingDeadLetter = {
-  propertyId: string;
-  channelBookingId: string;
-  code: string;
-  reason: string;
-  alerted: boolean;
-};
+/** How a booking alert write ended: `superseded` when the PMS already holds a newer revision. */
+type AlertOutcome = "raised" | "superseded" | "unbound" | "failed";
+/** VAY-2108 W1d: what the worker reports for its log lines, each naming the hotel. */
+export type ChannexBookingWorkerEvent =
+  | {
+      kind: "dead_lettered";
+      propertyId: string;
+      channelBookingId: string;
+      code: string;
+      reason: string;
+      alert: AlertOutcome;
+      alertError?: string;
+    }
+  | { kind: "alert_failed"; propertyId: string; channelBookingId: string; alertError: string }
+  | { kind: "feed_truncated"; propertyId: string; total: number | null; unpaged: boolean };
 // `reason` refines `code` for the hotel's alert; the job keeps the code.
 // prettier-ignore
 class Failure extends Error{constructor(readonly code:string,readonly retryable:boolean,readonly reason:string=code){super(code)}}
@@ -69,7 +76,7 @@ class LeaseLost extends Error{constructor(){super("lease_lost")}}
 // prettier-ignore
 export async function runChannexBookingJobs(
   connectionString: string,
-  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;ownedPropertyIds?:readonly string[];fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbAlterationPropertyIds?:readonly string[];airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope;onDeadLetter?:(deadLetter:ChannexBookingDeadLetter)=>void},
+  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;ownedPropertyIds?:readonly string[];fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbAlterationPropertyIds?:readonly string[];airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope;onEvent?:(event:ChannexBookingWorkerEvent)=>void},
 ): Promise<Counters> {
   if (options.stagingImport && options.apiBaseUrl !== "https://staging.channex.io") throw new Error("staging_import_required");
   const pool = new pg.Pool({ connectionString, max: 2, connectionTimeoutMillis: 5_000 }),
@@ -100,23 +107,23 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){current=item;active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job);await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false,channexExcludedIds(options.apiBaseUrl));await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",true)}
+    for(const item of loaded){current=item;active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job);await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false,channexExcludedIds(options.apiBaseUrl));if(job.alertError){report(options,{kind:"alert_failed",propertyId:job.propertyId,channelBookingId:job.channelBookingId,alertError:job.alertError});job.alertError=undefined}await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",true)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
     if(error instanceof LeaseLost)throw error;
     const failure=error instanceof PmsOccupiedInventoryCoverageError?new Failure("operational_inventory_unavailable",true,"inventory_not_open"):error instanceof PmsOccupiedInventoryInvariantError?new Failure("operational_inventory_unavailable",true):error instanceof ChannexAssignmentConflict||error instanceof ChannexRevenueEvidenceConflict?new Failure(error.message,false):error instanceof Failure?error:error instanceof Error&&/^(?:alteration|airbnb_finance|airbnb_alteration)_[a-z_]{1,80}$/.test(error.message)?new Failure(error.message,true):new Failure(pgCode(error)?"write_unavailable":"handler_failed",true);
     const finished=await finish(pool,job,failure,current??record(record(job.rawPayload).payload));
-    if(finished.outcome==="deadLettered")report(options,{propertyId:job.propertyId,channelBookingId:job.channelBookingId,code:failure.code,reason:failure.reason,alerted:finished.alerted});
+    if(finished.outcome==="deadLettered")report(options,{kind:"dead_lettered",propertyId:job.propertyId,channelBookingId:job.channelBookingId,code:failure.code,reason:failure.reason,...finished.alert});
     return finished.outcome;
   }
 }
 
 // prettier-ignore
-function report(options:Parameters<typeof runChannexBookingJobs>[1],deadLetter:ChannexBookingDeadLetter){try{options.onDeadLetter?.(deadLetter)}catch{/* logging never stops the worker */}}
+function report(options:Parameters<typeof runChannexBookingJobs>[1],event:ChannexBookingWorkerEvent){try{options.onEvent?.(event)}catch{/* logging never stops the worker */}}
 
 // prettier-ignore
-async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope,owned?:readonly string[]):Promise<Job|{expired:ChannexBookingDeadLetter}|null>{
+async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope,owned?:readonly string[]):Promise<Job|{expired:ChannexBookingWorkerEvent}|null>{
   return transaction(pool, async (client) => {
     const row = (
       await client.query<{id:string;propertyId:string|null;resourceId:string;correlationId:string|null;status:"pending"|"running";attemptsCount:number;maxAttempts:number;handledRevisions:unknown;payload:unknown}>(
@@ -140,8 +147,8 @@ async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope,owne
     if (row.status === "running") {
       await client.query("UPDATE platform.job_attempts SET status='timed_out',finished_at=now(),error_type='worker_lease_expired',error_message='Channex booking worker lease expired' WHERE job_id=$1::uuid AND attempt_number=$2 AND status='running'",[row.id,row.attemptsCount]);
       if (row.attemptsCount >= row.maxAttempts) {
-        const alerted = await expire(client, row);
-        return { expired: { propertyId: row.propertyId ?? "", channelBookingId: row.resourceId, code: "worker_lease_expired", reason: "worker_lease_expired", alerted } };
+        const alert = await expire(client, row);
+        return { expired: { kind: "dead_lettered", propertyId: row.propertyId ?? "", channelBookingId: row.resourceId, code: "worker_lease_expired", reason: "worker_lease_expired", ...alert } };
       }
     }
     let payload:Payload,invalidPayload:false|true=false;
@@ -169,7 +176,8 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
     return text(attributes.booking_id)===job.channelBookingId&&(job.revision==="unknown"||text(item.id)===job.revision||text(attributes.revision)===job.revision||text(attributes.revision_number)===job.revision);
   };
   // VAY-2108 W1d: refused revisions stay in the feed, so page past them (an unknown revision reads it all).
-  const feed=await readChannexFeed(async url=>{const response=record(await providerRequest(options,`${url.pathname}${url.search}`,"GET"));return{data:Array.isArray(response.data)?response.data.map(record):[],meta:record(response.meta)}},{apiBaseUrl:options.apiBaseUrl,providerPropertyId:job.providerPropertyId,found:revisions=>job.revision!=="unknown"&&revisions.some(matches)});
+  const feed=await readChannexFeed(async url=>{if(url.searchParams.get("pagination[page]")!=="1")await heartbeat(pool,job,options);const response=record(await providerRequest(options,`${url.pathname}${url.search}`,"GET"));return{data:Array.isArray(response.data)?response.data.map(record):[],meta:record(response.meta)}},{apiBaseUrl:options.apiBaseUrl,providerPropertyId:job.providerPropertyId,found:revisions=>job.revision!=="unknown"&&revisions.some(matches)});
+  if(feed.truncated)report(options,{kind:"feed_truncated",propertyId:job.propertyId,total:feed.total,unpaged:feed.unpaged});
   const found = feed.revisions.filter(matches);
   if (found.length) return found;
   if(job.recoveryAlertId){
@@ -223,7 +231,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     const isAirbnb=canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource)==="airbnb";
     let guestBookingId = mappings[0]?.guestBookingId,alreadyCanceled=false;
     if(!guestBookingId&&revision.amount===null)throw new Failure("invalid_revision",false);
-    if(!guestBookingId&&revision.status==="canceled"){await resolveSupersededChannexBookingAlerts(client,{connectionId:connection[0]!.id,bookingId:job.channelBookingId,revisionInsertedAt:revision.insertedAt!});await client.query(`INSERT INTO pms.channel_booking_revision_tombstones(connection_id,property_id,binding_generation,external_booking_id,authoritative_revision_id,inserted_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::timestamptz) ON CONFLICT(connection_id,binding_generation,external_booking_id) DO UPDATE SET authoritative_revision_id=EXCLUDED.authoritative_revision_id,inserted_at=EXCLUDED.inserted_at,resolved_at=NULL,created_at=now(),retention_expires_at=now()+interval '90 days',updated_at=now()`,[connection[0]!.id,job.propertyId,connection[0]!.bindingGeneration,job.channelBookingId,revision.id,revision.insertedAt]);await recordHandled(client,job,revision,"ignored");return true}
+    if(!guestBookingId&&revision.status==="canceled"){await resolveSupersededChannexBookingAlerts(client,{connectionId:connection[0]!.id,bookingId:job.channelBookingId,revisionInsertedAt:revision.insertedAt!,eventTypes:["booking_not_imported"]});await client.query(`INSERT INTO pms.channel_booking_revision_tombstones(connection_id,property_id,binding_generation,external_booking_id,authoritative_revision_id,inserted_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::timestamptz) ON CONFLICT(connection_id,binding_generation,external_booking_id) DO UPDATE SET authoritative_revision_id=EXCLUDED.authoritative_revision_id,inserted_at=EXCLUDED.inserted_at,resolved_at=NULL,created_at=now(),retention_expires_at=now()+interval '90 days',updated_at=now()`,[connection[0]!.id,job.propertyId,connection[0]!.bindingGeneration,job.channelBookingId,revision.id,revision.insertedAt]);await recordHandled(client,job,revision,"ignored");return true}
     const isModified=(text(record(record(rawRevision).attributes).status)??text(record(rawRevision).status))?.toLowerCase()==="modified";
     if(isAirbnb&&isModified&&guestBookingId&&!applyAlterations&&(await client.query(`SELECT 1 FROM booking.booking_change_requests WHERE guest_booking_id=$1 AND status='pending' AND requested_changes ? 'channex' LIMIT 1`,[guestBookingId])).rows.length)throw new Failure("alteration_runtime_disabled",true);
     const financialHistory=guestBookingId&&(await client.query(`SELECT 1 FROM finance.airbnb_provider_snapshots WHERE property_id=$1 AND guest_booking_id=$2 LIMIT 1`,[job.propertyId,guestBookingId])).rows.length;
@@ -269,10 +277,12 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
       if(revision.hasCustomer)await client.query("UPDATE booking.booking_guests SET first_name=COALESCE($2,first_name),last_name=COALESCE($3,last_name),email=CASE WHEN $6 THEN $4 ELSE email END,phone=CASE WHEN $7 THEN $5 ELSE phone END,updated_at=now() WHERE guest_booking_id=$1::uuid AND guest_role='booker'",[guestBookingId,revision.firstName,revision.lastName,revision.email,revision.phone,revision.hasEmail,revision.hasPhone]);
     }
     if(isAirbnb)await client.query(`UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || jsonb_build_object('airbnbMoneyStatus','unverified','airbnbProviderAmount',jsonb_build_object('amount',$3::text,'currency',$4::text,'revisionId',$5::text,'revisionAt',$6::text,'amountBasis',NULL)) WHERE id=$1::uuid AND property_id=$2::uuid`,[guestBookingId,job.propertyId,revision.amount,revision.currency,revision.id,revision.insertedAt]);
-    // VAY-2108 W1d: this revision supersedes the booking's earlier alerts; nights it landed on closed raise a new one.
-    await resolveSupersededChannexBookingAlerts(client,{connectionId:connection[0]!.id,bookingId:job.channelBookingId,revisionInsertedAt:revision.insertedAt!});
+    // VAY-2108 W1d: this revision imports the booking, so its earlier not-imported alerts close. Closed-night
+    // alerts close only when the stay was rewritten or canceled; a stay still on closed nights raises a new one.
+    await resolveSupersededChannexBookingAlerts(client,{connectionId:connection[0]!.id,bookingId:job.channelBookingId,revisionInsertedAt:revision.insertedAt!,eventTypes:["booking_not_imported"]});
     const inventoryWarnings:ChannexInventoryWarning[]=[];
-    if(!alreadyCanceled&&!alterationApplied)await persistChannexAssignments(client,{propertyId:job.propertyId,connectionId:connection[0]!.id,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,channel:canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource),canceled:revision.status==="canceled",rooms:assignmentRooms(revision.rooms),inventoryWarnings,...(scope?.catalogHash?{stagingCatalogBindingGeneration:scope.bindingGeneration,bootstrapHash:scope.catalogHash}:{})});
+    const rewritten=!alreadyCanceled&&!alterationApplied&&await persistChannexAssignments(client,{propertyId:job.propertyId,connectionId:connection[0]!.id,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,channel:canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource),canceled:revision.status==="canceled",rooms:assignmentRooms(revision.rooms),inventoryWarnings,...(scope?.catalogHash?{stagingCatalogBindingGeneration:scope.bindingGeneration,bootstrapHash:scope.catalogHash}:{})});
+    if(rewritten)await resolveSupersededChannexBookingAlerts(client,{connectionId:connection[0]!.id,bookingId:job.channelBookingId,revisionInsertedAt:revision.insertedAt!,eventTypes:["booking_on_closed_night"]});
     if(inventoryWarnings.length)await alertClosedNights(client,job,rawRevision,inventoryWarnings);
     if(financialHistory&&!alterationApplied){
       const rooms=revision.status==="canceled"?[]:(await client.query<{position:number;roomTypeId:string}>(`SELECT position,room_type_id::text AS "roomTypeId" FROM pms.operational_booking_assignments WHERE property_id=$1 AND guest_booking_id=$2 AND assignment_status IN ('pending','assigned') ORDER BY position`,[job.propertyId,guestBookingId])).rows;
@@ -312,7 +322,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
 }
 
 // prettier-ignore
-async function finish(pool:pg.Pool,job:Job,result:"succeeded"|Failure,rawRevision?:unknown):Promise<{outcome:keyof Counters;alerted:boolean}>{
+async function finish(pool:pg.Pool,job:Job,result:"succeeded"|Failure,rawRevision?:unknown):Promise<{outcome:keyof Counters;alert:{alert:AlertOutcome;alertError?:string}}>{
   return transaction(pool, async (client) => {
     const now = new Date(),
       succeeded = result === "succeeded",
@@ -342,7 +352,7 @@ async function finish(pool:pg.Pool,job:Job,result:"succeeded"|Failure,rawRevisio
         [job.id,job.channelBookingId,job.correlationId,code,failure!.retryable,job.attempt],
       );
     // VAY-2108 W1d: never silent. The dead letter and the hotel's alert commit together.
-    const alerted=!succeeded&&!retry&&await alertNotImported(client,job,rawRevision,failure!.reason);
+    const alert:{alert:AlertOutcome;alertError?:string}=!succeeded&&!retry?await alertNotImported(client,job,rawRevision,failure!.reason):{alert:"unbound"};
     await client.query(
       `INSERT INTO platform.product_audit_events(audit_key,product,action,occurred_at,tenant_scope,
          actor_type,target_resource_product,target_resource_type,target_resource_id,job_id,correlation_id,redacted_payload,retention_class,privacy_scope)
@@ -350,12 +360,12 @@ async function finish(pool:pg.Pool,job:Job,result:"succeeded"|Failure,rawRevisio
          jsonb_strip_nulls(jsonb_build_object('propertyId',$7::text,'outcome',$8::text,'failureCode',$9::text)),'provider_receipt','restricted')`,
       [`channex.booking:${job.id}:attempt:${job.attempt}:${outcome}`,`channex.booking_ingestion.${outcome}`,now,job.channelBookingId,job.id,job.correlationId,job.propertyId,outcome,code],
     );
-    return {outcome,alerted};
+    return {outcome,alert};
   });
 }
 
 // prettier-ignore
-async function expire(client:pg.PoolClient,row:{id:string;propertyId:string|null;resourceId:string;correlationId:string|null;attemptsCount:number;payload:unknown}):Promise<boolean>{
+async function expire(client:pg.PoolClient,row:{id:string;propertyId:string|null;resourceId:string;correlationId:string|null;attemptsCount:number;payload:unknown}):Promise<{alert:AlertOutcome;alertError?:string}>{
   await client.query("UPDATE platform.jobs SET status='dead_lettered',finished_at=now(),locked_at=NULL,locked_by=NULL,updated_at=now(),job_metadata=job_metadata||jsonb_build_object('lastErrorCode','worker_lease_expired') WHERE id=$1::uuid",[row.id]);
   await client.query(
     `INSERT INTO platform.dead_letter_events(source_kind,job_id,job_attempt_id,tenant_scope,resource_product,resource_type,resource_id,correlation_id,reason_code,failure_summary,failure_payload)
@@ -372,14 +382,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * VAY-2108 W1d: the hotel's "booking not imported" alert, written in the dead letter's transaction.
  * Its own savepoint keeps a failed alert write from undoing the dead letter (the log line still
- * names the hotel and reason, with alerted:false).
+ * names the hotel and reason, with alert "failed" and the database error code).
  */
 // prettier-ignore
-async function alertNotImported(client:pg.PoolClient,job:Pick<Job,"propertyId"|"providerPropertyId"|"channelBookingId"|"revision">,rawRevision:unknown,reason:string):Promise<boolean>{
-  if(!UUID.test(job.propertyId)||!job.providerPropertyId)return false;
+async function alertNotImported(client:pg.PoolClient,job:Pick<Job,"propertyId"|"providerPropertyId"|"channelBookingId"|"revision">,rawRevision:unknown,reason:string):Promise<{alert:AlertOutcome;alertError?:string}>{
+  if(!UUID.test(job.propertyId)||!job.providerPropertyId)return {alert:"unbound"};
   await client.query("SAVEPOINT channex_booking_alert");
-  try{const raised=await raiseChannexBookingAlert(client,{propertyId:job.propertyId,providerPropertyId:job.providerPropertyId,eventType:"booking_not_imported",impact:bookingAlertImpact(job,rawRevision,reason)});await client.query("RELEASE SAVEPOINT channex_booking_alert");return raised}
-  catch{await client.query("ROLLBACK TO SAVEPOINT channex_booking_alert");await client.query("RELEASE SAVEPOINT channex_booking_alert");return false}
+  try{const alert=await raiseChannexBookingAlert(client,{propertyId:job.propertyId,providerPropertyId:job.providerPropertyId,eventType:"booking_not_imported",impact:bookingAlertImpact(job,rawRevision,reason)});await client.query("RELEASE SAVEPOINT channex_booking_alert");return {alert}}
+  catch(error){await client.query("ROLLBACK TO SAVEPOINT channex_booking_alert");await client.query("RELEASE SAVEPOINT channex_booking_alert");return {alert:"failed",alertError:pgCode(error)??"alert_write_failed"}}
 }
 /** VAY-2108 W1d: the booking landed on closed or linked stop-sell nights; the hotel checks it can host the guest. */
 // prettier-ignore
@@ -389,7 +399,7 @@ async function alertClosedNights(client:pg.PoolClient,job:Job,rawRevision:unknow
   try{
     const names=(await client.query<{name:string}>("SELECT name FROM pms.room_types WHERE property_id=$1::uuid AND id=ANY($2::uuid[]) ORDER BY name",[job.propertyId,[...new Set(warnings.map(warning=>warning.roomTypeId))]])).rows.map(row=>row.name).join(", ")||null;
     await raiseChannexBookingAlert(client,{propertyId:job.propertyId,providerPropertyId:job.providerPropertyId,eventType:"booking_on_closed_night",impact:{...bookingAlertImpact(job,rawRevision,warnings.some(warning=>warning.warning==="closed")?"inventory_closed":"inventory_linked_stop_sell"),roomTypeNames:names}});
-  }catch{await client.query("ROLLBACK TO SAVEPOINT channex_closed_night_alert")}
+  }catch(error){await client.query("ROLLBACK TO SAVEPOINT channex_closed_night_alert");job.alertError=pgCode(error)??"alert_write_failed"}
   await client.query("RELEASE SAVEPOINT channex_closed_night_alert");
 }
 /** What the hotel needs to find the booking: OTA, its reservation code, the stay and the Channex ids. */

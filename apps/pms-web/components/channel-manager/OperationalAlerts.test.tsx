@@ -208,7 +208,7 @@ it("waits for both reconnection jobs and verified scope before showing resolutio
 
 // VAY-2108 W1d: the alerts booking intake raises when an OTA booking is refused or lands on closed nights.
 it.each([
-  ["inventory_not_open", "Open the calendar further"],
+  ["inventory_not_open", "Open the calendar for those dates"],
   ["operational_mapping_unavailable", "Fix the mapping in channel settings"],
   ["handler_failed", "Something stopped the import."],
 ])(
@@ -222,6 +222,7 @@ it.each([
         eventType: "booking_not_imported",
         impact: {
           bookingId: "chx-booking",
+          revisionId: "chx-revision",
           channel: "BookingCom",
           reference: "BDC-4711",
           dateFrom: "2026-12-01",
@@ -326,6 +327,55 @@ it("asks the hotel to check a booking that landed on closed nights, without a re
     expect(channexService.alertAction).toHaveBeenCalledWith("closed", "acknowledge", 0);
     expect(JSON.stringify(view.toJSON())).toContain("Marked checked.");
     expect(labels()).not.toContain("Mark checked");
+  } finally {
+    if (view) act(() => view.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps Retry import off when the alert names no revision, and says a closed alert was not checked", async () => {
+  vi.stubGlobal("window", { setInterval: () => 1, clearInterval: () => {} });
+  const base = {
+    firstOccurredAt: "2026-10-27T10:00:00Z",
+    lastOccurredAt: "2026-10-27T10:00:00Z",
+    acknowledgedAt: null,
+    recoveryRound: 0,
+    occurrences: 0,
+    recovery: [],
+  };
+  vi.mocked(channexService.getAlerts).mockResolvedValue([
+    {
+      ...base,
+      id: "no-revision",
+      eventType: "booking_not_imported",
+      impact: { bookingId: "chx-booking", errorType: "worker_lease_expired" },
+      resolvedAt: null,
+    } as ChannexAlert,
+    {
+      ...base,
+      id: "moved",
+      eventType: "booking_on_closed_night",
+      impact: { bookingId: "chx-other", errorType: "inventory_closed" },
+      resolvedAt: "2026-10-27T12:00:00Z",
+    } as ChannexAlert,
+  ]);
+  const snapshot = {
+    sync: { booking: { retryAfter: null }, ari: { retryAfter: null } },
+    capabilityModes: { bookingSync: "mutating", ariSync: "mutating", iframe: "mutating" },
+  } as ChannexSnapshot;
+  let view!: ReturnType<typeof create>;
+  try {
+    await act(async () => {
+      view = create(createElement(OperationalAlerts, { snapshot, openSettings: async () => {} }));
+    });
+    const text = JSON.stringify(view.toJSON());
+    expect(
+      view.root.findAllByType("button").find((b) => b.children.join("") === "Retry import")!.props
+        .disabled,
+    ).toBe(true);
+    expect(text).toContain("can't be retried from here");
+    expect(text).toContain("Closed: a later update moved or cancelled this booking.");
+    expect(text).not.toContain("Marked checked.");
   } finally {
     if (view) act(() => view.unmount());
     vi.unstubAllGlobals();

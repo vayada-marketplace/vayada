@@ -2502,8 +2502,12 @@ const runChannexBookings = () => {
       config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.channexManagement.bookingMutationOwner === "target",
     // VAY-2108 W1d: each dead letter names its hotel and reason; the hotel sees a PMS alert.
-    onDeadLetter: (deadLetter) =>
-      app.log.error(deadLetter, "Channex booking was dead-lettered and not imported"),
+    onEvent: (event) =>
+      event.kind === "dead_lettered"
+        ? app.log.error(event, "Channex booking was dead-lettered and not imported")
+        : event.kind === "alert_failed"
+          ? app.log.error(event, "Channex booking alert could not be written")
+          : app.log.warn(event, "Channex booking feed is longer than one read covers"),
   })
     .then(() => undefined)
     .catch((error: unknown) => app.log.warn({ err: error }, "Channex booking ingestion failed"))

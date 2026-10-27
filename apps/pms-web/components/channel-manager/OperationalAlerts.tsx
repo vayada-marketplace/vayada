@@ -43,7 +43,7 @@ const notImportedReasons: Record<string, string> = {
   operational_inventory_unavailable:
     "No room was free for these nights. Free a room by moving another booking or removing a block, then retry the import.",
   inventory_not_open:
-    "These nights are after the end of your open calendar. Open the calendar further, then retry the import.",
+    "Some of its nights are outside your open calendar. Open the calendar for those dates, then retry the import.",
   operational_assignment_conflict:
     "The guest changed the stay, but a room you chose by hand is in the way. Change or clear that room on the booking, then retry the import.",
   operational_booking_terminal:
@@ -169,7 +169,9 @@ export function OperationalAlerts({
               <span className="text-sm">
                 {resolved
                   ? closedNight
-                    ? "Checked"
+                    ? alert.acknowledgedAt
+                      ? "Checked"
+                      : "Closed"
                     : notImported
                       ? "Resolved"
                       : "Recovery verified"
@@ -214,9 +216,11 @@ export function OperationalAlerts({
             <p className="mt-2 text-sm" role="status">
               {resolved
                 ? closedNight
-                  ? "Marked checked."
+                  ? alert.acknowledgedAt
+                    ? "Marked checked."
+                    : "Closed: a later update moved or cancelled this booking."
                   : notImported
-                    ? "Resolved: the booking's latest update reached your PMS."
+                    ? "Closed: the booking reached your PMS, or the guest cancelled it."
                     : "Recovery completed and provider evidence was checked."
                 : closedNight
                   ? "Open until you mark it checked."
@@ -321,12 +325,19 @@ export function OperationalAlerts({
                       pending ||
                       !allowed ||
                       alert.recoveryRound >= 3 ||
+                      (notImported && !alert.impact.revisionId) ||
                       ((mapping || disconnected) && !corrected[alert.id])
                     }
                   >
                     {notImported ? "Retry import" : "Retry recovery"}
                   </button>
                 </div>
+                {notImported && !alert.impact.revisionId && (
+                  <p className="mt-2 text-sm text-amber-800">
+                    This booking can't be retried from here. Contact support with alert reference{" "}
+                    {alert.id}.
+                  </p>
+                )}
                 {alert.recoveryRound >= 3 && !pending && (
                   <p className="mt-2 text-sm text-amber-800">
                     Recovery limit reached. Contact support with alert reference {alert.id}.
