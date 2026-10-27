@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parse } from "yaml";
 import {
   API_SOURCE_DIR,
   DEFAULT_GROUP_SIZE,
@@ -17,6 +18,7 @@ import {
 } from "./integration-suites.mjs";
 
 const WORKFLOW = readFileSync(join(ROOT, WORKFLOW_FILE), "utf8");
+const NIGHTLY_WORKFLOW_FILE = ".github/workflows/main-integration-suites.yml";
 const FILES = integrationFiles();
 const COVERAGE = prChecksCoverage(WORKFLOW);
 const GROUPS = nightlyGroups({ files: FILES, coverage: COVERAGE });
@@ -150,4 +152,14 @@ test("the nightly CLI prints the same groups as the module", () => {
     encoding: "utf8",
   });
   assert.equal(usage.status, 2);
+});
+
+test("the nightly workflow runs the groups this module prints, on the PR Checks PostgreSQL images", () => {
+  const nightly = readFileSync(join(ROOT, NIGHTLY_WORKFLOW_FILE), "utf8");
+  assert.match(nightly, /node scripts\/ci\/integration-suites\.mjs nightly/);
+  assert.match(nightly, /schedule:\n\s+- cron:/);
+  // The same mirrored service image, so both runs test the same PostgreSQL builds.
+  const image = /image: (\S+ci-postgres:\$\{\{ matrix\.postgres \}\}-alpine)/;
+  assert.equal(image.exec(nightly)?.[1], image.exec(WORKFLOW)?.[1]);
+  assert.deepEqual(parse(nightly).jobs.integration.strategy.matrix.postgres, [16, 17]);
 });
