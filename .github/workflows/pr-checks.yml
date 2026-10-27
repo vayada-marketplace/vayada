@@ -1179,6 +1179,7 @@ jobs:
           src/channexAdoptionManifestFoundation.integration.test.ts
           src/channexAdoptionConsumer.integration.test.ts
           src/channexAdoptionEvidence.integration.test.ts
+          src/channexOfferAriDeliveries.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/bookingWebEventsMigration.integration.test.ts
           src/bookingWebEventsLogBlanking.integration.test.ts
