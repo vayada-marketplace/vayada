@@ -118,24 +118,18 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
         NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
         const database = decodeURIComponent(login.pathname.slice(1)).replaceAll('"', '""');
         await client.query(`GRANT CONNECT ON DATABASE "${database}" TO ${role}`);
-        await client.query(`GRANT USAGE ON SCHEMA
-        hotel_catalog, identity, finance, booking, platform TO ${role}`);
-        await client.query(`GRANT SELECT ON
-        identity.organizations, identity.organization_resource_links,
-        identity.product_entitlements, finance.billing_entitlements,
-        hotel_catalog.properties, hotel_catalog.property_locations,
-        hotel_catalog.property_contact_channels,
-        hotel_catalog.organization_setup_track_intents,
-        booking.booking_settings, platform.idempotency_keys TO ${role}`);
-        await client.query(`GRANT INSERT ON
-        hotel_catalog.properties, hotel_catalog.property_locations,
-        hotel_catalog.property_contact_channels,
-        identity.organization_resource_links, booking.booking_settings,
-        platform.idempotency_keys, platform.product_audit_events TO ${role}`);
-        await client.query(`GRANT UPDATE ON platform.idempotency_keys TO ${role}`);
-        // Existing location triggers record a separate canonical owner revision.
-        await client.query(`GRANT SELECT, INSERT, UPDATE ON
-        hotel_catalog.property_owner_revisions TO ${role}`);
+        // The create path writes more than the profile these days (product defaults, the
+        // completeness update on the property row, the public profile projection, VAY-2342), so
+        // the role gets ordinary DML everywhere and the proof stays on the two profile tables:
+        // locations and contacts are only ever inserted, by the create and by its replay.
+        const schemas = "hotel_catalog, identity, finance, booking, platform, distribution, pms";
+        await client.query(`GRANT USAGE ON SCHEMA ${schemas} TO ${role}`);
+        await client.query(
+          `GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA ${schemas} TO ${role}`,
+        );
+        await client.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${schemas} TO ${role}`);
+        await client.query(`REVOKE UPDATE, DELETE ON
+        hotel_catalog.property_locations, hotel_catalog.property_contact_channels FROM ${role}`);
         const command = {
           organizationId,
           idempotencyKey: `insert-only-profile-create-${mode}`,
