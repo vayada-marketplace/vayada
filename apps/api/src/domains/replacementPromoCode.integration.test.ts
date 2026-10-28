@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
+import { createHotelSetupOrdinaryLoginFixture } from "../hotelSetupOrdinaryLogin.fixture.js";
 import { lockReplacementPromoCode } from "./replacementPromoCode.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("current Booking promo code owner", () => {
@@ -21,8 +22,13 @@ describe.skipIf(!url)("current Booking promo code owner", () => {
       [propertyId],
     );
     await pool.query(
-      "INSERT INTO booking.booking_settings(property_id,default_currency) VALUES($1,$2)",
+      "INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,$2)",
       [propertyId, currency],
+    );
+    // VAY-2390: Booking settings' default is only the currency guests see first.
+    await pool.query(
+      "INSERT INTO booking.booking_settings(property_id,default_currency) VALUES($1,'LKR')",
+      [propertyId],
     );
     await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Promo room')", [
       roomTypeId,
@@ -176,7 +182,7 @@ describe.skipIf(!url)("current Booking promo code owner", () => {
       ).rejects.toMatchObject({ code: "55P03" });
       await expect(
         writer.query(
-          "UPDATE booking.booking_settings SET default_currency='USD' WHERE property_id=$1",
+          "UPDATE pms.property_pricing_settings SET currency='USD' WHERE property_id=$1",
           [f.input.propertyId],
         ),
       ).rejects.toMatchObject({ code: "55P03" });
@@ -200,6 +206,8 @@ describe.skipIf(!url)("current Booking promo code owner", () => {
       { ...f.input, checkIn: "bad" },
       { ...f.input, rooms: [] },
       { ...f.input, rooms: [...f.input.rooms, ...f.input.rooms] },
+      // The Booking default currency, not the pricing currency quotes charge in.
+      { ...f.input, currency: "LKR" },
     ])
       expect(await f.read(value)).toBeNull();
     await pool.query(
@@ -207,9 +215,28 @@ describe.skipIf(!url)("current Booking promo code owner", () => {
       [f.input.propertyId],
     );
     expect(await f.read()).toBeNull();
-    await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [
-      f.input.propertyId,
+    const priceless = await fixture();
+    await pool.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [
+      priceless.input.propertyId,
     ]);
-    expect(await f.read()).toBeNull();
+    expect(await priceless.read()).toBeNull();
+  });
+  it("reads and locks the pricing currency on the ordinary API login", async () => {
+    const f = await fixture("USD"),
+      login = await createHotelSetupOrdinaryLoginFixture(pool, url!),
+      runtime = new pg.Pool({ connectionString: login.connectionString, max: 1 });
+    try {
+      const client = await runtime.connect();
+      try {
+        await client.query("BEGIN");
+        expect(await lockReplacementPromoCode(client, f.input)).toMatchObject({ code: "SAVE" });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    } finally {
+      await runtime.end();
+      await login.drop();
+    }
   });
 });

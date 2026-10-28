@@ -5746,7 +5746,7 @@ async function loadTargetPromoDefinition(
        promo.code,
        promo.discount_type AS "discountType",
        promo.discount_value::text AS "discountValue",
-       COALESCE(settings.default_currency, 'EUR') AS "propertyCurrency",
+       COALESCE(pricing.currency, settings.default_currency, 'EUR') AS "propertyCurrency",
        promo.min_booking_value::text AS "minBookingValue",
        promo.applicable_room_ids::text[] AS "applicableRoomIds",
        promo.valid_from AS "validFrom",
@@ -5758,6 +5758,8 @@ async function loadTargetPromoDefinition(
        promo.current_uses AS "currentUses"
      FROM booking.promo_definitions promo
      LEFT JOIN booking.booking_settings settings ON settings.property_id = promo.property_id
+     -- VAY-2390: quotes charge in the PMS pricing currency, so promo amounts are in it too.
+     LEFT JOIN pms.property_pricing_settings pricing ON pricing.property_id = promo.property_id
      WHERE promo.property_id = $1::uuid
        AND (upper(promo.code) = upper($2) OR promo.id::text = $2)
        AND promo.status <> 'retired'

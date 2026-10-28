@@ -76,15 +76,6 @@ describe("paymentSaveError (VAY-2185)", () => {
       { message: "settings.paymentsSave.currencyChanged", retry: false },
     ],
     [
-      "prices and booking settings in different currencies",
-      financeError(
-        409,
-        "property_currency_conflict",
-        "Prices use EUR but booking settings use LKR. Use one currency before saving payments.",
-      ),
-      { message: "settings.paymentsSave.currencyMismatch", retry: false },
-    ],
-    [
       "a stale bank destination version",
       new ApiErrorResponse(409, { detail: "Version conflict" }),
       { message: "settings.paymentsSave.reload", retry: false },

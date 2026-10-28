@@ -286,7 +286,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   } | null>(null);
   const [localizationLoading, setLocalizationLoading] = useState(true);
   const [localizationLoadError, setLocalizationLoadError] = useState("");
-  const [canonicalDefaultCurrency, setCanonicalDefaultCurrency] = useState<string | null>(null);
   const localizationLoadVersion = useRef(0);
   const getBookingHotelIdForLocalization = useCallback(() => {
     const hotelId = readBookingHotelId(settings);
@@ -309,11 +308,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     getBookingHotelIdForSave: getBookingHotelIdForLocalization,
     showFeedback: (type, message) => setFeedback({ type, message }),
   });
-  const saveLocalizationSettings = async () => {
-    const saved = await handleSaveCurrencyLang();
-    if (saved) setCanonicalDefaultCurrency(saved.defaultCurrency);
-  };
-
   // Stripe Connect / Payments
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [stripeOnboarded, setStripeOnboarded] = useState(false);
@@ -340,6 +334,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const bankSaveAttempt = useRef<BankTransferSaveAttempt>({});
   const [bankDestination, setBankDestination] = useState<SavedBankTransferDestination | null>(null);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
+  // Finance's currency, the PMS pricing currency guests pay in; not Localization's (VAY-2390).
+  const [paymentCurrency, setPaymentCurrency] = useState<string | null>(null);
   // The saved row has setup's plain Pay at Hotel, without a Cash/Card choice (VAY-2185).
   const [plainPayAtHotel, setPlainPayAtHotel] = useState(false);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
@@ -409,14 +405,12 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         loadVersion === localizationLoadVersion.current && hotelId === getSelectedBookingHotelId();
       setLocalizationLoading(true);
       setLocalizationLoadError("");
-      setCanonicalDefaultCurrency(null);
       try {
         await localizationWriteSettled();
         if (!isCurrentLoad()) return;
         const localization = await getBookingLocalizationSettings({ hotelId });
         if (!isCurrentLoad()) return;
         applyLocalizationSettings(localization);
-        setCanonicalDefaultCurrency(localization.defaultCurrency);
       } catch {
         if (!isCurrentLoad()) return;
         setLocalizationLoadError("admin.localizationSettingsFailedToLoad");
@@ -463,6 +457,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       payout_swift: "",
     }));
     setBankDestination(res.bankDestination ?? null);
+    setPaymentCurrency(ps.defaultCurrency);
     setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
     setOfferedMethods({
       card: ps.acceptedMethods.includes("card") && isFinanceStripeReady(res),
@@ -486,6 +481,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       setStripeAccountCreationBlocked(true);
     }
     setPaymentSettingsLoaded(false);
+    setPaymentCurrency(null);
     setOfferedMethods(null);
     setBillingPlanLoading(true);
     setAcceptanceLoading(true);
@@ -881,17 +877,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       if (showPageFeedback) setFeedback({ type: "error", message, retry });
     };
     try {
-      if (!paymentSettingsLoaded) {
+      if (!paymentSettingsLoaded || !paymentCurrency) {
         fail("admin.paymentSettingsDidNotLoadRefreshBeforeSavingPayments");
-        return null;
-      }
-      if (
-        localizationLoading ||
-        localizationLoadError ||
-        savingCurrencyLang ||
-        !canonicalDefaultCurrency
-      ) {
-        fail("admin.localizationSettingsDidNotLoadRetryLocalizationBeforeSavingPayments");
         return null;
       }
       if (
@@ -950,7 +937,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             payoutBankName: settings.payout_bank_name,
             payoutSwift: settings.payout_swift,
             paymentProvider,
-            defaultCurrency: canonicalDefaultCurrency,
+            defaultCurrency: paymentCurrency,
             commandPrefix: `settings-payment-settings-${hotelId}`,
           }),
         });
@@ -1592,7 +1579,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               setSupportedCurrencies={setSupportedCurrencies}
               supportedLanguages={supportedLanguages}
               setSupportedLanguages={setSupportedLanguages}
-              onSave={saveLocalizationSettings}
+              onSave={handleSaveCurrencyLang}
               saving={savingCurrencyLang}
             />
           )}

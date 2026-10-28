@@ -29,7 +29,9 @@ test.describe("booking-admin localization settings cutover", () => {
         : route.fallback(),
     );
     const financeWrites: unknown[] = [];
-    let expectedFinanceCurrency = "CHF";
+    // VAY-2390: Finance's currency is the PMS pricing currency guests pay in. Localization's
+    // default (CHF, USD below) is only the one guests see first.
+    const expectedFinanceCurrency = "EUR";
     await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
       const providerAccount = {
         providerAccountId: "acct_localization_e2e",
@@ -210,7 +212,7 @@ test.describe("booking-admin localization settings cutover", () => {
     await page.getByRole("button", { name: "Save Changes", exact: true }).click();
     await expect.poll(() => financeWrites.length).toBe(1);
     expect(financeWrites[0]).toMatchObject({
-      paymentSettings: { defaultCurrency: "CHF", supportedCurrencies: ["CHF"] },
+      paymentSettings: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"] },
     });
     await openSettingsPage("General");
     await assertHealthy();
@@ -222,31 +224,15 @@ test.describe("booking-admin localization settings cutover", () => {
     await page.getByRole("button", { name: /^Save Changes$/ }).click();
     await expect.poll(() => typedWrites.length).toBe(2);
 
-    // The currency write is still in flight: Payments must not save the old currency.
+    // A Localization currency write in flight doesn't hold Payments up: it saves Finance's.
     await openSettingsPage("Payments");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
-    expect(financeWrites).toHaveLength(1);
-    await expect(
-      page.getByRole("alert").filter({
-        hasText: "Localization settings did not load. Retry Localization before saving payments.",
-      }),
-    ).toBeVisible();
-
-    expectedFinanceCurrency = "USD";
-    delayWrite = false;
-    // Payments re-reads the canonical currency once the write settles.
-    const reread = page.waitForResponse(
-      (response) =>
-        response.request().method() === "GET" &&
-        new URL(response.url()).pathname === BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH,
-    );
-    releaseLocalizationWrite?.();
-    await reread;
     await page.getByRole("button", { name: "Save Changes", exact: true }).click();
     await expect.poll(() => financeWrites.length).toBe(2);
     expect(financeWrites[1]).toMatchObject({
-      paymentSettings: { defaultCurrency: "USD", supportedCurrencies: ["USD"] },
+      paymentSettings: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"] },
     });
+    delayWrite = false;
+    releaseLocalizationWrite?.();
 
     await openSettingsPage("General");
     await page.getByRole("button", { name: /US Dollar/ }).click();
@@ -263,7 +249,7 @@ test.describe("booking-admin localization settings cutover", () => {
     await page.getByRole("button", { name: "Save Changes", exact: true }).click();
     await expect.poll(() => financeWrites.length).toBe(3);
     expect(financeWrites[2]).toMatchObject({
-      paymentSettings: { defaultCurrency: "USD", supportedCurrencies: ["USD"] },
+      paymentSettings: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"] },
     });
 
     // Booking Flow is gone (VAY-2144): its old URL opens Room Filters, which has no localization.
