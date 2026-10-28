@@ -125,6 +125,25 @@ export function QuickHotelStep({
     more.some((option) => option.value === draft.propertyType),
   );
   const firstRender = useRef(true);
+  const whereRef = useRef<HTMLDivElement>(null);
+  const focusBeforeFailedSave = useRef<HTMLElement | null>(null);
+
+  // While a save runs the fields are disabled, as the buttons are: a change made meanwhile would not be part
+  // of the save, and the screen then leaves (VAY-2397). One fieldset does it, with no group role to announce.
+  // Google's map and address search on "Where it is" aren't form controls, so the disabled fieldset doesn't
+  // reach them; that screen's part is inert instead.
+  useEffect(() => {
+    whereRef.current?.toggleAttribute("inert", submitting);
+  }, [submitting, part]);
+
+  // The browser takes focus off a control as it is disabled: after a failed save it goes back there, unless
+  // the owner has moved on.
+  useEffect(() => {
+    const focused = focusBeforeFailedSave.current;
+    focusBeforeFailedSave.current = null;
+    if (submitting || !focused?.isConnected) return;
+    if (!document.activeElement || document.activeElement === document.body) focused.focus();
+  }, [submitting]);
 
   // A new screen starts at its title, for keyboard and screen-reader users too.
   useEffect(() => {
@@ -155,12 +174,15 @@ export function QuickHotelStep({
   }
 
   async function save(action: (draft: QuickHotelDraft) => Promise<void>) {
+    const focused =
+      typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null);
     setSubmitting(true);
     try {
       await action(draft);
       return true;
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "We couldn't save your hotel.");
+      focusBeforeFailedSave.current = focused;
       return false;
     } finally {
       setSubmitting(false);
@@ -288,125 +310,127 @@ export function QuickHotelStep({
           </QuickSetupPreviewCard>
         }
       >
-        <form id={FORM_ID} noValidate onSubmit={handleSubmit} className="flex flex-col gap-8">
-          {part === "hotel" ? (
-            <>
-              <QuickSetupField
-                label="Hotel name"
-                required
-                value={draft.displayName}
-                error={errors.displayName}
-                helper="Guests see it on your booking page and in emails."
-                inputProps={{ placeholder: "e.g. Hotel Alpenrose", maxLength: 120 }}
-                onChange={(displayName) => change({ displayName }, "displayName")}
-              />
-              <div>
-                <p className="text-sm font-semibold text-gray-950">Logo</p>
-                <label className="mt-2 flex cursor-pointer items-start gap-3.5 rounded-[14px] border-[1.5px] border-dashed border-primary-300 bg-primary-50 p-4 focus-within:ring-2 focus-within:ring-primary-600 focus-within:ring-offset-2 lg:items-center lg:gap-4 lg:p-5">
-                  <span className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-primary-100 bg-white">
-                    {logoPreviewUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- a local object URL
-                      <img src={logoPreviewUrl} alt="" className="h-full w-full object-contain" />
-                    ) : (
-                      <ArrowUpTrayIcon className="h-6 w-6 text-primary-600" aria-hidden="true" />
-                    )}
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5 lg:flex-row lg:items-center lg:gap-4">
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="text-base font-semibold text-gray-950">
-                        {logoPreviewUrl ? "Your logo" : "Upload your logo"}
+        <form id={FORM_ID} noValidate onSubmit={handleSubmit}>
+          <fieldset role="none" disabled={submitting} className="flex min-w-0 flex-col gap-8">
+            {part === "hotel" ? (
+              <>
+                <QuickSetupField
+                  label="Hotel name"
+                  required
+                  value={draft.displayName}
+                  error={errors.displayName}
+                  helper="Guests see it on your booking page and in emails."
+                  inputProps={{ placeholder: "e.g. Hotel Alpenrose", maxLength: 120 }}
+                  onChange={(displayName) => change({ displayName }, "displayName")}
+                />
+                <div>
+                  <p className="text-sm font-semibold text-gray-950">Logo</p>
+                  <label className="mt-2 flex cursor-pointer items-start gap-3.5 rounded-[14px] border-[1.5px] border-dashed border-primary-300 bg-primary-50 p-4 focus-within:ring-2 focus-within:ring-primary-600 focus-within:ring-offset-2 lg:items-center lg:gap-4 lg:p-5">
+                    <span className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-primary-100 bg-white">
+                      {logoPreviewUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- a local object URL
+                        <img src={logoPreviewUrl} alt="" className="h-full w-full object-contain" />
+                      ) : (
+                        <ArrowUpTrayIcon className="h-6 w-6 text-primary-600" aria-hidden="true" />
+                      )}
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5 lg:flex-row lg:items-center lg:gap-4">
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="text-base font-semibold text-gray-950">
+                          {logoPreviewUrl ? "Your logo" : "Upload your logo"}
+                        </span>
+                        <span className="text-[13px] text-gray-500">
+                          PNG or SVG · optional
+                          <span className="hidden lg:inline"> · you can add it later</span>
+                        </span>
                       </span>
-                      <span className="text-[13px] text-gray-500">
-                        PNG or SVG · optional
-                        <span className="hidden lg:inline"> · you can add it later</span>
+                      <span className="mt-2 inline-flex h-10 w-fit shrink-0 items-center rounded-full border border-primary-200 bg-white px-4 text-sm font-semibold text-primary-700 lg:mt-0">
+                        {logoPreviewUrl ? "Change file" : "Choose file"}
                       </span>
                     </span>
-                    <span className="mt-2 inline-flex h-10 w-fit shrink-0 items-center rounded-full border border-primary-200 bg-white px-4 text-sm font-semibold text-primary-700 lg:mt-0">
-                      {logoPreviewUrl ? "Change file" : "Choose file"}
-                    </span>
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                    className="sr-only"
-                    aria-label={logoPreviewUrl ? "Change logo" : "Upload your logo"}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) onLogoSelected(file);
-                      event.target.value = "";
-                    }}
-                  />
-                </label>
-                <QuickSetupFieldError message={logoError} />
-              </div>
-              <div>
-                <p id="quick-hotel-type" className="text-sm font-semibold text-gray-950">
-                  Property type
-                  <span aria-hidden="true" className="ml-1 text-red-600">
-                    *
-                  </span>
-                </p>
-                <div
-                  role="radiogroup"
-                  aria-labelledby="quick-hotel-type"
-                  className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4"
-                >
-                  {shown.map(typeCard)}
-                  {showMore ? more.map(typeCard) : null}
-                  {!showMore && more.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowMore(true)}
-                      className="flex h-[60px] items-center gap-2.5 rounded-xl border border-gray-200 bg-white px-3 text-left outline-none hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 lg:h-[104px] lg:flex-col lg:items-start lg:justify-between lg:rounded-[14px] lg:p-3.5"
-                    >
-                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-50 text-gray-600 lg:h-10 lg:w-10 lg:rounded-[10px]">
-                        <EllipsisHorizontalIcon
-                          className="h-[18px] w-[18px] lg:h-[22px] lg:w-[22px]"
-                          aria-hidden="true"
-                        />
-                      </span>
-                      <span className="text-sm font-semibold text-gray-950">More…</span>
-                    </button>
-                  ) : null}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="sr-only"
+                      aria-label={logoPreviewUrl ? "Change logo" : "Upload your logo"}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) onLogoSelected(file);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <QuickSetupFieldError message={logoError} />
                 </div>
-                <QuickSetupFieldError message={errors.propertyType} />
-              </div>
-            </>
-          ) : null}
+                <div>
+                  <p id="quick-hotel-type" className="text-sm font-semibold text-gray-950">
+                    Property type
+                    <span aria-hidden="true" className="ml-1 text-red-600">
+                      *
+                    </span>
+                  </p>
+                  <div
+                    role="radiogroup"
+                    aria-labelledby="quick-hotel-type"
+                    className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4"
+                  >
+                    {shown.map(typeCard)}
+                    {showMore ? more.map(typeCard) : null}
+                    {!showMore && more.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowMore(true)}
+                        className="flex h-[60px] items-center gap-2.5 rounded-xl border border-gray-200 bg-white px-3 text-left outline-none hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 lg:h-[104px] lg:flex-col lg:items-start lg:justify-between lg:rounded-[14px] lg:p-3.5"
+                      >
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-50 text-gray-600 lg:h-10 lg:w-10 lg:rounded-[10px]">
+                          <EllipsisHorizontalIcon
+                            className="h-[18px] w-[18px] lg:h-[22px] lg:w-[22px]"
+                            aria-hidden="true"
+                          />
+                        </span>
+                        <span className="text-sm font-semibold text-gray-950">More…</span>
+                      </button>
+                    ) : null}
+                  </div>
+                  <QuickSetupFieldError message={errors.propertyType} />
+                </div>
+              </>
+            ) : null}
 
-          {part === "where" ? address(errors.address) : null}
+            {part === "where" ? <div ref={whereRef}>{address(errors.address)}</div> : null}
 
-          {part === "contacts" ? (
-            <>
-              {contactsAction}
-              <QuickSetupField
-                label="Reception email"
-                required
-                value={draft.contactEmail}
-                error={errors.contactEmail}
-                inputProps={{
-                  type: "email",
-                  autoComplete: "email",
-                  placeholder: "reception@yourhotel.com",
-                }}
-                onChange={(contactEmail) => change({ contactEmail }, "contactEmail")}
-              />
-              <CountryPhoneField
-                label="Reception phone"
-                required
-                value={draft.phone}
-                error={errors.phone}
-                defaultCountry={draft.countryCode}
-                onChange={(phone) => change({ phone }, "phone")}
-              />
-              {contactsNote}
-            </>
-          ) : null}
-          {submitError ? (
-            <p role="alert" className="text-sm text-red-700">
-              {submitError}
-            </p>
-          ) : null}
+            {part === "contacts" ? (
+              <>
+                {contactsAction}
+                <QuickSetupField
+                  label="Reception email"
+                  required
+                  value={draft.contactEmail}
+                  error={errors.contactEmail}
+                  inputProps={{
+                    type: "email",
+                    autoComplete: "email",
+                    placeholder: "reception@yourhotel.com",
+                  }}
+                  onChange={(contactEmail) => change({ contactEmail }, "contactEmail")}
+                />
+                <CountryPhoneField
+                  label="Reception phone"
+                  required
+                  value={draft.phone}
+                  error={errors.phone}
+                  defaultCountry={draft.countryCode}
+                  onChange={(phone) => change({ phone }, "phone")}
+                />
+                {contactsNote}
+              </>
+            ) : null}
+            {submitError ? (
+              <p role="alert" className="text-sm text-red-700">
+                {submitError}
+              </p>
+            ) : null}
+          </fieldset>
         </form>
       </QuickSetupStepLayout>
     </QuickSetupShell>
