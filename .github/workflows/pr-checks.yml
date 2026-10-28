@@ -693,6 +693,25 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # The transfer suites need their own database. This one also runs the transfer as the
+      # restricted identity login with the platform grant contract (VAY-2396).
+      - name: Verify the account admin transfer, also as the restricted identity login
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1439_transfer_command_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay1439_transfer_command_test");
+            await client.end();
+          '
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace @vayada/backend-auth run test -- --no-file-parallelism src/accountAdminTransferCommand.test.ts
+
       - name: Verify Finance expense worker permissions and real handlers
         if: matrix.shard == 'platform'
         env:
