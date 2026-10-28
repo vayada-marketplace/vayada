@@ -19,6 +19,7 @@ import {
 import { formatBillingAmount, formatInvoiceDate } from "@/lib/settings/billing";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import {
   activateFixedPlanByCard,
   activateFixedPlanByInvoice,
@@ -35,6 +36,8 @@ import {
 
 export default function BillingSettingsPage() {
   const { t } = useTranslation();
+  // Billing is the account owner's; the API refuses everyone else (VAY-2154, VAY-2401).
+  const isOwner = useHasPmsPermission("finance.billing.manage");
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -73,8 +76,8 @@ export default function BillingSettingsPage() {
   }, [hydrate]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (isOwner) void load();
+  }, [isOwner, load]);
 
   // No plan until the hotel chooses one: bookings are refused without it (VAY-2171).
   const notChosen = billing?.planStatus.plan === null;
@@ -168,6 +171,22 @@ export default function BillingSettingsPage() {
       setPortalLoading(false);
     }
   };
+
+  if (!isOwner) {
+    return (
+      <SettingsSubPage
+        title={t("settings.navigation.billing")}
+        description={t("settings.cards.billing.description")}
+      >
+        <p
+          role="note"
+          className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600"
+        >
+          {t("settings.billing.ownerOnly")}
+        </p>
+      </SettingsSubPage>
+    );
+  }
 
   return (
     <SettingsSubPage

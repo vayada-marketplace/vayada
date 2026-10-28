@@ -13,12 +13,16 @@ vi.mock("@/lib/i18n", () => ({
         "settings.calendar.sameDayCutoff": "Same-day booking cutoff",
         "common.saving": "Saving…",
         "settings.retry": "Retry",
+        "settings.access.viewOnly": "You can see these settings, but your role can't change them.",
+        "settings.access.none": "Your role can't see or change these settings.",
       })[key] ?? key,
   }),
 }));
 
 function props() {
   return {
+    canEditAssignments: true,
+    canEditSameDay: true,
     enabled: true,
     loading: false,
     saving: false,
@@ -95,5 +99,21 @@ describe("same-day booking calendar settings", () => {
     );
     act(() => alert.findByType("button").props.onClick());
     expect(input.onSameDayRetry).toHaveBeenCalledOnce();
+  });
+
+  it("shows a settings reader the same-day rule without letting them change it (VAY-2154)", () => {
+    const input = { ...props(), canEditAssignments: false, canEditSameDay: false };
+    const view = create(createElement(CalendarSection, input));
+
+    expect(view.root.findAllByProps({ "aria-label": "Optimize room assignments" })).toHaveLength(0);
+    const notes = view.root.findAllByProps({ role: "note" }).map((note) => note.children.join(""));
+    expect(notes).toEqual([
+      "Your role can't see or change these settings.",
+      "You can see these settings, but your role can't change them.",
+    ]);
+    const toggle = view.root.findByProps({ "aria-label": "Allow same-day bookings" });
+    const cutoff = view.root.findByProps({ "aria-label": "Same-day booking cutoff" });
+    expect([toggle.props.disabled, cutoff.props.disabled]).toEqual([true, true]);
+    expect(cutoff.props.value).toBe("18:00");
   });
 });

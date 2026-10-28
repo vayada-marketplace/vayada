@@ -12,8 +12,10 @@ import {
 import { CheckoutInspectionStep, settingsService } from "@/services/settings";
 import { SettingsSection } from "@vayada/settings-ui";
 import { useTranslation } from "@/lib/i18n";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeCheckoutInspectionStep } from "@/lib/settings/checklistCopy";
+import { SettingsAccessNote } from "./SettingsAccessNote";
 
 const DRAFT_STORAGE_KEY = "vayada:pms:checkout-inspection-preview";
 
@@ -76,8 +78,10 @@ export function CheckoutInspectionPreview({ steps }: { steps: CheckoutInspection
 
 export function CheckoutInspectionBuilder() {
   const { t } = useTranslation();
+  // The inspection takes operations access, even to read (VAY-2154).
+  const canManage = useHasPmsPermission("pms.operations.manage");
   const [steps, setSteps] = useState<CheckoutInspectionStep[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(canManage);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -86,6 +90,7 @@ export function CheckoutInspectionBuilder() {
   const nextFocusId = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!canManage) return;
     settingsService
       .getCheckoutInspection()
       .then((template) => setSteps(template.steps || []))
@@ -93,7 +98,7 @@ export function CheckoutInspectionBuilder() {
         setError(localizedErrorText(err, err.message || t("settings.inspection.loadError"), t)),
       )
       .finally(() => setLoading(false));
-  }, [t]);
+  }, [canManage, t]);
 
   useEffect(() => {
     if (!nextFocusId.current) return;
@@ -177,6 +182,13 @@ export function CheckoutInspectionBuilder() {
     title: t("settings.guestFlows.checkOut"),
     description: t("settings.inspection.description"),
   };
+  if (!canManage) {
+    return (
+      <SettingsSection {...heading}>
+        <SettingsAccessNote access="none" />
+      </SettingsSection>
+    );
+  }
   if (loading) {
     return (
       <SettingsSection {...heading}>

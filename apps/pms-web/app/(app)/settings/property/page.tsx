@@ -13,6 +13,8 @@ import { SettingsFeedback } from "@/components/settings/SettingsFeedback";
 import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import { humanizeApiError } from "@/components/settings/constants";
 import { useScrollToHash } from "@/components/settings/useScrollToHash";
+import { SettingsAccessNote } from "@/components/settings/SettingsAccessNote";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import {
   pmsPropertyDetailsSaveError,
   type PmsPropertyProfileLoadStatus,
@@ -37,6 +39,10 @@ export default function PropertySettingsPage() {
   const [propertyProfileLoadStatus, setPropertyProfileLoadStatus] =
     useState<PmsPropertyProfileLoadStatus>("loading");
   const [propertyProfileLoadError, setPropertyProfileLoadError] = useState("");
+  // Country and time zone are the account owner's (hotel setup); arrival times take Booking
+  // settings access, even to read (VAY-2154).
+  const canEditLocation = useHasPmsPermission("hotel_catalog.setup.manage");
+  const canEditArrivalTimes = useHasPmsPermission("booking.settings.manage");
   useScrollToHash();
 
   const loadPropertyProfile = useCallback(async () => {
@@ -72,8 +78,8 @@ export default function PropertySettingsPage() {
         setCurrencyLoadError(t("settings.localization.currencyLoadError"));
         setCurrencyLoadStatus("error");
       });
-    void loadPropertyProfile();
-  }, [loadPropertyProfile, t]);
+    if (canEditLocation) void loadPropertyProfile();
+  }, [canEditLocation, loadPropertyProfile, t]);
 
   const savePropertyDetails = async () => {
     const validationError = pmsPropertyDetailsSaveError({
@@ -117,23 +123,33 @@ export default function PropertySettingsPage() {
       description={t("settings.cards.property.description")}
     >
       <SettingsFeedback error={error} success={success} />
-      <PropertySection
-        timezone={timezone}
-        setTimezone={setTimezone}
-        country={country}
-        setCountry={setCountry}
-        saving={savingProperty}
-        loadStatus={propertyProfileLoadStatus}
-        loadError={propertyProfileLoadError}
-        onRetry={loadPropertyProfile}
-        onSave={savePropertyDetails}
-      />
+      {canEditLocation ? (
+        <PropertySection
+          timezone={timezone}
+          setTimezone={setTimezone}
+          country={country}
+          setCountry={setCountry}
+          saving={savingProperty}
+          loadStatus={propertyProfileLoadStatus}
+          loadError={propertyProfileLoadError}
+          onRetry={loadPropertyProfile}
+          onSave={savePropertyDetails}
+        />
+      ) : (
+        <SettingsSection
+          id="property-details"
+          title={t("settings.property.locationTitle")}
+          description={t("settings.property.locationDescription")}
+        >
+          <SettingsAccessNote access="none" />
+        </SettingsSection>
+      )}
       <SettingsSection
         id="arrival-times"
         title={t("settings.arrivalTimes.title")}
         description={t("settings.arrivalTimes.description")}
       >
-        <ArrivalTimesSection />
+        {canEditArrivalTimes ? <ArrivalTimesSection /> : <SettingsAccessNote access="none" />}
       </SettingsSection>
       <LocalizationSection
         currency={currency}
