@@ -158,7 +158,6 @@ export interface Booking {
   /** The guest pays the hotel directly; "mark paid" confirms the booking, there is no accept step. */
   awaitingPaymentConfirmation: boolean;
   platformFeeAmount: number | null;
-  affiliateCommissionAmount: number | null;
   propertyPayoutAmount: number | null;
   addonIds: string[];
   addonNames: string[];
@@ -533,7 +532,6 @@ export interface PaymentSettings {
   stripeConnectOnboarded: boolean;
   platformFeeType: string;
   platformFeeValue: number;
-  platformFeeWithAffiliate: number;
   payAtPropertyEnabled: boolean;
   onlineCardPayment: boolean;
   bankTransfer: boolean;
@@ -1541,7 +1539,6 @@ function toBooking(
     cardRefund: reservation.cardRefund ?? null,
     bookedAt: reservation.bookedAt ?? null,
     platformFeeAmount: null,
-    affiliateCommissionAmount: null,
     propertyPayoutAmount: null,
     addonIds: addOns.map(({ addonId }) => addonId),
     addonNames: addOns.map(({ name }) => name),

@@ -163,7 +163,6 @@ export function createTargetBookingReservationsReadRepository(config: {
              checkout_record.completed_at AS "checkedOutAt",
              NULLIF(booking.booking_metadata ->> 'hostResponseDeadline', '') AS "hostResponseDeadline",
              payment.fee_amount AS "platformFeeAmount",
-             NULL::numeric AS "affiliateCommissionAmount",
              payment.net_amount AS "propertyPayoutAmount",
              COALESCE(addons.addon_ids, '[]'::jsonb) AS "addonIds",
              COALESCE(addons.addon_names, '[]'::jsonb) AS "addonNames",

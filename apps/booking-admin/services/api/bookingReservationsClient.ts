@@ -63,7 +63,6 @@ export interface BookingReservation {
   checkedOutAt: string | null;
   hostResponseDeadline: string | null;
   platformFeeAmount: number | null;
-  affiliateCommissionAmount: number | null;
   propertyPayoutAmount: number | null;
   addonIds: string[];
   addonNames: string[];

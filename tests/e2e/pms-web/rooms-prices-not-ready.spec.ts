@@ -21,7 +21,6 @@ function paymentSettings(overrides: Record<string, unknown>) {
       stripeConnectOnboarded: false,
       platformFeeType: "none",
       platformFeeValue: 0,
-      platformFeeWithAffiliate: 0,
       payAtPropertyEnabled: false,
       onlineCardPayment: false,
       bankTransfer: false,

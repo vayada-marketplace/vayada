@@ -671,7 +671,6 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
           stripeConnectOnboarded: false,
           platformFeeType: "percentage",
           platformFeeValue: 0,
-          platformFeeWithAffiliate: 0,
           payAtPropertyEnabled: true,
           onlineCardPayment: false,
           bankTransfer: false,
