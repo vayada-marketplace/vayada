@@ -101,13 +101,6 @@ export const PROPERTY_SELECTION_STATES = [
   "single_property",
   "multiple_properties",
 ] as const;
-export const SETUP_LAUNCH_READINESS_STATES = [
-  "not_applicable",
-  "blocked",
-  "pending",
-  "ready",
-] as const;
-
 export type SetupTaskId = (typeof SETUP_TASK_IDS)[number];
 export type SetupTask = {
   taskId: SetupTaskId;
@@ -139,16 +132,13 @@ export type ProductEntryDecision = {
   reasonCode: string | null;
 };
 
+/**
+ * The selected property's setup plan: the hotel-basics task the setup flow reads (VAY-2175). Until
+ * the API stops sending them, the parser also accepts the old plan's other tasks and keys.
+ */
 export type PropertySetupPlan = {
   propertyId: string;
-  planRevision: string;
   tasks: SetupTask[];
-  recommendedTaskId: SetupTaskId | null;
-  ownerProgress: { complete: number; total: number };
-  launchReadiness: {
-    operationsUse: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
-    directBookingPublish: (typeof SETUP_LAUNCH_READINESS_STATES)[number];
-  };
 };
 
 export type AdaptiveHotelSetupStatus = {
@@ -414,74 +404,40 @@ function isProductEntryDecision(value: unknown): value is ProductEntryDecision {
   );
 }
 
+// The old full plan's keys: accepted and not read until the API stops sending them (VAY-2175).
+const RETIRED_SETUP_PLAN_KEYS = [
+  "planRevision",
+  "recommendedTaskId",
+  "ownerProgress",
+  "launchReadiness",
+] as const;
+
 function isPropertySetupPlan(
   value: unknown,
   selectedTracks: SetupTrack[],
 ): value is PropertySetupPlan {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, [
-      "propertyId",
-      "planRevision",
-      "tasks",
-      "recommendedTaskId",
-      "ownerProgress",
-      "launchReadiness",
-    ])
+    !hasOnlyKeys(value, ["propertyId", "tasks", ...RETIRED_SETUP_PLAN_KEYS]) ||
+    !isNonEmptyString(value["propertyId"]) ||
+    !isArrayOf(value["tasks"], isSetupTask)
   ) {
     return false;
   }
-  const progress = value["ownerProgress"];
-  const launch = value["launchReadiness"];
-  if (
-    !(
-      isNonEmptyString(value["propertyId"]) &&
-      isNonEmptyString(value["planRevision"]) &&
-      isArrayOf(value["tasks"], isSetupTask) &&
-      (value["recommendedTaskId"] === null ||
-        isOneOf(value["recommendedTaskId"], SETUP_TASK_IDS)) &&
-      isRecord(progress) &&
-      hasOnlyKeys(progress, ["complete", "total"]) &&
-      isNonNegativeInteger(progress["complete"]) &&
-      isNonNegativeInteger(progress["total"]) &&
-      (progress["complete"] as number) <= (progress["total"] as number) &&
-      isRecord(launch) &&
-      hasOnlyKeys(launch, ["operationsUse", "directBookingPublish"]) &&
-      isOneOf(launch["operationsUse"], SETUP_LAUNCH_READINESS_STATES) &&
-      isOneOf(launch["directBookingPublish"], SETUP_LAUNCH_READINESS_STATES)
-    )
-  ) {
-    return false;
-  }
-  const tasks = value["tasks"];
-  const recommendedTaskId = value["recommendedTaskId"];
-  const recommendedTask = tasks.find(({ taskId }) => taskId === recommendedTaskId);
+  const taskIds = value["tasks"].map(({ taskId }) => taskId);
   const expectedTaskIds = SETUP_TASK_IDS.filter(
     (taskId) =>
       (SETUP_TASK_TRACK[taskId] === "shared" && selectedTracks.length > 0) ||
       selectedTracks.includes(SETUP_TASK_TRACK[taskId] as SetupTrack),
   );
-  const operationsSelected = selectedTracks.includes("hotel_operations");
   return (
-    sameOrder(
-      tasks.map(({ taskId }) => taskId),
-      expectedTaskIds,
-    ) &&
-    uniqueValues(tasks.map(({ taskId }) => taskId)) &&
-    tasks.every(
+    uniqueValues(taskIds) &&
+    taskIds.every((taskId) => expectedTaskIds.includes(taskId)) &&
+    taskIds.includes("shared_identity") === expectedTaskIds.includes("shared_identity") &&
+    value["tasks"].every(
       ({ taskId, propertyId, track }) =>
         propertyId === value["propertyId"] && track === SETUP_TASK_TRACK[taskId],
-    ) &&
-    progress["total"] === tasks.length &&
-    progress["complete"] ===
-      tasks.filter(({ ownerProgress }) => ownerProgress === "owner_complete").length &&
-    (operationsSelected
-      ? launch["operationsUse"] !== "not_applicable" &&
-        launch["directBookingPublish"] !== "not_applicable"
-      : launch["operationsUse"] === "not_applicable" &&
-        launch["directBookingPublish"] === "not_applicable") &&
-    (recommendedTaskId === null || isSetupTaskLaunchable(recommendedTask)) &&
-    launchReadinessMatchesTasks(value as unknown as PropertySetupPlan, selectedTracks)
+    )
   );
 }
 
@@ -520,47 +476,6 @@ function isSetupTask(value: unknown): value is SetupTask {
     (value["readiness"] !== "complete" || value["actionableBy"] === null) &&
     (value["freshness"] !== "stale" || value["readiness"] !== "complete") &&
     (value["readiness"] !== "actionable" || value["actionableBy"] !== null)
-  );
-}
-
-function launchReadinessMatchesTasks(
-  plan: PropertySetupPlan,
-  selectedTracks: SetupTrack[],
-): boolean {
-  const byId = new Map(plan.tasks.map((task) => [task.taskId, task]));
-  const expected = (
-    track: SetupTrack,
-    taskIds: SetupTaskId[],
-  ): PropertySetupPlan["launchReadiness"]["operationsUse"] => {
-    if (!selectedTracks.includes(track)) return "not_applicable";
-    const required = taskIds.map((taskId) => byId.get(taskId));
-    if (required.some((task) => !task)) return "blocked";
-    if (
-      required.some(
-        (task) =>
-          task?.readiness === "rejected" ||
-          task?.reasonCodes.includes("domain_readiness_blocked") ||
-          task?.reasonCodes.includes("task_product_access_blocked"),
-      )
-    ) {
-      return "blocked";
-    }
-    return required.every((task) => task?.readiness === "complete" && task.freshness === "fresh")
-      ? "ready"
-      : "pending";
-  };
-  return (
-    plan.launchReadiness.operationsUse ===
-      expected("hotel_operations", ["shared_identity", "rooms_rates_availability"]) &&
-    plan.launchReadiness.directBookingPublish ===
-      expected("hotel_operations", [
-        "shared_identity",
-        "rooms_rates_availability",
-        "guest_settings_policies",
-        "billing_plan",
-        "payment",
-        "direct_booking_publication",
-      ])
   );
 }
 

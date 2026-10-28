@@ -46,28 +46,17 @@ describe("resolveSharedFirstRunSetupView", () => {
     expect(status.organization.selectedTracks).toEqual([]);
   });
 
-  it.each([
-    {
-      name: "Hotel Operations",
-      tracks: ["hotel_operations"] as SetupTrack[],
-      tasks: [
-        "shared_identity",
-        "rooms_rates_availability",
-        "guest_settings_policies",
-        "billing_plan",
-        "payment",
-        "direct_booking_publication",
-      ] as SetupTaskId[],
-    },
-  ])("keeps the authoritative $name task plan", ({ tracks, tasks }) => {
-    const view = resolveSharedFirstRunSetupView(statusFor(tracks, tasks));
+  it("keeps the authoritative hotel-basics plan (VAY-2175)", () => {
+    const view = resolveSharedFirstRunSetupView(
+      statusFor(["hotel_operations"], ["shared_identity"]),
+    );
 
     expect(view.screen).toBe("setup_plan");
-    expect(view.setupPlan?.tasks.map(({ taskId }) => taskId)).toEqual(tasks);
+    expect(view.setupPlan?.tasks.map(({ taskId }) => taskId)).toEqual(["shared_identity"]);
   });
 
   it("reopens the selected property's existing profile inside setup when hotel basics are edited", () => {
-    const status = statusFor(["hotel_operations"], ["shared_identity", "rooms_rates_availability"]);
+    const status = statusFor(["hotel_operations"], ["shared_identity"]);
 
     expect(resolveSharedFirstRunSetupView(status, { editPropertyProfile: true })).toMatchObject({
       screen: "property_profile",
@@ -124,26 +113,7 @@ function statusFor(selectedTracks: SetupTrack[], taskIds: SetupTaskId[]): Adapti
       ],
     },
     entryDecision: null,
-    setupPlan: {
-      propertyId: "property-1",
-      planRevision: "plan-1",
-      tasks,
-      recommendedTaskId:
-        tasks.find(
-          ({ readiness, callerCapability }) =>
-            readiness === "actionable" && callerCapability === "allowed",
-        )?.taskId ?? null,
-      ownerProgress: {
-        complete: tasks.filter(({ ownerProgress }) => ownerProgress === "owner_complete").length,
-        total: tasks.length,
-      },
-      launchReadiness: {
-        operationsUse: selectedTracks.includes("hotel_operations") ? "pending" : "not_applicable",
-        directBookingPublish: selectedTracks.includes("hotel_operations")
-          ? "pending"
-          : "not_applicable",
-      },
-    },
+    setupPlan: { propertyId: "property-1", tasks },
     updatedAt: "2026-07-26T12:00:00.000Z",
   };
 }

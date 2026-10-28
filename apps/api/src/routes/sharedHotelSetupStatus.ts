@@ -299,7 +299,7 @@ export async function registerSharedHotelSetupStatusRoutes(
           })
         : null,
       updatedAt: evaluatedAt,
-    } satisfies AdaptiveHotelSetupStatus;
+    } satisfies SharedHotelSetupStatusResponse;
   });
 
   app.get("/properties/:propertyId/profile", async (request, reply) => {
@@ -1882,6 +1882,23 @@ function selectionState(
   return propertyIds.length === 1 ? "single_property" : "multiple_properties";
 }
 
+type SetupLaunchReadiness = "not_applicable" | "blocked" | "pending" | "ready";
+
+/** The old full plan, still sent until VAY-2175 release 2; the frontends read only its tasks. */
+type SetupPlanResponse = PropertySetupPlan & {
+  planRevision: string;
+  recommendedTaskId: SetupTaskId | null;
+  ownerProgress: { complete: number; total: number };
+  launchReadiness: {
+    operationsUse: SetupLaunchReadiness;
+    directBookingPublish: SetupLaunchReadiness;
+  };
+};
+
+export type SharedHotelSetupStatusResponse = Omit<AdaptiveHotelSetupStatus, "setupPlan"> & {
+  setupPlan: SetupPlanResponse | null;
+};
+
 type SetupTaskDefinition = Pick<SetupTask, "taskId" | "track" | "requirementOwnerDomain"> & {
   permissions: PermissionKey[];
   actionableBy: Exclude<SetupTask["actionableBy"], null>;
@@ -2060,7 +2077,7 @@ export function buildPropertySetupPlan(input: {
   trackRevision: number;
   tracks: TrackStatus[];
   evaluatedAt: string;
-}): PropertySetupPlan {
+}): SetupPlanResponse {
   const { context, property, selectedTracks, trackRevision, tracks, evaluatedAt } = input;
   const definitions = SETUP_TASK_REGISTRY.filter(({ track }) =>
     track === "shared" ? selectedTracks.length > 0 : selectedTracks.includes(track),
@@ -2183,8 +2200,8 @@ function propertySetupPlanRevision(input: {
   definitions: readonly SetupTaskDefinition[];
   tasks: SetupTask[];
   recommendedTaskId: SetupTaskId | null;
-  ownerProgress: PropertySetupPlan["ownerProgress"];
-  launchReadiness: PropertySetupPlan["launchReadiness"];
+  ownerProgress: SetupPlanResponse["ownerProgress"];
+  launchReadiness: SetupPlanResponse["launchReadiness"];
 }): string {
   const {
     context,
@@ -2329,7 +2346,7 @@ function launchReadiness(
   selectedTracks: SetupTrack[],
   track: SetupTrack,
   requiredTaskIds: SetupTaskId[],
-): PropertySetupPlan["launchReadiness"]["operationsUse"] {
+): SetupLaunchReadiness {
   if (!selectedTracks.includes(track)) return "not_applicable";
   const required = requiredTaskIds.map((taskId) => tasks.find((task) => task.taskId === taskId)!);
   if (

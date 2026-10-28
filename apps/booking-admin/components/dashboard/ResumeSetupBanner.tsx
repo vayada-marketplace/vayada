@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { buildSharedHotelSetupRedirectPath, setupExitPropertyId } from "@vayada/product-onboarding";
 import { useTranslation } from "@/lib/i18n";
-import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 
 /**
  * Shown after "Exit setup" brings a hotel back here while its setup is still unfinished (VAY-2249).
- * `hidden` while the setup checklist shows instead (VAY-2247): the exit marker is still dropped.
+ * `hidden` unless the setup checklist couldn't load (VAY-2247): the checklist shows what's left, so
+ * the banner answers from the exit marker alone, as PMS does (VAY-2175). The marker is still dropped.
  */
 export function ResumeSetupBanner({ hidden = false }: { hidden?: boolean } = {}) {
   const { t } = useTranslation();
@@ -27,24 +27,7 @@ export function ResumeSetupBanner({ hidden = false }: { hidden?: boolean } = {})
       // syncs its router with a plain history update.
       if (exitPropertyId.current) window.history.replaceState(null, "", "/dashboard");
     }
-    const id = exitPropertyId.current;
-    if (!id) return;
-    let active = true;
-    // "Finish for now" leaves setup with the same marker, so ask whether anything is left.
-    void sharedHotelSetupApi
-      .getStatus({ entryProduct: "booking", propertyId: id })
-      .then((status) => {
-        const plan = status.setupPlan;
-        if (active && plan && plan.ownerProgress.complete < plan.ownerProgress.total) {
-          setPropertyId(id);
-        }
-      })
-      .catch(() => {
-        // Without a readable status there's nothing reliable to say; the dashboard stays as is.
-      });
-    return () => {
-      active = false;
-    };
+    setPropertyId(exitPropertyId.current);
   }, []);
 
   if (!propertyId || hidden) return null;

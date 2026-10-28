@@ -149,9 +149,6 @@ function status(input: {
   const tasks = selectedPropertyId
     ? setupTasks(selectedPropertyId, selectedTracks, input.sharedIdentityIncomplete === true)
     : [];
-  const completeTasks = tasks.filter(
-    ({ ownerProgress }) => ownerProgress === "owner_complete",
-  ).length;
 
   return {
     contractVersion: "adaptive-hotel-setup.v1",
@@ -208,27 +205,7 @@ function status(input: {
             destinationRouteKey: "hotel_setup",
             reasonCode: selectedPropertyId ? "track_not_selected" : "property_selection_required",
           },
-    setupPlan: selectedPropertyId
-      ? {
-          propertyId: selectedPropertyId,
-          planRevision: "plan-1",
-          tasks,
-          recommendedTaskId: input.sharedIdentityIncomplete ? "shared_identity" : null,
-          ownerProgress: { complete: completeTasks, total: tasks.length },
-          launchReadiness: {
-            operationsUse: selectedTracks.includes("hotel_operations")
-              ? input.sharedIdentityIncomplete
-                ? "pending"
-                : "ready"
-              : "not_applicable",
-            directBookingPublish: selectedTracks.includes("hotel_operations")
-              ? input.sharedIdentityIncomplete
-                ? "pending"
-                : "ready"
-              : "not_applicable",
-          },
-        }
-      : null,
+    setupPlan: selectedPropertyId ? { propertyId: selectedPropertyId, tasks } : null,
     updatedAt: "2026-07-26T10:00:00.000Z",
   };
 }
@@ -238,6 +215,7 @@ function setupTasks(
   selectedTracks: SetupTrack[],
   sharedIdentityIncomplete: boolean,
 ): SetupTask[] {
+  // The plan keeps only the hotel-basics task (VAY-2175).
   const definitions: Array<
     Pick<SetupTask, "taskId" | "track" | "requirementOwnerDomain" | "destinationRouteKey">
   > = [
@@ -246,36 +224,6 @@ function setupTasks(
       track: "shared",
       requirementOwnerDomain: "hotel_catalog",
       destinationRouteKey: "hotel_catalog.shared_identity",
-    },
-    {
-      taskId: "rooms_rates_availability",
-      track: "hotel_operations",
-      requirementOwnerDomain: "pms",
-      destinationRouteKey: "pms.rooms_rates_availability",
-    },
-    {
-      taskId: "guest_settings_policies",
-      track: "hotel_operations",
-      requirementOwnerDomain: "booking",
-      destinationRouteKey: "booking.guest_settings_policies",
-    },
-    {
-      taskId: "billing_plan",
-      track: "hotel_operations",
-      requirementOwnerDomain: "finance",
-      destinationRouteKey: "finance.billing_plan",
-    },
-    {
-      taskId: "payment",
-      track: "hotel_operations",
-      requirementOwnerDomain: "finance",
-      destinationRouteKey: "finance.payment",
-    },
-    {
-      taskId: "direct_booking_publication",
-      track: "hotel_operations",
-      requirementOwnerDomain: "distribution",
-      destinationRouteKey: "distribution.direct_booking_publication",
     },
   ];
 

@@ -222,32 +222,25 @@ function status(input: {
     },
     setupPlan: {
       propertyId: input.propertyId,
-      planRevision: "plan-2",
       tasks: input.withIncompleteTask
         ? [
             {
-              taskId: "rooms_rates_availability",
+              taskId: "shared_identity",
               propertyId: input.propertyId,
-              track: "hotel_operations",
-              requirementOwnerDomain: "pms",
-              destinationRouteKey: "pms.rooms_rates_availability",
+              track: "shared",
+              requirementOwnerDomain: "hotel_catalog",
+              destinationRouteKey: "hotel_catalog.shared_identity",
               callerCapability: "allowed",
               ownerProgress: "in_progress",
               readiness: "actionable",
-              actionableBy: "owner",
-              reasonCodes: ["rooms_missing"],
-              sourceRevision: "rooms-1",
+              actionableBy: "operator",
+              reasonCodes: ["missing_phone_contact"],
+              sourceRevision: "identity-1",
               freshness: "fresh",
               evaluatedAt: "2026-07-26T10:00:00.000Z",
             },
           ]
         : [],
-      recommendedTaskId: input.withIncompleteTask ? "rooms_rates_availability" : null,
-      ownerProgress: { complete: 0, total: input.withIncompleteTask ? 1 : 0 },
-      launchReadiness: {
-        operationsUse: input.withIncompleteTask ? "blocked" : "ready",
-        directBookingPublish: "pending",
-      },
     },
     updatedAt: "2026-07-26T10:00:00.000Z",
   };

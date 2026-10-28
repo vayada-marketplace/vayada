@@ -1624,7 +1624,6 @@ function readySetupStatus(): AdaptiveHotelSetupStatus {
     publicId: "alpenrose-munich",
     propertyDisplayName: "Alpenrose Munich",
     locationSummary: "Munich, DE",
-    recommendedTaskId: null,
   });
 }
 

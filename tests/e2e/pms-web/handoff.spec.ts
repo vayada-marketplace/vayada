@@ -18,14 +18,6 @@ test.describe("pms-web handoff", () => {
         organizationId: TARGET_ORGANIZATION_ID,
         organizationDisplayName: "Target Hotel Group",
         propertyId: PMS_WEB_PROPERTY_ID,
-        taskOverrides: {
-          rooms_rates_availability: {
-            ownerProgress: "in_progress",
-            readiness: "actionable",
-            actionableBy: "owner",
-            reasonCodes: ["rooms_missing"],
-          },
-        },
       });
       return route.fulfill({
         json: {
@@ -175,7 +167,7 @@ test.describe("pms-web handoff", () => {
   test("selects the hinted organization and opens PMS for incomplete setup", async ({ page }) => {
     await mockPmsWebTargetRoutes(page);
     await page.route("**/api/hotel-setup/status**", (route) =>
-      route.fulfill({ json: pmsSetupStatus(PMS_WEB_PROPERTY_ID, "selected_incomplete") }),
+      route.fulfill({ json: pmsSetupStatus(PMS_WEB_PROPERTY_ID) }),
     );
     const refreshRequests = await mockOrganizationSelection(page, PMS_WEB_PROPERTY_ID);
 
@@ -287,8 +279,8 @@ test.describe("pms-web handoff", () => {
       sessionStorage.setItem("seededPropertySelection", "true");
     }, OTHER_PROPERTY_ID);
 
-    const firstStatus = pmsSetupStatus(OTHER_PROPERTY_ID, "selected_incomplete");
-    const targetStatus = pmsSetupStatus(PMS_WEB_PROPERTY_ID, "active");
+    const firstStatus = pmsSetupStatus(OTHER_PROPERTY_ID);
+    const targetStatus = pmsSetupStatus(PMS_WEB_PROPERTY_ID);
     await page.route("**/api/hotel-setup/status**", (route) => {
       const requestedPropertyId = new URL(route.request().url()).searchParams.get("propertyId");
       const selectedPropertyId = requestedPropertyId ?? PMS_WEB_PROPERTY_ID;
@@ -358,7 +350,7 @@ test.describe("pms-web handoff", () => {
       if (requestedPropertyId === PMS_WEB_PROPERTY_ID) {
         return route.fulfill({ status: 404, json: { detail: "Property not found" } });
       }
-      return route.fulfill({ json: pmsSetupStatus(OTHER_PROPERTY_ID, "active") });
+      return route.fulfill({ json: pmsSetupStatus(OTHER_PROPERTY_ID) });
     });
     await mockOrganizationSelection(page, PMS_WEB_PROPERTY_ID);
 
@@ -471,7 +463,7 @@ function authenticatedSession(
   };
 }
 
-function pmsSetupStatus(propertyId: string, status: "active" | "selected_incomplete") {
+function pmsSetupStatus(propertyId: string) {
   return createAdaptiveHotelSetupStatusMock({
     entryProduct: "pms",
     organizationId: TARGET_ORGANIZATION_ID,
@@ -480,16 +472,5 @@ function pmsSetupStatus(propertyId: string, status: "active" | "selected_incompl
     publicId: `public-${propertyId}`,
     propertyDisplayName: "Target Hotel",
     locationSummary: "Munich, DE",
-    taskOverrides:
-      status === "selected_incomplete"
-        ? {
-            rooms_rates_availability: {
-              ownerProgress: "in_progress",
-              readiness: "actionable",
-              actionableBy: "owner",
-              reasonCodes: ["rooms_missing"],
-            },
-          }
-        : undefined,
   });
 }

@@ -594,53 +594,19 @@ function adaptiveSetupStatus(
     setupPlan: selectedPropertyId
       ? {
           propertyId: selectedPropertyId,
-          planRevision: "plan-1",
-          tasks: hotelOperationsTasks(selectedPropertyId),
-          recommendedTaskId: null,
-          ownerProgress: { complete: 6, total: 6 },
-          launchReadiness: {
-            operationsUse: "ready",
-            directBookingPublish: "ready",
-          },
+          tasks: [
+            setupTask(
+              "shared_identity",
+              "shared",
+              "hotel_catalog",
+              "hotel_catalog.shared_identity",
+              selectedPropertyId,
+            ),
+          ],
         }
       : null,
     updatedAt: "2026-07-10T10:00:00.000Z",
   };
-}
-
-function hotelOperationsTasks(propertyId: string) {
-  return [
-    setupTask(
-      "shared_identity",
-      "shared",
-      "hotel_catalog",
-      "hotel_catalog.shared_identity",
-      propertyId,
-    ),
-    setupTask(
-      "rooms_rates_availability",
-      "hotel_operations",
-      "pms",
-      "pms.rooms_rates_availability",
-      propertyId,
-    ),
-    setupTask(
-      "guest_settings_policies",
-      "hotel_operations",
-      "booking",
-      "booking.guest_settings_policies",
-      propertyId,
-    ),
-    setupTask("billing_plan", "hotel_operations", "finance", "finance.billing_plan", propertyId),
-    setupTask("payment", "hotel_operations", "finance", "finance.payment", propertyId),
-    setupTask(
-      "direct_booking_publication",
-      "hotel_operations",
-      "distribution",
-      "distribution.direct_booking_publication",
-      propertyId,
-    ),
-  ];
 }
 
 function setupTask(

@@ -26,10 +26,10 @@ type AdaptiveHotelSetupStatusMockInput = {
   >;
   trackProvisioning?: Partial<Record<SetupTrack, TrackStatus["provisioning"]>>;
   taskOverrides?: Partial<Record<SetupTaskId, Partial<SetupTask>>>;
-  recommendedTaskId?: SetupTaskId | null;
   updatedAt?: string;
 };
 
+// The plan keeps only the hotel-basics task (VAY-2175).
 const TASK_DEFINITIONS: Array<
   Pick<SetupTask, "taskId" | "track" | "requirementOwnerDomain" | "destinationRouteKey">
 > = [
@@ -38,36 +38,6 @@ const TASK_DEFINITIONS: Array<
     track: "shared",
     requirementOwnerDomain: "hotel_catalog",
     destinationRouteKey: "hotel_catalog.shared_identity",
-  },
-  {
-    taskId: "rooms_rates_availability",
-    track: "hotel_operations",
-    requirementOwnerDomain: "pms",
-    destinationRouteKey: "pms.rooms_rates_availability",
-  },
-  {
-    taskId: "guest_settings_policies",
-    track: "hotel_operations",
-    requirementOwnerDomain: "booking",
-    destinationRouteKey: "booking.guest_settings_policies",
-  },
-  {
-    taskId: "billing_plan",
-    track: "hotel_operations",
-    requirementOwnerDomain: "finance",
-    destinationRouteKey: "finance.billing_plan",
-  },
-  {
-    taskId: "payment",
-    track: "hotel_operations",
-    requirementOwnerDomain: "finance",
-    destinationRouteKey: "finance.payment",
-  },
-  {
-    taskId: "direct_booking_publication",
-    track: "hotel_operations",
-    requirementOwnerDomain: "distribution",
-    destinationRouteKey: "distribution.direct_booking_publication",
   },
 ];
 
@@ -99,27 +69,6 @@ export function createAdaptiveHotelSetupStatusMock(
             input.taskOverrides?.[definition.taskId],
           ),
         );
-  const recommendedTaskId =
-    input.recommendedTaskId === undefined
-      ? (tasks.find(
-          ({ readiness, callerCapability }) =>
-            readiness === "actionable" && callerCapability === "allowed",
-        )?.taskId ?? null)
-      : input.recommendedTaskId;
-  const launchReadiness = {
-    operationsUse: setupLaunchReadiness(selectedTracks, tasks, "hotel_operations", [
-      "shared_identity",
-      "rooms_rates_availability",
-    ]),
-    directBookingPublish: setupLaunchReadiness(selectedTracks, tasks, "hotel_operations", [
-      "shared_identity",
-      "rooms_rates_availability",
-      "guest_settings_policies",
-      "billing_plan",
-      "payment",
-      "direct_booking_publication",
-    ]),
-  } as const;
   const defaultDecision: ProductEntryDecision =
     selectedProperty === null
       ? {
@@ -175,20 +124,7 @@ export function createAdaptiveHotelSetupStatusMock(
             ...input.entryDecision,
           },
     setupPlan:
-      selectedProperty === null
-        ? null
-        : {
-            propertyId: selectedProperty.propertyId,
-            planRevision: "e2e-plan-1",
-            tasks,
-            recommendedTaskId,
-            ownerProgress: {
-              complete: tasks.filter(({ ownerProgress }) => ownerProgress === "owner_complete")
-                .length,
-              total: tasks.length,
-            },
-            launchReadiness,
-          },
+      selectedProperty === null ? null : { propertyId: selectedProperty.propertyId, tasks },
     updatedAt: input.updatedAt ?? "2026-06-30T00:00:00.000Z",
   };
 }
@@ -221,32 +157,6 @@ function defaultTracks(): SetupTrack[] {
 
 function canonicalTracks(tracks: readonly SetupTrack[]): SetupTrack[] {
   return (["hotel_operations"] as const).filter((track) => tracks.includes(track));
-}
-
-function setupLaunchReadiness(
-  selectedTracks: readonly SetupTrack[],
-  tasks: readonly SetupTask[],
-  track: SetupTrack,
-  taskIds: readonly SetupTaskId[],
-): "not_applicable" | "pending" | "ready" | "blocked" {
-  if (!selectedTracks.includes(track)) return "not_applicable";
-
-  const byId = new Map(tasks.map((task) => [task.taskId, task]));
-  const required = taskIds.map((taskId) => byId.get(taskId));
-  if (required.some((task) => !task)) return "blocked";
-  if (
-    required.some(
-      (task) =>
-        task?.readiness === "rejected" ||
-        task?.reasonCodes.includes("domain_readiness_blocked") ||
-        task?.reasonCodes.includes("task_product_access_blocked"),
-    )
-  ) {
-    return "blocked";
-  }
-  return required.every((task) => task?.readiness === "complete" && task.freshness === "fresh")
-    ? "ready"
-    : "pending";
 }
 
 function trackStatus(
