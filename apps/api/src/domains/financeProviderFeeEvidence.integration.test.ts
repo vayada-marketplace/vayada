@@ -2,6 +2,11 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  createHotelSetupOrdinaryLoginFixture,
+  listExecutableDefinerFunctions,
+  listOrdinaryPostureViolations,
+} from "../hotelSetupOrdinaryLogin.fixture.js";
+import {
   appendFinanceProviderFeeEvidence,
   FinanceProviderFeeEvidenceError,
   readFinanceProviderFeeEvidence,
@@ -14,7 +19,7 @@ const URL=process.env["TEST_DATABASE_URL"],id=(n:number)=>`12340000-0000-4000-80
 if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathname))
   throw new Error("Unsafe test database");
 // prettier-ignore
-const I={property:id(1),otherProperty:id(2),account:id(3),otherAccount:id(4),payment:id(5),zero:id(6),missing:id(7),rollback:id(8),race:id(9),fork:id(10)};
+const I={property:id(1),otherProperty:id(2),account:id(3),otherAccount:id(4),payment:id(5),zero:id(6),missing:id(7),rollback:id(8),race:id(9),fork:id(10),ordinary:id(11)};
 
 // prettier-ignore
 describe.skipIf(!URL)("PostgreSQL Finance provider fee evidence",()=>{
@@ -33,7 +38,8 @@ describe.skipIf(!URL)("PostgreSQL Finance provider fee evidence",()=>{
       ('${I.missing}','${I.property}','${I.account}','full','paid',100,0,100,'EUR'),
       ('${I.rollback}','${I.property}','${I.account}','full','paid',100,0,100,'EUR'),
       ('${I.race}','${I.property}','${I.account}','full','paid',100,0,100,'EUR'),
-      ('${I.fork}','${I.property}','${I.account}','full','paid',100,0,100,'EUR')`)});
+      ('${I.fork}','${I.property}','${I.account}','full','paid',100,0,100,'EUR'),
+      ('${I.ordinary}','${I.property}','${I.account}','full','paid',100,0,100,'EUR')`)});
   afterAll(async()=>{await cleanup();await client.end()});
 
   it("keeps upgraded zero defaults missing and snapshots property-local evidence",async()=>{
@@ -75,7 +81,23 @@ describe.skipIf(!URL)("PostgreSQL Finance provider fee evidence",()=>{
     expect((await client.query("SELECT count(*)::int count FROM finance.provider_fee_evidence WHERE payment_id=$1",[I.rollback])).rows[0]).toEqual({count:0});
   });
 
+  // VAY-2108 W2d (0522): the API login appends evidence; its trigger queues Finance discovery
+  // through an owner-rights function that no login can EXECUTE directly.
+  it("appends evidence and queues Finance discovery on the production-shaped API login",async()=>{
+    const login=await createHotelSetupOrdinaryLoginFixture(client,URL!),pool=new pg.Pool({connectionString:login.connectionString,max:1});
+    try{
+      const captured=await pooled(pool,input(I.ordinary,"applied","1.5000",1,"ordinary:1"));expect(captured.outcome).toBe("captured");
+      expect((await client.query("SELECT count(*)::int count FROM finance.expense_generation_dispatches WHERE family='provider_fee' AND evidence_id=$1 AND payment_id=$2",[captured.evidence.evidenceId,I.ordinary])).rows[0]).toEqual({count:1});
+      const executable=await pool.query("SELECT has_function_privilege(current_user,'finance.dispatch_ota_commission_expense_generation()','EXECUTE') ota,has_function_privilege(current_user,'finance.dispatch_provider_fee_expense_generation()','EXECUTE') fee");
+      expect(executable.rows[0]).toEqual({ota:false,fee:false});
+      expect((await client.query("SELECT bool_and(p.prosecdef) definer,bool_and(p.proconfig=ARRAY['search_path=pg_catalog']) pinned,bool_and(p.proowner=c.relowner) owned FROM pg_proc p CROSS JOIN pg_class c WHERE c.oid='finance.expense_generation_dispatches'::regclass AND p.oid IN ('finance.dispatch_ota_commission_expense_generation()'::regprocedure,'finance.dispatch_provider_fee_expense_generation()'::regprocedure)")).rows[0]).toEqual({definer:true,pinned:true,owned:true});
+      expect(await listExecutableDefinerFunctions(pool)).toEqual([]);expect(await listOrdinaryPostureViolations(pool)).toEqual([]);
+      await expect(pool.query("INSERT INTO finance.expense_generation_dispatches(family,evidence_id,property_id,payment_id,created_at) VALUES('provider_fee',gen_random_uuid(),$1,$2,now())",[I.property,I.ordinary])).rejects.toMatchObject({code:"42501"});
+    }finally{await pool.end();await login.drop()}
+  },60_000);
+
   async function cleanup(){await client.query(`BEGIN;SET LOCAL session_replication_role=replica;
+    DELETE FROM finance.expense_generation_dispatches WHERE property_id IN ('${I.property}','${I.otherProperty}');
     DELETE FROM finance.provider_fee_evidence WHERE property_id IN ('${I.property}','${I.otherProperty}');
     DELETE FROM finance.payments WHERE property_id IN ('${I.property}','${I.otherProperty}');
     DELETE FROM finance.payment_provider_accounts WHERE id IN ('${I.account}','${I.otherAccount}');
