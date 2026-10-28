@@ -150,9 +150,34 @@ describe("hotel account invite routes", () => {
         payload: { code: INVITE_CODE },
       });
       expect(response.statusCode, action).toBe(404);
+      expect(response.body, action).toMatchObject({ error: "Not Found" });
     }
+    expect(repository.calls.lookup).toHaveLength(0);
     expect(repository.calls.redeem).toHaveLength(0);
     expect(tracks.calls).toHaveLength(0);
+  });
+
+  it("ends its pool on shutdown", async () => {
+    let ended = 0;
+    const repository = createPgHotelAccountInviteRepository({
+      connectionString: "postgresql://unused",
+      pool: {
+        async connect() {
+          throw new Error("unexpected transaction");
+        },
+        async query() {
+          throw new Error("unexpected query");
+        },
+        async end() {
+          ended += 1;
+        },
+      } as never,
+    });
+    const inviteApp = buildInviteApp(repository, createMemoryTrackCommands().repository);
+    await inviteApp.ready();
+    await inviteApp.close();
+
+    expect(ended).toBe(1);
   });
 
   it("requires an authenticated active hotel account before reading the redemption token", async () => {

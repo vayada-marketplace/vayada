@@ -127,6 +127,25 @@ describe("hotel account invite code routes", () => {
       headers: { authorization: "Bearer platform-token" },
     });
     expect(list.statusCode).toBe(404);
+    expect(list.body).toMatchObject({ error: "Not Found" });
+  });
+
+  it("ends its pool on shutdown", async () => {
+    let ended = 0;
+    const repository = createPgHotelAccountInviteCodeRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        ...createAdminPgPool([]),
+        async end() {
+          ended += 1;
+        },
+      } as never,
+    });
+    const inviteCodeApp = buildInviteCodeApp(repository);
+    await inviteCodeApp.ready();
+    await inviteCodeApp.close();
+
+    expect(ended).toBe(1);
   });
 
   it("rejects retired setup payloads and invalid setup tracks", async () => {
