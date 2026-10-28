@@ -21,6 +21,7 @@ import {
 import { FeedbackAlert } from "@/components/ui";
 import { uploadSingleImageWithMediaReference } from "@/lib/utils/uploadImage";
 import AddonsTab, { type AddonItemFormValues } from "@/components/booking-flow/AddonsTab";
+import { ADDON_WEEKDAYS, addonScheduleFor } from "@vayada/product-onboarding/AddonEditor";
 import { PageLayout } from "@/components/layout/PageLayout";
 
 const DEFAULT_ADDON_SETTINGS: AddonSettings = {
@@ -62,6 +63,8 @@ function toSettingsAddonItem(item: BookingAddonItem): AddonItem {
     duration: item.duration ?? undefined,
     perPerson: item.pricingModel === "per_guest" || item.pricingModel === "per_guest_night",
     perNight: item.pricingModel === "per_night" || item.pricingModel === "per_guest_night",
+    scheduleMode: item.scheduleMode,
+    bookableWeekdays: item.bookableWeekdays,
     sortOrder: item.sortOrder,
     ownershipKind: item.ownershipKind,
     partnerCommissionRate: item.partnerCommissionRate,
@@ -92,6 +95,21 @@ function toAddonLeadTime(values: AddonItemFormValues, saved?: AddonItem) {
   return values.legacyLeadTime ? { leadTime: values.legacyLeadTime } : {};
 }
 
+/**
+ * VAY-2391: when it happens, only when it differs from the saved add-on (for a new one: from what
+ * the API picks anyway), so other saves work on an API without the fields, like the lead time.
+ */
+function toAddonSchedule(values: AddonItemFormValues, saved?: AddonItem) {
+  const mode = saved?.scheduleMode ?? addonScheduleFor(values, null);
+  const days: readonly number[] = saved?.bookableWeekdays ?? ADDON_WEEKDAYS;
+  return {
+    ...(values.scheduleMode === mode ? {} : { scheduleMode: values.scheduleMode }),
+    ...(values.bookableWeekdays.join() === days.join()
+      ? {}
+      : { bookableWeekdays: values.bookableWeekdays }),
+  };
+}
+
 function toAddonWritableFields(values: AddonItemFormValues, saved?: AddonItem) {
   const fields = {
     name: values.name,
@@ -105,6 +123,7 @@ function toAddonWritableFields(values: AddonItemFormValues, saved?: AddonItem) {
     maxQuantity: Number(values.maxQuantity),
     ...toAddonLeadTime(values, saved),
     pricingModel: toAddonPricingModel(values) as BookingAddonPricingModel,
+    ...toAddonSchedule(values, saved),
   };
   return values.ownershipKind === "partner"
     ? {

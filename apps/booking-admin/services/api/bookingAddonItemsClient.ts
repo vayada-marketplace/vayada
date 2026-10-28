@@ -1,4 +1,4 @@
-import type { AddonPhoto } from "@vayada/product-onboarding/AddonEditor";
+import type { AddonPhoto, AddonScheduleMode } from "@vayada/product-onboarding/AddonEditor";
 import { apiClient, omitHotelContext, type ApiClient } from "./client";
 import {
   toBookingSettingsClientErrorInput,
@@ -17,6 +17,7 @@ type DeleteClient = Pick<ApiClient, "delete">;
 
 export type BookingAddonPricingModel = "per_stay" | "per_night" | "per_guest" | "per_guest_night";
 export type BookingAddonOwnershipKind = "property" | "partner";
+export type BookingAddonScheduleMode = AddonScheduleMode;
 
 export interface BookingAddonItem {
   addonItemId: string;
@@ -37,6 +38,10 @@ export interface BookingAddonItem {
   leadTimeHours?: number | null;
   /** Free text from before VAY-2232; null once a lead time is chosen. */
   leadTime?: string | null;
+  /** VAY-2391: when it happens; a per-night price is always "daily". */
+  scheduleMode?: BookingAddonScheduleMode;
+  /** ISO weekdays (1 Monday … 7 Sunday) a guest can pick for "guest_pick". */
+  bookableWeekdays?: number[];
   duration: string | null;
   pricingModel: BookingAddonPricingModel;
   publicVisible: boolean;
@@ -78,6 +83,8 @@ type BookingAddonItemWriteFields = {
   leadTimeHours?: number | null;
   /** Only to copy an add-on whose lead time was typed before VAY-2232. */
   leadTime?: string;
+  scheduleMode?: BookingAddonScheduleMode;
+  bookableWeekdays?: number[];
   duration?: string | null;
   pricingModel?: BookingAddonPricingModel;
   publicVisible?: boolean;
