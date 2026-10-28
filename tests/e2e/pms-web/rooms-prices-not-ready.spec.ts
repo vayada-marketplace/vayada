@@ -113,8 +113,9 @@ test("says before typing that payments aren't set up, and after a refused save t
   await expect(notice).toBeVisible();
   await expect(notice).toContainText("Settings → Payments");
   await expect(notice).toContainText("Settings → General → Localization");
-  await page.getByLabel("Room price per night").fill("1500000");
-  await page.getByLabel("Currency code (for example EUR)").fill("IDR");
+  // VAY-2390: the first price is in Payment settings' currency, never typed.
+  await expect(page.getByLabel("Currency code (for example EUR)")).toHaveCount(0);
+  await page.getByLabel("Room price per night").fill("150");
   await page.getByRole("checkbox", { name: "Pay at property" }).check();
   await page.getByRole("button", { name: "Save and publish" }).click();
   await expect(alert(page)).toBeVisible();
@@ -135,8 +136,8 @@ test("names the payment currency when the prices are in another one", async ({ p
   await expect(
     page.locator("main").getByRole("status").filter({ hasText: "can't be saved" }),
   ).toHaveCount(0);
-  await page.getByLabel("Room price per night").fill("1500000");
-  await page.getByLabel("Currency code (for example EUR)").fill("IDR");
+  // The form can no longer send another currency (VAY-2390), but Finance's may change before the save.
+  await page.getByLabel("Room price per night").fill("150");
   await page.getByRole("button", { name: "Save and publish" }).click();
   await expect(alert(page)).toBeVisible();
   await expect(alert(page)).toContainText("not saved");

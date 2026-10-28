@@ -4251,8 +4251,16 @@ it("names the payment currency when the first prices are refused for another one
   expect(shown()).not.toContain("edits are kept");
 });
 it("on a room page, offers only that room for the first setup and asks to finish room details when it cannot have prices", async () => {
-  client.read.mockResolvedValueOnce(null); await mountRoom();
-  expect(view.root.findByType(StepFirstPrices).props.rooms).toEqual([familySetup]); expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBeUndefined();
+  // VAY-2390: no prices yet, so the first price is in the pricing currency Payment settings give, never typed.
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "CHF" } } as never);
+  client.read.mockResolvedValueOnce(null); await mountRoom(); await act(async () => {});
+  expect(view.root.findByType(StepFirstPrices).props.rooms).toEqual([familySetup]); expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBe("CHF");
+  expect(view.root.findAllByProps({ "aria-label": "Currency code (for example EUR)" })).toHaveLength(0);
+  act(() => view.unmount());
+  // Unreadable Payment settings leave the code to the form, which asks for it.
+  settings.mockRejectedValueOnce(new Error("offline"));
+  client.read.mockResolvedValueOnce(null); await mountRoom(); await act(async () => {});
+  expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBeUndefined();
   act(() => view.unmount());
   client.read.mockResolvedValueOnce(null); await mountRoom([]);
   expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(view.root.findAllByType(StepFirstPrices)).toHaveLength(0);
