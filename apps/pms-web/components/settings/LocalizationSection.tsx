@@ -1,20 +1,37 @@
 "use client";
 
+import { useState } from "react";
 import { SettingsSection, SettingsCard } from "@vayada/settings-ui";
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
+import { ChangeCurrencyDialog } from "./ChangeCurrencyDialog";
 
 interface LocalizationSectionProps {
   currency: string;
   currencyLoadError: string;
   currencyLoadStatus: "loading" | "ready" | "error";
+  /** VAY-2390 P5: after the Owner's change, so the page shows the new currency. */
+  onCurrencyChanged?: (currency: string) => void;
 }
 
 export function LocalizationSection({
   currency,
   currencyLoadError,
   currencyLoadStatus,
+  onCurrencyChanged,
 }: LocalizationSectionProps) {
   const { t, locale, setLocale } = useTranslation();
+  // Only Owners hold this key (VAY-2401); the change route checks the same one.
+  const canChange = useHasPmsPermission("finance.billing.manage");
+  const [changing, setChanging] = useState(false);
+  const [changed, setChanged] = useState("");
+  const name = (code: string) => {
+    try {
+      return new Intl.DisplayNames([locale], { type: "currency" }).of(code) ?? code;
+    } catch {
+      return code;
+    }
+  };
 
   return (
     <SettingsSection
@@ -33,11 +50,27 @@ export function LocalizationSection({
               {t("settings.localization.loadingCurrency")}
             </p>
           ) : currency ? (
-            <div className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-              <span className="text-sm font-medium text-gray-700">{currency}</span>
-              <span className="text-[11px] font-medium text-gray-500">
-                {t("settings.localization.editingUnavailable")}
-              </span>
+            <div className="flex flex-col gap-3 rounded-lg border border-gray-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900">
+                  {currency} · {name(currency)}
+                </p>
+                <p className="mt-0.5 text-sm text-gray-600">
+                  {t("settings.currencyChange.rowBody", { currency })}
+                </p>
+              </div>
+              {canChange && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChanged("");
+                    setChanging(true);
+                  }}
+                  className="shrink-0 self-start rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:self-auto"
+                >
+                  {t("settings.currencyChange.changeButton")}
+                </button>
+              )}
             </div>
           ) : (
             <p className="text-sm text-gray-500" role="status">
@@ -45,6 +78,21 @@ export function LocalizationSection({
             </p>
           )}
         </div>
+        {changed && (
+          <p role="status" className="mt-3 text-sm text-green-700">
+            {t("settings.currencyChange.changed", { code: changed })}
+          </p>
+        )}
+        {changing && (
+          <ChangeCurrencyDialog
+            onClose={() => setChanging(false)}
+            onChanged={(next) => {
+              setChanging(false);
+              setChanged(next);
+              onCurrencyChanged?.(next);
+            }}
+          />
+        )}
       </SettingsCard>
 
       <SettingsCard title={t("settings.language")} description={t("settings.languageDescription")}>

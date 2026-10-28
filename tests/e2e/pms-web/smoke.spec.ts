@@ -380,7 +380,8 @@ test.describe("pms-web smoke", () => {
     await page.goto("/settings/property");
     await expect(page.getByLabel("Timezone")).toHaveValue("Europe/Berlin");
     await expect(page.getByLabel("Country (ISO code)")).toHaveValue("DE");
-    await expect(page.getByText("Editing not available yet")).toBeVisible();
+    // VAY-2390: the property currency, now with what it covers (only the Owner can change it).
+    await expect(page.locator("#currency").getByText("EUR · Euro")).toBeVisible();
     await expect(page.getByRole("switch", { name: "Accept bookings instantly" })).toHaveCount(0);
 
     await page.goto("/settings/ota-commissions");

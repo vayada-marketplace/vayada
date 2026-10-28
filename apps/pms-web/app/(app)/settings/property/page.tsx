@@ -155,6 +155,7 @@ export default function PropertySettingsPage() {
         currency={currency}
         currencyLoadError={currencyLoadError}
         currencyLoadStatus={currencyLoadStatus}
+        onCurrencyChanged={setCurrency}
       />
     </SettingsSubPage>
   );

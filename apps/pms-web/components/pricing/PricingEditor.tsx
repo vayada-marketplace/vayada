@@ -45,6 +45,7 @@ import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepOpening } from "./StepOpening";
 import { StepFirstPrices, type FirstPrices, type FirstThen } from "./StepFirstPrices";
 import { paymentSettingsDefaults, type PaymentSettingsDefaults } from "./pricingPaymentDefaults";
+import { bookingsService } from "@/services/bookings";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 import { GuestPreview } from "./GuestPreview";
 import { ArrowPathIcon, CalendarDaysIcon, CheckIcon } from "@heroicons/react/24/outline";
@@ -86,6 +87,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // A first price's ways to pay and currency from Payment settings (undefined: loading; methods null: unknown), and a
   // season window to open once "Add a season" has added the first prices (VAY-2188).
   const [paymentDefaults, setPaymentDefaults] = useState<PaymentSettingsDefaults | undefined>(undefined), [seasonOnStart, setSeasonOnStart] = useState(false);
+  // VAY-2390 P5: after an Owner's currency change the published prices keep their numbers in the old currency. The editor
+  // shows them in the pricing currency (Payment settings follow it), and Save publishes them again in it, with no FX.
+  const [pricingCurrency, setPricingCurrency] = useState<string | null>(null), [publishedCurrency, setPublishedCurrency] = useState<string | null>(null);
   const defaultMethods: readonly PaymentMethod[] | null | undefined = paymentDefaults?.methods;
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
   const exclusiveEditPending = addingOfferRoom !== null || preset !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
@@ -134,7 +138,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
       // Read every option's terms again, also when their revisions didn't change (the effect wouldn't re-run).
       requestedTerms.current.clear(); setSavedTerms({}); setTermsAttempt((attempt) => attempt + 1);
-      setAddingOfferRoom(null); setPreset(null); setDeleting(null); setDeleteError(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
+      setAddingOfferRoom(null); setPreset(null); setDeleting(null); setDeleteError(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setPublishedCurrency(saved?.currency ?? null); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
       if (handover) handedOver.current = undefined;
       // A save that broke off without an answer may have published them after all: only when the published prices
       // are exactly these (someone else may have priced the room meanwhile).
@@ -331,6 +335,21 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     void paymentSettingsDefaults(client).then((defaults) => { if (live) setPaymentDefaults(defaults); });
     return () => { live = false; };
   }, [firstTime, client]);
+  useEffect(() => {
+    let live = true;
+    // Unreadable Payment settings only leave out the currency-change banner.
+    bookingsService.getPaymentSettings().then(({ paymentSettings }) => {
+      if (live) setPricingCurrency(paymentSettings.defaultCurrency?.trim().toUpperCase() || null);
+    }, () => {});
+    return () => { live = false; };
+  }, []);
+  const relabelFrom = pricingCurrency && publishedCurrency && publishedCurrency !== pricingCurrency &&
+    pricingCurrencyScale(publishedCurrency) === pricingCurrencyScale(pricingCurrency) && pricingAmountStep(publishedCurrency) === pricingAmountStep(pricingCurrency) ? publishedCurrency : null;
+  useEffect(() => {
+    if (!relabelFrom || !pricingCurrency || !current || current.currency === pricingCurrency) return;
+    setCurrent({ ...current, currency: pricingCurrency, rooms: current.rooms.map((room) => ({ ...room, currency: pricingCurrency })) });
+    setDirty(true);
+  }, [relabelFrom, pricingCurrency, current]);
   // A first price is in the published prices' currency, else the pricing currency Payment settings give (VAY-2390): never
   // typed, so it can't drift from what the hotel is paid in. Asked only when neither can be read.
   const firstCurrency = display?.currency ?? paymentDefaults?.currency ?? undefined;
@@ -373,6 +392,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t, { paymentCurrency: paymentDefaults?.currency })}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}{financeNotReady(error) && dirty && <p className="mt-2">{t("pricing.editor.financeUnsavedHint")}</p>}</div>}
     {/* Before any typing (VAY-2383): Payment settings already say the server would refuse the first prices. */}
     {error === null && firstForm && paymentDefaults?.notReady && <p role="status" className={ui.warningBanner}>{t("pricing.editor.financeNotReadyBefore")}</p>}
+    {relabelFrom && pricingCurrency && <div role="status" className={ui.warningBanner}><p className="font-semibold">{t("pricing.currencyChanged.title", { code: pricingCurrency })}</p>
+      <p>{t("pricing.currencyChanged.body", { before: money("10000", relabelFrom), after: money("10000", pricingCurrency) })}</p></div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>

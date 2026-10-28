@@ -4188,6 +4188,28 @@ it("keeps this room's edits over the reload after a refused save when only anoth
   expect(saved.snapshot.rooms[1].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12345" } } });
   expect(confirm).toHaveBeenCalledTimes(2); expect(publish).toHaveBeenCalledTimes(2);
 });
+it("after an Owner's currency change shows the prices in the new currency and publishes the same numbers (VAY-2390)", async () => {
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "CHF" } } as never);
+  try {
+    client.read.mockResolvedValue(published()); await mountRoom(); await act(async () => {});
+    const shown = () => JSON.stringify(view.toJSON());
+    expect(shown()).toContain("Your currency changed to CHF. Please review all prices.");
+    expect(shown()).toMatch(/€100 is now CHF\s?100/);
+    expect(button("Save and publish").props.disabled).toBe(false);
+    await click("Save and publish");
+    expect(saved.snapshot.currency).toBe("CHF");
+    expect(saved.snapshot.rooms.map((room) => [room.currency, room.offers[0].price])).toEqual(published().rooms.map((room) => ["CHF", room.offers[0].price]));
+  } finally { settings.mockRestore(); }
+});
+it("names the same-numbers rule when edited prices are refused in the new currency (VAY-2390)", async () => {
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "CHF" } } as never);
+  try {
+    client.read.mockResolvedValue(published()); await mountRoom(); await act(async () => {});
+    client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "currency_conversion_required" } as never));
+    await click("Save and publish");
+    expect(JSON.stringify(view.toJSON())).toContain("Publish your prices unchanged in the new currency first, then change them.");
+  } finally { settings.mockRestore(); }
+});
 it("drops this room's edits when someone else changed the room, so a later save cannot overwrite their change", async () => {
   client.read.mockResolvedValueOnce(published()); await mountRoom();
   await act(async () => input().props.onChange({ target: { value: "123.45" } }));
@@ -4257,8 +4279,8 @@ it("on a room page, offers only that room for the first setup and asks to finish
   expect(view.root.findByType(StepFirstPrices).props.rooms).toEqual([familySetup]); expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBe("CHF");
   expect(view.root.findAllByProps({ "aria-label": "Currency code (for example EUR)" })).toHaveLength(0);
   act(() => view.unmount());
-  // Unreadable Payment settings leave the code to the form, which asks for it.
-  settings.mockRejectedValueOnce(new Error("offline"));
+  // Unreadable Payment settings leave the code to the form, which asks for it. (Every read fails: the Prices banner reads them too.)
+  settings.mockRejectedValue(new Error("offline"));
   client.read.mockResolvedValueOnce(null); await mountRoom(); await act(async () => {});
   expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBeUndefined();
   act(() => view.unmount());
@@ -4266,6 +4288,7 @@ it("on a room page, offers only that room for the first setup and asks to finish
   expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(view.root.findAllByType(StepFirstPrices)).toHaveLength(0);
   client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false }); await click("Reload pricing");
   expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(button("Save and publish")).toBeUndefined();
+  settings.mockRestore();
 });
 it("on a room page, lets links navigate in the app until there are unsaved prices, then asks before leaving", async () => {
   class FakeElement { constructor(readonly link: unknown) {} closest() { return this.link; } }
