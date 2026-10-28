@@ -7,7 +7,11 @@ import { captureDirectNightlyRevenueEvidence } from "./stripeBookingSettlement.j
 import { loadPricingBookingCancellation } from "./pricingBookingCancellation.js";
 
 // The booked-terms read has its own PostgreSQL proof (pricingInventoryAdoption); here it is fixed.
-vi.mock("./pricingBookingCancellation.js", () => ({ loadPricingBookingCancellation: vi.fn() }));
+// The rest stays real: the booking emails read the terms through it too (VAY-2392).
+vi.mock("./pricingBookingCancellation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pricingBookingCancellation.js")>()),
+  loadPricingBookingCancellation: vi.fn(),
+}));
 
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("host actions PostgreSQL consistency", () => {

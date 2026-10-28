@@ -7,7 +7,7 @@ import {
   cancellationLine,
   type CancellationLinePart,
   type PolicyBlock,
-} from "@/lib/cancellationPolicy";
+} from "@vayada/domain-booking/replacement-pricing";
 import { resolveLocale } from "@/lib/utils";
 import CancellationPolicy from "./CancellationPolicy";
 

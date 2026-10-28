@@ -1,14 +1,17 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { QueryResultRow } from "pg";
 
 import {
   BOOKING_EMAIL_QUEUE,
+  CANCEL_LINE_TEXT,
   BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE,
   BOOKING_RESERVED_PENDING_PAYMENT_EMAIL_JOB_TYPE,
   bookingLifecycleEmailJobKey,
   enqueueBookingLifecycleEmailJob,
   enqueueBookingTransitionNotifications,
   type BookingLifecycleEmailInput,
+  type BookingLifecycleTransition,
 } from "./bookingEmails.js";
 
 describe("booking lifecycle email jobs", () => {
@@ -209,6 +212,114 @@ describe("booking lifecycle email jobs", () => {
       { propertyLocation: null, bookedRooms: null },
     ])
       expect(await text("final_confirmation", booking)).not.toContain("Where you'll stay");
+  });
+
+  it("tells the guest how the confirmed stay cancels, as its confirmation page does (VAY-2392)", async () => {
+    type Cancellation = NonNullable<BookingLifecycleEmailInput["booking"]["cancellation"]>;
+    type Terms = Cancellation["rooms"][number]["cancellation"];
+    const free = {
+      kind: "flexible",
+      terms: { flexibleCancellationType: "free", freeCancellationDeadlineDays: 3 },
+    } as unknown as Terms;
+    const none: Terms = { kind: "non_refundable" };
+    const stay = (...rooms: Array<[string, Terms]>): Cancellation => ({
+      checkIn: "2026-10-12",
+      currency: "EUR",
+      timeZone: "Asia/Colombo",
+      totalMinor: "60000",
+      rooms: rooms.map(([roomName, cancellation]) => ({
+        roomName,
+        cancellation,
+        subtotalMinor: "30000",
+      })),
+    });
+    const text = async (
+      kind: BookingLifecycleEmailInput["kind"],
+      cancellation: Cancellation | null,
+      occurredAt = "2026-09-01T10:00:00.000Z",
+    ) => {
+      const target = createTargetEmailStore();
+      const input = bookingEmailInput({ kind, occurredAt });
+      input.booking.cancellation = cancellation;
+      await enqueueBookingLifecycleEmailJob(target, input);
+      return String(
+        JSON.parse(String(target.requiredCall("INSERT INTO platform.jobs").values?.[8])).text,
+      );
+    };
+    const payFull = "If you cancel or don't arrive, you pay the full amount (600.00 EUR).";
+
+    // Free until 3 days before the 12th: to the end of the 9th on the hotel's calendar.
+    for (const kind of ["final_confirmation", "booking_accepted"] as const)
+      expect(await text(kind, stay(["Double", free]))).toContain(
+        "\n\nCancellation: Free cancellation until the end of Fri, 9 Oct 2026, hotel time. After that, you pay the full amount (600.00 EUR).\n\n",
+      );
+    // 23:30 on the 9th in Colombo still counts. Half an hour later it's the 10th there: a last-minute
+    // booking can't be refunded.
+    expect(
+      await text("final_confirmation", stay(["Double", free]), "2026-10-09T18:00:00.000Z"),
+    ).toContain("Cancellation: Free cancellation until the end of Fri, 9 Oct 2026, hotel time.");
+    expect(
+      await text("final_confirmation", stay(["Double", free]), "2026-10-09T18:30:00.000Z"),
+    ).toContain(`Cancellation: Free cancellation ended on Fri, 9 Oct 2026. ${payFull}`);
+    expect(await text("final_confirmation", stay(["Double", none]))).toContain(
+      `Cancellation: Non-refundable. ${payFull}`,
+    );
+    expect(await text("final_confirmation", stay(["Double", free], ["Suite $$", none]))).toContain(
+      "Cancellation: Your rooms cancel differently. Double: free until the end of Fri, 9 Oct 2026. Suite $$: non-refundable.",
+    );
+    // Without trusted pricing terms, and in the other emails, nothing is said about cancelling.
+    expect(await text("final_confirmation", null)).not.toContain("Cancellation:");
+    for (const kind of ["request_received", "booking_updated", "host_new_booking"] as const)
+      expect(await text(kind, stay(["Double", free]))).not.toContain("Cancellation:");
+  });
+
+  it("reads the booked terms only for a confirmed pricing stay's guest confirmation emails (VAY-2392)", async () => {
+    const reads = async (
+      snapshot: Record<string, unknown>,
+      transition: BookingLifecycleTransition,
+    ) => {
+      const target = createTargetEmailStore(snapshot);
+      await enqueueBookingTransitionNotifications(target, {
+        propertyId: "f2000000-0000-0000-0000-000000000951",
+        guestBookingId: "book_bank_001",
+        occurredAt: "2026-09-01T10:00:00.000Z",
+        transition,
+      });
+      return target.calls.filter((call) => call.text.includes("booking.pricing_quote_acceptances"))
+        .length;
+    };
+    const pricing = {
+      status: "confirmed",
+      bookingMetadata: { targetSource: "pricing_quote_draft" },
+    };
+    const confirmed = {
+      eventType: "guest_booking.payment_received",
+      fromStatus: "pending_payment",
+      toStatus: "confirmed",
+    };
+    expect(await reads(pricing, confirmed)).toBe(1);
+    // Other bookings, stays not confirmed, and the other emails don't read them.
+    expect(await reads({ status: "confirmed" }, confirmed)).toBe(0);
+    expect(await reads({ ...pricing, status: "pending_payment" }, confirmed)).toBe(0);
+    expect(
+      await reads(pricing, {
+        eventType: "guest_booking.canceled",
+        fromStatus: "confirmed",
+        toStatus: "canceled",
+        reason: "guest_request",
+      }),
+    ).toBe(0);
+  });
+
+  it("keeps the cancellation line in the confirmation page's English words (VAY-2392)", () => {
+    const page = JSON.parse(
+      readFileSync(new URL("../../../booking-web/messages/en.json", import.meta.url), "utf8"),
+    ).confirmation.cancelLine;
+    for (const [key, words] of Object.entries(CANCEL_LINE_TEXT))
+      expect(
+        key.split(".").reduce((node, part) => node?.[part], page),
+        key,
+      ).toBe(words);
   });
 
   it("reads the property's place and the booked rooms with the booking (VAY-2322)", async () => {

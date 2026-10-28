@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import pg, { type PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { replacementStayKey } from "@vayada/domain-booking";
+import { createHotelSetupOrdinaryLoginFixture } from "../hotelSetupOrdinaryLogin.fixture.js";
+import {
+  loadBookingEmailCancellation,
+  loadBookingNotificationSnapshot,
+} from "../jobs/bookingEmails.js";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { stagePricingAcceptanceNotifications } from "./pricingAcceptanceNotifications.js";
@@ -130,6 +135,24 @@ describe.skipIf(!url)("replacement acceptance notification staging", () => {
           expect(guest.text).toContain("Balance: 360.00 EUR");
           expect(guest.text).toContain("Rooms: 1");
           expect(guest.text).not.toContain("paid in full");
+          // VAY-2392: how the booked rate cancels (the fixture's is non-refundable), as next-api's
+          // runtime login reads it: the mirrored login, created and dropped with this transaction.
+          expect(guest.text).toContain(
+            "Cancellation: Non-refundable. If you cancel or don't arrive, you pay the full amount (360.00 EUR).",
+          );
+          const runtime = await createHotelSetupOrdinaryLoginFixture(db, url);
+          await db.query(`SET LOCAL ROLE ${runtime.login}`);
+          const snapshot = await loadBookingNotificationSnapshot(db, {
+            propertyId,
+            guestBookingId: bookingId,
+          });
+          const terms =
+            snapshot &&
+            (await loadBookingEmailCancellation(db, snapshot, new Date(row.accepted_at)));
+          await db.query("RESET ROLE");
+          expect(terms?.rooms.map((room) => room.cancellation)).toEqual([
+            { kind: "non_refundable" },
+          ]);
           expect(
             (
               await db.query(

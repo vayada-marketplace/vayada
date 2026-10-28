@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import messages from "../messages/en.json";
-import { choiceKeys, choiceText, freeCancellationUntil, hotelToday } from "./roomChoices";
+import { freeCancellationUntil } from "@vayada/domain-booking/replacement-pricing";
+import { choiceKeys, choiceText, hotelToday } from "./roomChoices";
 import type { PricingOffer } from "@/services/api/replacementOffers";
 
 const choice = messages.home.choice as unknown as Record<string, unknown>;

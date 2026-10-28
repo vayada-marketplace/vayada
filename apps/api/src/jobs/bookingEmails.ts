@@ -1,8 +1,17 @@
+import {
+  bookedPolicyBlocks,
+  cancellationLine,
+  type BookedStayCancellation,
+} from "@vayada/domain-booking/replacement-pricing";
 import { pricingCurrencyScale } from "@vayada/domain-pms";
 import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
-import type { QueryResultRow } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 import type { MapPin } from "../domains/bookingLocationMap.js";
+import {
+  loadOpenPricingBookingCancellationTerms,
+  localDate,
+} from "../domains/pricingBookingCancellation.js";
 import {
   BOOKED_ROOM_PLACES_SQL,
   PROPERTY_PLACE_SQL,
@@ -100,7 +109,14 @@ export type BookingLifecycleEmailInput = {
     propertyLocation?: StayPropertyLocation | null;
     /** The booked room types with their saved locations, in booking order. */
     bookedRooms?: Array<{ name: string; attributes: unknown }> | null;
+    /** VAY-2392: a pricing stay's booked terms, for the confirmation emails' cancellation line. */
+    cancellation?: BookingEmailCancellation | null;
   };
+};
+
+export type BookingEmailCancellation = BookedStayCancellation & {
+  currency: string;
+  timeZone: string;
 };
 
 export type BookingTransitionNotificationInput = {
@@ -336,6 +352,7 @@ type BookingNotificationSnapshot = QueryResultRow & {
   addons: string | null;
   propertyLocation: StayPropertyLocation | null;
   bookedRooms: Array<{ name: string; attributes: unknown }>;
+  cancellation?: BookingEmailCancellation | null;
 };
 
 export async function loadBookingNotificationSnapshot(
@@ -428,15 +445,84 @@ export async function loadBookingNotificationSnapshot(
   return result.rows[0] ?? null;
 }
 
+/** The emails whose guest copy has the cancellation line. */
+const CANCELLATION_LINE_KINDS: ReadonlySet<BookingLifecycleEmailKind> = new Set([
+  "final_confirmation",
+  "booking_accepted",
+]);
+
+/** VAY-2392: the terms a confirmed pricing stay's confirmation email words, as its confirmation page does: the
+ * ones the cancel route would apply at `at`, with the rooms' names. Null for other bookings, once a room has
+ * started, and for terms the cancel route couldn't use. */
+export async function loadBookingEmailCancellation(
+  queryable: Queryable,
+  booking: BookingNotificationSnapshot,
+  at: Date,
+): Promise<BookingEmailCancellation | null> {
+  if (
+    booking.status !== "confirmed" ||
+    record(booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft"
+  )
+    return null;
+  const terms = await loadOpenPricingBookingCancellationTerms(
+    queryable as Pick<PoolClient, "query">,
+    {
+      propertyId: booking.propertyId,
+      guestBookingId: booking.guestBookingId,
+      stay: {
+        checkIn: booking.checkIn,
+        checkOut: booking.checkOut,
+        roomCount: booking.roomCount,
+        currency: booking.currency,
+      },
+    },
+    at,
+  );
+  if (!terms) return null;
+  const names = new Map(
+    (
+      await queryable.query<{ id: string; name: string }>(
+        `SELECT id::text AS id, name FROM pms.room_types WHERE property_id = $1::uuid AND id = ANY($2::uuid[])`,
+        [booking.propertyId, terms.rooms.map((room) => room.roomTypeId ?? null)],
+      )
+    ).rows.map((row) => [row.id, row.name]),
+  );
+  return {
+    checkIn: terms.checkIn,
+    currency: terms.currency,
+    timeZone: terms.timeZone,
+    totalMinor: terms.totalMinor,
+    rooms: terms.rooms.map((room) => ({
+      roomName: names.get(room.roomTypeId ?? "") ?? null,
+      cancellation: room.cancellation,
+      subtotalMinor: room.subtotalMinor,
+    })),
+  };
+}
+
 export async function enqueueBookingTransitionNotifications(
   queryable: Queryable,
   input: BookingTransitionNotificationInput,
 ): Promise<BookingLifecycleEmailEnqueueResult[]> {
-  const booking = await loadBookingNotificationSnapshot(queryable, input);
-  if (!booking) throw new Error("Booking notification snapshot was not found.");
-  if (record(booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified") return [];
+  const snapshot = await loadBookingNotificationSnapshot(queryable, input);
+  if (!snapshot) throw new Error("Booking notification snapshot was not found.");
+  if (record(snapshot.bookingMetadata)["airbnbMoneyStatus"] === "unverified") return [];
 
-  const notifications = notificationsForTransition(input.transition, booking);
+  const notifications = notificationsForTransition(input.transition, snapshot);
+  // Only the guest's confirmation emails read the booked terms (VAY-2392).
+  const booking = notifications.some(
+    (notification) =>
+      notification.role === "guest" && CANCELLATION_LINE_KINDS.has(notification.kind),
+  )
+    ? {
+        ...snapshot,
+        cancellation: await loadBookingEmailCancellation(
+          queryable,
+          snapshot,
+          new Date(input.occurredAt),
+        ),
+      }
+    : snapshot;
   const enqueued: BookingLifecycleEmailEnqueueResult[] = [];
   for (const notification of notifications) {
     if (notification.role === "host" && !normalizeEmail(booking.hostEmail)) {
@@ -635,6 +721,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `We've accepted your booking request for ${property}.`,
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
+        ...cancellationDetails(booking, input.occurredAt),
         ...whereYoullStay(booking),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -776,6 +863,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       `Your booking at ${property} is confirmed.`,
       `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
       ...confirmationDetails(booking),
+      ...cancellationDetails(booking, input.occurredAt),
       ...whereYoullStay(booking),
       `Booking reference: ${booking.bookingReference}`,
       "We look forward to welcoming you!",
@@ -807,6 +895,57 @@ function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): st
     `Add-ons: ${booking.addons || "None"}`,
     ...(booking.specialRequests ? [`Special requests: ${booking.specialRequests}`] : []),
   ];
+}
+
+/** The confirmation page's cancellation line (booking-web `confirmation.cancelLine`) in English, so the email
+ * says what the page says (VAY-2392). Only the confirmed stay's parts: no request or transfer is waiting. */
+export const CANCEL_LINE_TEXT: Readonly<Partial<Record<string, string>>> = {
+  freeUntil: "Free cancellation until the end of {date}, hotel time.",
+  freeUntilAfter: "After that, you pay the full amount ({amount}).",
+  refundsUntil: "Refunds until the end of {date}, hotel time.",
+  refundsUntilAfter:
+    "What you get back depends on when you cancel. After that, you pay the full amount ({amount}).",
+  freeEnded: "Free cancellation ended on {date}.",
+  noRefund: "Refunds ended on {date}.",
+  nonRefundable: "Non-refundable.",
+  payFull: "If you cancel or don't arrive, you pay the full amount ({amount}).",
+  rooms: "Your rooms cancel differently.",
+  "room.freeUntil": "{rooms}: free until the end of {date}.",
+  "room.refundsUntil": "{rooms}: refunds until the end of {date}.",
+  "room.freeEnded": "{rooms}: free cancellation has ended.",
+  "room.noRefund": "{rooms}: no refund any more.",
+  "room.nonRefundable": "{rooms}: non-refundable.",
+};
+
+/** VAY-2392: the confirmed stay's cancellation as its confirmation page words it, judged on the hotel's date when
+ * the email is written. Nothing without trusted pricing terms. */
+function cancellationDetails(
+  booking: BookingLifecycleEmailInput["booking"],
+  occurredAt: string,
+): string[] {
+  const stay = booking.cancellation;
+  const at = new Date(occurredAt);
+  if (!stay || !Number.isFinite(at.getTime())) return [];
+  const line = cancellationLine(
+    bookedPolicyBlocks(stay, {
+      today: localDate(stay.timeZone, at),
+      request: false,
+      card: false,
+      bankTransfer: false,
+    }),
+  );
+  // Replacer functions, so a "$" in a room name stays as written.
+  const parts = line
+    ? [line.lead, ...line.rest].map((part) =>
+        CANCEL_LINE_TEXT[part.key]
+          ?.replace("{date}", () => (part.date ? stayDate(part.date) : ""))
+          .replace("{amount}", () =>
+            part.amountMinor ? minorMoney(part.amountMinor, stay.currency) : "",
+          )
+          .replace("{rooms}", () => part.rooms?.filter(Boolean).join(", ") || "Room"),
+      )
+    : [];
+  return parts.length && parts.every(Boolean) ? [`Cancellation: ${parts.join(" ")}`] : [];
 }
 
 /** "Where you'll stay" (VAY-2322), for the guest once the stay is confirmed, as on the approved Paper board: the

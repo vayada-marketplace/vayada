@@ -15,6 +15,7 @@ export type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
 export * from "./pricingPaidWhenBooking.js";
 export * from "./pricingOfferNames.js";
 export * from "./paymentMethodWindows.js";
+export * from "./cancellationPolicy.js";
 export {
   isManualPricingPaymentMethod,
   isPricingPaymentMethod,
