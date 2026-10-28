@@ -7,7 +7,7 @@ import en from "@/messages/en.json";
 import { CurrencyProvider } from "@/contexts/CurrencyContext";
 import ApproximateAmountsNote from "./ApproximateAmountsNote";
 
-// Sri Journeys' shape (VAY-2390): prices in LKR, shown to guests in US dollars first.
+// A hotel priced in LKR and shown to guests in US dollars first (VAY-2390).
 const hotel = {
   currency: "LKR",
   displayCurrencies: ["LKR", "USD"],
