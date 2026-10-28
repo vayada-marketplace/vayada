@@ -66,7 +66,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
   // platform runtime grant contract (grant-target-database-runtime-product-dml.mjs, #594); this pins
   // every table the change writes, locks or reads on that login.
   it("runs on the runtime grant contract: UPDATE wherever it writes or locks, SELECT where it counts", async () => {
-    expect(await listOrdinaryPostureViolations(admin)).toEqual([]);
+    // The posture queries read the connected login's own privileges.
+    const runtime = new pg.Pool({ connectionString: fixture.connectionString, max: 1 });
+    try {
+      expect(await listOrdinaryPostureViolations(runtime)).toEqual([]);
+    } finally {
+      await runtime.end();
+    }
     const tables = {
       "hotel_catalog.properties": ["SELECT", "UPDATE"],
       "pms.property_pricing_settings": ["SELECT", "UPDATE"],
