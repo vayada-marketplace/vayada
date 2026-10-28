@@ -223,3 +223,47 @@ export function roomGuestProblem(
   if (children > limits.maxChildren) return "too_many_children";
   return null;
 }
+
+/** VAY-2393: a room removed on /book that sent the guest back to the room cards (its other
+ * place was too small): the hotel page shows the removal there, with Undo back to /book. */
+export type RoomUndo = {
+  message: string;
+  /** The /book address before the removal: its draft still has the rooms and extras. */
+  bookSearch: string;
+  /** The stay (pickIdentity) the removal was for; a promo checked after arrival keeps it. */
+  identity: string;
+  /** The hotel page's picks before the removal. */
+  hotel: PickDraft | null;
+  /** Removed from the keyboard: focus goes to Undo. */
+  focusAction: boolean;
+  at: number;
+};
+const undoKey = (slug: string) => `roomUndo:${slug}`;
+
+export function saveRoomUndo(slug: string, undo: RoomUndo) {
+  try {
+    sessionStorage.setItem(undoKey(slug), JSON.stringify(undo));
+  } catch {
+    // Storage off: the removal still happened, without Undo on the hotel page.
+  }
+}
+
+/** Read once: an Undo older than its 6 seconds (plus the page load) is gone. */
+export function takeRoomUndo(slug: string, now = Date.now()): RoomUndo | null {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(undoKey(slug)) ?? "null") as RoomUndo | null;
+    sessionStorage.removeItem(undoKey(slug));
+    return raw &&
+      typeof raw.message === "string" &&
+      typeof raw.bookSearch === "string" &&
+      raw.bookSearch.startsWith("?") &&
+      typeof raw.identity === "string" &&
+      typeof raw.focusAction === "boolean" &&
+      typeof raw.at === "number" &&
+      now - raw.at < 10_000
+      ? raw
+      : null;
+  } catch {
+    return null;
+  }
+}

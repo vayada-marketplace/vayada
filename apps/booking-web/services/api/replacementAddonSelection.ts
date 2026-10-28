@@ -124,3 +124,47 @@ export function buildReplacementAddonSelection(
   }
   return output;
 }
+
+/** VAY-2393: extras the guest chose for other rooms of the same stay (a room was changed or
+ * removed), carried over to these rooms: the same extras, quantities and days. A per-guest extra
+ * keeps as many adults and children as before, the first ones of these rooms, and is left out
+ * when these rooms have fewer. An extra these rooms can't take (gone from the catalogue, another
+ * currency, too many guests) is left out too, so the step never gets stuck on one the guest can't
+ * see. Null when nothing carries over. */
+export function carryReplacementExtras(
+  value: ReplacementExtrasValue,
+  catalogue: PricingAddon[],
+  selection: Selection,
+  allocationRevision: number,
+): ReplacementExtrasValue | null {
+  const guests = (kind: ExtraPerson["kind"]): ExtraPerson[] =>
+    selection.rooms.flatMap((room) =>
+      Array.from(
+        { length: kind === "adult" ? room.guests.adults : room.guests.childAgesAtCheckIn.length },
+        (_, index) => ({ selectionId: room.selectionId, kind, index }),
+      ),
+    );
+  const adults = guests("adult"),
+    children = guests("child");
+  const scope = replacementExtrasScope(catalogue, selection, allocationRevision);
+  const ids = new Set<string>();
+  const items = value.items.flatMap((item) => {
+    const wantAdults = item.people.filter((person) => person.kind === "adult").length;
+    const wantChildren = item.people.length - wantAdults;
+    if (wantAdults > adults.length || wantChildren > children.length) return [];
+    const carried = item.people.length
+      ? { ...item, people: [...adults.slice(0, wantAdults), ...children.slice(0, wantChildren)] }
+      : item;
+    if (
+      ids.has(item.id) ||
+      !buildReplacementAddonSelection(catalogue, selection, allocationRevision, {
+        scope,
+        items: [carried],
+      })
+    )
+      return [];
+    ids.add(item.id);
+    return [carried];
+  });
+  return items.length ? { scope, items: items.slice(0, 99) } : null;
+}

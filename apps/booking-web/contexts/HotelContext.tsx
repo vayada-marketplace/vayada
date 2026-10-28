@@ -216,7 +216,10 @@ export function HotelProvider({
     );
   }
 
-  if (loading) {
+  // The first load only. A hotel fetched again (moving between /book and the other pages, which
+  // load the add-ons) keeps the page mounted: a remount would lose what it read once on arrival,
+  // such as the room to change or a room's Undo (VAY-2393).
+  if (loading && !hotel) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="animate-spin w-8 h-8 border-4 border-gray-200 border-t-gray-900 rounded-full" />

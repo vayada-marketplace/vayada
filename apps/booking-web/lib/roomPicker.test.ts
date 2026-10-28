@@ -14,8 +14,11 @@ import {
   roomGuestProblem,
   roomGuests,
   savePickDraft,
+  saveRoomUndo,
   splitParty,
+  takeRoomUndo,
   type RoomPick,
+  type RoomUndo,
 } from "./roomPicker";
 
 const KEY = `pricing-offer.v2:${"a".repeat(64)}`;
@@ -186,6 +189,34 @@ describe("pick drafts", () => {
     ]) {
       sessionStorage.setItem("roomPicks:hotel", JSON.stringify(draft));
       expect(readPickDraft("hotel", "x")).toBeNull();
+    }
+  });
+});
+
+// VAY-2393: a room removed on the Extras step that sent the guest back to the room cards.
+describe("room Undo from the Extras step", () => {
+  afterEach(() => sessionStorage.clear());
+  const undo: RoomUndo = {
+    message: "Room 2 removed.",
+    bookSearch: "?checkIn=2026-11-10&pick=x",
+    identity: "stay",
+    hotel: null,
+    focusAction: true,
+    at: 1_000_000,
+  };
+
+  it("is shown once, within 10 seconds", () => {
+    saveRoomUndo("hotel", undo);
+    expect(takeRoomUndo("hotel", 1_000_000 + 5000)).toEqual(undo);
+    expect(takeRoomUndo("hotel", 1_000_000 + 5000)).toBeNull();
+    saveRoomUndo("hotel", undo);
+    expect(takeRoomUndo("hotel", 1_000_000 + 10_000)).toBeNull();
+  });
+
+  it("ignores an Undo it can't trust", () => {
+    for (const bad of [{ bookSearch: "//evil.test" }, { identity: null }, { focusAction: "yes" }]) {
+      saveRoomUndo("hotel", { ...undo, ...bad } as unknown as RoomUndo);
+      expect(takeRoomUndo("hotel", 1_000_000)).toBeNull();
     }
   });
 });

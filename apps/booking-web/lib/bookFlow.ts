@@ -120,14 +120,17 @@ export function readBookFlowDraft(slug: string, entry: string): BookFlowDraft | 
     // The extras builder re-checks every item against the current catalogue and stay.
     extras: extras && typeof extras === "object" && Array.isArray(extras.items) ? extras : null,
     payment: d.payment as BookFlowDraft["payment"],
-    guest: Object.fromEntries(
-      (Object.keys(emptyGuest) as (keyof GuestDetails)[]).map((field) => {
-        const value = (d.guest as Record<string, unknown> | undefined)?.[field];
-        return [field, text(value) ? value : ""];
-      }),
-    ) as GuestDetails,
+    guest: readGuest(d.guest),
   };
 }
+
+const readGuest = (guest: unknown): GuestDetails =>
+  Object.fromEntries(
+    (Object.keys(emptyGuest) as (keyof GuestDetails)[]).map((field) => {
+      const value = (guest as Record<string, unknown> | undefined)?.[field];
+      return [field, text(value) ? value : ""];
+    }),
+  ) as GuestDetails;
 
 export function saveBookFlowDraft(slug: string, draft: BookFlowDraft): void {
   try {
@@ -138,5 +141,71 @@ export function saveBookFlowDraft(slug: string, draft: BookFlowDraft): void {
 export function clearBookFlowDraft(slug: string): void {
   try {
     sessionStorage.removeItem(key(slug));
+  } catch {}
+}
+
+/** VAY-2393: what the guest chose on /book when they changed or removed a room there. The next
+ * hand-off for the same stay starts with it: each room's child ages (by room, while its children
+ * add up), the extras (fitted to the new rooms once they are known), details and way to pay.
+ * Other hand-offs start afresh. */
+export type StayCarryOver = {
+  checkIn: string;
+  checkOut: string;
+  childAges: string[][];
+  extras: ReplacementExtrasValue | null;
+  payment: PricingPaymentMethod | "";
+  guest: GuestDetails;
+  at: number;
+};
+const carryKey = (slug: string) => `bookCarry:${slug}`;
+
+export function saveStayCarryOver(slug: string, carry: StayCarryOver): void {
+  try {
+    sessionStorage.setItem(carryKey(slug), JSON.stringify(carry));
+  } catch {}
+}
+
+/** The carry-over for this stay, for 30 minutes. It stays until its extras are fitted
+ * (clearStayCarryOver), so a refresh before then keeps them. */
+export function readStayCarryOver(
+  slug: string,
+  stay: { checkIn: string; checkOut: string },
+  now = Date.now(),
+): StayCarryOver | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(sessionStorage.getItem(carryKey(slug)) ?? "null");
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  if (
+    d.checkIn !== stay.checkIn ||
+    d.checkOut !== stay.checkOut ||
+    typeof d.at !== "number" ||
+    !(now - d.at >= 0 && now - d.at < 30 * 60_000) ||
+    !Array.isArray(d.childAges) ||
+    d.childAges.length > 99 ||
+    !d.childAges.every((ages) => Array.isArray(ages) && ages.every(text)) ||
+    !(d.payment === "" || isPricingPaymentMethod(d.payment))
+  )
+    return null;
+  const extras = d.extras as ReplacementExtrasValue | null;
+  return {
+    checkIn: stay.checkIn,
+    checkOut: stay.checkOut,
+    childAges: d.childAges as string[][],
+    // The extras are re-checked against the catalogue and these rooms when they are fitted.
+    extras: extras && typeof extras === "object" && Array.isArray(extras.items) ? extras : null,
+    payment: d.payment as StayCarryOver["payment"],
+    guest: readGuest(d.guest),
+    at: d.at,
+  };
+}
+
+export function clearStayCarryOver(slug: string): void {
+  try {
+    sessionStorage.removeItem(carryKey(slug));
   } catch {}
 }

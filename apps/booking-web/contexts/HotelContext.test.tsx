@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement, useEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import { expect, it, vi } from "vitest";
@@ -7,12 +7,13 @@ import enMessages from "../messages/en.json";
 import { ApiError } from "@/services/api/client";
 import { HotelProvider, useAddons, useHotel } from "./HotelContext";
 
-const { getHotel, getAddons } = vi.hoisted(() => ({
+const { getHotel, getAddons, path } = vi.hoisted(() => ({
   getHotel: vi.fn(),
   getAddons: vi.fn(),
+  path: { current: "/" },
 }));
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+vi.mock("next/navigation", () => ({ usePathname: () => path.current }));
 vi.mock("@/services/api/hotel", () => ({ hotelService: { getHotel, getAddons } }));
 // next/font only runs inside Next's compiler; the pairing map has its own test.
 vi.mock("@vayada/fonts/brand", () => ({
@@ -26,19 +27,23 @@ async function renderProvider(children: ReactNode, slug?: string) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   const root = createRoot(container);
-  await act(async () => {
-    root.render(
-      <NextIntlClientProvider locale="en" messages={enMessages}>
-        <HotelProvider slug={slug}>{children}</HotelProvider>
-      </NextIntlClientProvider>,
-    );
-  });
+  const render = () =>
+    act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="en" messages={enMessages}>
+          <HotelProvider slug={slug}>{children}</HotelProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+  await render();
   return {
     container,
+    render,
     cleanup() {
       act(() => root.unmount());
       vi.unstubAllGlobals();
       vi.clearAllMocks();
+      path.current = "/";
     },
   };
 }
@@ -59,6 +64,33 @@ it("loads the hotel profile and its add-on catalogue", async () => {
   try {
     expect(result).toEqual({ hotelName: "Pricing Test Hotel", addonIds: ["breakfast"] });
     expect(container.textContent).toBe("Pricing Test Hotel");
+  } finally {
+    cleanup();
+  }
+});
+
+// VAY-2393: the hotel page reads the room to change and a room's Undo once, on arrival from /book.
+it("keeps the page mounted while a loaded hotel is fetched again for another page", async () => {
+  getHotel.mockResolvedValue({ slug: "pricing-test", name: "Pricing Test Hotel" });
+  getAddons.mockResolvedValue([]);
+  let mounts = 0;
+  function Page() {
+    useEffect(() => {
+      mounts++;
+    }, []);
+    return createElement("p", null, "Hotel content");
+  }
+
+  const { container, render, cleanup } = await renderProvider(<Page />, "pricing-test");
+  try {
+    expect(mounts).toBe(1);
+    // /book fetches the hotel again (without the add-ons); the page stays while it loads.
+    getHotel.mockReturnValue(new Promise(() => {}));
+    path.current = "/book";
+    await render();
+    expect(getHotel).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toBe("Hotel content");
+    expect(mounts).toBe(1);
   } finally {
     cleanup();
   }
