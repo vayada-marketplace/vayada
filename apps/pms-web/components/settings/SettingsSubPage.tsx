@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { SettingsBreadcrumb } from "@vayada/settings-ui";
+import { PageTitle } from "@/components/layout/PageHeader";
 import { useTranslation } from "@/lib/i18n";
 
 /**
@@ -37,7 +38,7 @@ export function SettingsSubPage({
         />
         <div className="mb-6 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
           <div className="min-w-0 flex-[1_1_14rem]">
-            <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">{title}</h1>
+            <PageTitle>{title}</PageTitle>
             {description && <p className="mt-1 text-[13px] text-gray-500">{description}</p>}
           </div>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

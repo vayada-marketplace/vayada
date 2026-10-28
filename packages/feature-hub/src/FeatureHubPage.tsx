@@ -30,6 +30,8 @@ interface FeatureHubPageProps {
   activationClient: FeatureActivationClient;
   /** Rendered above the title, e.g. the PMS "Settings / Feature Hub" breadcrumb. */
   breadcrumb?: ReactNode;
+  /** The host's own page title style, e.g. the PMS one (VAY-2413). */
+  titleClassName?: string;
 }
 
 function cx(...classes: Array<string | false | null | undefined>): string {
@@ -39,7 +41,12 @@ function cx(...classes: Array<string | false | null | undefined>): string {
 const PREVIEW_PRODUCTS: FeatureProduct[] = ["pms", "booking_engine"];
 
 /** One list of every module, whichever app shows it (VAY-2200). */
-export function FeatureHubPage({ translate, activationClient, breadcrumb }: FeatureHubPageProps) {
+export function FeatureHubPage({
+  translate,
+  activationClient,
+  breadcrumb,
+  titleClassName = "text-xl font-semibold text-gray-900 md:text-2xl",
+}: FeatureHubPageProps) {
   // Module copy the host catalog lacks falls back to the English defaults, not to the raw key.
   const t = useMemo<Translate>(
     () =>
@@ -119,9 +126,7 @@ export function FeatureHubPage({ translate, activationClient, breadcrumb }: Feat
       <header className="flex flex-col gap-3 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           {breadcrumb}
-          <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
-            {t("featureHub.copy.featureHub")}
-          </h1>
+          <h1 className={titleClassName}>{t("featureHub.copy.featureHub")}</h1>
           <p className="mt-1 max-w-2xl text-[13px] text-gray-500">
             {t("featureHub.copy.activatePropertyModulesAndKeepNavigationFocusedOnTheTools")}
           </p>

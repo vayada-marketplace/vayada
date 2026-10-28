@@ -8,6 +8,7 @@ import { useTranslation } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { normalizeChannelKey } from "@/lib/constants/statusStyles";
 import { getBalanceStatus } from "@/lib/bookingBalanceStatus";
+import { PageHeader } from "@/components/layout/PageHeader";
 import {
   AWAITING_PAYMENT_BADGE_CLASS,
   formatPaymentDeadline,
@@ -168,20 +169,20 @@ export default function ReservationsPage() {
 
   return (
     <div className="p-4 md:p-6 pb-0">
-      {/* Header */}
-      <div className="mb-6 md:mb-8 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("bookings.title")}</h1>
-          <p className="text-sm text-gray-500 mt-1">{t("bookings.subtitle")}</p>
-        </div>
-        <div className="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-200 bg-white">
-          <span className="relative flex w-2 h-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex w-2 h-2 rounded-full bg-emerald-500" />
-          </span>
-          <span className="text-xs font-medium text-gray-700">{t("bookings.liveSync")}</span>
-        </div>
-      </div>
+      <PageHeader
+        title={t("bookings.title")}
+        subtitle={t("bookings.subtitle")}
+        actions={
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-200 bg-white">
+            <span className="relative flex w-2 h-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex w-2 h-2 rounded-full bg-emerald-500" />
+            </span>
+            <span className="text-xs font-medium text-gray-700">{t("bookings.liveSync")}</span>
+          </div>
+        }
+        className="mb-6 md:mb-8"
+      />
 
       {/* Search & Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-4 md:mb-5">
