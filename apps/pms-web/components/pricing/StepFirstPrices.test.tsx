@@ -243,6 +243,26 @@ it("waits for Payment settings before saving, and names a discount it can't use"
   });
 });
 
+it("asks for a currency code only once Payment settings couldn't give one (VAY-2390)", async () => {
+  await mount({ fixedCurrency: undefined, defaultMethods: undefined });
+  const codes = () => view.root.findAllByProps({ "aria-label": "Currency code (for example EUR)" });
+  // While they load, the code they will give is coming: no field that then disappears.
+  expect(codes()).toHaveLength(0);
+  await act(async () =>
+    view.update(
+      <StepFirstPrices
+        propertyId={id}
+        rooms={[room]}
+        disabled={false}
+        defaultMethods={null}
+        onCreate={vi.fn()}
+        onDirty={vi.fn()}
+      />,
+    ),
+  );
+  expect(codes()).toHaveLength(1);
+});
+
 // A keystroke handled by the render from before Payment settings arrived (the price typed just as they load) used to
 // write back that render's empty ways to pay, so Create Room Type then asked for How guests pay.
 it("keeps the ways to pay that arrive while a price is being typed", async () => {
