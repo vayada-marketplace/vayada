@@ -169,9 +169,9 @@ export function QuickHotelEdit({
       onLogoSelected={(file) => setLogo({ file, url: URL.createObjectURL(file) })}
       // Back from the rooms step lands on the last of the three hotel screens.
       initialPart="contacts"
-      // Back from the first screen saves an edit first, as Save & exit does (VAY-2394).
       onBack={onDone}
-      // The edits live in this screen only (VAY-2383): Continue on the last screen or Save & exit saves them.
+      // The edits live in this screen only (VAY-2383): Continue on the last screen, Save & exit, or Back from
+      // the first screen (VAY-2394) saves them.
       footerNote="Not saved yet: finish with Continue, or use Save & exit"
       onSaveAndExit={onSaveAndExit}
       // Nothing edited: Save & exit and Back from the first screen leave at once, without a write.

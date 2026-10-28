@@ -138,6 +138,8 @@ test("Back from the first Your hotel screen saves the edit, then goes back to th
     expectedProfileRevision: 4,
     patch: { displayName: "Alpenrose Munich Old Town", propertyType: "hotel" },
   });
+  // Checked before "Where it is" opens again: its map logs InvalidKeyMapError with the test Maps key.
+  await assertHealthy();
   // Opening "Your hotel" again shows the saved name.
   await back(page).click();
   await expect(heading(page, "How guests reach you")).toBeVisible();
@@ -148,10 +150,9 @@ test("Back from the first Your hotel screen saves the edit, then goes back to th
     "Alpenrose Munich Old Town",
   );
   expect(state.profileWrites).toHaveLength(1);
-  await assertHealthy();
 });
 
-test("Back from the first Your hotel screen without an edit, or with one typed back, leaves without a save", async ({
+test("Back from the first Your hotel screen without an edit leaves at once, without a save", async ({
   page,
   baseURL,
 }, testInfo) => {
@@ -162,11 +163,17 @@ test("Back from the first Your hotel screen without an edit, or with one typed b
   await back(page).click();
   await expect(heading(page, "Your first room and price")).toBeVisible();
   expect(state.profileWrites).toHaveLength(0);
-  await back(page).click();
-  await expect(heading(page, "How guests reach you")).toBeVisible();
-  await back(page).click();
-  await back(page).click();
-  await expect(heading(page, "Your hotel")).toBeVisible();
+  await assertHealthy();
+});
+
+test("Back from the first Your hotel screen with a value typed back to what it was leaves without a save", async ({
+  page,
+  baseURL,
+}, testInfo) => {
+  const state = await openYourHotelEdit(page, baseURL);
+  const assertHealthy = watchPageHealth(page, testInfo, {
+    expectedMissingUrls: [new RegExp(`/pricing-source$`)],
+  });
   const name = page.getByRole("textbox", { name: /Hotel name/ });
   await name.fill("Alpenrose Munich Old Town");
   await name.fill("Alpenrose Munich");
