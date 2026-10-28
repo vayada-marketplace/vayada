@@ -41,11 +41,16 @@ const booking = {
   balanceAmount: 200,
   createdAt: new Date().toISOString(),
 };
-const stay = (places: boolean, extras: unknown = null) => ({
+const stay = (
+  places: boolean,
+  extras: unknown = null,
+  terms: { freeDays: number; bookedOn?: string } = { freeDays: 1 },
+) => ({
   extras,
   version: "booking-stay.v1",
   cancellation: {
     checkIn,
+    ...(terms.bookedOn && { bookedOn: terms.bookedOn }),
     currency: "EUR",
     timeZone: "Europe/Zurich",
     totalMinor: "20000",
@@ -56,7 +61,7 @@ const stay = (places: boolean, extras: unknown = null) => ({
         roomName: "Ocean Suite with private patio",
         cancellation: {
           kind: "flexible",
-          terms: { flexibleCancellationType: "free", freeCancellationDeadlineDays: 1 },
+          terms: { flexibleCancellationType: "free", freeCancellationDeadlineDays: terms.freeDays },
         },
         subtotalMinor: "20000",
       },
@@ -85,6 +90,7 @@ async function openConfirmation(
   fields: Record<string, unknown> = {},
   nearby?: unknown,
   extras?: unknown,
+  terms?: Parameters<typeof stay>[2],
 ) {
   await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
   // Analytics choice already made, so the consent banner doesn't cover the page.
@@ -112,7 +118,7 @@ async function openConfirmation(
   const stayRequests: unknown[] = [];
   await page.route(`${hotelApi}/bookings/${id}/stay`, (route) => {
     stayRequests.push(route.request().postDataJSON());
-    return route.fulfill({ json: stay(!pending, extras ?? null) });
+    return route.fulfill({ json: stay(!pending, extras ?? null, terms) });
   });
   await page.route(`${hotelApi}/bookings/confirmation`, (route) =>
     route.fulfill({ json: { ...booking, ...fields } }),
@@ -171,6 +177,33 @@ test("shows a confirmed stay on one desktop screen", async ({ page }, testInfo) 
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
 });
+
+// VAY-2392: booked today for a stay in 12 days on a rate free until 14 days before arrival: it was
+// never refundable, and the line says so and why.
+for (const width of [1440, 390]) {
+  test(`says a stay booked after its free cancellation ended can't be refunded (${width})`, async ({
+    page,
+  }, testInfo) => {
+    await openConfirmation(page, width, {}, undefined, undefined, {
+      freeDays: 14,
+      bookedOn: day(0),
+    });
+    const line = page.getByTestId("confirmation-cancellation");
+    await expect(line).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`confirmation-late-${width}.png`) });
+    await expect(line).toContainText(
+      "Non-refundable: booked less than 14 days before arrival. If you cancel or don't arrive, you pay the full amount (€200",
+    );
+    await expect(line).not.toContainText("Free cancellation ended");
+    await line.getByRole("button", { name: "Full policy" }).click();
+    const dialog = page.getByRole("dialog", { name: "Cancellation policy" });
+    await expect(dialog).toContainText("Non-refundable");
+    await expect(dialog).toContainText(
+      "You’re booking less than 14 days before arrival, so this booking can’t be cancelled for free.",
+    );
+    await page.screenshot({ path: testInfo.outputPath(`confirmation-late-policy-${width}.png`) });
+  });
+}
 
 test("puts the ticket first, then the hotel and next steps, on a phone", async ({
   page,

@@ -489,6 +489,7 @@ export async function loadBookingEmailCancellation(
   );
   return {
     checkIn: terms.checkIn,
+    bookedOn: terms.bookedOn,
     currency: terms.currency,
     timeZone: terms.timeZone,
     totalMinor: terms.totalMinor,
@@ -908,6 +909,7 @@ export const CANCEL_LINE_TEXT: Readonly<Partial<Record<string, string>>> = {
   freeEnded: "Free cancellation ended on {date}.",
   noRefund: "Refunds ended on {date}.",
   nonRefundable: "Non-refundable.",
+  lateBooking: "Non-refundable: booked less than {days} before arrival.",
   payFull: "If you cancel or don't arrive, you pay the full amount ({amount}).",
   rooms: "Your rooms cancel differently.",
   "room.freeUntil": "{rooms}: free until the end of {date}.",
@@ -939,6 +941,7 @@ function cancellationDetails(
     ? [line.lead, ...line.rest].map((part) =>
         CANCEL_LINE_TEXT[part.key]
           ?.replace("{date}", () => (part.date ? stayDate(part.date) : ""))
+          .replace("{days}", () => `${part.days} ${part.days === 1 ? "day" : "days"}`)
           .replace("{amount}", () =>
             part.amountMinor ? minorMoney(part.amountMinor, stay.currency) : "",
           )

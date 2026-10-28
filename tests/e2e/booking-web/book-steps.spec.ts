@@ -315,7 +315,7 @@ for (const width of [1440, 390]) {
       "Quiet hours",
     );
     const confirm = page.getByRole("button", { name: "Confirm booking" });
-    const agree = page.getByLabel(/^I agree to the cancellation policy/);
+    const agree = page.getByLabel(/I agree to the cancellation policy/);
     const missing = page
       .getByRole("alert")
       .filter({ hasText: "Tick the box to agree before you book." });
@@ -353,7 +353,7 @@ for (const width of [1440, 390]) {
     await expect(agree).not.toBeChecked();
     await expect(missing).toHaveCount(0);
     await paymentOption(page, "pay_at_property").click();
-    await page.getByLabel(/^I agree to the cancellation policy/).check();
+    await page.getByLabel(/I agree to the cancellation policy/).check();
     await confirm.click();
 
     await expect(page).toHaveURL(new RegExp(`/booking/${reference}$`));

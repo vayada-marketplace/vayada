@@ -527,6 +527,8 @@
       "freeEnded": "Pembatalan gratis berakhir pada {date}.",
       "noRefund": "Pengembalian dana berakhir pada {date}.",
       "nonRefundable": "Tidak dapat dikembalikan.",
+      "lateBooking": "Tidak dapat dikembalikan: dipesan kurang dari {days} sebelum kedatangan.",
+      "days": "{count} hari",
       "payFull": "Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh ({amount}).",
       "beforeAccept": "Gratis ditarik sampai kami menjawab.",
       "afterAccept": {
@@ -888,6 +890,8 @@
     "retry": "Coba lagi",
     "roomsMissing": "Detail kamar tidak tersedia. Pilih kamar Anda lagi untuk memesan.",
     "agree": "Saya menyetujui kebijakan pembatalan, aturan tamu, serta syarat & ketentuan di atas.",
+    "agreeNonRefundable": "Saya memahami bahwa pemesanan ini tidak dapat dikembalikan dananya. Jika saya membatalkan atau tidak datang, seluruh masa menginap akan ditagih.",
+    "agreeSomeNonRefundable": "Saya memahami bahwa beberapa kamar ini tidak dapat dikembalikan dananya. Jika saya membatalkan atau tidak datang, harga penuhnya akan ditagih.",
     "agreeNoTerms": "Saya menyetujui kebijakan pembatalan dan aturan tamu di atas.",
     "agreeMissing": "Centang kotak untuk menyetujui sebelum memesan.",
     "hintDetails": "Isi data Anda untuk memesan.",
@@ -936,6 +940,8 @@
       "note": {
         "freeUntil": "Pembatalan gratis hingga akhir {date}, waktu setempat hotel. Untuk membatalkan, gunakan tautan di email konfirmasi atau hubungi hotel.",
         "freeEnded": "Pembatalan gratis berakhir pada {date}. Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh.",
+        "lateBooking": "Anda memesan kurang dari {days} hari sebelum kedatangan, jadi pemesanan ini tidak dapat dibatalkan secara gratis. Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh.",
+        "paidLateBooking": "Anda memesan kurang dari {days} hari sebelum kedatangan, jadi setelah transfer Anda diterima, pemesanan ini tidak dapat dibatalkan secara gratis: membatalkan atau tidak datang akan dikenakan jumlah penuh.",
         "partial": "Jumlah yang dikembalikan tergantung kapan Anda membatalkan. Setelah {date}, atau jika Anda tidak datang, Anda membayar jumlah penuh.",
         "partialEnded": "Pengembalian dana berakhir pada {date}. Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh.",
         "nonRefundable": "Tarif ini tidak dapat dibatalkan atau diubah dengan pengembalian dana.",

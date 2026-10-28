@@ -527,6 +527,8 @@
       "freeEnded": "L’annulation gratuite s’est terminée le {date}.",
       "noRefund": "Les remboursements se sont terminés le {date}.",
       "nonRefundable": "Non remboursable.",
+      "lateBooking": "Non remboursable : réservée moins de {days} avant l’arrivée.",
+      "days": "{count, plural, one {# jour} other {# jours}}",
       "payFull": "Si vous annulez ou ne venez pas, vous payez le montant total ({amount}).",
       "beforeAccept": "Vous pouvez la retirer gratuitement tant que nous n’avons pas répondu.",
       "afterAccept": {
@@ -888,6 +890,8 @@
     "retry": "Réessayer",
     "roomsMissing": "Les détails de la chambre ne sont pas disponibles. Choisissez à nouveau vos chambres pour réserver.",
     "agree": "J’accepte les conditions d’annulation, les règles de l’établissement et les conditions générales ci-dessus.",
+    "agreeNonRefundable": "Je comprends que cette réservation n’est pas remboursable. Si j’annule ou ne viens pas, la totalité du séjour est facturée.",
+    "agreeSomeNonRefundable": "Je comprends que certaines de ces chambres ne sont pas remboursables. Si j’annule ou ne viens pas, leur prix total est facturé.",
     "agreeNoTerms": "J’accepte les conditions d’annulation et les règles de l’établissement ci-dessus.",
     "agreeMissing": "Cochez la case pour accepter avant de réserver.",
     "hintDetails": "Indiquez vos coordonnées pour réserver.",
@@ -936,6 +940,8 @@
       "note": {
         "freeUntil": "Annulation gratuite jusqu’à la fin du {date}, heure locale de l’hôtel. Pour annuler, utilisez le lien de votre e-mail de confirmation ou contactez l’hôtel.",
         "freeEnded": "L’annulation gratuite s’est terminée le {date}. Si vous annulez ou ne venez pas, vous payez le montant total.",
+        "lateBooking": "Vous réservez moins de {days, plural, one {# jour} other {# jours}} avant l’arrivée : cette réservation ne peut donc pas être annulée gratuitement. Si vous annulez ou ne venez pas, vous payez le montant total.",
+        "paidLateBooking": "Vous réservez moins de {days, plural, one {# jour} other {# jours}} avant l’arrivée : une fois votre virement reçu, cette réservation ne peut pas être annulée gratuitement, et annuler ou ne pas venir coûte alors le montant total.",
         "partial": "Le remboursement dépend de la date d’annulation. Après le {date}, ou si vous ne venez pas, vous payez le montant total.",
         "partialEnded": "Les remboursements se sont terminés le {date}. Si vous annulez ou ne venez pas, vous payez le montant total.",
         "nonRefundable": "Ce tarif ne peut être ni annulé ni modifié contre remboursement.",
