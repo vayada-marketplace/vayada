@@ -35,6 +35,7 @@ export type QuickPayStepProps = {
   /** A Fixed Fee checkout already started in Stripe (back from checkout before it confirmed). */
   checkoutPending?: boolean;
   initialPlan?: QuickPlanChoice;
+  /** Rejects with the reason to show, or leaves the step: after it resolves the step stays disabled. */
   onSubmit: (plan: QuickPlanChoice) => Promise<void>;
   onBack: () => void;
   onSaveAndExit: () => void;
@@ -159,6 +160,17 @@ export function QuickPayStep({
     if (!document.activeElement || document.activeElement === document.body) focused.focus();
   }, [submitting]);
 
+  // Back from Stripe, a page the browser kept in its back/forward cache comes back as it left, still
+  // disabled: give the step back to the owner (VAY-2402).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const restored = (event: PageTransitionEvent) => {
+      if (event.persisted) setSubmitting(false);
+    };
+    window.addEventListener("pageshow", restored);
+    return () => window.removeEventListener("pageshow", restored);
+  }, []);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitError(null);
@@ -172,7 +184,8 @@ export function QuickPayStep({
         error instanceof Error ? error.message : "We couldn't finish setting up your hotel.",
       );
       focusBeforeFailedSave.current = focused;
-    } finally {
+      // Only a failed run gives the step back. A run that worked leaves it, for step 5 or for Stripe; until
+      // Stripe's page loads, a plan picked wouldn't be sent and Continue would send a second run (VAY-2402).
       setSubmitting(false);
     }
   }
