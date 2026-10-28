@@ -94,6 +94,27 @@ it("shows the chosen way's payment lines on the payment step", () => {
   expect(text()).not.toContain("Instant confirmation");
 });
 
+it("shows the discount row only for a real discount, not the quote's zero code line (VAY-2388)", () => {
+  const withDiscounts = (...amounts: string[]) => ({
+    ...quote,
+    lines: [
+      { kind: "room", selectionId: "a", amountMinor: "20000" },
+      ...amounts.map((amountMinor, index) => ({
+        kind: "discount",
+        selectionId: index ? null : "a",
+        amountMinor,
+      })),
+    ],
+  });
+  render({ quote: withDiscounts("0") });
+  expect(text()).not.toContain("Discount");
+  render({ quote: withDiscounts("0", "0") });
+  expect(text()).not.toContain("Discount");
+  // A last-minute discount on the room plus a promo code: one row with both.
+  render({ quote: withDiscounts("2000", "500") });
+  expect(text()).toContain("Discount−US$25");
+});
+
 it("counts the hold down and says when the price has run out", () => {
   render();
   act(() => vi.advanceTimersByTime(60_000));

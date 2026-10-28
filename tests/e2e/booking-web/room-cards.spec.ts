@@ -116,6 +116,21 @@ for (const width of [1440, 390]) {
     await expect(choices).toHaveCount(3);
     await expect(choices.nth(0)).toContainText("Non-refundable");
     await expect(choices.nth(0)).toContainText("-10% OFF");
+    // VAY-2389: rate names sit on 20px lines, 6px above the description, badge or not. The 18px
+    // badge is centered on the name's line at 1440; at 390 it wraps and starts flush below it.
+    const box = async (choice: number, p: number) =>
+      (await choices.nth(choice).locator("p").nth(p).boundingBox())!;
+    const badge = (await choices.nth(0).getByText("-10% OFF").boundingBox())!;
+    const [title, terms] = [await box(0, 0), await box(0, 1)];
+    const line = width === 390 ? title.y + 20 : title.y;
+    expect(badge.height).toBe(18);
+    expect(title.height).toBe(width === 390 ? 40 : 20);
+    expect(badge.y).toBe(line + 1);
+    if (width === 390) expect(badge.x).toBe(title.x);
+    expect(terms.y - (title.y + title.height)).toBe(6);
+    const [plainTitle, plainTerms] = [await box(1, 0), await box(1, 1)];
+    expect(plainTitle.height).toBe(20);
+    expect(plainTerms.y - (plainTitle.y + plainTitle.height)).toBe(6);
     await expect(choices.nth(0)).toContainText("€268");
     await expect(choices.nth(0)).toContainText("€134 / per night");
     await expect(choices.nth(0)).toHaveAttribute("aria-pressed", "true");
