@@ -10,6 +10,12 @@ _VAY-965 decision record._
 > Hotel Operations is the only setup track. VAY-2272 then removed the Marketplace data itself
 > (migrations 0496-0502), so this record now describes only Hotel Operations; the two-track design
 > is in Git history.
+>
+> **Update (VAY-2175, 2026-10):** the setup plan is now `{ propertyId, tasks }` with only the
+> hotel-basics (`shared_identity`) task, the one task the setup flow reads (#3834, #3842). The
+> API no longer computes the rooms, guest settings, billing, payment and publication tasks, the
+> recommended task, owner progress or launch readiness; the task registry and recommendation rules
+> below describe the original design.
 
 ## Decision
 
@@ -264,14 +270,7 @@ type ProductEntryDecision = {
 
 type PropertySetupPlan = {
   propertyId: string;
-  planRevision: string;
   tasks: SetupTask[];
-  recommendedTaskId: string | null;
-  ownerProgress: { complete: number; total: number };
-  launchReadiness: {
-    operationsUse: "not_applicable" | "blocked" | "pending" | "ready";
-    directBookingPublish: "not_applicable" | "blocked" | "pending" | "ready";
-  };
 };
 
 type AdaptiveHotelSetupStatus = {
