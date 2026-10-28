@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { PublicBookingQuoteRequest } from "@vayada/domain-booking/replacement-pricing";
 import {
   buildReplacementAddonSelection as build,
+  carryReplacementExtras,
   replacementExtrasScope,
   type ReplacementExtrasValue,
 } from "./replacementAddonSelection";
@@ -134,4 +135,70 @@ it("applies selected-count, quantity, currency and guest limits without a catalo
     const changed = [{ ...catalogue[0], ...change }];
     expect(build(changed, selection, 0, value(changed))).toBeNull();
   }
+});
+
+// VAY-2393: a room changed or removed keeps the guest's extras for the same stay.
+it("carries extras over to other rooms, with as many adults and children as before", () => {
+  const before: ReplacementExtrasValue = {
+    scope: "old",
+    items: [
+      {
+        id: "breakfast",
+        quantity: "1",
+        people: [
+          { selectionId: "one", kind: "adult", index: 1 },
+          { selectionId: "two", kind: "adult", index: 0 },
+          { selectionId: "one", kind: "child", index: 0 },
+        ],
+        dates: ["2027-01-02"],
+      },
+    ],
+  };
+  // Room two was removed: room one now has all 3 adults and both children.
+  const after: PublicBookingQuoteRequest["selection"] = {
+    ...selection,
+    rooms: [
+      {
+        selectionId: "one",
+        publicOfferKey: "offer",
+        guests: { adults: 3, childAgesAtCheckIn: [0, 7] },
+      },
+    ],
+  };
+  const carried = carryReplacementExtras(before, catalogue, after, 4)!;
+  expect(carried.scope).toBe(replacementExtrasScope(catalogue, after, 4));
+  expect(carried.items[0]!.people).toEqual([
+    { selectionId: "one", kind: "adult", index: 0 },
+    { selectionId: "one", kind: "adult", index: 1 },
+    { selectionId: "one", kind: "child", index: 0 },
+  ]);
+  expect(carried.items[0]!.dates).toEqual(["2027-01-02"]);
+  expect(build(catalogue, after, 4, carried)).not.toBeNull();
+  // Fewer guests than the extra had: it is left out, and nothing is left to carry.
+  const small = {
+    ...after,
+    rooms: [{ ...after.rooms[0]!, guests: { adults: 1, childAgesAtCheckIn: [] } }],
+  };
+  expect(carryReplacementExtras(before, catalogue, small, 4)).toBeNull();
+});
+
+it("leaves out a carried extra these rooms can't take", () => {
+  const item = (id: string) => ({
+    id,
+    quantity: "1",
+    people: [{ selectionId: "one", kind: "adult" as const, index: 0 }],
+    dates: ["2027-01-02"],
+  });
+  const before: ReplacementExtrasValue = {
+    scope: "old",
+    // Gone from the catalogue, then twice the same extra.
+    items: [item("spa"), item("breakfast"), item("breakfast")],
+  };
+  const carried = carryReplacementExtras(before, catalogue, selection, 1)!;
+  expect(carried.items.map((current) => current.id)).toEqual(["breakfast"]);
+  expect(build(catalogue, selection, 1, carried)).not.toBeNull();
+  // Another currency: nothing is left to carry.
+  expect(carryReplacementExtras(before, catalogue, { ...selection, currency: "USD" }, 1)).toBe(
+    null,
+  );
 });

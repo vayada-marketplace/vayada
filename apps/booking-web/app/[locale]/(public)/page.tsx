@@ -29,6 +29,7 @@ import {
   mostRooms,
   pickIdentity as stayIdentity,
   readPickDraft,
+  takeRoomUndo,
   roomGuests,
   savePickDraft,
   type PickDraft,
@@ -285,7 +286,11 @@ function HomePageContent() {
     return !!room && fitsRoom(room.occupancy, slots[index]!);
   });
   const firstOpen = done.indexOf(false);
-  const [changing, setChanging] = useState<number | null>(null);
+  // VAY-2393: "Change" on the Extras step arrives with the room to open (`change=N`).
+  const [changing, setChanging] = useState<number | null>(() => {
+    const value = Number(searchParams.get("change"));
+    return Number.isInteger(value) && value >= 1 && value <= MAX_ROOMS ? value - 1 : null;
+  });
   // VAY-2393: every room chosen and none reopened (Back from the next step): nothing to pick.
   const allChosen = pickMode && firstOpen === -1 && (changing === null || changing >= roomCount);
   // The room the cards are sized and priced for; the last one while every room is chosen.
@@ -296,8 +301,36 @@ function HomePageContent() {
         ? roomCount - 1
         : firstOpen;
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  // The stay an Undo from the Extras step was for: its promo is checked after arrival.
+  const arrivalStay = useRef<string | null>(null);
   // Other dates or promo start other picks: an Undo from before them can't come back.
-  useEffect(() => setToast(null), [pickIdentity]);
+  useEffect(() => {
+    if (pickIdentity === arrivalStay.current) return;
+    arrivalStay.current = null;
+    setToast(null);
+  }, [pickIdentity]);
+  // VAY-2393: a room removed on the Extras step that sent the guest back here (the place left was
+  // too small) says so here, with Undo back to the Extras step as it was.
+  useEffect(() => {
+    const undo = takeRoomUndo(slug);
+    if (!undo) return;
+    arrivalStay.current = undo.identity;
+    setToast({
+      id: Date.now(),
+      message: undo.message,
+      duration: 6000,
+      focusAction: undo.focusAction,
+      action: {
+        label: t("roomsProgress.undo"),
+        onClick: () => {
+          if (undo.hotel) savePickDraft(slug, undo.identity, undo.hotel);
+          router.push(`/book${undo.bookSearch}`);
+        },
+      },
+    });
+    // Once per arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
   const stay = useStayPrices(
     slug,
     rooms?.length
@@ -332,13 +365,20 @@ function HomePageContent() {
       else params.set(name, value);
     // The picks are kept per promo: an applied one stays in the address (removing it drops it).
     if (appliedPromo) params.set("promoCode", appliedPromo.code);
+    // The room to open is read once; a refresh doesn't open it again.
+    params.delete("change");
     const search = params.toString();
     if (search !== window.location.search.slice(1))
       window.history.replaceState(null, "", `${window.location.pathname}?${search}`);
   }, [checkIn, checkOut, adults, effectiveChildren, roomCount, pickMode, appliedPromo]);
   // Other guests or dates: the room the guest reopened closes again, so a room the new split
   // makes too small comes up first (VAY-2393).
-  useEffect(() => setChanging(null), [adults, effectiveChildren, checkIn, checkOut]);
+  const guestsAndDates = JSON.stringify([adults, effectiveChildren, checkIn, checkOut]);
+  const [lastGuestsAndDates, setLastGuestsAndDates] = useState(guestsAndDates);
+  if (guestsAndDates !== lastGuestsAndDates) {
+    setLastGuestsAndDates(guestsAndDates);
+    setChanging(null);
+  }
   const [sortOption, setSortOption] = useState("recommended");
   const roomPrices = (room: PricingRoom) =>
     stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
@@ -533,6 +573,12 @@ function HomePageContent() {
     setChanging(index);
     toRoomList();
   };
+  // Arriving from the Extras step to change a room: straight to the room cards.
+  useEffect(() => {
+    if (searchParams.get("change")) toRoomList();
+    // Once per arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const progressRooms: RoomsProgressRoom[] = picks.map((pick, index) => {
     const room = pickedRoom(pick);
     return !room

@@ -1016,5 +1016,13 @@
     "listLabel": "Orte, die wir empfehlen",
     "all": "Alle",
     "empty": "Wir haben noch keine Tipps hinzugefügt."
+  },
+  "extrasRooms": {
+    "title": "{count, plural, one {Ihr Zimmer} other {Ihre # Zimmer}}",
+    "roomTitle": "Zimmer {number} · {guests}",
+    "change": "Ändern",
+    "changeRoom": "Zimmer {number} ändern",
+    "remove": "Entfernen",
+    "pickAnother": "Die verbleibende Unterkunft ist zu klein – wählen Sie eine andere."
   }
 }

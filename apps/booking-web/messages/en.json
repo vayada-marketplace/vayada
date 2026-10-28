@@ -1016,5 +1016,13 @@
     "listLabel": "Places we recommend",
     "all": "All",
     "empty": "We haven't added any tips yet."
+  },
+  "extrasRooms": {
+    "title": "{count, plural, one {Your room} other {Your # rooms}}",
+    "roomTitle": "Room {number} · {guests}",
+    "change": "Change",
+    "changeRoom": "Change Room {number}",
+    "remove": "Remove",
+    "pickAnother": "Your remaining place is too small – pick another."
   }
 }

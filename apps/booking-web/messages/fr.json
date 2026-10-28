@@ -1015,5 +1015,13 @@
     "listLabel": "Adresses que nous recommandons",
     "all": "Tout",
     "empty": "Nous n’avons pas encore ajouté de conseils."
+  },
+  "extrasRooms": {
+    "title": "{count, plural, one {Votre chambre} other {Vos # chambres}}",
+    "roomTitle": "Chambre {number} · {guests}",
+    "change": "Modifier",
+    "changeRoom": "Modifier la chambre {number}",
+    "remove": "Retirer",
+    "pickAnother": "Le logement restant est trop petit : choisissez-en un autre."
   }
 }

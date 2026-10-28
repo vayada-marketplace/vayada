@@ -12,7 +12,20 @@ import {
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { decodePicks, pickIdentity, releaseSoldOutPicks, roomGuestProblem } from "@/lib/roomPicker";
+import {
+  decodePicks,
+  encodePick,
+  evenSplit,
+  pickIdentity,
+  readPickDraft,
+  releaseSoldOutPicks,
+  roomGuestProblem,
+  roomGuests,
+  savePickDraft,
+  saveRoomUndo,
+} from "@/lib/roomPicker";
+import ExtrasRooms, { type ExtrasRoomLine } from "@/components/booking/ExtrasRooms";
+import Toast, { type ToastMessage } from "@/components/booking/Toast";
 import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
@@ -38,6 +51,7 @@ import { useQuoteGuestDisclosure } from "@/lib/hooks/useQuoteGuestDisclosure";
 import { getReplacementAddons, type PricingAddon } from "@/services/api/replacementAddons";
 import {
   buildReplacementAddonSelection,
+  carryReplacementExtras,
   replacementExtrasScope,
   type ReplacementExtrasValue,
 } from "@/services/api/replacementAddonSelection";
@@ -70,6 +84,9 @@ import {
   parseBookStep,
   reachableStep,
   readBookFlowDraft,
+  readStayCarryOver,
+  saveStayCarryOver,
+  clearStayCarryOver,
   saveBookFlowDraft,
   clearBookFlowDraft,
   type BookStep,
@@ -133,6 +150,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tBefore = useTranslations("beforeYouBook");
   const tGroup = useTranslations("groupRooms");
   const tCommon = useTranslations("common");
+  const tExtrasRooms = useTranslations("extrasRooms");
   const { hotel } = useHotel();
   // VAY-2347: the one tick, for the price, rules and room names it was given for.
   const [agreedTo, setAgreedTo] = useState<string | null>(null);
@@ -143,6 +161,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
   const [extras, setExtras] = useState<ReplacementExtrasValue | null>(null);
+  // VAY-2393: extras chosen for other rooms of this stay, fitted to these rooms once they're known.
+  const [carried, setCarried] = useState<ReplacementExtrasValue | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [allocationRevision, setAllocationRevision] = useState(0);
   const [addonCatalogue, setAddonCatalogue] = useState<PricingAddon[] | null>(null);
   const [addonError, setAddonError] = useState(false);
@@ -185,6 +206,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode", "rooms"])
       if (params.get(name)) home.set(name, params.get(name)!);
     setHomeSearch(home.toString());
+    // VAY-2393: a room changed or removed on the Extras step keeps this tab's choices.
+    const carry = readStayCarryOver(slug, {
+      checkIn: params.get("checkIn") ?? "",
+      checkOut: params.get("checkOut") ?? "",
+    });
     const draft = readBookFlowDraft(slug, handOff);
     if (draft) {
       setCheckIn(draft.checkIn);
@@ -195,23 +221,34 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       setExtras(draft.extras);
       setPayment(draft.payment);
       setGuest(draft.guest);
+      // A refresh before the carried extras were fitted to these rooms still fits them.
+      if (carry?.extras && !draft.extras) setCarried(carry.extras);
       return;
     }
     setCheckIn(params.get("checkIn") ?? "");
     setCheckOut(params.get("checkOut") ?? "");
     setPromoCode(params.get("promoCode") ?? "");
+    if (carry) {
+      setCarried(carry.extras);
+      setGuest(carry.guest);
+      setPayment(carry.payment);
+    }
     // The hotel page hands over its party as a first room the guest can adjust or split;
     // child ages stay blank until chosen. A room card also hands over its choice and the rooms
     // the party needs (VAY-2190): adults spread evenly, children in the first room.
-    // VAY-2320: a group chose each room on the hotel page: its rate and its guests.
+    // VAY-2320: a group chose each room on the hotel page: its rate and its guests. VAY-2393: a
+    // room keeps its children's ages from before a change while it has as many children.
     const picks = decodePicks(params.getAll("pick"));
     if (picks) {
       setChoices(
-        picks.map((pick) => ({
+        picks.map((pick, index) => ({
           ...newRoom(),
           publicOfferKey: pick.publicOfferKey,
           adults: String(pick.adults),
-          childAges: Array(pick.children).fill(""),
+          childAges:
+            carry?.childAges[index]?.length === pick.children
+              ? carry.childAges[index]!
+              : Array(pick.children).fill(""),
         })),
       );
       return;
@@ -331,6 +368,20 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       : null;
   const roomsComplete =
     !!rooms && !!roomQuoteRequest(rooms, choices, checkIn, checkOut, "card", quotedPromoCode);
+  // VAY-2393: carried extras are fitted to these rooms once they and the catalogue are known.
+  const carryTo = baseRequest?.selection ?? null;
+  useEffect(() => {
+    if (!carried || !carryTo || !addonCatalogue) return;
+    setExtras(carryReplacementExtras(carried, addonCatalogue, carryTo, allocationRevision));
+    setCarried(null);
+    // The selection is rebuilt on every render; it only matters once it exists.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carried, !!carryTo, addonCatalogue, allocationRevision]);
+  // The carry-over is used up once this hand-off's draft holds it and its extras are fitted. Not
+  // on mount: React may mount twice (Strict Mode) and the second one still needs it.
+  useEffect(() => {
+    if (entry !== null && !carried) clearStayCarryOver(slug);
+  }, [entry, carried, slug]);
   const addons = buildReplacementAddonSelection(
     addonCatalogue ?? [],
     baseRequest?.selection ?? null,
@@ -465,6 +516,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         details: detailsReady,
       })
     : wanted;
+  // VAY-2393: a removed room's Undo belongs to the Extras step it was removed on.
+  useEffect(() => setToast(null), [step]);
   // The steps this tab moved forward from, so in-page Back returns through the browser history.
   const forwardFrom = useRef<BookStep[]>([]);
   const go = (next: BookStep, replace = false) => {
@@ -713,6 +766,168 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const roomNames = Object.fromEntries(
     summaryRooms.map((room) => [room.selectionId, `${room.name} · ${room.choice}`]),
   );
+  // VAY-2393: each booked room on the Extras step, priced from this quote.
+  const extrasRoomLines: ExtrasRoomLine[] = choices.flatMap((choice, index) => {
+    const room = roomOf(choice);
+    if (!room) return [];
+    const guests = [
+      tCommon("adults", { count: Number(choice.adults) || 0 }),
+      ...(choice.childAges.length ? [tCommon("children", { count: choice.childAges.length })] : []),
+    ].join(", ");
+    const amount = quote
+      ? quote.lines
+          .filter(
+            (line) =>
+              line.selectionId === choice.selectionId &&
+              (line.kind === "room" || line.kind === "meal"),
+          )
+          .reduce((sum, line) => sum + BigInt(line.amountMinor), BigInt(0))
+      : null;
+    return [
+      {
+        selectionId: choice.selectionId,
+        title:
+          choices.length > 1 ? tExtrasRooms("roomTitle", { number: index + 1, guests }) : guests,
+        name: room.name,
+        rate: [
+          choiceName(room, choice.publicOfferKey),
+          Number.isFinite(nights) ? tCommon("nights", { count: nights }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        price: amount === null || !quote ? null : money(String(amount), quote.currency),
+      },
+    ];
+  });
+  // VAY-2393: the next hand-off for this stay starts with the guest's choices for these rooms.
+  const carryStay = (rooms: RoomChoice[]) =>
+    saveStayCarryOver(slug, {
+      checkIn,
+      checkOut,
+      childAges: rooms.map((choice) => choice.childAges),
+      extras,
+      payment,
+      guest,
+      at: Date.now(),
+    });
+  const focusExtrasRooms = () =>
+    requestAnimationFrame(() =>
+      document.getElementById("extras-rooms-title")?.focus({ preventScroll: true }),
+    );
+  // VAY-2393: Change goes back to the room cards with that room open; its new place comes back
+  // here. A room card's single hand-off goes back to the cards as before.
+  const changeRoomFromExtras = (index: number) => {
+    if (!fromPicks) return backToRooms();
+    carryStay(choices);
+    const home = new URLSearchParams(homeSearch);
+    home.set("change", String(index + 1));
+    router.push(`/?${home}`);
+  };
+  // VAY-2393: Remove spreads the adults evenly over the rooms left; each keeps its children, and
+  // the removed room's go where roomGuests puts them. While every place still fits, the guest
+  // stays here with the extras carried over; otherwise the room cards open with the place that
+  // no longer fits. Undo brings everything back for 6 seconds.
+  const removeRoomFromExtras = (index: number, byKeyboard: boolean) => {
+    if (!rooms || choices.length < 2) return;
+    const before = {
+      choices,
+      extras,
+      allocationRevision,
+      search: window.location.search,
+      homeSearch,
+      entry,
+    };
+    const adults = choices.reduce((sum, choice) => sum + (Number(choice.adults) || 0), 0);
+    const kept = choices.filter((_, position) => position !== index);
+    const split = evenSplit(adults, kept.length);
+    const moved = choices[index]!.childAges;
+    const movedTo = roomGuests(split, moved.length);
+    let child = 0;
+    const next = kept.map((choice, position) => {
+      const count = movedTo[position]!.children;
+      const childAges = [...choice.childAges, ...moved.slice(child, child + count)];
+      child += count;
+      return { ...choice, adults: String(split[position]), childAges };
+    });
+    // The hotel page's picks follow, so Change and Back show these rooms.
+    const identity = pickIdentity({
+      checkIn,
+      checkOut,
+      promoCode: new URLSearchParams(before.search).get("promoCode"),
+    });
+    const hotelBefore = readPickDraft(slug, identity);
+    savePickDraft(slug, identity, {
+      split,
+      picks: next.map((choice) => ({
+        roomTypeId: roomOf(choice)!.roomTypeId,
+        publicOfferKey: choice.publicOfferKey,
+      })),
+      children: next.map((choice) => choice.childAges.length),
+    });
+    const home = new URLSearchParams(homeSearch);
+    home.set("rooms", String(next.length));
+    const message =
+      next.length === 1
+        ? t("roomsProgress.removedToOne", { number: index + 1, adults })
+        : t("roomsProgress.removed", { number: index + 1 });
+    const tooSmall = next.findIndex((choice) => !!roomGuestProblem(roomOf(choice), choice));
+    if (tooSmall !== -1) {
+      home.set("change", String(tooSmall + 1));
+      carryStay(next);
+      saveRoomUndo(slug, {
+        message: `${message} ${tExtrasRooms("pickAnother")}`,
+        bookSearch: before.search,
+        identity,
+        hotel: hotelBefore,
+        focusAction: byKeyboard,
+        at: Date.now(),
+      });
+      return router.push(`/?${home}`);
+    }
+    const search = new URLSearchParams(before.search);
+    search.delete("pick");
+    search.set("rooms", String(next.length));
+    for (const choice of next)
+      search.append(
+        "pick",
+        encodePick({
+          adults: Number(choice.adults),
+          children: choice.childAges.length,
+          publicOfferKey: choice.publicOfferKey,
+        }),
+      );
+    window.history.replaceState(null, "", `${window.location.pathname}?${search}`);
+    setEntry(bookEntry(search.toString()));
+    setHomeSearch(home.toString());
+    setCarried(before.extras);
+    setExtras(null);
+    setChoices(next);
+    setAllocationRevision((value) => value + 1);
+    // The pressed Remove is gone: a pointer's focus goes to the rooms' heading, a keyboard's to
+    // Undo.
+    if (!byKeyboard) focusExtrasRooms();
+    setToast({
+      id: Date.now(),
+      message,
+      duration: 6000,
+      focusAction: byKeyboard,
+      action: {
+        label: t("roomsProgress.undo"),
+        onClick: () => {
+          window.history.replaceState(null, "", `${window.location.pathname}${before.search}`);
+          setEntry(before.entry);
+          setHomeSearch(before.homeSearch);
+          if (hotelBefore) savePickDraft(slug, identity, hotelBefore);
+          // The rooms and extras exactly as they were, for the allocation they were chosen for.
+          setCarried(null);
+          setChoices(before.choices);
+          setAllocationRevision(before.allocationRevision);
+          setExtras(before.extras);
+          focusExtrasRooms();
+        },
+      },
+    });
+  };
   // VAY-2347: the tick holds for this price, its rules' evidence and the rooms as named; a new
   // price, an expired one or rooms without names need it again.
   const consentFor =
@@ -1374,69 +1589,89 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           </form>
         )}
         {settled && step === "extras" && (
-          <>
-            {addonError ? (
-              <div
-                role="alert"
-                className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700"
-              >
-                <p className="font-semibold">We couldn’t load our extras right now.</p>
-                <p className="mt-1">Your rooms are kept. You can continue without extras.</p>
-                <button
-                  type="button"
-                  className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
-                  onClick={() => setAddonReload((value) => value + 1)}
-                >
-                  Try again
-                </button>
-              </div>
-            ) : (
-              baseRequest && (
-                <ExtrasStep
-                  catalogue={addonCatalogue ?? []}
-                  display={pagePayment.extras}
-                  showCategories={pagePayment.groupExtras}
-                  selection={baseRequest.selection}
-                  allocationRevision={allocationRevision}
-                  value={extras}
-                  onChange={(value) => {
-                    setExtras(value);
-                    setExtrasTried(false);
-                  }}
-                  attention={extrasTried}
-                  formatMoney={money}
-                  formatDay={pageDay}
-                  formatNotice={(hours) => tAddons("needsNotice", { hours })}
+          // VAY-2393: the booked rooms beside the extras on wide screens, above them on phones.
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+            {extrasRoomLines.length > 0 && (
+              <div className="lg:sticky lg:top-6 lg:order-2">
+                <ExtrasRooms
+                  rooms={extrasRoomLines}
+                  onChange={changeRoomFromExtras}
+                  onRemove={fromPicks && extrasRoomLines.length > 1 ? removeRoomFromExtras : null}
                   labels={{
-                    seeDetails: tAddons("seeDetails"),
-                    add: tAddons("add"),
-                    added: tAddons("added"),
-                    remove: tAddons("remove"),
-                    previousPhoto: tAddons("previousPhoto"),
-                    nextPhoto: tAddons("nextPhoto"),
-                    showPhoto: (number) => tAddons("showPhoto", { number }),
-                    upToGuests: (count) => tAddons("upToGuests", { count }),
-                    close: tAddons("closeDetails"),
-                    inYourStay: (detail) => tAddons("inYourStay", { detail }),
-                    groupsUpTo: (count) => tAddons("groupsUpTo", { count }),
-                    tooSoon: (notice) => tAddons("tooSoonForStay", { notice }),
-                    scheduledAutomatically: tAddons("scheduledAutomatically"),
-                    arrivalDay: (day) => tAddons("arrivalDay", { day }),
-                    departureDay: (day) => tAddons("departureDay", { day }),
-                    everyDay: tAddons("everyDay"),
-                    nights: (count) => tAddons("nights", { count }),
-                    anytime: tAddons("anytime"),
-                    noDateNeeded: tAddons("noDateNeeded"),
-                    whichDay: tAddons("whichDay"),
-                    chooseADay: tAddons("chooseDayToContinue"),
-                    notOnYourDates: tAddons("notOnYourDates"),
-                    dayOn: (name, day) => tAddons("dayOn", { name, day }),
+                    title: tExtrasRooms("title", { count: extrasRoomLines.length }),
+                    change: tExtrasRooms("change"),
+                    changeRoom: (number) => tExtrasRooms("changeRoom", { number }),
+                    remove: tExtrasRooms("remove"),
+                    removeRoom: (number) => t("roomsProgress.remove", { number }),
                   }}
                 />
-              )
+              </div>
             )}
-          </>
+            <div className="min-w-0 lg:order-1">
+              {addonError ? (
+                <div
+                  role="alert"
+                  className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700"
+                >
+                  <p className="font-semibold">We couldn’t load our extras right now.</p>
+                  <p className="mt-1">Your rooms are kept. You can continue without extras.</p>
+                  <button
+                    type="button"
+                    className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
+                    onClick={() => setAddonReload((value) => value + 1)}
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : (
+                baseRequest && (
+                  <ExtrasStep
+                    catalogue={addonCatalogue ?? []}
+                    display={pagePayment.extras}
+                    showCategories={pagePayment.groupExtras}
+                    selection={baseRequest.selection}
+                    allocationRevision={allocationRevision}
+                    value={extras}
+                    onChange={(value) => {
+                      setExtras(value);
+                      setExtrasTried(false);
+                    }}
+                    attention={extrasTried}
+                    formatMoney={money}
+                    formatDay={pageDay}
+                    formatNotice={(hours) => tAddons("needsNotice", { hours })}
+                    labels={{
+                      seeDetails: tAddons("seeDetails"),
+                      add: tAddons("add"),
+                      added: tAddons("added"),
+                      remove: tAddons("remove"),
+                      previousPhoto: tAddons("previousPhoto"),
+                      nextPhoto: tAddons("nextPhoto"),
+                      showPhoto: (number) => tAddons("showPhoto", { number }),
+                      upToGuests: (count) => tAddons("upToGuests", { count }),
+                      close: tAddons("closeDetails"),
+                      inYourStay: (detail) => tAddons("inYourStay", { detail }),
+                      groupsUpTo: (count) => tAddons("groupsUpTo", { count }),
+                      tooSoon: (notice) => tAddons("tooSoonForStay", { notice }),
+                      scheduledAutomatically: tAddons("scheduledAutomatically"),
+                      arrivalDay: (day) => tAddons("arrivalDay", { day }),
+                      departureDay: (day) => tAddons("departureDay", { day }),
+                      everyDay: tAddons("everyDay"),
+                      nights: (count) => tAddons("nights", { count }),
+                      anytime: tAddons("anytime"),
+                      noDateNeeded: tAddons("noDateNeeded"),
+                      whichDay: tAddons("whichDay"),
+                      chooseADay: tAddons("chooseDayToContinue"),
+                      notOnYourDates: tAddons("notOnYourDates"),
+                      dayOn: (name, day) => tAddons("dayOn", { name, day }),
+                    }}
+                  />
+                )
+              )}
+            </div>
+          </div>
         )}
+        <Toast toast={toast} onClose={() => setToast(null)} />
         {settled && step === "details" && (
           // VAY-2347: the form, then "Your stay" (below it on a phone), then the buttons. Continue
           // is always pressable; missing fields are marked and the first one gets focus.

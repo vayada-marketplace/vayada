@@ -5,11 +5,15 @@ import {
   bookStepQuery,
   bookSteps,
   clearBookFlowDraft,
+  clearStayCarryOver,
   parseBookStep,
   reachableStep,
   readBookFlowDraft,
+  readStayCarryOver,
   saveBookFlowDraft,
+  saveStayCarryOver,
   type BookFlowDraft,
+  type StayCarryOver,
 } from "./bookFlow";
 
 beforeEach(() => sessionStorage.clear());
@@ -94,4 +98,27 @@ it("ignores a draft it can't trust", () => {
     JSON.stringify({ ...draft, payment: "cash", choices: [{ selectionId: 1 }] }),
   );
   expect(readBookFlowDraft("alpenrose", draft.entry)).toBeNull();
+});
+
+// VAY-2393: Change or Remove on the Extras step hands its choices to the next hand-off.
+it("carries a changed room's choices over to the same stay for a while", () => {
+  const carry: StayCarryOver = {
+    checkIn: draft.checkIn,
+    checkOut: draft.checkOut,
+    childAges: [["4"], []],
+    extras: { scope: "old", items: [] },
+    payment: "pay_at_property",
+    guest: draft.guest,
+    at: 1_000_000,
+  };
+  saveStayCarryOver("alpenrose", carry);
+  const stay = { checkIn: draft.checkIn, checkOut: draft.checkOut };
+  expect(readStayCarryOver("alpenrose", stay, 1_000_000 + 60_000)).toEqual(carry);
+  // Other dates, or after 30 minutes: nothing carries over.
+  expect(readStayCarryOver("alpenrose", { ...stay, checkOut: "2026-11-09" }, 1_000_000)).toBe(null);
+  expect(readStayCarryOver("alpenrose", stay, 1_000_000 + 30 * 60_000)).toBeNull();
+  sessionStorage.setItem("bookCarry:alpenrose", JSON.stringify({ ...carry, childAges: [[4]] }));
+  expect(readStayCarryOver("alpenrose", stay, 1_000_000)).toBeNull();
+  clearStayCarryOver("alpenrose");
+  expect(sessionStorage.getItem("bookCarry:alpenrose")).toBeNull();
 });

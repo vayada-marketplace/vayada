@@ -1015,5 +1015,13 @@
     "listLabel": "Tempat yang kami rekomendasikan",
     "all": "Semua",
     "empty": "Kami belum menambahkan rekomendasi."
+  },
+  "extrasRooms": {
+    "title": "{count, plural, one {Kamar Anda} other {# kamar Anda}}",
+    "roomTitle": "Kamar {number} · {guests}",
+    "change": "Ubah",
+    "changeRoom": "Ubah Kamar {number}",
+    "remove": "Hapus",
+    "pickAnother": "Tempat yang tersisa terlalu kecil – pilih yang lain."
   }
 }

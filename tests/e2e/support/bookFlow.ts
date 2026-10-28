@@ -50,9 +50,10 @@ export async function fillGuestDetails(page: Page) {
   await page.getByRole("textbox", { name: /^Phone( \(optional\))?$/ }).fill("+49 30 1234567");
 }
 
-/** A price for whatever is asked (each room 100.00 a stay, pay at the property) and its guest
- * rules, for specs that pass through the steps without testing the price itself. */
-export async function mockAnyPrice(page: Page) {
+/** A price for whatever is asked (each room 100.00 a stay, pay at the property; each chosen extra
+ * `extraMinor`, none by default) and its guest rules, for specs that pass through the steps
+ * without testing the price itself. */
+export async function mockAnyPrice(page: Page, { extraMinor }: { extraMinor?: number } = {}) {
   const quotes = new Map<string, { issuedAt: string; expiresAt: string }>();
   await page.route("**/bookings/quote", (route) => {
     const { selection, paymentMethod } = route.request().postDataJSON();
@@ -62,7 +63,15 @@ export async function mockAnyPrice(page: Page) {
       expiresAt: new Date(Date.now() + 600_000).toISOString(),
     };
     quotes.set(quoteId, times);
-    const total = String(10000 * selection.rooms.length);
+    const extras: { kind: "addon"; selectionId: null; amountMinor: string }[] =
+      extraMinor === undefined
+        ? []
+        : selection.addons.map(() => ({
+            kind: "addon",
+            selectionId: null,
+            amountMinor: String(extraMinor),
+          }));
+    const total = String(10000 * selection.rooms.length + (extraMinor ?? 0) * extras.length);
     return route.fulfill({
       json: {
         version: "public-booking-quote.v1",
@@ -77,11 +86,14 @@ export async function mockAnyPrice(page: Page) {
         totalMinor: total,
         dueNowMinor: paymentMethod === "pay_at_property" ? "0" : total,
         dueLaterMinor: paymentMethod === "pay_at_property" ? total : "0",
-        lines: selection.rooms.map((room: { selectionId: string }) => ({
-          kind: "room",
-          selectionId: room.selectionId,
-          amountMinor: "10000",
-        })),
+        lines: [
+          ...selection.rooms.map((room: { selectionId: string }) => ({
+            kind: "room",
+            selectionId: room.selectionId,
+            amountMinor: "10000",
+          })),
+          ...extras,
+        ],
         rooms: selection.rooms.map((room: { selectionId: string }) => ({
           selectionId: room.selectionId,
           mealPlan: "room_only",
