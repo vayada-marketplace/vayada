@@ -1,4 +1,5 @@
 import {
+  freeCancellationUntil,
   pricingOfferNameKeys,
   type PricingOfferNameKey,
 } from "@vayada/domain-booking/replacement-pricing";
@@ -16,14 +17,6 @@ export function choiceKeys(offers: readonly PricingOffer[]): ChoiceKeys[] {
     const mealDescription = offers[index]!.mealDescription;
     return mealDescription ? { ...keys, mealDescription } : keys;
   });
-}
-
-/** The last day free cancellation is possible for a stay (YYYY-MM-DD): the cutoff day itself
- * still counts, as on the old booking page. */
-export function freeCancellationUntil(checkIn: string, days: number): string {
-  const date = new Date(`${checkIn}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
 }
 
 /** Today in the hotel's time zone (YYYY-MM-DD), so every guest sees the hotel's deadline. Without

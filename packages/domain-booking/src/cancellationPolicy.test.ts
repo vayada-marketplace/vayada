@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
+import type { PublicBookingQuote } from "./publicBookingQuote.js";
 import {
   bookedPolicyBlocks,
   cancellationLine,
@@ -7,7 +7,7 @@ import {
   policyBlocks,
   roomShares,
   shareTotal,
-} from "./cancellationPolicy";
+} from "./cancellationPolicy.js";
 
 type Cancellation = PublicBookingQuote["rooms"][number]["cancellation"];
 const free = (days: number) =>

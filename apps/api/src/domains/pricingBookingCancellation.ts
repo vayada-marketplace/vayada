@@ -78,6 +78,25 @@ export async function loadPricingBookingCancellationTerms(
   };
 }
 
+/** The booked terms the cancel route would apply at `at` (VAY-2360), or null once a room has started or when
+ * the route couldn't work them out: what the confirmation page and the confirmation emails word (VAY-2392). */
+export async function loadOpenPricingBookingCancellationTerms(
+  client: Pick<PoolClient, "query">,
+  input: Parameters<typeof loadPricingBookingCancellationTerms>[1],
+  at: Date,
+): Promise<PricingBookingCancellationTerms | null> {
+  const started = await client.query(
+    `SELECT 1 FROM pms.operational_booking_assignments
+     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+       AND assignment_status IN ('checked_in','in_house','checked_out')
+     LIMIT 1`,
+    [input.propertyId, input.guestBookingId],
+  );
+  if (started.rows.length > 0) return null;
+  const terms = await loadPricingBookingCancellationTerms(client, input);
+  return terms && pricingBookingCancellationOutcome(terms, at) ? terms : null;
+}
+
 /** What the booked terms refund if the stay is cancelled at `cancelledAt` (see
  * loadPricingBookingCancellationTerms). */
 export async function loadPricingBookingCancellation(
@@ -181,7 +200,8 @@ async function storedPricingHolds(
   return reservation;
 }
 
-function localDate(timeZone: string, at: Date): string {
+/** The property's calendar date at `at` (YYYY-MM-DD). */
+export function localDate(timeZone: string, at: Date): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",

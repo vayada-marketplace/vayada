@@ -112,9 +112,8 @@ import {
 import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservation.js";
 import {
   cancelAcceptedPricingStay,
+  loadOpenPricingBookingCancellationTerms,
   loadPricingBookingCancellation,
-  loadPricingBookingCancellationTerms,
-  pricingBookingCancellationOutcome,
   type PricingBookingCancellationTerms,
 } from "../domains/pricingBookingCancellation.js";
 import { loadStayPlaces, type StayPlace } from "../domains/stayPlaces.js";
@@ -4496,30 +4495,25 @@ async function enqueueExtrasEmail(
 
 /** The booked terms the cancel route would apply now (VAY-2360), or null once a room has started or when the
  * route couldn't work them out. */
-async function loadStayCancellationTerms(
+function loadStayCancellationTerms(
   db: Pick<pg.PoolClient, "query">,
   ids: { propertyId: string; guestBookingId: string },
   booking: TargetBookingRow,
   at: Date,
 ): Promise<PricingBookingCancellationTerms | null> {
-  const started = await db.query(
-    `SELECT 1 FROM pms.operational_booking_assignments
-     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
-       AND assignment_status IN ('checked_in','in_house','checked_out')
-     LIMIT 1`,
-    [ids.propertyId, ids.guestBookingId],
-  );
-  if (started.rows.length > 0) return null;
-  const terms = await loadPricingBookingCancellationTerms(db, {
-    ...ids,
-    stay: {
-      checkIn: dateOnly(booking.checkIn),
-      checkOut: dateOnly(booking.checkOut),
-      roomCount: booking.roomCount,
-      currency: booking.currency,
+  return loadOpenPricingBookingCancellationTerms(
+    db,
+    {
+      ...ids,
+      stay: {
+        checkIn: dateOnly(booking.checkIn),
+        checkOut: dateOnly(booking.checkOut),
+        roomCount: booking.roomCount,
+        currency: booking.currency,
+      },
     },
-  });
-  return terms && pricingBookingCancellationOutcome(terms, at) ? terms : null;
+    at,
+  );
 }
 
 /** The confirmation page's extras (VAY-2360), `booking-stay.v1`: the booked cancellation terms (each room's raw
