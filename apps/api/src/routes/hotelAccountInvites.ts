@@ -83,6 +83,7 @@ export type HotelAccountInviteRepository = {
       mode: "apply" | "recover",
     ) => Promise<ApplyInviteResult>;
   }): Promise<HotelAccountInviteRedemptionResult>;
+  /** Each route prefix's registration calls this (VAY-2302), so repeats must be safe. */
   close?(): Promise<void>;
 };
 

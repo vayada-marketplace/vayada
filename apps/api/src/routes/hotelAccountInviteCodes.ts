@@ -76,6 +76,7 @@ export type HotelAccountInviteCodeRepository = {
     createdByUserId: string;
   }): Promise<HotelAccountInviteCode>;
   revokeInviteCode(inviteCodeId: string): Promise<boolean>;
+  /** Each route prefix's registration calls this (VAY-2302), so repeats must be safe. */
   close?(): Promise<void>;
 };
 
