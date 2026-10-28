@@ -41,6 +41,7 @@ export default function RoomCard({
   detailsRequest = 0,
   pick,
   bookPart,
+  chosen = null,
   place = null,
   locationLine = null,
   compact = false,
@@ -84,6 +85,8 @@ export default function RoomCard({
   /** VAY-2393, one room for the whole party: a room too small for it is booked for the adults it
    * takes, and the guest picks a second room for the rest. `guests` is the whole party. */
   bookPart?: { guests: number; onBook: (publicOfferKey: string, adults: number) => void };
+  /** VAY-2393, back to one room: the rate of the place the group kept ("Your choice"). */
+  chosen?: string | null;
   /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
   place?: GuestPlace | null;
   /** Where the room is next to the main house, while its rooms are in several places (VAY-2324). */
@@ -102,7 +105,7 @@ export default function RoomCard({
   const { approximate } = useCurrency();
   const [imageIndex, setImageIndex] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
-  const current = pick?.current ?? null;
+  const current = pick?.current ?? chosen;
   // A rate clicked while choosing one room isn't the next room's choice (VAY-2393).
   const [pickedFor, setPickedFor] = useState(pick?.room);
   if (pickedFor !== pick?.room) {
@@ -381,7 +384,9 @@ export default function RoomCard({
             ? t("soldOut")
             : tooSmall || (prices && !selected)
               ? t("notAvailable")
-              : t("selectThisRate")}
+              : current
+                ? t("pickRoom.continueWithPlace")
+                : t("selectThisRate")}
         </button>
       )}
       {pick && currentRate && !pick.allChosen && (
@@ -471,13 +476,15 @@ export default function RoomCard({
                 sizes={bookingImageSizes.roomThumb}
               />
             )}
-            {pick && !soldOut && (current || pick.takenBy.length > 0) && (
+            {!soldOut && (current || (pick && pick.takenBy.length > 0)) && (
               <span
                 className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold text-white shadow ${current ? "bg-success-700" : "bg-gray-900"}`}
               >
-                {t("pickRoom.yourRoomChip", {
-                  number: current ? pick.room : pick.takenBy.join(" & "),
-                })}
+                {pick
+                  ? t("pickRoom.yourRoomChip", {
+                      number: current ? pick.room : pick.takenBy.join(" & "),
+                    })
+                  : t("pickRoom.yourChoice")}
               </span>
             )}
           </div>
@@ -595,6 +602,11 @@ export default function RoomCard({
                 d="M3 18v-6a2 2 0 012-2h14a2 2 0 012 2v6M3 18h18M3 18v2m18-2v2M6 10V7a1 1 0 011-1h4a1 1 0 011 1v3m0 0V7a1 1 0 011-1h4a1 1 0 011 1v3"
               />
             </svg>
+          )}
+          {!pick && current && !soldOut && (
+            <span className="absolute left-4 top-4 z-20 rounded-full bg-success-700 px-3.5 py-2 text-[13px] font-bold text-white shadow">
+              {t("pickRoom.yourChoice")}
+            </span>
           )}
           {soldOut && (
             <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">

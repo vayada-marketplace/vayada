@@ -20,7 +20,7 @@ import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
 import RoomsProgress, { type RoomsProgressRoom } from "@/components/booking/RoomsProgress";
-import Toast from "@/components/booking/Toast";
+import Toast, { type ToastMessage } from "@/components/booking/Toast";
 import {
   encodePick,
   evenSplit,
@@ -295,7 +295,9 @@ function HomePageContent() {
       : firstOpen === -1
         ? roomCount - 1
         : firstOpen;
-  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  // Other dates or promo start other picks: an Undo from before them can't come back.
+  useEffect(() => setToast(null), [pickIdentity]);
   const stay = useStayPrices(
     slug,
     rooms?.length
@@ -359,14 +361,18 @@ function HomePageContent() {
         ? [index + 1]
         : [],
     );
+  // VAY-2393: back to one room after removing the others, the place kept is "Your choice".
+  const kept = pickMode ? null : pickedRoom(draft.picks[0] ?? null);
   // VAY-2393, as Timo's prototype sorts: rooms that fit first, then those too small for the
   // room being chosen (or the whole party), those the group's other rooms used up, and sold out
-  // last, including a too-small type with none free.
+  // last, including a too-small type with none free. One room: "Your choice" first while it
+  // holds the whole party.
   const pickOrder = (room: PricingRoom) => {
     const prices = roomPrices(room);
     if (!prices) return 0;
     if (prices.availability === "sold_out" && (prices.roomCount !== null || prices.roomsFree === 0))
       return 4;
+    if (kept?.roomTypeId === room.roomTypeId && prices.roomCount !== null) return -1;
     if (allChosen) return 1;
     // Used up by the group's other rooms says so before too small (the card's label too).
     if (pickMode && prices.roomsFree != null && prices.roomsFree - takenBy(room).length <= 0)
@@ -395,6 +401,8 @@ function HomePageContent() {
   const locationLine = useLocationLine(mapProperty, guestPlaces.pins);
   const roomsMap = severalPlaces && mapsKey ? { ...guestPlaces, apiKey: mapsKey } : null;
   const selectRoom = (publicOfferKey: string, roomCount: number) => {
+    // A place chosen with one room ends any earlier "Your choice" (VAY-2393).
+    if (draft.picks.length) saveDraft({ split: [], picks: [] });
     trackEvent(slug, "rate_selected", { entry: "room_card" });
     const params = new URLSearchParams(bookParams);
     params.set("offer", publicOfferKey);
@@ -452,6 +460,35 @@ function HomePageContent() {
     setRoomsWanted(count);
     setChanging(null);
     saveDraft({ split: [], picks: draft.picks.slice(0, count) });
+  };
+  // VAY-2393: a pill's × removes its room; the adults spread evenly over the rooms left, and
+  // Undo brings back the rooms, split and choices for 6 seconds.
+  const removeRoom = (index: number, byKeyboard = false) => {
+    const before = { count: roomCount, draft: { split: [...split], picks: [...picks] } };
+    const count = roomCount - 1;
+    setRoomsWanted(count);
+    setChanging(null);
+    saveDraft({ split: [], picks: picks.filter((_, position) => position !== index) });
+    setToast({
+      id: Date.now(),
+      message:
+        count === 1
+          ? t("roomsProgress.removedToOne", { number: index + 1, adults })
+          : t("roomsProgress.removed", { number: index + 1 }),
+      action: {
+        label: t("roomsProgress.undo"),
+        onClick: () => {
+          setRoomsWanted(before.count);
+          setChanging(null);
+          saveDraft(before.draft);
+          requestAnimationFrame(() =>
+            document.getElementById("rooms-progress-title")?.focus({ preventScroll: true }),
+          );
+        },
+      },
+      duration: 6000,
+      focusAction: byKeyboard,
+    });
   };
   // VAY-2393, one room: a place too small for the whole party becomes room 1 for the adults it
   // takes, and the rest pick room 2.
@@ -580,6 +617,7 @@ function HomePageContent() {
             }
           : undefined
       }
+      chosen={kept?.roomTypeId === room.roomTypeId ? draft.picks[0]!.publicOfferKey : null}
       bookPart={
         !pickMode && adults > 1
           ? {
@@ -615,6 +653,7 @@ function HomePageContent() {
           hasExtras={hasAddons}
           onOpen={openRoom}
           onContinue={() => continueWithRooms(picks as RoomPick[])}
+          onRemove={removeRoom}
         />
       ) : noneFits ? (
         // VAY-2393: no place fits the whole party; the rooms it needs are one click away.
