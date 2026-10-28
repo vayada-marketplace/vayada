@@ -35,6 +35,7 @@ export type QuickPayStepProps = {
   /** A Fixed Fee checkout already started in Stripe (back from checkout before it confirmed). */
   checkoutPending?: boolean;
   initialPlan?: QuickPlanChoice;
+  /** Rejects with the reason to show, or leaves the step: after it resolves the step stays disabled. */
   onSubmit: (plan: QuickPlanChoice) => Promise<void>;
   onBack: () => void;
   onSaveAndExit: () => void;

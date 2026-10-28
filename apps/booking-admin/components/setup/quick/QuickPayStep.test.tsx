@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HotelFirstRunError } from "@/services/api/hotelFirstRunClient";
 import { QuickPayStep, type QuickPayStepProps } from "./QuickPayStep";
@@ -47,6 +47,8 @@ async function submit(renderer: ReactTestRenderer) {
 }
 
 describe("QuickPayStep (VAY-2247 step 4)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("starts with paying at the hotel and Commission, and shows the Fixed Fee in the hotel's currency", () => {
     const markup = renderToStaticMarkup(<QuickPayStep {...props()} />);
     expect(markup).toContain("Step 6 of 7");
@@ -163,7 +165,6 @@ describe("QuickPayStep (VAY-2247 step 4)", () => {
     expect(footer()).toEqual(new Set([false]));
     expect(text(renderer)).not.toContain("Setting up your hotel…");
     renderer.unmount();
-    vi.unstubAllGlobals();
   });
 
   it("keeps a checkout that is already open in Stripe", () => {
@@ -269,6 +270,8 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
     await submit(renderer);
     expect(openCheckout).toHaveBeenCalledWith("https://checkout.stripe.com/c/pay/cs_test");
     expect(text(renderer)).not.toContain("Does this look right?");
+    // The step stays disabled while the browser leaves for Stripe (VAY-2402).
+    expect(renderer.root.findByType("fieldset").props.disabled).toBe(true);
     renderer.unmount();
   });
 
