@@ -36,11 +36,10 @@ const shown = (date: string) =>
 
 // VAY-2347: a stay tomorrow on a rate with free cancellation until 3 days before arrival. That
 // deadline passed two days ago, so the payment step must not promise free cancellation, and the
-// times read as local hotel time with the hotel's country, not a time zone's name.
+// times read as local hotel time with the hotel's country, not a time zone's name. VAY-2392: booked
+// now, it was never refundable: the policy says so and why, and so does the consent.
 for (const width of [1440, 390]) {
-  test(`says free cancellation has ended for a stay tomorrow at ${width}px`, async ({
-    page,
-  }, testInfo) => {
+  test(`says a stay tomorrow can't be refunded at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     const checkIn = hotelDay(1);
     await openDetails(page, { checkIn, checkOut: shift(checkIn, 1), freeDays: 3 });
@@ -52,17 +51,30 @@ for (const width of [1440, 390]) {
     const policy = page.getByRole("table", { name: "Cancellation policy" });
     await expect(policy).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`payment-${width}.png`), fullPage: true });
-    // The amber badge, the row that applies now and the note all say it has ended.
-    await expect(page.getByText("Free cancellation ended", { exact: true })).toBeVisible();
+    // The amber badge, the row that applies now and the note all say it can't be refunded.
+    const before = page.getByRole("region", { name: "Before you book" });
+    await expect(before.getByText("Non-refundable", { exact: true })).toBeVisible();
     await expect(policy.getByRole("row", { name: /From now until check-in/ })).toHaveAttribute(
       "aria-current",
       "true",
     );
+    // The ended free row stays, dated without this year's year ("Until Mon 26 Oct").
+    const dayMonth = deadline.replace(/^\w+, /, "").replace(/ \d{4}$/, "");
+    await expect(
+      policy.getByRole("row", { name: new RegExp(`^Until .*${dayMonth}`) }),
+    ).toBeVisible();
     // The note sits under the table, in the policy's box.
-    const before = page.getByRole("region", { name: "Before you book" });
-    await expect(before).toContainText(`Free cancellation ended on ${deadline}.`);
-    await expect(before).not.toContainText("days before arrival");
+    await expect(before).toContainText(
+      "You’re booking less than 3 days before arrival, so this booking can’t be cancelled for free. If you cancel or don’t arrive, you pay the full amount.",
+    );
+    await expect(before).not.toContainText("Free cancellation ended");
     await expect(before).toContainText("All times are local hotel time (Switzerland).");
+    // The consent says it first.
+    await expect(
+      page.getByRole("checkbox", {
+        name: /^I understand this booking is non-refundable\. If I cancel or don’t arrive, the full stay is charged\. I agree to the cancellation policy/,
+      }),
+    ).toBeVisible();
   });
 }
 
@@ -80,6 +92,10 @@ test("words a deadline still ahead as the hotel's date", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Before you book" })).toContainText(
     `Free cancellation until the end of ${until}, local hotel time.`,
   );
+  // A refundable stay's consent has no non-refundable sentence (VAY-2392).
+  await expect(
+    page.getByRole("checkbox", { name: /^I agree to the cancellation policy/ }),
+  ).toBeVisible();
 });
 
 async function openDetails(

@@ -528,6 +528,8 @@
       "freeEnded": "La cancelación gratuita terminó el {date}.",
       "noRefund": "Los reembolsos terminaron el {date}.",
       "nonRefundable": "No reembolsable.",
+      "lateBooking": "No reembolsable: reservada con menos de {days} de antelación a la llegada.",
+      "days": "{count, plural, one {# día} other {# días}}",
       "payFull": "Si cancelas o no te presentas, pagas el importe total ({amount}).",
       "beforeAccept": "Puedes retirarla gratis hasta que respondamos.",
       "afterAccept": {
@@ -889,6 +891,8 @@
     "retry": "Reintentar",
     "roomsMissing": "Los detalles de la habitación no están disponibles. Elige de nuevo tus habitaciones para reservar.",
     "agree": "Acepto la política de cancelación, las normas de la casa y los términos y condiciones de arriba.",
+    "agreeNonRefundable": "Entiendo que esta reserva no es reembolsable. Si cancelo o no me presento, se cobra la estancia completa.",
+    "agreeSomeNonRefundable": "Entiendo que algunas de estas habitaciones no son reembolsables. Si cancelo o no me presento, se cobra su precio completo.",
     "agreeNoTerms": "Acepto la política de cancelación y las normas de la casa de arriba.",
     "agreeMissing": "Marca la casilla para aceptar antes de reservar.",
     "hintDetails": "Completa tus datos para reservar.",
@@ -937,6 +941,8 @@
       "note": {
         "freeUntil": "Cancelación gratuita hasta el final del {date}, hora local del hotel. Para cancelar, usa el enlace del correo de confirmación o contacta con el hotel.",
         "freeEnded": "La cancelación gratuita terminó el {date}. Si cancelas o no te presentas, pagas el importe total.",
+        "lateBooking": "Estás reservando con menos de {days, plural, one {# día} other {# días}} de antelación a la llegada, así que esta reserva no se puede cancelar gratis. Si cancelas o no te presentas, pagas el importe total.",
+        "paidLateBooking": "Estás reservando con menos de {days, plural, one {# día} other {# días}} de antelación a la llegada: cuando llegue tu transferencia, esta reserva no se puede cancelar gratis, y cancelar o no presentarte cuesta el importe total.",
         "partial": "Lo que recuperas depende de cuándo canceles. Después del {date}, o si no te presentas, pagas el importe total.",
         "partialEnded": "Los reembolsos terminaron el {date}. Si cancelas o no te presentas, pagas el importe total.",
         "nonRefundable": "Esta tarifa no se puede cancelar ni cambiar con reembolso.",

@@ -101,6 +101,21 @@ it("reads the extras a stay can ask for, its latest request and what we accepted
   ).toEqual({ offered: [offer], request: null, accepted: [] });
 });
 
+it("reads the hotel's date the stay was booked on, when the lookup sends one (VAY-2392)", () => {
+  const withDate = {
+    ...response,
+    cancellation: { ...response.cancellation, bookedOn: "2026-11-05" },
+  };
+  expect(parseBookingStay(withDate).cancellation?.bookedOn).toBe("2026-11-05");
+  // An older lookup without it, or a date that isn't one, still reads the terms.
+  const bad = { ...response, cancellation: { ...response.cancellation, bookedOn: "yesterday" } };
+  for (const value of [response, bad]) {
+    const stay = parseBookingStay(value).cancellation;
+    expect(stay?.checkIn).toBe("2026-11-06");
+    expect(stay).not.toHaveProperty("bookedOn");
+  }
+});
+
 it("drops terms it can't trust and anything from another version", () => {
   const broken = (rooms: unknown) =>
     parseBookingStay({ ...response, cancellation: { ...response.cancellation, rooms } })

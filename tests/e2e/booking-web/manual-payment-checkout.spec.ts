@@ -176,7 +176,7 @@ test("books by bank transfer and opens the protected payment details", async ({ 
       { exact: false },
     ),
   ).toBeVisible();
-  await page.getByLabel(/^I agree to the cancellation policy/).check();
+  await page.getByLabel(/I agree to the cancellation policy/).check();
   await page.getByRole("button", { name: "Confirm booking" }).click();
 
   // VAY-2195: the reservation opens its protected confirmation page, as a booking does.

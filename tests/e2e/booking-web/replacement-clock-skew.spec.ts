@@ -99,7 +99,7 @@ for (const [label, skewMs] of [
     await expect(orderTotal(page)).toHaveText("€180");
 
     // VAY-2347: one tick for this price's policy, rules and terms.
-    const agree = page.getByLabel(/^I agree to the cancellation policy/);
+    const agree = page.getByLabel(/I agree to the cancellation policy/);
     await expect(agree).toBeEnabled();
     await expect(page.getByText(/couldn.t check the hotel.s guest rules/)).toHaveCount(0);
     await agree.check();

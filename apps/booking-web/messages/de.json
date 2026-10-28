@@ -529,6 +529,8 @@
       "freeEnded": "Die kostenlose Stornierung ist am {date} abgelaufen.",
       "noRefund": "Die Erstattung ist am {date} abgelaufen.",
       "nonRefundable": "Nicht erstattbar.",
+      "lateBooking": "Nicht erstattbar: weniger als {days} vor der Anreise gebucht.",
+      "days": "{count, plural, one {# Tag} other {# Tage}}",
       "payFull": "Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag ({amount}).",
       "beforeAccept": "Bis wir antworten, können Sie kostenlos zurückziehen.",
       "afterAccept": {
@@ -890,6 +892,8 @@
     "retry": "Erneut versuchen",
     "roomsMissing": "Zimmerdetails sind nicht verfügbar. Wählen Sie Ihre Zimmer erneut, um zu buchen.",
     "agree": "Ich stimme den Stornierungsbedingungen, Hausregeln und Allgemeinen Geschäftsbedingungen oben zu.",
+    "agreeNonRefundable": "Mir ist bewusst, dass diese Buchung nicht erstattbar ist. Wenn ich storniere oder nicht anreise, wird der gesamte Aufenthalt berechnet.",
+    "agreeSomeNonRefundable": "Mir ist bewusst, dass einige dieser Zimmer nicht erstattbar sind. Wenn ich storniere oder nicht anreise, wird ihr voller Preis berechnet.",
     "agreeNoTerms": "Ich stimme den Stornierungsbedingungen und Hausregeln oben zu.",
     "agreeMissing": "Setzen Sie das Häkchen, um vor der Buchung zuzustimmen.",
     "hintDetails": "Geben Sie Ihre Daten ein, um zu buchen.",
@@ -938,6 +942,8 @@
       "note": {
         "freeUntil": "Kostenlose Stornierung bis Ende {date}, Ortszeit des Hotels. Zum Stornieren nutzen Sie den Link in Ihrer Bestätigungs-E-Mail oder kontaktieren das Hotel.",
         "freeEnded": "Die kostenlose Stornierung ist am {date} abgelaufen. Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag.",
+        "lateBooking": "Sie buchen weniger als {days, plural, one {# Tag} other {# Tage}} vor der Anreise, daher kann diese Buchung nicht kostenlos storniert werden. Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag.",
+        "paidLateBooking": "Sie buchen weniger als {days, plural, one {# Tag} other {# Tage}} vor der Anreise: Sobald Ihre Überweisung eingegangen ist, kann diese Buchung nicht kostenlos storniert werden, und eine Stornierung oder Nichtanreise kostet dann den Gesamtbetrag.",
         "partial": "Wie viel Sie zurückbekommen, hängt davon ab, wann Sie stornieren. Nach dem {date} oder wenn Sie nicht anreisen, zahlen Sie den Gesamtbetrag.",
         "partialEnded": "Die Erstattung ist am {date} abgelaufen. Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag.",
         "nonRefundable": "Dieser Tarif kann nicht gegen Erstattung storniert oder geändert werden.",

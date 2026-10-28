@@ -529,6 +529,8 @@
       "freeEnded": "Free cancellation ended on {date}.",
       "noRefund": "Refunds ended on {date}.",
       "nonRefundable": "Non-refundable.",
+      "lateBooking": "Non-refundable: booked less than {days} before arrival.",
+      "days": "{count, plural, one {# day} other {# days}}",
       "payFull": "If you cancel or don't arrive, you pay the full amount ({amount}).",
       "beforeAccept": "Free to withdraw until we answer.",
       "afterAccept": {
@@ -890,6 +892,8 @@
     "retry": "Try again",
     "roomsMissing": "Room details are unavailable. Choose your rooms again to book.",
     "agree": "I agree to the cancellation policy, guest rules and terms & conditions above.",
+    "agreeNonRefundable": "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged.",
+    "agreeSomeNonRefundable": "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged.",
     "agreeNoTerms": "I agree to the cancellation policy and guest rules above.",
     "agreeMissing": "Tick the box to agree before you book.",
     "hintDetails": "Fill in your details to book.",
@@ -938,6 +942,8 @@
       "note": {
         "freeUntil": "Free cancellation until the end of {date}, local hotel time. To cancel, use the link in your confirmation email or contact the hotel.",
         "freeEnded": "Free cancellation ended on {date}. If you cancel or don’t arrive, you pay the full amount.",
+        "lateBooking": "You’re booking less than {days, plural, one {# day} other {# days}} before arrival, so this booking can’t be cancelled for free. If you cancel or don’t arrive, you pay the full amount.",
+        "paidLateBooking": "You’re booking less than {days, plural, one {# day} other {# days}} before arrival, so once your transfer has arrived this booking can’t be cancelled for free: cancelling or not arriving then costs the full amount.",
         "partial": "What you get back depends on when you cancel. After {date}, or if you don’t arrive, you pay the full amount.",
         "partialEnded": "Refunds ended on {date}. If you cancel or don’t arrive, you pay the full amount.",
         "nonRefundable": "This rate can’t be cancelled or changed for a refund.",

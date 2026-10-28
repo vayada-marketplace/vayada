@@ -108,7 +108,7 @@ test("sends a pay-at-property booking request to a hotel that confirms each book
   await expect(orderTotal(page)).toHaveText("€240");
   // VAY-2195: the payment step says what happens next for a hotel that confirms each booking.
   await expect(page.getByText(/If the hotel accepts your request/)).toBeVisible();
-  await page.getByLabel(/^I agree to the cancellation policy/).check();
+  await page.getByLabel(/I agree to the cancellation policy/).check();
   const send = page.getByRole("button", { name: "Send booking request" });
   await expect(send).toBeEnabled();
   await send.click();
