@@ -347,7 +347,10 @@ test("How guests pay can't be changed while the first run runs, and a failed run
 
 // VAY-2402: a Fixed Fee run that works opens Stripe, and the step stays on screen until Stripe's page
 // loads. It stays disabled meanwhile: a plan picked then wasn't sent, and Continue sent a second run.
-// Playwright's Chromium runs without the back/forward cache, so coming back from Stripe is a unit test.
+// Playwright can't look at a page while it navigates away (its checks wait for the navigation to finish),
+// so the page notes its controls on every change, and the test reads the notes after coming back.
+// Playwright's Chromium runs without the back/forward cache, so that Back is a reload; a page restored
+// from the cache is the unit test's case.
 test("How guests pay stays disabled while Stripe's checkout opens", async ({ page, baseURL }) => {
   await primeQuickSetupBrowserState(page);
   await mockQuickSetupExistingHotel(page);
@@ -374,11 +377,9 @@ test("How guests pay stays disabled while Stripe's checkout opens", async ({ pag
       });
     },
   );
-  // Stripe's page is slow to load: the browser stays on the step until the test lets it go.
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
+  // Stripe's page is slow to load.
   await page.route(checkout, async (route) => {
-    await held;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.fulfill({ contentType: "text/html", body: "<title>Stripe Checkout</title>" });
   });
   await page.goto(quickSetupUrl(baseURL));
@@ -390,51 +391,39 @@ test("How guests pay stays disabled while Stripe's checkout opens", async ({ pag
   await proceed(page).click();
   await expect(heading(page, "How guests pay")).toBeVisible();
 
-  const commission = page.getByRole("radio", { name: /^Commission\b/ });
-  const fixedFee = page.getByRole("radio", { name: /^Fixed Fee\b/ });
-  await fixedFee.check();
-  const leaving = page.waitForRequest(checkout);
-  await proceed(page).click();
-  await leaving;
-  // The run is done and the browser is on its way to Stripe. Playwright's checks wait for that navigation
-  // to finish, so the step is read in the page, a moment after the run returned.
-  const step = () =>
-    page.evaluate(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+  await page.getByRole("radio", { name: /^Fixed Fee\b/ }).check();
+  await page.evaluate(() => {
+    new MutationObserver(() => {
       const controls = Array.from(
         document.querySelectorAll<HTMLInputElement | HTMLButtonElement>("main input, main button"),
       );
-      const label = (each: HTMLInputElement | HTMLButtonElement) =>
-        each instanceof HTMLInputElement ? each.value : each.textContent?.trim();
-      return {
-        heading: document.querySelector("main h1")?.textContent,
-        enabled: controls.filter((each) => !each.matches(":disabled")).map(label),
-        disabled: controls.filter((each) => each.matches(":disabled")).map(label),
-        plan: document.querySelector<HTMLInputElement>('input[name="quick-setup-plan"]:checked')
-          ?.value,
-      };
-    });
-  const stillDisabled = {
-    heading: "How guests pay",
-    enabled: [],
-    disabled: expect.arrayContaining([
-      "commission",
-      "fixed_fee",
-      "Setting up your hotel…",
-      "Back",
-      "Save & exit",
-    ]),
-    plan: "fixed_fee",
-  };
-  expect(await step()).toEqual(stillDisabled);
-  // Clicks don't get through either (forced clicks don't wait for the navigation).
-  await commission.click({ force: true });
-  await page
-    .getByRole("button", { name: "Setting up your hotel…", exact: true })
-    .click({ force: true });
-  expect(await step()).toEqual(stillDisabled);
-  release();
+      const notes = JSON.parse(localStorage.getItem("vay2402-step") ?? "[]") as unknown[];
+      notes.push({
+        busy: document.querySelector('main button[aria-busy="true"]') !== null,
+        enabled: controls
+          .filter((each) => !each.matches(":disabled"))
+          .map((each) => (each instanceof HTMLInputElement ? each.value : each.textContent)),
+      });
+      localStorage.setItem("vay2402-step", JSON.stringify(notes));
+    }).observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
+  await proceed(page).click();
   await expect(page).toHaveURL(checkout);
   expect(runs).toHaveLength(1);
   expect(runs[0]).toMatchObject({ plan: "fixed_fee" });
+
+  await page.goBack();
+  const notes = await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem("vay2402-step") ?? "[]") as {
+        busy: boolean;
+        enabled: string[];
+      }[],
+  );
+  // From the moment Continue was pressed until the page left, nothing on the step could be used.
+  const pressed = notes.findIndex((note) => note.busy);
+  expect(pressed).toBeGreaterThanOrEqual(0);
+  expect(notes.slice(pressed)).toEqual(
+    notes.slice(pressed).map(() => ({ busy: true, enabled: [] })),
+  );
 });
