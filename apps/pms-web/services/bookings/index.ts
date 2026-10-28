@@ -87,6 +87,8 @@ export interface Booking {
   /** Recorded when the guest's cancellation applied the booked terms. */
   cancellationOutcome?: BookingCancellationOutcome | null;
   cardRefund?: BookingCardRefund | null;
+  /** When the booking was made, when the PMS sends it (Booking Detail, VAY-2392). */
+  bookedAt?: string | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -156,7 +158,6 @@ export interface Booking {
   /** The guest pays the hotel directly; "mark paid" confirms the booking, there is no accept step. */
   awaitingPaymentConfirmation: boolean;
   platformFeeAmount: number | null;
-  affiliateCommissionAmount: number | null;
   propertyPayoutAmount: number | null;
   addonIds: string[];
   addonNames: string[];
@@ -408,6 +409,8 @@ type PmsOperationalReservation = {
   checkout: { completedAt: string | null; pendingFlags: string[] };
   cancellationOutcome?: BookingCancellationOutcome | null;
   cardRefund?: BookingCardRefund;
+  /** When the booking was made; Booking Detail only (VAY-2392). */
+  bookedAt?: string;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: Array<{
@@ -529,7 +532,6 @@ export interface PaymentSettings {
   stripeConnectOnboarded: boolean;
   platformFeeType: string;
   platformFeeValue: number;
-  platformFeeWithAffiliate: number;
   payAtPropertyEnabled: boolean;
   onlineCardPayment: boolean;
   bankTransfer: boolean;
@@ -1535,8 +1537,8 @@ function toBooking(
     awaitingPaymentConfirmation: reservation.awaitingHotelPaymentConfirmation === true,
     cancellationOutcome: reservation.cancellationOutcome ?? null,
     cardRefund: reservation.cardRefund ?? null,
+    bookedAt: reservation.bookedAt ?? null,
     platformFeeAmount: null,
-    affiliateCommissionAmount: null,
     propertyPayoutAmount: null,
     addonIds: addOns.map(({ addonId }) => addonId),
     addonNames: addOns.map(({ name }) => name),

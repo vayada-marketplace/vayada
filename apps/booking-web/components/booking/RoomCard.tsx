@@ -213,16 +213,19 @@ export default function RoomCard({
 
   const amount = (choice: (typeof shown)[number]) =>
     choice.priced ? quoteMoneyAmount(choice.priced.totalMinor, choice.priced.currency) : null;
-  // The charged amount in its own currency, with cents when it has them, then any approximation.
-  const money = (value: number, currency: string) => {
-    const exact = new Intl.NumberFormat("en-GB", {
+  // The charged amount in its own currency, with cents when it has them.
+  const exactMoney = (value: number, currency: string) =>
+    new Intl.NumberFormat("en-GB", {
       style: "currency",
       currency,
       minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
       maximumFractionDigits: Number.isInteger(value) ? 0 : 2,
     }).format(value);
+  // VAY-2390: the guest's display currency leads ("≈ US$311"), and what they pay follows it.
+  const money = (value: number, currency: string) => {
+    const exact = exactMoney(value, currency);
     const approx = approximate(value, currency);
-    return approx ? `${exact} (${approx})` : exact;
+    return { label: approx ?? exact, paid: approx ? exact : null };
   };
   // A no-refund rate's saving on the same meal's cheapest refundable rate, else on one whose free
   // cancellation has passed and is hidden (VAY-2392, as Timo's prototype shows); never on the
@@ -255,6 +258,7 @@ export default function RoomCard({
       <div className="space-y-3">
         {shown.map((choice) => {
           const total = amount(choice);
+          const price = total === null ? null : money(total, choice.priced!.currency);
           return (
             <RateOption
               key={choice.offer.publicOfferKey}
@@ -264,15 +268,16 @@ export default function RoomCard({
               refundable={choice.text.refundable}
               title={choice.text.name}
               terms={choice.text.terms}
-              totalLabel={total === null ? null : money(total, choice.priced!.currency)}
+              totalLabel={price?.label ?? null}
               nightlyLabel={
-                total === null
+                total === null || price?.paid
                   ? null
-                  : money(
+                  : exactMoney(
                       Math.round((total / Math.max(nights, 1)) * 100) / 100,
                       choice.priced!.currency,
                     )
               }
+              paidLabel={price?.paid ?? null}
               discountPercent={discount(choice)}
               unavailable={
                 choice.unavailable ||
@@ -493,9 +498,12 @@ export default function RoomCard({
             ) : nightly ? (
               <p className="text-sm text-gray-500">
                 <span className="font-bold text-gray-900 sm:block sm:text-base">
-                  {tc("fromPrice", { price: nightly })}
+                  {tc("fromPrice", { price: nightly.label })}
                 </span>{" "}
                 {tc("perNight")}
+                {nightly.paid && (
+                  <span className="block text-xs">{t("youPay", { price: nightly.paid })}</span>
+                )}
               </p>
             ) : (
               <span />

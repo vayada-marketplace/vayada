@@ -149,6 +149,63 @@ test("shows the cancellation terms a manual stay was booked under", async ({ pag
   await expect(main.getByText("Non-refundable")).toHaveCount(0);
 });
 
+// VAY-2392: free until 7 days before the 16th, to the end of the 9th on the hotel's calendar (Vienna).
+// 23:30 UTC on the 9th is already the 10th there: booked late, though UTC and this browser (Los Angeles)
+// still say the 9th. Noon on the 9th is the last free day itself: in time.
+test.describe("a browser in another time zone", () => {
+  test.use({ timezoneId: "America/Los_Angeles" });
+  for (const [bookedAt, late, width] of [
+    ["2026-11-09T23:30:00.000Z", true, 1440],
+    ["2026-11-09T23:30:00.000Z", true, 390],
+    ["2026-11-09T12:00:00.000Z", false, 1440],
+  ] as const)
+    test(`says whether a stay was booked after its free cancellation ended (${late ? "late" : "in time"}, ${width})`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+      // Today is after the booking, as it always is: the 12th.
+      await page.clock.setFixedTime(new Date("2026-11-12T10:00:00.000Z"));
+      await mockBooking(
+        page,
+        {
+          ...manualBooking({
+            ratePlanId: null,
+            pricingOfferId: "offer-flex",
+            bookedCancellation: { kind: "flexible", terms: flexibleTerms },
+          }),
+          bookedAt,
+        },
+        [
+          {
+            ratePlanId: "offer-flex",
+            pricingContractVersion: "pricing.v2",
+            code: "offer-flex",
+            name: "Flexible",
+            rateType: "flexible",
+            mealPlan: "room_only",
+            baseRate: euros("100.00"),
+            active: true,
+          },
+        ],
+      );
+      await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+      const main = page.locator("main");
+      await expect(main.getByText("Cancellation policy · Flexible", { exact: true })).toBeVisible();
+      await main
+        .getByText("Cancelling here records no cancellation charge.")
+        .scrollIntoViewIfNeeded();
+      await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
+      await page.screenshot({
+        path: testInfo.outputPath(`booked-${late ? "late" : "in-time"}-${width}.png`),
+      });
+      await expect(
+        main.getByText(
+          "Booked on November 10, 2026, after free cancellation had ended: this booking couldn't be cancelled for free from the start.",
+        ),
+      ).toHaveCount(late ? 1 : 0);
+    });
+});
+
 test("states that a custom rate has no recorded cancellation terms", async ({ page }) => {
   await mockBooking(page, manualBooking({ ratePlanId: null, pricingOfferId: null }));
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);

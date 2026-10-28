@@ -171,6 +171,13 @@ it("shows the Flexible rate always on beside the Non-refundable rate, with cance
   expect(checkbox("Non-refundable rate", "Pay at property").props.disabled).toBe(false);
 });
 
+it("says what guests booking inside the free cancellation window get (VAY-2392)", () => {
+  mount(room(), terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
+  expect(textOf(card("Flexible rate"))).toContain(
+    "Guests booking less than 7 days before arrival can't cancel for free. The booking engine shows this rate as Non-refundable for those dates.",
+  );
+});
+
 it("changes the cancellation days, opens the refund steps, and sets each rate's methods on its own options (VAY-2282)", () => {
   mount(room(), terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
   act(() => card("Flexible rate").findByProps({ "aria-label": "14 days" }).props.onClick());

@@ -39,6 +39,7 @@ import RoomsLocationMap, {
   useLocationLine,
 } from "@/components/booking/RoomsLocationMap";
 import AccommodationViews from "@/components/booking/AccommodationViews";
+import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import {
   getReplacementCatalog,
   quoteMoneyAmount,
@@ -869,9 +870,13 @@ function HomePageContent() {
       <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 scroll-mt-36">
         {/* Section Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-          <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
-            {t("availableAccommodations")}
-          </h2>
+          <div>
+            <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
+              {t("availableAccommodations")}
+            </h2>
+            {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
+            <ApproximateAmountsNote currency={hotel.currency} className="mt-2" />
+          </div>
 
           {/* Step Indicator */}
           <div className="flex items-center gap-2">

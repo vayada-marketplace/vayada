@@ -4,7 +4,8 @@ import {
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
 
-// VAY-2073: Help moved from the top bar into the profile menu, between Currency and Sign Out.
+// VAY-2073: Help moved from the top bar into the profile menu, between Language and Sign Out.
+// VAY-2390: the menu has no Currency item; the guest display currency lives in Localization.
 for (const viewport of [
   { width: 390, height: 844 },
   { width: 1440, height: 1000 },
@@ -27,14 +28,15 @@ for (const viewport of [
 
     const avatar = banner.getByRole("button", { name: "BO", exact: true });
     await avatar.click();
-    const [currencyBox, helpBox, signOutBox] = await Promise.all(
+    await expect(page.getByRole("button", { name: /^Currency/ })).toHaveCount(0);
+    const [languageBox, helpBox, signOutBox] = await Promise.all(
       [
-        page.getByRole("button", { name: /^Currency/ }),
+        page.getByRole("button", { name: /^Language/ }),
         page.getByRole("button", { name: "Help", exact: true }),
         page.getByRole("button", { name: "Sign Out", exact: true }),
       ].map((item) => item.boundingBox()),
     );
-    expect(currencyBox!.y).toBeLessThan(helpBox!.y);
+    expect(languageBox!.y).toBeLessThan(helpBox!.y);
     expect(helpBox!.y).toBeLessThan(signOutBox!.y);
     await page.screenshot({ path: testInfo.outputPath("booking-admin-profile-menu.png") });
 

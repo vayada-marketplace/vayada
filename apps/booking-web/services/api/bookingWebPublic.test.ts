@@ -92,6 +92,24 @@ describe("Booking Web public hotel adapter", () => {
 
     expect(hotel.displayCurrencies).toEqual(["EUR", "USD"]);
     expect(hotel.currency).toBe("EUR");
+    expect(hotel.displayDefaultCurrency).toBeNull();
+  });
+
+  it("maps the guest display currency the page opens in (VAY-2390)", () => {
+    const response = publicHotelResponse();
+    response.hotel.branding = {
+      displayCurrencies: ["EUR", "USD"],
+      displayDefaultCurrency: "USD",
+      heroImage: null,
+      heroHeading: null,
+      heroSubtext: null,
+      primaryColor: null,
+      fontPairing: null,
+    };
+    const hotel = toLegacyHotel(response);
+
+    expect(hotel.displayDefaultCurrency).toBe("USD");
+    expect(hotel.currency).toBe("EUR");
   });
 
   it("maps header visibility and keeps Refer a Guest behind the active module", () => {

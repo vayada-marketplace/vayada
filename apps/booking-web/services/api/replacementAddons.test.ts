@@ -16,8 +16,15 @@ it("loads an unpriced catalogue with tenant encoding and no caching", async () =
     .fn()
     .mockResolvedValue(response([{ ...addon, private: "ignored", price: 42 }]));
   vi.stubGlobal("fetch", fetcher);
+  // An API from before VAY-2391 sends no schedule: a per-night extra is every night.
   expect(await getReplacementAddons("a/b")).toEqual([
-    { ...addon, leadTimeHours: null, bookableFrom: null },
+    {
+      ...addon,
+      leadTimeHours: null,
+      bookableFrom: null,
+      scheduleMode: "daily",
+      bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
+    },
   ]);
   expect(fetcher).toHaveBeenCalledWith("/api/booking-web/hotels/a%2Fb/pricing-addons", {
     signal: undefined,
@@ -71,6 +78,37 @@ it("keeps an add-on's lead time and first bookable check-in date (VAY-2232)", as
     { leadTimeHours: 48, bookableFrom: null },
   ]);
 });
+it("keeps when each extra happens and the weekdays a guest can pick (VAY-2391)", async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+  fetcher.mockResolvedValueOnce(
+    response([
+      { ...addon, pricingModel: "per_stay", scheduleMode: "guest_pick", bookableWeekdays: [5, 6] },
+    ]),
+  );
+  expect(await getReplacementAddons("hotel")).toMatchObject([
+    { scheduleMode: "guest_pick", bookableWeekdays: [5, 6] },
+  ]);
+  // A schedule the page doesn't know leaves out that extra only, not the whole list.
+  for (const change of [
+    { scheduleMode: "weekly" },
+    { scheduleMode: "arrival" },
+    { pricingModel: "per_stay", scheduleMode: "daily" },
+    { bookableWeekdays: [] },
+    { bookableWeekdays: [0] },
+    { bookableWeekdays: [3, 1] },
+    { bookableWeekdays: [1, 1] },
+  ]) {
+    const other = { ...addon, id: "22222222-2222-4222-8222-222222222222" };
+    fetcher.mockResolvedValueOnce(response([{ ...addon, ...change }, other]));
+    expect((await getReplacementAddons("hotel")).map((extra) => extra.id)).toEqual([other.id]);
+  }
+  // Without the fields, a one-off extra asks the guest for a day, on any weekday.
+  fetcher.mockResolvedValueOnce(response([{ ...addon, pricingModel: "per_stay" }]));
+  expect(await getReplacementAddons("hotel")).toMatchObject([
+    { scheduleMode: "guest_pick", bookableWeekdays: [1, 2, 3, 4, 5, 6, 7] },
+  ]);
+});
 it("preserves all supported pricing-model semantics without inferring people or dates", async () => {
   const fetcher = vi.fn();
   vi.stubGlobal("fetch", fetcher);
@@ -98,6 +136,12 @@ it("accepts more than 99 distinct configured extras without adding prices or sel
   }));
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(addons)));
   expect(await getReplacementAddons("hotel")).toEqual(
-    addons.map((extra) => ({ ...extra, leadTimeHours: null, bookableFrom: null })),
+    addons.map((extra) => ({
+      ...extra,
+      leadTimeHours: null,
+      bookableFrom: null,
+      scheduleMode: "daily",
+      bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
+    })),
   );
 });

@@ -11,11 +11,14 @@ const catalogue: PricingAddon[] = [
     id: "breakfast",
     name: "Breakfast",
     currency: "EUR",
-    pricingModel: "per_guest_night",
+    // VAY-2391: a one-off extra the guest picks a day for.
+    pricingModel: "per_guest",
     maxQuantity: 2,
     maxGuests: null,
     leadTimeHours: null,
     bookableFrom: null,
+    scheduleMode: "guest_pick",
+    bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
   },
 ];
 const selection: PublicBookingQuoteRequest["selection"] = {
@@ -48,7 +51,7 @@ const value = (catalog = catalogue): ReplacementExtrasValue => ({
     },
   ],
 });
-it("preserves selected infant/adult physical-room references and actual chosen nights in V2", () => {
+it("preserves selected infant/adult physical-room references and the chosen day in V2", () => {
   expect(build(catalogue, selection, 0, value())).toEqual([
     {
       version: "addon-selection.v2",
@@ -83,7 +86,7 @@ it("rejects absent, duplicate, foreign or shifted participants without substitut
   };
   expect(build(catalogue, changed, 0, value())).toBeNull();
 });
-it("requires explicit valid dates, no checkout night, no empty quantity or stale catalogue", () => {
+it("requires one valid picked day, never the check-out day, a quantity and a current catalogue", () => {
   for (const dates of [[], ["2027-01-03"], ["2026-12-31"], ["2027-01-01", "2027-01-01"]]) {
     const input = value();
     input.items[0].dates = dates;
@@ -97,18 +100,26 @@ it("requires explicit valid dates, no checkout night, no empty quantity or stale
   expect(build([], selection, 0, value())).toBeNull();
   expect(build(catalogue, { ...selection, checkOut: "2027-01-04" }, 0, value())).toBeNull();
 });
-it("preserves quantities for non-person models and permits a single checkout-day service", () => {
-  for (const pricingModel of ["per_stay", "per_night", "per_guest"] as const) {
-    const catalog = [{ ...catalogue[0], pricingModel }];
+it("preserves quantities for non-person models; only a picked day is sent (VAY-2391)", () => {
+  for (const [pricingModel, scheduleMode] of [
+    ["per_stay", "guest_pick"],
+    ["per_night", "daily"],
+    ["per_guest", "guest_pick"],
+    ["per_stay", "departure"],
+  ] as const) {
+    const catalog = [{ ...catalogue[0], pricingModel, scheduleMode }];
     const input = value(catalog);
     input.items[0].quantity = pricingModel === "per_guest" ? "1" : "2";
     if (pricingModel !== "per_guest") input.items[0].people = [];
-    input.items[0].dates = [pricingModel === "per_night" ? "2027-01-02" : "2027-01-03"];
+    input.items[0].dates = scheduleMode === "guest_pick" ? ["2027-01-02"] : [];
     expect(build(catalog, selection, 0, input)?.[0]).toMatchObject({
       quantity: Number(input.items[0].quantity),
-      dates: input.items[0].dates,
+      dates: scheduleMode === "guest_pick" ? ["2027-01-02"] : null,
     });
   }
+  // A day the hotel schedules itself isn't the guest's to send.
+  const departure = [{ ...catalogue[0], scheduleMode: "departure" as const }];
+  expect(build(departure, selection, 0, value(departure))).toBeNull();
 });
 it("applies selected-count, quantity, currency and guest limits without a catalogue ceiling", () => {
   const catalog = Array.from({ length: 100 }, (_, i) => ({ ...catalogue[0], id: String(i) }));

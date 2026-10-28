@@ -40,6 +40,13 @@ export function replacementExtraDates(selection: Selection, nightly: boolean): s
     new Date(start + i * 86400000).toISOString().slice(0, 10),
   );
 }
+/** VAY-2391: the days a guest can pick for a "guest_pick" extra: the nights of the stay (never the
+ * check-out day) on the weekdays the hotel offers it. */
+export function addonPickDates(selection: Selection, addon: PricingAddon): string[] {
+  return replacementExtraDates(selection, true).filter((date) =>
+    addon.bookableWeekdays.includes(new Date(`${date}T00:00:00Z`).getUTCDay() || 7),
+  );
+}
 /** UI validation only; the current server quote remains the authority for eligibility and price. */
 export function buildReplacementAddonSelection(
   catalogue: PricingAddon[],
@@ -68,8 +75,7 @@ export function buildReplacementAddonSelection(
     )
       return null;
     ids.add(item.id);
-    const perPerson = addonPerPerson(addon),
-      perNight = addonPerNight(addon);
+    const perPerson = addonPerPerson(addon);
     if (
       perPerson
         ? item.quantity !== "1" || !item.people.length || item.people.length > 99
@@ -99,12 +105,13 @@ export function buildReplacementAddonSelection(
           0,
         );
     if (addon.maxGuests !== null && guestCount > addon.maxGuests) return null;
-    const dates = replacementExtraDates(selection, perNight);
+    // VAY-2391: only a guest-pick extra sends its day; the server dates the others (check-in,
+    // check-out, every night, or no day).
+    const pick = addon.scheduleMode === "guest_pick";
     if (
-      !item.dates.length ||
-      (!perNight && item.dates.length !== 1) ||
-      new Set(item.dates).size !== item.dates.length ||
-      item.dates.some((date) => !dates.includes(date))
+      pick
+        ? item.dates.length !== 1 || !addonPickDates(selection, addon).includes(item.dates[0]!)
+        : item.dates.length !== 0
     )
       return null;
     output.push({
@@ -112,7 +119,7 @@ export function buildReplacementAddonSelection(
       id: item.id,
       quantity: Number(item.quantity),
       people: perPerson ? item.people.map((person) => ({ ...person })) : null,
-      dates: [...item.dates].sort(),
+      dates: pick ? [item.dates[0]!] : null,
     });
   }
   return output;

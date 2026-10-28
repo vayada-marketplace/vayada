@@ -22,6 +22,15 @@ async function mockFlow(
     arrivalWindows = {} as Record<string, { from?: string; through?: string }>,
     // The ways the rate takes, as the catalog names them (VAY-2309); older APIs send none.
     offerPaymentMethods = undefined as string[] | undefined,
+    // VAY-2391: more extras, each with when it happens and its price.
+    moreExtras = [] as {
+      id: string;
+      name: string;
+      pricingModel: string;
+      scheduleMode: string;
+      bookableWeekdays?: number[];
+      price: number;
+    }[],
   } = {},
 ) {
   await mockBookingApis(page);
@@ -41,6 +50,12 @@ async function mockFlow(
         price: 30,
         category: "other",
       },
+      ...moreExtras.map((extra) => ({
+        id: extra.id,
+        description: "",
+        price: extra.price,
+        category: "other",
+      })),
     ],
     payAtPropertyEnabled: true,
     bookingPagePaymentMethods: methods,
@@ -87,6 +102,9 @@ async function mockFlow(
                 pricingModel: "per_guest_night",
                 maxQuantity: 1,
                 maxGuests: null,
+                // VAY-2391: as the live API sends them.
+                scheduleMode: "daily",
+                bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
               },
               {
                 id: lateCheckOut,
@@ -95,15 +113,31 @@ async function mockFlow(
                 pricingModel: "per_stay",
                 maxQuantity: 1,
                 maxGuests: null,
+                scheduleMode: "guest_pick",
+                bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
                 ...lateCheckOutNotice,
               },
+              ...moreExtras.map((extra) => ({
+                id: extra.id,
+                name: extra.name,
+                currency: "EUR",
+                pricingModel: extra.pricingModel,
+                maxQuantity: 1,
+                maxGuests: null,
+                scheduleMode: extra.scheduleMode,
+                bookableWeekdays: extra.bookableWeekdays ?? [1, 2, 3, 4, 5, 6, 7],
+              })),
             ]
           : [],
       },
     }),
   );
   const quotes = new Map<string, { issuedAt: string; expiresAt: string }>();
-  const unit: Record<string, number> = { [breakfast]: 1800, [lateCheckOut]: 3000 };
+  const unit: Record<string, number> = {
+    [breakfast]: 1800,
+    [lateCheckOut]: 3000,
+    ...Object.fromEntries(moreExtras.map((extra) => [extra.id, extra.price * 100])),
+  };
   // A test can refuse the next prices (all of them, or one way to pay's), fail them with another
   // status, or make them run out quickly.
   const prices = {
@@ -131,12 +165,21 @@ async function mockFlow(
       expiresAt: new Date(Date.now() + prices.lastsMs).toISOString(),
     };
     quotes.set(quoteId, times);
+    // VAY-2391: an extra the hotel dates sends no day; a per-night one counts every night.
+    const nights = (Date.parse(selection.checkOut) - Date.parse(selection.checkIn)) / 86_400_000;
     const addonLines = selection.addons.map(
-      (addon: { id: string; people: unknown[] | null; dates: string[]; quantity: number }) => ({
+      (addon: {
+        id: string;
+        people: unknown[] | null;
+        dates: string[] | null;
+        quantity: number;
+      }) => ({
         kind: "addon",
         selectionId: null,
         amountMinor: String(
-          unit[addon.id]! * (addon.people?.length ?? addon.quantity) * addon.dates.length,
+          unit[addon.id]! *
+            (addon.people?.length ?? addon.quantity) *
+            (addon.dates?.length ?? (addon.id === breakfast ? nights : 1)),
         ),
       }),
     );
@@ -251,7 +294,7 @@ for (const width of [1440, 390]) {
     const assertHealthy = watchPageHealth(page, testInfo, {
       expectedMissingUrls: [/\/change-request/],
     });
-    if (width === 390) await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     const { accepted } = await mockFlow(page);
     await page.goto(STAY);
 
@@ -262,18 +305,36 @@ for (const width of [1440, 390]) {
     const total = page.getByRole("status", { name: "Your stay total" });
     await expect(total).toContainText("€268");
     await expect(extras).toContainText("€18 / person / night");
+    // VAY-2391: the sticky bar; without extras it goes on without them.
+    await expect(page.getByRole("button", { name: "Continue without extras" })).toBeVisible();
+    await expect(page.getByText(/Your extras \(/)).toHaveCount(0);
     await extras.getByRole("button", { name: "Add Garden breakfast" }).click();
+    // Every night of the stay, nothing to choose.
+    await expect(extras).toContainText("Every day of your stay2 nights");
     await expect(total).toContainText("€340");
     await extras.getByRole("button", { name: "Add Late check-out" }).click();
     const next = page.getByRole("button", { name: "Continue to your details" });
-    await expect(next).toBeDisabled();
-    await expect(page.getByText("Choose a day for Late check-out, or remove it.")).toBeVisible();
-    // Without its day the extra can't be priced: the totals ask for it instead of loading.
+    // Without its day the extra can't be priced: the total asks for it instead of loading.
     await expect(total).toHaveText("Choose a day to see your total");
-    await expect(extras.getByText("Extras total").locator("..")).toContainText("Choose a day");
-    await extras.getByRole("button", { name: "Late check-out on Sun 8 Nov" }).click();
+    await expect(page.getByText("1 to schedule")).toBeVisible();
+    // Continue says what's missing and marks the card.
+    await next.click();
+    await expect(page.getByText("Choose a day for Late check-out, or remove it.")).toBeVisible();
+    await expect(extras.getByText("Choose a day to continue")).toBeVisible();
+    await expect(page).toHaveURL(/[?&]step=extras/);
+    // Only the nights of the stay: never the check-out day.
+    await expect(extras.getByRole("button", { name: "Late check-out on Sun 8 Nov" })).toHaveCount(
+      0,
+    );
+    await extras.getByRole("button", { name: "Late check-out on Sat 7 Nov" }).click();
     await expect(total).toContainText("€370");
-    await expect(extras.getByText("Your extras (2)")).toBeVisible();
+    await expect(page.getByText("Your extras (2)")).toBeVisible();
+    await page.getByRole("button", { name: /^Show your extras/ }).click();
+    const list = page.getByRole("dialog", { name: "Your extras" });
+    await expect(list.getByRole("listitem")).toHaveText([/Garden breakfast/, /Late check-out/]);
+    await expect(list).toContainText("Extras total€102");
+    await page.screenshot({ path: testInfo.outputPath(`extras-list-${width}.png`) });
+    await list.getByRole("button", { name: "Close your extras" }).click();
     await page.screenshot({ path: testInfo.outputPath(`extras-${width}.png`), fullPage: true });
     await next.click();
 
@@ -294,7 +355,7 @@ for (const width of [1440, 390]) {
     await page.screenshot({ path: testInfo.outputPath(`details-${width}.png`), fullPage: true });
     await page.goBack();
     await expect(page).toHaveURL(/[?&]step=extras/);
-    await expect(extras.getByText("Your extras (2)")).toBeVisible();
+    await expect(page.getByText("Your extras (2)")).toBeVisible();
     await page.goForward();
     await page.getByRole("button", { name: "Continue to review" }).click();
 
@@ -475,9 +536,98 @@ test("prices the stay again without extras when an extra's notice ran out meanwh
   await extras.getByRole("button", { name: "Add Garden breakfast" }).click();
   // The extra is dropped, the extras load again and the stay is priced without them.
   await expect.poll(() => catalogues).toBeGreaterThan(loaded);
-  await expect(extras.getByText("Your extras (1)")).toHaveCount(0);
+  await expect(page.getByText("Your extras (1)")).toHaveCount(0);
   await expect(total).toContainText("€268");
   await expect(page.getByText("We couldn't price this selection")).toHaveCount(0);
+});
+
+// VAY-2391: six extras, each scheduled its own way. The sticky bar keeps Continue in view on a
+// 1080p screen, and the list in it orders the extras by their day.
+test("shows when each extra happens and keeps Continue in view with six extras", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const id = (n: number) => `77777777-7777-4777-8777-00000000000${n}`;
+  await mockFlow(page, {
+    moreExtras: [
+      {
+        id: id(1),
+        name: "Airport transfer",
+        pricingModel: "per_stay",
+        scheduleMode: "arrival",
+        price: 30,
+      },
+      {
+        id: id(2),
+        name: "Sunset dinner",
+        pricingModel: "per_guest",
+        scheduleMode: "guest_pick",
+        bookableWeekdays: [5],
+        price: 45,
+      },
+      {
+        id: id(3),
+        name: "Welcome bottle",
+        pricingModel: "per_stay",
+        scheduleMode: "anytime",
+        price: 35,
+      },
+      {
+        id: id(4),
+        name: "Drop-off",
+        pricingModel: "per_stay",
+        scheduleMode: "departure",
+        price: 25,
+      },
+    ],
+  });
+  await page.goto(STAY);
+  const extras = page.getByRole("region", { name: "Optional extras" });
+  const next = page.getByRole("button", { name: /^Continue (to your details|without extras)$/ });
+  await expect(extras.getByRole("article")).toHaveCount(6);
+  await expect(next).toBeInViewport();
+  const card = (name: string) => extras.getByRole("article", { name });
+  for (const name of ["Airport transfer", "Drop-off", "Welcome bottle", "Sunset dinner"])
+    await card(name)
+      .getByRole("button", { name: `Add ${name}` })
+      .click();
+  await expect(card("Airport transfer")).toContainText(
+    "Fri 6 Nov · your arrival dayScheduled automatically",
+  );
+  await expect(card("Drop-off")).toContainText("Sun 8 Nov · your departure day");
+  await expect(card("Welcome bottle")).toContainText("Anytime during your stayNo date needed");
+  // Fridays only: the one Friday of the stay.
+  await expect(
+    card("Sunset dinner").getByRole("button", { name: /^Sunset dinner on / }),
+  ).toHaveText(["Fri6 Nov"]);
+  const priced = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/bookings/quote") &&
+      request.postDataJSON()?.selection?.addons?.length === 4,
+  );
+  await card("Sunset dinner").getByRole("button", { name: "Sunset dinner on Fri 6 Nov" }).click();
+  // Only the guest's own pick is sent; the server dates the rest.
+  expect(
+    (await priced)
+      .postDataJSON()
+      .selection.addons.map((addon: { id: string; dates: unknown }) => [addon.id, addon.dates])
+      .sort(([a]: [string], [b]: [string]) => a.localeCompare(b)),
+  ).toEqual([
+    [id(1), null],
+    [id(2), ["2026-11-06"]],
+    [id(3), null],
+    [id(4), null],
+  ]);
+  await expect(next).toHaveText("Continue to your details");
+  await expect(next).toBeInViewport();
+  await page.getByRole("button", { name: /^Show your extras/ }).click();
+  await expect(page.getByRole("dialog", { name: "Your extras" }).getByRole("listitem")).toHaveText([
+    /^—.*Welcome bottle/,
+    /^6.*Airport transfer.*On arrival/,
+    /^6.*Sunset dinner/,
+    /^8.*Drop-off.*On departure/,
+  ]);
+  await page.screenshot({ path: testInfo.outputPath("extras-six-1080p.png") });
 });
 
 test("skips Extras for a hotel without extras", async ({ page }) => {
@@ -504,7 +654,7 @@ test("a selection we can't price stops at Extras, above the buttons", async ({ p
   await page.goto(STAY);
   await expect(page).toHaveURL(/[?&]step=extras/);
   const notice = page.getByRole("alert").filter({ hasText: "We couldn't price this selection" });
-  const next = page.getByRole("button", { name: "Continue to your details" });
+  const next = page.getByRole("button", { name: "Continue without extras" });
   // Paying at the hotel is refused, then paying by card: only then does the notice stay.
   await expect.poll(() => prices.asked.includes("card")).toBe(true);
   await expect(notice).toBeVisible();
@@ -519,13 +669,14 @@ test("a selection we can't price stops at Extras, above the buttons", async ({ p
     .click();
   await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€340");
   await expect(notice).toHaveCount(0);
-  await expect(next).toBeEnabled();
+  // With an extra added, Continue goes on to the details (VAY-2391).
+  await expect(page.getByRole("button", { name: "Continue to your details" })).toBeEnabled();
 });
 
 test("a refused updated price keeps the stay on the payment step", async ({ page }) => {
   const { prices } = await mockFlow(page);
   await page.goto(STAY);
-  await page.getByRole("button", { name: "Continue to your details" }).click();
+  await page.getByRole("button", { name: "Continue without extras" }).click();
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();
   // A card price that runs out, then the updated price is refused.
@@ -555,17 +706,17 @@ test("a price that failed to load can be tried again", async ({ page }) => {
   await page.goto(STAY);
   const notice = page.getByRole("alert").filter({ hasText: "We couldn't price this selection" });
   await expect(notice).toBeVisible();
-  await expect(page.getByRole("button", { name: "Continue to your details" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Continue without extras" })).toBeDisabled();
   prices.refuse = false;
   await notice.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€268");
-  await expect(page.getByRole("button", { name: "Continue to your details" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Continue without extras" })).toBeEnabled();
 });
 
 test("a way to pay the new choices don't take goes back to the hotel's own", async ({ page }) => {
   const { prices } = await mockFlow(page);
   await page.goto(STAY);
-  await page.getByRole("button", { name: "Continue to your details" }).click();
+  await page.getByRole("button", { name: "Continue without extras" }).click();
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();
   await paymentOption(page, "card").click();
@@ -602,7 +753,7 @@ for (const width of [1440, 390]) {
     prices.refuse = "pay_at_property";
     await page.goto(STAY);
     await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€268");
-    await page.getByRole("button", { name: "Continue to your details" }).click();
+    await page.getByRole("button", { name: "Continue without extras" }).click();
     await fillGuestDetails(page);
     await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
@@ -624,7 +775,7 @@ test("names a way to pay the rate doesn't take on Payment, in the guest's langua
   // An older API names no ways to pay, so the page offers both and the API refuses one.
   const { prices } = await mockFlow(page);
   await page.goto(STAY);
-  await page.getByRole("button", { name: "Continue to your details" }).click();
+  await page.getByRole("button", { name: "Continue without extras" }).click();
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();
   await paymentOption(page, "card").click();
@@ -671,7 +822,7 @@ for (const width of [1440, 390]) {
         "The rooms you chose can't be paid for in any way this hotel offers. Please choose other rooms.",
     });
     await page.goto(STAY);
-    await page.getByRole("button", { name: "Continue to your details" }).click();
+    await page.getByRole("button", { name: "Continue without extras" }).click();
     await fillGuestDetails(page);
     await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(paymentOption(page, "card")).toHaveAttribute("aria-checked", "true");
@@ -699,7 +850,7 @@ for (const width of [1440, 390]) {
     await page.goto(STAY);
     await expect(noWay).toBeVisible();
     await expect(noWay.getByRole("button", { name: "Choose another room" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Continue to your details" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Continue without extras" })).toBeDisabled();
     await page.waitForTimeout(1_000);
     expect(prices.asked.length).toBe(asked);
     // In the guest's language.

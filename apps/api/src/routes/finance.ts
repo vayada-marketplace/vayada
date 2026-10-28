@@ -6270,7 +6270,6 @@ function toPmsPaymentSettingsFacade(
     stripeConnectOnboarded: boolean;
     platformFeeType: "none";
     platformFeeValue: 0;
-    platformFeeWithAffiliate: 0;
     payAtPropertyEnabled: boolean;
     onlineCardPayment: boolean;
     bankTransfer: boolean;
@@ -6296,7 +6295,6 @@ function toPmsPaymentSettingsFacade(
         settings.providerAccount.onboardingStatus === "completed",
       platformFeeType: "none",
       platformFeeValue: 0,
-      platformFeeWithAffiliate: 0,
       payAtPropertyEnabled: enabledMethods.includes("pay_at_property"),
       onlineCardPayment:
         enabledMethods.includes("card") && canChargeOnline && settings.paymentProvider !== "xendit",

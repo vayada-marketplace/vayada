@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { GlobeAltIcon } from "@heroicons/react/24/outline";
+import { GlobeAltIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 import { LocalizationMultiSelect } from "@vayada/product-onboarding/LocalizationMultiSelect";
 import { useTranslation } from "@/lib/i18n";
 import { SaveButton } from "@/components/ui";
@@ -22,6 +22,8 @@ interface LocalizationTabProps {
   setSupportedCurrencies: React.Dispatch<React.SetStateAction<string[]>>;
   supportedLanguages: string[];
   setSupportedLanguages: React.Dispatch<React.SetStateAction<string[]>>;
+  /** The PMS pricing currency guests pay in (VAY-2390); null until known. */
+  propertyCurrency: string | null;
   onSave: () => void;
   saving: boolean;
 }
@@ -35,10 +37,17 @@ export default function LocalizationTab({
   setSupportedCurrencies,
   supportedLanguages,
   setSupportedLanguages,
+  propertyCurrency,
   onSave,
   saving,
 }: LocalizationTabProps) {
   const { t, locale } = useTranslation();
+  // VAY-2390: the display currency is only what guests see first; they pay in the property
+  // currency, which is always offered on the booking page.
+  const showsOtherCurrency = Boolean(propertyCurrency && propertyCurrency !== defaultCurrency);
+  const propertyCurrencyOption = CURRENCY_OPTIONS.find(
+    (option) => option.code === propertyCurrency,
+  );
 
   const multiselectCopy = {
     noResults: t("common.noResultsFound"),
@@ -93,6 +102,11 @@ export default function LocalizationTab({
             }))}
             getLabel={(o) => o.name}
           />
+          {propertyCurrency && (
+            <p className="mt-1 text-[12px] leading-5 text-gray-600">
+              {t("bookingFlow.localization.displayCurrencyHelp", { currency: propertyCurrency })}
+            </p>
+          )}
         </div>
         <div>
           <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
@@ -121,6 +135,28 @@ export default function LocalizationTab({
         </div>
       </div>
 
+      {showsOtherCurrency && (
+        <div
+          role="note"
+          className="flex gap-2.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5"
+        >
+          <InformationCircleIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-600" />
+          <div className="space-y-0.5 text-[13px] leading-5">
+            <p className="font-semibold text-blue-900">
+              {t("bookingFlow.localization.displayCurrencyNoteTitle", {
+                display: defaultCurrency,
+                property: propertyCurrency ?? "",
+              })}
+            </p>
+            <p className="text-blue-800">
+              {t("bookingFlow.localization.displayCurrencyNoteBody", {
+                property: propertyCurrency ?? "",
+              })}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div>
         <label
           htmlFor="booking-localization-additional-currencies"
@@ -132,7 +168,24 @@ export default function LocalizationTab({
           </span>
         </label>
         <LocalizationMultiSelect<CurrencyOption>
-          copy={multiselectCopy}
+          copy={
+            showsOtherCurrency
+              ? { ...multiselectCopy, added: () => t("bookingFlow.localization.guestsCanSwitchTo") }
+              : multiselectCopy
+          }
+          fixedItems={
+            showsOtherCurrency && propertyCurrency
+              ? [
+                  {
+                    code: propertyCurrency,
+                    flag: propertyCurrencyOption?.flag ?? "",
+                    label: t("bookingFlow.localization.propertyCurrencyChip", {
+                      currency: propertyCurrency,
+                    }),
+                  },
+                ]
+              : []
+          }
           id="booking-localization-additional-currencies"
           selected={supportedCurrencies}
           onToggle={toggleCurrency}

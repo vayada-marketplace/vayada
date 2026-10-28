@@ -46,7 +46,6 @@ export type BookingReservationReadModelRow = {
   checkedOutAt?: Date | string | null;
   hostResponseDeadline?: Date | string | null;
   platformFeeAmount?: number | string | null;
-  affiliateCommissionAmount?: number | string | null;
   propertyPayoutAmount?: number | string | null;
   addonIds?: string[] | string | null;
   addonNames?: string[] | string | null;
@@ -146,7 +145,6 @@ export function toBookingReservationReadModel(
     checkedOutAt: toIsoDateTimeOrNull(reservation.checkedOutAt),
     hostResponseDeadline: toIsoDateTimeOrNull(reservation.hostResponseDeadline),
     platformFeeAmount: toNullableNumber(reservation.platformFeeAmount),
-    affiliateCommissionAmount: toNullableNumber(reservation.affiliateCommissionAmount),
     propertyPayoutAmount: toNullableNumber(reservation.propertyPayoutAmount),
     addonIds: parseJson<string[]>(reservation.addonIds, []),
     addonNames: parseJson<string[]>(reservation.addonNames, []),

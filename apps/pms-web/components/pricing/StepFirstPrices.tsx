@@ -421,7 +421,7 @@ export function StepFirstPrices({
                     {fixedCurrency}
                   </span>
                 )
-              ) : (
+              ) : defaultMethods === undefined ? null : (
                 <label className={ui.fieldLabel}>
                   {t("pricing.setup.currency")}
                   <input

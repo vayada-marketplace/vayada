@@ -49,6 +49,19 @@ describe("parsePublicBookabilityProfileProjection", () => {
     expect(parsed?.hotel.supportedCurrencies).toEqual(["EUR"]);
   });
 
+  it("keeps the guest display currency the page opens in (VAY-2390)", () => {
+    const profile = storedProfile();
+    (profile.hotel as Record<string, unknown>).branding = branding({
+      displayCurrencies: ["EUR", "USD"],
+      displayDefaultCurrency: "USD",
+    });
+
+    const parsed = parsePublicBookabilityProfileProjection(profile);
+
+    expect(parsed?.hotel.branding?.displayDefaultCurrency).toBe("USD");
+    expect(parsed?.hotel.defaultCurrency).toBe("EUR");
+  });
+
   it("preserves midnight as the explicit end-of-arrival-day deadline", () => {
     const profile = storedProfile();
     profile.hotel = {
@@ -138,6 +151,22 @@ describe("parsePublicBookabilityProfileProjection", () => {
     [
       "a lowercase display currency",
       (profile: any) => (profile.hotel.branding = branding({ displayCurrencies: ["EUR", "usd"] })),
+    ],
+    [
+      "a guest display currency guests can't switch to",
+      (profile: any) =>
+        (profile.hotel.branding = branding({
+          displayCurrencies: ["EUR", "USD"],
+          displayDefaultCurrency: "GBP",
+        })),
+    ],
+    [
+      "the pricing currency named as the guest display currency",
+      (profile: any) =>
+        (profile.hotel.branding = branding({
+          displayCurrencies: ["EUR", "USD"],
+          displayDefaultCurrency: "EUR",
+        })),
     ],
   ])("fails closed for %s", (_name, poison) => {
     const profile = storedProfile();

@@ -102,6 +102,7 @@ const brandingSchema = z.strictObject({
   showLanguageSelector: z.boolean().optional(),
   showCurrencySelector: z.boolean().optional(),
   displayCurrencies: uniqueArray(currency).min(2).optional(),
+  displayDefaultCurrency: currency.optional(),
   heroImage: httpsUrl.nullable(),
   heroHeading: nonEmpty.nullable(),
   heroSubtext: nonEmpty.nullable(),
@@ -208,6 +209,12 @@ const profileSchema: z.ZodType<PublicBookabilityProfileProjection> = z
       hotel.branding.displayCurrencies[0] !== hotel.defaultCurrency
     )
       issue(context, ["hotel", "branding", "displayCurrencies"]);
+    if (
+      hotel.branding?.displayDefaultCurrency !== undefined &&
+      (hotel.branding.displayDefaultCurrency === hotel.defaultCurrency ||
+        !hotel.branding.displayCurrencies?.includes(hotel.branding.displayDefaultCurrency))
+    )
+      issue(context, ["hotel", "branding", "displayDefaultCurrency"]);
     if (
       hotel.supportedQuoteParameters.maxRooms < hotel.supportedQuoteParameters.minRooms ||
       hotel.supportedQuoteParameters.maxAdults < hotel.supportedQuoteParameters.minAdults

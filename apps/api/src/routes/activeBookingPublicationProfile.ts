@@ -19,6 +19,7 @@ type CurrentPublicGatesRow = QueryResultRow & {
   latitude: number | null;
   longitude: number | null;
   displayCurrencies: string[] | null;
+  displayDefaultCurrency: string | null;
 };
 
 const ACTIVE_PROFILE_SELECT = `SELECT
@@ -134,19 +135,27 @@ async function currentActiveProfile(
            AND latitude IS NOT NULL AND longitude IS NOT NULL) AS longitude,
        ${LIVE_PROMO_CODES_SQL("$1::uuid")} AS "promoCodes",
        (SELECT supported_currencies FROM booking.booking_settings
-         WHERE property_id=$1::uuid) AS "displayCurrencies"`,
+         WHERE property_id=$1::uuid) AS "displayCurrencies",
+       (SELECT default_currency::text FROM booking.booking_settings
+         WHERE property_id=$1::uuid) AS "displayDefaultCurrency"`,
     [row.propertyId],
   );
   const gates = result.rows[0];
   const branding = profile.hotel.branding;
   // Live, not from the publication, which never carried them (VAY-2345): the currencies Booking
   // settings add for display, after the hotel's own. Quotes and charges stay in that currency.
+  // VAY-2390: Localization's guest display currency is offered too, and guests see it first.
+  const rawDisplayDefault = gates?.displayDefaultCurrency ?? "";
+  const displayDefault = /^[A-Z]{3}$/.test(rawDisplayDefault) ? rawDisplayDefault : null;
   const displayCurrencies = [
     ...new Set([
       profile.hotel.defaultCurrency,
+      ...(displayDefault ? [displayDefault] : []),
       ...(gates?.displayCurrencies ?? []).filter((code) => /^[A-Z]{3}$/.test(code)),
     ]),
   ];
+  const showsDisplayDefault =
+    displayDefault !== null && displayDefault !== profile.hotel.defaultCurrency;
   return {
     ...profile,
     hotel: {
@@ -168,6 +177,7 @@ async function currentActiveProfile(
               ...branding,
               showReferAGuestButton: false,
               ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
+              ...(showsDisplayDefault ? { displayDefaultCurrency: displayDefault } : {}),
             },
           }
         : {}),

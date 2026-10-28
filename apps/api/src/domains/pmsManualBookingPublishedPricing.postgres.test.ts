@@ -359,6 +359,14 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
           freeCancellationDeadlineDays: 7,
         }),
       });
+      // VAY-2392: Booking Detail says when it was booked, for a stay booked after its deadline.
+      const detail = await createTargetPmsOperationsReadRepository({
+        connectionString: url!,
+        pool,
+      }).findReservationByGuestBookingId(propertyId, flexible.guestBookingId);
+      const age = Date.now() - Date.parse(detail!.bookedAt!);
+      expect(age).toBeGreaterThanOrEqual(-60_000);
+      expect(age).toBeLessThan(10 * 60_000);
       const nonRefundable = await repository().createManualBooking(
         command(nrId, { checkIn: "2027-08-09" }),
       );

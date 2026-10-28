@@ -30,6 +30,7 @@ export function LocalizationMultiSelect<T extends { code: string; flag: string }
   emptyMessage,
   comfortable = false,
   copy,
+  fixedItems = [],
 }: {
   id?: string;
   selected: string[];
@@ -48,6 +49,8 @@ export function LocalizationMultiSelect<T extends { code: string; flag: string }
     added: (count: number) => string;
     remove: (name: string) => string;
   };
+  /** Always offered and not removable, shown first (the property currency, VAY-2390). */
+  fixedItems?: readonly { code: string; flag: string; label: string }[];
 }) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
@@ -64,11 +67,16 @@ export function LocalizationMultiSelect<T extends { code: string; flag: string }
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const available = filterLocalizationOptions(options, excludeCode, "", getSearchLabel);
-  const filtered = filterLocalizationOptions(options, excludeCode, query, getSearchLabel);
+  const isFixed = (code: string) => fixedItems.some((item) => item.code === code);
+  const available = filterLocalizationOptions(options, excludeCode, "", getSearchLabel).filter(
+    (option) => !isFixed(option.code),
+  );
+  const filtered = filterLocalizationOptions(options, excludeCode, query, getSearchLabel).filter(
+    (option) => !isFixed(option.code),
+  );
   const popular = available.filter((option) => popularCodes.includes(option.code));
   const selectedItems = selected
-    .filter((code) => code !== excludeCode)
+    .filter((code) => code !== excludeCode && !isFixed(code))
     .map((code) => {
       const option = options.find((candidate) => candidate.code === code);
       return {
@@ -191,7 +199,7 @@ export function LocalizationMultiSelect<T extends { code: string; flag: string }
         </div>
       </div>
 
-      {selectedItems.length > 0 ? (
+      {selectedItems.length > 0 || fixedItems.length > 0 ? (
         <div className={comfortable ? "mt-2.5" : "mt-2"}>
           <p
             className={
@@ -203,6 +211,14 @@ export function LocalizationMultiSelect<T extends { code: string; flag: string }
             {copy?.added(selectedItems.length) ?? `Added (${selectedItems.length}):`}
           </p>
           <div className="flex flex-wrap gap-1.5">
+            {fixedItems.map((item) => (
+              <span
+                key={item.code}
+                className={`inline-flex items-center gap-1 rounded-full border border-primary-300 bg-primary-50 font-medium text-primary-700 ${comfortable ? "px-2.5 py-1 text-xs" : "px-2.5 py-0.5 text-[11px]"}`}
+              >
+                {item.flag && <span>{item.flag}</span>} {item.label}
+              </span>
+            ))}
             {selectedItems.map((item) => (
               <span
                 key={item.code}

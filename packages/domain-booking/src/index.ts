@@ -231,7 +231,6 @@ export type BookingReservationReadModel = {
   checkedOutAt: BookingUtcDateTime | null;
   hostResponseDeadline: BookingUtcDateTime | null;
   platformFeeAmount: number | null;
-  affiliateCommissionAmount: number | null;
   propertyPayoutAmount: number | null;
   addonIds: string[];
   addonNames: string[];

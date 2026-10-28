@@ -46,16 +46,11 @@ export function extraFitsParty(addon: PricingAddon, selection: Selection): boole
     : extraGuests(selection).length <= addon.maxGuests;
 }
 
-/** A newly added extra, like the old page: every guest it can take (one item otherwise), every
- * night for a nightly extra; a one-day extra waits for the guest to pick its day. */
+/** A newly added extra, like the old page: every guest it can take (one item otherwise). Its day
+ * comes from when it happens (VAY-2391); only a "guest_pick" extra waits for the guest's day. */
 export function newExtraItem(addon: PricingAddon, selection: Selection): ExtraItem {
   return withCount(
-    {
-      id: addon.id,
-      quantity: "1",
-      people: [],
-      dates: addonPerNight(addon) ? replacementExtraDates(selection, true) : [],
-    },
+    { id: addon.id, quantity: "1", people: [], dates: [] },
     addon,
     selection,
     addonPerPerson(addon) ? extraCountLimit(addon, selection) : 1,
@@ -78,13 +73,30 @@ export function withCount(
     : { ...item, quantity: String(value), people: [] };
 }
 
-/** A nightly extra keeps at least one night; a one-day extra has exactly the day picked. */
-export function toggleExtraDate(addon: PricingAddon, item: ExtraItem, date: string): ExtraItem {
-  if (!addonPerNight(addon)) return { ...item, dates: item.dates[0] === date ? [] : [date] };
-  const dates = item.dates.includes(date)
-    ? item.dates.filter((value) => value !== date)
-    : [...item.dates, date].sort();
-  return dates.length ? { ...item, dates } : item;
+/** A "guest_pick" extra has exactly the day picked; picking it again clears it. */
+export function toggleExtraDate(item: ExtraItem, date: string): ExtraItem {
+  return { ...item, dates: item.dates[0] === date ? [] : [date] };
+}
+
+/** VAY-2391: an added "guest_pick" extra still waiting for its day. */
+export const extraNeedsDay = (addon: PricingAddon, item: ExtraItem) =>
+  addon.scheduleMode === "guest_pick" && item.dates.length === 0;
+
+/** The days an added extra happens on, as the booking will store them: the arrival or departure
+ * day, every night, the guest's day, or none (anytime, or a day still to pick). */
+export function extraDates(addon: PricingAddon, item: ExtraItem, selection: Selection): string[] {
+  switch (addon.scheduleMode) {
+    case "arrival":
+      return [selection.checkIn];
+    case "departure":
+      return [selection.checkOut];
+    case "daily":
+      return replacementExtraDates(selection, true);
+    case "guest_pick":
+      return item.dates;
+    default:
+      return [];
+  }
 }
 
 /** What an extra costs at its display price, in minor units: the quote is the authority, so the
@@ -93,10 +105,12 @@ export function extraAmountMinor(
   addon: PricingAddon,
   item: ExtraItem,
   unitPrice: number | null | undefined,
+  selection: Selection,
 ): bigint | null {
   const unit = unitMinor(unitPrice, addon.currency);
   if (unit === null) return null;
-  const nights = addonPerNight(addon) ? item.dates.length : 1;
+  // A per-night price counts every night of the stay (VAY-2391).
+  const nights = addonPerNight(addon) ? replacementExtraDates(selection, true).length : 1;
   return unit * BigInt(extraCount(addon, item)) * BigInt(nights);
 }
 
@@ -106,6 +120,24 @@ export function unitMinor(price: number | null | undefined, currency: string): b
   if (scale === null || price === null || price === undefined || !Number.isFinite(price))
     return null;
   return BigInt(Math.round(price * 10 ** scale));
+}
+
+/** "Fri", "6 Nov" for a stay date (YYYY-MM-DD), in the page's language. English reads as the old
+ * page did ("6 Nov", not "Nov 6"). */
+export function formatExtraDay(date: string, locale: string) {
+  const day = new Date(`${date}T00:00:00Z`);
+  const language = locale === "en" ? "en-GB" : locale;
+  return {
+    weekday: day.toLocaleDateString(language, { weekday: "short", timeZone: "UTC" }),
+    day: day.toLocaleDateString(language, { day: "numeric", month: "short", timeZone: "UTC" }),
+  };
+}
+
+/** The extras' own amounts, only when they add up to what the quote charges for them. */
+export function extraLinesMinor(lines: (bigint | null)[], quoted: bigint | null): bigint[] | null {
+  if (quoted === null || lines.some((line) => line === null)) return null;
+  const known = lines as bigint[];
+  return known.reduce((sum, line) => sum + line, BigInt(0)) === quoted ? known : null;
 }
 
 /** The quote's extras total in minor units, or null without extras lines. */

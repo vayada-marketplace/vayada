@@ -81,7 +81,6 @@ const reservationListFixture: BookingReservationList = {
       checkedOutAt: null,
       hostResponseDeadline: null,
       platformFeeAmount: null,
-      affiliateCommissionAmount: null,
       propertyPayoutAmount: null,
       addonIds: [],
       addonNames: [],

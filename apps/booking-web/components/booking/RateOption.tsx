@@ -12,6 +12,7 @@ export default function RateOption({
   terms,
   totalLabel,
   nightlyLabel,
+  paidLabel,
   discountPercent,
   unavailable,
   loading,
@@ -28,6 +29,9 @@ export default function RateOption({
   /** Formatted stay total and per-night price; null while prices load. */
   totalLabel: string | null;
   nightlyLabel: string | null;
+  /** VAY-2390: what the guest pays, in the charged currency, when totalLabel is an approximation
+   * in their display currency. It takes the per-night line's place. */
+  paidLabel?: string | null;
   /** The `-X% OFF` badge next to a non-refundable choice. */
   discountPercent?: number;
   /** No price for this stay: shown, but can't be picked. */
@@ -117,10 +121,16 @@ export default function RateOption({
               <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
                 {totalLabel}
               </p>
-              {nightlyLabel && (
+              {paidLabel ? (
                 <p className="text-xs text-gray-500 whitespace-nowrap">
-                  {t("perNightly", { price: nightlyLabel })}
+                  {t("youPay", { price: paidLabel })}
                 </p>
+              ) : (
+                nightlyLabel && (
+                  <p className="text-xs text-gray-500 whitespace-nowrap">
+                    {t("perNightly", { price: nightlyLabel })}
+                  </p>
+                )
               )}
             </>
           )}
