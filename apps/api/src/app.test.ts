@@ -7812,6 +7812,8 @@ describe("vayada-api", () => {
           defaultLanguage: "en-US",
           supportedCurrencies: ["CHF"],
           supportedLanguages: ["de"],
+          // VAY-2390: with no PMS pricing currency yet, what guests pay in is the default.
+          propertyCurrency: "EUR",
         },
       },
       {
