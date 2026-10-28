@@ -114,6 +114,17 @@ webhook (runbook P17) comes later. Before it does, `CHANNEX_WEBHOOK_INTAKE_MODE`
 `observe_only`: in `mutating` mode, a claimed hotel whose connection is down would get booking
 and message jobs that retry and then dead-letter.
 
+**After a pull outage, re-run the booking copy.** The feed does not keep an unacknowledged
+revision for good. Channex documents only that it is served for 30 minutes, followed by an email
+warning, and states no retention. In W3's S1 re-test (2026-10-28) staging revision 0c5db7c0
+was still pending acknowledgement but had left the feed within about 16 hours. So when the
+hotel's pulls have not run, or failed, for more than 30 minutes, queue a new
+`channex.resync-bookings` job for its current binding. Use the attach job's payload, with a new
+suffix on the job key (the attach key is taken). It copies every booking departing from yesterday
+on; revisions already imported replay harmlessly. No runner action exists for this yet; it is a
+production write, so Flamur's go. "Retry import" is not affected: it reads the alert's revision
+by id when the feed no longer lists it.
+
 ### When intake refuses a booking
 
 The OTA has already confirmed the booking, so a refusal must never be silent (VAY-2108 W1d):
@@ -123,7 +134,7 @@ The OTA has already confirmed the booking, so a refusal must never be silent (VA
   Channex room and rate ids and the reason. The worker logs each one with the property id and
   reason. "Retry import" re-ingests the revision once the cause is fixed. An applied later
   revision of the same booking, or its cancellation, closes the alert.
-- A refused revision is **not** acknowledged, so Channex keeps flagging it too. Both feed readers
+- A refused revision is **not** acknowledged, so Channex keeps it pending and emails a warning. Both feed readers
   (the scheduled pull and the webhook-hint load) page through the whole feed, at most 20 pages of
   100 per run; a longer feed is logged with the hotel. Refused revisions never hide newer ones.
 - A booking on `closed` or `linked_stop_sell` nights is saved (VAY-1981 refused it): its rooms get
