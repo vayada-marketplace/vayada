@@ -209,10 +209,14 @@ export async function registerPmsChannexManagementRoutes(
       const alerts = await options.repository.getAlerts?.(propertyId);
       const alert = alerts?.find((item) => item.id === alertId);
       if (!alert) return reply.code(404).send({ code: "alert_not_found" });
+      // VAY-2108 W1d: a booking that landed on a closed night has nothing to re-import.
+      if (alert.eventType === "booking_on_closed_night")
+        return reply.code(409).send({ code: "alert_not_recoverable" });
       const booking = [
         "booking_unmapped_room",
         "booking_unmapped_rate",
         "non_acked_booking",
+        "booking_not_imported",
         "disconnected_channel",
       ].includes(alert.eventType);
       const ari = ["rate_error", "sync_error", "sync_warning", "disconnected_channel"].includes(

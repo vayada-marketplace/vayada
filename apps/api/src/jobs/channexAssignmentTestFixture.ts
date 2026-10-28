@@ -62,9 +62,17 @@ export async function seedChannexAssignmentInventory(db: Pool, propertyId: strin
   }
 }
 
-export async function clearChannexAssignmentFixture(db: Pool, propertyId: string) {
+export async function clearChannexAssignmentFixture(
+  db: { query(text: string, values?: unknown[]): Promise<unknown> },
+  propertyId: string,
+) {
   // Test-only callers already disable triggers while deleting their own fixture.
+  await db.query(
+    "DELETE FROM pms.channel_operational_alert_occurrences WHERE alert_id IN (SELECT id FROM pms.channel_operational_alerts WHERE property_id=$1)",
+    [propertyId],
+  );
   for (const table of [
+    "pms.channel_operational_alerts",
     "platform.outbox_events",
     "platform.domain_events",
     "booking.nightly_revenue_evidence",

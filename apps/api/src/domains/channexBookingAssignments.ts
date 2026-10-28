@@ -38,6 +38,12 @@ type Assignment = Stay & {
   providerStay: ChannexRoomStay | null;
   channexOfferTargetId: string | null;
 };
+/** VAY-2108 W1d: why an OTA room landed on nights the hotel does not sell. */
+export type ChannexInventoryWarning = {
+  position: number;
+  roomTypeId: string;
+  warning: "closed" | "linked_stop_sell";
+};
 export class ChannexAssignmentConflict extends Error {}
 const conflict = () => new ChannexAssignmentConflict("operational_assignment_conflict");
 
@@ -56,6 +62,8 @@ export async function persistChannexAssignments(
     repair?: boolean;
     stagingCatalogBindingGeneration?: string;
     bootstrapHash?: string;
+    /** Filled with the rooms saved on closed or linked stop-sell nights. */
+    inventoryWarnings?: ChannexInventoryWarning[];
   },
 ) {
   const { propertyId, bookingId } = input;
@@ -160,13 +168,26 @@ export async function persistChannexAssignments(
       );
     if (!changed) return false;
     if (existing.some((row) => !row.untouched)) throw conflict();
-    for (const stay of stays) {
-      const closed = await client.query(
-        `SELECT 1 FROM pms.inventory_days WHERE property_id=$1::uuid AND room_type_id=$2::uuid
-         AND stay_date >= $3::date AND stay_date < $4::date AND (status='closed' OR linked_stop_sell) LIMIT 1`,
-        [propertyId, stay.roomTypeId, stay.checkIn, stay.checkOut],
-      );
-      if (closed.rowCount) throw new ChannexAssignmentConflict("operational_inventory_closed");
+    // VAY-2108 W1d: the OTA already sold these nights, so a closed or linked stop-sell night no
+    // longer refuses the booking (VAY-1981 did). The room is saved with a marker and the caller
+    // raises a PMS alert. Physical capacity is still enforced by the occupied-inventory reconcile.
+    const warnings: (ChannexInventoryWarning["warning"] | undefined)[] = [];
+    for (const [index, stay] of stays.entries()) {
+      const closed = (
+        await client.query<{ closed: boolean }>(
+          `SELECT bool_or(status='closed') AS closed FROM pms.inventory_days
+           WHERE property_id=$1::uuid AND room_type_id=$2::uuid
+             AND stay_date >= $3::date AND stay_date < $4::date AND (status='closed' OR linked_stop_sell)`,
+          [propertyId, stay.roomTypeId, stay.checkIn, stay.checkOut],
+        )
+      ).rows[0]?.closed;
+      if (closed === null || closed === undefined) continue;
+      warnings[index] = closed ? "closed" : "linked_stop_sell";
+      input.inventoryWarnings?.push({
+        position: index + 1,
+        roomTypeId: stay.roomTypeId,
+        warning: warnings[index]!,
+      });
     }
     // VAY-2361 lock order: unit locks before the rows below key-share their room types.
     await lockRoomTypesForUnitAssignment(client, propertyId, [
@@ -192,6 +213,7 @@ export async function persistChannexAssignments(
         ...(stay.stagingCatalogReferenceId
           ? { stagingCatalogReferenceId: stay.stagingCatalogReferenceId }
           : {}),
+        ...(warnings[index] ? { inventoryWarning: warnings[index] } : {}),
         version: input.revisionId,
       };
       await client.query(
@@ -199,7 +221,7 @@ export async function persistChannexAssignments(
           position,assignment_status,channel,source,assignment_payload,stay_evidence_kind,check_in,check_out,adults,children,external_reservation_id)
          VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,'pending',$6,'channel',$7::jsonb,'exact',$8::date,$9::date,$10,$11,$12)
          ON CONFLICT(guest_booking_id,position) DO UPDATE SET room_type_id=EXCLUDED.room_type_id,rate_plan_id=EXCLUDED.rate_plan_id,
-          assignment_payload=((pms.operational_booking_assignments.assignment_payload-'channexAlterationReleased'-'channexOffer')
+          assignment_payload=((pms.operational_booking_assignments.assignment_payload-'channexAlterationReleased'-'channexOffer'-'inventoryWarning')
             -CASE WHEN $13::boolean THEN ARRAY[]::text[] ELSE ARRAY['autoAssigned'] END)||EXCLUDED.assignment_payload,
           assignment_status=CASE WHEN $13::boolean THEN 'assigned' ELSE 'pending' END,
           room_id=CASE WHEN $13::boolean THEN pms.operational_booking_assignments.room_id ELSE NULL END,

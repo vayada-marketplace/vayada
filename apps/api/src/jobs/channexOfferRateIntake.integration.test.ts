@@ -458,6 +458,46 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
     }
   });
 
+  // VAY-2108 W1d: an offer-plan stay goes through the same closed-night landing as a legacy one.
+  it("lands an offer-plan booking on a closed night with the warning and the alert", async () => {
+    const close = (status: "closed" | "open") =>
+      withReplicaRole((client) =>
+        client.query(
+          `UPDATE pms.inventory_days SET status=$3,available_count=CASE WHEN $3='closed' THEN 0 ELSE total_count-assigned_count-blocked_count END
+           WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-09-02'`,
+          [P, B, status],
+        ),
+      );
+    await close("closed");
+    try {
+      await job(
+        "offer-closed",
+        revision("offer-closed-1", "offer-closed", [["provider-room-b", "offer-rate-b"]]),
+      );
+      expect(await run()).toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+      expect(
+        (
+          await db.query(
+            `SELECT assignment_payload->>'inventoryWarning' AS warning,assignment_payload ? 'channexOffer' AS offer
+             FROM pms.operational_booking_assignments WHERE guest_booking_id=$1::uuid`,
+            [await bookingId("offer-closed")],
+          )
+        ).rows,
+      ).toEqual([{ warning: "closed", offer: true }]);
+      expect(
+        (
+          await db.query(
+            `SELECT event_type AS type,impact->>'roomTypeNames' AS rooms FROM pms.channel_operational_alerts
+             WHERE property_id=$1 AND impact->>'bookingId'='offer-closed'`,
+            [P],
+          )
+        ).rows,
+      ).toEqual([{ type: "booking_on_closed_night", rooms: "Offer room" }]);
+    } finally {
+      await close("open");
+    }
+  });
+
   function link(
     target: string,
     version: string,

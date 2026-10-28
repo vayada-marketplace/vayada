@@ -23,6 +23,7 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
   let resyncPages: Array<Record<string, unknown>[]> = [];
   let resyncTotal: number | null = null;
   let resyncListStatus: number | null = null;
+  let ownedFeed: Record<string, unknown>[] | null = null;
   const fetcher: typeof fetch = async (input, init) => {
     calls.push(`${init?.method ?? "GET"} ${String(input)}`);
     const url = new globalThis.URL(String(input));
@@ -43,6 +44,14 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       if (id === "rev-broken")
         return Response.json({ data: { id, attributes: { property_id: "elsewhere" } } });
       return Response.json({ data: revision(id, `booking-${id.slice(4)}`) });
+    }
+    if (ownedFeed && property === external(OWNED)) {
+      const page = Number(url.searchParams.get("pagination[page]"));
+      const limit = Number(url.searchParams.get("pagination[limit]"));
+      return Response.json({
+        data: ownedFeed.slice((page - 1) * limit, page * limit),
+        meta: { page, limit, total: ownedFeed.length },
+      });
     }
     return Response.json({
       data:
@@ -145,7 +154,7 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       ]),
     );
     const read = (property: string) =>
-      `GET ${FEED}?filter%5Bproperty_id%5D=${external(property)}&order%5Binserted_at%5D=asc&pagination%5Blimit%5D=100`;
+      `GET ${FEED}?filter%5Bproperty_id%5D=${external(property)}&order%5Binserted_at%5D=asc&pagination%5Bpage%5D=1&pagination%5Blimit%5D=100`;
     expect(new Set(calls)).toEqual(new Set([read(OWNED), read(REBOUND)]));
     const failed = await db.query(
       `SELECT job_metadata->'failedRevisionIds' AS ids FROM platform.jobs
@@ -163,6 +172,36 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
       { booking: "booking-1", source: "revision_feed", pull: false },
       { booking: "booking-2", source: "revision_feed", pull: false },
     ]);
+  });
+
+  // VAY-2108 W1d: refused revisions stay unacknowledged at the head of the feed.
+  it("pages past more than 100 refused revisions to queue the new one behind them", async () => {
+    const pull = (minutes: number) =>
+      runChannexFeedPulls(URL!, {
+        ...options,
+        ownedPropertyIds: [OWNED],
+        now: () => new Date(NOW.getTime() + minutes * 60_000),
+      });
+    const refused = Array.from({ length: 101 }, (_, index) =>
+      revision(`rev-page-${index}`, `booking-page-${index}`),
+    );
+    ownedFeed = refused;
+    calls.length = 0;
+    expect(await pull(5)).toMatchObject({ pulled: 1, failed: 0, revisions: 101, truncated: [] });
+    expect(
+      calls.map((call) => new globalThis.URL(call.slice(4)).searchParams.get("pagination[page]")),
+    ).toEqual(["1", "2"]);
+    // The next bucket: the same refused revisions, still unacknowledged, and a new one behind them.
+    ownedFeed = [...refused, revision("rev-page-new", "booking-page-new")];
+    expect(await pull(10)).toMatchObject({ pulled: 1, failed: 0, truncated: [] });
+    const queued = await db.query<{ n: number; fresh: number }>(
+      `SELECT count(*)::int AS n, count(*) FILTER (WHERE payload->>'channelBookingId'='booking-page-new')::int AS fresh
+       FROM platform.jobs WHERE job_type='channex.ingest-booking' AND payload->>'propertyId'=$1
+         AND payload->>'channelBookingId' LIKE 'booking-page-%'`,
+      [OWNED],
+    );
+    expect(queued.rows[0]).toEqual({ n: 102, fresh: 1 });
+    ownedFeed = null;
   });
 
   it("copies the upcoming bookings the attach executor asked for, once per binding", async () => {
