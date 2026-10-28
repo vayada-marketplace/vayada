@@ -308,9 +308,11 @@ describe("PMS pricing routes", () => {
     app = await testApp(ports);
   });
 
-  it("sends an Owner's currency change to its own port, and only with the Owner's key (VAY-2390)", async () => {
+  it("sends an Owner's currency change and its blockers preview to its own port, and only with the Owner's key (VAY-2390)", async () => {
     const ports = fakePorts();
     const change = fakePorts();
+    const previewReads: string[] = [];
+    let preview: unknown = [{ code: "booking_reference", affectedCount: 2 }];
     const build = async (
       relationship: LinkedResource["relationship"],
       sessionId: string | undefined,
@@ -338,7 +340,13 @@ describe("PMS pricing routes", () => {
       });
       await owned.register(registerPmsPricingRoutes, {
         ...ports,
-        currencyChangeCommandPort: change.commandPort,
+        currencyChangeCommandPort: {
+          ...change.commandPort,
+          async getCurrencyChangeBlockers(requestPropertyId) {
+            previewReads.push(requestPropertyId);
+            return preview as [];
+          },
+        },
         propertyAccessRepository: agencyPropertyAccessRepository,
       });
       return owned;
@@ -349,9 +357,17 @@ describe("PMS pricing routes", () => {
       headers: headers("change-key"),
       payload: { expectedPricingCurrencyRevision: 1, currency: "CHF" },
     };
+    const previewRequest = {
+      method: "GET" as const,
+      url: `/properties/${propertyId}/pricing-source/currency-change/blockers`,
+    };
     const owner: PermissionKey[] = ["pms.operations.manage", "finance.billing.manage"];
 
     app = await build("owner", "session-1", owner);
+    const previewed = await injectJson(app, previewRequest);
+    expect(previewed.statusCode).toBe(200);
+    expect(previewed.body).toEqual({ blockers: [{ code: "booking_reference", affectedCount: 2 }] });
+    expect(previewReads).toEqual([propertyId]);
     const changed = await injectJson(app, request);
     expect(changed.statusCode).toBe(200);
     expect(changed.body).toMatchObject({
@@ -368,10 +384,20 @@ describe("PMS pricing routes", () => {
     ] as const) {
       app = await build(relationship, sessionId, [...permissions]);
       expect((await injectJson(app, request)).statusCode).toBe(403);
+      expect((await injectJson(app, previewRequest)).statusCode).toBe(403);
       await app.close();
     }
     expect(change.currencyCalls).toHaveLength(1);
     expect(ports.currencyCalls).toHaveLength(0);
+    expect(previewReads).toHaveLength(1);
+
+    // Nothing in the way is an empty list; a malformed port answer is never passed on.
+    app = await build("owner", "session-1", owner);
+    preview = [];
+    expect((await injectJson(app, previewRequest)).body).toEqual({ blockers: [] });
+    preview = [{ code: "booking_reference", affectedCount: 0 }];
+    expect((await injectJson(app, previewRequest)).statusCode).toBe(500);
+    await app.close();
 
     change.commandPort.upsertPropertyPricingCurrency = async () => ({
       ok: false,

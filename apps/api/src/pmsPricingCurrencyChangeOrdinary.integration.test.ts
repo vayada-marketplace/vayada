@@ -120,6 +120,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
   it("moves Finance, add-ons and a matching Booking default to the new currency, numbers kept, for this hotel only", async () => {
     const otherBefore = await finance(otherHotel);
     const hotelBefore = await finance(hotel);
+    // The dialog's preview finds nothing in the way either.
+    await expect(repository.getCurrencyChangeBlockers(hotel)).resolves.toEqual([]);
 
     const result = await repository.upsertPropertyPricingCurrency(command("change", 1, "CHF"));
 
@@ -202,6 +204,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
     await admin.query(insert, [hotel]);
     await admin.query("COMMIT");
     const before = await snapshot();
+    // The dialog's preview names the same reason before the Owner types anything.
+    await expect(repository.getCurrencyChangeBlockers(hotel)).resolves.toEqual([
+      { code, affectedCount: 1 },
+    ]);
 
     const result = await repository.upsertPropertyPricingCurrency(
       command(`blocked-${code}`, 1, "CHF"),
@@ -227,6 +233,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       const before = await snapshot();
       const change = repository.upsertPropertyPricingCurrency(command("racing", 1, "CHF"));
       await waitForLockWaiter(fixture.login);
+      // The preview takes no locks: it answers at once, without the uncommitted channel.
+      await expect(repository.getCurrencyChangeBlockers(hotel)).resolves.toEqual([]);
       await writer.query("COMMIT");
 
       await expect(change).resolves.toMatchObject({

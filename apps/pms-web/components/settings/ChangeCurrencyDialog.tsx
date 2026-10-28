@@ -11,8 +11,9 @@ import {
 } from "@/services/settings/pricingCurrency";
 
 /** VAY-2390 P5: the Owner's protected currency change. The numbers stay (100 EUR becomes 100 CHF),
- * so the booking page stops selling until the prices are published again. The API checks what
- * blocks a change in its own transaction, so the reasons show after the attempt. */
+ * so the booking page stops selling until the prices are published again. What blocks a change
+ * shows on open, from a read-only preview; the change checks again in its own transaction, so the
+ * reasons can still show after the attempt. */
 export function ChangeCurrencyDialog({
   onClose,
   onChanged,
@@ -33,8 +34,12 @@ export function ChangeCurrencyDialog({
 
   useEffect(() => {
     let live = true;
-    pricingCurrencyService.load().then(
-      (loaded) => live && setState(loaded),
+    loadWithBlockers().then(
+      (loaded) => {
+        if (!live) return;
+        setState(loaded.state);
+        if (loaded.blockers.length) setBlockers(loaded.blockers);
+      },
       () => live && setLoadFailed(true),
     );
     return () => {
@@ -43,7 +48,13 @@ export function ChangeCurrencyDialog({
   }, []);
   const load = () => {
     setLoadFailed(false);
-    pricingCurrencyService.load().then(setState, () => setLoadFailed(true));
+    loadWithBlockers().then(
+      (loaded) => {
+        setState(loaded.state);
+        if (loaded.blockers.length) setBlockers(loaded.blockers);
+      },
+      () => setLoadFailed(true),
+    );
   };
 
   const name = (code: string) => {
@@ -226,6 +237,15 @@ export function ChangeCurrencyDialog({
       )}
     </Modal>
   );
+}
+
+/** A preview that fails leaves the reasons to the change, which checks them anyway. */
+async function loadWithBlockers() {
+  const state = await pricingCurrencyService.load();
+  const blockers = await pricingCurrencyService
+    .blockers(state)
+    .catch((): PmsPricingCurrencyChangeBlocker[] => []);
+  return { state, blockers };
 }
 
 type BlockerItem = { title: string; body: string; count?: number; link?: string };
