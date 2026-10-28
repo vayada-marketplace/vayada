@@ -84,6 +84,11 @@ export function readAddonSchedule(
   return { scheduleMode, bookableWeekdays };
 }
 
+/** The ISO weekday of a YYYY-MM-DD date. */
+export function isoWeekday(date: string): number {
+  return new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
+}
+
 /** The day a one-off add-on is booked for when the guest sends none: check-in for arrival, check-out for
  * departure, none ([]) for anytime. Null for guest_pick, where the guest has to pick. */
 export function addonScheduledDates(

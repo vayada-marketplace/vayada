@@ -28,6 +28,7 @@ import { fetchGuestNearby } from "@/lib/nearbyPlaces";
 import { hotelToday } from "@/lib/roomChoices";
 import { serverNow } from "@/lib/serverClock";
 import { resolveLocale } from "@/lib/utils";
+import { formatExtraDays } from "@/lib/extrasChoices";
 import { useState, useEffect, useId, useRef, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
@@ -1022,12 +1023,19 @@ export default function BookingConfirmationPageClient({
                             (booking.addonQuantities?.[addonId] ?? 1) *
                             (booking.addonPackageQuantities?.[addonId] ?? 1);
                           const name = booking.addonNames?.[idx] || addonId;
+                          // VAY-2391: the day or days it happens on.
+                          const days = formatExtraDays(booking.addonDates?.[addonId], locale);
                           return (
                             <li key={addonId} className="font-medium text-gray-900">
                               {name}
                               {qty && qty > 1 ? (
                                 <span className="ml-2 font-normal text-gray-500">× {qty}</span>
                               ) : null}
+                              {days && (
+                                <span className="block text-sm font-normal text-gray-500">
+                                  {days}
+                                </span>
+                              )}
                             </li>
                           );
                         })}

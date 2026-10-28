@@ -107,6 +107,26 @@ function formatDateLong(iso: string, locale?: string): string {
   });
 }
 
+/** VAY-2391: when an extra happens, in PMS's date style: "Mon, Nov 16"; "Nov 16 – Nov 18" over
+ * consecutive days, "Mon, Nov 16 · Wed, Nov 18" otherwise; null without a day. */
+function formatServiceDays(dates: string[] | undefined, locale?: string): string | null {
+  const days = Array.from(new Set(dates ?? [])).sort();
+  if (!days.length) return null;
+  const day = (iso: string, weekday: boolean) =>
+    new Date(iso + "T00:00:00").toLocaleDateString(locale, {
+      ...(weekday ? { weekday: "short" as const } : {}),
+      day: "numeric",
+      month: "short",
+    });
+  const consecutive = days.every(
+    (date, index) => index === 0 || Date.parse(date) - Date.parse(days[index - 1]!) === 86400000,
+  );
+  if (days.length === 1) return day(days[0]!, true);
+  return consecutive
+    ? `${day(days[0]!, false)} – ${day(days[days.length - 1]!, false)}`
+    : days.map((date) => day(date, true)).join(" · ");
+}
+
 function formatDateTime(iso: string, locale?: string): string {
   return new Date(iso).toLocaleString(locale, {
     day: "numeric",
@@ -1942,7 +1962,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const addonRows = booking.addonIds.map((addonId, idx) => {
     const qty = booking.addonQuantities[addonId];
     const name = booking.addonNames?.[idx] || addonId;
-    return { addonId, name, qty };
+    // VAY-2391: the day or days it happens on.
+    const days = formatServiceDays(booking.addonDates?.[addonId], locale);
+    return { addonId, name, qty, days };
   });
 
   return (
@@ -2417,7 +2439,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               <div className="space-y-1.5 text-sm">
                 {addonRows.map((row) => (
                   <div key={row.addonId} className="flex justify-between text-gray-700">
-                    <span>{row.name}</span>
+                    <span>
+                      <span>{row.name}</span>
+                      {row.days && <span className="block text-xs text-gray-500">{row.days}</span>}
+                    </span>
                     {row.qty && (
                       <span className="text-gray-500">
                         {t("bookings.detail.quantity", { quantity: row.qty })}

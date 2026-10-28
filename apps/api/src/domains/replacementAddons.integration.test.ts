@@ -231,10 +231,11 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
     for (const [model, quantity, participants, dates, total] of [
       ["per_stay", 3, null, null, "6000"],
       ["per_night", 1, null, null, "6000"],
-      ["per_night", 1, null, ["2026-10-01", "2026-10-03"], "4000"],
+      // VAY-2391: a per-night extra is every night; the nights may be named, all of them.
+      ["per_night", 1, null, ["2026-10-01", "2026-10-02", "2026-10-03"], "6000"],
       ["per_guest", 1, people, null, "4000"],
-      ["per_guest_night", 1, people, ["2026-10-01", "2026-10-03"], "8000"],
-      ["per_guest_night", 1, people.slice(0, 1), ["2026-10-03"], "2000"],
+      ["per_guest_night", 1, people, null, "12000"],
+      ["per_guest_night", 1, people.slice(0, 1), null, "6000"],
     ]) {
       await pool.query("UPDATE booking.addon_definitions SET pricing_model=$2 WHERE id=$1", [
         f.id,
@@ -260,12 +261,15 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
     ])
       expect(await f.amounts({ ...f.stay, addons: [addon] })).toBeNull();
     expect(
-      (await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-04"] }] }))?.totalMinor,
+      (await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-03"] }] }))?.totalMinor,
     ).toBe("1250");
+    // VAY-2391: a guest's day is a night of the stay, never the check-out day.
+    expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-04"] }] })).toBeNull();
     await pool.query("UPDATE booking.addon_definitions SET pricing_model='per_night' WHERE id=$1", [
       f.id,
     ]);
-    expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-04"] }] })).toBeNull();
+    for (const dates of [["2026-10-04"], ["2026-10-01"], ["2026-10-01", "2026-10-03"]])
+      expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates }] })).toBeNull();
     await pool.query(
       "UPDATE booking.addon_definitions SET pricing_model='per_guest',metadata='{\"maxQuantity\":3,\"maxGuests\":1}' WHERE id=$1",
       [f.id],
@@ -313,7 +317,7 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
     await pool.query("UPDATE booking.addon_definitions SET metadata='{}' WHERE id=$1", [f.id]);
     const scheduled = await f.amounts({
       ...f.stay,
-      addons: [{ ...f.stay.addons[0], dates: ["2026-10-04"] }],
+      addons: [{ ...f.stay.addons[0], dates: ["2026-10-02"] }],
     });
     expect(scheduled?.totalMinor).toBe(result?.totalMinor);
     expect(scheduled?.requestKey).not.toBe(result?.requestKey);
@@ -379,15 +383,20 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
     expect(await dates()).toEqual(["2026-10-04"]);
     await schedule("anytime");
     expect(await dates()).toEqual([]);
-    // Today's booking page sends a day for every one-off extra and offers every day of the stay. Until
-    // the page that sends none is live, those days still count; VAY-2391 part 4 refuses them.
+    // The guest sends no day for an add-on the hotel dates; at most its own day.
+    expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-02"] }] })).toBeNull();
+    await schedule("arrival");
+    expect(await dates({ ...f.stay, addons: [{ ...a, dates: ["2026-10-01"] }] })).toEqual([
+      "2026-10-01",
+    ]);
+    expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-02"] }] })).toBeNull();
+    // Friday and Saturday only: Thursday and the check-out day are refused.
+    await schedule("guest_pick", "{5,6}");
     expect(await dates({ ...f.stay, addons: [{ ...a, dates: ["2026-10-02"] }] })).toEqual([
       "2026-10-02",
     ]);
-    // Friday and Saturday only, yet Thursday and the check-out day are still accepted.
-    await schedule("guest_pick", "{5,6}");
-    for (const day of ["2026-10-02", "2026-10-01", "2026-10-04"])
-      expect(await dates({ ...f.stay, addons: [{ ...a, dates: [day] }] })).toEqual([day]);
+    for (const day of ["2026-10-01", "2026-10-04"])
+      expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates: [day] }] })).toBeNull();
     // A per-night price is every night, whatever was stored by an older writer.
     await schedule("guest_pick", "{5}", "per_night");
     expect(await dates()).toEqual(["2026-10-01", "2026-10-02", "2026-10-03"]);

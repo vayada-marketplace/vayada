@@ -14,6 +14,7 @@ import {
   extraLinesMinor,
   extraNeedsDay,
   formatExtraDay,
+  formatExtraDays,
   newExtraItem,
   quoteExtrasMinor,
   toggleExtraDate,
@@ -181,4 +182,13 @@ it("formats a stay day in the page's language, English as '6 Nov' (VAY-2391)", (
   expect(formatExtraDay("2026-11-06", "en")).toEqual({ weekday: "Fri", day: "6 Nov" });
   // Other languages as the browser writes them (ICU versions differ in the details).
   expect(formatExtraDay("2026-11-06", "de").day).toMatch(/^6\. Nov/);
+});
+
+it("says when a booked extra happens: one day or a range (VAY-2391)", () => {
+  expect(formatExtraDays(["2026-11-06"], "en")).toBe("Fri 6 Nov");
+  expect(formatExtraDays(["2026-11-07", "2026-11-06", "2026-11-07"], "en")).toBe("6 Nov – 7 Nov");
+  // Days with a gap (a stay booked before every night was required) are listed, not ranged.
+  expect(formatExtraDays(["2026-11-06", "2026-11-08"], "en")).toBe("Fri 6 Nov · Sun 8 Nov");
+  expect(formatExtraDays([], "en")).toBeNull();
+  expect(formatExtraDays(undefined, "en")).toBeNull();
 });

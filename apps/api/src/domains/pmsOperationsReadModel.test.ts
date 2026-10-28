@@ -174,6 +174,7 @@ describe("target PMS reservation stay dates", () => {
                       addonId: "addon-1",
                       name: "Breakfast",
                       quantity: 2,
+                      serviceDates: ["2026-05-02", "not a date"],
                     },
                   ],
                   assignments: [],
@@ -295,6 +296,8 @@ describe("target PMS reservation stay dates", () => {
             addonId: "addon-1",
             name: "Breakfast",
             quantity: 2,
+            // VAY-2391: the line's days, dates only.
+            serviceDates: ["2026-05-02"],
           },
         ],
         bookedOffer: {

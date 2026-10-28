@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
 import {
   parseReplacementStay,
@@ -7,7 +8,7 @@ import {
 import { isMinorAmount } from "@vayada/domain-pms";
 import { lockReplacementAddons } from "./replacementAddons.js";
 import { addonLeadTimeAllows } from "./addonLeadTime.js";
-import { addonScheduledDates } from "./addonSchedule.js";
+import { addonScheduledDates, isoWeekday } from "./addonSchedule.js";
 import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 
 /** Caller must already own authorization and validated room allocation in this transaction.
@@ -76,20 +77,34 @@ export async function lockReplacementAddonAmounts(client: PoolClient, value: unk
       return null;
     const participants = perPerson ? selected.people!.length : guestCount;
     if (definition.maxGuests !== null && participants > definition.maxGuests) return null;
-    let dates = selected.dates;
+    // VAY-2391: the days follow when the add-on happens. The guest sends a day only for a guest-pick
+    // add-on; a day list for any other must be the add-on's own.
+    const sent = selected.dates === null ? null : [...selected.dates].sort();
+    let dates: string[] | null = sent;
     if (perNight) {
-      if (dates === null)
-        dates = Array.from(
-          { length: (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86400000 },
-          (_, i) => new Date(Date.parse(stay.checkIn) + i * 86400000).toISOString().slice(0, 10),
-        );
-      if (dates.some((date) => date >= stay.checkOut)) return null;
-    } else if (dates === null) {
-      // VAY-2391: the add-on's own day (check-in, check-out, or none for anytime). Guest-pick add-ons stay
-      // undated, which the booking refuses. Days today's booking page sends still count, on any weekday,
-      // until the page that sends none is live (VAY-2391 part 4 refuses them).
-      dates = addonScheduledDates(definition.scheduleMode, stay);
-    } else if (dates.length !== 1) return null;
+      // Every night of the stay.
+      const nights = Array.from(
+        { length: (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86400000 },
+        (_, i) => new Date(Date.parse(stay.checkIn) + i * 86400000).toISOString().slice(0, 10),
+      );
+      if (sent !== null && !isDeepStrictEqual(sent, nights)) return null;
+      dates = nights;
+    } else if (definition.scheduleMode === "guest_pick") {
+      // A night of the stay on a weekday it is offered; without one it stays undated, which the
+      // booking refuses.
+      if (
+        sent !== null &&
+        (sent.length !== 1 ||
+          sent[0]! >= stay.checkOut ||
+          !definition.bookableWeekdays.includes(isoWeekday(sent[0]!)))
+      )
+        return null;
+    } else {
+      // Check-in for arrival, check-out for departure, no day for anytime.
+      const scheduled = addonScheduledDates(definition.scheduleMode, stay);
+      if (sent !== null && !isDeepStrictEqual(sent, scheduled)) return null;
+      dates = scheduled;
+    }
     const peopleMultiplier = perPerson ? participants : 1,
       daysMultiplier = perNight ? dates!.length : 1;
     const amount =
@@ -103,7 +118,7 @@ export async function lockReplacementAddonAmounts(client: PoolClient, value: unk
       definition,
       quantity: selected.quantity,
       people: selected.people,
-      dates: dates === null ? null : [...dates].sort(),
+      dates,
       peopleMultiplier,
       daysMultiplier,
       amountMinor: amount.toString(),
