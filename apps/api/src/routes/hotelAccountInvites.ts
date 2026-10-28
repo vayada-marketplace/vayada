@@ -83,7 +83,6 @@ export type HotelAccountInviteRepository = {
       mode: "apply" | "recover",
     ) => Promise<ApplyInviteResult>;
   }): Promise<HotelAccountInviteRedemptionResult>;
-  /** Each route prefix's registration calls this (VAY-2302), so repeats must be safe. */
   close?(): Promise<void>;
 };
 
@@ -249,8 +248,6 @@ export function createPgHotelAccountInviteRepository(config: {
   }
   const pool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
-  // Each route prefix's registration closes the repository (VAY-2302); the pool ends once.
-  let closing: Promise<void> | undefined;
 
   return {
     async lookup(input) {
@@ -376,8 +373,7 @@ export function createPgHotelAccountInviteRepository(config: {
     },
 
     async close() {
-      closing ??= pool.end();
-      await closing;
+      await pool.end();
     },
   };
 }

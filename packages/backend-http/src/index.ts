@@ -40,7 +40,7 @@ export type HttpRouteContract<
   error: Error;
 };
 
-export const routeGroups = ["marketplace", "booking", "pms", "platform", "ai"] as const;
+export const routeGroups = ["booking", "pms", "platform", "ai"] as const;
 
 export type RouteGroup = (typeof routeGroups)[number];
 
