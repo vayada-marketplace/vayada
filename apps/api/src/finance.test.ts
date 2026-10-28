@@ -4219,8 +4219,9 @@ const emptyFinanceRepository: FinancePropertyReadRepository = {
   },
 };
 
+// The owner's: payout accounts and payouts also take finance.billing.manage (VAY-2401).
 function financeManagePermissions(): PermissionKey[] {
-  return ["pms.finance.read", "pms.operations.manage"];
+  return ["pms.finance.read", "pms.operations.manage", "finance.billing.manage"];
 }
 
 function filterPayouts(query: FinancePayoutListQuery): FinancePayout[] {

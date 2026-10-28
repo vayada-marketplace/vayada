@@ -421,6 +421,17 @@ export async function mockBookingAdminShellRoutes(
   await mockSetupChecklistUnavailable(page);
   // VAY-2246: an account that accepted its terms and DPA at sign-up, so no banner.
   await mockHotelAccountAgreements(page);
+  // Billing and Payments ask who is signed in (VAY-2401). The owner by default, as a context route,
+  // so a spec's own page.route for a staff member wins.
+  await page.context().route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "booking-admin-owner-membership",
+        roleKey: "hotel_owner",
+        permissions: ["booking.settings.manage", "finance.billing.manage"],
+      },
+    }),
+  );
   await page.route("**/api/pms/properties/*/module-activations", (route) =>
     route.fulfill({
       json: {

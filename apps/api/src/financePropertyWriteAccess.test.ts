@@ -84,6 +84,16 @@ const billingRoutes = new Set<string>([
   "billing-details",
   "payment-method",
 ]);
+// Where guests' money goes is the owner's too (VAY-2401): the payout accounts, payouts and the bank
+// account guests transfer to. How guests pay stays with booking settings managers.
+const payoutRoutes = new Set<string>([
+  "provider-accounts/stripe",
+  `provider-accounts/${itemId}/onboarding-link`,
+  "provider-accounts/stripe/dashboard-link",
+  "provider-accounts/xendit/bank-validation",
+  `payouts/${itemId}/dispatch`,
+  "bank-transfer-destination",
+]);
 
 function state() {
   const context = structuredClone(
@@ -157,6 +167,7 @@ function fixture(value: State) {
     .fn()
     .mockResolvedValue({ status: "valid", accountHolderName: "Test", providerReference: "test" });
   const publish = vi.fn();
+  const windows = { read: vi.fn().mockResolvedValue({}), replace: vi.fn().mockResolvedValue({}) };
   const { context } = value;
   const findMembershipPropertyScope = vi.fn(async () => value.scope);
   const app = buildApp({
@@ -164,6 +175,7 @@ function fixture(value: State) {
     financeRepository: repository,
     financeSubscriptionService: service,
     financeBankTransfer: { repository: bank },
+    financePaymentWindows: { repository: windows },
     financeXenditBankValidator: { validateBankAccount },
     publicBookabilityPublisher: { publish },
     auth: {
@@ -209,6 +221,7 @@ function fixture(value: State) {
     writes,
     service,
     bank,
+    windows,
     validateBankAccount,
     findMembershipPropertyScope,
     ports: [
@@ -425,7 +438,7 @@ describe("Finance billing access (VAY-2401)", () => {
     },
   );
 
-  it("lets the owner's finance.billing.manage read and change billing", async () => {
+  it("lets the owner's finance.billing.manage read and change billing and payouts", async () => {
     const value = state();
     value.context.membership.permissions = ["finance.billing.manage"];
     const { app, service } = fixture(value);
@@ -435,10 +448,59 @@ describe("Finance billing access (VAY-2401)", () => {
       expect(overview.statusCode).toBe(200);
       for (const [method, route, payload] of routes) {
         const response = await app.inject({ method, url: `${root}/${route}`, payload, headers });
-        expect(response.statusCode, route).toBe(billingRoutes.has(route) ? 409 : 403);
+        expect(response.statusCode, route).toBe(
+          route.endsWith("bank-validation")
+            ? 200
+            : billingRoutes.has(route) || payoutRoutes.has(route)
+              ? 409
+              : 403,
+        );
       }
       for (const [name, port] of Object.entries(service))
         if (name !== "getPlanStatus") expect(port, name).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("Finance payout access (VAY-2401)", () => {
+  it("lets booking settings managers set how guests pay, but not where the money goes", async () => {
+    const value = state();
+    value.context.membership.permissions = ["booking.settings.manage"];
+    value.context.entitlements[0]!.product = "booking";
+    value.context.entitlements[0]!.key = "direct-booking-finance";
+    const { app, writes, bank, windows, validateBankAccount } = fixture(value);
+    const headers = { authorization: "Bearer valid-token" };
+    try {
+      for (const [method, route, payload] of routes) {
+        if (billingRoutes.has(route)) continue;
+        const response = await app.inject({ method, url: `${root}/${route}`, payload, headers });
+        expect(response.statusCode, `${method} ${route}`).toBe(payoutRoutes.has(route) ? 403 : 409);
+      }
+      const paymentWindows = await app.inject({
+        method: "PUT",
+        url: `${root}/payment-windows`,
+        payload: { windows: {} },
+        headers,
+      });
+      expect(paymentWindows.statusCode).toBe(200);
+      expect(windows.replace).toHaveBeenCalledTimes(1);
+      for (const port of [
+        writes.updatePaymentSettings,
+        writes.reconcileStripeProviderAccount,
+        writes.enqueueXenditPayoutReconciliation,
+      ])
+        expect(port).toHaveBeenCalledTimes(1);
+      for (const port of [
+        writes.createStripeProviderAccount,
+        writes.issueStripeOnboardingLink,
+        writes.issueStripeDashboardLoginLink,
+        writes.enqueuePropertyPayoutDispatch,
+        bank.execute,
+        validateBankAccount,
+      ])
+        expect(port).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

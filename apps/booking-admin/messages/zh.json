@@ -598,6 +598,8 @@
   "settings.tabs.notifications": "通知",
   "settings.tabs.security": "安全",
   "settings.tabs.billing": "账单",
+  "settings.ownerOnly.billing": "只有账户所有者可以查看和更改账单。",
+  "settings.ownerOnly.payouts": "只有账户所有者可以连接收款账户、开启或关闭银行转账，或更改客人付款的银行账户。",
   "settings.feedback.saveSuccess": "设置保存成功",
   "settings.feedback.saveError": "设置保存失败",
   "settings.feedback.propertyNameNotSaved": "其他更改已保存，但住宿名称未更改。只有业主可以重命名，且酒店信息必须完整。",

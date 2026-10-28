@@ -598,6 +598,8 @@
   "settings.tabs.notifications": "Notifiche",
   "settings.tabs.security": "Sicurezza",
   "settings.tabs.billing": "Fatturazione",
+  "settings.ownerOnly.billing": "Solo il titolare dell'account può vedere e modificare la fatturazione.",
+  "settings.ownerOnly.payouts": "Solo il titolare dell'account può collegare i conti per i pagamenti, attivare o disattivare il bonifico bancario o cambiare il conto bancario su cui pagano gli ospiti.",
   "settings.feedback.saveSuccess": "Impostazioni salvate con successo",
   "settings.feedback.saveError": "Impossibile salvare le impostazioni",
   "settings.feedback.propertyNameNotSaved": "Le altre modifiche sono state salvate, ma il nome della struttura non è stato cambiato. Solo il proprietario può rinominarla e i dati dell'hotel devono essere completi.",

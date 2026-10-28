@@ -598,6 +598,8 @@
   "settings.tabs.notifications": "Notifications",
   "settings.tabs.security": "Security",
   "settings.tabs.billing": "Billing",
+  "settings.ownerOnly.billing": "Only the account owner can see and change billing.",
+  "settings.ownerOnly.payouts": "Only the account owner can connect payout accounts, turn bank transfer on or off, or change the bank account guests pay into.",
   "settings.feedback.saveSuccess": "Settings saved successfully",
   "settings.feedback.saveError": "Failed to save settings",
   "settings.feedback.propertyNameNotSaved": "Your other changes were saved, but the property name wasn't changed. Only the property owner can rename it, and the hotel details must be complete.",
