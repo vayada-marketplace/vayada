@@ -190,3 +190,37 @@ export function isCompletePricingCurrencyConversion(
     );
   });
 }
+
+/** VAY-2390 P5 (D2): the same rooms with the same numbers in another currency, as an Owner's
+ * currency change publishes them again. Only `currency` and `revision` may differ, and only
+ * between currencies of one scale and amount step, so every amount means the same number. The
+ * caller must still check that `to` is the property's locked pricing currency. */
+export function isSamePricingNumbersInCurrency(
+  before: readonly unknown[],
+  after: readonly unknown[],
+  from: string,
+  to: string,
+): boolean {
+  const scale = pricingCurrencyScale(from);
+  if (
+    from === to ||
+    scale === null ||
+    pricingCurrencyScale(to) !== scale ||
+    pricingAmountStep(from) !== pricingAmountStep(to) ||
+    !Array.isArray(before) ||
+    !Array.isArray(after) ||
+    !before.length ||
+    before.length !== after.length
+  )
+    return false;
+  const old = Array.from(before, parsePricingConfiguration),
+    next = Array.from(after, parsePricingConfiguration);
+  if (old.some((r) => r?.currency !== from) || next.some((r) => r?.currency !== to)) return false;
+  const numbers = (r: PricingConfiguration) => canonical({ ...r, currency: "", revision: 0 });
+  const kept = new Map(old.map((r) => [r!.roomTypeId, numbers(r!)]));
+  return (
+    kept.size === old.length &&
+    new Set(next.map((r) => r!.roomTypeId)).size === next.length &&
+    next.every((r) => kept.get(r!.roomTypeId) === numbers(r!))
+  );
+}

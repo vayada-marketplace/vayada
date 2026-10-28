@@ -1998,6 +1998,14 @@ const app = buildApp({
         commandPort: pmsGuestPolicySetupCommands.pricing,
         readPort: pmsPricingReadModel,
         currencyCapabilitiesReadPort: PMS_PRICING_CURRENCY_CAPABILITIES_PORT,
+        // VAY-2390 P5: the Owner's protected change checks its blockers in its own transaction,
+        // so the fail-closed guard (still required) is never consulted.
+        currencyChangeCommandPort: createPgPmsPricingCommandRepository({
+          connectionString: targetDatabaseUrl,
+          currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+          ownerCurrencyChange: true,
+          max: 2,
+        }),
       }
     : undefined,
   pmsRecurringPricing: pmsGuestPolicySetupCommands

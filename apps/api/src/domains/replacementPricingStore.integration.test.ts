@@ -202,6 +202,25 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     f.allowConversion(); await f.store.save(f.scope, command);
     expect(await f.store.read(f.scope)).toMatchObject({ currency: "USD", revision: 2, rooms: [{ currency: "USD" }] });
   });
+  it("publishes the same numbers again in the pricing currency an Owner changed to, without FX (VAY-2390)", async () => {
+    const f = await fixture(); await f.store.save(f.scope, f.command());
+    const same = (currency: string, nightlyMinor = "2000") => {
+      const eur = f.snapshot(2);
+      return { ...eur, currency, rooms: eur.rooms.map((r) => ({ ...r, currency,
+        children: { ...r.children, bands: r.children.bands.map((b) => ({ ...b, nightlyMinor })) } })) };
+    };
+    // No pricing row names CHF yet: the same numbers in CHF are still a conversion.
+    await expect(f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF") })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    // The fixture's legacy EUR room type would refuse the row through trigger 0050.
+    await pool.query(`BEGIN; SET LOCAL session_replication_role=replica;
+      INSERT INTO pms.property_pricing_settings(property_id,currency,pricing_currency_revision) VALUES('${f.scope.propertyId}','CHF',2); COMMIT`);
+    // Edited numbers, or a currency other than the pricing one, still need FX.
+    for (const snapshot of [same("CHF", "2100"), same("USD")])
+      await expect(f.store.save(f.scope, { ...f.command(1), snapshot })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    expect((await f.store.read(f.scope))?.currency).toBe("EUR");
+    await f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF") });
+    expect(await f.store.read(f.scope)).toMatchObject({ currency: "CHF", revision: 2, rooms: [{ currency: "CHF" }] });
+  });
   it("rejects missing/wrong FX and partial or edited multi-room conversion even with owner approval", async () => {
     const f = await fixture(), initial = f.command(), room = initial.snapshot.rooms[0], secondId = randomUUID();
     await pool.query("INSERT INTO pms.room_types(id,property_id,name,base_rate_amount,currency) VALUES($1,$2,'Second',100,'EUR')", [secondId, f.scope.propertyId]);

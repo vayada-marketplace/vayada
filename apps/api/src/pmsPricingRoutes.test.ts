@@ -308,6 +308,98 @@ describe("PMS pricing routes", () => {
     app = await testApp(ports);
   });
 
+  it("sends an Owner's currency change to its own port, and only with the Owner's key (VAY-2390)", async () => {
+    const ports = fakePorts();
+    const change = fakePorts();
+    const build = async (
+      relationship: LinkedResource["relationship"],
+      sessionId: string | undefined,
+      permissions: PermissionKey[],
+    ) => {
+      const owned = Fastify({ logger: false });
+      owned.decorateRequest("authContext", null);
+      owned.addHook("onRequest", async (request) => {
+        request.authContext = {
+          actor: { internalUserId: actorUserId, status: "active", providerIdentity: { sessionId } },
+          selectedOrganization: { organizationId, kind: "hotel_group", status: "active" },
+          membership: {
+            membershipId: "membership-1",
+            roleKey: "hotel_owner",
+            status: "active",
+            permissions,
+          },
+          linkedResources: [
+            link(relationship),
+            { ...link(relationship), product: "hotel_catalog", resourceType: "property" },
+          ],
+          entitlements: [entitlement()],
+          audit: { requestId: "request-1", correlationId: null, source: "api", receivedAt: now },
+        } as unknown as RequestContext;
+      });
+      await owned.register(registerPmsPricingRoutes, {
+        ...ports,
+        currencyChangeCommandPort: change.commandPort,
+        propertyAccessRepository: agencyPropertyAccessRepository,
+      });
+      return owned;
+    };
+    const request = {
+      method: "PUT" as const,
+      url: `/properties/${propertyId}/pricing-source/currency-change`,
+      headers: headers("change-key"),
+      payload: { expectedPricingCurrencyRevision: 1, currency: "CHF" },
+    };
+    const owner: PermissionKey[] = ["pms.operations.manage", "finance.billing.manage"];
+
+    app = await build("owner", "session-1", owner);
+    const changed = await injectJson(app, request);
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body).toMatchObject({
+      outcome: "updated",
+      pricingCurrency: { currency: "CHF" },
+    });
+    expect(change.currencyCalls).toHaveLength(1);
+    await app.close();
+    // Staff with pricing rights, an operator, or no session never reach the port.
+    for (const [relationship, sessionId, permissions] of [
+      ["owner", "session-1", ["pms.operations.manage"]],
+      ["operator", "session-1", owner],
+      ["owner", undefined, owner],
+    ] as const) {
+      app = await build(relationship, sessionId, [...permissions]);
+      expect((await injectJson(app, request)).statusCode).toBe(403);
+      await app.close();
+    }
+    expect(change.currencyCalls).toHaveLength(1);
+    expect(ports.currencyCalls).toHaveLength(0);
+
+    change.commandPort.upsertPropertyPricingCurrency = async () => ({
+      ok: false,
+      error: {
+        code: "pricing_currency_change_blocked",
+        currentRevision: 1,
+        blockers: [
+          { code: "booking_reference", affectedCount: 2 },
+          { code: "channel_connection", affectedCount: 1 },
+          { code: "finance_record", affectedCount: 3 },
+        ],
+      },
+    });
+    app = await build("owner", "session-1", owner);
+    const blocked = await injectJson(app, request);
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.body).toMatchObject({
+      code: "pricing_currency_change_blocked",
+      blockers: [
+        { code: "booking_reference", affectedCount: 2 },
+        { code: "channel_connection", affectedCount: 1 },
+        { code: "finance_record", affectedCount: 3 },
+      ],
+    });
+    await app.close();
+    app = await testApp(ports);
+  });
+
   it("serves narrow source evidence and rejects escaped port scope", async () => {
     const ports = fakePorts();
     app = await testApp(ports);
