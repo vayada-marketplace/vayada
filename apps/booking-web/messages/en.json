@@ -105,6 +105,7 @@
     "nonRefundableDesc": "Non-refundable",
     "off": "-15% OFF",
     "perNightly": "{price} / per night",
+    "youPay": "You pay {price}",
     "includes": "Includes:",
     "dailyBreakfast": "Daily breakfast for {count}",
     "welcomeDrink": "Welcome drink",

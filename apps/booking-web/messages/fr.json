@@ -105,6 +105,7 @@
     "nonRefundableDesc": "Non remboursable",
     "off": "-15% DE RÉDUCTION",
     "perNightly": "{price} / par nuit",
+    "youPay": "Vous payez {price}",
     "includes": "Inclus :",
     "dailyBreakfast": "Petit-déjeuner quotidien pour {count}",
     "welcomeDrink": "Boisson de bienvenue",

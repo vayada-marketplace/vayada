@@ -290,6 +290,8 @@ type MockBookingApisOptions = {
   supportedQuoteParameters?: Partial<typeof publicHotelProfile.hotel.supportedQuoteParameters>;
   supportedLocales?: string[];
   displayCurrencies?: string[];
+  /** VAY-2390: Localization's guest display currency, one of displayCurrencies. */
+  displayDefaultCurrency?: string;
   headerLogoUrl?: string;
   headerSettings?: {
     showContactButton: boolean;
@@ -319,7 +321,8 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
       ...(options.headerLogoUrl ||
       options.headerSettings ||
       options.fontPairing ||
-      options.primaryColor
+      options.primaryColor ||
+      options.displayDefaultCurrency
         ? {
             branding: {
               logoUrl: options.headerLogoUrl ?? null,
@@ -328,6 +331,9 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
               showLanguageSelector: options.headerSettings?.showLanguageSelector ?? true,
               showCurrencySelector: options.headerSettings?.showCurrencySelector ?? true,
               ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
+              ...(options.displayDefaultCurrency
+                ? { displayDefaultCurrency: options.displayDefaultCurrency }
+                : {}),
               heroImage: null,
               heroHeading: null,
               heroSubtext: null,

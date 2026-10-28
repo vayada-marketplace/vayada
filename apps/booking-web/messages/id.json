@@ -105,6 +105,7 @@
     "nonRefundableDesc": "Tidak dapat dikembalikan",
     "off": "-15% DISKON",
     "perNightly": "{price} / per malam",
+    "youPay": "Anda membayar {price}",
     "includes": "Termasuk:",
     "dailyBreakfast": "Sarapan harian untuk {count}",
     "welcomeDrink": "Minuman selamat datang",

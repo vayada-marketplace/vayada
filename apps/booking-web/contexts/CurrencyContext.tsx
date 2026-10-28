@@ -68,7 +68,8 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hotel || !slug) return;
     const stored = localStorage.getItem(getStorageKey(slug));
-    setChosenCurrency(stored || hotel.currency);
+    // VAY-2390: without a saved choice, guests start in the hotel's guest display currency.
+    setChosenCurrency(stored || hotel.displayDefaultCurrency || hotel.currency);
   }, [hotel, slug]);
 
   // Rates only for this hotel's display currencies; a hotel with one currency asks for none.

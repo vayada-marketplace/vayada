@@ -169,6 +169,54 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
+  test(`leads with the guest display currency and says what the guest pays at ${width}px (VAY-2390)`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    await page.addInitScript(
+      ({ slug, version }) =>
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: false }),
+        ),
+      { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+    );
+    await mockBookingApis(page, { displayDefaultCurrency: "USD" });
+    await mockRooms(page);
+    await mockAnyPrice(page);
+    await page.goto(STAY);
+
+    const note = page.getByTestId("approximate-amounts-note");
+    await expect(note).toContainText(
+      "We charge in EUR. Amounts marked ≈ are approximate conversions.",
+    );
+    const choices = page.getByTestId("room-card-deluxe").locator("[data-offer-key]");
+    // €268 at 1.1: what the guest sees first, then what they pay in its place of the night price.
+    await expect(choices.nth(0)).toContainText("≈ US$295");
+    await expect(choices.nth(0)).toContainText("You pay €268");
+    await expect(choices.nth(0)).not.toContainText("per night");
+    await page.screenshot({
+      path: testInfo.outputPath(`room-cards-usd-${width}.png`),
+      fullPage: true,
+    });
+
+    if (width === 1440) {
+      // A guest who picks the hotel currency sees its plain prices, and keeps that choice.
+      const nav = page.locator("nav");
+      await nav.getByRole("button", { name: "USD", exact: true }).click();
+      await nav.getByRole("button", { name: "€ Euro" }).click();
+      await expect(choices.nth(0)).toContainText("€134 / per night");
+      await expect(note).toHaveCount(0);
+      await page.reload();
+      await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
+      await expect(choices.nth(0)).toContainText("€268");
+    }
+    await assertHealthy();
+  });
+}
+
+for (const width of [1440, 390]) {
   test(`names free cancellation non-refundable once its last day has passed at ${width}px (VAY-2392)`, async ({
     page,
   }, testInfo) => {

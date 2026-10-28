@@ -6,6 +6,7 @@ import { CurrencyProvider, useCurrency } from "./CurrencyContext";
 const hotel = {
   currency: "EUR",
   displayCurrencies: ["EUR", "USD", "JPY"],
+  displayDefaultCurrency: null as string | null,
   headerSettings: { showCurrencySelector: true },
 };
 const get = vi.fn();
@@ -34,6 +35,7 @@ async function renderCurrency(stored: string | null = null) {
 
 afterEach(() => {
   hotel.displayCurrencies = ["EUR", "USD", "JPY"];
+  hotel.displayDefaultCurrency = null;
   hotel.headerSettings.showCurrencySelector = true;
   get.mockReset();
   vi.unstubAllGlobals();
@@ -109,5 +111,26 @@ it("keeps the hotel currency when the hotel switched the selector off", async ()
   expect(get).not.toHaveBeenCalled();
   expect(currency().selectedCurrency).toBe("EUR");
   expect(currency().availableCurrencies).toEqual(["EUR"]);
+  unmount();
+});
+
+it("opens in the hotel's guest display currency until the guest picks another (VAY-2390)", async () => {
+  get.mockResolvedValue(rates);
+  hotel.displayDefaultCurrency = "USD";
+  const first = await renderCurrency();
+  expect(first.currency().selectedCurrency).toBe("USD");
+  expect(first.currency().approximate(610.25, "EUR")).toBe("≈ US$671");
+  first.unmount();
+  const returning = await renderCurrency("JPY");
+  expect(returning.currency().selectedCurrency).toBe("JPY");
+  returning.unmount();
+});
+
+it("keeps the hotel currency while the guest display currency has no rate (VAY-2390)", async () => {
+  get.mockRejectedValue(new Error("offline"));
+  hotel.displayDefaultCurrency = "USD";
+  const { currency, unmount } = await renderCurrency();
+  expect(currency().selectedCurrency).toBe("EUR");
+  expect(currency().approximate(610.25, "EUR")).toBeNull();
   unmount();
 });

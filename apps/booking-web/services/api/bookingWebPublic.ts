@@ -32,6 +32,7 @@ export type BookingWebPublicHotelResponse = {
       showLanguageSelector?: boolean;
       showCurrencySelector?: boolean;
       displayCurrencies?: string[];
+      displayDefaultCurrency?: string;
       heroImage: string | null;
       heroHeading: string | null;
       heroSubtext: string | null;
@@ -154,6 +155,8 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     currency: hotel.defaultCurrency,
     // Display only: quotes and charges stay in the hotel currency.
     displayCurrencies: hotel.branding?.displayCurrencies ?? [hotel.defaultCurrency],
+    // VAY-2390: the guest display currency the hotel picked; guests see it first, as ≈ amounts.
+    displayDefaultCurrency: hotel.branding?.displayDefaultCurrency ?? null,
     heroImage,
     images,
     amenities: hotel.amenities,
