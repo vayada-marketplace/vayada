@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   GuestAddonCard,
+  GuestAddonDayChips,
   GuestAddonDetail,
+  GuestAddonScheduledLine,
   formatGuestPrice,
   guestAddonAddClass,
   guestAddonCategories,
   guestAddonPrimaryClass,
+  guestAddonScheduleText,
   guestAddonText,
   guestAddonUnit,
 } from "./GuestAddon";
@@ -34,6 +37,10 @@ export type AddonEditorValues = {
   maxQuantity: string;
   perPerson: boolean;
   perNight: boolean;
+  /** VAY-2391: when it happens. A per-night price is always "daily", and "daily" needs one. */
+  scheduleMode: AddonScheduleMode;
+  /** ISO weekdays (1 Monday … 7 Sunday) a guest can pick for "guest_pick". */
+  bookableWeekdays: number[];
   photos: AddonPhoto[];
   ownershipKind: "property" | "partner";
   partnerCommissionRate: string;
@@ -53,6 +60,8 @@ export function emptyAddonValues(currency: string): AddonEditorValues {
     maxQuantity: "1",
     perPerson: false,
     perNight: false,
+    scheduleMode: "guest_pick",
+    bookableWeekdays: [...ADDON_WEEKDAYS],
     photos: [],
     ownershipKind: "property",
     partnerCommissionRate: "",
@@ -105,6 +114,71 @@ export type AddonLeadTimeHours = (typeof addonLeadTimes)[number][0];
 export function addonLeadTimeNoticeKey(hours: number | string | null | undefined) {
   return addonLeadTimes.find(([value]) => String(value) === String(hours))?.[2] ?? null;
 }
+/** VAY-2391: when an add-on happens, in the order the editor shows them, with each one's label and
+ * the line under the choice. */
+export const addonScheduleModes = [
+  ["arrival", "addons.editor.schedule.arrival", "addons.editor.schedule.arrivalHint"],
+  ["departure", "addons.editor.schedule.departure", "addons.editor.schedule.departureHint"],
+  ["guest_pick", "addons.editor.schedule.guestPick", "addons.editor.schedule.guestPickHint"],
+  ["daily", "addons.editor.schedule.daily", "addons.editor.schedule.dailyHint"],
+  ["anytime", "addons.editor.schedule.anytime", "addons.editor.schedule.anytimeHint"],
+] as const;
+export type AddonScheduleMode = (typeof addonScheduleModes)[number][0];
+/** ISO weekdays: 1 is Monday, 7 is Sunday. */
+export const ADDON_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
+/**
+ * The mode for these values. A per-night price is always every day and every day needs one (as
+ * the API requires). Otherwise the host's choice, `chosen`, holds; without one the category picks
+ * (the 0525 backfill and the API's default): the arrival day for transport, else the guest picks.
+ */
+export function addonScheduleFor(
+  values: Pick<AddonEditorValues, "perNight" | "category">,
+  chosen: AddonScheduleMode | null,
+): AddonScheduleMode {
+  if (values.perNight) return "daily";
+  if (chosen && chosen !== "daily") return chosen;
+  return values.category === "transport" ? "arrival" : "guest_pick";
+}
+// The preview's example stay: Tuesday 3 to Friday 6 November, three nights; a week from Tuesday 3
+// when the guest picks a day, so every set of weekdays has a night in it.
+const exampleDay = (offset: number) => new Date(Date.UTC(2026, 10, 3 + offset));
+const exampleDate = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+const exampleWeekday = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "UTC" });
+const exampleLabel = (offset: number) =>
+  `${exampleWeekday.format(exampleDay(offset))} ${exampleDate.format(exampleDay(offset))}`;
+
+/** The schedule a guest sees once the add-on is added, for the example stay. */
+function SchedulePreview({ values }: { values: AddonEditorValues }) {
+  const text = guestAddonScheduleText;
+  if (values.scheduleMode === "guest_pick") {
+    // The first three nights it can be booked on; the check-out day is never one.
+    const days = Array.from({ length: 7 }, (_, offset) => offset)
+      .filter((offset) => values.bookableWeekdays.includes(exampleDay(offset).getUTCDay() || 7))
+      .slice(0, 3)
+      .map((offset) => ({
+        date: String(offset),
+        weekday: exampleWeekday.format(exampleDay(offset)),
+        day: exampleDate.format(exampleDay(offset)),
+      }));
+    return (
+      <GuestAddonDayChips legend={text.whichDay} days={days} selected={days[1]?.date ?? null} />
+    );
+  }
+  const [line, sub] =
+    values.scheduleMode === "arrival"
+      ? [text.arrivalDay(exampleLabel(0)), text.scheduledAutomatically]
+      : values.scheduleMode === "departure"
+        ? [text.departureDay(exampleLabel(3)), text.scheduledAutomatically]
+        : values.scheduleMode === "daily"
+          ? [text.everyDay, text.nights(3)]
+          : [text.anytime, text.noDateNeeded];
+  return <GuestAddonScheduledLine line={line} sub={sub} />;
+}
+
 // Fields under "More options"; opened when they hold values or have errors.
 const optionalFields = [
   "maxQuantity",
@@ -249,6 +323,7 @@ export function AddonGuestPreview({
 
 export function AddonEditor({
   translate,
+  locale,
   initialValues,
   currency,
   editing,
@@ -256,6 +331,8 @@ export function AddonEditor({
   onCancel,
 }: {
   translate?: Translate;
+  /** The host's language, for the weekday names. */
+  locale?: string;
   initialValues: AddonEditorValues;
   currency: string;
   editing: boolean;
@@ -266,6 +343,19 @@ export function AddonEditor({
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // The host's choice of when it happens (a saved add-on's own); until there is one, the category
+  // and price pick it. It survives a detour through a per-night price.
+  const [chosenMode, setChosenMode] = useState<AddonScheduleMode | null>(
+    editing ? initialValues.scheduleMode : null,
+  );
+  const withSchedule = (next: AddonEditorValues) => ({
+    ...next,
+    scheduleMode: addonScheduleFor(next, chosenMode),
+  });
+  const weekdayName = (day: number) =>
+    new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(
+      new Date(Date.UTC(2026, 10, 1 + day)),
+    );
   const [moreOpen, setMoreOpen] = useState(
     initialValues.ownershipKind === "partner" ||
       ["duration", "leadTimeHours", "location", "maxGuests"].some(
@@ -402,7 +492,7 @@ export function AddonEditor({
                       name="addon-category"
                       className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                       checked={values.category === category}
-                      onChange={() => setValues((v) => ({ ...v, category }))}
+                      onChange={() => setValues((v) => withSchedule({ ...v, category }))}
                     />
                     {t(`addons.category.${category}`)}
                   </label>
@@ -539,7 +629,7 @@ export function AddonEditor({
                       aria-label={t(label)}
                       className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
                       checked={values.perPerson === perPerson && values.perNight === perNight}
-                      onChange={() => setValues((v) => ({ ...v, perPerson, perNight }))}
+                      onChange={() => setValues((v) => withSchedule({ ...v, perPerson, perNight }))}
                     />
                     <span className="block font-medium text-gray-900">{t(label)}</span>
                     <span className="mt-1 block text-xs text-gray-500">{t(description)}</span>
@@ -557,6 +647,103 @@ export function AddonEditor({
                   ),
                 })}
               </p>
+            </div>
+            <div className="space-y-3 rounded-xl border border-gray-200 p-4">
+              <fieldset>
+                <legend className="mb-2 text-xs font-medium text-gray-800">
+                  {t("addons.editor.schedule.title")}
+                  <span
+                    aria-hidden="true"
+                    className="ml-1.5 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700"
+                  >
+                    {t("addons.editor.schedule.new")}
+                  </span>
+                </legend>
+                <div className="flex flex-wrap gap-2">
+                  {addonScheduleModes.map(([mode, label]) => {
+                    // A per-night price is every day; every day needs a per-night price.
+                    const allowed = (mode === "daily") === values.perNight;
+                    const checked = values.scheduleMode === mode;
+                    return (
+                      <label
+                        key={mode}
+                        title={
+                          allowed
+                            ? undefined
+                            : t(
+                                values.perNight
+                                  ? "addons.editor.schedule.perNightOnly"
+                                  : "addons.editor.schedule.dailyNeedsPerNight",
+                              )
+                        }
+                        className={`relative rounded-full border px-3.5 py-1.5 text-sm focus-within:ring-2 focus-within:ring-primary-500 ${checked ? "border-primary-500 bg-primary-50 text-primary-700" : allowed ? "cursor-pointer border-gray-200 text-gray-700 hover:border-gray-300" : "cursor-not-allowed border-gray-100 text-gray-400"}`}
+                      >
+                        <input
+                          type="radio"
+                          name="addon-schedule-mode"
+                          className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                          checked={checked}
+                          disabled={!allowed}
+                          onChange={() => {
+                            setChosenMode(mode);
+                            setValues((v) => ({ ...v, scheduleMode: mode }));
+                          }}
+                        />
+                        {t(label)}
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+              <p className="text-xs text-gray-500">
+                {t(
+                  values.perNight
+                    ? "addons.editor.schedule.perNightOnly"
+                    : (addonScheduleModes.find(([mode]) => mode === values.scheduleMode)?.[2] ??
+                        "addons.editor.schedule.guestPickHint"),
+                )}
+              </p>
+              {!values.perNight && (
+                <p className="text-xs text-gray-400">
+                  {t("addons.editor.schedule.dailyNeedsPerNight")}
+                </p>
+              )}
+              {values.scheduleMode === "guest_pick" && (
+                <div className="border-t border-gray-200 pt-3">
+                  <fieldset>
+                    <legend className="mb-2 text-xs font-medium text-gray-800">
+                      {t("addons.editor.schedule.bookableOn")}
+                    </legend>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ADDON_WEEKDAYS.map((day) => {
+                        const on = values.bookableWeekdays.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            aria-pressed={on}
+                            // At least one day stays bookable.
+                            disabled={on && values.bookableWeekdays.length === 1}
+                            onClick={() => {
+                              // Choosing the days is choosing that the guest picks one.
+                              setChosenMode("guest_pick");
+                              setValues((v) => ({
+                                ...v,
+                                bookableWeekdays: on
+                                  ? v.bookableWeekdays.filter((value) => value !== day)
+                                  : [...v.bookableWeekdays, day].sort((a, b) => a - b),
+                              }));
+                            }}
+                            className={`min-w-12 rounded-full border px-2.5 py-1.5 text-sm font-medium transition-colors ${on ? "border-primary-600 bg-primary-600 text-white" : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"}`}
+                          >
+                            {weekdayName(day)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                </div>
+              )}
             </div>
             <details
               open={moreOpen}
@@ -674,15 +861,51 @@ export function AddonEditor({
               </div>
               <div className="mt-3">
                 {previewTab === "list" ? (
-                  <GuestAddonCard
-                    name={view.name}
-                    description={view.description}
-                    photo={view.photos[0] ?? null}
-                    price={view.price}
-                    unit={view.unit}
-                    action={<span className={guestAddonAddClass}>{guestAddonText.add}</span>}
-                    onOpenDetails={() => setPreviewTab("detail")}
-                  />
+                  <>
+                    <GuestAddonCard
+                      name={view.name}
+                      description={view.description}
+                      photo={view.photos[0] ?? null}
+                      price={view.price}
+                      unit={view.unit}
+                      action={<span className={guestAddonAddClass}>{guestAddonText.add}</span>}
+                      onOpenDetails={() => setPreviewTab("detail")}
+                    />
+                    {/* VAY-2391: the card once added, with when it happens. */}
+                    <h4 className="mt-5 text-xs font-semibold tracking-widest text-gray-500">
+                      {t("addons.editor.schedule.afterTappingAdd")}
+                    </h4>
+                    <div className="mt-2 rounded-2xl border-2 border-gray-900 bg-white p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-lg font-bold text-gray-900">
+                          {view.price}
+                          <span className="text-xs font-normal text-gray-500"> {view.unit}</span>
+                        </p>
+                        <span aria-hidden="true" className="flex items-center gap-1 text-gray-400">
+                          {["−", "1", "+", "×"].map((sign) => (
+                            <span
+                              key={sign}
+                              className={
+                                sign === "1"
+                                  ? "w-6 text-center text-sm font-semibold text-gray-900"
+                                  : "flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 text-xs"
+                              }
+                            >
+                              {sign}
+                            </span>
+                          ))}
+                        </span>
+                      </div>
+                      <SchedulePreview values={values} />
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      {t(
+                        values.scheduleMode === "guest_pick"
+                          ? "addons.editor.schedule.pickNote"
+                          : "addons.editor.schedule.fixedNote",
+                      )}
+                    </p>
+                  </>
                 ) : (
                   <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-200">
                     <GuestAddonDetail
@@ -831,4 +1054,27 @@ export const AddonEditorMessages = {
   "addons.preview.inert": "Buttons in the preview don’t do anything.",
   "addons.preview.close": "Close guest preview",
   "addons.preview.done": "Done",
+  "addons.editor.schedule.title": "When does it happen?",
+  "addons.editor.schedule.new": "New",
+  "addons.editor.schedule.arrival": "Arrival day",
+  "addons.editor.schedule.departure": "Departure day",
+  "addons.editor.schedule.guestPick": "Guest picks a day",
+  "addons.editor.schedule.daily": "Every day",
+  "addons.editor.schedule.anytime": "Anytime",
+  "addons.editor.schedule.arrivalHint":
+    "Scheduled automatically on the check-in day. Guests aren’t asked.",
+  "addons.editor.schedule.departureHint":
+    "Scheduled automatically on the check-out day. Guests aren’t asked.",
+  "addons.editor.schedule.guestPickHint": "Guests choose a day of their stay when they add it.",
+  "addons.editor.schedule.dailyHint": "Applies to each day of the stay. Guests aren’t asked.",
+  "addons.editor.schedule.anytimeHint": "No date needed. Guests aren’t asked.",
+  "addons.editor.schedule.perNightOnly":
+    "Priced per night, so it happens every day of the stay. Guests aren’t asked.",
+  "addons.editor.schedule.dailyNeedsPerNight": "Every day goes with a per-night price.",
+  "addons.editor.schedule.bookableOn": "Bookable on",
+  "addons.editor.schedule.afterTappingAdd": "AFTER TAPPING ADD",
+  "addons.editor.schedule.pickNote":
+    "One tap for the day. Only days it can be booked on are offered, never the check-out day.",
+  "addons.editor.schedule.fixedNote":
+    "Guests have nothing to answer: just this line under the card.",
 };

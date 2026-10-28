@@ -4,8 +4,10 @@ import { useTranslation } from "@/lib/i18n";
 import { useState, type DragEvent } from "react";
 import {
   ADDON_CATEGORIES,
+  ADDON_WEEKDAYS,
   AddonEditor,
   AddonGuestPreview,
+  addonScheduleFor,
   addonLeadTimeNoticeKey,
   emptyAddonValues,
   type AddonEditorValues,
@@ -67,6 +69,17 @@ function toDraft(addon: AddonItem, currency: string): AddonItemFormValues {
     maxQuantity: String(addon.maxQuantity ?? 1),
     perPerson: addon.perPerson === true,
     perNight: addon.perNight === true,
+    // VAY-2391: an API from before the field reads like the 0525 backfill.
+    scheduleMode:
+      addon.scheduleMode ??
+      addonScheduleFor(
+        {
+          perNight: addon.perNight === true,
+          category: addon.category as AddonEditorValues["category"],
+        },
+        null,
+      ),
+    bookableWeekdays: addon.bookableWeekdays ?? [...ADDON_WEEKDAYS],
     partnerCommissionRate: addon.partnerCommissionRate ?? "",
     photos:
       addon.photos ??
@@ -613,6 +626,7 @@ export default function AddonsTab({
       {isEditorOpen && (
         <AddonEditor
           translate={t}
+          locale={locale}
           initialValues={draft}
           currency={propertyCurrency}
           editing={Boolean(editingAddon)}
