@@ -5,8 +5,14 @@ import {
   combinable,
   decodePicks,
   encodePick,
+  evenSplit,
+  fitsRoom,
+  mostRooms,
+  moveAdult,
+  pickIdentity,
   readPickDraft,
   roomGuestProblem,
+  roomGuests,
   savePickDraft,
   splitParty,
   type RoomPick,
@@ -38,6 +44,54 @@ describe("splitParty", () => {
       { adults: 1, children: 1 },
       { adults: 1, children: 1 },
     ]);
+  });
+});
+
+describe("who sleeps where (VAY-2393)", () => {
+  it("splits adults evenly by default", () => {
+    expect(evenSplit(4, 2)).toEqual([2, 2]);
+    expect(evenSplit(5, 2)).toEqual([3, 2]);
+    expect(evenSplit(2, 4)).toEqual([1, 1]);
+  });
+
+  it("puts children with the fewest adults of the group's own split", () => {
+    expect(roomGuests([3, 1], 1)).toEqual([
+      { adults: 3, children: 0 },
+      { adults: 1, children: 1 },
+    ]);
+    expect(roomGuests([1, 3], 2)).toEqual([
+      { adults: 1, children: 1 },
+      { adults: 3, children: 1 },
+    ]);
+  });
+
+  it("moves one adult at a time and keeps the total and an adult in every room", () => {
+    expect(moveAdult([2, 2], 0, 1)).toEqual([3, 1]);
+    expect(moveAdult([3, 1], 0, -1)).toEqual([2, 2]);
+    expect(moveAdult([3, 1], 1, 1)).toEqual([2, 2]);
+    // More in room 1 comes from the fullest other room, fewer goes to the emptiest.
+    expect(moveAdult([1, 3, 2], 0, 1)).toEqual([2, 2, 2]);
+    expect(moveAdult([3, 2, 1], 0, -1)).toEqual([2, 2, 2]);
+    // Not possible: every other room is down to one adult, or this one is.
+    expect(moveAdult([3, 1], 0, 1)).toEqual([3, 1]);
+    expect(moveAdult([3, 1], 1, -1)).toEqual([3, 1]);
+  });
+
+  it("offers up to 4 rooms, more only when the group needs them, never more than adults", () => {
+    expect(mostRooms(10, 1)).toBe(4);
+    expect(mostRooms(3, 1)).toBe(3);
+    expect(mostRooms(12, 6)).toBe(6);
+    expect(mostRooms(40, 20)).toBe(9);
+  });
+
+  it("checks one room's guests against its limits like the API", () => {
+    const limits = { maxGuests: 3, maxAdults: 3, maxChildren: 1 };
+    expect(fitsRoom(limits, { adults: 3, children: 0 })).toBe(true);
+    expect(fitsRoom(limits, { adults: 4, children: 0 })).toBe(false);
+    expect(fitsRoom(limits, { adults: 2, children: 2 })).toBe(false);
+    expect(fitsRoom(limits, { adults: 3, children: 1 })).toBe(false);
+    expect(fitsRoom(undefined, { adults: 9, children: 0 })).toBe(true);
+    expect(fitsRoom(undefined, { adults: 0, children: 1 })).toBe(false);
   });
 });
 
@@ -104,21 +158,28 @@ describe("picks in the /book link", () => {
 
 describe("pick drafts", () => {
   afterEach(() => sessionStorage.clear());
-  const pick: RoomPick = {
-    adults: 2,
-    children: 0,
-    roomTypeId: "room",
-    publicOfferKey: KEY,
-    totalMinor: "29800",
-    currency: "EUR",
-  };
+  const pick: RoomPick = { roomTypeId: "room", publicOfferKey: KEY };
+  const stay = { checkIn: "2026-11-10", checkOut: "2026-11-12", promoCode: null };
 
-  it("keeps a tab's picks for the same search only", () => {
-    savePickDraft("hotel", "search-1", [pick, null]);
-    expect(readPickDraft("hotel", "search-1")).toEqual([pick, null]);
-    expect(readPickDraft("hotel", "search-2")).toBeNull();
-    sessionStorage.setItem("roomPicks:hotel", JSON.stringify({ identity: "x", picks: [{}] }));
-    expect(readPickDraft("hotel", "x")).toBeNull();
+  it("keeps a tab's split and picks for the same stay only", () => {
+    const identity = pickIdentity(stay);
+    savePickDraft("hotel", identity, { split: [3, 1], picks: [pick, null] });
+    expect(readPickDraft("hotel", identity)).toEqual({ split: [3, 1], picks: [pick, null] });
+    expect(readPickDraft("hotel", pickIdentity({ ...stay, checkOut: "2026-11-13" }))).toBeNull();
+    expect(readPickDraft("hotel", pickIdentity({ ...stay, promoCode: "SUMMER" }))).toBeNull();
+  });
+
+  it("ignores a draft it can't trust", () => {
+    for (const draft of [
+      { identity: "x", split: [2], picks: [{}] },
+      { identity: "x", split: [0, 2], picks: [] },
+      { identity: "x", picks: [] },
+      // VAY-2320's drafts had no split.
+      { identity: "x", picks: [{ ...pick, adults: 2, children: 0 }] },
+    ]) {
+      sessionStorage.setItem("roomPicks:hotel", JSON.stringify(draft));
+      expect(readPickDraft("hotel", "x")).toBeNull();
+    }
   });
 });
 
