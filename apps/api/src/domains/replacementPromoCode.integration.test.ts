@@ -215,11 +215,19 @@ describe.skipIf(!url)("current Booking promo code owner", () => {
       [f.input.propertyId],
     );
     expect(await f.read()).toBeNull();
+    // Before the hotel has a pricing currency, Booking settings' default (LKR here) stands in.
     const priceless = await fixture();
     await pool.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [
       priceless.input.propertyId,
     ]);
     expect(await priceless.read()).toBeNull();
+    expect(await priceless.read({ ...priceless.input, currency: "LKR" })).toMatchObject({
+      code: "SAVE",
+    });
+    await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [
+      priceless.input.propertyId,
+    ]);
+    expect(await priceless.read({ ...priceless.input, currency: "LKR" })).toBeNull();
   });
   it("reads and locks the pricing currency on the ordinary API login", async () => {
     const f = await fixture("USD"),
