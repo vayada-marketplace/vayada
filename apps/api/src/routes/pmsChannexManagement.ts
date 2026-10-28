@@ -32,8 +32,8 @@ export type PmsChannexManagementRoutesOptions = {
   publishedOfferProvisioningPropertyId?: string;
   /** VAY-2108 D7: the claimed scope's owned hotels may provision their published offers. */
   publishedOfferProvisioningPropertyIds?: readonly string[];
-  /** VAY-2108 D7: under the claimed ARI scope only these hotels get ARI commands; plain
-   * provisioning, inventory rules and ARI alert recovery are refused for everyone (the claimed
+  /** VAY-2108 D7: under the claimed ARI scope only these hotels get ARI and provisioning
+   * commands; inventory rules and ARI alert recovery are refused for everyone (the claimed
    * worker never claims those jobs). */
   claimedOwnedPropertyIds?: readonly string[];
 };
@@ -272,10 +272,8 @@ export async function registerPmsChannexManagementRoutes(
         !isMutating(options.capabilityModes, input.operationType) ||
         (options.connectionOnly && input.operationType === "disable") ||
         (options.claimedOwnedPropertyIds &&
-          ((input.operationType === "sync_ari" &&
+          ((["sync_ari", "provision"].includes(input.operationType) &&
             !options.claimedOwnedPropertyIds.includes(request.params.propertyId)) ||
-            // Plain provisioning (room types) is D7b; only the published-offer route provisions.
-            input.operationType === "provision" ||
             input.operationType === "update_inventory_rules"))
       ) {
         return reply.code(409).send({ code: "channex_capability_not_mutating" });

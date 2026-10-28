@@ -62,6 +62,53 @@ describe("target Channex management plans", () => {
     expect(title).not.toMatch(/[\uD800-\uDFFF]/u);
   });
 
+  it("provisions the missing room types of a claimed hotel and nothing else (VAY-2108 D7b)", async () => {
+    const db = new FakePool("multi_room");
+    const port = createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: db,
+      bookingRevisionHandoff: vi.fn(),
+    });
+    const plan = await port.plan(job("provision"));
+    expect(plan.externalPropertyId).toBe("external-1");
+    expect(plan.requests.map((request) => [request.method, request.path, request.capture?.kind])).toEqual([
+      ["GET", "/api/v1/room_types", "room_type_list"],
+      ["POST", "/api/v1/room_types", "room_type"],
+      ["GET", "/api/v1/room_types", "room_type_list"],
+      ["POST", "/api/v1/room_types", "room_type"],
+    ]);
+    expect(plan.requests[1]!.body).toEqual({
+      room_type: {
+        property_id: "external-1",
+        title: "Deluxe [Vayada:room-1]",
+        count_of_rooms: 2,
+        occ_adults: 1,
+        occ_children: 0,
+        occ_infants: 0,
+        default_occupancy: 1,
+        room_kind: "room",
+      },
+    });
+    expect(plan.requests[1]!.skipIf).toEqual({ kind: "room_type", roomTypeId: "room-1" });
+    // Only rooms without an active mapping and with a unit; rate plans are never provisioned here.
+    expect(db.sql()).toContain("mapping.id IS NULL OR mapping.status <> 'active'");
+    expect(db.sql()).toContain("HAVING count(unit.id) > 0");
+    expect(db.sql()).toContain("occupancy_limits ->> 'adults'");
+    expect(db.sql()).toContain("occupancy_limits ->> 'children'");
+    expect(db.sql()).not.toContain("FROM pms.rate_plans");
+    // A room whose only mapping is disabled or stale fails the job instead of silently passing.
+    await expect(
+      createPgChannexManagementPlanPort({
+        connectionString: "postgresql://target",
+        pool: new FakePool("stale_mapping"),
+        bookingRevisionHandoff: vi.fn(),
+      }).plan(job("provision")),
+    ).rejects.toMatchObject({ code: "CHANNEX_MAPPING_REPAIR_REQUIRED" });
+    await expect(
+      port.plan({ ...job("provision"), input: { ...job("provision").input, mealRatePlanId: "meal-1" } }),
+    ).rejects.toThrow("Pricing is unavailable");
+  });
+
   it.each([
     ["historical", "sync_bookings", "Channex binding claim is not active"],
     ["retained", "enable", "A retained Channex binding claim requires audited repair"],
@@ -101,6 +148,7 @@ type Mode =
   | "retained"
   | "provision"
   | "multi_room"
+  | "stale_mapping"
   | "ari"
   | "ari_rate_gated"
   | "ari_disabled";
@@ -198,6 +246,7 @@ class FakePool {
           countOfRooms: 2,
           adults: 1,
           children: 0,
+          mappingStatus: this.mode === "stale_mapping" ? "stale" : null,
         },
       ];
       if (this.mode === "multi_room") {

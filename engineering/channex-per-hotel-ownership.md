@@ -163,12 +163,18 @@ The OTA has already confirmed the booking, so a refusal must never be silent (VA
    under the claimed DB scope (0519: new RLS helper, the pinned scope functions untouched, digests
    re-pinned) after the platform's claimed grant and preflight. It claims `sync_ari` and
    `provision` jobs only for the owned hotels that pass the gate, plus unbound `enable` jobs.
-   Creating the missing Channex room types of a hotel that pressed "Enable connection" is the
-   D7b follow-up: the worker login may lock but not insert `pms.channel_room_type_mappings`, so
-   it needs a migration (restrictive insert policy on the claimed gate) and a platform grant
-   first; a taken-over hotel adopts its existing rooms through the attach step and needs none of
-   that. Rate plans come only from published offers, which the owned hotels may provision through
-   the published-offer route. The
+   Provisioning (D7b) creates the missing Channex room types of a hotel that pressed "Enable
+   connection": rooms without any mapping row, looked up by exact provider title first. The
+   worker records each mapping through the 0523 insert policy (owned hotel, connected binding,
+   active room, insert only: 0408's lock-only policy still forbids edits) with the INSERT grant
+   from the platform's claimed grant mode. Order: 0523 first, then the grant, then an image
+   that asserts the claimed scope; the preflight refuses the grant without the policy
+   (`claimed_grant_before_policy`) and, once the scope is asserted, the policy without the grant
+   (`grant_missing`). A room whose only mapping is disabled or stale fails the job
+   (`CHANNEX_MAPPING_REPAIR_REQUIRED`) instead of passing silently, because the worker cannot
+   refresh it. A taken-over hotel adopts its existing rooms through the attach step, so its plan
+   is empty. Rate plans come only from published offers, which the
+   owned hotels provision through the published-offer route. The
    ARI schedule enqueues a full sync for each owned, claimed hotel whenever its pricing, rooms,
    mappings, inventory or closures change, or the local date moves. Then the initial offer ARI
    with `stop_sell=true`, activation, and ongoing delivery

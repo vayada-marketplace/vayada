@@ -3,6 +3,7 @@ import type pg from "pg";
 import {
   CHANNEX_MANAGEMENT_WORKER_ROLE,
   channexManagementWorkerPrivileges,
+  optionalChannexClaimedGrants,
   optionalChannexDeliveryRelations,
 } from "./channexManagementWorkerPrivileges.js";
 
@@ -10,10 +11,13 @@ import {
 // delivery scope (0521), both checked on PG16 and PG17. This image lists the 0520 delivery tables
 // in its privilege matrix, so it needs 0519 and 0520 (cloud job 6dc8de37 computed both values on
 // that base); accepting both lets it start on either side of 0521, so it is released before 0521
-// and stays a safe rollback target once 0521 ships.
+// and stays a safe rollback target once 0521 ships. VAY-2108 D7b adds the value after 0523
+// (claimed room-type provisioning: jobs shape and mapping insert policy; cloud job 25364544 on
+// 0521 + 0523, PG16 = PG17), so this image also starts once 0523 is applied.
 const POLICY_DIGESTS = new Set([
   "f9a53a613884875be8387bfb59bf5772038eda202d0f213c32854585d247b7be",
   "4b14279a210c9f240ea9fefbc8c78dd3886dcccd5e42c1f7f67a436fe6685e3a",
+  "0c5495ae7663bb77912a9928395df91c47aa25e1d0c0f9f19d952ab8c982c33c",
 ]);
 // Shared trigger catalog over the privilege-matrix relations plus the pinned helpers: with 0519
 // and 0520 (the delivery tables' guard triggers are attested through the matrix), and with 0521's
@@ -167,6 +171,41 @@ export async function assertChannexManagementWorkerBoundary(
     )
       fail("column_privileges");
   }
+  // VAY-2108: the claimed scope is exactly ARI plus published-offer provisioning. Its SELECT comes
+  // from the platform's claimed grant, never the matrix (this preflight gates every next-api
+  // start); without it the claimed helper grants nothing. The grant may land before an image asks
+  // for claimedScope, so only an explicit claimedScope requires it.
+  const readable = (
+    await client.query(
+      "SELECT has_table_privilege($1,'platform.channex_management_worker_claimed_operations','SELECT') AS ok",
+      [role],
+    )
+  ).rows[0]?.ok;
+  const claimed = readable
+    ? (
+        await client.query(
+          "SELECT operation_type FROM platform.channex_management_worker_claimed_operations ORDER BY 1",
+        )
+      ).rows
+        .map((row) => row.operation_type)
+        .join(",")
+    : "";
+  if (claimed !== "provision,sync_ari" && (options.claimedScope || claimed !== ""))
+    fail("claimed_scope_mismatch");
+  // D7b: a claimed-only grant must never outrun its insert policy (0523); until the policy exists
+  // 0408's scope policy alone would admit the write.
+  for (const [name, privileges] of optionalChannexClaimedGrants)
+    for (const privilege of privileges)
+      if (
+        columnGrants.some((row) => row.name === name && row.privilege === privilege) &&
+        !policyRows.some(
+          (row) =>
+            `${row.schemaname}.${row.tablename}` === name &&
+            row.policyname === "channex_management_worker_insert" &&
+            row.cmd === privilege,
+        )
+      )
+        fail("claimed_grant_before_policy");
   for (const [name, privileges] of Object.entries(channexManagementWorkerPrivileges)) {
     const deliveryPending = optionalChannexDeliveryRelations.has(name) && !options.offerDelivery;
     if (
@@ -179,6 +218,9 @@ export async function assertChannexManagementWorkerBoundary(
       fail("rls_disabled");
     if (options.allowMissingGrants || deliveryPending) continue;
     for (const [privilege, columns] of Object.entries(privileges)) {
+      // D7b: a claimed-only grant is required only when the claimed scope is asserted.
+      if (!options.claimedScope && optionalChannexClaimedGrants.get(name)?.includes(privilege))
+        continue;
       if (
         columns === true
           ? !tableGrants.some((row) => row.name === name && row.privilege === privilege)
@@ -220,27 +262,6 @@ export async function assertChannexManagementWorkerBoundary(
     ).rows;
     if (rows.length !== 1 || rows[0].operation_type !== "enable") fail("operation_scope_mismatch");
   }
-  // VAY-2108: the claimed scope is exactly ARI plus published-offer provisioning. Its SELECT comes
-  // from the platform's claimed grant, never the matrix (this preflight gates every next-api
-  // start); without it the claimed helper grants nothing. The grant may land before an image asks
-  // for claimedScope, so only an explicit claimedScope requires it.
-  const readable = (
-    await client.query(
-      "SELECT has_table_privilege($1,'platform.channex_management_worker_claimed_operations','SELECT') AS ok",
-      [role],
-    )
-  ).rows[0]?.ok;
-  const claimed = readable
-    ? (
-        await client.query(
-          "SELECT operation_type FROM platform.channex_management_worker_claimed_operations ORDER BY 1",
-        )
-      ).rows
-        .map((row) => row.operation_type)
-        .join(",")
-    : "";
-  if (claimed !== "provision,sync_ari" && (options.claimedScope || claimed !== ""))
-    fail("claimed_scope_mismatch");
 }
 
 // Attest transitive invoker functions, enabled triggers and the invoker view as

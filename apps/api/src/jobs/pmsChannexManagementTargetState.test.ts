@@ -108,6 +108,9 @@ describe("PMS Channex management target state", () => {
       { now, retryAt: null },
     );
     expect(client.sql()).toContain("pms.channel_room_type_mappings");
+    // VAY-2108 D7b: a provisioning job only adds room mappings (0523 insert policy, 0408 lock-only).
+    expect(client.sql()).toContain("ON CONFLICT (connection_id, room_type_id) DO NOTHING");
+    expect(client.sql().split("pms.channel_rate_plan_mappings")[0]).not.toContain("EXCLUDED");
     expect(client.sql()).toContain("pms.channel_rate_plan_mappings");
     expect(client.sql()).toContain("AND connection_id = (");
     expect(client.sql()).toMatch(/channel_rate_plan_mappings[\s\S]*provider = 'channex'/);
