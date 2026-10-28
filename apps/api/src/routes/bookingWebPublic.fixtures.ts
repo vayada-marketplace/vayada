@@ -7,7 +7,6 @@ const rejectUnexpectedCall = (method: keyof BookingWebCheckoutAdapter) => (): ne
 export const unusedBookingWebCheckoutAdapter = {
   getCheckoutConfig: rejectUnexpectedCall("getCheckoutConfig"),
   quoteBooking: rejectUnexpectedCall("quoteBooking"),
-  createBooking: rejectUnexpectedCall("createBooking"),
   confirmAuthorization: rejectUnexpectedCall("confirmAuthorization"),
   getStatus: rejectUnexpectedCall("getStatus"),
   lookup: rejectUnexpectedCall("lookup"),

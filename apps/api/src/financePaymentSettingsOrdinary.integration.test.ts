@@ -59,6 +59,7 @@ describe.skipIf(!url)("Booking Admin payment settings on the ordinary API login"
       "platform.domain_events",
       "platform.idempotency_keys",
       "finance.payment_settings",
+      "pms.property_pricing_settings",
       "booking.booking_settings",
     ])
       await admin.query(`DELETE FROM ${table} WHERE property_id=$1::uuid`, [propertyId]);
@@ -70,12 +71,15 @@ describe.skipIf(!url)("Booking Admin payment settings on the ordinary API login"
     await admin.end();
   });
 
-  function save(acceptedMethods: FinanceRoutePaymentMethod[]) {
-    const settings = createTargetFinancePropertySettingsRepository({
+  function repository() {
+    return createTargetFinancePropertySettingsRepository({
       connectionString: fixture.connectionString,
       pool,
     });
-    return settings.updatePaymentSettings!({
+  }
+
+  function save(acceptedMethods: FinanceRoutePaymentMethod[], defaultCurrency?: string) {
+    return repository().updatePaymentSettings!({
       commandType: "finance.payment_settings.update",
       commandId: randomUUID(),
       idempotencyKey: randomUUID(),
@@ -87,7 +91,11 @@ describe.skipIf(!url)("Booking Admin payment settings on the ordinary API login"
         reason: "Payments saved from Booking Admin",
         requestedAt: new Date().toISOString(),
       },
-      payload: { paymentsEnabled: true, acceptedMethods },
+      payload: {
+        paymentsEnabled: true,
+        acceptedMethods,
+        ...(defaultCurrency ? { defaultCurrency } : {}),
+      },
     });
   }
 
@@ -104,5 +112,35 @@ describe.skipIf(!url)("Booking Admin payment settings on the ordinary API login"
         defaultCurrency: "LKR",
       },
     });
+  });
+
+  // VAY-2390: once the hotel has prices, their currency is the one guests pay in. Booking
+  // settings keep LKR as the currency guests see first; Payments saves in USD and binds to it.
+  it("reads and saves the PMS pricing currency, not Booking settings' default", async () => {
+    await admin.query(
+      `INSERT INTO pms.property_pricing_settings(property_id,currency,pricing_currency_revision)
+       VALUES($1::uuid,'USD',3)`,
+      [propertyId],
+    );
+    await expect(repository().getPaymentSettings(propertyId)).resolves.toMatchObject({
+      defaultCurrency: "USD",
+      supportedCurrencies: ["USD"],
+    });
+    await expect(save(["pay_at_property", "cash"], "LKR")).resolves.toMatchObject({
+      ok: false,
+      statusCode: 409,
+      code: "property_currency_conflict",
+      message: "Payment currency changed to USD. Reload before saving.",
+    });
+    await expect(save(["pay_at_property", "cash"], "USD")).resolves.toMatchObject({
+      ok: true,
+      settings: { acceptedMethods: ["pay_at_property", "cash"], defaultCurrency: "USD" },
+    });
+    const row = await admin.query(
+      `SELECT default_currency::text AS currency, source_pricing_currency_revision::int AS revision
+       FROM finance.payment_settings WHERE property_id=$1::uuid`,
+      [propertyId],
+    );
+    expect(row.rows).toEqual([{ currency: "USD", revision: 3 }]);
   });
 });

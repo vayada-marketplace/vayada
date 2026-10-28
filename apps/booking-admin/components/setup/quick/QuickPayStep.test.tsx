@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HotelFirstRunError } from "@/services/api/hotelFirstRunClient";
 import { QuickPayStep, type QuickPayStepProps } from "./QuickPayStep";
@@ -47,6 +47,8 @@ async function submit(renderer: ReactTestRenderer) {
 }
 
 describe("QuickPayStep (VAY-2247 step 4)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("starts with paying at the hotel and Commission, and shows the Fixed Fee in the hotel's currency", () => {
     const markup = renderToStaticMarkup(<QuickPayStep {...props()} />);
     expect(markup).toContain("Step 6 of 7");
@@ -119,6 +121,49 @@ describe("QuickPayStep (VAY-2247 step 4)", () => {
     );
     expect(plan("fixed_fee").props.checked).toBe(true);
     expect(plan("commission").props.checked).toBe(false);
+    renderer.unmount();
+  });
+
+  it("stays disabled after a run that opens Stripe, until the browser brings the page back (VAY-2402)", async () => {
+    // The Fixed Fee run worked and the browser is on its way to Stripe: the step is still on screen.
+    const page = new EventTarget();
+    vi.stubGlobal("window", page);
+    const onSubmit = vi.fn(async () => undefined);
+    const renderer = create(<QuickPayStep {...props({ onSubmit })} />);
+    const fieldset = () => renderer.root.findByType("fieldset");
+    const inFieldset = (node: ReactTestInstance | null): boolean =>
+      node !== null && (node.type === "fieldset" || inFieldset(node.parent));
+    // Back, Continue (desktop and phone footers) and Save & exit sit outside the form's fieldset.
+    const footer = () =>
+      new Set(
+        renderer.root
+          .findAllByType("button")
+          .filter((each) => !inFieldset(each))
+          .map((each) => each.props.disabled),
+      );
+    const pageshow = (persisted: boolean) =>
+      act(async () => {
+        page.dispatchEvent(Object.assign(new Event("pageshow"), { persisted }));
+      });
+
+    await act(async () =>
+      renderer.root
+        .find((node) => node.type === "input" && node.props.value === "fixed_fee")
+        .props.onChange(),
+    );
+    await submit(renderer);
+    expect(onSubmit).toHaveBeenCalledWith("fixed_fee");
+    expect(fieldset().props.disabled).toBe(true);
+    expect(footer()).toEqual(new Set([true]));
+    expect(text(renderer)).toContain("Setting up your hotel…");
+
+    await pageshow(false);
+    expect(fieldset().props.disabled).toBe(true);
+    // Back from Stripe, the page comes out of the back/forward cache as it left.
+    await pageshow(true);
+    expect(fieldset().props.disabled).toBe(false);
+    expect(footer()).toEqual(new Set([false]));
+    expect(text(renderer)).not.toContain("Setting up your hotel…");
     renderer.unmount();
   });
 
@@ -225,6 +270,8 @@ describe("step 4 sends the first run (VAY-2247 3.7)", () => {
     await submit(renderer);
     expect(openCheckout).toHaveBeenCalledWith("https://checkout.stripe.com/c/pay/cs_test");
     expect(text(renderer)).not.toContain("Does this look right?");
+    // The step stays disabled while the browser leaves for Stripe (VAY-2402).
+    expect(renderer.root.findByType("fieldset").props.disabled).toBe(true);
     renderer.unmount();
   });
 

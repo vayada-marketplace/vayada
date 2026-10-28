@@ -192,7 +192,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
     await expect(rowState()).resolves.toEqual(before);
   });
 
-  it("saves unbound while booking and price currencies differ, but won't rebind a bound row", async () => {
+  // VAY-2390: Booking settings' default currency is only what guests see first.
+  it("saves and binds in the price currency while booking settings show another one", async () => {
     await pool.query(
       `INSERT INTO booking.booking_settings (
          property_id, default_currency, default_language, supported_languages, acceptance_mode
@@ -201,21 +202,32 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
     );
     await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
       ok: true,
-      settings: { defaultCurrency: "USD" },
+      settings: { defaultCurrency: "EUR" },
     });
     await expect(binding()).resolves.toEqual({
-      contractVersion: null,
-      revision: null,
-      pricingRevision: null,
+      contractVersion: "finance-payment-readiness.v1",
+      revision: 1,
+      pricingRevision: 7,
     });
 
-    await expect(saveSetup(0, ["pay_at_property"])).resolves.toMatchObject({ ok: true });
+    // Setup keeps the Cash choice, so the next settings-page save changes no methods: no 409,
+    // and the binding stays.
+    await expect(saveSetup(1, ["pay_at_property"])).resolves.toMatchObject({ ok: true });
     await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
+      ok: true,
+      settings: { defaultCurrency: "EUR" },
+    });
+    await expect(binding()).resolves.toMatchObject({ revision: 2, pricingRevision: 7 });
+    await expect(
+      saveSettingsPage([], {
+        payload: { paymentsEnabled: true, acceptedMethods: ["cash"], defaultCurrency: "USD" },
+      }),
+    ).resolves.toMatchObject({
       ok: false,
       statusCode: 409,
       code: "property_currency_conflict",
+      message: "Payment currency changed to EUR. Reload before saving.",
     });
-    await expect(binding()).resolves.toMatchObject({ revision: 1 });
   });
 
   it("keeps PayPal and the pay-at-hotel choice when the setup step saves", async () => {

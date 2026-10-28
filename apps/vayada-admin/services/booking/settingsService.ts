@@ -62,7 +62,6 @@ export interface SuperAdminHotel extends HotelSummary {
   billing_switch_effective_date: string | null;
   booking_engine_fee_pct: number;
   channel_manager_fee_pct: number;
-  affiliate_platform_fee_pct: number;
   billing_commission_note: string | null;
   fixed_base_fee: number;
   fixed_rooms_included: number;
@@ -75,7 +74,6 @@ export interface SuperAdminHotel extends HotelSummary {
 export interface HotelBillingUpdate {
   booking_engine_fee_pct?: number;
   channel_manager_fee_pct?: number;
-  affiliate_platform_fee_pct?: number;
   fixed_base_fee?: number;
   fixed_rooms_included?: number;
   fixed_per_extra_room_fee?: number;
@@ -242,7 +240,6 @@ function toSuperAdminHotel(property: {
     billing_switch_effective_date: null,
     booking_engine_fee_pct: 5,
     channel_manager_fee_pct: 0,
-    affiliate_platform_fee_pct: 0,
     billing_commission_note: null,
     fixed_base_fee: 0,
     fixed_rooms_included: 0,

@@ -202,6 +202,11 @@ parameters keep the pricing currency, and every quote and charge stays in it.
 
 ## Quote Endpoint
 
+> Status (2026-10-28): removed. After the old pricing model was retired (VAY-1543) this route only
+> answered 410 `PRICING_RETIRED`; VAY-2387 deleted it together with
+> `GET /api/booking-web/hotels/{slug}/offers`. Guests price through
+> `GET /api/booking-web/hotels/{slug}/pricing-offers` and `POST …/bookings/quote`.
+
 Recommended route:
 
 ```text

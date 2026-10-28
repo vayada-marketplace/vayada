@@ -266,6 +266,7 @@ export function createPgTargetBookingPromoCodesRepository(config: {
       (body.discountType === undefined && body.discountValue === undefined)
     )
       return;
+    // VAY-2390: quotes charge in the PMS pricing currency; before prices exist, the Booking default.
     const row = (
       await pool.query<{
         currency: string | null;
@@ -273,7 +274,10 @@ export function createPgTargetBookingPromoCodesRepository(config: {
         discountValue: string | null;
       }>(
         `SELECT
-           (SELECT default_currency FROM booking.booking_settings WHERE property_id = $1) AS currency,
+           COALESCE(
+             (SELECT currency FROM pms.property_pricing_settings WHERE property_id = $1),
+             (SELECT default_currency FROM booking.booking_settings WHERE property_id = $1)
+           ) AS currency,
            promo.discount_type AS "discountType",
            promo.discount_value::text AS "discountValue"
          FROM (SELECT 1) one

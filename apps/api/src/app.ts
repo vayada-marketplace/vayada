@@ -67,7 +67,6 @@ import type { SameDayBookingSettingsPort } from "./domains/sameDayBookingSetting
 import type { PmsRoomAssignmentSettingsPort } from "./domains/pmsRoomAssignmentSettings.js";
 import type { PmsRoomAssignmentOptimizationHistoryPort } from "./domains/pmsRoomAssignmentOptimizationHistory.js";
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
-import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import type {
   PmsOperationsCommandRepository,
@@ -79,7 +78,6 @@ import type {
   BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
-import { registerAiHotelQuoteRoutes } from "./routes/aiHotelQuotes.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
 import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
@@ -144,7 +142,6 @@ import {
 import {
   registerBookingWebPublicRoutes,
   type BookingWebAttributionSink,
-  type BookingWebCalendarRepository,
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
 } from "./routes/bookingWebPublic.js";
@@ -397,7 +394,6 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingPublicationRefresh?: BookingPublicationRefreshPort;
   bookingCustomDomainRepository?: BookingCustomDomainRepository;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
-  publicHotelQuoteRepository?: PublicHotelQuoteRepository;
   hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   /** Approved public profile images for the auth session (platform media). */
@@ -438,7 +434,6 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
   platformPropertySlug?: PlatformPropertySlugRoutesOptions;
   identityPrivacyAllowedOrigins?: string[];
-  bookingWebCalendarRepository?: BookingWebCalendarRepository;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
   bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
@@ -551,12 +546,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.publicHotelProfileRepository,
     });
   }
-  if (options.publicHotelQuoteRepository) {
-    app.register(registerAiHotelQuoteRoutes, {
-      prefix: "/api/ai",
-      repository: options.publicHotelQuoteRepository,
-    });
-  }
   if (options.publicHotelProfileRepository) {
     const bookingWebCheckoutAdapter = options.bookingWebCheckoutAdapter;
     if (!bookingWebCheckoutAdapter) {
@@ -566,8 +555,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/booking-web",
       profileRepository: options.publicHotelProfileRepository,
       nearby: options.publicNearby,
-      quoteRepository: options.publicHotelQuoteRepository,
-      calendarRepository: options.bookingWebCalendarRepository,
       checkoutAdapter: bookingWebCheckoutAdapter,
       attributionSink: options.bookingWebAttributionSink,
       now: options.bookingWebPublicNow,
@@ -839,9 +826,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       commandRepository: options.pmsOperationsCommandRepository,
       roomClosureRepository: options.pmsRoomClosureRepository,
       linkedInventoryGroupCommandRepository: options.pmsLinkedInventoryGroupCommandRepository,
-      resolveOnboardingRoomCurrency: async (propertyId) =>
-        (await options.bookingSettingsRepository?.findPropertySettingsByHotelId?.(propertyId))
-          ?.defaultCurrency ?? null,
       inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
       bookingGuestPiiPort: options.bookingGuestPiiPort,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
@@ -893,7 +877,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsPricing,
       currencyCommandPort: options.hotelSetupCurrencyCommandPort,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
-      inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     });
   }
   if (options.pmsRecurringPricing) {

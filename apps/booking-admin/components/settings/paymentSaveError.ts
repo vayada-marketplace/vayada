@@ -46,13 +46,7 @@ export function paymentSaveError(error: unknown): PaymentSaveError {
     const fieldMessage = error.statusCode === 400 ? FINANCE_MESSAGES[error.detail] : undefined;
     if (fieldMessage) return { message: fieldMessage, retry: false };
     if (error.code === "property_currency_conflict") {
-      // Reloading fixes a currency that changed meanwhile, not prices and settings that disagree.
-      return {
-        message: error.detail.startsWith("Prices use ")
-          ? "settings.paymentsSave.currencyMismatch"
-          : "settings.paymentsSave.currencyChanged",
-        retry: false,
-      };
+      return { message: "settings.paymentsSave.currencyChanged", retry: false };
     }
   }
   const status = statusOf(error);

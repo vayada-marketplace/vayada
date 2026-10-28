@@ -8,9 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createPublicRuntimeRepositories } from "./publicRuntime.js";
-import type { PublicHotelQuoteReadPool } from "./routes/aiHotelQuotes.js";
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
-import type { BookingWebCalendarReadPool } from "./routes/bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.fixtures.js";
 
 const legacyRuntimeEnvKeys = [
@@ -77,33 +75,6 @@ const publicHotelProfilePool: PublicHotelProfileReadPool = {
   async end() {},
 };
 
-const publicHotelQuotePool: PublicHotelQuoteReadPool = {
-  async query<T extends QueryResultRow>(text: string) {
-    expect(text).toContain("distribution.public_quote_read_models");
-    expect(text).not.toContain("PMS_PUBLIC_API_URL");
-
-    return {
-      rows: [targetPublicHotelQuoteRow()] as unknown as T[],
-    };
-  },
-  async end() {},
-};
-
-const bookingWebCalendarPool: BookingWebCalendarReadPool = {
-  async query<T extends QueryResultRow>(text: string) {
-    expect(text).toContain("distribution.public_room_offer_snapshots");
-
-    return {
-      rows: [
-        targetCalendarRow("2026-09-12", true),
-        targetCalendarRow("2026-09-13", true),
-        targetCalendarRow("2026-09-14", false),
-      ] as unknown as T[],
-    };
-  },
-  async end() {},
-};
-
 describe("next-api legacy-free runtime check", () => {
   let app: FastifyInstance | null = null;
 
@@ -125,11 +96,7 @@ describe("next-api legacy-free runtime check", () => {
       financeSource: "target",
     });
 
-    const publicRuntime = createPublicRuntimeRepositories(config, {
-      publicHotelProfilePool,
-      publicHotelQuotePool,
-      bookingWebCalendarPool,
-    });
+    const publicRuntime = createPublicRuntimeRepositories(config, { publicHotelProfilePool });
 
     app = buildApp({
       logger: false,
@@ -153,12 +120,9 @@ describe("next-api legacy-free runtime check", () => {
       "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2",
       "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2",
     ]) {
+      // The retired availability routes are gone (VAY-2387).
       const response = await injectJson(app, { method: "GET", url });
-      expect(response.statusCode, url).toBe(410);
-      expect(response.body).toMatchObject({
-        code: "PRICING_RETIRED",
-        message: expect.stringContaining("/pricing-offers"),
-      });
+      expect(response.statusCode, url).toBe(404);
     }
   });
 
@@ -222,61 +186,4 @@ function activeContent(profile: typeof publicBookabilityFixture.profile) {
   });
   if (!result) throw new Error("Expected valid active-publication fixture");
   return result.publicContent;
-}
-
-function targetPublicHotelQuoteRow(): QueryResultRow {
-  const quote = publicBookabilityFixture.quote!;
-  const offer = quote.quote!.offers[0]!;
-
-  return {
-    quoteSessionId: "f6898100-0000-0000-0000-000000000001",
-    publicQuoteReference: quote.quote!.quoteId,
-    quoteHash: quote.quote!.quoteHash,
-    requestSnapshot: {},
-    quoteStatus: quote.status,
-    unavailableReasons: quote.unavailableReasons,
-    offers: [
-      {
-        offerId: offer.offerId,
-        roomTypeId: offer.roomTypeId,
-        ratePlanId: offer.ratePlanId,
-        name: offer.name,
-        availableRooms: offer.availableRooms,
-        paymentOptions: offer.paymentOptions,
-        totals: offer.totals,
-        bookingUrl: offer.bookingUrl,
-      },
-    ],
-    totals: {},
-    deepLinkUrl: quote.deepLink?.url ?? null,
-    priceGuarantee: quote.quote!.priceGuarantee,
-    currency: quote.request.currency,
-    sourceFreshness: {
-      sources: quote.freshness.sources.map((source) => ({
-        owner: source.owner,
-        status: source.status,
-        lastUpdatedAt: source.lastUpdatedAt,
-      })),
-    },
-    freshnessStatus: quote.freshness.status,
-    dataSources: quote.dataSources,
-    generatedAt: quote.generatedAt,
-    expiresAt: quote.quote!.expiresAt,
-  };
-}
-
-function targetCalendarRow(stayDate: string, hasAvailability: boolean): QueryResultRow {
-  return {
-    stayDate,
-    hasAvailability,
-    hasUnavailableState: !hasAvailability,
-    sourceFreshnessValues: [
-      JSON.stringify({
-        sources: [{ owner: "pms", status: "fresh" }],
-      }),
-    ],
-    freshnessStatuses: ["fresh"],
-    dataSources: ["pms", "distribution"],
-    generatedAt: "2026-06-21T19:00:00.000Z",
-  };
 }

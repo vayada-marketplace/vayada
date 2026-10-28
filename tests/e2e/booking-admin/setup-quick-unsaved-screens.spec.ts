@@ -344,3 +344,86 @@ test("How guests pay can't be changed while the first run runs, and a failed run
   expect(runs).toHaveLength(2);
   expect(runs.map((run) => run["plan"])).toEqual(["commission", "commission"]);
 });
+
+// VAY-2402: a Fixed Fee run that works opens Stripe, and the step stays on screen until Stripe's page
+// loads. It stays disabled meanwhile: a plan picked then wasn't sent, and Continue sent a second run.
+// Playwright can't look at a page while it navigates away (its checks wait for the navigation to finish),
+// so the page notes its controls on every change, and the test reads the notes after coming back.
+// Playwright's Chromium runs without the back/forward cache, so that Back is a reload; a page restored
+// from the cache is the unit test's case.
+test("How guests pay stays disabled while Stripe's checkout opens", async ({ page, baseURL }) => {
+  await primeQuickSetupBrowserState(page);
+  await mockQuickSetupExistingHotel(page);
+  const checkout = "https://checkout.stripe.com/c/pay/cs_test";
+  const runs: Record<string, unknown>[] = [];
+  await page.route(
+    new RegExp(`/api/hotel-setup/properties/${QUICK_SETUP_PROPERTY_ID}/first-run$`),
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      runs.push(route.request().postDataJSON() as Record<string, unknown>);
+      const steps = ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"];
+      return route.fulfill({
+        headers: corsHeaders(route),
+        json: {
+          state: {
+            contractVersion: "hotel-first-run.v1",
+            propertyId: QUICK_SETUP_PROPERTY_ID,
+            steps: steps.map((id) => ({ id, state: id === "plan" ? "awaiting_checkout" : "done" })),
+            nextStep: "plan",
+          },
+          ran: steps,
+          checkout: { url: checkout },
+        },
+      });
+    },
+  );
+  // Stripe's page is slow to load.
+  await page.route(checkout, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.fulfill({ contentType: "text/html", body: "<title>Stripe Checkout</title>" });
+  });
+  await page.goto(quickSetupUrl(baseURL));
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  await page.getByRole("textbox", { name: "Room type name", exact: true }).fill("Classic Double");
+  await page.getByRole("textbox", { name: "Rooms of this type", exact: true }).fill("2");
+  await page.getByRole("textbox", { name: "Price per night", exact: true }).fill("150");
+  await page.getByText("My prices include all mandatory taxes and fees", { exact: true }).click();
+  await proceed(page).click();
+  await expect(heading(page, "How guests pay")).toBeVisible();
+
+  await page.getByRole("radio", { name: /^Fixed Fee\b/ }).check();
+  await page.evaluate(() => {
+    new MutationObserver(() => {
+      const controls = Array.from(
+        document.querySelectorAll<HTMLInputElement | HTMLButtonElement>("main input, main button"),
+      );
+      const notes = JSON.parse(localStorage.getItem("vay2402-step") ?? "[]") as unknown[];
+      notes.push({
+        busy: document.querySelector('main button[aria-busy="true"]') !== null,
+        enabled: controls
+          .filter((each) => !each.matches(":disabled"))
+          .map((each) => (each instanceof HTMLInputElement ? each.value : each.textContent)),
+      });
+      localStorage.setItem("vay2402-step", JSON.stringify(notes));
+    }).observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
+  await proceed(page).click();
+  await expect(page).toHaveURL(checkout);
+  expect(runs).toHaveLength(1);
+  expect(runs[0]).toMatchObject({ plan: "fixed_fee" });
+
+  await page.goBack();
+  const notes = await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem("vay2402-step") ?? "[]") as {
+        busy: boolean;
+        enabled: string[];
+      }[],
+  );
+  // From the moment Continue was pressed until the page left, nothing on the step could be used.
+  const pressed = notes.findIndex((note) => note.busy);
+  expect(pressed).toBeGreaterThanOrEqual(0);
+  expect(notes.slice(pressed)).toEqual(
+    notes.slice(pressed).map(() => ({ busy: true, enabled: [] })),
+  );
+});

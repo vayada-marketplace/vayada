@@ -73,19 +73,26 @@ export default function RateOption({
               />
             </svg>
           )}
-          <div className="min-w-0">
-            <p className="text-sm font-bold text-gray-900 flex items-center gap-2 flex-wrap">
-              <span className="break-words">{title}</span>
+          <div className="min-w-0 flex flex-col gap-1.5">
+            {/* VAY-2389: the badge flows after the title, so a wrapped title keeps it beside its
+                last line. Top-aligned and 1px down, the 18px badge sits centered in the 20px line
+                and never makes it taller. A space (widened), not a margin, keeps them apart: it
+                vanishes when the badge wraps, so the badge starts flush with the title. */}
+            <p className="text-sm leading-5 font-bold text-gray-900 break-words">
+              {title}
               {discountPercent != null && discountPercent > 0 && (
-                <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded whitespace-nowrap">
-                  {t("percentOff", { percent: discountPercent })}
-                </span>
+                <>
+                  <span className="[word-spacing:0.25rem]"> </span>
+                  <span className="relative top-px inline-flex h-[18px] items-center align-top text-[10px] leading-none font-bold bg-primary-600 text-white px-1.5 rounded whitespace-nowrap">
+                    {t("percentOff", { percent: discountPercent })}
+                  </span>
+                </>
               )}
             </p>
             {blocked ? (
-              <p className="text-xs text-gray-600">{blocked}</p>
+              <p className="text-xs leading-[18px] text-gray-600">{blocked}</p>
             ) : (
-              terms && <p className="text-xs text-gray-500">{terms}</p>
+              terms && <p className="text-xs leading-[18px] text-gray-500">{terms}</p>
             )}
           </div>
         </div>

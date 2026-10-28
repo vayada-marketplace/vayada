@@ -67,12 +67,27 @@ export async function lockReplacementPromoCode(
     return null;
   const settings = (
     await client.query(
-      `SELECT s.default_currency,l.timezone FROM booking.booking_settings s
-    JOIN hotel_catalog.property_locations l USING(property_id) WHERE s.property_id=$1 FOR SHARE OF s,l`,
+      "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1 FOR SHARE",
       [propertyId],
     )
   ).rows[0];
-  if (!settings || settings.default_currency !== request.currency) return null;
+  // VAY-2390: promo amounts are in the PMS pricing currency, which quotes charge in; Booking
+  // settings' default currency (only what guests see first) stands in before the hotel has one.
+  const pricing = (
+    await client.query(
+      "SELECT currency::text AS currency FROM pms.property_pricing_settings WHERE property_id=$1 FOR SHARE",
+      [propertyId],
+    )
+  ).rows[0];
+  const currency =
+    pricing?.currency ??
+    (
+      await client.query(
+        "SELECT default_currency::text AS currency FROM booking.booking_settings WHERE property_id=$1 FOR SHARE",
+        [propertyId],
+      )
+    ).rows[0]?.currency;
+  if (!settings || currency !== request.currency) return null;
   const scale = pricingCurrencyScale(request.currency);
   if (
     scale === null ||

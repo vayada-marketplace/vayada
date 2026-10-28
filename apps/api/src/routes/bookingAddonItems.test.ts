@@ -404,4 +404,44 @@ describe("target booking add-on plan enforcement", () => {
     const update = queries.find((query) => query.text.includes("UPDATE booking.addon_definitions"));
     expect(update?.text).toContain("status <> 'retired'");
   });
+
+  it("saves a mode only beside the price it was checked against (VAY-2391)", async () => {
+    const queries: Array<{ text: string; values?: unknown[] }> = [];
+    const repository = createPgTargetBookingAddonItemsRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(text: string, values?: unknown[]) {
+          queries.push({ text, values });
+          if (text.includes("WITH direct_property AS"))
+            return {
+              rows: [{ propertyId: "d3000000-0000-4000-8000-000000000682" }] as unknown as T[],
+            };
+          if (text.includes("UPDATE booking.addon_definitions")) return { rows: [] as T[] };
+          if (text.includes("SELECT pricing_model"))
+            return {
+              rows: [
+                { pricingModel: "per_night", category: "dining", scheduleMode: "daily" },
+              ] as unknown as T[],
+            };
+          return { rows: [] as T[] };
+        },
+      },
+    });
+    const update = (body: Parameters<typeof repository.updateAddonItemByHotelId>[2]) =>
+      repository.updateAddonItemByHotelId(
+        "booking_hotel_alpenrose",
+        "d3000000-0000-4000-8000-000000000683",
+        body,
+      );
+
+    // A per-night price is every day: another mode is refused before anything is written.
+    await expect(update({ scheduleMode: "anytime" })).rejects.toThrow("per-night price");
+    expect(queries.some((query) => query.text.includes("UPDATE booking.addon_definitions"))).toBe(
+      false,
+    );
+    await update({ scheduleMode: "daily" });
+    const write = queries.find((query) => query.text.includes("UPDATE booking.addon_definitions"));
+    expect(write?.text).toMatch(/AND pricing_model = \$\d+/);
+    expect(write?.values).toContain("per_night");
+  });
 });

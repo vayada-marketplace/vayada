@@ -2,7 +2,11 @@
 
 import { useId, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { PolicyBlock, PolicyPay, PolicyWhen } from "@/lib/cancellationPolicy";
+import type {
+  PolicyBlock,
+  PolicyPay,
+  PolicyWhen,
+} from "@vayada/domain-booking/replacement-pricing";
 import { formatStayDate, resolveLocale } from "@/lib/utils";
 
 export const chevron = (open: boolean) => (

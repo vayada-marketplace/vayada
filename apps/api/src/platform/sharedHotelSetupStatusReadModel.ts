@@ -42,6 +42,7 @@ type SharedHotelSetupStatusPool = SharedHotelSetupQueryClient & {
   end(): Promise<void>;
 };
 
+// The hotel-basics facts: the setup plan's only task (VAY-2175).
 type AdaptiveHotelSetupFactsRow = {
   propertyId: string;
   publicId: string;
@@ -50,7 +51,6 @@ type AdaptiveHotelSetupFactsRow = {
   city: string | null;
   countryCode: string | null;
   hasStreetAddress: boolean;
-  hasPostalCode: boolean;
   hasCity: boolean;
   hasCountryCode: boolean;
   hasTimezone: boolean;
@@ -59,38 +59,6 @@ type AdaptiveHotelSetupFactsRow = {
   propertyUpdatedAt: unknown;
   locationUpdatedAt: unknown;
   contactUpdatedAt: unknown;
-  hasDescription: boolean;
-  hasApprovedMedia: boolean;
-  localityPublic: boolean;
-  profileUpdatedAt: unknown;
-  mediaUpdatedAt: unknown;
-  hasActiveRoomType: boolean;
-  hasNonRetiredRoom: boolean;
-  hasActiveRatePlan: boolean;
-  hasFutureInventory: boolean;
-  roomTypeUpdatedAt: unknown;
-  roomUpdatedAt: unknown;
-  ratePlanUpdatedAt: unknown;
-  inventoryUpdatedAt: unknown;
-  hasCheckInPolicy: boolean;
-  hasCheckOutPolicy: boolean;
-  hasCancellationPolicy: boolean;
-  policyUpdatedAt: unknown;
-  billingPlanSelected: boolean;
-  billingPlanUpdatedAt: unknown;
-  paymentsEnabled: boolean | null;
-  hasAcceptedPaymentMethod: boolean;
-  hasEffectivePaymentMethod: boolean;
-  paymentRequiresManualReview: boolean;
-  paymentSettingsUpdatedAt: unknown;
-  bookabilityStatus: string | null;
-  bookabilityFreshness: string | null;
-  bookabilitySetupReady: boolean;
-  bookabilityMissingEmpty: boolean;
-  bookabilityExpired: boolean;
-  bookabilityUpdatedAt: unknown;
-  activePublicationRevisionId: string | null;
-  activePublicationActivatedAt: unknown;
 };
 
 export type SharedPropertyProfileRow = {
@@ -206,7 +174,6 @@ export function createPgSharedHotelSetupStatusRepository(config: {
       }
 
       const result = await pool.query<AdaptiveHotelSetupFactsRow>(adaptiveHotelSetupFactsSql(), [
-        organizationId,
         propertyIds,
       ]);
 
@@ -1176,18 +1143,6 @@ function toAdaptivePropertySetupFacts(row: AdaptiveHotelSetupFactsRow): Adaptive
   const identityReasons: string[] = HOTEL_BASICS_REASON_CODES.filter(
     (code) => identityMissing[code],
   );
-  const roomReasons = [
-    !row.hasActiveRoomType && "missing_active_room_type",
-    !row.hasNonRetiredRoom && "missing_non_retired_room",
-    !row.hasActiveRatePlan && "missing_active_rate_plan",
-    !row.hasFutureInventory && "missing_future_inventory",
-  ].filter(isReasonCode);
-  const policyReasons = [
-    !row.hasCheckInPolicy && "missing_check_in_policy",
-    !row.hasCheckOutPolicy && "missing_check_out_policy",
-    !row.hasCancellationPolicy && "missing_cancellation_policy",
-  ].filter(isReasonCode);
-
   return {
     propertyId: row.propertyId,
     publicId: row.publicId,
@@ -1201,34 +1156,6 @@ function toAdaptivePropertySetupFacts(row: AdaptiveHotelSetupFactsRow): Adaptive
         Boolean(nonEmpty(row.displayName)),
         latest(row.propertyUpdatedAt, row.locationUpdatedAt, row.contactUpdatedAt),
       ),
-      rooms_rates_availability: basicTaskFact(
-        "rooms_rates_availability",
-        roomReasons,
-        row.hasActiveRoomType ||
-          row.hasNonRetiredRoom ||
-          row.hasActiveRatePlan ||
-          row.hasFutureInventory,
-        latest(
-          row.roomTypeUpdatedAt,
-          row.roomUpdatedAt,
-          row.ratePlanUpdatedAt,
-          row.inventoryUpdatedAt,
-        ),
-      ),
-      guest_settings_policies: basicTaskFact(
-        "guest_settings_policies",
-        policyReasons,
-        Boolean(row.policyUpdatedAt),
-        toIsoString(row.policyUpdatedAt),
-      ),
-      billing_plan: basicTaskFact(
-        "billing_plan",
-        row.billingPlanSelected ? [] : ["billing_plan_not_selected"],
-        row.billingPlanSelected,
-        toIsoString(row.billingPlanUpdatedAt),
-      ),
-      payment: paymentFact(row),
-      direct_booking_publication: publicationFact(row),
     },
   };
 }
@@ -1248,95 +1175,6 @@ function basicTaskFact(
     sourceRevision: taskRevision(sourceRevision, reasonCodes),
     freshness: "fresh",
   };
-}
-
-function paymentFact(row: AdaptiveHotelSetupFactsRow): AdaptiveSetupTaskFact {
-  const enabled = row.paymentsEnabled === true;
-  const configured = enabled && row.hasAcceptedPaymentMethod;
-  const paymentEffective = enabled && row.hasEffectivePaymentMethod;
-  const pendingReview = paymentEffective && row.paymentRequiresManualReview;
-  const complete = paymentEffective && !row.paymentRequiresManualReview;
-  return {
-    taskId: "payment",
-    ownerProgress: paymentEffective ? "owner_complete" : configured ? "in_progress" : "not_started",
-    readiness: complete ? "complete" : pendingReview ? "pending_review" : "actionable",
-    reasonCodes: complete
-      ? []
-      : unique([
-          !enabled ? "payments_not_enabled" : "",
-          enabled && !row.hasAcceptedPaymentMethod ? "missing_accepted_payment_method" : "",
-          enabled && row.hasAcceptedPaymentMethod && !row.hasEffectivePaymentMethod
-            ? "no_supported_checkout_payment_method"
-            : "",
-          pendingReview ? "manual_payment_review_pending" : "",
-        ]).filter(isReasonCode),
-    sourceRevision: taskRevision(
-      toIsoString(row.paymentSettingsUpdatedAt),
-      enabled,
-      row.hasAcceptedPaymentMethod,
-      row.hasEffectivePaymentMethod,
-      row.paymentRequiresManualReview,
-    ),
-    freshness: "fresh",
-  };
-}
-
-function publicationFact(row: AdaptiveHotelSetupFactsRow): AdaptiveSetupTaskFact {
-  // Guests see the setup publication since the switch to active publications. The legacy row
-  // below is frozen, so it only describes hotels that never published (VAY-2292).
-  if (row.activePublicationRevisionId) {
-    return {
-      taskId: "direct_booking_publication",
-      ownerProgress: "owner_complete",
-      readiness: "complete",
-      reasonCodes: [],
-      sourceRevision: taskRevision(
-        row.activePublicationRevisionId,
-        toIsoString(row.activePublicationActivatedAt),
-      ),
-      freshness: "fresh",
-    };
-  }
-  const status = row.bookabilityStatus;
-  const isPublic = status === "public";
-  const projectionFresh = row.bookabilityFreshness === "fresh" && !row.bookabilityExpired;
-  const setupComplete = row.bookabilitySetupReady && row.bookabilityMissingEmpty;
-  const complete = isPublic && projectionFresh && setupComplete;
-  const readiness = complete
-    ? "complete"
-    : status === null || !setupComplete
-      ? "actionable"
-      : status === "unavailable"
-        ? "blocked"
-        : "pending_sync";
-  return {
-    taskId: "direct_booking_publication",
-    ownerProgress: setupComplete ? "owner_complete" : status ? "in_progress" : "not_started",
-    readiness,
-    reasonCodes:
-      readiness === "complete"
-        ? []
-        : unique([
-            !isPublic ? "direct_booking_not_public" : "",
-            row.bookabilityFreshness !== "fresh" ? "bookability_stale" : "",
-            row.bookabilityExpired ? "bookability_expired" : "",
-            !row.bookabilitySetupReady ? "bookability_setup_not_ready" : "",
-            !row.bookabilityMissingEmpty ? "bookability_setup_missing" : "",
-          ]).filter(isReasonCode),
-    sourceRevision: taskRevision(
-      toIsoString(row.bookabilityUpdatedAt),
-      status,
-      row.bookabilityFreshness,
-      row.bookabilitySetupReady,
-      row.bookabilityMissingEmpty,
-      row.bookabilityExpired,
-    ),
-    freshness: status === null || projectionFresh ? "fresh" : "stale",
-  };
-}
-
-function isReasonCode(value: string | false): value is string {
-  return typeof value === "string" && value.length > 0;
 }
 
 function taskRevision(...facts: unknown[]): string {
@@ -1900,7 +1738,6 @@ function adaptiveHotelSetupFactsSql(): string {
       NULLIF(location.city, '') AS city,
       NULLIF(location.country_code::text, '') AS "countryCode",
       NULLIF(location.street_address, '') IS NOT NULL AS "hasStreetAddress",
-      NULLIF(location.postal_code, '') IS NOT NULL AS "hasPostalCode",
       NULLIF(location.city, '') IS NOT NULL AS "hasCity",
       NULLIF(location.country_code::text, '') IS NOT NULL AS "hasCountryCode",
       NULLIF(location.timezone, '') IS NOT NULL AS "hasTimezone",
@@ -1908,91 +1745,12 @@ function adaptiveHotelSetupFactsSql(): string {
       COALESCE(contacts.has_phone, FALSE) AS "hasPhone",
       property.updated_at AS "propertyUpdatedAt",
       location.updated_at AS "locationUpdatedAt",
-      contacts.updated_at AS "contactUpdatedAt",
-      public_profile.normalized_description IS NOT NULL AS "hasDescription",
-      COALESCE(public_media.has_approved_media, FALSE) AS "hasApprovedMedia",
-      COALESCE(location.address_public, FALSE) AS "localityPublic",
-      public_profile.updated_at AS "profileUpdatedAt",
-      public_media.updated_at AS "mediaUpdatedAt",
-      COALESCE(room_readiness.has_active_room_type, FALSE) AS "hasActiveRoomType",
-      COALESCE(room_readiness.has_non_retired_room, FALSE) AS "hasNonRetiredRoom",
-      COALESCE(room_readiness.has_active_rate_plan, FALSE) AS "hasActiveRatePlan",
-      COALESCE(room_readiness.has_future_inventory, FALSE) AS "hasFutureInventory",
-      room_readiness.room_type_updated_at AS "roomTypeUpdatedAt",
-      room_readiness.room_updated_at AS "roomUpdatedAt",
-      room_readiness.rate_plan_updated_at AS "ratePlanUpdatedAt",
-      room_readiness.inventory_updated_at AS "inventoryUpdatedAt",
-      policy.check_in_time IS NOT NULL AS "hasCheckInPolicy",
-      policy.check_out_time IS NOT NULL AS "hasCheckOutPolicy",
-      (
-        NULLIF(policy.cancellation_summary, '') IS NOT NULL
-        OR NULLIF(policy.cancellation_terms_url, '') IS NOT NULL
-      ) AS "hasCancellationPolicy",
-      policy.updated_at AS "policyUpdatedAt",
-      COALESCE(
-        billing.plan_key = 'fixed'
-        OR billing.checkout_session_ref IS NOT NULL
-        OR NULLIF(billing.entitlement_metadata ->> 'planSelectedAt', '') IS NOT NULL,
-        FALSE
-      ) AS "billingPlanSelected",
-      billing.updated_at AS "billingPlanUpdatedAt",
-      payment.payments_enabled AS "paymentsEnabled",
-      COALESCE(cardinality(payment.accepted_methods) > 0, FALSE)
-        AS "hasAcceptedPaymentMethod",
-      COALESCE(
-        payment.payments_enabled
-        AND (
-          'pay_at_property' = ANY(payment.accepted_methods)
-          OR (
-            'bank_transfer' = ANY(payment.accepted_methods)
-            AND EXISTS (SELECT 1 FROM finance.bank_transfer_destinations destination
-              WHERE destination.property_id=payment.property_id AND destination.enabled)
-          )
-          OR (
-            'paypal' = ANY(payment.accepted_methods)
-            AND BTRIM(payment.deposit_policy ->> 'paypalEmail')
-              ~* '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$'
-          )
-          OR (
-            'card' = ANY(payment.accepted_methods)
-            AND payment_provider.provider = 'stripe'
-            AND payment_provider.status = 'active'
-            AND payment_provider.onboarding_status = 'completed'
-            AND payment_provider.charges_enabled = TRUE
-          )
-        ),
-        FALSE
-      ) AS "hasEffectivePaymentMethod",
-      COALESCE(payment.requires_manual_review, FALSE) AS "paymentRequiresManualReview",
-      payment.updated_at AS "paymentSettingsUpdatedAt",
-      bookability.profile_status AS "bookabilityStatus",
-      bookability.freshness_status AS "bookabilityFreshness",
-      COALESCE(
-        bookability.public_setup_completeness ->> 'status' = 'ready',
-        FALSE
-      ) AS "bookabilitySetupReady",
-      COALESCE(
-        CASE
-          WHEN jsonb_typeof(bookability.public_setup_completeness -> 'missing') = 'array'
-            THEN jsonb_array_length(bookability.public_setup_completeness -> 'missing') = 0
-          ELSE FALSE
-        END,
-        FALSE
-      ) AS "bookabilityMissingEmpty",
-      (
-        bookability.expires_at IS NOT NULL
-        AND bookability.expires_at <= now()
-      ) AS "bookabilityExpired",
-      bookability.updated_at AS "bookabilityUpdatedAt",
-      active_publication.content_revision_id::text AS "activePublicationRevisionId",
-      active_publication.activated_at AS "activePublicationActivatedAt"
-    FROM unnest($2::uuid[]) AS scoped(property_id)
+      contacts.updated_at AS "contactUpdatedAt"
+    FROM unnest($1::uuid[]) AS scoped(property_id)
     JOIN hotel_catalog.properties property
       ON property.id = scoped.property_id
     LEFT JOIN hotel_catalog.property_locations location
       ON location.property_id = property.id
-    LEFT JOIN hotel_catalog.property_public_profile_read_model catalog_public_profile
-      ON catalog_public_profile.property_id = property.id
     LEFT JOIN LATERAL (
       SELECT
         bool_or(
@@ -2008,141 +1766,7 @@ function adaptiveHotelSetupFactsSql(): string {
       WHERE contact.property_id = property.id
         AND contact.channel_type IN ('email', 'phone')
     ) contacts ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT
-        COALESCE(
-          NULLIF(BTRIM(profile.short_description), ''),
-          NULLIF(BTRIM(profile.long_description), '')
-        ) AS normalized_description,
-        profile.updated_at
-      FROM hotel_catalog.property_profiles profile
-      WHERE profile.property_id = property.id
-        AND profile.locale = property.default_locale
-      LIMIT 1
-    ) public_profile ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT
-        count(*) > 0 AS has_approved_media,
-        max(media.updated_at) AS updated_at
-      FROM hotel_catalog.property_media media
-      JOIN platform.media_objects media_object
-        ON media_object.id = media.platform_media_object_id
-       AND media_object.property_id = property.id
-       AND ${APPROVED_PUBLIC_PROPERTY_MEDIA_OBJECT_PREDICATE}
-      JOIN platform.media_variants media_variant
-        ON media_variant.media_object_id = media_object.id
-       AND media_variant.variant_name = 'original_safe'
-       AND media_variant.visibility = 'public'
-       AND NULLIF(media_variant.public_cdn_url, '') IS NOT NULL
-      WHERE media.property_id = property.id
-        AND media.public_approved = TRUE
-        AND media.source_system = 'platform'
-    ) public_media ON TRUE
-    -- A pricing-v2 publication replaces the legacy rate plans (VAY-2087), as for setup Pricing
-    -- and calendar auto-open. A draft-only head (revision 0) is not a publication.
-    LEFT JOIN pms.pricing_v2_heads published_pricing
-      ON published_pricing.property_id = property.id
-     AND published_pricing.revision > 0
-    LEFT JOIN pms.pricing_v2_revisions published_revision
-      ON published_revision.property_id = published_pricing.property_id
-     AND published_revision.revision = published_pricing.revision
-    LEFT JOIN LATERAL (
-      SELECT
-        count(*) > 0 AS has_active_room_type,
-        COALESCE(bool_or(candidate.has_non_retired_room), FALSE)
-          AS has_non_retired_room,
-        COALESCE(
-          bool_or(
-            candidate.has_non_retired_room
-            AND candidate.has_active_rate_plan
-          ),
-          FALSE
-        ) AS has_active_rate_plan,
-        COALESCE(
-          bool_or(
-            candidate.has_non_retired_room
-            AND candidate.has_active_rate_plan
-            AND candidate.has_future_inventory
-          ),
-          FALSE
-        ) AS has_future_inventory,
-        max(candidate.room_type_updated_at) AS room_type_updated_at,
-        max(candidate.room_updated_at) AS room_updated_at,
-        max(candidate.rate_plan_updated_at) AS rate_plan_updated_at,
-        max(candidate.inventory_updated_at) AS inventory_updated_at
-      FROM (
-        SELECT
-          room_type.updated_at AS room_type_updated_at,
-          COALESCE(room_facts.exists, FALSE) AS has_non_retired_room,
-          room_facts.updated_at AS room_updated_at,
-          COALESCE(rate_plan_facts.exists OR published_offer_facts.exists, FALSE)
-            AS has_active_rate_plan,
-          CASE
-            WHEN published_offer_facts.exists THEN published_revision.created_at
-            ELSE rate_plan_facts.updated_at
-          END AS rate_plan_updated_at,
-          COALESCE(inventory_facts.exists, FALSE) AS has_future_inventory,
-          inventory_facts.updated_at AS inventory_updated_at
-        FROM pms.room_types room_type
-        LEFT JOIN LATERAL (
-          SELECT count(*) > 0 AS exists, max(room.updated_at) AS updated_at
-          FROM pms.rooms room
-          WHERE room.property_id = room_type.property_id
-            AND room.room_type_id = room_type.id
-            AND room.status <> 'retired'
-        ) room_facts ON TRUE
-        LEFT JOIN LATERAL (
-          SELECT count(*) > 0 AS exists, max(rate_plan.updated_at) AS updated_at
-          FROM pms.rate_plans rate_plan
-          WHERE published_pricing.property_id IS NULL
-            AND rate_plan.property_id = room_type.property_id
-            AND rate_plan.room_type_id = room_type.id
-            AND rate_plan.active = TRUE
-        ) rate_plan_facts ON TRUE
-        LEFT JOIN LATERAL (
-          SELECT count(*) > 0 AS exists
-          FROM pms.pricing_v2_rooms price_room
-          WHERE price_room.property_id = room_type.property_id
-            AND price_room.revision = published_pricing.revision
-            AND price_room.room_type_id = room_type.id
-            AND jsonb_array_length(price_room.configuration->'offers') > 0
-        ) published_offer_facts ON TRUE
-        LEFT JOIN LATERAL (
-          SELECT count(*) > 0 AS exists, max(day.updated_at) AS updated_at
-          FROM pms.inventory_days day
-          WHERE day.property_id = room_type.property_id
-            AND day.room_type_id = room_type.id
-            AND day.stay_date >= CURRENT_DATE
-        ) inventory_facts ON TRUE
-        WHERE room_type.property_id = property.id
-          AND room_type.active = TRUE
-      ) candidate
-    ) room_readiness ON TRUE
-    LEFT JOIN hotel_catalog.property_policy_summaries policy
-      ON policy.property_id = property.id
-    LEFT JOIN LATERAL (
-      SELECT entitlement.plan_key,
-             entitlement.checkout_session_ref,
-             entitlement.entitlement_metadata,
-             entitlement.updated_at
-      FROM finance.billing_entitlements entitlement
-      WHERE entitlement.property_id = property.id
-        AND entitlement.organization_id = $1::uuid
-        AND entitlement.product = 'booking'
-        AND entitlement.entitlement_key = 'direct-booking-finance'
-      ORDER BY entitlement.updated_at DESC
-      LIMIT 1
-    ) billing ON TRUE
-    LEFT JOIN finance.payment_settings payment
-      ON payment.property_id = property.id
-    LEFT JOIN finance.payment_provider_accounts payment_provider
-      ON payment_provider.id = payment.provider_account_id
-     AND payment_provider.property_id = property.id
-    LEFT JOIN distribution.public_hotel_bookability_profiles bookability
-      ON bookability.property_id = property.id
-    LEFT JOIN distribution.active_public_booking_revision active_publication
-      ON active_publication.property_id = property.id
-    ORDER BY array_position($2::uuid[], property.id)
+    ORDER BY array_position($1::uuid[], property.id)
   `;
 }
 
@@ -2259,8 +1883,4 @@ function toIsoString(value: unknown): string | null {
     return new Date(value).toISOString();
   }
   return null;
-}
-
-function unique<T>(values: T[]): T[] {
-  return [...new Set(values)];
 }

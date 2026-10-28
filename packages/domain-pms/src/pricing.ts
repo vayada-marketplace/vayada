@@ -230,14 +230,6 @@ export type PmsPricingCommandPort = {
   upsertPropertyPricingCurrency(
     command: UpsertPropertyPricingCurrencyCommand,
   ): Promise<PropertyPricingCurrencyCommandResult>;
-  /**
-   * Creates or updates the one stable flexible plan for an active room type.
-   * The amount inherits the locked authoritative property currency; the
-   * command cannot submit a second currency or write room/calendar state.
-   */
-  upsertFlexibleRatePlan(
-    command: UpsertFlexibleRatePlanCommand,
-  ): Promise<FlexibleRatePlanCommandResult>;
 };
 
 export type PmsPricingReadPort = {

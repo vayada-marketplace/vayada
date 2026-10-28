@@ -2,11 +2,11 @@
 
 import { useId, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
-import type {
-  PublicBookingQuote,
-  PublicQuoteGuestDisclosure,
+import {
+  policyBlocks,
+  type PublicBookingQuote,
+  type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
-import { policyBlocks } from "@/lib/cancellationPolicy";
 import CancellationPolicy, { chevron } from "./CancellationPolicy";
 import ConsentTile from "./ConsentTile";
 

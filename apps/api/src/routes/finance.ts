@@ -1429,7 +1429,6 @@ async function updatePaymentSettingsInClient(
       LIMIT 1`,
     [command.propertyId],
   );
-  const canonicalCurrency = currencyCode(currencyResult.rows[0]?.currency);
   if (!currencyResult.rows[0]) {
     return {
       ok: false,
@@ -1438,23 +1437,11 @@ async function updatePaymentSettingsInClient(
       message: "The property currency could not be resolved.",
     };
   }
-  // VAY-2136: bind like the setup Payments step, to the PMS pricing currency, when booking
-  // settings agree with it. A bound row can't change currency here; an unbound row whose
-  // currencies disagree saves unbound, as before, until the setup step binds it.
-  const bindingPricing =
-    pricing?.currency === canonicalCurrency && command.audit.actor.kind === "user" ? pricing : null;
-  if (
-    pricing &&
-    pricing.currency !== canonicalCurrency &&
-    previous?.paymentMethodsRevision != null
-  ) {
-    return {
-      ok: false,
-      statusCode: 409,
-      code: "property_currency_conflict",
-      message: `Prices use ${pricing.currency} but booking settings use ${canonicalCurrency}. Use one currency before saving payments.`,
-    };
-  }
+  // VAY-2390: guests pay in the PMS pricing currency; Booking settings' default currency is only
+  // the one they see first. A property without prices yet keeps the Booking default.
+  const canonicalCurrency = pricing?.currency ?? currencyCode(currencyResult.rows[0].currency);
+  // VAY-2136: bind like the setup Payments step, to the PMS pricing currency.
+  const bindingPricing = command.audit.actor.kind === "user" ? pricing : null;
   if (
     (command.payload.defaultCurrency && command.payload.defaultCurrency !== canonicalCurrency) ||
     (command.payload.supportedCurrencies &&
@@ -4695,7 +4682,7 @@ async function loadPaymentSettingsRow(
        property.id::text AS "propertyId",
        COALESCE(settings.payments_enabled, FALSE) AS "paymentsEnabled",
        COALESCE(settings.accepted_methods, ARRAY[]::text[]) AS "acceptedMethods",
-       COALESCE(booking_settings.default_currency, settings.default_currency, 'EUR') AS "defaultCurrency",
+       COALESCE(pricing.currency, booking_settings.default_currency, settings.default_currency, 'EUR') AS "defaultCurrency",
        EXISTS (SELECT 1 FROM finance.bank_transfer_destinations destination
          WHERE destination.property_id=property.id AND destination.enabled) AS "bankTransferReady",
        COALESCE(settings.deposit_policy, '{}'::jsonb) AS "depositPolicy",
@@ -4716,6 +4703,8 @@ async function loadPaymentSettingsRow(
        ON settings.property_id = property.id
      LEFT JOIN booking.booking_settings booking_settings
        ON booking_settings.property_id = property.id
+     LEFT JOIN pms.property_pricing_settings pricing
+       ON pricing.property_id = property.id
      LEFT JOIN finance.payment_provider_accounts account
        ON account.id = settings.provider_account_id
       AND account.property_id = settings.property_id

@@ -1105,11 +1105,6 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       expect(await calendarBlockersInDays(1)).toEqual([]);
       expect(await calendarBlockersInDays(31)).toEqual([]);
       expect(await calendarBlockersInDays(32)).toEqual(["inventory_launch_readiness_incomplete"]);
-      // Setup's last task stays open until the page is published (VAY-2292).
-      const publicationTask = async () =>
-        (await creation.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] }))
-          .properties[0]?.taskFacts.direct_booking_publication;
-      expect((await publicationTask())?.ownerProgress).not.toBe("owner_complete");
       const requested = await runtime.routes.repository.requestPublication({
         ...scope,
         actorUserId: owner,
@@ -1134,12 +1129,6 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           operationId: requested.operation.operationId,
         }),
       ).toMatchObject({ status: "succeeded" });
-      // Published: the setup plan counts the task done, so "Resume setup" goes away.
-      expect(await publicationTask()).toMatchObject({
-        ownerProgress: "owner_complete",
-        readiness: "complete",
-        reasonCodes: [],
-      });
       const active = (
         await admin.query(
           `SELECT revision.public_content AS content
@@ -1264,17 +1253,11 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             targetDatabaseUrl: cs,
             replacementPricingManualPaymentAcceptanceEnabled: false,
           } as ApiConfig,
-          {
-            publicHotelProfilePool: pool,
-            publicHotelQuotePool: pool,
-            bookingWebCalendarPool: pool,
-          },
+          { publicHotelProfilePool: pool },
         );
         await site.register(registerBookingWebPublicRoutes, {
           prefix: "/api/booking-web",
           profileRepository: publicRuntime.publicHotelProfileRepository,
-          quoteRepository: publicRuntime.publicHotelQuoteRepository,
-          calendarRepository: publicRuntime.bookingWebCalendarRepository,
           checkoutAdapter: createTargetBookingWebCheckoutAdapter({
             externalChanges: externalBookingChanges,
             connectionString: cs,

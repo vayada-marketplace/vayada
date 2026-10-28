@@ -5,6 +5,7 @@ import { pricingAmountStep, pricingCurrencyScale, pricingObject } from "@vayada/
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { readAddonLeadTime, type AddonLeadTimeHours } from "./addonLeadTime.js";
+import { readAddonSchedule, type AddonScheduleMode } from "./addonSchedule.js";
 
 const uuid = (v: unknown): v is string =>
   typeof v === "string" &&
@@ -22,6 +23,10 @@ type Addon = AddonEconomicTerms & {
   leadTimeHours: AddonLeadTimeHours | null;
   /** Free-text lead time from before VAY-2232: not bookable until it is converted. */
   legacyLeadTime: boolean;
+  /** VAY-2391: when it happens; a per-night price is always daily. */
+  scheduleMode: AddonScheduleMode;
+  /** ISO weekdays (1 Monday … 7 Sunday) a guest can pick for a guest_pick add-on. */
+  bookableWeekdays: number[];
 };
 const limit = (v: unknown): v is number =>
   typeof v === "number" && Number.isSafeInteger(v) && v >= 1 && v <= 2147483647;
@@ -112,6 +117,7 @@ function parseAddonDefinition(
   const maxQuantity = row.metadata.maxQuantity === undefined ? 1 : row.metadata.maxQuantity;
   const maxGuests = row.metadata.maxGuests === undefined ? null : row.metadata.maxGuests;
   const leadTime = readAddonLeadTime(row.metadata);
+  const schedule = readAddonSchedule(row.pricing_model, row.schedule_mode, row.bookable_weekdays);
   if (
     amountMinor === null ||
     // Whole rupiah for IDR (VAY-2085); other currencies step by one minor unit.
@@ -119,7 +125,8 @@ function parseAddonDefinition(
     !terms ||
     !limit(maxQuantity) ||
     (maxGuests !== null && !limit(maxGuests)) ||
-    !leadTime
+    !leadTime ||
+    !schedule
   )
     return null;
   return {
@@ -132,6 +139,7 @@ function parseAddonDefinition(
     maxGuests,
     leadTimeHours: leadTime.hours,
     legacyLeadTime: leadTime.legacy !== null,
+    ...schedule,
     ...terms,
   };
 }

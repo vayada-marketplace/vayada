@@ -911,7 +911,6 @@ function PaymentTab({
   const [savedCommissionNote, setSavedCommissionNote] = useState("");
   const [savedBeFee, setSavedBeFee] = useState(COMMISSION_DEFAULT_PCT);
   const [history, setHistory] = useState<CommissionRateChange[]>([]);
-  const [affiliatePlatformFee, setAffiliatePlatformFee] = useState(2);
   const [fixedBase, setFixedBase] = useState(30);
   const [roomsIncluded, setRoomsIncluded] = useState(1);
   const [perExtraRoom, setPerExtraRoom] = useState(5);
@@ -946,7 +945,6 @@ function PaymentTab({
           const note = hotel.billing_commission_note ?? "";
           setCommissionNote(note);
           setSavedCommissionNote(note);
-          setAffiliatePlatformFee(hotel.affiliate_platform_fee_pct ?? 2);
           setFixedBase(hotel.fixed_base_fee ?? 30);
           setRoomsIncluded(hotel.fixed_rooms_included ?? 1);
           setPerExtraRoom(hotel.fixed_per_extra_room_fee ?? 5);
@@ -977,7 +975,6 @@ function PaymentTab({
       // and so a note-only edit still persists.
       await bookingSettingsService.updateHotelBilling(hotelId, {
         booking_engine_fee_pct: beFee,
-        affiliate_platform_fee_pct: affiliatePlatformFee,
         fixed_base_fee: fixedBase,
         fixed_rooms_included: roomsIncluded,
         fixed_per_extra_room_fee: perExtraRoom,
@@ -1109,22 +1106,6 @@ function PaymentTab({
 
       <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
         <div>
-          <h2 className="text-[14px] font-semibold text-gray-900">Affiliate Platform Fee</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">
-            Added on top of the platform fee whenever a booking has a referral — applies under both
-            plans.
-          </p>
-        </div>
-        <FeeInput
-          label="Affiliate booking"
-          suffix="% added to every affiliate booking"
-          value={affiliatePlatformFee}
-          onChange={setAffiliatePlatformFee}
-        />
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-        <div>
           <h2 className="text-[14px] font-semibold text-gray-900">Fixed Plan</h2>
           <p className="text-[12px] text-gray-500 mt-0.5">
             Monthly subscription for hotels on the Fixed plan. {roomsIncluded} room included · +
@@ -1171,36 +1152,6 @@ function PaymentTab({
         >
           {saving ? "Saving..." : "Save Billing Settings"}
         </button>
-      </div>
-    </div>
-  );
-}
-
-function FeeInput({
-  label,
-  suffix,
-  value,
-  onChange,
-}: {
-  label: string;
-  suffix: string;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div>
-      <label className="block text-[12px] font-medium text-gray-700 mb-1">{label}</label>
-      <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min={0}
-          max={100}
-          step={0.5}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
-        />
-        <span className="text-[13px] text-gray-600">{suffix}</span>
       </div>
     </div>
   );

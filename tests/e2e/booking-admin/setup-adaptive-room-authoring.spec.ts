@@ -361,15 +361,11 @@ async function mockRoomOwnerApis(page: Page) {
   let lastDraftPayload: Record<string, unknown> | null = null;
   let lastDraftRoomId: string | null = null;
 
-  // The retired room-create route answers 503 in production; room setup must not call it.
+  // The old room-create route was removed (VAY-2387); room setup must not call this path.
   await page.route(/\/api\/pms\/properties\/[^/]+\/room-types(?:\?|$)/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
     events.push(`retired-room-route:${route.request().method()}`);
-    await route.fulfill({
-      status: 503,
-      headers: corsHeaders(route),
-      json: { code: "PRICING_UNAVAILABLE" },
-    });
+    await route.fulfill({ status: 404, headers: corsHeaders(route) });
   });
   await page.route(/\/api\/pms\/properties\/[^/]+\/plan-limits$/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
