@@ -2038,6 +2038,14 @@ function adaptiveHotelSetupFactsSql(): string {
         AND media.public_approved = TRUE
         AND media.source_system = 'platform'
     ) public_media ON TRUE
+    -- A pricing-v2 publication replaces the legacy rate plans (VAY-2087), as for setup Pricing
+    -- and calendar auto-open. A draft-only head (revision 0) is not a publication.
+    LEFT JOIN pms.pricing_v2_heads published_pricing
+      ON published_pricing.property_id = property.id
+     AND published_pricing.revision > 0
+    LEFT JOIN pms.pricing_v2_revisions published_revision
+      ON published_revision.property_id = published_pricing.property_id
+     AND published_revision.revision = published_pricing.revision
     LEFT JOIN LATERAL (
       SELECT
         count(*) > 0 AS has_active_room_type,
@@ -2067,8 +2075,12 @@ function adaptiveHotelSetupFactsSql(): string {
           room_type.updated_at AS room_type_updated_at,
           COALESCE(room_facts.exists, FALSE) AS has_non_retired_room,
           room_facts.updated_at AS room_updated_at,
-          COALESCE(rate_plan_facts.exists, FALSE) AS has_active_rate_plan,
-          rate_plan_facts.updated_at AS rate_plan_updated_at,
+          COALESCE(rate_plan_facts.exists OR published_offer_facts.exists, FALSE)
+            AS has_active_rate_plan,
+          CASE
+            WHEN published_offer_facts.exists THEN published_revision.created_at
+            ELSE rate_plan_facts.updated_at
+          END AS rate_plan_updated_at,
           COALESCE(inventory_facts.exists, FALSE) AS has_future_inventory,
           inventory_facts.updated_at AS inventory_updated_at
         FROM pms.room_types room_type
@@ -2082,10 +2094,19 @@ function adaptiveHotelSetupFactsSql(): string {
         LEFT JOIN LATERAL (
           SELECT count(*) > 0 AS exists, max(rate_plan.updated_at) AS updated_at
           FROM pms.rate_plans rate_plan
-          WHERE rate_plan.property_id = room_type.property_id
+          WHERE published_pricing.property_id IS NULL
+            AND rate_plan.property_id = room_type.property_id
             AND rate_plan.room_type_id = room_type.id
             AND rate_plan.active = TRUE
         ) rate_plan_facts ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT count(*) > 0 AS exists
+          FROM pms.pricing_v2_rooms price_room
+          WHERE price_room.property_id = room_type.property_id
+            AND price_room.revision = published_pricing.revision
+            AND price_room.room_type_id = room_type.id
+            AND jsonb_array_length(price_room.configuration->'offers') > 0
+        ) published_offer_facts ON TRUE
         LEFT JOIN LATERAL (
           SELECT count(*) > 0 AS exists, max(day.updated_at) AS updated_at
           FROM pms.inventory_days day
