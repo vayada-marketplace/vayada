@@ -117,43 +117,16 @@ describe("hotel account invite code routes", () => {
     expect(repository.calls.revokeInviteCode).toEqual(["invite_801"]);
   });
 
-  it("still answers on the old /api/marketplace path for one release (VAY-2302)", async () => {
+  it("no longer answers on the retired /api/marketplace path (VAY-2302)", async () => {
     const repository = createMemoryHotelAccountInviteCodeRepository();
     app = buildInviteCodeApp(repository);
 
-    const list = await injectJson<HotelAccountInviteCode[]>(app, {
+    const list = await injectJson(app, {
       method: "GET",
       url: "/api/marketplace/admin/invite-codes",
       headers: { authorization: "Bearer platform-token" },
     });
-    expect(list.statusCode).toBe(200);
-    expect(list.body[0]).toMatchObject({ code: "VAY-INVITE" });
-
-    const unauthorized = await injectJson(app, {
-      method: "DELETE",
-      url: "/api/marketplace/admin/invite-codes/invite_801",
-      headers: { authorization: "Bearer hotel-token" },
-    });
-    expect(unauthorized.statusCode).toBe(403);
-    expect(repository.calls.revokeInviteCode).toHaveLength(0);
-  });
-
-  it("ends its pool once although both route prefixes close it (VAY-2302)", async () => {
-    let ended = 0;
-    const repository = createPgHotelAccountInviteCodeRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        ...createAdminPgPool([]),
-        async end() {
-          ended += 1;
-        },
-      } as never,
-    });
-    const inviteCodeApp = buildInviteCodeApp(repository);
-    await inviteCodeApp.ready();
-    await inviteCodeApp.close();
-
-    expect(ended).toBe(1);
+    expect(list.statusCode).toBe(404);
   });
 
   it("rejects retired setup payloads and invalid setup tracks", async () => {

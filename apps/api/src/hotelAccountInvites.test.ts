@@ -137,49 +137,22 @@ describe("hotel account invite routes", () => {
     expect(tracks.calls).toHaveLength(0);
   });
 
-  it("still answers on the old /api/marketplace path for one release (VAY-2302)", async () => {
+  it("no longer answers on the retired /api/marketplace paths (VAY-2302)", async () => {
     const repository = createMemoryInviteRepository();
     const tracks = createMemoryTrackCommands();
     app = buildInviteApp(repository, tracks.repository);
 
-    const lookup = await injectJson<HotelAccountInviteLookupResponse>(app, {
-      method: "POST",
-      url: "/api/marketplace/hotel-account-invites/lookup",
-      payload: { code: INVITE_CODE },
-    });
-    const unauthenticated = await injectJson(app, {
-      method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
-      payload: { code: INVITE_CODE },
-    });
-
-    expect(lookup.statusCode).toBe(200);
-    expect(lookup.body.property).toEqual({ displayName: "Hotel Alpenrose" });
-    expect(unauthenticated.statusCode).toBe(401);
+    for (const action of ["lookup", "redeem"]) {
+      const response = await injectJson(app, {
+        method: "POST",
+        url: `/api/marketplace/hotel-account-invites/${action}`,
+        headers: { authorization: "Bearer owner-token" },
+        payload: { code: INVITE_CODE },
+      });
+      expect(response.statusCode, action).toBe(404);
+    }
     expect(repository.calls.redeem).toHaveLength(0);
-  });
-
-  it("ends its pool once although both route prefixes close it (VAY-2302)", async () => {
-    let ended = 0;
-    const repository = createPgHotelAccountInviteRepository({
-      connectionString: "postgresql://unused",
-      pool: {
-        async connect() {
-          throw new Error("unexpected transaction");
-        },
-        async query() {
-          throw new Error("unexpected query");
-        },
-        async end() {
-          ended += 1;
-        },
-      } as never,
-    });
-    const inviteApp = buildInviteApp(repository, createMemoryTrackCommands().repository);
-    await inviteApp.ready();
-    await inviteApp.close();
-
-    expect(ended).toBe(1);
+    expect(tracks.calls).toHaveLength(0);
   });
 
   it("requires an authenticated active hotel account before reading the redemption token", async () => {

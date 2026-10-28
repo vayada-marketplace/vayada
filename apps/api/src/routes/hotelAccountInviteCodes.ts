@@ -76,7 +76,6 @@ export type HotelAccountInviteCodeRepository = {
     createdByUserId: string;
   }): Promise<HotelAccountInviteCode>;
   revokeInviteCode(inviteCodeId: string): Promise<boolean>;
-  /** Each route prefix's registration calls this (VAY-2302), so repeats must be safe. */
   close?(): Promise<void>;
 };
 
@@ -108,8 +107,6 @@ export function createPgHotelAccountInviteCodeRepository(config: {
       connectionString: config.connectionString,
       max: config.max,
     });
-  // Each route prefix's registration closes the repository (VAY-2302); the pool ends once.
-  let closing: Promise<void> | undefined;
 
   return {
     async listInviteCodes() {
@@ -207,8 +204,7 @@ export function createPgHotelAccountInviteCodeRepository(config: {
       }
     },
     async close() {
-      closing ??= pool.end();
-      await closing;
+      await pool.end();
     },
   };
 }
