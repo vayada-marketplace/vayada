@@ -20,7 +20,7 @@ This complements:
 > **Note (VAY-2272, 2026-10-20):** the Marketplace, the affiliate program and the creator accounts
 > are gone: `next-marketplace` (`apps/marketplace-web`), `next-affiliate`
 > (`apps/affiliate-dashboard`), the old Python Marketplace API and their `apps/api` routes are
-> deleted (only the hotel invite routes keep their `/api/marketplace/...` paths), and migrations 0496-0502 drop their data from the new database.
+> deleted (the hotel invite routes kept their `/api/marketplace/...` paths until VAY-2302 moved them to `/api/platform/admin/invite-codes` and `/api/hotel-setup/hotel-account-invites/*`), and migrations 0496-0502 drop their data from the new database.
 > Their entries are removed below; their history is in the
 > [marketplace route migration inventory](marketplace-route-migration-inventory.md) and
 > [affiliate portal source retirement](affiliate-portal-retirement.md).

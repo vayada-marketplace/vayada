@@ -60,7 +60,7 @@ test.describe("vayada-admin smoke", () => {
     });
 
     await page.route(
-      /https:\/\/api\.localhost(?::\d+)?\/api\/marketplace\/admin\/invite-codes(?:\?|$)/,
+      /https:\/\/api\.localhost(?::\d+)?\/api\/platform\/admin\/invite-codes(?:\?|$)/,
       async (route) => {
         if (route.request().method() === "GET") {
           await fulfillJson(route, pageOrigin, []);

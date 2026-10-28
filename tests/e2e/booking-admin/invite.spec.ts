@@ -38,7 +38,7 @@ function fulfillCorsPreflight(route: Route) {
 }
 
 async function mockInviteApi(page: Page, requests: InviteRequest[], lookupStatus = 200) {
-  await page.route(/\/api\/marketplace\/hotel-account-invites\/(lookup|redeem)$/, async (route) => {
+  await page.route(/\/api\/hotel-setup\/hotel-account-invites\/(lookup|redeem)$/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
     const url = new URL(route.request().url());
     requests.push({
@@ -98,7 +98,7 @@ test("a signed-out owner sees the invitation and the way to create or open the a
   expect(requestedUrls.some((url) => url.includes(inviteCode))).toBe(false);
   expect(requests).toEqual([
     {
-      path: "/api/marketplace/hotel-account-invites/lookup",
+      path: "/api/hotel-setup/hotel-account-invites/lookup",
       body: { code: inviteCode },
       authorization: undefined,
     },
@@ -144,7 +144,7 @@ test("a signed-in owner accepts the invitation and is handed to setup", async ({
     csrf: "test-csrf-token",
   });
   expect(requests.find((request) => request.path.endsWith("/redeem"))).toEqual({
-    path: "/api/marketplace/hotel-account-invites/redeem",
+    path: "/api/hotel-setup/hotel-account-invites/redeem",
     body: { code: inviteCode },
     authorization: "Bearer test-access-token",
   });
@@ -211,7 +211,7 @@ test("a new owner who signs up from the invitation comes back to it", async ({ p
 
 test("a server failure while loading keeps the invitation code for a retry", async ({ page }) => {
   let lookups = 0;
-  await page.route(/\/api\/marketplace\/hotel-account-invites\/lookup$/, async (route) => {
+  await page.route(/\/api\/hotel-setup\/hotel-account-invites\/lookup$/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
     lookups++;
     return route.fulfill({

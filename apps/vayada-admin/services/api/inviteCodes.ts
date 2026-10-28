@@ -37,14 +37,14 @@ export interface InviteCode {
 
 export const inviteCodesService = {
   async list(): Promise<InviteCode[]> {
-    return apiClient.get<InviteCode[]>("/api/marketplace/admin/invite-codes");
+    return apiClient.get<InviteCode[]>("/api/platform/admin/invite-codes");
   },
 
   async create(request: HotelAccountInviteCreateRequest): Promise<InviteCode> {
-    return apiClient.post<InviteCode>("/api/marketplace/admin/invite-codes", request);
+    return apiClient.post<InviteCode>("/api/platform/admin/invite-codes", request);
   },
 
   async delete(id: string): Promise<void> {
-    return apiClient.delete(`/api/marketplace/admin/invite-codes/${id}`);
+    return apiClient.delete(`/api/platform/admin/invite-codes/${id}`);
   },
 };

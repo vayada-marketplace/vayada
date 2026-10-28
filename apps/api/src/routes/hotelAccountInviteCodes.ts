@@ -14,8 +14,8 @@ import { enforceRoutePolicy } from "./policy.js";
 
 // Hotel account invite codes, issued by platform staff in Vayada Admin and redeemed in Booking
 // Admin (routes/hotelAccountInvites.ts). Carved out of the retired Marketplace admin routes
-// (VAY-2270). The routes keep their `/api/marketplace/admin/invite-codes` path; the rows live in
-// `hotel_catalog.hotel_account_invites` since migration 0496 (VAY-2272).
+// (VAY-2270). The routes are served at `/api/platform/admin/invite-codes` since VAY-2302; the rows
+// live in `hotel_catalog.hotel_account_invites` since migration 0496 (VAY-2272).
 
 export const HOTEL_ACCOUNT_INVITE_CONTRACT_VERSION = "hotel-account-invite.v1" as const;
 export const HOTEL_ACCOUNT_INVITE_HANDOFF_PATH = "/setup" as const;
@@ -76,6 +76,7 @@ export type HotelAccountInviteCodeRepository = {
     createdByUserId: string;
   }): Promise<HotelAccountInviteCode>;
   revokeInviteCode(inviteCodeId: string): Promise<boolean>;
+  /** Each route prefix's registration calls this (VAY-2302), so repeats must be safe. */
   close?(): Promise<void>;
 };
 
@@ -107,6 +108,8 @@ export function createPgHotelAccountInviteCodeRepository(config: {
       connectionString: config.connectionString,
       max: config.max,
     });
+  // Each route prefix's registration closes the repository (VAY-2302); the pool ends once.
+  let closing: Promise<void> | undefined;
 
   return {
     async listInviteCodes() {
@@ -204,7 +207,8 @@ export function createPgHotelAccountInviteCodeRepository(config: {
       }
     },
     async close() {
-      await pool.end();
+      closing ??= pool.end();
+      await closing;
     },
   };
 }

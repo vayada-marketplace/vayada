@@ -26,7 +26,7 @@ test("prepares hotel details and rooms before creating an invitation", async ({
     );
   });
   let submitted: Record<string, any> | undefined;
-  await page.route("**/api/marketplace/admin/invite-codes", async (route) => {
+  await page.route("**/api/platform/admin/invite-codes", async (route) => {
     const headers = {
       "access-control-allow-origin": baseURL!,
       "access-control-allow-credentials": "true",
