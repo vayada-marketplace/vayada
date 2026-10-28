@@ -53,7 +53,6 @@
   },
   "nav": {
     "contact": "Kontak",
-    "referGuest": "Referensikan Tamu",
     "phone": "Telepon",
     "whatsapp": "WhatsApp",
     "email": "Email"
@@ -183,7 +182,12 @@
       "readyForExtras": "Siap untuk tambahan",
       "readyForDetails": "Siap untuk data Anda",
       "continueToExtras": "Lanjut ke tambahan",
-      "continueToDetails": "Lanjut ke data Anda"
+      "continueToDetails": "Lanjut ke data Anda",
+      "partChosen": "Kamar 1: {name} untuk {count}. Sekarang pilih tempat untuk {rest} lainnya.",
+      "remove": "Hapus Kamar {number} dari pemesanan",
+      "removedToOne": "Kamar {number} dihapus. Semua {adults} dewasa kini di satu kamar.",
+      "removed": "Kamar {number} dihapus.",
+      "undo": "Urungkan"
     },
     "pickRoom": {
       "selectFor": "Pilih untuk Kamar {number}",
@@ -195,9 +199,20 @@
       "updateRoom": "Perbarui Kamar {number}",
       "soldOut": "Habis untuk tanggal ini",
       "allChosen": "Semua kamar sudah dipilih",
-      "swapHint": "Pilih tempat lain untuk menukarnya."
+      "swapHint": "Pilih tempat lain untuk menukarnya.",
+      "bookPart": "Pesan untuk {adults} + pilih kamar ke-2 untuk {rest}",
+      "partNote": "Muat {count} dari {guests} tamu Anda.",
+      "yourChoice": "Pilihan Anda",
+      "continueWithPlace": "Lanjut dengan tempat ini"
     },
-    "pricesPerRoom": "Harga per kamar, untuk orang dewasa di dalamnya. Anak-anak kami tambahkan setelah Anda memberi tahu usia mereka di langkah berikutnya."
+    "pricesPerRoom": "Harga per kamar, untuk orang dewasa di dalamnya. Anak-anak kami tambahkan setelah Anda memberi tahu usia mereka di langkah berikutnya.",
+    "oneRoom": {
+      "together": "Menampilkan tempat menginap untuk {count} tamu bersama.",
+      "preferSeparate": "Lebih suka kamar terpisah?",
+      "noneFits": "Tidak ada satu tempat yang muat untuk {count} tamu.",
+      "splitHint": "Bagi rombongan Anda dan pilih tempat untuk setiap bagian.",
+      "bookRooms": "Pesan {count} kamar"
+    }
   },
   "rooms": {
     "title": "Kamar Kami",
@@ -616,33 +631,6 @@
         "per_guest_night": "{amount} per tamu per malam"
       }
     }
-  },
-  "refer": {
-    "title": "Referensikan Tamu",
-    "step1Desc": "Dapatkan komisi 5% dari setiap pemesanan melalui tautan Anda.",
-    "step2Desc": "Hubungkan akun Stripe Anda untuk menerima komisi secara otomatis.",
-    "step3Desc": "Bagikan tautan unik Anda untuk mulai menghasilkan!",
-    "fullName": "Nama Lengkap",
-    "emailAddress": "Alamat Email",
-    "socialMedia": "Media Sosial / Kanal (Opsional)",
-    "iAmA": "Saya seorang...",
-    "guest": "Tamu",
-    "creator": "Kreator",
-    "paymentMethod": "Atur pembayaran",
-    "connectWithStripe": "Hubungkan dengan Stripe",
-    "stripeOnboardingOpened": "Onboarding Stripe dibuka — selesaikan di tab baru",
-    "paypal": "PayPal",
-    "bankTransfer": "Transfer Bank",
-    "paypalEmail": "Email PayPal",
-    "iban": "IBAN / Nomor Rekening",
-    "accountHolder": "Nama Pemilik Rekening",
-    "swiftBic": "SWIFT / BIC",
-    "bankName": "Nama Bank",
-    "bankCountry": "Negara",
-    "generateLink": "Buat Tautan",
-    "yourReferralLink": "Tautan Referral Anda",
-    "commissionInfo": "Anda akan menerima <strong>5%</strong> dari total pendapatan pemesanan untuk setiap pemesanan langsung yang berhasil melalui tautan Anda.",
-    "pendingReview": "Pengajuan Anda sedang dalam peninjauan. Kami akan memberitahu Anda di <strong>{email}</strong> setelah disetujui."
   },
   "requestChange": {
     "title": "Ajukan Perubahan Pemesanan",

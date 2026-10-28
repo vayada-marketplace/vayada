@@ -197,7 +197,7 @@ export default function ReservationsPage() {
             />
           </label>
           <label>
-            <span className="sr-only">{t("affiliates.allAffiliates.status")}</span>
+            <span className="sr-only">{t("reservations.statusColumn")}</span>
             <select
               value={status}
               onChange={(event) => handleStatusChange(event.target.value)}
@@ -247,11 +247,11 @@ export default function ReservationsPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <TableHead label={t("admin.reservation")} />
-                    <TableHead label={t("affiliates.typeFilter.guest")} />
+                    <TableHead label={t("reservations.guest")} />
                     <TableHead label={t("admin.stay")} />
                     <TableHead label={t("admin.rooms")} />
                     <TableHead label={t("admin.payment")} />
-                    <TableHead label={t("affiliates.allAffiliates.status")} />
+                    <TableHead label={t("reservations.statusColumn")} />
                   </tr>
                 </thead>
                 <tbody className={`divide-y divide-gray-100 ${refreshing ? "opacity-70" : ""}`}>
@@ -311,9 +311,7 @@ function ReservationRow({ booking }: { booking: BookingReservation }) {
         </div>
       </TableCell>
       <TableCell>
-        <div className="font-medium text-gray-900">
-          {guestName || t("affiliates.typeFilter.guest")}
-        </div>
+        <div className="font-medium text-gray-900">{guestName || t("reservations.guest")}</div>
         <div className="mt-1 max-w-[220px] truncate text-[12px] text-gray-500">
           {booking.guestEmail || booking.guestPhone || t("admin.noContactDetails")}
         </div>

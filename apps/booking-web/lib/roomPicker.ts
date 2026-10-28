@@ -128,7 +128,13 @@ export function decodePicks(
 /** The group's split and picks for one stay, kept per tab so Back from /book and a refresh find
  * them again. Other guests or rooms keep the picks (VAY-2393); a split for other guests is
  * ignored. */
-export type PickDraft = { split: number[]; picks: (RoomPick | null)[] };
+export type PickDraft = {
+  split: number[];
+  picks: (RoomPick | null)[];
+  /** Children per room when the guest placed them ("Book for 2 + …" puts them all in the
+   * second room); otherwise roomGuests places them. */
+  children?: number[];
+};
 const draftKey = (slug: string) => `roomPicks:${slug}`;
 const count = (value: unknown, min: number) =>
   Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= 99;
@@ -155,7 +161,14 @@ export function readPickDraft(slug: string, identity: string): PickDraft | null 
           typeof pick.roomTypeId === "string" &&
           typeof pick.publicOfferKey === "string"),
     );
-    return valid ? { split: raw.split, picks: raw.picks } : null;
+    if (!valid) return null;
+    const children =
+      Array.isArray(raw.children) &&
+      raw.children.length === raw.split.length &&
+      raw.children.every((n) => count(n, 0))
+        ? { children: raw.children }
+        : {};
+    return { split: raw.split, picks: raw.picks, ...children };
   } catch {
     return null;
   }

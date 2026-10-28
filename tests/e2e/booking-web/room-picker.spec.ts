@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
-import { key, mockGroup, STAY } from "../support/roomPickerMocks";
+import { key, mockGroup, ONE_ROOM_STAY, STAY } from "../support/roomPickerMocks";
 
 // VAY-2320 / VAY-2393: a group too big for one room picks its rooms one after another, mixing
 // room types; the last pick goes straight on, with no Continue button and no rooms bar.
@@ -144,7 +144,7 @@ for (const width of [1440, 390]) {
     await mockBookingApis(page);
     await mockGroup(page, []);
     // 4 adults: two rooms of 2 by default.
-    await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4");
+    await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4&rooms=2");
     const garden = page.getByTestId("room-card-garden");
     await garden.getByRole("button", { name: "Select for Room 1" }).click();
     await garden.getByRole("button", { name: "Select for Room 2" }).click();
@@ -202,18 +202,23 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("starts at the fewest rooms the group needs and lets it add rooms", async ({
+test("offers the rooms a group needs when no place holds it, and lets it add rooms", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   await mockBookingApis(page);
   await mockGroup(page, []);
-  await openHotelPage(page, STAY);
+  // VAY-2393: the group starts in one room and is offered the rooms it needs.
+  await openHotelPage(page, ONE_ROOM_STAY);
+  const noneFits = page.getByTestId("none-fits");
+  await expect(noneFits).toContainText("No single place fits 4 guests.");
+  await expect(page.getByTestId("rooms-progress")).toHaveCount(0);
+  await noneFits.getByRole("button", { name: "Book 2 rooms" }).click();
   await expect(page.getByTestId("rooms-progress")).toContainText("Room 1 of 2");
   await page.getByText("3 Adults, 1 Child", { exact: true }).click();
   const picker = page.getByTestId("guest-selector");
   await expect(picker.getByText("4 guests need at least 2 rooms here")).toBeVisible();
-  await expect(picker.getByRole("button", { name: "Fewer Rooms" })).toBeDisabled();
+  await expect(picker.getByRole("button", { name: "Fewer Rooms" })).toBeEnabled();
   await picker.getByRole("button", { name: "More Rooms" }).click();
   // Never more rooms than adults.
   await expect(picker.getByRole("button", { name: "More Rooms" })).toBeDisabled();
@@ -258,5 +263,213 @@ test("picks from inside a room's details and keeps a reopened room from its pill
   await page.getByTestId("room-pill-1").click();
   await expect(page.getByTestId("room-pill-1")).toContainText("✓ Deluxe Double Room");
   await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
+  await assertHealthy();
+});
+
+for (const width of [1440, 390]) {
+  test(`books a place too small for the whole group for part of it at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await mockBookingApis(page);
+    const stayRequests: URL[] = [];
+    await mockGroup(page, stayRequests);
+    await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4");
+
+    // No place sleeps 4: each free one is priced for the 2 it takes, not greyed out.
+    await expect(page.getByTestId("none-fits")).toContainText("No single place fits 4 guests.");
+    const garden = page.getByTestId("room-card-garden");
+    const bookPart = garden.getByRole("button", { name: "Book for 2 + pick a 2nd room for 2" });
+    await expect(bookPart).toBeEnabled();
+    await expect(garden.locator(`[data-offer-key="${key("f")}"]`)).toContainText("€238");
+    await expect(garden).not.toContainText("Not available");
+    await expect(garden).toContainText("Sleeps 2 of your 4 guests.");
+    await expect(page.getByTestId("none-fits")).toContainText(
+      "Split your group and pick a place for each part.",
+    );
+    await expect(page.getByTestId("room-card-family")).toContainText("Sold Out");
+    await page.screenshot({
+      path: testInfo.outputPath(`one-room-too-small-${width}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+
+    // The place becomes room 1 for 2 adults; room 2 is for the other 2.
+    await bookPart.click();
+    await expect(page.getByTestId("toast")).toHaveText(
+      "Room 1: Garden Double Room for 2. Now pick a place for the other 2.",
+    );
+    const progress = page.getByTestId("rooms-progress");
+    await expect(progress).toContainText("Room 2 of 2");
+    await expect(progress).toContainText("Pick a place for 2 adults");
+    await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
+    await page
+      .getByTestId("room-card-deluxe")
+      .getByRole("button", { name: "Select for Room 2" })
+      .click();
+    await expect(page).toHaveURL(/\/(en\/)?book\?/);
+    expect(new URL(page.url()).searchParams.getAll("pick")).toEqual([
+      `2-0-${key("f")}`,
+      `2-0-${key("a")}`,
+    ]);
+    // One room for the whole party, then room 2's guests.
+    const asked = stayRequests.map((url) => url.searchParams.get("roomAdults"));
+    expect(asked).toContain("4");
+    expect(asked).toContain("2");
+    await assertHealthy();
+  });
+}
+
+test("offers separate rooms to a group one place holds", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockGroup(page, []);
+  await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=2");
+  await expect(page.getByText("Showing places for all 2 guests together.")).toBeVisible();
+  await expect(page.getByTestId("none-fits")).toHaveCount(0);
+  await expect(page.getByTestId("select-rate-garden")).toHaveText("Select This Rate");
+  await page.getByRole("button", { name: "Prefer separate rooms?" }).click();
+  const progress = page.getByTestId("rooms-progress");
+  await expect(progress).toContainText("Room 1 of 2");
+  await expect(progress).toContainText("Pick a place for 1 adult");
+  await assertHealthy();
+});
+
+// Independent review (VAY-2393): the part is priced for its adults alone, so the children go
+// with the rest and the place just booked still fits Room 1.
+test("books part of a group with a child and puts the child in the second room", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  const stayRequests: URL[] = [];
+  await mockGroup(page, stayRequests);
+  await openHotelPage(page, ONE_ROOM_STAY);
+  await page
+    .getByTestId("room-card-garden")
+    .getByRole("button", { name: "Book for 2 + pick a 2nd room for 2" })
+    .click();
+  await expect(page.getByTestId("toast")).toHaveText(
+    "Room 1: Garden Double Room for 2. Now pick a place for the other 2.",
+  );
+  const progress = page.getByTestId("rooms-progress");
+  await expect(progress).toContainText("Room 2 of 2");
+  await expect(progress).toContainText("Pick a place for 1 adult and 1 child");
+  await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
+  await expect
+    .poll(() =>
+      stayRequests.map((url) =>
+        [url.searchParams.get("roomAdults"), url.searchParams.get("roomChildren")].join("+"),
+      ),
+    )
+    .toContain("1+1");
+  await page
+    .getByTestId("room-card-deluxe")
+    .getByRole("button", { name: "Select for Room 2" })
+    .click();
+  await expect(page).toHaveURL(/\/(en\/)?book\?/);
+  expect(new URL(page.url()).searchParams.getAll("pick")).toEqual([
+    `2-0-${key("f")}`,
+    `1-1-${key("a")}`,
+  ]);
+  await assertHealthy();
+});
+
+for (const width of [1440, 390]) {
+  test(`removes a room from its pill and can undo it at ${width}px`, async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await mockBookingApis(page);
+    await mockGroup(page, []);
+    await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4&rooms=2");
+    const garden = page.getByTestId("room-card-garden");
+    await garden.getByRole("button", { name: "Select for Room 1" }).click();
+    await expect(page.getByTestId("rooms-progress")).toContainText("Room 2 of 2");
+
+    // One click removes room 2: all 4 adults are in one room again, and Garden is their choice.
+    await page.getByRole("button", { name: "Remove Room 2 from booking" }).click();
+    const toast = page.getByTestId("toast");
+    await expect(toast).toContainText("Room 2 removed. All 4 adults are now in one room.");
+    await expect(page.getByTestId("rooms-progress")).toHaveCount(0);
+    await expect(page.getByTestId("none-fits")).toContainText("No single place fits 4 guests.");
+    await expect(garden).toContainText("Your choice");
+    // It sleeps 2, so it isn't moved to the top: booked for 2 again, with a second room for the
+    // others.
+    await expect(
+      garden.getByRole("button", { name: "Book for 2 + pick a 2nd room for 2" }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: testInfo.outputPath(`removed-to-one-room-${width}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+
+    // Undo brings room 2 back with room 1's choice.
+    await toast.getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByTestId("rooms-progress")).toContainText("Room 2 of 2");
+    await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
+    await expect(toast).toHaveCount(0);
+    await assertHealthy();
+  });
+}
+
+test("keeps the place that sleeps everyone and continues with it", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockGroup(page, []);
+  await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=2&rooms=2");
+  await page
+    .getByTestId("room-card-garden")
+    .getByRole("button", { name: "Select for Room 1" })
+    .click();
+  await page.getByRole("button", { name: "Remove Room 2 from booking" }).click();
+  await expect(page.getByTestId("toast")).toContainText(
+    "Room 2 removed. All 2 adults are now in one room.",
+  );
+  const choice = page.getByTestId("select-rate-garden");
+  await expect(choice).toHaveText("Continue with this place");
+  await expect(page.getByTestId("room-card-garden")).toContainText("Your choice");
+  // It sleeps both adults: listed first.
+  await expect.poll(() => cardOrder(page).then((order) => order[0])).toBe("room-card-garden");
+  await choice.click();
+  await expect(page).toHaveURL(/\/(en\/)?book\?/);
+  const params = new URL(page.url()).searchParams;
+  expect(params.get("offer")).toBe(key("f"));
+  expect(params.getAll("pick")).toEqual([]);
+  await assertHealthy();
+});
+
+// Independent review (VAY-2393): removing from the keyboard puts focus on Undo, which stays up
+// while it has focus; removing a room of three keeps the others' choices in order.
+test("removes rooms from the keyboard and from the middle of three", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockGroup(page, []);
+  await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=3&rooms=3");
+  const garden = page.getByTestId("room-card-garden");
+  await garden.getByRole("button", { name: "Select for Room 1" }).click();
+  await garden.getByRole("button", { name: "Select for Room 2" }).click();
+  await expect(page.getByTestId("rooms-progress")).toContainText("Room 3 of 3");
+
+  // Room 1 goes: the old Room 2 (Garden) is Room 1 now, and Room 2 is still to choose.
+  await page.getByRole("button", { name: "Remove Room 1 from booking" }).click();
+  const toast = page.getByTestId("toast");
+  await expect(toast).toContainText("Room 1 removed.");
+  const progress = page.getByTestId("rooms-progress");
+  await expect(progress).toContainText("Room 2 of 2");
+  await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
+  await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
+
+  // From the keyboard: focus goes to Undo, and the toast waits while it has focus.
+  await page.getByRole("button", { name: "Remove Room 2 from booking" }).focus();
+  await page.keyboard.press("Enter");
+  const undo = toast.getByRole("button", { name: "Undo" });
+  await expect(undo).toBeFocused();
+  await page.waitForTimeout(6500);
+  await expect(undo).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(progress).toContainText("Room 2 of 2");
+  await expect(page.locator("#rooms-progress-title")).toBeFocused();
   await assertHealthy();
 });

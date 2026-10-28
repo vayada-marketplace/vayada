@@ -11,8 +11,9 @@ export type RoomsProgressRoom =
   | { state: "open" };
 
 /** VAY-2393: one compact line above the room cards while a group chooses room by room: which
- * room is being chosen and for whom, and a pill per room. A pill opens its room again. With
- * every room chosen (Back from the next step), it says so and offers to go on. */
+ * room is being chosen and for whom, and a pill per room. A pill opens its room again; its ×
+ * removes the room from the booking. With every room chosen (Back from the next step), it says
+ * so and offers to go on. */
 export default function RoomsProgress({
   rooms,
   current,
@@ -20,6 +21,7 @@ export default function RoomsProgress({
   hasExtras,
   onOpen,
   onContinue,
+  onRemove,
 }: {
   rooms: RoomsProgressRoom[];
   /** The room being chosen (index), or null while every room is chosen. */
@@ -30,6 +32,8 @@ export default function RoomsProgress({
   hasExtras: boolean;
   onOpen: (index: number) => void;
   onContinue: () => void;
+  /** `byKeyboard`: the × was pressed from the keyboard. */
+  onRemove: (index: number, byKeyboard: boolean) => void;
 }) {
   const t = useTranslations("home.roomsProgress");
   return (
@@ -77,24 +81,44 @@ export default function RoomsProgress({
                   ? t("tooSmall", { name: room.name })
                   : t("next");
           return (
-            <li key={index} className="min-w-0 max-w-full">
+            <li
+              key={index}
+              className={`flex min-h-[44px] min-w-0 max-w-full items-center rounded-full border text-sm transition-colors ${
+                index === current
+                  ? "border-primary-600 bg-primary-600 text-white"
+                  : room.state === "done"
+                    ? "border-success-200 bg-success-50 text-success-800 hover:border-success-500"
+                    : room.state === "too_small"
+                      ? "border-red-700 bg-white text-red-700 hover:bg-red-50"
+                      : "border-dashed border-gray-400 bg-white text-gray-700 hover:border-gray-600"
+              }`}
+            >
               <button
                 type="button"
                 data-testid={`room-pill-${number}`}
                 aria-current={index === current ? "step" : undefined}
                 onClick={() => onOpen(index)}
-                className={`flex min-h-[44px] max-w-full items-center gap-2 rounded-full border px-4 text-sm transition-colors ${
-                  index === current
-                    ? "border-primary-600 bg-primary-600 text-white"
-                    : room.state === "done"
-                      ? "border-success-200 bg-success-50 text-success-800 hover:border-success-500"
-                      : room.state === "too_small"
-                        ? "border-red-700 bg-white text-red-700 hover:bg-red-50"
-                        : "border-dashed border-gray-400 bg-white text-gray-700 hover:border-gray-600"
-                }`}
+                className="flex min-h-[44px] min-w-0 items-center gap-2 rounded-l-full pl-4 pr-1"
               >
                 <span className="shrink-0 font-bold">{t("room", { number })}</span>
                 <span className="min-w-0 truncate">{status}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={t("remove", { number })}
+                title={t("remove", { number })}
+                onClick={(event) => onRemove(index, event.detail === 0)}
+                className="flex h-11 w-10 shrink-0 items-center justify-center rounded-r-full opacity-80 hover:opacity-100"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeWidth={2.4} d="M6 6l12 12M18 6L6 18" />
+                </svg>
               </button>
             </li>
           );

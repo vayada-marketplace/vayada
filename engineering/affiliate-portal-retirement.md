@@ -125,6 +125,8 @@ retain their refresh wiring.
 
 - Booking `?ref=` cookie/click capture, quote attribution and reservation history remain.
   These paths prove capture/storage, not verified completed-booking attribution.
+  (Superseded: VAY-2263 and VAY-2272 removed the capture and attribution, and since VAY-2302 the
+  retired booking pages' redirects drop `ref` too.)
 - Existing-affiliate Connect remains scoped to existing registration evidence. Shared
   provider handling, identity derivation, callbacks and historical events are unchanged.
 - Module inventory advertises no supported modules but still reads existing scoped

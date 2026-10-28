@@ -373,6 +373,8 @@ type PmsOperationalReservation = {
     addonId: string;
     name: string;
     quantity: number;
+    /** VAY-2391: the days this line is for; none for an extra without a day. */
+    serviceDates?: string[];
   }>;
   assignments: Array<{
     assignmentId?: string | null;
@@ -1462,6 +1464,24 @@ function toBooking(
       : recordedRoomCharges / recordedNights.length;
   const [guestFirstName, guestLastName] = splitGuestName(reservation.primaryGuest.displayName);
   const addOns = reservation.addOns ?? [];
+  // VAY-2391: a per-night extra is one line per night; the booking lists it once, with its days.
+  // Its nights carry the same quantity; lines that differ (older bookings) add up.
+  const addonGroups = new Map<string, { name: string; quantities: number[]; dates: Set<string> }>();
+  for (const { addonId, name, quantity, serviceDates = [] } of addOns) {
+    const group = addonGroups.get(addonId);
+    if (group) {
+      group.quantities.push(quantity);
+      serviceDates.forEach((date) => group.dates.add(date));
+    } else addonGroups.set(addonId, { name, quantities: [quantity], dates: new Set(serviceDates) });
+  }
+  const addonGroupList = Array.from(addonGroups, ([addonId, { name, quantities, dates }]) => ({
+    addonId,
+    name,
+    dates,
+    quantity: quantities.every((quantity) => quantity === quantities[0])
+      ? quantities[0]!
+      : quantities.reduce((sum, quantity) => sum + quantity, 0),
+  }));
   // prettier-ignore
   const capacities = reservation.assignments.map((assignment) => maxOccupancy(roomTypesById.get(assignment.roomTypeId)));
   const knownCapacity = capacities.reduce((sum, capacity) => sum + capacity, 0);
@@ -1540,11 +1560,15 @@ function toBooking(
     bookedAt: reservation.bookedAt ?? null,
     platformFeeAmount: null,
     propertyPayoutAmount: null,
-    addonIds: addOns.map(({ addonId }) => addonId),
-    addonNames: addOns.map(({ name }) => name),
+    addonIds: addonGroupList.map(({ addonId }) => addonId),
+    addonNames: addonGroupList.map(({ name }) => name),
     addonTotal: 0,
-    addonQuantities: Object.fromEntries(addOns.map(({ addonId, quantity }) => [addonId, quantity])),
-    addonDates: {},
+    addonQuantities: Object.fromEntries(
+      addonGroupList.map(({ addonId, quantity }) => [addonId, quantity]),
+    ),
+    addonDates: Object.fromEntries(
+      addonGroupList.map(({ addonId, dates }) => [addonId, Array.from(dates).sort()]),
+    ),
     addonSelections: toAddonSelections(addOns),
     estimatedArrivalTime: null,
     numberOfGuests: reservation.stay.adults + reservation.stay.children,

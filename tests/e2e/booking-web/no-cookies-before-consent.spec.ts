@@ -13,9 +13,10 @@ test("sets no cookie before or after the privacy choice", async ({ page, context
   await page.getByRole("link", { name: "Choose rooms and get a price" }).click();
   await expect(page).toHaveURL(/\/(en\/)?book\?/);
   await expect(page.getByRole("button", { name: "Add room", exact: true })).toBeVisible();
-  // A retired booking page keeps the referral in its permanent redirect, not in a cookie.
+  // A retired booking page's permanent redirect drops the old referral code too (VAY-2302).
   await page.goto("/rooms?ref=PARTNER-2223&checkIn=2026-09-12&checkOut=2026-09-15");
-  await expect(page).toHaveURL(/\/(en\/)?book\?.*ref=PARTNER-2223/);
+  await expect(page).toHaveURL(/\/(en\/)?book\?.*checkIn=2026-09-12/);
+  expect(new URL(page.url()).searchParams.has("ref")).toBe(false);
   expect(await context.cookies()).toEqual([]);
 
   await page.getByRole("button", { name: "Privacy choices", exact: true }).click();

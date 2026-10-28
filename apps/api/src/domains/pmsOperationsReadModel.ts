@@ -202,6 +202,8 @@ export type PmsOperationalReservation = {
     addonId: string;
     name: string;
     quantity: number;
+    /** VAY-2391: the days this line is for; none for an extra without a day. */
+    serviceDates: PmsDate[];
   }>;
   assignments: PmsOperationalAssignment[];
   checkin: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
@@ -1222,7 +1224,8 @@ LEFT JOIN LATERAL (
              'selectionId', item.selection_id::text,
              'addonId', item.addon_key,
              'name', item.addon_name,
-             'quantity', item.quantity
+             'quantity', item.quantity,
+             'serviceDates', item.service_dates
            ) ORDER BY item.created_at, item.selection_id, item.item_ordinality
          ) AS items
   FROM booking.booking_addon_selection_items item
@@ -1760,6 +1763,11 @@ function toBookingAddOns(value: unknown): PmsOperationalReservation["addOns"] {
       addonId: String(item.addonId ?? ""),
       name: String(item.name ?? ""),
       quantity: toInteger(Number(item.quantity ?? 0)),
+      serviceDates: Array.isArray(item.serviceDates)
+        ? item.serviceDates.filter(
+            (date): date is string => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date),
+          )
+        : [],
     }))
     .filter(
       (item) =>

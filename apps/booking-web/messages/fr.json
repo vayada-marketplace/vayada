@@ -53,7 +53,6 @@
   },
   "nav": {
     "contact": "Contact",
-    "referGuest": "Parrainer un client",
     "phone": "Téléphone",
     "whatsapp": "WhatsApp",
     "email": "E-mail"
@@ -183,7 +182,12 @@
       "readyForExtras": "Prêt pour les suppléments",
       "readyForDetails": "Prêt pour vos coordonnées",
       "continueToExtras": "Continuer vers les suppléments",
-      "continueToDetails": "Continuer vers vos coordonnées"
+      "continueToDetails": "Continuer vers vos coordonnées",
+      "partChosen": "Chambre 1 : {name} pour {count}. Choisissez maintenant un logement pour les {rest} autres.",
+      "remove": "Retirer la chambre {number} de la réservation",
+      "removedToOne": "Chambre {number} retirée. Les {adults} adultes sont maintenant dans une seule chambre.",
+      "removed": "Chambre {number} retirée.",
+      "undo": "Annuler"
     },
     "pickRoom": {
       "selectFor": "Choisir pour la chambre {number}",
@@ -195,9 +199,20 @@
       "updateRoom": "Mettre à jour la chambre {number}",
       "soldOut": "Complet pour ces dates",
       "allChosen": "Toutes les chambres sont choisies",
-      "swapHint": "Choisissez un autre logement pour l'échanger."
+      "swapHint": "Choisissez un autre logement pour l'échanger.",
+      "bookPart": "Réserver pour {adults} + choisir une 2e chambre pour {rest}",
+      "partNote": "Accueille {count} de vos {guests} personnes.",
+      "yourChoice": "Votre choix",
+      "continueWithPlace": "Continuer avec ce logement"
     },
-    "pricesPerRoom": "Les prix sont par chambre, pour les adultes qui y dorment. Nous ajoutons les enfants dès que vous indiquez leur âge à l'étape suivante."
+    "pricesPerRoom": "Les prix sont par chambre, pour les adultes qui y dorment. Nous ajoutons les enfants dès que vous indiquez leur âge à l'étape suivante.",
+    "oneRoom": {
+      "together": "Logements pour les {count} personnes ensemble.",
+      "preferSeparate": "Vous préférez des chambres séparées ?",
+      "noneFits": "Aucun logement n'accueille {count} personnes à lui seul.",
+      "splitHint": "Répartissez votre groupe et choisissez un logement pour chaque partie.",
+      "bookRooms": "Réserver {count} chambres"
+    }
   },
   "rooms": {
     "title": "Nos chambres",
@@ -616,33 +631,6 @@
         "per_guest_night": "{amount} par personne et par nuit"
       }
     }
-  },
-  "refer": {
-    "title": "Parrainer un client",
-    "step1Desc": "Gagnez 5% de commission sur chaque réservation effectuée via votre lien.",
-    "step2Desc": "Connectez votre compte Stripe pour recevoir les commissions automatiquement.",
-    "step3Desc": "Partagez votre lien unique pour commencer à gagner !",
-    "fullName": "Nom complet",
-    "emailAddress": "Adresse e-mail",
-    "socialMedia": "Réseau social / Canal (Optionnel)",
-    "iAmA": "Je suis un(e)...",
-    "guest": "Client(e)",
-    "creator": "Créateur/Créatrice",
-    "paymentMethod": "Configurer les paiements",
-    "connectWithStripe": "Se connecter avec Stripe",
-    "stripeOnboardingOpened": "Onboarding Stripe ouvert — complétez-le dans le nouvel onglet",
-    "paypal": "PayPal",
-    "bankTransfer": "Virement bancaire",
-    "paypalEmail": "E-mail PayPal",
-    "iban": "IBAN / Numéro de compte",
-    "accountHolder": "Titulaire du compte",
-    "swiftBic": "SWIFT / BIC",
-    "bankName": "Nom de la banque",
-    "bankCountry": "Pays",
-    "generateLink": "Générer le lien",
-    "yourReferralLink": "Votre lien de parrainage",
-    "commissionInfo": "Vous recevrez <strong>5%</strong> du chiffre d'affaires total pour chaque réservation directe effectuée via votre lien.",
-    "pendingReview": "Votre candidature est en cours d'examen. Nous vous informerons à <strong>{email}</strong> une fois approuvée."
   },
   "requestChange": {
     "title": "Demander une modification de réservation",

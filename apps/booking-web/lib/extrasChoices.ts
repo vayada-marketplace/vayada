@@ -133,6 +133,27 @@ export function formatExtraDay(date: string, locale: string) {
   };
 }
 
+/** VAY-2391: when a booked extra happens: "Fri 6 Nov"; "6 Nov – 7 Nov" over consecutive days,
+ * "Fri 6 Nov · Sun 8 Nov" otherwise; null without a day. */
+export function formatExtraDays(
+  dates: readonly string[] | undefined,
+  locale: string,
+): string | null {
+  const days = Array.from(new Set(dates ?? [])).sort();
+  if (!days.length) return null;
+  const label = (date: string) => {
+    const { weekday, day } = formatExtraDay(date, locale);
+    return `${weekday} ${day}`;
+  };
+  const consecutive = days.every(
+    (date, index) => index === 0 || Date.parse(date) - Date.parse(days[index - 1]!) === 86400000,
+  );
+  if (days.length === 1) return label(days[0]!);
+  return consecutive
+    ? `${formatExtraDay(days[0]!, locale).day} – ${formatExtraDay(days[days.length - 1]!, locale).day}`
+    : days.map(label).join(" · ");
+}
+
 /** The extras' own amounts, only when they add up to what the quote charges for them. */
 export function extraLinesMinor(lines: (bigint | null)[], quoted: bigint | null): bigint[] | null {
   if (quoted === null || lines.some((line) => line === null)) return null;

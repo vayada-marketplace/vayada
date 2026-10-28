@@ -19,7 +19,6 @@ export interface GuestDetailsDraft {
   specialRequests?: string;
   estimatedArrivalTime?: string;
   numberOfGuests?: number;
-  referralCode?: string;
   addonIds?: string[];
   addonQuantities?: Record<string, number>;
   addonPackageQuantities?: Record<string, number>;

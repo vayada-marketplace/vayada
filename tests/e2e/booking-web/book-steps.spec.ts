@@ -425,6 +425,12 @@ for (const width of [1440, 390]) {
     await expect(page.getByText("Due at the hotel", { exact: true }).locator("..")).toContainText(
       "€370",
     );
+    // VAY-2391: each extra with when it happens.
+    const bookedExtras = page.getByTestId("confirmation-addons");
+    await expect(bookedExtras.getByRole("listitem")).toHaveText([
+      /^Garden breakfast.*6 Nov – 7 Nov$/,
+      /^Late check-out.*Sat 7 Nov$/,
+    ]);
     // The page shows the server's answer, not the fallback this booking knows (its id is empty).
     expect(
       await page.evaluate(() => JSON.parse(sessionStorage.getItem("lastBooking") ?? "{}").id),
