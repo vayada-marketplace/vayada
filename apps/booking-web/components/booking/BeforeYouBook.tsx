@@ -120,6 +120,17 @@ export default function BeforeYouBook({
   const tHome = useTranslations("home");
   const rules = disclosure?.choices ?? null;
   const blocks = policyBlocks(quote, { today, roomNames });
+  // VAY-2392: when rooms can't be refunded from booking, the consent says so first (Timo's
+  // prototype). Not while a request waits for us or a transfer for its money: cancelling is free
+  // until then, as the policy's first row says.
+  const notRefundable = blocks.filter(
+    ({ policy }) => policy.tone === "amber" && !policy.request && !policy.bankTransfer,
+  ).length;
+  const consentNonRefundable = !notRefundable
+    ? null
+    : notRefundable === blocks.length
+      ? t("agreeNonRefundable")
+      : t("agreeSomeNonRefundable");
   const meals = Array.from(new Set(quote.rooms.map((room) => room.mealPlan)));
   const facts: [string, string][] = rules
     ? [
@@ -217,7 +228,9 @@ export default function BeforeYouBook({
         </div>
       )}
       <ConsentTile
-        label={termsText ? t("agree") : t("agreeNoTerms")}
+        label={[consentNonRefundable, termsText ? t("agree") : t("agreeNoTerms")]
+          .filter(Boolean)
+          .join(" ")}
         checked={agreed}
         disabled={consentDisabled}
         errorId={consentErrorId}

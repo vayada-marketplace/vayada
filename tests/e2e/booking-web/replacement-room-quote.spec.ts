@@ -172,7 +172,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
   await expect(orderTotal(page)).toHaveText("€320");
   // VAY-2347: "Before you book" shows the policy, the rules behind their row, and one tick.
-  const acknowledgement = page.getByLabel(/^I agree to the cancellation policy/);
+  const acknowledgement = page.getByLabel(/I agree to the cancellation policy/);
   await expect(page.getByRole("table", { name: /[Cc]ancellation/ }).first()).toBeVisible();
   await page.getByRole("button", { name: "Guest rules" }).click();
   await expect(page.getByRole("region", { name: "Guest rules", exact: true })).toContainText(

@@ -46,7 +46,8 @@ export default function DailyStatsStrip({ hotelId }: { hotelId?: string }) {
           revenue: today.revenue,
           bookings: today.bookings,
           pageViews: today.page_views,
-          currency: settings.default_currency || "EUR",
+          // The property's currency, the one guests pay in; not Localization's (VAY-2390).
+          currency: today.currency,
         });
       })
       // No Dashboard access or a failed read: leave the strip out rather than show wrong zeros.

@@ -7,11 +7,14 @@ import type { PublicBookingQuote } from "./publicBookingQuote.js";
 type Cancellation = PublicBookingQuote["rooms"][number]["cancellation"];
 type Tier = { minDaysBeforeCheckIn: number; refundPercent: number };
 /** The stay the terms are worded for: its arrival and the hotel's date today (YYYY-MM-DD). The
- * server refunds by the hotel's calendar day, the deadline day included (VAY-2347). */
-export type TermsStay = { checkIn: string; today: string };
-/** A booked stay's terms as the cancel route works from them (VAY-2360), with each room's name. */
+ * server refunds by the hotel's calendar day, the deadline day included (VAY-2347). `bookedOn`:
+ * the hotel's date it was booked on, today while booking, when known (VAY-2392). */
+export type TermsStay = { checkIn: string; today: string; bookedOn?: string };
+/** A booked stay's terms as the cancel route works from them (VAY-2360), with each room's name and
+ * the hotel's date it was booked on, when known (VAY-2392). */
 export type BookedStayCancellation = {
   checkIn: string;
+  bookedOn?: string;
   totalMinor: string;
   rooms: ReadonlyArray<{
     roomName: string | null;
@@ -83,6 +86,9 @@ export type PolicyBadge =
         | "notRefundableOncePaid";
     };
 export type PolicyNote =
+  /** VAY-2392: booked after free cancellation's last day, the stay never had it (for a bank
+   * transfer: once its money has arrived). */
+  | { kind: "lateBooking" | "paidLateBooking"; date: string; days: number }
   | {
       kind:
         | "freeUntil"
@@ -193,8 +199,17 @@ export function cancellationPolicy(
           { when: { kind: "until", date: until }, pay: { kind: "free" }, now: false, ended: true },
           { when: { kind: "fromNow" }, pay: full, now: true, ended: false },
         ];
-    badge = refundable ? { kind: "freeUntil", date: until } : { kind: "freeEnded" };
-    note = { kind: refundable ? "freeUntil" : "freeEnded", date: until };
+    // Booked after the last free day (VAY-2392): non-refundable from the start, and why. Unknown
+    // without the booking date: then it says free cancellation ended, as before.
+    const late = stay.bookedOn !== undefined && stay.bookedOn > until;
+    badge = refundable
+      ? { kind: "freeUntil", date: until }
+      : late
+        ? { kind: "nonRefundable" }
+        : { kind: "freeEnded" };
+    note = late
+      ? { kind: "lateBooking", date: until, days: terms.freeCancellationDeadlineDays }
+      : { kind: refundable ? "freeUntil" : "freeEnded", date: until };
   }
   if (mode.request) {
     // Before the hotel answers the guest can withdraw for free; the rate's terms apply once it
@@ -251,6 +266,7 @@ export function cancellationPolicy(
     if (note.kind === "freeUntil") note = { kind: "paidFreeUntil", date: note.date };
     if (note.kind === "freeEnded") note = { kind: "paidFreeEnded", date: note.date };
     if (note.kind === "partialEnded") note = { kind: "paidPartialEnded", date: note.date };
+    if (note.kind === "lateBooking") note = { ...note, kind: "paidLateBooking" };
   }
   const tone = badge.kind === "freeUntil" || badge.kind === "refundsUntil" ? "ok" : "amber";
   return { badge, tone, rows: [...rows, noShow], note, request: mode.request, bankTransfer };
@@ -320,7 +336,7 @@ export function policyBlocks(
       cancellation: room.cancellation,
       share: shares[index]!,
     })),
-    { checkIn: quote.checkIn, today },
+    { checkIn: quote.checkIn, today, bookedOn: today },
     {
       request:
         quote.acceptanceMode === "request" && !isManualPricingPaymentMethod(quote.paymentMethod),
@@ -346,7 +362,7 @@ export function bookedPolicyBlocks(
       cancellation: room.cancellation,
       share: shares[index]!,
     })),
-    { checkIn: stay.checkIn, today },
+    { checkIn: stay.checkIn, today, bookedOn: stay.bookedOn },
     mode,
   );
 }
@@ -381,6 +397,7 @@ function groupBlocks(
 export type CancellationLinePart = {
   key: string;
   date?: string;
+  days?: number;
   amountMinor?: string;
   rooms?: string[];
 };
@@ -443,6 +460,14 @@ export function cancellationLine(blocks: readonly PolicyBlock[]): {
         rest: [{ key: "payFull", amountMinor }],
       };
     default:
-      return { tone, lead: { key: "nonRefundable" }, rest: [{ key: "payFull", amountMinor }] };
+      return {
+        tone,
+        // VAY-2392: booked after free cancellation's last day.
+        lead:
+          note.kind === "lateBooking"
+            ? { key: "lateBooking", days: note.days }
+            : { key: "nonRefundable" },
+        rest: [{ key: "payFull", amountMinor }],
+      };
   }
 }

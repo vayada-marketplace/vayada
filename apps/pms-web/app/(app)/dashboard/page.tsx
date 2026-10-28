@@ -295,10 +295,16 @@ export default function DashboardPage() {
     return `${today.slice(0, 7)}-01`;
   }, [today]);
 
+  // VAY-2390: only bookings in the hotel's currency add up; an OTA booking in another one doesn't.
   const revenueThisMonth = useMemo(
     () =>
-      bookings.filter((b) => b.checkIn >= monthStartStr).reduce((sum, b) => sum + b.totalAmount, 0),
-    [bookings, monthStartStr],
+      bookings
+        .filter((b) => b.checkIn >= monthStartStr && b.currency === hotelCurrency)
+        .reduce((sum, b) => sum + b.totalAmount, 0),
+    [bookings, monthStartStr, hotelCurrency],
+  );
+  const otherCurrencyThisMonth = bookings.some(
+    (b) => b.checkIn >= monthStartStr && hotelCurrency !== null && b.currency !== hotelCurrency,
   );
 
   const forecastDays = useMemo(() => {
@@ -309,7 +315,10 @@ export default function DashboardPage() {
       const dateStr = addPropertyDays(today, startOffset + i);
       const occupancy = getDashboardOccupancy(forecastInventoryDays, dateStr);
       const occupying = eligibleBookings.filter(
-        (booking) => booking.checkIn <= dateStr && booking.checkOut > dateStr,
+        (booking) =>
+          booking.checkIn <= dateStr &&
+          booking.checkOut > dateStr &&
+          booking.currency === hotelCurrency,
       );
       const adr =
         occupying.length > 0 && occupying.every((booking) => booking.amountStatus !== "unverified")
@@ -327,7 +336,7 @@ export default function DashboardPage() {
       });
     }
     return days;
-  }, [bookings, forecastInventoryDays, weekOffset, today, t, locale]);
+  }, [bookings, forecastInventoryDays, weekOffset, today, t, locale, hotelCurrency]);
 
   if (loading) {
     return (
@@ -444,7 +453,11 @@ export default function DashboardPage() {
                   ? t("bookings.detail.amountUnverified")
                   : formatCurrency(revenueThisMonth, hotelCurrency)
             }
-            sub={t("dashboard.monthToDate")}
+            sub={t(
+              otherCurrencyThisMonth
+                ? "dashboard.monthToDateOtherCurrencies"
+                : "dashboard.monthToDate",
+            )}
             icon={<DollarIcon />}
           />
         )}

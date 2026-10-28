@@ -42,6 +42,7 @@ describe("dashboardService target route adapter", () => {
               totalRevenue: { amountDecimal: "3600.00", currency: "EUR" },
               bookingCount: 10,
               unverifiedBookingCount: 2,
+              otherCurrencyBookingCount: 1,
               avgNightlyRate: { amountDecimal: "120.00", currency: "EUR" },
               pageViewCount: 28,
             },
@@ -65,11 +66,14 @@ describe("dashboardService target route adapter", () => {
     );
     expect(localStorage.getItem("selectedHotelId")).toBe("booking_hotel_alpenrose");
     expect(stats).toMatchObject({
+      currency: "EUR",
       revenue: 3600,
       revenue_previous: 2880,
       bookings: 10,
       unverified_bookings: 2,
       unverified_bookings_previous: 0,
+      other_currency_bookings: 1,
+      other_currency_bookings_previous: 0,
       bookings_previous: 8,
       avg_nightly_rate: 120,
       avg_nightly_rate_previous: 110,

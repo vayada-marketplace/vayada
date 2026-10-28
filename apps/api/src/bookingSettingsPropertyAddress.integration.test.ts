@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgTargetBookingSettingsRepository } from "./routes/bookingSettings.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -32,6 +33,12 @@ describe.skipIf(!TEST_DATABASE_URL)("booking settings property address", () => {
 
   afterAll(async () => {
     await repository.close?.();
+    await control.query("DELETE FROM pms.property_pricing_settings WHERE property_id = $1::uuid", [
+      propertyId,
+    ]);
+    await control.query("DELETE FROM booking.booking_settings WHERE property_id = $1::uuid", [
+      propertyId,
+    ]);
     await control.end();
   });
 
@@ -57,6 +64,46 @@ describe.skipIf(!TEST_DATABASE_URL)("booking settings property address", () => {
     await expect(repository.findPropertySettingsByHotelId!(propertyId)).resolves.toMatchObject({
       address: "1 Beach Road, Ahangama, 80650, LK",
     });
+  });
+
+  // VAY-2390: Localization shows the guest display currency next to the PMS pricing currency guests
+  // pay in. Read and saved on the ordinary API login, as next-api runs them.
+  it("reads and saves Localization with the PMS pricing currency on the ordinary login", async () => {
+    await control.query(
+      `INSERT INTO booking.booking_settings (property_id, default_currency, supported_currencies)
+       VALUES ($1::uuid, 'LKR', ARRAY['EUR']::text[])`,
+      [propertyId],
+    );
+    await expect(repository.findLocalizationSettingsByHotelId(propertyId)).resolves.toMatchObject({
+      defaultCurrency: "LKR",
+      propertyCurrency: null,
+    });
+    await control.query(
+      `INSERT INTO pms.property_pricing_settings (property_id, currency) VALUES ($1::uuid, 'USD')`,
+      [propertyId],
+    );
+    const login = await createHotelSetupOrdinaryLoginFixture(control, connectionString);
+    const runtime = createPgTargetBookingSettingsRepository({
+      connectionString: login.connectionString,
+    });
+    try {
+      await expect(runtime.findLocalizationSettingsByHotelId(propertyId)).resolves.toMatchObject({
+        defaultCurrency: "LKR",
+        supportedCurrencies: ["EUR"],
+        propertyCurrency: "USD",
+      });
+      await expect(
+        runtime.updateLocalizationSettingsByHotelId(propertyId, {
+          defaultCurrency: "GBP",
+          defaultLanguage: "en",
+          supportedCurrencies: ["EUR"],
+          supportedLanguages: [],
+        }),
+      ).resolves.toMatchObject({ defaultCurrency: "GBP", propertyCurrency: "USD" });
+    } finally {
+      await runtime.close?.();
+      await login.drop();
+    }
   });
 });
 

@@ -1,6 +1,13 @@
 import { act, create } from "react-test-renderer";
 import { expect, it, vi } from "vitest";
-import { GuestAddonCard, GuestAddonDetail, formatGuestPrice, guestAddonUnit } from "./GuestAddon";
+import {
+  GuestAddonCard,
+  GuestAddonDayChips,
+  GuestAddonDetail,
+  GuestAddonScheduledLine,
+  formatGuestPrice,
+  guestAddonUnit,
+} from "./GuestAddon";
 
 it("formats prices and units the way the booking page does", () => {
   expect(formatGuestPrice(25, "EUR")).toBe("€25");
@@ -109,4 +116,35 @@ it("opens the details from the card's photo, name and See details", () => {
   card.root.findByType("button").props.onClick();
   expect(card.root.findByType("button").children).toContain("See details");
   expect(open).toHaveBeenCalledTimes(2);
+});
+
+it("shows when an added extra happens: a line, or the days to pick (VAY-2391)", async () => {
+  const line = create(
+    <GuestAddonScheduledLine line="Tue 3 Nov · your arrival day" sub="Scheduled automatically" />,
+  );
+  expect(JSON.stringify(line.toJSON())).toContain("Tue 3 Nov · your arrival day");
+  const days = [
+    { date: "2026-11-03", weekday: "Tue", day: "3 Nov" },
+    { date: "2026-11-04", weekday: "Wed", day: "4 Nov" },
+  ];
+  const pick = vi.fn();
+  const chips = create(
+    <GuestAddonDayChips
+      legend="Choose a day to continue"
+      attention
+      days={days}
+      selected="2026-11-04"
+      onPick={pick}
+      dayLabel={(weekday, day) => `Sunset Dinner on ${weekday} ${day}`}
+    />,
+  );
+  const buttons = chips.root.findAllByType("button");
+  expect(buttons.map((button) => button.props["aria-pressed"])).toEqual([false, true]);
+  expect(buttons[0].props["aria-label"]).toBe("Sunset Dinner on Tue 3 Nov");
+  expect(chips.root.findByType("legend").props.className).toContain("text-amber-700");
+  await act(async () => buttons[0].props.onClick());
+  expect(pick).toHaveBeenCalledWith("2026-11-03");
+  // Without onPick (Booking Admin's preview) the chips aren't buttons.
+  const preview = create(<GuestAddonDayChips legend="Which day?" days={days} selected={null} />);
+  expect(preview.root.findAllByType("button")).toHaveLength(0);
 });

@@ -17,6 +17,9 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
  * its dates and prices, the booked terms per room and the property timezone the guest accepted under. */
 export type PricingBookingCancellationTerms = {
   checkIn: string;
+  /** The property's date the guest accepted the terms on (VAY-2392): booked after the deadline,
+   * the stay never had free cancellation. */
+  bookedOn: string;
   currency: string;
   timeZone: string;
   totalMinor: string;
@@ -71,6 +74,10 @@ export async function loadPricingBookingCancellationTerms(
   }
   return {
     checkIn: quote.stay.checkIn,
+    bookedOn: localDate(
+      current.acceptance.propertyTimeZone,
+      new Date(current.acceptance.acceptedAt),
+    ),
     currency: quote.stay.currency,
     timeZone: current.acceptance.propertyTimeZone,
     totalMinor: quote.evidence.totalMinor,

@@ -64,6 +64,7 @@ import {
   formatPaymentDeadline,
   useHotelTimeZone,
 } from "@/lib/awaitingPayment";
+import { addPropertyDays, formatPropertyDate, getPropertyToday } from "@/lib/dashboardBookings";
 
 type Translate = ReturnType<typeof useTranslation>["t"];
 
@@ -281,27 +282,31 @@ interface CancellationPanelProps {
   /** Terms the rooms were booked under; null when none were recorded or rooms differ. */
   terms: BookingCancellationTerms | null;
   mixedTerms: boolean;
+  /** The hotel's time zone, null until known: UTC then, as elsewhere in the PMS. */
+  timeZone: string | null;
+  /** When the booking was made, for a stay booked after free cancellation ended (VAY-2392). */
+  bookedAt: string | null;
 }
 
 const DAY_MS = 86_400_000;
+const LONG_DATE = { day: "numeric", month: "long", year: "numeric" } as const;
 
 function CancellationPolicyPanel({
   checkIn,
   planLabel,
   terms,
   mixedTerms,
+  timeZone,
+  bookedAt,
 }: CancellationPanelProps) {
   const { locale, t } = useTranslation();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const checkInDate = new Date(checkIn + "T00:00:00");
-  const daysBeforeCheckIn = Math.round((checkInDate.getTime() - today.getTime()) / DAY_MS);
+  // VAY-2392: days count on the hotel's calendar, as the booking engine and the refund do.
+  const today = getPropertyToday(timeZone);
+  const daysBeforeCheckIn = Math.round(
+    (Date.parse(`${checkIn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / DAY_MS,
+  );
   const dateLabel = (daysBefore: number) =>
-    new Date(checkInDate.getTime() - daysBefore * DAY_MS).toLocaleDateString(locale, {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    formatPropertyDate(addPropertyDays(checkIn, -daysBefore), LONG_DATE, locale);
   const dayLabel = (days: number) => t(days === 1 ? "common.day" : "common.days");
 
   // The booked terms (VAY-2089): free until the deadline, or refund steps by notice period for
@@ -313,6 +318,16 @@ function CancellationPolicyPanel({
       ])
     : [];
   const lastStepDays = steps.length ? steps[steps.length - 1]!.minDaysBeforeCheckIn : 0;
+  // Booked after its last free day, the stay was never free to cancel (VAY-2392).
+  const bookedOn =
+    bookedAt && Number.isFinite(Date.parse(bookedAt))
+      ? getPropertyToday(timeZone, new Date(bookedAt))
+      : null;
+  const bookedLate =
+    !!flexible &&
+    !flexible.refundTiers &&
+    !!bookedOn &&
+    bookedOn > addPropertyDays(checkIn, -flexible.freeCancellationDays);
   const currentStep = steps.find((step) => daysBeforeCheckIn >= step.minDaysBeforeCheckIn);
   const stepLabel = (refundPercent: number) =>
     refundPercent === 100
@@ -380,12 +395,15 @@ function CancellationPolicyPanel({
                 : "bg-amber-50 text-amber-800"
             }`}
           >
+            {bookedLate && (
+              <span className="block mb-1">
+                {t("bookings.detail.bookedAfterFreeWindow", {
+                  date: formatPropertyDate(bookedOn!, LONG_DATE, locale),
+                })}
+              </span>
+            )}
             {t("bookings.detail.todayIs", {
-              date: today.toLocaleDateString(locale, {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }),
+              date: formatPropertyDate(today, LONG_DATE, locale),
             })}{" "}
             —{" "}
             {!currentStep
@@ -3264,6 +3282,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 }
                 terms={bookedCancellationTerms}
                 mixedTerms={mixedCancellationTerms}
+                timeZone={hotelTimeZone}
+                bookedAt={booking.bookedAt ?? null}
               />
             </div>
 

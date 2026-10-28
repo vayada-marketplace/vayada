@@ -4438,6 +4438,7 @@ describe("vayada-api", () => {
       defaultLanguage: "de",
       supportedCurrencies: ["CHF", "EUR"],
       supportedLanguages: ["de", "en"],
+      propertyCurrency: "CHF",
     });
   });
 
@@ -4601,6 +4602,7 @@ describe("vayada-api", () => {
         defaultLanguage: "en",
         supportedCurrencies: ["USD"],
         supportedLanguages: ["de"],
+        propertyCurrency: "EUR",
       },
     },
     {
@@ -7810,6 +7812,8 @@ describe("vayada-api", () => {
           defaultLanguage: "en-US",
           supportedCurrencies: ["CHF"],
           supportedLanguages: ["de"],
+          // VAY-2390: with no PMS pricing currency yet, what guests pay in is the default.
+          propertyCurrency: "EUR",
         },
       },
       {
@@ -8567,6 +8571,7 @@ describe("vayada-api", () => {
       defaultLanguage: "en",
       supportedCurrencies: [],
       supportedLanguages: ["en"],
+      propertyCurrency: "EUR",
     });
   });
 
@@ -8610,12 +8615,53 @@ describe("vayada-api", () => {
         defaultLanguage: "en",
         supportedCurrencies: [],
         supportedLanguages: ["en"],
+        propertyCurrency: "EUR",
       });
 
       await malformedApp.close();
     }
   });
 
+  // VAY-2390: the display currency is only what guests see first; they pay in the pricing currency.
+  it("returns the PMS pricing currency next to the guest display currency", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          return {
+            defaultCurrency: "LKR",
+            defaultLanguage: "en",
+            supportedCurrencies: ["EUR", "GBP"],
+            supportedLanguages: ["en"],
+            propertyCurrency: "USD",
+          };
+        },
+      },
+    });
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      defaultCurrency: "LKR",
+      defaultLanguage: "en",
+      supportedCurrencies: ["EUR", "GBP"],
+      supportedLanguages: ["en"],
+      propertyCurrency: "USD",
+    });
+  });
   it("parses JSON-encoded booking localization lists like the legacy read path", async () => {
     app = buildAuthenticatedApp({
       settingsRepository: {
@@ -8653,6 +8699,7 @@ describe("vayada-api", () => {
       defaultLanguage: "en",
       supportedCurrencies: ["EUR", "USD"],
       supportedLanguages: ["en", "de"],
+      propertyCurrency: "EUR",
     });
   });
 

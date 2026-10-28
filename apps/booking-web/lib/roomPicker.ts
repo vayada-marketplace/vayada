@@ -6,28 +6,73 @@ import type { PricingOffer, PricingRoom, RoomChoice } from "@/services/api/repla
 
 export type RoomGuests = { adults: number; children: number };
 
-/** One room the group has chosen: its rate, its guests and the price shown when it was chosen. */
-export type RoomPick = RoomGuests & {
-  roomTypeId: string;
-  publicOfferKey: string;
-  /** The room's stay total for its adults, as the room card showed it; null when unpriced. */
-  totalMinor: string | null;
-  currency: string;
-};
+/** One room the group has chosen: its room type and rate. Its guests are the group's split
+ * (VAY-2393), so a new split keeps the choice and only checks it still fits. */
+export type RoomPick = { roomTypeId: string; publicOfferKey: string };
 
 /** The most rooms one booking takes on the booking page. */
 export const MAX_ROOMS = 9;
 
-/** The group's guests spread over its rooms: adults evenly (the first rooms take any remainder),
- * children into the rooms with the fewest adults, last rooms first. */
-export function splitParty(adults: number, children: number, rooms: number): RoomGuests[] {
+/** VAY-2393: the guests picker offers up to 4 rooms, more only when the group needs them. Every
+ * room needs an adult. */
+export function mostRooms(adults: number, fewest: number): number {
+  return Math.max(1, Math.min(adults, MAX_ROOMS, Math.max(4, fewest)));
+}
+
+/** Adults spread evenly; the first rooms take any remainder (4 → 2+2, 5 → 3+2). */
+export function evenSplit(adults: number, rooms: number): number[] {
   const count = Math.max(1, Math.min(rooms, adults));
-  const split = Array.from({ length: count }, (_, index) => ({
-    adults: Math.floor(adults / count) + (index < adults % count ? 1 : 0),
-    children: 0,
-  }));
-  for (let child = 0; child < children; child++) split[count - 1 - (child % count)]!.children++;
-  return split;
+  return Array.from(
+    { length: count },
+    (_, index) => Math.floor(adults / count) + (index < adults % count ? 1 : 0),
+  );
+}
+
+/** Each room's guests: its adults, and the children in the rooms with the fewest adults, last
+ * rooms first. */
+export function roomGuests(adultsPerRoom: readonly number[], children: number): RoomGuests[] {
+  const rooms = adultsPerRoom.map((adults) => ({ adults, children: 0 }));
+  const order = rooms
+    .map((_, index) => index)
+    .sort((a, b) => rooms[a]!.adults - rooms[b]!.adults || b - a);
+  for (let child = 0; child < children && order.length; child++)
+    rooms[order[child % order.length]!]!.children++;
+  return rooms;
+}
+
+/** The group's guests spread evenly over its rooms (see evenSplit and roomGuests). */
+export function splitParty(adults: number, children: number, rooms: number): RoomGuests[] {
+  return roomGuests(evenSplit(adults, rooms), children);
+}
+
+/** "Who sleeps where" (VAY-2393): one adult more or fewer in a room, the total unchanged. One
+ * more comes from the room with the most adults, one fewer goes to the room with the fewest;
+ * every room keeps an adult. The split as it was when the move isn't possible. */
+export function moveAdult(split: readonly number[], index: number, delta: 1 | -1): number[] {
+  const next = [...split];
+  const others = next.map((_, position) => position).filter((position) => position !== index);
+  const other =
+    delta === 1
+      ? others.filter((p) => next[p]! > 1).sort((a, b) => next[b]! - next[a]! || b - a)[0]
+      : next[index]! > 1
+        ? others.sort((a, b) => next[a]! - next[b]! || a - b)[0]
+        : undefined;
+  if (other === undefined) return next;
+  next[index]! += delta;
+  next[other]! -= delta;
+  return next;
+}
+
+/** One room for these guests: an adult and within every limit, as the API sizes it. Unknown
+ * limits fit: the quote decides. */
+export function fitsRoom(occupancy: PricingRoom["occupancy"], guests: RoomGuests): boolean {
+  if (guests.adults < 1) return false;
+  if (!occupancy) return true;
+  return (
+    guests.adults <= occupancy.maxAdults &&
+    guests.children <= occupancy.maxChildren &&
+    guests.adults + guests.children <= occupancy.maxGuests
+  );
 }
 
 /** A rate the group can add next to the rates it already chose, or why not. One booking is paid
@@ -80,56 +125,58 @@ export function decodePicks(
   return picks;
 }
 
-/** The group's picks for one search, kept per tab so Back from /book finds them again. */
-type PickDraft = { identity: string; picks: (RoomPick | null)[] };
+/** The group's split and picks for one stay, kept per tab so Back from /book and a refresh find
+ * them again. Other guests or rooms keep the picks (VAY-2393); a split for other guests is
+ * ignored. */
+export type PickDraft = { split: number[]; picks: (RoomPick | null)[] };
 const draftKey = (slug: string) => `roomPicks:${slug}`;
+const count = (value: unknown, min: number) =>
+  Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= 99;
 
-export function readPickDraft(slug: string, identity: string): (RoomPick | null)[] | null {
+export function readPickDraft(slug: string, identity: string): PickDraft | null {
   try {
-    const raw = JSON.parse(sessionStorage.getItem(draftKey(slug)) ?? "null") as PickDraft | null;
-    if (!raw || raw.identity !== identity || !Array.isArray(raw.picks)) return null;
+    const raw = JSON.parse(sessionStorage.getItem(draftKey(slug)) ?? "null") as
+      | (PickDraft & { identity: unknown })
+      | null;
+    if (
+      !raw ||
+      raw.identity !== identity ||
+      !Array.isArray(raw.split) ||
+      !Array.isArray(raw.picks) ||
+      raw.split.length > MAX_ROOMS ||
+      raw.picks.length > MAX_ROOMS ||
+      !raw.split.every((adults) => count(adults, 1))
+    )
+      return null;
     const valid = raw.picks.every(
       (pick) =>
         pick === null ||
         (typeof pick === "object" &&
           typeof pick.roomTypeId === "string" &&
-          typeof pick.publicOfferKey === "string" &&
-          typeof pick.currency === "string" &&
-          (pick.totalMinor === null || /^(0|[1-9][0-9]*)$/.test(String(pick.totalMinor))) &&
-          Number.isSafeInteger(pick.adults) &&
-          Number.isSafeInteger(pick.children)),
+          typeof pick.publicOfferKey === "string"),
     );
-    return valid ? raw.picks : null;
+    return valid ? { split: raw.split, picks: raw.picks } : null;
   } catch {
     return null;
   }
 }
 
-export function savePickDraft(slug: string, identity: string, picks: (RoomPick | null)[]) {
+export function savePickDraft(slug: string, identity: string, draft: PickDraft) {
   try {
-    sessionStorage.setItem(draftKey(slug), JSON.stringify({ identity, picks }));
+    sessionStorage.setItem(draftKey(slug), JSON.stringify({ identity, ...draft }));
   } catch {
     // Storage off (private mode): the picks live as long as the page.
   }
 }
 
-/** One search's identity for its picks: other dates, guests, rooms or promo start afresh. */
+/** One stay's identity for its picks: other dates or promo start afresh, since prices and free
+ * rooms change with them. */
 export function pickIdentity(search: {
   checkIn: string;
   checkOut: string;
-  adults: number;
-  children: number;
-  rooms: number;
   promoCode: string | null;
 }): string {
-  return JSON.stringify([
-    search.checkIn,
-    search.checkOut,
-    search.adults,
-    search.children,
-    search.rooms,
-    search.promoCode,
-  ]);
+  return JSON.stringify([search.checkIn, search.checkOut, search.promoCode]);
 }
 
 /** VAY-2320: rooms that sold out at the last step are chosen again on the hotel page; the
@@ -139,13 +186,12 @@ export function releaseSoldOutPicks(
   identity: string,
   roomTypeIds: readonly string[],
 ): void {
-  const picks = readPickDraft(slug, identity);
-  if (!picks) return;
-  savePickDraft(
-    slug,
-    identity,
-    picks.map((pick) => (pick && roomTypeIds.includes(pick.roomTypeId) ? null : pick)),
-  );
+  const draft = readPickDraft(slug, identity);
+  if (!draft) return;
+  savePickDraft(slug, identity, {
+    split: draft.split,
+    picks: draft.picks.map((pick) => (pick && roomTypeIds.includes(pick.roomTypeId) ? null : pick)),
+  });
 }
 
 /** What a room's guests break, against its limits (VAY-2320). */

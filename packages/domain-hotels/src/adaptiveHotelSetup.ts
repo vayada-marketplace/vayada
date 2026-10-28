@@ -54,21 +54,10 @@ export type SetupCommandError = {
 };
 
 export const ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION = "adaptive-hotel-setup.v1" as const;
-export const SETUP_TASK_IDS = [
-  "shared_identity",
-  "rooms_rates_availability",
-  "guest_settings_policies",
-  "billing_plan",
-  "payment",
-  "direct_booking_publication",
-] as const;
+// The hotel-basics task is the only setup task; the API stopped computing the others (VAY-2175).
+export const SETUP_TASK_IDS = ["shared_identity"] as const;
 export const SETUP_TASK_DESTINATION_ROUTE_KEYS = {
   shared_identity: "hotel_catalog.shared_identity",
-  rooms_rates_availability: "pms.rooms_rates_availability",
-  guest_settings_policies: "booking.guest_settings_policies",
-  billing_plan: "finance.billing_plan",
-  payment: "finance.payment",
-  direct_booking_publication: "distribution.direct_booking_publication",
 } as const satisfies Record<(typeof SETUP_TASK_IDS)[number], string>;
 export const SETUP_TASK_TRACKS = ["shared", ...SETUP_TRACKS] as const;
 export const SETUP_REQUIREMENT_OWNER_DOMAINS = [
@@ -160,11 +149,6 @@ export type AdaptiveHotelSetupStatus = {
 
 const SETUP_TASK_TRACK: Record<SetupTaskId, SetupTask["track"]> = {
   shared_identity: "shared",
-  rooms_rates_availability: "hotel_operations",
-  guest_settings_policies: "hotel_operations",
-  billing_plan: "hotel_operations",
-  payment: "hotel_operations",
-  direct_booking_publication: "hotel_operations",
 };
 
 const MAX_EXPECTED_REVISION = 2_147_483_646;

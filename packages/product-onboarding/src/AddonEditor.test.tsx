@@ -1,7 +1,12 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import { AddonEditor, AddonGuestPreview, emptyAddonValues } from "./AddonEditor";
-import { GuestAddonCard, GuestAddonDetail } from "./GuestAddon";
+import {
+  GuestAddonCard,
+  GuestAddonDayChips,
+  GuestAddonDetail,
+  GuestAddonScheduledLine,
+} from "./GuestAddon";
 
 const previewTab = (view: ReactTestRenderer, label: string) =>
   view.root.find(
@@ -331,4 +336,124 @@ it("previews a saved add-on as guests see it, with a way to edit it", async () =
   button("Done").props.onClick();
   expect(edit).toHaveBeenCalledTimes(1);
   expect(close).toHaveBeenCalledTimes(1);
+});
+
+describe("when an add-on happens (VAY-2391)", () => {
+  const editor = async (values = emptyAddonValues("EUR"), editing = false) => {
+    const save = vi.fn();
+    let view: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        <AddonEditor
+          initialValues={{ ...values, name: "Airport Transfer", price: "30.00" }}
+          currency="EUR"
+          locale="en-GB"
+          editing={editing}
+          onSave={save}
+          onCancel={() => {}}
+        />,
+      );
+    });
+    const modes = () => view!.root.findAllByProps({ name: "addon-schedule-mode" });
+    const mode = () =>
+      ["arrival", "departure", "guest_pick", "daily", "anytime"][
+        modes().findIndex((input) => input.props.checked)
+      ];
+    const change = async (name: string, index: number) =>
+      act(async () => view!.root.findAllByProps({ name })[index].props.onChange());
+    const submit = async () =>
+      act(async () => view!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+    const weekday = (label: string) =>
+      view!.root.find((node) => node.type === "button" && node.children.includes(label));
+    return { view: () => view!, save, modes, mode, change, submit, weekday };
+  };
+
+  it("lets category and price pick it until the host does, and keeps a per-night price every day", async () => {
+    const e = await editor();
+    expect(e.modes()).toHaveLength(5);
+    expect(e.mode()).toBe("guest_pick");
+    // Transport happens on the arrival day.
+    await e.change("addon-category", 1);
+    expect(e.mode()).toBe("arrival");
+    // A per-night price is every day, and nothing else can be picked.
+    await e.change("addon-pricing-model", 2);
+    expect(e.mode()).toBe("daily");
+    expect(e.modes().map((input) => Boolean(input.props.disabled))).toEqual([
+      true,
+      true,
+      true,
+      false,
+      true,
+    ]);
+    // Back on a one-off price, transport is on arrival again and every day can't be picked.
+    await e.change("addon-pricing-model", 0);
+    expect(e.mode()).toBe("arrival");
+    expect(e.modes()[3].props.disabled).toBe(true);
+    // The host's choice stays when the category changes.
+    await e.change("addon-schedule-mode", 4);
+    await e.change("addon-category", 0);
+    expect(e.mode()).toBe("anytime");
+    await e.submit();
+    expect(e.save.mock.calls[0][0]).toMatchObject({
+      scheduleMode: "anytime",
+      bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
+    });
+  });
+
+  it("keeps the host's choice through a per-night price, and counts picking days as a choice", async () => {
+    const e = await editor();
+    await e.change("addon-schedule-mode", 1);
+    await e.change("addon-pricing-model", 2);
+    expect(e.mode()).toBe("daily");
+    await e.change("addon-pricing-model", 0);
+    expect(e.mode()).toBe("departure");
+    const fresh = await editor();
+    await act(async () => fresh.weekday("Mon").props.onClick());
+    // Transport would otherwise move it to the arrival day.
+    await fresh.change("addon-category", 1);
+    expect(fresh.mode()).toBe("guest_pick");
+  });
+
+  it("keeps a saved add-on's choice and picks the days a guest can book it on", async () => {
+    const e = await editor({ ...emptyAddonValues("EUR"), scheduleMode: "guest_pick" }, true);
+    await e.change("addon-category", 1);
+    expect(e.mode()).toBe("guest_pick");
+    for (const day of ["Mon", "Tue", "Wed", "Thu", "Fri"])
+      await act(async () => e.weekday(day).props.onClick());
+    expect(e.weekday("Sat").props["aria-pressed"]).toBe(true);
+    await act(async () => e.weekday("Sat").props.onClick());
+    // The last bookable day can't be switched off.
+    expect(e.weekday("Sun").props.disabled).toBe(true);
+    await act(async () => e.weekday("Fri").props.onClick());
+    await e.submit();
+    expect(e.save.mock.calls[0][0]).toMatchObject({
+      scheduleMode: "guest_pick",
+      bookableWeekdays: [5, 7],
+    });
+  });
+
+  it("previews the card once added: a line, or the days to pick", async () => {
+    const e = await editor();
+    // Friday and Sunday only: the nights in the example week from Tue 3 Nov, never its check-out.
+    for (const day of ["Mon", "Tue", "Wed", "Thu", "Sat"])
+      await act(async () => e.weekday(day).props.onClick());
+    expect(e.view().root.findByType(GuestAddonDayChips).props).toMatchObject({
+      legend: "Which day?",
+      days: [
+        { weekday: "Fri", day: "6 Nov" },
+        { weekday: "Sun", day: "8 Nov" },
+      ],
+    });
+    expect(JSON.stringify(e.view().toJSON())).toContain("never the check-out day");
+    await e.change("addon-schedule-mode", 0);
+    expect(e.view().root.findByType(GuestAddonScheduledLine).props).toEqual({
+      line: "Tue 3 Nov · your arrival day",
+      sub: "Scheduled automatically",
+    });
+    await e.change("addon-pricing-model", 3);
+    expect(e.view().root.findByType(GuestAddonScheduledLine).props).toEqual({
+      line: "Every day of your stay",
+      sub: "3 nights",
+    });
+  });
 });

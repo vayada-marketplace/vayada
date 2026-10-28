@@ -9,7 +9,6 @@ import { ChevronDownIcon, ArrowTopRightOnSquareIcon, PlusIcon } from "@heroicons
 import { authService } from "@/services/auth";
 import { settingsService, HotelSummary, SuperAdminHotel } from "@/services/settings";
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
-import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import NavigationSearch from "./NavigationSearch";
 import DailyStatsStrip from "./DailyStatsStrip";
 import NotificationsBell from "./notifications/NotificationsBell";
@@ -37,9 +36,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
-  const [currencyOpen, setCurrencyOpen] = useState(false);
-  const [currency, setCurrency] = useState("EUR");
-  const [savingCurrency, setSavingCurrency] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [previewFeedback, setPreviewFeedback] = useState("");
   const [userName, setUserName] = useState("");
@@ -87,32 +83,12 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         }
       })
       .catch(() => {});
-
-    settingsService
-      .getPropertySettings()
-      .then((settings) => {
-        if (settings.default_currency) setCurrency(settings.default_currency);
-      })
-      .catch(() => {});
   }, []);
 
   // The bell's feed for the selected property (VAY-2349), by its canonical property id.
   const propertyId = selectedHotel?.propertyId ?? selectedHotel?.id;
   const notifications = useHostNotifications(propertyId);
   const notificationActions = useNotificationActions(propertyId, notifications);
-
-  const handleCurrencyChange = async (code: string) => {
-    if (code === currency || savingCurrency) return;
-    setSavingCurrency(true);
-    try {
-      await settingsService.updatePropertySettings({ default_currency: code });
-      // Reload so the Dashboard and any other currency-aware view picks up
-      // the new property default_currency on its next mount.
-      window.location.reload();
-    } catch {
-      setSavingCurrency(false);
-    }
-  };
 
   const initials = userName
     ? userName
@@ -375,48 +351,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                         >
                           <span>{lang.flag}</span>
                           <span>{lang.nativeName}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {/* Currency selector */}
-                <div className="relative">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCurrencyOpen(!currencyOpen);
-                    }}
-                    disabled={savingCurrency}
-                    className="w-full flex items-center justify-between px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
-                  >
-                    <span>{t("layout.header.currency")}</span>
-                    <span className="text-gray-400">
-                      {CURRENCY_OPTIONS.find((c) => c.code === currency)?.flag} {currency}
-                    </span>
-                  </button>
-                  {currencyOpen && (
-                    <div className="absolute right-full top-0 mr-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 max-h-72 overflow-y-auto">
-                      {CURRENCY_OPTIONS.map((cur) => (
-                        <button
-                          key={cur.code}
-                          onClick={() => {
-                            setCurrencyOpen(false);
-                            setProfileOpen(false);
-                            handleCurrencyChange(cur.code);
-                          }}
-                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left transition-colors ${
-                            currency === cur.code
-                              ? "bg-primary-50 text-primary-700 font-medium"
-                              : "text-gray-700 hover:bg-gray-50"
-                          }`}
-                        >
-                          <span>{cur.flag}</span>
-                          <span>{cur.code}</span>
-                          <span className="text-gray-400 truncate">
-                            {new Intl.DisplayNames([locale], { type: "currency" }).of(cur.code) ??
-                              cur.code}
-                          </span>
                         </button>
                       ))}
                     </div>

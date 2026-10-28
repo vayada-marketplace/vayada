@@ -176,6 +176,7 @@
   "dashboard.noDepartures": "Tidak ada keberangkatan hari ini",
   "dashboard.revenueThisMonth": "Pendapatan Bulan Ini",
   "dashboard.monthToDate": "Bulan berjalan",
+  "dashboard.monthToDateOtherCurrencies": "Bulan berjalan, tanpa pemesanan dalam mata uang lain",
   "dashboard.viewAll": "Lihat semua",
   "dashboard.clickGuestToStartCheckIn": "Klik tamu untuk memulai check-in",
   "dashboard.confirmed": "Dikonfirmasi",

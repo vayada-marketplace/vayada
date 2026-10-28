@@ -2,10 +2,15 @@ import { getSelectedBookingHotelId } from "../api/bookingHotelScope";
 import { apiClient } from "../api/client";
 
 export interface DashboardStats {
+  /** The property's currency, which revenue and rates are in (VAY-2390). */
+  currency: string;
   revenue: number;
   revenue_previous: number;
   unverified_bookings: number;
   unverified_bookings_previous: number;
+  /** Bookings in another currency, such as from an OTA: counted, but not in revenue or rates. */
+  other_currency_bookings: number;
+  other_currency_bookings_previous: number;
   bookings: number;
   bookings_previous: number;
   avg_nightly_rate: number;
@@ -24,6 +29,7 @@ export interface SourceBreakdown {
 }
 
 export interface BookingsBySource {
+  currency: string;
   total_revenue: number;
   sources: SourceBreakdown[];
 }
@@ -85,6 +91,7 @@ type TargetDashboardStatsResponse = {
       totalRevenue: Money;
       bookingCount: number;
       unverifiedBookingCount?: number;
+      otherCurrencyBookingCount?: number;
       avgNightlyRate: Money;
       pageViewCount: number;
     };
@@ -92,6 +99,7 @@ type TargetDashboardStatsResponse = {
       totalRevenue: Money;
       bookingCount: number;
       unverifiedBookingCount?: number;
+      otherCurrencyBookingCount?: number;
       avgNightlyRate: Money;
       pageViewCount: number;
     };
@@ -210,10 +218,13 @@ export const dashboardService = {
       `${basePath}/stats?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}&previousPeriodStart=${query.previousStart}&previousPeriodEnd=${query.previousEnd}`,
     );
     return {
+      currency: response.metrics.current.totalRevenue.currency,
       revenue: amount(response.metrics.current.totalRevenue),
       revenue_previous: amount(response.metrics.previous.totalRevenue),
       unverified_bookings: response.metrics.current.unverifiedBookingCount ?? 0,
       unverified_bookings_previous: response.metrics.previous.unverifiedBookingCount ?? 0,
+      other_currency_bookings: response.metrics.current.otherCurrencyBookingCount ?? 0,
+      other_currency_bookings_previous: response.metrics.previous.otherCurrencyBookingCount ?? 0,
       bookings: response.metrics.current.bookingCount,
       bookings_previous: response.metrics.previous.bookingCount,
       avg_nightly_rate: amount(response.metrics.current.avgNightlyRate),
@@ -232,6 +243,7 @@ export const dashboardService = {
       `${basePath}/bookings-by-source?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}`,
     );
     return {
+      currency: response.sourceMix.totalRevenue.currency,
       total_revenue: amount(response.sourceMix.totalRevenue),
       sources: response.sourceMix.items.map((item) => ({
         source: item.source,

@@ -1090,6 +1090,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           version: "booking-stay.v1",
           cancellation: {
             checkIn: quote.stay.checkIn,
+            // VAY-2392: the hotel's date it was booked on, from the acceptance.
+            bookedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
             currency: quote.stay.currency,
             timeZone: expect.any(String),
             totalMinor: "108000",

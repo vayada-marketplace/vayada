@@ -50,6 +50,7 @@ export default function ConfirmationCancellation({
   const text = (part: CancellationLinePart) =>
     t(`cancelLine.${part.key}`, {
       date: part.date ? day(part.date) : "",
+      days: part.days !== undefined ? t("cancelLine.days", { count: part.days }) : "",
       amount: part.amountMinor ? lineMoney(part.amountMinor) : "",
       rooms: (part.rooms ?? []).filter(Boolean).join(", ") || t("room"),
     });

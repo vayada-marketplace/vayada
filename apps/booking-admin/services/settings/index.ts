@@ -1,4 +1,4 @@
-import type { AddonPhoto } from "@vayada/product-onboarding/AddonEditor";
+import type { AddonPhoto, AddonScheduleMode } from "@vayada/product-onboarding/AddonEditor";
 import { ApiErrorResponse, apiClient, isNextApiTarget, omitHotelContext } from "../api/client";
 import { getSelectedBookingHotelId, listScopedBookingHotelIds } from "../api/bookingHotelScope";
 import {
@@ -332,6 +332,10 @@ export interface AddonItem {
   duration?: string;
   perPerson?: boolean;
   perNight?: boolean;
+  /** VAY-2391: when it happens; a per-night price is always "daily". */
+  scheduleMode?: AddonScheduleMode;
+  /** ISO weekdays (1 Monday … 7 Sunday) a guest can pick for "guest_pick". */
+  bookableWeekdays?: number[];
   sortOrder?: number;
   ownershipKind: "property" | "partner";
   partnerCommissionRate: string | null;
