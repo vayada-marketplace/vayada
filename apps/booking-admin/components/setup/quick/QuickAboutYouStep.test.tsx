@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
 import { QuickAboutYouStep, aboutYouErrors } from "./QuickAboutYouStep";
@@ -110,6 +110,52 @@ describe("QuickAboutYouStep (VAY-2247 step 1)", () => {
         .filter((button) => button.props.type === "submit")
         .every((button) => !button.props.disabled),
     ).toBe(true);
+    renderer.unmount();
+  });
+
+  it("disables the fields while the save runs, and a failed save gives them back with every value (VAY-2399)", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const onSubmit = vi.fn(() => new Promise<void>((_resolve, reject) => (fail = reject)));
+    const renderer = create(
+      <QuickAboutYouStep
+        {...base}
+        initialName="Clara Schumann"
+        initialPhone="+49 30 1234 5678"
+        onSubmit={onSubmit}
+      />,
+    );
+    // Every control of the form, the phone's country button too, sits in the one fieldset.
+    const controls = (node: ReactTestInstance) =>
+      node.findAll((each) => ["input", "select", "textarea", "button"].includes(String(each.type)))
+        .length;
+    const fieldset = () => renderer.root.findByType("fieldset");
+    expect(controls(fieldset())).toBeGreaterThan(0);
+    expect(controls(fieldset())).toBe(controls(renderer.root.findByType("form")));
+    expect(fieldset().props.disabled).toBe(false);
+
+    await type(renderer, 0, "Clara-Marie");
+    // A slow save: a change can't be made while it runs, as it wouldn't be part of the save.
+    await act(async () => {
+      void renderer.root.findByType("form").props.onSubmit({ preventDefault() {} });
+    });
+    expect(onSubmit).toHaveBeenCalledWith({
+      firstName: "Clara-Marie",
+      lastName: "Schumann",
+      phone: expect.stringMatching(/^\+49 30/),
+    });
+    expect(fieldset().props.disabled).toBe(true);
+    expect(JSON.stringify(renderer.toJSON())).toContain("Saving…");
+
+    await act(async () => fail(new Error("We couldn't reach the server. Try again.")));
+    expect(fieldset().props.disabled).toBe(false);
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
+      "We couldn't reach the server. Try again.",
+    );
+    expect(inputs(renderer).map((input) => input.props.value)).toEqual([
+      "Clara-Marie",
+      "Schumann",
+      expect.stringMatching(/^30 1234 5678/),
+    ]);
     renderer.unmount();
   });
 

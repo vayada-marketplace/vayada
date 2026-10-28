@@ -8,7 +8,7 @@ import {
   type SharedAccountDetailsInput,
 } from "@vayada/product-onboarding";
 import { CountryPhoneField } from "@vayada/product-onboarding/CountryPhoneField";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { QuickSetupField } from "./QuickSetupField";
 import { QuickSetupShell } from "./QuickSetupShell";
@@ -63,6 +63,16 @@ export function QuickAboutYouStep({
   const [errors, setErrors] = useState<Errors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const focusBeforeFailedSave = useRef<HTMLElement | null>(null);
+
+  // The browser takes focus off a control as it is disabled for the save: after a failed save it goes back
+  // there, unless the owner has moved on (as on "Your hotel", VAY-2397).
+  useEffect(() => {
+    const focused = focusBeforeFailedSave.current;
+    focusBeforeFailedSave.current = null;
+    if (submitting || !focused?.isConnected) return;
+    if (!document.activeElement || document.activeElement === document.body) focused.focus();
+  }, [submitting]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -70,6 +80,8 @@ export function QuickAboutYouStep({
     const found = aboutYouErrors({ firstName, lastName, phone });
     setErrors(found);
     if (Object.keys(found).length > 0) return;
+    const focused =
+      typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null);
     setSubmitting(true);
     try {
       await onSubmit({
@@ -79,6 +91,7 @@ export function QuickAboutYouStep({
       });
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "We couldn't save your details.");
+      focusBeforeFailedSave.current = focused;
     } finally {
       setSubmitting(false);
     }
@@ -109,47 +122,51 @@ export function QuickAboutYouStep({
           primaryBusyLabel: "Saving…",
         }}
       >
-        <form id={FORM_ID} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
-          <div className="grid gap-6 lg:grid-cols-2 lg:gap-4">
-            <QuickSetupField
-              label="First name"
+        {/* While the save runs the fields are disabled, as the buttons are: a change made meanwhile would not
+            be part of the save, and the step then leaves (VAY-2399). One fieldset, with no group role. */}
+        <form id={FORM_ID} noValidate onSubmit={handleSubmit}>
+          <fieldset role="none" disabled={submitting} className="flex min-w-0 flex-col gap-6">
+            <div className="grid gap-6 lg:grid-cols-2 lg:gap-4">
+              <QuickSetupField
+                label="First name"
+                required
+                value={firstName}
+                error={errors.firstName}
+                inputProps={{ autoComplete: "given-name", maxLength: 60 }}
+                onChange={(value) => {
+                  setFirstName(value);
+                  setErrors((current) => ({ ...current, firstName: undefined }));
+                }}
+              />
+              <QuickSetupField
+                label="Last name"
+                required
+                value={lastName}
+                error={errors.lastName}
+                inputProps={{ autoComplete: "family-name", maxLength: 60 }}
+                onChange={(value) => {
+                  setLastName(value);
+                  setErrors((current) => ({ ...current, lastName: undefined }));
+                }}
+              />
+            </div>
+            <CountryPhoneField
+              label="Your phone"
               required
-              value={firstName}
-              error={errors.firstName}
-              inputProps={{ autoComplete: "given-name", maxLength: 60 }}
+              value={phone}
+              error={errors.phone}
+              helper="So we can reach you about your account. Not shown to guests."
               onChange={(value) => {
-                setFirstName(value);
-                setErrors((current) => ({ ...current, firstName: undefined }));
+                setPhone(value);
+                setErrors((current) => ({ ...current, phone: undefined }));
               }}
             />
-            <QuickSetupField
-              label="Last name"
-              required
-              value={lastName}
-              error={errors.lastName}
-              inputProps={{ autoComplete: "family-name", maxLength: 60 }}
-              onChange={(value) => {
-                setLastName(value);
-                setErrors((current) => ({ ...current, lastName: undefined }));
-              }}
-            />
-          </div>
-          <CountryPhoneField
-            label="Your phone"
-            required
-            value={phone}
-            error={errors.phone}
-            helper="So we can reach you about your account. Not shown to guests."
-            onChange={(value) => {
-              setPhone(value);
-              setErrors((current) => ({ ...current, phone: undefined }));
-            }}
-          />
-          {submitError ? (
-            <p role="alert" className="text-sm text-red-700">
-              {submitError}
-            </p>
-          ) : null}
+            {submitError ? (
+              <p role="alert" className="text-sm text-red-700">
+                {submitError}
+              </p>
+            ) : null}
+          </fieldset>
         </form>
       </QuickSetupStepLayout>
     </QuickSetupShell>
