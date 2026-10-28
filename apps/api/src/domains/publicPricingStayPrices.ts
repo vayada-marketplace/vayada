@@ -26,6 +26,13 @@ export type StayPricesQuery = {
   room?: { adults: number; children: number };
 };
 
+/** One offer's stay total, or why it has none in this read. */
+type OfferPrice =
+  | ({ publicOfferKey: string; status: "priced" } & NonNullable<
+      Awaited<ReturnType<typeof stayTotal>>
+    >)
+  | { publicOfferKey: string; status: "unavailable" | "unpriced" };
+
 /** A party never needs more rooms of one type than this on the booking page. */
 const MAX_ROOMS = 9;
 /** Rooms left at or below this are shown to guests ("Only 2 left"), as the old page did. */
@@ -104,6 +111,14 @@ export function oneRoomFits(occupancy: Occupancy, room: { adults: number; childr
   );
 }
 
+/** VAY-2393: the most adults of a party one room takes while a second room keeps at least one
+ * adult (children go with the rest): "Book for 3 + pick a 2nd room for 1". Null when the room
+ * takes no adult that way. */
+export function adultsForPart(occupancy: Occupancy, party: { adults: number }) {
+  const adults = Math.min(occupancy.maxAdults, occupancy.maxGuests, party.adults - 1);
+  return adults >= 1 ? adults : null;
+}
+
 /** The fewest rooms a party could need when it may mix the given room types (VAY-2320): enough
  * for the adults, the children and everyone in the largest rooms, each room with an adult. A
  * lower bound to start the group's room count; null when no type takes the children, or more
@@ -167,6 +182,11 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
       let budget = MAX_PRICED_OFFERS;
       const rooms = [];
       const one = query.room;
+      // The booking page asks for its whole party as one room until the guest picks rooms one
+      // by one (VAY-2320).
+      const wholeParty = !!one && one.adults === query.adults && one.children === query.children;
+      const parts: { index: number; room: (typeof offered.rooms)[number]; adults: number }[] = [];
+      const partOffers = new Map<number, { adults: number; offers: OfferPrice[] }>();
       const suggestedRooms = fewestRooms(
         offered.rooms.filter((room) => (free.get(room.roomTypeId) ?? 0) >= 1),
         query,
@@ -197,6 +217,24 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
               : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
           );
         }
+        // Additive (VAY-2393): a free room too small for the whole party takes part of it, so
+        // the guest can book it and pick a second room for the rest; priced below. Only while
+        // the rest (with every child) fits a free room: this type's second one, or another's.
+        const partAdults =
+          wholeParty && roomCount === null && left >= 1
+            ? adultsForPart(room.occupancy, query)
+            : null;
+        if (partAdults !== null) {
+          const rest = { adults: query.adults - partAdults, children: query.children };
+          if (
+            offered.rooms.some(
+              (other) =>
+                (free.get(other.roomTypeId) ?? 0) >= (other === room ? 2 : 1) &&
+                oneRoomFits(other.occupancy, rest),
+            )
+          )
+            parts.push({ index: rooms.length, room, adults: partAdults });
+        }
         rooms.push({
           roomTypeId: room.roomTypeId,
           roomCount,
@@ -208,6 +246,26 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
           offers,
         });
       }
+      // Parts are priced with what the whole party's offers left of the budget, so rooms that
+      // fit the party always come first (VAY-2393).
+      for (const { index, room, adults } of parts) {
+        const part: OfferPrice[] = [];
+        for (const offer of room.offers) {
+          if (budget-- <= 0) {
+            part.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
+            continue;
+          }
+          const price = await short(pool, (client) =>
+            stayTotal(client, slug, query, offer, [adults]),
+          );
+          part.push(
+            price
+              ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
+              : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
+          );
+        }
+        partOffers.set(index, { adults, offers: part });
+      }
       return {
         version: "public-pricing-stay-prices.v1" as const,
         checkIn: query.checkIn,
@@ -215,7 +273,10 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
         childrenPriced: (one ? one.children : query.children) === 0,
         // Additive (VAY-2320).
         suggestedRooms,
-        rooms,
+        rooms: rooms.map((room, index) => {
+          const part = partOffers.get(index);
+          return { ...room, ...(part && { part }) };
+        }),
       };
     },
   };

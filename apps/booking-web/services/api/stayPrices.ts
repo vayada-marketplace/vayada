@@ -23,6 +23,9 @@ export type StayRoomPrices = {
   /** VAY-2320, room by room only: free rooms of this type (up to 9). */
   roomsFree?: number;
   offers: StayOfferPrice[];
+  /** VAY-2393: a free room too small for the whole party, priced for the adults it takes; the
+   * guest books it for them and picks a second room for the rest. Absent from older APIs. */
+  part?: { adults: number; offers: StayOfferPrice[] };
 };
 export type StayPrices = {
   checkIn: string;
@@ -44,6 +47,44 @@ export type StayQuery = {
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
 const invalid = () => new Error("Stay prices could not be verified.");
+
+/** An additive field: a part that can't be read is left out (the card then says the room is
+ * too small), never the whole answer. */
+function partOf(part: unknown): { part?: StayRoomPrices["part"] } {
+  if (
+    !object(part) ||
+    !(Number.isSafeInteger(part.adults) && (part.adults as number) >= 1) ||
+    !Array.isArray(part.offers)
+  )
+    return {};
+  try {
+    return { part: { adults: part.adults as number, offers: part.offers.map(offerPrice) } };
+  } catch {
+    return {};
+  }
+}
+
+function offerPrice(offer: unknown): StayOfferPrice {
+  if (!object(offer) || typeof offer.publicOfferKey !== "string") throw invalid();
+  if (offer.status === "unavailable" || offer.status === "unpriced")
+    return { publicOfferKey: offer.publicOfferKey, status: offer.status };
+  if (
+    offer.status !== "priced" ||
+    typeof offer.totalMinor !== "string" ||
+    !/^(0|[1-9][0-9]*)$/.test(offer.totalMinor) ||
+    typeof offer.currency !== "string" ||
+    pricingCurrencyScale(offer.currency) === null ||
+    typeof offer.promoApplied !== "boolean"
+  )
+    throw invalid();
+  return {
+    publicOfferKey: offer.publicOfferKey,
+    status: "priced",
+    totalMinor: offer.totalMinor,
+    currency: offer.currency,
+    promoApplied: offer.promoApplied,
+  };
+}
 
 /** The room cards' read-only stay prices (VAY-2190). They preview the stay; the quote on /book
  * stays the binding price. */
@@ -106,27 +147,8 @@ export async function getStayPrices(
         availability: room.availability,
         roomsLeft: room.roomsLeft as number | null,
         ...(count(room.roomsFree, 0) && { roomsFree: room.roomsFree as number }),
-        offers: room.offers.map((offer): StayOfferPrice => {
-          if (!object(offer) || typeof offer.publicOfferKey !== "string") throw invalid();
-          if (offer.status === "unavailable" || offer.status === "unpriced")
-            return { publicOfferKey: offer.publicOfferKey, status: offer.status };
-          if (
-            offer.status !== "priced" ||
-            typeof offer.totalMinor !== "string" ||
-            !/^(0|[1-9][0-9]*)$/.test(offer.totalMinor) ||
-            typeof offer.currency !== "string" ||
-            pricingCurrencyScale(offer.currency) === null ||
-            typeof offer.promoApplied !== "boolean"
-          )
-            throw invalid();
-          return {
-            publicOfferKey: offer.publicOfferKey,
-            status: "priced",
-            totalMinor: offer.totalMinor,
-            currency: offer.currency,
-            promoApplied: offer.promoApplied,
-          };
-        }),
+        offers: room.offers.map(offerPrice),
+        ...partOf(room.part),
       };
     }),
   };

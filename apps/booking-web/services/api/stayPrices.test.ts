@@ -58,3 +58,51 @@ it("refuses prices for another stay or with malformed amounts", async () => {
     await expect(getStayPrices("hotel", stay)).rejects.toThrow("verified");
   }
 });
+
+// VAY-2393: a room too small for the whole party, priced for the adults it takes.
+it("reads a too-small room's price for the part of the party it takes", async () => {
+  const part = {
+    adults: 2,
+    offers: [
+      {
+        publicOfferKey: "key-a",
+        status: "priced",
+        totalMinor: "19800",
+        currency: "EUR",
+        promoApplied: false,
+      },
+    ],
+  };
+  const loft = { ...body.rooms[1]!, roomsFree: 1, part };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...body, rooms: [loft] }))),
+  );
+  expect((await getStayPrices("a", stay)).rooms[0]).toEqual(loft);
+  // A part without adults, or with a malformed amount, is left out; the rest of the read stays.
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ ...body, rooms: [{ ...loft, part: { ...part, adults: 0 } }] }),
+        ),
+      ),
+  );
+  expect((await getStayPrices("a", stay)).rooms[0]).not.toHaveProperty("part");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...body,
+          rooms: [
+            { ...loft, part: { adults: 2, offers: [{ ...part.offers[0], totalMinor: "1.5" }] } },
+          ],
+        }),
+      ),
+    ),
+  );
+  expect((await getStayPrices("a", stay)).rooms[0]).not.toHaveProperty("part");
+});

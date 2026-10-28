@@ -7,6 +7,7 @@ vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: auth
 vi.mock("./publicPricingChargeTotals.js", () => ({ lockPublicPricingChargeTotals: totals }));
 
 import {
+  adultsForPart,
   createPublicPricingStayPrices,
   fewestRooms,
   oneRoomFits,
@@ -174,6 +175,14 @@ describe("rooms for a party", () => {
     expect(fewestRooms([family], { adults: 2, children: 0 })).toBe(2);
     expect(fewestRooms([family], { adults: 10, children: 0 })).toBeNull();
     expect(fewestRooms([], { adults: 2, children: 0 })).toBeNull();
+  });
+
+  it("leaves a second room at least one adult when a room takes part of a party", () => {
+    const room = { maxGuests: 3, maxAdults: 3, maxChildren: 1 };
+    expect(adultsForPart(room, { adults: 4 })).toBe(3);
+    expect(adultsForPart(room, { adults: 3 })).toBe(2);
+    expect(adultsForPart({ maxGuests: 2, maxAdults: 2, maxChildren: 0 }, { adults: 5 })).toBe(2);
+    expect(adultsForPart(room, { adults: 1 })).toBeNull();
   });
 
   it("spreads adults evenly", () => {
@@ -361,6 +370,61 @@ describe("createPublicPricingStayPrices", () => {
     expect(childRoom!.childrenPriced).toBe(false);
   });
 
+  // VAY-2393: "Book for 2 + pick a 2nd room for 2": a free room too small for the whole party is
+  // priced for the adults it takes, leaving one for a second room.
+  it("prices a free room too small for the whole party for the part of it the room takes", async () => {
+    // Two free A rooms: one for 2 of the 4 adults, the second for the other 2.
+    const env = setup([
+      { roomTypeId: ROOM_A, nights: 2, free: 2 },
+      { roomTypeId: ROOM_B, nights: 2, free: 0 },
+    ]);
+    totals.mockResolvedValue({ totalMinor: "19800" });
+    const party = { ...stay, adults: 4, room: { adults: 4, children: 0 } };
+    const prices = await env.reader.read("hotel", party);
+    const [roomA, roomB] = prices!.rooms;
+    expect(roomA).toMatchObject({ roomCount: null, availability: "sold_out", roomsFree: 2 });
+    // The answer for the whole party is unchanged; the part is additive.
+    expect(roomA!.offers.every((offer) => offer.status === "unavailable")).toBe(true);
+    expect(roomA!.part).toEqual({
+      adults: 2,
+      offers: [
+        {
+          publicOfferKey: "offer-a-free",
+          status: "priced",
+          totalMinor: "19800",
+          currency: "EUR",
+          promoApplied: false,
+        },
+        {
+          publicOfferKey: "offer-a-nonref",
+          status: "priced",
+          totalMinor: "19800",
+          currency: "EUR",
+          promoApplied: false,
+        },
+      ],
+    });
+    expect(
+      totals.mock.calls.map(([, , selection]) =>
+        selection.rooms.map((room: { guests: unknown }) => room.guests),
+      ),
+    ).toEqual([[{ adults: 2, childAgesAtCheckIn: [] }], [{ adults: 2, childAgesAtCheckIn: [] }]]);
+    // No free room, no part.
+    expect(roomB).not.toHaveProperty("part");
+    expectShortReads(env);
+
+    // A room chosen room by room, a party of one, or a room that fits: no part either.
+    totals.mockClear();
+    const oneRoom = await env.reader.read("hotel", { ...party, room: { adults: 2, children: 0 } });
+    expect(oneRoom!.rooms.some((room) => "part" in room)).toBe(false);
+    const single = await env.reader.read("hotel", {
+      ...stay,
+      adults: 1,
+      room: { adults: 1, children: 0 },
+    });
+    expect(single!.rooms.some((room) => "part" in room)).toBe(false);
+  });
+
   it("suggests no room count when no type with a free room fits the group", async () => {
     const env = setup([
       { roomTypeId: ROOM_A, nights: 2, free: 3 },
@@ -430,6 +494,68 @@ describe("createPublicPricingStayPrices", () => {
       expect.objectContaining({ promoCode: "AUTUMN" }),
     );
     expectShortReads(env);
+  });
+
+  it("offers no part when the rest of the party fits no other free room", async () => {
+    // One free A room: it takes 2 of the 4 adults, and nothing free holds the other 2.
+    const one = setup([
+      { roomTypeId: ROOM_A, nights: 2, free: 1 },
+      { roomTypeId: ROOM_B, nights: 2, free: 0 },
+    ]);
+    totals.mockResolvedValue({ totalMinor: "19800" });
+    const party = { ...stay, adults: 4, room: { adults: 4, children: 0 } };
+    expect((await one.reader.read("hotel", party))!.rooms.some((room) => "part" in room)).toBe(
+      false,
+    );
+    // 9 adults: the largest room takes 2, and nothing holds the other 7.
+    const big = setup([
+      { roomTypeId: ROOM_A, nights: 2, free: 5 },
+      { roomTypeId: ROOM_B, nights: 2, free: 5 },
+    ]);
+    const nine = { ...stay, adults: 9, room: { adults: 9, children: 0 } };
+    expect((await big.reader.read("hotel", nine))!.rooms.some((room) => "part" in room)).toBe(
+      false,
+    );
+    expect(totals).not.toHaveBeenCalled();
+  });
+
+  it("prices the rooms that fit the party before the parts of rooms too small for it", async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      publicOfferKey: `small-${i}`,
+      currency: "EUR",
+    }));
+    // A (listed first, too small for 3 adults) has 30 offers; B fits the party with 1.
+    const env = setup(
+      [
+        { roomTypeId: ROOM_A, nights: 2, free: 1 },
+        { roomTypeId: ROOM_B, nights: 2, free: 1 },
+      ],
+      [
+        { ...defaultRooms()[0]!, offers: many },
+        {
+          roomTypeId: ROOM_B,
+          occupancy: { maxGuests: 4, maxAdults: 3, maxChildren: 2 },
+          offers: [{ publicOfferKey: "offer-b", currency: "EUR" }],
+        },
+      ],
+    );
+    totals.mockResolvedValue({ totalMinor: "1000" });
+    const party = { ...stay, adults: 3, room: { adults: 3, children: 0 } };
+    const prices = await env.reader.read("hotel", party);
+    expect(totals).toHaveBeenCalledTimes(30);
+    expect(prices!.rooms[1]!.offers).toEqual([
+      {
+        publicOfferKey: "offer-b",
+        status: "priced",
+        totalMinor: "1000",
+        currency: "EUR",
+        promoApplied: false,
+      },
+    ]);
+    const part = prices!.rooms[0]!.part!;
+    expect(part.adults).toBe(2);
+    expect(part.offers.filter(({ status }) => status === "priced")).toHaveLength(29);
+    expect(part.offers.at(-1)).toEqual({ publicOfferKey: "small-29", status: "unpriced" });
   });
 
   it("prices at most 30 offers per request", async () => {

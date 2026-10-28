@@ -149,8 +149,7 @@ function HomePageContent() {
   const [checkOut, setCheckOut] = useState(initialDates.checkOut);
   const [adults, setAdults] = useState(() => parseInt(searchParams.get("adults") || "2"));
   const [children, setChildren] = useState(() => parseInt(searchParams.get("children") || "0"));
-  // VAY-2320: the rooms the group wants; null until the guest picks a number (then the fewest
-  // the group needs).
+  // VAY-2320: the rooms the group wants; null until the guest picks a number (then one).
   const [roomsWanted, setRoomsWanted] = useState<number | null>(() => {
     const value = Number(searchParams.get("rooms"));
     return Number.isInteger(value) && value >= 1 && value <= MAX_ROOMS ? value : null;
@@ -226,14 +225,11 @@ function HomePageContent() {
       });
     return () => controller.abort();
   }, [slug]);
-  // VAY-2320: the group's room count starts at the fewest rooms it needs (the API's lower bound
-  // across room types) and never goes below it. One room is chosen like before; with two or
-  // more the guest chooses room by room, each card priced and sized for the room being chosen.
+  // One room is chosen like before; with two or more the guest chooses room by room, each card
+  // priced and sized for the room being chosen (VAY-2320). VAY-2393: a group starts in one room
+  // even when no place fits it all; the page offers the fewest rooms it needs instead.
   const [fewestRooms, setFewestRooms] = useState(1);
-  const roomCount = Math.min(
-    Math.max(roomsWanted ?? fewestRooms, fewestRooms),
-    mostRooms(Math.max(adults, 1), fewestRooms),
-  );
+  const roomCount = Math.min(roomsWanted ?? 1, mostRooms(Math.max(adults, 1), fewestRooms));
   const pickMode = roomCount > 1;
   // VAY-2393: the group's split and picks are kept per stay (dates and promo), so other guests or
   // rooms keep the rooms chosen; Back from /book and a refresh find them again.
@@ -265,7 +261,17 @@ function HomePageContent() {
     draft.split.length === roomCount && draft.split.reduce((sum, n) => sum + n, 0) === adults
       ? draft.split
       : evenSplit(adults, roomCount);
-  const slots = roomGuests(split, effectiveChildren);
+  // Children where the guest put them while they still add up, else in the rooms with the fewest
+  // adults.
+  const placed =
+    split === draft.split &&
+    draft.children?.length === split.length &&
+    draft.children.reduce((sum, n) => sum + n, 0) === effectiveChildren
+      ? draft.children
+      : null;
+  const slots = placed
+    ? split.map((roomAdults, index) => ({ adults: roomAdults, children: placed[index]! }))
+    : roomGuests(split, effectiveChildren);
   const picks = Array.from({ length: roomCount }, (_, index) => draft.picks[index] ?? null);
   // A chosen room is done while its rate is still offered and it sleeps the room's guests; one
   // the split made too small is chosen again (VAY-2393).
@@ -353,16 +359,19 @@ function HomePageContent() {
         ? [index + 1]
         : [],
     );
-  // VAY-2393, room by room, as Timo's prototype sorts: rooms that fit first, then those too small
-  // for this room's guests, those the group's other rooms used up, and sold out last.
+  // VAY-2393, as Timo's prototype sorts: rooms that fit first, then those too small for the
+  // room being chosen (or the whole party), those the group's other rooms used up, and sold out
+  // last, including a too-small type with none free.
   const pickOrder = (room: PricingRoom) => {
     const prices = roomPrices(room);
-    if (!pickMode || !prices) return 0;
+    if (!prices) return 0;
     if (prices.availability === "sold_out" && (prices.roomCount !== null || prices.roomsFree === 0))
       return 4;
     if (allChosen) return 1;
-    if (prices.roomCount === null) return 2;
-    return prices.roomsFree != null && prices.roomsFree - takenBy(room).length <= 0 ? 3 : 0;
+    // Used up by the group's other rooms says so before too small (the card's label too).
+    if (pickMode && prices.roomsFree != null && prices.roomsFree - takenBy(room).length <= 0)
+      return 3;
+    return prices.roomCount === null ? 2 : 0;
   };
   const shownRooms = [...(rooms ?? [])].sort(
     (a, b) =>
@@ -420,7 +429,7 @@ function HomePageContent() {
     if (!room.offers.some((offer) => offer.publicOfferKey === publicOfferKey)) return;
     const next = [...picks];
     next[activeRoom] = { roomTypeId: room.roomTypeId, publicOfferKey };
-    saveDraft({ split, picks: next });
+    saveDraft({ split, picks: next, ...(placed && { children: placed }) });
     setChanging(null);
     const open = done.findIndex((isDone, index) => index !== activeRoom && !isDone);
     if (open === -1) return continueWithRooms(next as RoomPick[]);
@@ -438,6 +447,48 @@ function HomePageContent() {
       }),
     });
   };
+  // Other rooms: an even split again, the first rooms' choices kept.
+  const changeRoomCount = (count: number) => {
+    setRoomsWanted(count);
+    setChanging(null);
+    saveDraft({ split: [], picks: draft.picks.slice(0, count) });
+  };
+  // VAY-2393, one room: a place too small for the whole party becomes room 1 for the adults it
+  // takes, and the rest pick room 2.
+  const bookPart = (room: PricingRoom, publicOfferKey: string, partAdults: number) => {
+    if (!room.offers.some((offer) => offer.publicOfferKey === publicOfferKey)) return;
+    saveDraft({
+      split: [partAdults, adults - partAdults],
+      // The part was priced for its adults alone: every child goes with the rest.
+      children: [0, effectiveChildren],
+      picks: [{ roomTypeId: room.roomTypeId, publicOfferKey }],
+    });
+    setRoomsWanted(2);
+    setChanging(null);
+    toRoomList();
+    requestAnimationFrame(() =>
+      document.getElementById("rooms-progress-title")?.focus({ preventScroll: true }),
+    );
+    setToast({
+      id: Date.now(),
+      message: t("roomsProgress.partChosen", {
+        name: room.name,
+        count: partAdults,
+        rest: adults + effectiveChildren - partAdults,
+      }),
+    });
+  };
+  // VAY-2393, one room: no free place holds the whole party (some is free, none fits), read from
+  // this answer's own rooms; the fewest rooms it needs is a lower bound, at least 2.
+  const noneFits =
+    !pickMode &&
+    adults > 1 &&
+    !!stay.prices?.rooms.length &&
+    stay.prices.rooms.every(
+      (room) => room.roomCount === null || room.availability === "sold_out",
+    ) &&
+    stay.prices.rooms.some((room) => room.roomCount === null && room.roomsFree !== 0);
+  const roomsNeeded = Math.min(Math.max(2, fewestRooms), mostRooms(adults, fewestRooms));
   // A pill opens its room again; its choice stays until another one replaces it. Pressing the
   // reopened room's pill again keeps its choice and closes it.
   const openRoom = (index: number) => {
@@ -529,6 +580,14 @@ function HomePageContent() {
             }
           : undefined
       }
+      bookPart={
+        !pickMode && adults > 1
+          ? {
+              guests: adults + effectiveChildren,
+              onBook: (publicOfferKey, partAdults) => bookPart(room, publicOfferKey, partAdults),
+            }
+          : undefined
+      }
       onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
       detailsRequest={detailsRequests[room.roomTypeId] ?? 0}
       place={mapProperty}
@@ -548,7 +607,7 @@ function HomePageContent() {
           </button>
         </div>
       )}
-      {pickMode && (
+      {pickMode ? (
         <RoomsProgress
           rooms={progressRooms}
           current={allChosen ? null : activeRoom}
@@ -557,6 +616,38 @@ function HomePageContent() {
           onOpen={openRoom}
           onContinue={() => continueWithRooms(picks as RoomPick[])}
         />
+      ) : noneFits ? (
+        // VAY-2393: no place fits the whole party; the rooms it needs are one click away.
+        <div
+          role="note"
+          data-testid="none-fits"
+          className="mb-5 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-sm text-amber-900">
+            <strong>{t("oneRoom.noneFits", { count: adults + effectiveChildren })}</strong>{" "}
+            {t("oneRoom.splitHint")}
+          </p>
+          <button
+            type="button"
+            onClick={() => changeRoomCount(roomsNeeded)}
+            className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700"
+          >
+            {t("oneRoom.bookRooms", { count: roomsNeeded })}
+          </button>
+        </div>
+      ) : (
+        adults > 1 && (
+          <p className="mb-5 text-sm text-gray-600">
+            {t("oneRoom.together", { count: adults + effectiveChildren })}{" "}
+            <button
+              type="button"
+              onClick={() => changeRoomCount(2)}
+              className="font-semibold text-primary-600 underline"
+            >
+              {t("oneRoom.preferSeparate")}
+            </button>
+          </p>
+        )
       )}
       {pickMode ? (
         <p className="mb-5 text-sm text-gray-500">{t("pricesPerRoom")}</p>
@@ -701,12 +792,7 @@ function HomePageContent() {
                   ? {
                       count: roomCount,
                       fewest: fewestRooms,
-                      onChange: (count) => {
-                        setRoomsWanted(count);
-                        setChanging(null);
-                        // Other rooms: an even split again, the first rooms' choices kept.
-                        saveDraft({ split: [], picks: draft.picks.slice(0, count) });
-                      },
+                      onChange: changeRoomCount,
                       split: slots,
                       onSplit: (next) => {
                         setChanging(null);
