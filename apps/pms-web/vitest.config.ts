@@ -8,11 +8,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: [
-      "app/**/*.test.ts",
-      "components/**/*.test.tsx",
-      "services/**/*.test.ts",
-      "lib/**/*.test.ts",
-    ],
+    // Every test file, wherever it sits: a narrower list left two files unrun (VAY-2356).
+    include: ["**/*.test.{ts,tsx}"],
+    exclude: ["**/node_modules/**", "**/.next/**"],
   },
 });
