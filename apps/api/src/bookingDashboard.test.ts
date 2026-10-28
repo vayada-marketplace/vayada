@@ -659,6 +659,8 @@ describe("target Booking dashboard metrics read port", () => {
     expect(sparklines.points[0].avgNightlyRate.amountDecimal).toBe("100.00");
     expect(sparklines.points[0].pageViewCount).toBe(4);
     expect(pool.queries.join("\n")).toContain("booking.guest_bookings");
+    // VAY-2390: amounts are added up in the PMS pricing currency guests pay in.
+    expect(pool.queries.join("\n")).toContain("pms.property_pricing_settings");
     expect(pool.queries.join("\n")).toContain("distribution.booking_web_events");
     expect(pool.queries.join("\n")).toContain("event.traffic_class = 'human'");
     expect(pool.queries.join("\n")).not.toContain("platform.domain_events");

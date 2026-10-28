@@ -47,6 +47,8 @@ export type UpdateBookingPromoCodeBody = Partial<CreateBookingPromoCodeBody>;
 
 export type BookingPromoCodesRepository = {
   listPromoCodesByHotelId(hotelId: string): Promise<BookingPromoCode[] | null>;
+  /** The currency promo amounts are in: the PMS pricing currency guests pay in (VAY-2390). */
+  findPropertyCurrencyByHotelId?(hotelId: string): Promise<string | null>;
   createPromoCodeByHotelId(
     hotelId: string,
     body: CreateBookingPromoCodeBody,
@@ -112,9 +114,12 @@ export async function registerBookingPromoCodeRoutes(
     if (accessError) return sendPromoCodesError(reply, accessError);
 
     try {
-      const promoCodes = await repository.listPromoCodesByHotelId(hotelId);
+      const [promoCodes, propertyCurrency] = await Promise.all([
+        repository.listPromoCodesByHotelId(hotelId),
+        repository.findPropertyCurrencyByHotelId?.(hotelId),
+      ]);
       if (!promoCodes) return sendPromoCodesError(reply, readNotFoundError());
-      return { promoCodes };
+      return propertyCurrency ? { promoCodes, propertyCurrency } : { promoCodes };
     } catch {
       return sendPromoCodesError(reply, readUnavailableError());
     }
@@ -266,7 +271,6 @@ export function createPgTargetBookingPromoCodesRepository(config: {
       (body.discountType === undefined && body.discountValue === undefined)
     )
       return;
-    // VAY-2390: quotes charge in the PMS pricing currency; before prices exist, the Booking default.
     const row = (
       await pool.query<{
         currency: string | null;
@@ -274,10 +278,7 @@ export function createPgTargetBookingPromoCodesRepository(config: {
         discountValue: string | null;
       }>(
         `SELECT
-           COALESCE(
-             (SELECT currency FROM pms.property_pricing_settings WHERE property_id = $1),
-             (SELECT default_currency FROM booking.booking_settings WHERE property_id = $1)
-           ) AS currency,
+           ${PROPERTY_CURRENCY_SQL} AS currency,
            promo.discount_type AS "discountType",
            promo.discount_value::text AS "discountValue"
          FROM (SELECT 1) one
@@ -294,6 +295,15 @@ export function createPgTargetBookingPromoCodesRepository(config: {
   }
 
   return {
+    async findPropertyCurrencyByHotelId(hotelId) {
+      const propertyId = await resolvePropertyId(hotelId);
+      if (!propertyId) return null;
+      const result = await pool.query<{ currency: string | null }>(
+        `SELECT ${PROPERTY_CURRENCY_SQL} AS currency`,
+        [propertyId],
+      );
+      return result.rows[0]?.currency ?? null;
+    },
     async listPromoCodesByHotelId(hotelId) {
       const propertyId = await resolvePropertyId(hotelId);
       if (!propertyId) return null;
@@ -410,6 +420,13 @@ type PromoCodeRow = {
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+// VAY-2390: quotes charge in the PMS pricing currency, so promo amounts are in it; before the hotel
+// has prices, in Booking settings' default.
+const PROPERTY_CURRENCY_SQL = `COALESCE(
+  (SELECT currency::text FROM pms.property_pricing_settings WHERE property_id = $1),
+  (SELECT default_currency::text FROM booking.booking_settings WHERE property_id = $1)
+)`;
 
 function promoCodeSelectSql(source = "booking.promo_definitions"): string {
   return `SELECT

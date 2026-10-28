@@ -185,6 +185,7 @@
   "dashboard.noDepartures": "No departures today",
   "dashboard.revenueThisMonth": "Revenue This Month",
   "dashboard.monthToDate": "Month to date",
+  "dashboard.monthToDateOtherCurrencies": "Month to date, without bookings in other currencies",
   "dashboard.viewAll": "View all",
   "dashboard.clickGuestToStartCheckIn": "Click a guest to start check-in",
   "dashboard.confirmed": "Confirmed",

@@ -59,6 +59,8 @@ export type BookingRevenueStats = {
   bookingCount: number;
   /** Bookings excluded from monetary metrics because their amounts are unverified. */
   unverifiedBookingCount?: number;
+  /** Bookings excluded from monetary metrics because they are in another currency than the property's (VAY-2390). */
+  otherCurrencyBookingCount?: number;
   avgNightlyRate: BookingMoney;
   pageViewCount: number;
 };
@@ -70,6 +72,8 @@ export type BookingSourceMixItem = {
   bookingCount: number;
   /** Bookings excluded from monetary metrics because their amounts are unverified. */
   unverifiedBookingCount?: number;
+  /** Bookings excluded from monetary metrics because they are in another currency than the property's (VAY-2390). */
+  otherCurrencyBookingCount?: number;
   /** Revenue share as 0–100, rounded to one decimal place */
   revenueSharePercent: number;
 };
@@ -91,6 +95,8 @@ export type BookingSparklinePoint = {
   bookingCount: number;
   /** Bookings excluded from monetary metrics because their amounts are unverified. */
   unverifiedBookingCount?: number;
+  /** Bookings excluded from monetary metrics because they are in another currency than the property's (VAY-2390). */
+  otherCurrencyBookingCount?: number;
   avgNightlyRate: BookingMoney;
   pageViewCount: number;
 };

@@ -27,6 +27,7 @@ type BookingDashboardMetricsRow = {
   revenueAmount: string | null;
   bookingCount: string;
   unverifiedBookingCount: string;
+  otherCurrencyBookingCount: string;
   roomNightCount: string | null;
   currency: string | null;
   nextArrivalDate: string | Date | null;
@@ -38,6 +39,7 @@ type BookingDashboardSourceRow = {
   revenueAmount: string | null;
   bookingCount: string;
   unverifiedBookingCount: string;
+  otherCurrencyBookingCount: string;
   currency: string | null;
 };
 
@@ -47,6 +49,7 @@ type BookingDashboardSparklineRow = {
   revenueAmount: string | null;
   bookingCount: string;
   unverifiedBookingCount: string;
+  otherCurrencyBookingCount: string;
   roomNightCount: string | null;
   currency: string | null;
 };
@@ -167,6 +170,7 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
             revenue: money(revenue, row.currency ?? currency),
             bookingCount: Number(row.bookingCount),
             unverifiedBookingCount: Number(row.unverifiedBookingCount ?? 0),
+            otherCurrencyBookingCount: Number(row.otherCurrencyBookingCount ?? 0),
             revenueSharePercent:
               totalRevenue > 0 ? Math.round((revenue / totalRevenue) * 1000) / 10 : 0,
           };
@@ -197,6 +201,7 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
           revenue: money(numeric(row.revenueAmount), row.currency ?? currency),
           bookingCount: Number(row.bookingCount),
           unverifiedBookingCount: Number(row.unverifiedBookingCount ?? 0),
+          otherCurrencyBookingCount: Number(row.otherCurrencyBookingCount ?? 0),
           avgNightlyRate: averageNightlyRate(row, row.currency ?? currency),
           pageViewCount: totalPageViews(
             pageViews.rows,
@@ -266,8 +271,25 @@ export function bookingScopedPropertyCte(): string {
   )`;
 }
 
+// VAY-2390: money metrics add up only bookings in the property's currency, the PMS pricing currency
+// guests pay in (Booking settings' default before the hotel has prices). An OTA booking in another
+// currency still counts as a booking and is reported as otherCurrencyBookingCount.
+function propertyCurrencyCte(): string {
+  return `property_currency AS (
+    SELECT COALESCE(pricing.currency, settings.default_currency, 'EUR')::text AS currency
+    FROM scoped_property scoped
+    LEFT JOIN pms.property_pricing_settings pricing ON pricing.property_id = scoped.property_id
+    LEFT JOIN booking.booking_settings settings ON settings.property_id = scoped.property_id
+  )`;
+}
+
+const VERIFIED_AMOUNT = `booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'`;
+const COUNTED_AMOUNT = `${VERIFIED_AMOUNT} AND booking.currency::text = (SELECT currency FROM property_currency)`;
+const OTHER_CURRENCY = `${VERIFIED_AMOUNT} AND booking.currency::text <> (SELECT currency FROM property_currency)`;
+
 function dashboardMetricsSql(): string {
   return `${bookingScopedPropertyCte()},
+  ${propertyCurrencyCte()},
   scoped_bookings AS (
     SELECT booking.*
     FROM booking.guest_bookings booking
@@ -275,15 +297,15 @@ function dashboardMetricsSql(): string {
     WHERE booking.lifecycle_status IN ('confirmed', 'completed')
   )
   SELECT
-    COALESCE(SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'), 0)::text AS "revenueAmount",
+    COALESCE(SUM(booking.total_amount) FILTER (WHERE ${COUNTED_AMOUNT}), 0)::text AS "revenueAmount",
     COUNT(*)::text AS "bookingCount",
     COUNT(*) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
+    COUNT(*) FILTER (WHERE ${OTHER_CURRENCY})::text AS "otherCurrencyBookingCount",
     COALESCE(
-      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'),
+      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count) FILTER (WHERE ${COUNTED_AMOUNT}),
       0
     )::text AS "roomNightCount",
-    (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id)
-      FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'))[1] AS currency,
+    (SELECT currency FROM property_currency) AS currency,
     (
       SELECT MIN(upcoming.check_in)::text
       FROM scoped_bookings upcoming
@@ -300,18 +322,19 @@ function dashboardMetricsSql(): string {
 }
 
 function sourceMixSql(): string {
-  return `${bookingScopedPropertyCte()}
+  return `${bookingScopedPropertyCte()},
+  ${propertyCurrencyCte()}
   SELECT
     COALESCE(
       NULLIF(booking.booking_metadata ->> 'channel', ''),
       NULLIF(booking.source_system, ''),
       'direct'
     ) AS source,
-    COALESCE(SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'), 0)::text AS "revenueAmount",
+    COALESCE(SUM(booking.total_amount) FILTER (WHERE ${COUNTED_AMOUNT}), 0)::text AS "revenueAmount",
     COUNT(*)::text AS "bookingCount",
     COUNT(*) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
-    (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id)
-      FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'))[1] AS currency
+    COUNT(*) FILTER (WHERE ${OTHER_CURRENCY})::text AS "otherCurrencyBookingCount",
+    (SELECT currency FROM property_currency) AS currency
   FROM booking.guest_bookings booking
   JOIN scoped_property scoped ON scoped.property_id = booking.property_id
   WHERE booking.lifecycle_status IN ('confirmed', 'completed')
@@ -322,11 +345,12 @@ function sourceMixSql(): string {
     NULLIF(booking.source_system, ''),
     'direct'
   )
-  ORDER BY SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified') DESC, source ASC`;
+  ORDER BY SUM(booking.total_amount) FILTER (WHERE ${COUNTED_AMOUNT}) DESC, source ASC`;
 }
 
 function sparklineSql(): string {
   return `${bookingScopedPropertyCte()},
+  ${propertyCurrencyCte()},
   -- One bucket per day up to 31 days; longer windows split into 31 contiguous buckets.
   sizing AS (
     SELECT $3::date - $2::date + 1 AS window_days, LEAST($3::date - $2::date + 1, 31) AS bucket_count
@@ -343,15 +367,15 @@ function sparklineSql(): string {
   SELECT
     bucket.bucket_start::text AS "bucketStart",
     bucket.bucket_end::text AS "bucketEnd",
-    COALESCE(SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'), 0)::text AS "revenueAmount",
+    COALESCE(SUM(booking.total_amount) FILTER (WHERE ${COUNTED_AMOUNT}), 0)::text AS "revenueAmount",
     COUNT(booking.id)::text AS "bookingCount",
     COUNT(booking.id) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
+    COUNT(booking.id) FILTER (WHERE ${OTHER_CURRENCY})::text AS "otherCurrencyBookingCount",
     COALESCE(
-      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'),
+      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count) FILTER (WHERE ${COUNTED_AMOUNT}),
       0
     )::text AS "roomNightCount",
-    (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id)
-      FILTER (WHERE booking.id IS NOT NULL AND booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'))[1] AS currency
+    (SELECT currency FROM property_currency) AS currency
   FROM buckets bucket
   JOIN scoped_property scoped ON TRUE
   LEFT JOIN booking.guest_bookings booking
@@ -401,6 +425,7 @@ function toRevenueStats(
     totalRevenue: money(numeric(row.revenueAmount), currency),
     bookingCount: Number(row.bookingCount),
     unverifiedBookingCount: Number(row.unverifiedBookingCount ?? 0),
+    otherCurrencyBookingCount: Number(row.otherCurrencyBookingCount ?? 0),
     avgNightlyRate: averageNightlyRate(row, currency),
     pageViewCount,
   };

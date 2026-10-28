@@ -321,6 +321,7 @@
   "dashboard.stats.revenue": "Revenue",
   "dashboard.stats.bookings": "Bookings",
   "dashboard.stats.incompleteAmounts": "Some booking amounts are unverified. Revenue and average rates exclude them; booking counts still include them. Financial comparisons are unavailable.",
+  "dashboard.stats.otherCurrencies": "Some bookings are in another currency than {currency}, such as from booking sites. Revenue and average rates exclude them; booking counts still include them.",
   "dashboard.stats.avgNightlyRate": "Avg. Nightly Rate",
   "dashboard.stats.pageViews": "Page Views",
   "dashboard.stats.noDataYet": "No data yet",

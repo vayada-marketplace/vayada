@@ -6,14 +6,19 @@ import {
   createPgTargetBookingAddonItemsRepository,
   type CreateBookingAddonItemBody,
 } from "./routes/bookingAddonItems.js";
+import {
+  BookingPromoCodeAmountError,
+  createPgTargetBookingPromoCodesRepository,
+} from "./routes/bookingPromoCodes.js";
 
 const url = process.env.TEST_DATABASE_URL;
 
 /**
  * Add-on prices use the PMS pricing currency (VAY-2141). Booking Admin reads its absence from
- * the list and asks the host to set it in setup instead of opening the editor.
+ * the list and asks the host to set it in setup instead of opening the editor. Promo amounts
+ * use it too (VAY-2390).
  */
-describe.skipIf(!url)("Booking add-on currency on the ordinary API login", () => {
+describe.skipIf(!url)("Booking add-on and promo currency on the ordinary API login", () => {
   const admin = new pg.Client({ connectionString: url });
   let fixture: Awaited<ReturnType<typeof createHotelSetupOrdinaryLoginFixture>>;
   let pool: pg.Pool;
@@ -63,6 +68,7 @@ describe.skipIf(!url)("Booking add-on currency on the ordinary API login", () =>
     await admin.query("SET LOCAL session_replication_role = replica");
     for (const table of [
       "booking.addon_definitions",
+      "booking.promo_definitions",
       "pms.property_pricing_settings",
       "booking.booking_settings",
     ])
@@ -93,5 +99,38 @@ describe.skipIf(!url)("Booking add-on currency on the ordinary API login", () =>
     await expect(addons.createAddonItemByHotelId(propertyId, transfer)).resolves.toMatchObject({
       outcome: "created",
     });
+  });
+
+  // VAY-2390: quotes charge in the PMS pricing currency; Booking settings keep LKR only as the
+  // currency guests see first. A fixed amount off must fit IDR's whole rupiah, not LKR's cents.
+  it("reads promo amounts in the PMS pricing currency", async () => {
+    await admin.query(
+      "UPDATE pms.property_pricing_settings SET currency='IDR' WHERE property_id=$1::uuid",
+      [propertyId],
+    );
+    const promos = createPgTargetBookingPromoCodesRepository({
+      connectionString: fixture.connectionString,
+      pool,
+    });
+    await expect(promos.findPropertyCurrencyByHotelId!(propertyId)).resolves.toBe("IDR");
+    const promo = {
+      code: "RUPIAH",
+      discountType: "fixed" as const,
+      discountValue: "1500.50",
+      minBookingValue: null,
+      applicableRoomIds: null,
+      validFrom: null,
+      validUntil: null,
+      stayDateFrom: null,
+      stayDateUntil: null,
+      isActive: true,
+      maxUses: 10,
+    };
+    await expect(promos.createPromoCodeByHotelId(propertyId, promo)).rejects.toBeInstanceOf(
+      BookingPromoCodeAmountError,
+    );
+    await expect(
+      promos.createPromoCodeByHotelId(propertyId, { ...promo, discountValue: "1500" }),
+    ).resolves.toMatchObject({ code: "RUPIAH" });
   });
 });
