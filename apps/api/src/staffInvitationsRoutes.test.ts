@@ -213,8 +213,16 @@ function fakes() {
   };
 }
 
-async function testApp(options: StaffInvitationRoutesOptions, auth: Auth = {}) {
-  const app = Fastify({ logger: false });
+async function testApp(
+  options: StaffInvitationRoutesOptions,
+  auth: Auth = {},
+  logLines?: string[],
+) {
+  const app = Fastify({
+    logger: logLines
+      ? { level: "warn", stream: { write: (line: string) => void logLines.push(line) } }
+      : false,
+  });
   app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => {
     if (auth.authenticated === false || request.headers.authorization !== "Bearer valid-token") {
@@ -642,6 +650,39 @@ describe("staff invitation routes", () => {
     ]) {
       expect((await app.inject({ ...request, payload })).statusCode).toBe(400);
     }
+  });
+
+  it("logs why an access update failed by its SQLSTATE, never its message", async () => {
+    const fake = fakes();
+    const logLines: string[] = [];
+    app = await testApp(fake.options, {}, logLines);
+    fake.options.repository.updateAccess = async () => {
+      throw Object.assign(new Error("permission denied for staff@example.test"), {
+        code: "42501",
+      });
+    };
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/identity/staff/members/${staffMembershipId}`,
+      headers: { authorization: "Bearer valid-token", "Idempotency-Key": "denied" },
+      payload: {
+        roleKey: "front_desk",
+        propertyIds: [propertyId],
+        permissionOverrides: { grant: [], deny: [] },
+      },
+    });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ code: "staff_access_update_failed" });
+    expect(logLines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        level: 50,
+        msg: "Staff route failed",
+        response: "staff_access_update_failed",
+        errorName: "Error",
+        errorCode: "42501",
+      }),
+    ]);
+    expect(logLines.join("")).not.toContain("staff@example.test");
   });
 
   it("reads saved invitation settings with tenant routing and no caching", async () => {

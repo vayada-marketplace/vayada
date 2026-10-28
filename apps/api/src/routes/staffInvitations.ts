@@ -166,7 +166,8 @@ export async function registerStaffInvitationRoutes(
     try {
       const roles = await options.roles.list(context.selectedOrganization.organizationId);
       return reply.send({ roles, canManageRoles: context.membership.roleKey === "hotel_owner" });
-    } catch {
+    } catch (error) {
+      logStaffRouteFailure(request, "team_roles_read_failed", error);
       return reply.status(500).send({ code: "team_roles_read_failed" });
     }
   });
@@ -186,7 +187,8 @@ export async function registerStaffInvitationRoutes(
         return invitation
           ? reply.send(invitation)
           : reply.status(404).send({ code: "invitation_not_found" });
-      } catch {
+      } catch (error) {
+        logStaffRouteFailure(request, "invitation_read_failed", error);
         return reply.status(500).send({ code: "invitation_read_failed" });
       }
     },
@@ -254,7 +256,8 @@ export async function registerStaffInvitationRoutes(
             return reply.status(status).send({ code: result.reason });
           }
           return reply.status(result.outcome === "created" ? 201 : 200).send(result);
-        } catch {
+        } catch (error) {
+          logStaffRouteFailure(request, "team_role_write_failed", error);
           return reply.status(500).send({ code: "team_role_write_failed" });
         }
       },
@@ -269,7 +272,8 @@ export async function registerStaffInvitationRoutes(
         context.selectedOrganization.organizationId,
       );
       return reply.send({ members });
-    } catch {
+    } catch (error) {
+      logStaffRouteFailure(request, "staff_roster_failed", error);
       return reply.status(500).send({ code: "staff_roster_failed" });
     }
   });
@@ -288,7 +292,8 @@ export async function registerStaffInvitationRoutes(
         );
         if (!access) return reply.status(404).send({ code: "staff_member_not_found" });
         return reply.send(access);
-      } catch {
+      } catch (error) {
+        logStaffRouteFailure(request, "staff_access_read_failed", error);
         return reply.status(500).send({ code: "staff_access_read_failed" });
       }
     },
@@ -329,7 +334,8 @@ export async function registerStaffInvitationRoutes(
         const result = await options.repository.updateAccess(command);
         if (result.outcome === "rejected") return sendAccessUpdateRejection(reply, result.reason);
         return reply.send(result);
-      } catch {
+      } catch (error) {
+        logStaffRouteFailure(request, "staff_access_update_failed", error);
         return reply.status(500).send({ code: "staff_access_update_failed" });
       }
     },
@@ -377,7 +383,8 @@ export async function registerStaffInvitationRoutes(
           membershipId: result.membershipId,
           status: result.membershipStatus === "suspended" ? "deactivated" : "active",
         });
-      } catch {
+      } catch (error) {
+        logStaffRouteFailure(request, "staff_status_update_failed", error);
         return reply.status(500).send({ code: "staff_status_update_failed" });
       }
     },
@@ -415,7 +422,8 @@ export async function registerStaffInvitationRoutes(
       let result;
       try {
         result = await options.repository.remove(command);
-      } catch {
+      } catch (error) {
+        logStaffRouteFailure(request, "staff_removal_failed", error);
         return reply.status(500).send({ code: "staff_removal_failed" });
       }
       if (result.outcome === "rejected") return sendAccessUpdateRejection(reply, result.reason);
@@ -429,8 +437,9 @@ export async function registerStaffInvitationRoutes(
             : revocation.outcome === "reconciliation_required"
               ? "reconciliation_required"
               : "pending";
-      } catch {
+      } catch (error) {
         // Internal access is already revoked atomically; the durable provider job remains retryable.
+        logStaffRouteFailure(request, "staff_provider_revocation_pending", error, "warn");
       }
       return reply.status(providerStatus === "revoked" ? 200 : 202).send({
         membershipId: result.membershipId,
@@ -472,7 +481,8 @@ export async function registerStaffInvitationRoutes(
     let result;
     try {
       result = await options.repository.persist(command);
-    } catch {
+    } catch (error) {
+      logStaffRouteFailure(request, "staff_invitation_failed", error);
       return reply.status(500).send({ code: "staff_invitation_failed" });
     }
     if (result.outcome === "rejected") return sendRejection(reply, result.reason);
@@ -480,7 +490,8 @@ export async function registerStaffInvitationRoutes(
     let delivery;
     try {
       delivery = await options.delivery.deliver(result.invitationId);
-    } catch {
+    } catch (error) {
+      logStaffRouteFailure(request, "staff_invitation_delivery_failed", error);
       return reply.status(500).send({ code: "staff_invitation_delivery_failed" });
     }
     if ("replacedRevocation" in delivery && delivery.replacedRevocation === "failed") {
@@ -687,6 +698,31 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+/** Logs a caught staff route failure by its type and code (the SQLSTATE for PostgreSQL errors), never
+ * by its message, which can quote submitted values. Without it a 42501 was a bare 500 (VAY-2395). */
+function logStaffRouteFailure(
+  request: FastifyRequest,
+  response: string,
+  error: unknown,
+  level: "error" | "warn" = "error",
+) {
+  const { code, table, constraint } = (error ?? {}) as Record<string, unknown>;
+  request.log[level](
+    {
+      response,
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorCode: logIdentifier(code),
+      table: logIdentifier(table),
+      constraint: logIdentifier(constraint),
+    },
+    "Staff route failed",
+  );
+}
+
+function logIdentifier(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_]{1,63}$/.test(value) ? value : undefined;
 }
 
 function sendRejection(reply: FastifyReply, reason: string) {

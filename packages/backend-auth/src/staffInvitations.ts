@@ -857,6 +857,9 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             return { outcome: "rejected" as const, reason: "revision_conflict" as const };
           }
         }
+        // Only the mutable organization links need row locks while the scope is validated (as in
+        // invitation acceptance): the identity login may only read properties, and a row lock needs
+        // UPDATE (VAY-2395). The assignment insert's foreign key still keeps each property.
         const linkedProperties = await client.query<{ property_id: string }>(
           `SELECT property.id::text AS property_id
            FROM identity.organization_resource_links link
@@ -864,7 +867,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
            WHERE link.organization_id = $1 AND link.product = 'hotel_catalog'
              AND link.resource_type = 'property' AND link.relationship IN ('owner', 'operator')
              AND link.status = 'active' AND property.id = ANY($2::uuid[])
-           FOR SHARE OF link, property`,
+           FOR SHARE OF link`,
           [normalized.organizationId, normalized.propertyIds],
         );
         if (

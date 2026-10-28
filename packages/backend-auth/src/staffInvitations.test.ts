@@ -49,6 +49,38 @@ const staffUser = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const staffMembership = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const staffIdentity = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const secondProperty = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+// Production's identity login and its privileges, as granted by vayada-platform
+// scripts/grant-target-database-identity-runtime.mjs (which refuses anything broader). Keep in step.
+const identityRuntimeRole = "vayada_next_identity_runtime";
+const identityRuntimeGrants = [
+  ["hotel_catalog.properties", "SELECT"],
+  ["identity.users", "SELECT, INSERT, UPDATE"],
+  ["identity.external_identities", "SELECT, INSERT, UPDATE"],
+  ["identity.organizations", "SELECT, INSERT, UPDATE"],
+  ["identity.organization_memberships", "SELECT, INSERT, UPDATE"],
+  ["identity.organization_resource_links", "SELECT, INSERT, UPDATE"],
+  ["identity.role_permission_grants", "SELECT, INSERT"],
+  ["identity.permission_catalog", "SELECT"],
+  ["identity.product_entitlements", "SELECT"],
+  ["identity.auth_reconciliation_events", "SELECT, INSERT"],
+  ["identity.auth_session_handoffs", "SELECT, INSERT, UPDATE, DELETE"],
+  ["identity.staff_invitations", "SELECT, INSERT, UPDATE"],
+  ["identity.staff_invitation_property_assignments", "SELECT, INSERT"],
+  ["identity.membership_property_assignments", "SELECT, INSERT, DELETE"],
+  ["identity.membership_delegations", "SELECT, DELETE"],
+  ["identity.organization_roles", "SELECT, INSERT, UPDATE, DELETE"],
+  ["identity.account_admin_guards", "SELECT, INSERT"],
+  ["identity.account_admin_transfer_proofs", "SELECT, INSERT, UPDATE"],
+  ["identity.cookie_consents", "SELECT, INSERT, UPDATE"],
+  ["identity.user_consent_status", "SELECT, INSERT, UPDATE"],
+  ["identity.consent_history", "SELECT, INSERT"],
+  ["identity.gdpr_requests", "SELECT, INSERT, UPDATE"],
+  ["platform.external_webhook_events", "SELECT, INSERT, UPDATE"],
+  ["platform.idempotency_keys", "SELECT, INSERT, UPDATE"],
+  ["platform.jobs", "SELECT, INSERT, UPDATE"],
+  ["platform.dead_letter_events", "SELECT, INSERT, UPDATE"],
+  ["platform.product_audit_events", "SELECT, INSERT"],
+] as const;
 type RejectionReason =
   | "inviter_not_authorized"
   | "idempotency_conflict"
@@ -2196,6 +2228,66 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       await client.query(`DROP OWNED BY ${restrictedRole}`);
       await client.query(`REVOKE ${restrictedRole} FROM CURRENT_USER`);
       await client.query(`DROP ROLE ${restrictedRole}`);
+    }
+  });
+
+  // VAY-2395: the scope check locked properties FOR SHARE, which needs UPDATE on them, so every
+  // update failed in production with 42501 while superuser suites passed.
+  it("updates staff access as the restricted identity login", async () => {
+    const password = "identity_runtime_test_only";
+    const existing = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [
+      identityRuntimeRole,
+    ]);
+    if (existing.rowCount) {
+      await client.query(`DROP OWNED BY ${identityRuntimeRole}`);
+      await client.query(`DROP ROLE ${identityRuntimeRole}`);
+    }
+    await client.query(
+      `CREATE ROLE ${identityRuntimeRole} LOGIN PASSWORD '${password}' NOINHERIT NOBYPASSRLS`,
+    );
+    let restricted: ReturnType<typeof createPgStaffInvitationRepository> | undefined;
+    try {
+      await client.query(
+        `GRANT USAGE ON SCHEMA hotel_catalog, identity, platform TO ${identityRuntimeRole}`,
+      );
+      for (const [table, privileges] of identityRuntimeGrants) {
+        await client.query(`GRANT ${privileges} ON ${table} TO ${identityRuntimeRole}`);
+      }
+      const login = new URL(TEST_DATABASE_URL!);
+      login.username = identityRuntimeRole;
+      login.password = password;
+      restricted = createPgStaffInvitationRepository({ connectionString: login.toString() });
+
+      const update = updateCommand({ propertyIds: [secondProperty] });
+      expect(await restricted.updateAccess(update)).toEqual({
+        outcome: "updated",
+        membershipId: staffMembership,
+      });
+      expect(
+        (
+          await client.query(
+            "SELECT property_id::text FROM identity.membership_property_assignments WHERE membership_id = $1",
+            [staffMembership],
+          )
+        ).rows,
+      ).toEqual([{ property_id: secondProperty }]);
+      expect(
+        (
+          await client.query(
+            `SELECT 1 FROM platform.product_audit_events
+             WHERE action = 'identity.staff.access.updated' AND target_resource_id = $1
+               AND correlation_id = $2`,
+            [staffMembership, update.audit.requestId],
+          )
+        ).rowCount,
+      ).toBe(1);
+      expect(
+        await restricted.updateAccess(updateCommand({ propertyIds: [foreignProperty] })),
+      ).toEqual({ outcome: "rejected", reason: "property_scope_invalid" });
+    } finally {
+      await restricted?.close();
+      await client.query(`DROP OWNED BY ${identityRuntimeRole}`);
+      await client.query(`DROP ROLE ${identityRuntimeRole}`);
     }
   });
 
