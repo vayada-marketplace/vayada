@@ -20,11 +20,7 @@ const PRODUCTS: Product[] = [
     eyebrow: "Booking Engine",
     title: "Turn website visitors into direct bookings",
     body: "Launch a branded booking flow that converts demand, captures guest data and increases revenue per stay.",
-    bullets: [
-      "Branded checkout",
-      "Referral tracking",
-      "Upsell experiences & transport",
-    ],
+    bullets: ["Branded checkout", "Upsell experiences & transport"],
     image: {
       src: "/booking-preview.jpg",
       alt: "Live Vayada-powered direct booking page for Green Poya Resort in Lombok",
