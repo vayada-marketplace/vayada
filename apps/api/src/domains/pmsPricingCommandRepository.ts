@@ -56,8 +56,8 @@ export type PmsPricingCommandRepositoryConfig = {
    * The change locks the property row FOR UPDATE, which every booking writer holds FOR SHARE or
    * FOR UPDATE, so its in-transaction blockers can't miss a new booking. It is refused for
    * upcoming bookings, channel connections and Finance records as well, and it carries the
-   * currency, with the same numbers, to Finance, add-ons, fixed promos and a matching Booking
-   * default. Trusted configuration; never read from the request DTO. */
+   * currency, with the same numbers, to Finance, add-ons and a matching Booking default. Trusted
+   * configuration; never read from the request DTO. */
   ownerCurrencyChange?: boolean;
   channexMealSyncEnabled?: boolean;
   channexMealSyncPropertyId?: string;
@@ -759,9 +759,10 @@ async function inspectOwnerChangeBlockers(
 }
 
 /** VAY-2390 P5 (D2): the same numbers in the new currency. A bound Finance row follows by the
- * 0526 cascade; an unbound one, add-ons, fixed-amount promos and a Booking default that matched
- * the old pricing currency move here. Published prices stay as they are, so the booking page
- * stops selling until the Owner publishes them again in the new currency. */
+ * 0526 cascade; an unbound one, add-ons and a Booking default that matched the old pricing
+ * currency move here. Fixed-amount promos have no currency of their own since 0107: they are in
+ * the pricing currency. Published prices stay as they are, so the booking page stops selling
+ * until the Owner publishes them again in the new currency. */
 async function carryPricingCurrency(
   client: PmsPricingCommandClient,
   propertyId: string,
@@ -774,8 +775,6 @@ async function carryPricingCurrency(
      WHERE property_id = $1::uuid AND source_pricing_currency_revision IS NULL
        AND default_currency = $2`,
     `UPDATE booking.addon_definitions SET currency = $3, updated_at = $4::timestamptz
-     WHERE property_id = $1::uuid AND currency = $2`,
-    `UPDATE booking.promo_definitions SET currency = $3, updated_at = $4::timestamptz
      WHERE property_id = $1::uuid AND currency = $2`,
     `UPDATE booking.booking_settings SET default_currency = $3, updated_at = $4::timestamptz
      WHERE property_id = $1::uuid AND default_currency = $2`,

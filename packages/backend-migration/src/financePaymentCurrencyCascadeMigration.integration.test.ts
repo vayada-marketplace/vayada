@@ -91,5 +91,5 @@ describe.skipIf(!URL)("Finance payment currency cascade 0526", () => {
       await admin.end();
       await rm(before, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 });

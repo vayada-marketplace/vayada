@@ -367,8 +367,11 @@ describe("the same numbers in another currency", () => {
   });
 
   it("refuses a changed amount, another room set, a currency of another scale or no change", () => {
-    const changed = room("CHF", 5);
-    changed.children.bands[0]!.nightlyMinor = "600";
+    const chf = room("CHF", 5);
+    const changed = {
+      ...chf,
+      children: { ...chf.children, bands: [{ ...chf.children.bands[0]!, nightlyMinor: "600" }] },
+    };
     expect(sameNumbers([room("EUR")], [changed], "EUR", "CHF")).toBe(false);
     expect(
       sameNumbers([room("EUR"), room("EUR", 4, "room-2")], [room("CHF", 5)], "EUR", "CHF"),

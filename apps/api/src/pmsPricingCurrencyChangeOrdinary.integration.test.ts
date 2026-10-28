@@ -29,8 +29,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
   const hotel = randomUUID();
   const otherHotel = randomUUID();
   const addonId = randomUUID();
-  const fixedPromoId = randomUUID();
-  const percentPromoId = randomUUID();
   let fixture: HotelSetupOrdinaryLoginFixture;
   let repository: ReturnType<typeof createPgPmsPricingCommandRepository>;
 
@@ -74,7 +72,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       "pms.property_pricing_settings": ["SELECT", "UPDATE"],
       "finance.payment_settings": ["SELECT", "UPDATE"],
       "booking.addon_definitions": ["SELECT", "UPDATE"],
-      "booking.promo_definitions": ["SELECT", "UPDATE"],
       "booking.booking_settings": ["SELECT", "UPDATE"],
       "booking.guest_bookings": ["SELECT"],
       "pms.channel_connections": ["SELECT"],
@@ -114,7 +111,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
     }
   });
 
-  it("moves Finance, add-ons, fixed promos and a matching Booking default to the new currency, numbers kept, for this hotel only", async () => {
+  it("moves Finance, add-ons and a matching Booking default to the new currency, numbers kept, for this hotel only", async () => {
     const otherBefore = await finance(otherHotel);
     const hotelBefore = await finance(hotel);
 
@@ -145,14 +142,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
         )
       ).rows[0],
     ).toEqual({ currency: "CHF", price: "25.00" });
-    const promos = await admin.query(
-      "SELECT id::text, currency::text, discount_value::text FROM booking.promo_definitions WHERE property_id=$1 ORDER BY discount_type",
-      [hotel],
-    );
-    expect(promos.rows).toEqual([
-      { id: fixedPromoId, currency: "CHF", discount_value: "10.00" },
-      { id: percentPromoId, currency: null, discount_value: "15.00" },
-    ]);
     expect(
       (
         await admin.query(
@@ -246,18 +235,19 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
 
   it("rolls the whole change back when a later step fails", async () => {
     const before = await snapshot();
-    await admin.query(`CREATE OR REPLACE FUNCTION public.vay2390_fail_promo() RETURNS trigger LANGUAGE plpgsql AS $f$
+    // The Booking default is the last row the change moves, after the pricing row and Finance.
+    await admin.query(`CREATE OR REPLACE FUNCTION public.vay2390_fail_carry() RETURNS trigger LANGUAGE plpgsql AS $f$
       BEGIN RAISE EXCEPTION 'injected VAY-2390 failure'; END $f$`);
     await admin.query(
-      "CREATE TRIGGER vay2390_fail_promo BEFORE UPDATE ON booking.promo_definitions FOR EACH ROW EXECUTE FUNCTION public.vay2390_fail_promo()",
+      "CREATE TRIGGER vay2390_fail_carry BEFORE UPDATE ON booking.booking_settings FOR EACH ROW EXECUTE FUNCTION public.vay2390_fail_carry()",
     );
     try {
       await expect(
         repository.upsertPropertyPricingCurrency(command("failing", 1, "CHF")),
       ).rejects.toThrow(/injected VAY-2390 failure/);
     } finally {
-      await admin.query("DROP TRIGGER IF EXISTS vay2390_fail_promo ON booking.promo_definitions");
-      await admin.query("DROP FUNCTION IF EXISTS public.vay2390_fail_promo()");
+      await admin.query("DROP TRIGGER IF EXISTS vay2390_fail_carry ON booking.booking_settings");
+      await admin.query("DROP FUNCTION IF EXISTS public.vay2390_fail_carry()");
     }
     // The pricing row, the cascaded Finance row and the add-on all kept their old currency.
     expect(await snapshot()).toEqual(before);
@@ -362,12 +352,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       [addonId, hotel],
     );
     await admin.query(
-      `INSERT INTO booking.promo_definitions (id, property_id, code, discount_type, discount_value, currency)
-       VALUES ($1::uuid, $3::uuid, 'VAYTEN', 'fixed', 10, 'EUR'),
-              ($2::uuid, $3::uuid, 'VAYPCT', 'percentage', 15, NULL)`,
-      [fixedPromoId, percentPromoId, hotel],
-    );
-    await admin.query(
       "INSERT INTO booking.booking_settings (property_id, default_currency) VALUES ($1::uuid, 'EUR')",
       [hotel],
     );
@@ -383,7 +367,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
         "DELETE FROM booking.guest_bookings WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM finance.expenses WHERE property_id = ANY($1::uuid[])",
-        "DELETE FROM booking.promo_definitions WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM booking.addon_definitions WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM booking.booking_settings WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM finance.payment_settings WHERE property_id = ANY($1::uuid[])",

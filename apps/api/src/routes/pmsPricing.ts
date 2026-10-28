@@ -1,4 +1,4 @@
-import { UnauthorizedError } from "@vayada/backend-auth";
+import { UnauthorizedError, type PermissionKey } from "@vayada/backend-auth";
 import {
   AuthorizationError,
   requirePropertyAccess,
@@ -50,7 +50,7 @@ export function registerPmsPricingCurrencyCommand(
     propertyAccessRepository?: PropertyAccessRepository;
     /** VAY-2390 P5: the Owner's protected change, on its own path and key. */
     path?: string;
-    permission?: string;
+    permission?: PermissionKey;
   } = {},
 ): void {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
@@ -191,7 +191,7 @@ async function authorizeRequest(
   reply: FastifyReply,
   requireOwnerSession = false,
   propertyAccessRepository?: PropertyAccessRepository,
-  permissionOverride?: string,
+  permissionOverride?: PermissionKey,
 ): Promise<AuthorizedScope | null> {
   const permission =
     permissionOverride ??
