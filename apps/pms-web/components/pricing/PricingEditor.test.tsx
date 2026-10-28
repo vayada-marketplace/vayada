@@ -4188,6 +4188,28 @@ it("keeps this room's edits over the reload after a refused save when only anoth
   expect(saved.snapshot.rooms[1].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12345" } } });
   expect(confirm).toHaveBeenCalledTimes(2); expect(publish).toHaveBeenCalledTimes(2);
 });
+it("after an Owner's currency change shows the prices in the new currency and publishes the same numbers (VAY-2390)", async () => {
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "CHF" } } as never);
+  try {
+    client.read.mockResolvedValue(published()); await mountRoom(); await act(async () => {});
+    const shown = () => JSON.stringify(view.toJSON());
+    expect(shown()).toContain("Your currency changed to CHF. Please review all prices.");
+    expect(shown()).toMatch(/€100 is now CHF\s100/);
+    expect(button("Save and publish").props.disabled).toBe(false);
+    await click("Save and publish");
+    expect(saved.snapshot.currency).toBe("CHF");
+    expect(saved.snapshot.rooms.map((room) => [room.currency, room.offers[0].price])).toEqual(published().rooms.map((room) => ["CHF", room.offers[0].price]));
+  } finally { settings.mockRestore(); }
+});
+it("names the same-numbers rule when edited prices are refused in the new currency (VAY-2390)", async () => {
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "CHF" } } as never);
+  try {
+    client.read.mockResolvedValue(published()); await mountRoom(); await act(async () => {});
+    client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "currency_conversion_required" } as never));
+    await click("Save and publish");
+    expect(JSON.stringify(view.toJSON())).toContain("Publish your prices unchanged in the new currency first, then change them.");
+  } finally { settings.mockRestore(); }
+});
 it("drops this room's edits when someone else changed the room, so a later save cannot overwrite their change", async () => {
   client.read.mockResolvedValueOnce(published()); await mountRoom();
   await act(async () => input().props.onChange({ target: { value: "123.45" } }));

@@ -66,6 +66,9 @@ export function pricingSaveError(error: unknown, t: Translate, { paymentCurrency
   if (nonRefundablePayAtProperty(error)) return t("pricing.error.nonRefundablePayAtProperty");
   const paymentRule = paymentRuleKey(error);
   if (paymentRule) return t(paymentRule);
+  // VAY-2390 P5: after a currency change only the same numbers go out in the new currency, without FX.
+  if (error instanceof ApiErrorResponse && error.status === 409 && (error.data as { code?: unknown }).code === "currency_conversion_required")
+    return t("pricing.currencyChanged.publishUnchanged");
   if (error instanceof ApiErrorResponse && error.status === 409) return t("pricing.editor.errorChanged");
   if (error instanceof ApiErrorResponse && error.status === 403) return t("pricing.editor.errorForbidden");
   return errorText(error, t, "pricing.editor.errorSaveFailed");
