@@ -105,6 +105,7 @@
     "nonRefundableDesc": "No reembolsable",
     "off": "-15% DTO",
     "perNightly": "{price} / por noche",
+    "youPay": "Pagas {price}",
     "includes": "Incluye:",
     "dailyBreakfast": "Desayuno diario para {count}",
     "welcomeDrink": "Bebida de bienvenida",

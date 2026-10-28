@@ -253,7 +253,7 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     expect(await promoCodes()).toBe(true);
   });
 
-  it("offers guests the display currencies Booking settings add, read live (VAY-2345)", async () => {
+  it("offers guests the display currencies Booking settings add, first its default, read live (VAY-2345, VAY-2390)", async () => {
     // A page as setup publishes it: with its header settings, never with display currencies.
     await seedRevision(propertyA, brandedRevision, "hotel-alpenrose", 3, false, (profile) => {
       profile.hotel.branding = {
@@ -286,6 +286,22 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
       [propertyA],
     );
     expect((await branding())?.displayCurrencies).toBeUndefined();
+    // VAY-2390: Localization's guest display currency is offered after the hotel's, and named
+    // so the page opens in it. Prices stay in the hotel's currency.
+    await admin.query(
+      "UPDATE booking.booking_settings SET default_currency = 'USD', supported_currencies = ARRAY['GBP'] WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect(await branding()).toMatchObject({
+      displayCurrencies: ["EUR", "USD", "GBP"],
+      displayDefaultCurrency: "USD",
+    });
+    await admin.query(
+      "UPDATE booking.booking_settings SET default_currency = 'EUR' WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect((await branding())?.displayCurrencies).toEqual(["EUR", "GBP"]);
+    expect((await branding())?.displayDefaultCurrency).toBeUndefined();
   });
 
   async function seedLegacyProperty(propertyId: string, slug: string): Promise<void> {
