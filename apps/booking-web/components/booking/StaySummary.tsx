@@ -100,7 +100,9 @@ export default function StaySummary({
   const nights = Math.round((Date.parse(quote.checkOut) - Date.parse(quote.checkIn)) / 86_400_000);
   const extras = quote.lines.filter((line) => line.kind === "addon");
   const charges = quote.lines.filter((line) => line.kind === "charge");
-  const discounts = quote.lines.filter((line) => line.kind === "discount");
+  // Every quote has a promo-code discount line, "0" without a code: show only a real discount
+  // (VAY-2388).
+  const discount = sum(quote.lines.filter((line) => line.kind === "discount"));
   const single = rooms.length === 1 ? rooms[0] : undefined;
   const ranOut = expired || !timeLeft;
   // Bank transfer and PayPal confirm once the money arrives, so "instant" holds only without them.
@@ -167,9 +169,7 @@ export default function StaySummary({
         ))}
         {extras.length > 0 && <Row label={t("stay.extras")} value={money(sum(extras))} />}
         {charges.length > 0 && <Row label={t("stay.fees")} value={money(sum(charges))} />}
-        {discounts.length > 0 && (
-          <Row label={t("stay.discount")} value={`−${money(sum(discounts))}`} />
-        )}
+        {discount > BigInt(0) && <Row label={t("stay.discount")} value={`−${money(discount)}`} />}
       </div>
       <div>
         <div className="flex items-baseline justify-between gap-4">
