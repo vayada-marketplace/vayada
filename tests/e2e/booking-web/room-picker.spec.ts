@@ -102,8 +102,9 @@ test("opens a chosen room again from its pill and replaces it directly", async (
   // Room 1 again: its choice stays until another one replaces it.
   await page.getByTestId("room-pill-1").click();
   await expect(page.getByTestId("rooms-progress")).toContainText("Room 1 of 2");
-  await expect(page.getByTestId("room-pill-1")).toContainText("choosing now");
-  await expect(garden.getByRole("button", { name: "Your Room 1 ✓" })).toBeEnabled();
+  await expect(page.getByTestId("room-pill-1")).toContainText("changing…");
+  await expect(garden.getByRole("button", { name: "Your Room 1 ✓" })).toBeDisabled();
+  await expect(garden).toContainText("Pick another place to swap it.");
   await garden.locator(`[data-offer-key="${key("e")}"]`).click();
   await expect(garden.getByRole("button", { name: "Update Room 1" })).toBeEnabled();
   await page
@@ -121,11 +122,15 @@ test("opens a chosen room again from its pill and replaces it directly", async (
     `1-1-${key("f")}`,
   ]);
 
-  // Back finds both rooms chosen; keeping the last one goes straight on again.
+  // Back finds both rooms chosen, and goes straight on again from there.
   await page.goBack();
+  const progress = page.getByTestId("rooms-progress");
+  await expect(progress).toContainText("All 2 rooms chosen");
   await expect(page.getByTestId("room-pill-1")).toContainText("✓ Deluxe Double Room");
-  await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
-  await garden.getByRole("button", { name: "Your Room 2 ✓" }).click();
+  await expect(page.getByTestId("room-pill-2")).toContainText("✓ Garden Double Room");
+  await expect(garden.getByRole("button", { name: "All rooms chosen" })).toBeDisabled();
+  await expect(garden).toContainText("Your Room 2");
+  await progress.getByRole("button", { name: /^Continue to (extras|your details)$/ }).click();
   await expect(page).toHaveURL(/\/(en\/)?book\?/);
   await assertHealthy();
 });
@@ -145,9 +150,10 @@ for (const width of [1440, 390]) {
     await garden.getByRole("button", { name: "Select for Room 2" }).click();
     await expect(page).toHaveURL(/\/(en\/)?book\?/);
     await page.goBack();
-    // Every room chosen: the last one is open to change, the others are done.
+    // Every room chosen: all pills are done.
+    await expect(page.getByTestId("rooms-progress")).toContainText("All 2 rooms chosen");
     await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
-    await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
+    await expect(page.getByTestId("room-pill-2")).toContainText("✓ Garden Double Room");
 
     // Room 1 takes 3 of the 4 adults: its Garden room sleeps 2, so room 1 is chosen again.
     await page.getByText("4 Adults", { exact: true }).click();
@@ -162,10 +168,10 @@ for (const width of [1440, 390]) {
     const progress = page.getByTestId("rooms-progress");
     await expect(progress).toContainText("Room 1 of 2");
     await expect(progress).toContainText("Pick a place for 3 adults");
-    await expect(page.getByTestId("room-pill-1")).toContainText("choosing now");
+    await expect(page.getByTestId("room-pill-1")).toContainText("changing…");
     await expect(page.getByTestId("room-pill-2")).toContainText("✓ Garden Double Room");
     // Every room here sleeps 2: each offers to change who sleeps where instead.
-    await expect(garden).toContainText("Room 1 is for 3 adults right now");
+    await expect(garden).toContainText("Room 1 is for 3 adults right now.");
     await page.screenshot({
       path: testInfo.outputPath(`too-small-${width}.png`),
       fullPage: true,
@@ -183,8 +189,8 @@ for (const width of [1440, 390]) {
       .click();
     await page.getByTestId("guest-selector").getByRole("button", { name: "Done" }).click();
     // Back to 2 + 2: both Garden rooms fit again.
+    await expect(page.getByTestId("rooms-progress")).toContainText("All 2 rooms chosen");
     await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
-    await expect(garden.getByRole("button", { name: "Your Room 2 ✓" })).toBeEnabled();
     await assertHealthy();
   });
 }
@@ -216,7 +222,7 @@ test("starts at the fewest rooms the group needs and lets it add rooms", async (
   expect(new URL(page.url()).searchParams.getAll("pick")).toHaveLength(3);
   // The third room, which the link didn't ask for, is still there on Back from /book.
   await page.goBack();
-  await expect(page.getByTestId("rooms-progress")).toContainText("Room 3 of 3");
-  await expect(page.getByTestId("room-pill-2")).toContainText("✓ Garden Double Room");
+  await expect(page.getByTestId("rooms-progress")).toContainText("All 3 rooms chosen");
+  await expect(page.getByTestId("room-pill-3")).toContainText("✓ Garden Double Room");
   await assertHealthy();
 });

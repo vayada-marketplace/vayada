@@ -175,18 +175,27 @@
       "choosingNow": "choosing now",
       "next": "next",
       "tooSmall": "{name} is too small",
-      "chosen": "Room {number}: {name}. Now pick Room {next}."
+      "chosen": "Room {number}: {name}. Now pick Room {next}.",
+      "changing": "changing…",
+      "allChosen": "All {count} rooms chosen",
+      "readyForExtras": "Ready for extras",
+      "readyForDetails": "Ready for your details",
+      "continueToExtras": "Continue to extras",
+      "continueToDetails": "Continue to your details"
     },
     "pickRoom": {
       "selectFor": "Select for Room {number}",
       "alreadyYours": "Already your Room {number}",
       "yourRoomChip": "Your Room {number}",
       "fitsChangeSplit": "Fits {count} – change who sleeps where",
-      "roomIsFor": "Room {number} is for {adults, plural, one {# adult} other {# adults}}{children, plural, =0 {} one { and # child} other { and # children}} right now",
+      "roomIsFor": "Room {number} is for {adults, plural, one {# adult} other {# adults}}{children, plural, =0 {} one { and # child} other { and # children}} right now.",
       "yourRoom": "Your Room {number} ✓",
       "updateRoom": "Update Room {number}",
-      "soldOut": "Sold out for these dates"
-    }
+      "soldOut": "Sold out for these dates",
+      "allChosen": "All rooms chosen",
+      "swapHint": "Pick another place to swap it."
+    },
+    "pricesPerRoom": "Prices are per room, for the adults in it. We add children once you tell us their ages on the next step."
   },
   "rooms": {
     "title": "Our Rooms",
@@ -726,7 +735,7 @@
     "children": "Children",
     "childAges": "Ages 0-{age}",
     "rooms": "Rooms",
-    "roomsHint": "Add rooms to spread out",
+    "roomsHint": "Want separate places?",
     "roomsNeeded": "{guests} guests need at least {count} rooms here",
     "fewer": "Fewer {label}",
     "more": "More {label}",

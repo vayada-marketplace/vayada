@@ -195,7 +195,7 @@ function HomePageContent() {
   }, [slug]);
 
   const nights = calculateNights(checkIn, checkOut);
-  const { steps: STEPS } = useBookingSteps("rooms");
+  const { steps: STEPS, hasAddons } = useBookingSteps("rooms");
 
   // The legacy availability search is retired (VAY-1543 C.2): rooms, availability and
   // prices come from the room-and-price page, which starts from the stay chosen here.
@@ -279,6 +279,9 @@ function HomePageContent() {
   });
   const firstOpen = done.indexOf(false);
   const [changing, setChanging] = useState<number | null>(null);
+  // VAY-2393: every room chosen and none reopened (Back from the next step): nothing to pick.
+  const allChosen = pickMode && firstOpen === -1 && (changing === null || changing >= roomCount);
+  // The room the cards are sized and priced for; the last one while every room is chosen.
   const activeRoom =
     changing !== null && changing < roomCount
       ? changing
@@ -336,19 +339,23 @@ function HomePageContent() {
     const [x, y] = [cheapest(a), cheapest(b)];
     return x === null || y === null ? Number(x === null) - Number(y === null) : (x - y) * direction;
   };
-  // The group's other rooms (by number) that took a room type, for the room being chosen.
+  // The group's other rooms (by number) that took a room type, for the room being chosen; all
+  // of them while every room is chosen.
   const takenBy = (room: PricingRoom) =>
     picks.flatMap((pick, index) =>
-      pick && index !== activeRoom && pick.roomTypeId === room.roomTypeId ? [index + 1] : [],
+      pick && (allChosen || index !== activeRoom) && pick.roomTypeId === room.roomTypeId
+        ? [index + 1]
+        : [],
     );
-  // VAY-2393, room by room: rooms that fit first, then those the group's other rooms used up,
-  // those too small for this room's guests, and sold out last.
+  // VAY-2393, room by room, as Timo's prototype sorts: rooms that fit first, then those too small
+  // for this room's guests, those the group's other rooms used up, and sold out last.
   const pickOrder = (room: PricingRoom) => {
     const prices = roomPrices(room);
     if (!pickMode || !prices) return 0;
+    if (prices.availability === "sold_out" && prices.roomCount !== null) return 4;
+    if (allChosen) return 1;
     if (prices.roomCount === null) return 2;
-    if (prices.availability === "sold_out") return 3;
-    return prices.roomsFree != null && prices.roomsFree - takenBy(room).length <= 0 ? 1 : 0;
+    return prices.roomsFree != null && prices.roomsFree - takenBy(room).length <= 0 ? 3 : 0;
   };
   const shownRooms = [...(rooms ?? [])].sort(
     (a, b) =>
@@ -496,10 +503,11 @@ function HomePageContent() {
                 return offer ? [offer] : [];
               }),
               current:
-                picks[activeRoom]?.roomTypeId === room.roomTypeId
+                !allChosen && picks[activeRoom]?.roomTypeId === room.roomTypeId
                   ? picks[activeRoom]!.publicOfferKey
                   : null,
               onChangeGuests: openGuests,
+              allChosen,
             }
           : undefined
       }
@@ -525,13 +533,19 @@ function HomePageContent() {
       {pickMode && (
         <RoomsProgress
           rooms={progressRooms}
-          current={activeRoom}
+          current={allChosen ? null : activeRoom}
           guests={slots[activeRoom]!}
+          hasExtras={hasAddons}
           onOpen={openRoom}
+          onContinue={() => continueWithRooms(picks as RoomPick[])}
         />
       )}
-      {effectiveChildren > 0 && (
-        <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
+      {pickMode ? (
+        <p className="mb-5 text-sm text-gray-500">{t("pricesPerRoom")}</p>
+      ) : (
+        effectiveChildren > 0 && (
+          <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
+        )
       )}
     </>
   );

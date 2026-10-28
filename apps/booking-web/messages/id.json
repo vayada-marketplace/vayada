@@ -175,18 +175,27 @@
       "choosingNow": "sedang dipilih",
       "next": "berikutnya",
       "tooSmall": "{name} terlalu kecil",
-      "chosen": "Kamar {number}: {name}. Sekarang pilih Kamar {next}."
+      "chosen": "Kamar {number}: {name}. Sekarang pilih Kamar {next}.",
+      "changing": "sedang diubah…",
+      "allChosen": "Semua {count} kamar sudah dipilih",
+      "readyForExtras": "Siap untuk tambahan",
+      "readyForDetails": "Siap untuk data Anda",
+      "continueToExtras": "Lanjut ke tambahan",
+      "continueToDetails": "Lanjut ke data Anda"
     },
     "pickRoom": {
       "selectFor": "Pilih untuk Kamar {number}",
       "alreadyYours": "Sudah jadi Kamar {number} Anda",
       "yourRoomChip": "Kamar {number} Anda",
       "fitsChangeSplit": "Muat {count} – ubah siapa tidur di mana",
-      "roomIsFor": "Kamar {number} saat ini untuk {adults} dewasa{children, plural, =0 {} other { dan # anak}}",
+      "roomIsFor": "Kamar {number} saat ini untuk {adults} dewasa{children, plural, =0 {} other { dan # anak}}.",
       "yourRoom": "Kamar {number} Anda ✓",
       "updateRoom": "Perbarui Kamar {number}",
-      "soldOut": "Habis untuk tanggal ini"
-    }
+      "soldOut": "Habis untuk tanggal ini",
+      "allChosen": "Semua kamar sudah dipilih",
+      "swapHint": "Pilih tempat lain untuk menukarnya."
+    },
+    "pricesPerRoom": "Harga per kamar, untuk orang dewasa di dalamnya. Anak-anak kami tambahkan setelah Anda memberi tahu usia mereka di langkah berikutnya."
   },
   "rooms": {
     "title": "Kamar Kami",
@@ -725,7 +734,7 @@
     "children": "Anak-anak",
     "childAges": "Usia 0-{age}",
     "rooms": "Kamar",
-    "roomsHint": "Tambah kamar agar lebih lega",
+    "roomsHint": "Ingin tempat terpisah?",
     "roomsNeeded": "{guests} tamu memerlukan minimal {count} kamar di sini",
     "fewer": "Kurangi {label}",
     "more": "Tambah {label}",

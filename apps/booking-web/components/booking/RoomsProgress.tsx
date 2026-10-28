@@ -11,38 +11,61 @@ export type RoomsProgressRoom =
   | { state: "open" };
 
 /** VAY-2393: one compact line above the room cards while a group chooses room by room: which
- * room is being chosen and for whom, and a pill per room. A pill opens its room again. */
+ * room is being chosen and for whom, and a pill per room. A pill opens its room again. With
+ * every room chosen (Back from the next step), it says so and offers to go on. */
 export default function RoomsProgress({
   rooms,
   current,
   guests,
+  hasExtras,
   onOpen,
+  onContinue,
 }: {
   rooms: RoomsProgressRoom[];
-  /** The room being chosen (index). */
-  current: number;
+  /** The room being chosen (index), or null while every room is chosen. */
+  current: number | null;
   /** The current room's guests. */
   guests: RoomGuests;
+  /** The hotel's next step is Extras, not the guest's details. */
+  hasExtras: boolean;
   onOpen: (index: number) => void;
+  onContinue: () => void;
 }) {
   const t = useTranslations("home.roomsProgress");
   return (
     <div
       data-testid="rooms-progress"
-      className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between"
+      className="mb-4 flex flex-col gap-3 border-b border-gray-200 pb-4 md:flex-row md:items-end md:justify-between"
     >
-      <div className="min-w-0">
+      <div className="flex min-w-0 flex-col items-start gap-1">
         <p className="text-xs font-bold uppercase tracking-wider text-gray-600">
-          {t("roomOf", { number: current + 1, count: rooms.length })}
+          {current === null
+            ? t("allChosen", { count: rooms.length })
+            : t("roomOf", { number: current + 1, count: rooms.length })}
         </p>
-        <h3 className="mt-1 text-xl font-bold text-gray-900 md:text-2xl">{t("pickFor", guests)}</h3>
+        <h3 className="text-xl font-bold text-gray-900 md:text-2xl">
+          {current === null
+            ? t(hasExtras ? "readyForExtras" : "readyForDetails")
+            : t("pickFor", guests)}
+        </h3>
+        {current === null && (
+          <button
+            type="button"
+            onClick={onContinue}
+            className="mt-1.5 min-h-[44px] rounded-full bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700"
+          >
+            {t(hasExtras ? "continueToExtras" : "continueToDetails")}
+          </button>
+        )}
       </div>
       <ul className="flex flex-wrap gap-2 md:justify-end" aria-label={t("yourRooms")}>
         {rooms.map((room, index) => {
           const number = index + 1;
           const status =
             index === current
-              ? t("choosingNow")
+              ? room.state === "open"
+                ? t("choosingNow")
+                : t("changing")
               : room.state === "done"
                 ? `✓ ${room.name}`
                 : room.state === "too_small"
@@ -61,7 +84,7 @@ export default function RoomsProgress({
                     : room.state === "done"
                       ? "border-success-200 bg-success-50 text-success-800 hover:border-success-500"
                       : room.state === "too_small"
-                        ? "border-red-200 bg-red-50 text-red-700 hover:border-red-400"
+                        ? "border-red-700 bg-white text-red-700 hover:bg-red-50"
                         : "border-dashed border-gray-400 bg-white text-gray-700 hover:border-gray-600"
                 }`}
               >

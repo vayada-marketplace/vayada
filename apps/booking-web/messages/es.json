@@ -175,18 +175,27 @@
       "choosingNow": "eligiendo ahora",
       "next": "siguiente",
       "tooSmall": "No caben en {name}",
-      "chosen": "Habitación {number}: {name}. Ahora elige la habitación {next}."
+      "chosen": "Habitación {number}: {name}. Ahora elige la habitación {next}.",
+      "changing": "cambiando…",
+      "allChosen": "Las {count} habitaciones elegidas",
+      "readyForExtras": "Listo para los extras",
+      "readyForDetails": "Listo para tus datos",
+      "continueToExtras": "Continuar a los extras",
+      "continueToDetails": "Continuar a tus datos"
     },
     "pickRoom": {
       "selectFor": "Elegir para la habitación {number}",
       "alreadyYours": "Ya es tu habitación {number}",
       "yourRoomChip": "Tu habitación {number}",
       "fitsChangeSplit": "Para {count} – cambia quién duerme dónde",
-      "roomIsFor": "La habitación {number} es ahora para {adults, plural, one {# adulto} other {# adultos}}{children, plural, =0 {} one { y # niño} other { y # niños}}",
+      "roomIsFor": "La habitación {number} es ahora para {adults, plural, one {# adulto} other {# adultos}}{children, plural, =0 {} one { y # niño} other { y # niños}}.",
       "yourRoom": "Tu habitación {number} ✓",
       "updateRoom": "Actualizar habitación {number}",
-      "soldOut": "Agotado para estas fechas"
-    }
+      "soldOut": "Agotado para estas fechas",
+      "allChosen": "Todas las habitaciones elegidas",
+      "swapHint": "Elige otro alojamiento para cambiarlo."
+    },
+    "pricesPerRoom": "Los precios son por habitación, para los adultos que se alojan en ella. Añadimos a los niños cuando nos digas sus edades en el siguiente paso."
   },
   "rooms": {
     "title": "Nuestras Habitaciones",
@@ -725,7 +734,7 @@
     "children": "Niños",
     "childAges": "0-{age} años",
     "rooms": "Habitaciones",
-    "roomsHint": "Añade habitaciones para repartiros",
+    "roomsHint": "¿Prefieres alojamientos separados?",
     "roomsNeeded": "{guests} huéspedes necesitan al menos {count} habitaciones aquí",
     "fewer": "Quitar: {label}",
     "more": "Añadir: {label}",

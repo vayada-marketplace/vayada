@@ -175,18 +175,27 @@
       "choosingNow": "en cours de choix",
       "next": "ensuite",
       "tooSmall": "Pas assez de place dans {name}",
-      "chosen": "Chambre {number} : {name}. Choisissez maintenant la chambre {next}."
+      "chosen": "Chambre {number} : {name}. Choisissez maintenant la chambre {next}.",
+      "changing": "en cours de modification…",
+      "allChosen": "Les {count} chambres sont choisies",
+      "readyForExtras": "Prêt pour les suppléments",
+      "readyForDetails": "Prêt pour vos coordonnées",
+      "continueToExtras": "Continuer vers les suppléments",
+      "continueToDetails": "Continuer vers vos coordonnées"
     },
     "pickRoom": {
       "selectFor": "Choisir pour la chambre {number}",
       "alreadyYours": "Déjà votre chambre {number}",
       "yourRoomChip": "Votre chambre {number}",
       "fitsChangeSplit": "Pour {count} – changer qui dort où",
-      "roomIsFor": "La chambre {number} est pour l'instant prévue pour {adults, plural, one {# adulte} other {# adultes}}{children, plural, =0 {} one { et # enfant} other { et # enfants}}",
+      "roomIsFor": "La chambre {number} est pour l'instant prévue pour {adults, plural, one {# adulte} other {# adultes}}{children, plural, =0 {} one { et # enfant} other { et # enfants}}.",
       "yourRoom": "Votre chambre {number} ✓",
       "updateRoom": "Mettre à jour la chambre {number}",
-      "soldOut": "Complet pour ces dates"
-    }
+      "soldOut": "Complet pour ces dates",
+      "allChosen": "Toutes les chambres sont choisies",
+      "swapHint": "Choisissez un autre logement pour l'échanger."
+    },
+    "pricesPerRoom": "Les prix sont par chambre, pour les adultes qui y dorment. Nous ajoutons les enfants dès que vous indiquez leur âge à l'étape suivante."
   },
   "rooms": {
     "title": "Nos chambres",
@@ -725,7 +734,7 @@
     "children": "Enfants",
     "childAges": "0 à {age} ans",
     "rooms": "Chambres",
-    "roomsHint": "Ajoutez des chambres pour vous répartir",
+    "roomsHint": "Envie de logements séparés ?",
     "roomsNeeded": "{guests} personnes ont besoin d'au moins {count} chambres ici",
     "fewer": "Retirer : {label}",
     "more": "Ajouter : {label}",

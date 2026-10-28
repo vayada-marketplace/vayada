@@ -27,14 +27,17 @@ function Stepper({
   label,
   hint,
   value,
+  display,
   min,
   max,
   labels,
   onChange,
 }: {
   label: string;
-  hint: string;
+  hint?: string;
   value: number;
+  /** Words in place of the number ("2 adults"). */
+  display?: string;
   min: number;
   max: number;
   /** The buttons' names when "Fewer {label}" doesn't read well. */
@@ -46,7 +49,7 @@ function Stepper({
     <div className="flex items-center justify-between gap-3">
       <div>
         <p className="text-sm font-semibold text-gray-900">{label}</p>
-        <p className="text-xs text-gray-500">{hint}</p>
+        {hint && <p className="text-xs text-gray-500">{hint}</p>}
       </div>
       <div className="flex items-center gap-3 flex-shrink-0">
         <button
@@ -58,7 +61,11 @@ function Stepper({
         >
           <span className="text-lg leading-none">-</span>
         </button>
-        <span className="w-6 text-center font-semibold text-gray-900">{value}</span>
+        <span
+          className={`text-center font-semibold text-gray-900 ${display ? "min-w-[4.5rem] text-sm" : "w-6"}`}
+        >
+          {display ?? value}
+        </span>
         <button
           type="button"
           aria-label={labels?.more ?? t("more", { label })}
@@ -156,7 +163,7 @@ export default function GuestSelector({
                   <Stepper
                     key={index}
                     label={t("roomNumber", { number: index + 1 })}
-                    hint={t("roomGuests", { adults: room.adults, children: room.children })}
+                    display={t("roomGuests", { adults: room.adults, children: room.children })}
                     value={room.adults}
                     min={1}
                     max={adults - (rooms.count - 1)}

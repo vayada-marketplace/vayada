@@ -76,6 +76,8 @@ export default function RoomCard({
     current: string | null;
     /** Opens "Who sleeps where", for a room too small for this room's guests. */
     onChangeGuests: () => void;
+    /** Every room is chosen (Back from the next step): nothing to pick until a pill opens one. */
+    allChosen: boolean;
   };
   /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
   place?: GuestPlace | null;
@@ -269,42 +271,64 @@ export default function RoomCard({
       {promoCode && selected?.priced && !selected.priced.promoApplied && (
         <p className="text-xs text-gray-500 mt-2">{t("promoNotApplied", { code: promoCode })}</p>
       )}
-      {pick && tooSmall && room.occupancy ? (
+      {pick && tooSmall && room.occupancy && !pick.allChosen ? (
         // VAY-2393: too small for this room's guests: another split may fit it.
         <button
           type="button"
           data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
           onClick={pick.onChangeGuests}
-          className="w-full mt-4 py-3 bg-white text-primary-700 font-semibold rounded-xl border border-primary-600 hover:bg-primary-50 transition-colors text-sm"
+          className="w-full mt-4 py-3 bg-white text-primary-700 font-semibold rounded-xl border-[1.5px] border-primary-600 hover:bg-primary-50 transition-colors text-sm"
         >
           {t("pickRoom.fitsChangeSplit", { count: room.occupancy.maxGuests })}
+        </button>
+      ) : pick ? (
+        // VAY-2393, room by room: what the room being chosen can do with this place.
+        <button
+          type="button"
+          data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+          onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
+          disabled={!selected || soldOut || usedUp || pick.allChosen || currentRate}
+          className={`w-full mt-4 py-3 font-semibold rounded-xl transition-colors text-sm ${
+            currentRate && !pick.allChosen
+              ? "bg-success-50 text-success-800 border border-success-200 cursor-default"
+              : !selected || soldOut || usedUp || pick.allChosen
+                ? "bg-gray-100 text-gray-600 border border-gray-200 cursor-not-allowed"
+                : "bg-primary-600 text-white hover:bg-primary-700"
+          }`}
+        >
+          {soldOut
+            ? t("pickRoom.soldOut")
+            : pick.allChosen
+              ? t("pickRoom.allChosen")
+              : usedUp
+                ? t("pickRoom.alreadyYours", { number: pick.takenBy.join(" & ") })
+                : prices && !selected
+                  ? t("notAvailable")
+                  : currentRate
+                    ? t("pickRoom.yourRoom", { number: pick.room })
+                    : isCurrent
+                      ? t("pickRoom.updateRoom", { number: pick.room })
+                      : t("pickRoom.selectFor", { number: pick.room })}
         </button>
       ) : (
         <button
           type="button"
           data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
           onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
-          disabled={!selected || tooSmall || usedUp}
+          disabled={!selected || tooSmall}
           className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
         >
           {soldOut
-            ? pick
-              ? t("pickRoom.soldOut")
-              : t("soldOut")
-            : usedUp
-              ? t("pickRoom.alreadyYours", { number: pick!.takenBy[0]! })
-              : tooSmall || (prices && !selected)
-                ? t("notAvailable")
-                : pick
-                  ? currentRate
-                    ? t("pickRoom.yourRoom", { number: pick.room })
-                    : isCurrent
-                      ? t("pickRoom.updateRoom", { number: pick.room })
-                      : t("pickRoom.selectFor", { number: pick.room })
-                  : t("selectThisRate")}
+            ? t("soldOut")
+            : tooSmall || (prices && !selected)
+              ? t("notAvailable")
+              : t("selectThisRate")}
         </button>
       )}
-      {tooSmall && room.occupancy && (
+      {pick && currentRate && !pick.allChosen && (
+        <p className="text-sm mt-3 text-gray-600">{t("pickRoom.swapHint")}</p>
+      )}
+      {tooSmall && room.occupancy && !pick?.allChosen && (
         <p className="text-sm mt-3 text-gray-600">
           {(pick ? pick.guests.children : childGuests) > 0 && room.occupancy.maxChildren === 0
             ? t("noChildren")
@@ -478,12 +502,22 @@ export default function RoomCard({
               />
             </svg>
           )}
-          {(soldOut || usedUp) && (
+          {soldOut && (
             <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">
               <span className="bg-white text-gray-900 text-sm font-bold px-5 py-2 rounded-full shadow">
-                {soldOut ? t("soldOut") : t("pickRoom.yourRoomChip", { number: pick!.takenBy[0]! })}
+                {t("soldOut")}
               </span>
             </div>
+          )}
+          {/* VAY-2393: the room being chosen has this place (green), or the group's other rooms do. */}
+          {pick && !soldOut && (current || pick.takenBy.length > 0) && (
+            <span
+              className={`absolute left-4 top-4 z-20 rounded-full px-3.5 py-2 text-[13px] font-bold shadow ${current ? "bg-success-700 text-white" : "bg-gray-900 text-white"}`}
+            >
+              {t("pickRoom.yourRoomChip", {
+                number: current ? pick.room : pick.takenBy.join(" & "),
+              })}
+            </span>
           )}
           {images.length > 1 && (
             <>

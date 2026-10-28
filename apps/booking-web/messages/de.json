@@ -175,18 +175,27 @@
       "choosingNow": "wird gewählt",
       "next": "als Nächstes",
       "tooSmall": "{name} ist zu klein",
-      "chosen": "Zimmer {number}: {name}. Wählen Sie jetzt Zimmer {next}."
+      "chosen": "Zimmer {number}: {name}. Wählen Sie jetzt Zimmer {next}.",
+      "changing": "wird geändert…",
+      "allChosen": "Alle {count} Zimmer gewählt",
+      "readyForExtras": "Bereit für die Extras",
+      "readyForDetails": "Bereit für Ihre Angaben",
+      "continueToExtras": "Weiter zu den Extras",
+      "continueToDetails": "Weiter zu Ihren Angaben"
     },
     "pickRoom": {
       "selectFor": "Für Zimmer {number} wählen",
       "alreadyYours": "Schon Ihr Zimmer {number}",
       "yourRoomChip": "Ihr Zimmer {number}",
       "fitsChangeSplit": "Passt für {count} – Aufteilung ändern",
-      "roomIsFor": "Zimmer {number} ist gerade für {adults, plural, one {# Erwachsenen} other {# Erwachsene}}{children, plural, =0 {} one { und # Kind} other { und # Kinder}}",
+      "roomIsFor": "Zimmer {number} ist gerade für {adults, plural, one {# Erwachsenen} other {# Erwachsene}}{children, plural, =0 {} one { und # Kind} other { und # Kinder}}.",
       "yourRoom": "Ihr Zimmer {number} ✓",
       "updateRoom": "Zimmer {number} ändern",
-      "soldOut": "Für diese Daten ausgebucht"
-    }
+      "soldOut": "Für diese Daten ausgebucht",
+      "allChosen": "Alle Zimmer gewählt",
+      "swapHint": "Wählen Sie eine andere Unterkunft, um sie zu tauschen."
+    },
+    "pricesPerRoom": "Preise gelten pro Zimmer für die Erwachsenen darin. Kinder kommen dazu, sobald Sie im nächsten Schritt ihr Alter angeben."
   },
   "rooms": {
     "title": "Unsere Zimmer",
@@ -726,7 +735,7 @@
     "children": "Kinder",
     "childAges": "0–{age} Jahre",
     "rooms": "Zimmer",
-    "roomsHint": "Mehr Zimmer, mehr Platz",
+    "roomsHint": "Lieber getrennte Unterkünfte?",
     "roomsNeeded": "{guests} Gäste brauchen hier mindestens {count} Zimmer",
     "fewer": "Weniger: {label}",
     "more": "Mehr: {label}",
