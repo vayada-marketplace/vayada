@@ -53,7 +53,6 @@
   },
   "nav": {
     "contact": "Contact",
-    "referGuest": "Refer a Guest",
     "phone": "Phone",
     "whatsapp": "WhatsApp",
     "email": "Email"
@@ -648,33 +647,6 @@
     "submitting": "Submitting…",
     "submitError": "We couldn't send your change request. Please try again.",
     "previewUnavailable": "We couldn't verify these dates. Choose different dates or try again."
-  },
-  "refer": {
-    "title": "Refer a Guest",
-    "step1Desc": "Earn 5% commission on every booking made through your link.",
-    "step2Desc": "Connect your Stripe account to receive commission payouts automatically.",
-    "step3Desc": "Share your unique link to start earning!",
-    "fullName": "Full Name",
-    "emailAddress": "Email Address",
-    "socialMedia": "Social Media / Channel (Optional)",
-    "iAmA": "I am a...",
-    "guest": "Guest",
-    "creator": "Creator",
-    "paymentMethod": "Set up payouts",
-    "connectWithStripe": "Connect with Stripe",
-    "stripeOnboardingOpened": "Stripe onboarding opened — complete it in the new tab",
-    "paypal": "PayPal",
-    "bankTransfer": "Bank Transfer",
-    "paypalEmail": "PayPal Email",
-    "iban": "IBAN / Account Number",
-    "accountHolder": "Account Holder Name",
-    "swiftBic": "SWIFT / BIC",
-    "bankName": "Bank Name",
-    "bankCountry": "Country",
-    "generateLink": "Generate Link",
-    "yourReferralLink": "Your Referral Link",
-    "commissionInfo": "You will receive <strong>5%</strong> of the total booking revenue for every successful direct booking made via your link.",
-    "pendingReview": "Your application is pending review. We'll notify you at <strong>{email}</strong> once approved."
   },
   "error": {
     "unableToLoad": "Unable to Load Hotel",

@@ -53,7 +53,6 @@
   },
   "nav": {
     "contact": "Kontakt",
-    "referGuest": "Gast empfehlen",
     "phone": "Telefon",
     "whatsapp": "WhatsApp",
     "email": "E-Mail"
@@ -627,33 +626,6 @@
         "per_guest_night": "{amount} pro Gast und Nacht"
       }
     }
-  },
-  "refer": {
-    "title": "Gast empfehlen",
-    "step1Desc": "Verdienen Sie 5% Provision für jede Buchung über Ihren Link.",
-    "step2Desc": "Verbinden Sie Ihr Stripe-Konto, um Provisionen automatisch zu erhalten.",
-    "step3Desc": "Teilen Sie Ihren einzigartigen Link und beginnen Sie zu verdienen!",
-    "fullName": "Vollständiger Name",
-    "emailAddress": "E-Mail-Adresse",
-    "socialMedia": "Social Media / Kanal (Optional)",
-    "iAmA": "Ich bin...",
-    "guest": "Gast",
-    "creator": "Creator",
-    "paymentMethod": "Auszahlung einrichten",
-    "connectWithStripe": "Mit Stripe verbinden",
-    "stripeOnboardingOpened": "Stripe-Onboarding geöffnet — schließen Sie es im neuen Tab ab",
-    "paypal": "PayPal",
-    "bankTransfer": "Banküberweisung",
-    "paypalEmail": "PayPal-E-Mail",
-    "iban": "IBAN / Kontonummer",
-    "accountHolder": "Kontoinhaber",
-    "swiftBic": "SWIFT / BIC",
-    "bankName": "Bankname",
-    "bankCountry": "Land",
-    "generateLink": "Link generieren",
-    "yourReferralLink": "Ihr Empfehlungslink",
-    "commissionInfo": "Sie erhalten <strong>5%</strong> des gesamten Buchungsumsatzes für jede erfolgreiche Direktbuchung über Ihren Link.",
-    "pendingReview": "Ihre Bewerbung wird geprüft. Wir benachrichtigen Sie unter <strong>{email}</strong>, sobald sie genehmigt wurde."
   },
   "requestChange": {
     "title": "Buchungsänderung anfragen",

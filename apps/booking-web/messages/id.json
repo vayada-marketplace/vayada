@@ -53,7 +53,6 @@
   },
   "nav": {
     "contact": "Kontak",
-    "referGuest": "Referensikan Tamu",
     "phone": "Telepon",
     "whatsapp": "WhatsApp",
     "email": "Email"
@@ -626,33 +625,6 @@
         "per_guest_night": "{amount} per tamu per malam"
       }
     }
-  },
-  "refer": {
-    "title": "Referensikan Tamu",
-    "step1Desc": "Dapatkan komisi 5% dari setiap pemesanan melalui tautan Anda.",
-    "step2Desc": "Hubungkan akun Stripe Anda untuk menerima komisi secara otomatis.",
-    "step3Desc": "Bagikan tautan unik Anda untuk mulai menghasilkan!",
-    "fullName": "Nama Lengkap",
-    "emailAddress": "Alamat Email",
-    "socialMedia": "Media Sosial / Kanal (Opsional)",
-    "iAmA": "Saya seorang...",
-    "guest": "Tamu",
-    "creator": "Kreator",
-    "paymentMethod": "Atur pembayaran",
-    "connectWithStripe": "Hubungkan dengan Stripe",
-    "stripeOnboardingOpened": "Onboarding Stripe dibuka — selesaikan di tab baru",
-    "paypal": "PayPal",
-    "bankTransfer": "Transfer Bank",
-    "paypalEmail": "Email PayPal",
-    "iban": "IBAN / Nomor Rekening",
-    "accountHolder": "Nama Pemilik Rekening",
-    "swiftBic": "SWIFT / BIC",
-    "bankName": "Nama Bank",
-    "bankCountry": "Negara",
-    "generateLink": "Buat Tautan",
-    "yourReferralLink": "Tautan Referral Anda",
-    "commissionInfo": "Anda akan menerima <strong>5%</strong> dari total pendapatan pemesanan untuk setiap pemesanan langsung yang berhasil melalui tautan Anda.",
-    "pendingReview": "Pengajuan Anda sedang dalam peninjauan. Kami akan memberitahu Anda di <strong>{email}</strong> setelah disetujui."
   },
   "requestChange": {
     "title": "Ajukan Perubahan Pemesanan",

@@ -355,7 +355,7 @@ export default function PromoCodesTab({
             <table className="w-full min-w-[1050px] text-left">
               <thead className="bg-gray-50 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
                 <tr>
-                  <th className="px-5 py-3">{t("affiliates.allAffiliates.code")}</th>
+                  <th className="px-5 py-3">{t("promos.code")}</th>
                   <th className="px-4 py-3">{t("admin.discount")}</th>
                   <th className="px-4 py-3">{t("admin.validity")}</th>
                   <th className="px-4 py-3">{t("admin.stayDates")}</th>
@@ -504,11 +504,7 @@ export default function PromoCodesTab({
               <EditorSectionHeading id="promo-details-heading" icon={TicketIcon}>
                 {t("admin.promoDetails")}
               </EditorSectionHeading>
-              <Field
-                id="promo-code"
-                label={t("affiliates.allAffiliates.code")}
-                helper={t("promos.codeHint")}
-              >
+              <Field id="promo-code" label={t("promos.code")} helper={t("promos.codeHint")}>
                 <Input
                   id="promo-code"
                   aria-describedby="promo-code-helper"

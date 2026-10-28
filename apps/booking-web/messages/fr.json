@@ -53,7 +53,6 @@
   },
   "nav": {
     "contact": "Contact",
-    "referGuest": "Parrainer un client",
     "phone": "Téléphone",
     "whatsapp": "WhatsApp",
     "email": "E-mail"
@@ -626,33 +625,6 @@
         "per_guest_night": "{amount} par personne et par nuit"
       }
     }
-  },
-  "refer": {
-    "title": "Parrainer un client",
-    "step1Desc": "Gagnez 5% de commission sur chaque réservation effectuée via votre lien.",
-    "step2Desc": "Connectez votre compte Stripe pour recevoir les commissions automatiquement.",
-    "step3Desc": "Partagez votre lien unique pour commencer à gagner !",
-    "fullName": "Nom complet",
-    "emailAddress": "Adresse e-mail",
-    "socialMedia": "Réseau social / Canal (Optionnel)",
-    "iAmA": "Je suis un(e)...",
-    "guest": "Client(e)",
-    "creator": "Créateur/Créatrice",
-    "paymentMethod": "Configurer les paiements",
-    "connectWithStripe": "Se connecter avec Stripe",
-    "stripeOnboardingOpened": "Onboarding Stripe ouvert — complétez-le dans le nouvel onglet",
-    "paypal": "PayPal",
-    "bankTransfer": "Virement bancaire",
-    "paypalEmail": "E-mail PayPal",
-    "iban": "IBAN / Numéro de compte",
-    "accountHolder": "Titulaire du compte",
-    "swiftBic": "SWIFT / BIC",
-    "bankName": "Nom de la banque",
-    "bankCountry": "Pays",
-    "generateLink": "Générer le lien",
-    "yourReferralLink": "Votre lien de parrainage",
-    "commissionInfo": "Vous recevrez <strong>5%</strong> du chiffre d'affaires total pour chaque réservation directe effectuée via votre lien.",
-    "pendingReview": "Votre candidature est en cours d'examen. Nous vous informerons à <strong>{email}</strong> une fois approuvée."
   },
   "requestChange": {
     "title": "Demander une modification de réservation",

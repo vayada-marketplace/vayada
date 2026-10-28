@@ -48,7 +48,6 @@ export type BookingCreateRequest = {
   adults: number;
   children: number;
   numberOfRooms?: number;
-  referralCode?: string;
   paymentMethod?: string;
   rateType?: string;
   addonIds?: string[];
