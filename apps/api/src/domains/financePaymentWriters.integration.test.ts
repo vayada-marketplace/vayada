@@ -210,12 +210,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
       pricingRevision: 7,
     });
 
+    // Setup keeps the Cash choice, so the next settings-page save changes no methods: no 409,
+    // and the binding stays.
     await expect(saveSetup(1, ["pay_at_property"])).resolves.toMatchObject({ ok: true });
     await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
       ok: true,
       settings: { defaultCurrency: "EUR" },
     });
-    await expect(binding()).resolves.toMatchObject({ revision: 3 });
+    await expect(binding()).resolves.toMatchObject({ revision: 2, pricingRevision: 7 });
     await expect(
       saveSettingsPage([], {
         payload: { paymentsEnabled: true, acceptedMethods: ["cash"], defaultCurrency: "USD" },
