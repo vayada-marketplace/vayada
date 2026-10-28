@@ -31,6 +31,8 @@ export type PmsPricingRoutesOptions = {
   /** Owner-only first-currency and currency saves on the ordinary login (VAY-2056); replaces
    * commandPort for the currency route. Requires propertyAccessRepository. */
   currencyCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  /** VAY-2390 P5: the Owner's protected currency change (`ownerCurrencyChange` on the API login). */
+  currencyChangeCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
   propertyAccessRepository?: PropertyAccessRepository;
   commandPort: PmsPricingCommandPort;
   readPort: PmsPricingReadPort;
@@ -46,6 +48,9 @@ export function registerPmsPricingCurrencyCommand(
   options: {
     requireOwnerSession?: boolean;
     propertyAccessRepository?: PropertyAccessRepository;
+    /** VAY-2390 P5: the Owner's protected change, on its own path and key. */
+    path?: string;
+    permission?: string;
   } = {},
 ): void {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
@@ -55,12 +60,13 @@ export function registerPmsPricingCurrencyCommand(
       reply,
       options.requireOwnerSession,
       options.propertyAccessRepository,
+      options.permission,
     );
     if (scope) authorized.set(request, scope);
   };
 
   app.put<{ Params: PropertyParams; Body: unknown }>(
-    "/properties/:propertyId/pricing-source/currency",
+    options.path ?? "/properties/:propertyId/pricing-source/currency",
     { onRequest: authorize },
     async (request, reply) => {
       const scope = requireAuthorizedScope(authorized, request);
@@ -114,6 +120,16 @@ export async function registerPmsPricingRoutes(
       propertyAccessRepository: options.propertyAccessRepository,
     });
   } else registerPmsPricingCurrencyCommand(app, options.commandPort);
+  if (options.currencyChangeCommandPort) {
+    if (!options.propertyAccessRepository)
+      throw new Error("Currency changes require property access");
+    registerPmsPricingCurrencyCommand(app, options.currencyChangeCommandPort, {
+      requireOwnerSession: true,
+      propertyAccessRepository: options.propertyAccessRepository,
+      path: "/properties/:propertyId/pricing-source/currency-change",
+      permission: "finance.billing.manage",
+    });
+  }
 
   app.get<{ Params: PropertyParams }>(
     "/properties/:propertyId/pricing-source/currency-capabilities",
@@ -175,8 +191,11 @@ async function authorizeRequest(
   reply: FastifyReply,
   requireOwnerSession = false,
   propertyAccessRepository?: PropertyAccessRepository,
+  permissionOverride?: string,
 ): Promise<AuthorizedScope | null> {
-  const permission = request.method === "GET" ? "pms.operations.read" : "pms.operations.manage";
+  const permission =
+    permissionOverride ??
+    (request.method === "GET" ? "pms.operations.read" : "pms.operations.manage");
   try {
     const baseContext = enforceRoutePolicy(request, { permission });
     if (baseContext.selectedOrganization.kind !== "hotel_group") {

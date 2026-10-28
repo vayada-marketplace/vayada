@@ -23,6 +23,9 @@ export const PMS_PRICING_CURRENCY_CHANGE_BLOCKER_CODES = Object.freeze([
   "booking_reference",
   "payment_configuration",
   "published_reference",
+  // VAY-2390: an owner's currency change waits for channels and keeps money history in its currency.
+  "channel_connection",
+  "finance_record",
   "other_pricing_configuration",
   "dependency_check_unavailable",
 ] as const);

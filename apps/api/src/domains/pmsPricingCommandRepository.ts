@@ -52,6 +52,13 @@ export type PmsPricingCommandRepositoryConfig = {
    * the strict Owner membership re-check and the first-currency Financials completion.
    * Trusted configuration; never read from the request DTO. */
   hotelSetupOrdinaryOwner?: boolean;
+  /** VAY-2390 P5: the Owner's protected currency change, on the API login (never hotel setup's).
+   * The change locks the property row FOR UPDATE, which every booking writer holds FOR SHARE or
+   * FOR UPDATE, so its in-transaction blockers can't miss a new booking. It is refused for
+   * upcoming bookings, channel connections and Finance records as well, and it carries the
+   * currency, with the same numbers, to Finance, add-ons, fixed promos and a matching Booking
+   * default. Trusted configuration; never read from the request DTO. */
+  ownerCurrencyChange?: boolean;
   channexMealSyncEnabled?: boolean;
   channexMealSyncPropertyId?: string;
   max?: number;
@@ -100,10 +107,17 @@ type LocalBlockerCountsRow = {
   legacyRatePlanCount: number | string;
   rateRuleCount: number | string;
 };
+type OwnerChangeBlockerCountsRow = {
+  bookingCount: number | string;
+  channelCount: number | string;
+  financeRecordCount: number | string;
+};
 type LegacyCurrencyRow = { currency: string };
 
 const CURRENCY_OPERATION = "pms.pricing_currency.upsert";
 const MANAGE_PERMISSION = "pms.operations.manage";
+/** VAY-2390 P5: only Owners hold it (0109), as for VAY-2401's money routes. */
+const OWNER_CHANGE_PERMISSION = "finance.billing.manage";
 
 const CURRENCY_RETURNING = `
   property_id::text AS "propertyId",
@@ -133,6 +147,10 @@ export function createPgPmsPricingCommandRepository(
     throw new Error("PMS pricing command repository requires a currency-change guard");
   }
   const setupOwnerScope = !!config.hotelSetupOrdinaryOwner;
+  const ownerChange = !!config.ownerCurrencyChange;
+  if (ownerChange && setupOwnerScope) {
+    throw new Error("PMS pricing currency change never runs on the hotel-setup login");
+  }
   const ownsPool = !config.pool;
   const pool: PmsPricingCommandPool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
@@ -167,7 +185,7 @@ export function createPgPmsPricingCommandRepository(
     try {
       const inScope = await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!inScope || !(await lockAuthorizedScope(client, command, acceptedAt, setupOwnerScope))) {
+      if (!inScope || !(await lockAuthorizedScope(client, command, acceptedAt, setupOwnerScope, ownerChange))) {
         await rollbackQuietly(client);
         return spec.scopeFailure();
       }
@@ -289,7 +307,7 @@ export function createPgPmsPricingCommandRepository(
     try {
       const inScope = await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!inScope || !(await lockAuthorizedScope(client, command, at, setupOwnerScope))) {
+      if (!inScope || !(await lockAuthorizedScope(client, command, at, setupOwnerScope, ownerChange))) {
         await rollbackQuietly(client);
         return { kind: "result", result: CURRENCY_SPEC.scopeFailure() };
       }
@@ -333,10 +351,13 @@ export function createPgPmsPricingCommandRepository(
             guardHeld,
             normalizeGuardBlockers(guardBlockers),
             acceptedAt,
+            ownerChange,
           ),
         );
 
       if (supported && prepared.currentCurrency && prepared.currentCurrency !== command.currency) {
+        // VAY-2390 P5: the Owner's change checks every dependency in its own locked transaction.
+        if (ownerChange) return execute(true, []);
         let callbackStarted = false;
         try {
           return await config.currencyChangeGuard.runWithCurrencyChangeGuard(
@@ -374,8 +395,15 @@ async function upsertCurrency(
   guardHeld: boolean,
   guardBlockers: readonly PmsPricingCurrencyChangeBlocker[],
   at: Date,
+  ownerChange: boolean,
 ): Promise<CommandWorkResult<PropertyPricingCurrencyCommandResult>> {
   if (!supported) return { result: currencyFailure({ code: "unsupported_pricing_currency" }) };
+  // After the scope's FOR SHARE (organization, then property), as booking drafts lock them.
+  if (ownerChange) {
+    await client.query("SELECT id FROM hotel_catalog.properties WHERE id = $1::uuid FOR UPDATE", [
+      command.propertyId,
+    ]);
+  }
   const current = await lockPricingCurrency(client, command.propertyId);
   if (!current) {
     if (command.expectedPricingCurrencyRevision !== 0) {
@@ -438,7 +466,10 @@ async function upsertCurrency(
     return { result: currencyFailure({ code: "pricing_currency_unchanged" }) };
   }
 
-  const localBlockers = await inspectLocalCurrencyBlockers(client, command.propertyId);
+  const localBlockers = [
+    ...(await inspectLocalCurrencyBlockers(client, command.propertyId)),
+    ...(ownerChange ? await inspectOwnerChangeBlockers(client, command.propertyId) : []),
+  ];
   const safetyBlockers = [
     ...guardBlockers,
     ...(!guardHeld || observedCurrency !== snapshot.currency
@@ -473,6 +504,9 @@ async function upsertCurrency(
   );
   if (!updated.rows[0]) throw new Error("PMS pricing currency compare-and-set failed");
   const pricingCurrency = pmsPricingCurrencySnapshotFromRow(updated.rows[0]);
+  if (ownerChange) {
+    await carryPricingCurrency(client, command.propertyId, snapshot.currency, command.currency, at);
+  }
   const response = {
     contractVersion: PMS_PRICING_CONTRACT_VERSION,
     outcome: "updated" as const,
@@ -519,6 +553,7 @@ async function lockAuthorizedScope(
   command: AnyCommand,
   at: Date,
   setupOwner: boolean,
+  ownerChange = false,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
   if (setupOwner) return lockHotelSetupCurrencyMembership(client, command);
@@ -549,7 +584,12 @@ async function lockAuthorizedScope(
      WHERE property.id = $2::uuid
      FOR SHARE OF property, organization, resource, actor, membership
      FOR KEY SHARE OF permission_grant`,
-    [command.organizationId, command.propertyId, command.audit.actor.userId, MANAGE_PERMISSION],
+    [
+      command.organizationId,
+      command.propertyId,
+      command.audit.actor.userId,
+      ownerChange ? OWNER_CHANGE_PERMISSION : MANAGE_PERMISSION,
+    ],
   );
   if ((scope.rowCount ?? 0) < 1) return false;
 
@@ -665,6 +705,77 @@ async function inspectLocalCurrencyBlockers(
       return affectedCount > 0 ? [{ code, affectedCount } as const] : [];
     }),
   );
+}
+
+/** VAY-2390 P5 (D3): what an Owner's change waits for or must not relabel, read in the change's
+ * transaction after the property lock. Upcoming stays count from a day early, whatever the
+ * property's time zone. A channel is settled only when disconnected with no pending handover,
+ * and a Channex claim only when historical or released. */
+async function inspectOwnerChangeBlockers(
+  client: PmsPricingCommandClient,
+  propertyId: string,
+): Promise<readonly PmsPricingCurrencyChangeBlocker[]> {
+  const result = await client.query<OwnerChangeBlockerCountsRow>(
+    `SELECT
+       (SELECT count(*) FROM booking.guest_bookings
+        WHERE property_id = $1::uuid
+          AND lifecycle_status IN ('pending_payment', 'confirmed')
+          AND check_out >= CURRENT_DATE - 1)::bigint AS "bookingCount",
+       ((SELECT count(*) FROM pms.channel_connections
+         WHERE property_id = $1::uuid
+           AND (connection_status <> 'disconnected'
+                OR connection_metadata ->> 'legacyExternalPropertyId' IS NOT NULL))
+        +
+        (SELECT count(*) FROM pms.channel_binding_claims
+         WHERE property_id = $1::uuid
+           AND claim_state IN ('active', 'verified_non_active')))::bigint AS "channelCount",
+       ((SELECT count(*) FROM finance.expenses WHERE property_id = $1::uuid)
+        +
+        (SELECT count(*) FROM finance.folio_revisions WHERE property_id = $1::uuid)
+        +
+        (SELECT count(*) FROM finance.recurring_expense_rules
+         WHERE property_id = $1::uuid))::bigint AS "financeRecordCount"`,
+    [propertyId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("PMS pricing currency change scan returned no row");
+  const values = [
+    ["booking_reference", row.bookingCount],
+    ["channel_connection", row.channelCount],
+    ["finance_record", row.financeRecordCount],
+  ] as const;
+  return Object.freeze(
+    values.flatMap(([code, rawCount]) => {
+      const affectedCount = nonNegativeDatabaseInteger(rawCount);
+      return affectedCount > 0 ? [{ code, affectedCount } as const] : [];
+    }),
+  );
+}
+
+/** VAY-2390 P5 (D2): the same numbers in the new currency. A bound Finance row follows by the
+ * 0526 cascade; an unbound one, add-ons, fixed-amount promos and a Booking default that matched
+ * the old pricing currency move here. Published prices stay as they are, so the booking page
+ * stops selling until the Owner publishes them again in the new currency. */
+async function carryPricingCurrency(
+  client: PmsPricingCommandClient,
+  propertyId: string,
+  from: PmsPricingCurrency,
+  to: PmsPricingCurrency,
+  at: Date,
+): Promise<void> {
+  for (const statement of [
+    `UPDATE finance.payment_settings SET default_currency = $3, updated_at = $4::timestamptz
+     WHERE property_id = $1::uuid AND source_pricing_currency_revision IS NULL
+       AND default_currency = $2`,
+    `UPDATE booking.addon_definitions SET currency = $3, updated_at = $4::timestamptz
+     WHERE property_id = $1::uuid AND currency = $2`,
+    `UPDATE booking.promo_definitions SET currency = $3, updated_at = $4::timestamptz
+     WHERE property_id = $1::uuid AND currency = $2`,
+    `UPDATE booking.booking_settings SET default_currency = $3, updated_at = $4::timestamptz
+     WHERE property_id = $1::uuid AND default_currency = $2`,
+  ]) {
+    await client.query(statement, [propertyId, from, to, at.toISOString()]);
+  }
 }
 
 function normalizeGuardBlockers(
