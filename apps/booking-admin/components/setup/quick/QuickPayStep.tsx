@@ -7,7 +7,15 @@ import {
   InformationCircleIcon,
   ReceiptPercentIcon,
 } from "@heroicons/react/24/outline";
-import { useState, type ComponentType, type FormEvent, type ReactNode, type SVGProps } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type FormEvent,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 
 import { QuickBookingPagePreview, type QuickPreviewRoom } from "./QuickBookingPagePreview";
 import { QuickSetupPreviewCard } from "./QuickSetupPreviewCard";
@@ -140,10 +148,22 @@ export function QuickPayStep({
   const [cardInterest, setCardInterest] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const focusBeforeFailedSave = useRef<HTMLElement | null>(null);
+
+  // The browser takes focus off a control as it is disabled for the first run: after a failed run it goes
+  // back there, unless the owner has moved on (as on "Your hotel", VAY-2397).
+  useEffect(() => {
+    const focused = focusBeforeFailedSave.current;
+    focusBeforeFailedSave.current = null;
+    if (submitting || !focused?.isConnected) return;
+    if (!document.activeElement || document.activeElement === document.body) focused.focus();
+  }, [submitting]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitError(null);
+    const focused =
+      typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null);
     setSubmitting(true);
     try {
       await onSubmit(plan);
@@ -151,6 +171,7 @@ export function QuickPayStep({
       setSubmitError(
         error instanceof Error ? error.message : "We couldn't finish setting up your hotel.",
       );
+      focusBeforeFailedSave.current = focused;
     } finally {
       setSubmitting(false);
     }
@@ -226,79 +247,83 @@ export function QuickPayStep({
           </QuickSetupPreviewCard>
         }
       >
-        <form id={FORM_ID} noValidate onSubmit={handleSubmit} className="flex flex-col gap-8">
-          <section className="flex flex-col gap-3" aria-labelledby="quick-pay-methods">
-            <SectionTitle icon={CreditCardIcon} id="quick-pay-methods" title="How guests pay" />
-            <MethodRow
-              icon={BuildingStorefrontIcon}
-              title="Pay at the hotel"
-              note="Guests pay when they arrive. Nothing to connect."
-              badge={<Badge tone="green">Ready now</Badge>}
-              selected
-            />
-            <MethodRow
-              icon={CreditCardIcon}
-              title="Online card"
-              note="Connect Stripe after launch — it's on your checklist."
-              badge={
-                <Badge tone={cardInterest ? "blue" : "amber"}>
-                  {cardInterest ? "After launch" : "Later"}
-                </Badge>
-              }
-              selected={false}
-              onClick={() => setCardInterest(true)}
-            />
-            <p className="text-[13px] text-gray-500">
-              Bank transfer and PayPal live in Booking Engine settings.
-            </p>
-          </section>
+        {/* While the first run runs the choices are disabled, as the buttons are: a plan picked meanwhile
+            would not be part of it, and the step then leaves (VAY-2399). One fieldset, with no group role. */}
+        <form id={FORM_ID} noValidate onSubmit={handleSubmit}>
+          <fieldset role="none" disabled={submitting} className="flex min-w-0 flex-col gap-8">
+            <section className="flex flex-col gap-3" aria-labelledby="quick-pay-methods">
+              <SectionTitle icon={CreditCardIcon} id="quick-pay-methods" title="How guests pay" />
+              <MethodRow
+                icon={BuildingStorefrontIcon}
+                title="Pay at the hotel"
+                note="Guests pay when they arrive. Nothing to connect."
+                badge={<Badge tone="green">Ready now</Badge>}
+                selected
+              />
+              <MethodRow
+                icon={CreditCardIcon}
+                title="Online card"
+                note="Connect Stripe after launch — it's on your checklist."
+                badge={
+                  <Badge tone={cardInterest ? "blue" : "amber"}>
+                    {cardInterest ? "After launch" : "Later"}
+                  </Badge>
+                }
+                selected={false}
+                onClick={() => setCardInterest(true)}
+              />
+              <p className="text-[13px] text-gray-500">
+                Bank transfer and PayPal live in Booking Engine settings.
+              </p>
+            </section>
 
-          <section className="flex flex-col gap-3" aria-labelledby="quick-pay-plan">
-            <SectionTitle
-              icon={ReceiptPercentIcon}
-              id="quick-pay-plan"
-              title="Your vayada plan"
-              note="How you pay vayada for direct bookings. Switch any time in Settings → Billing."
-            />
-            <div className="grid gap-3 lg:grid-cols-2">
-              {planCard(
-                "commission",
-                "Commission",
-                <Badge tone="blue">Recommended</Badge>,
-                "5% per direct booking",
-                "No monthly fee. Pay only when you earn.",
-              )}
-              {fixedFee.available
-                ? planCard(
-                    "fixed_fee",
-                    "Fixed Fee",
-                    null,
-                    `${fixedFee.base} / month`,
-                    `${fixedFee.base} for the first active room + ${fixedFee.extraRoom} for each additional room.`,
-                  )
-                : planCard(
-                    "fixed_fee",
-                    "Fixed Fee",
-                    null,
-                    `Not available in ${currency.code} yet.`,
-                    `Your hotel uses ${currencyName(currency.code)}. Commission works in every currency.`,
-                    true,
-                  )}
-            </div>
-            {plan === "fixed_fee" || checkoutPending ? (
-              <p className="flex gap-3 rounded-xl border border-primary-100 bg-primary-50 px-4 py-3 text-[13px] leading-5 text-primary-800">
-                <InformationCircleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                {checkoutPending
-                  ? "Your Fixed Fee checkout is open in Stripe. Your booking page goes live once the subscription is active."
-                  : "You'll confirm the Fixed Fee in Stripe checkout. Your booking page goes live once the subscription is active."}
+            <section className="flex flex-col gap-3" aria-labelledby="quick-pay-plan">
+              <SectionTitle
+                icon={ReceiptPercentIcon}
+                id="quick-pay-plan"
+                title="Your vayada plan"
+                note="How you pay vayada for direct bookings. Switch any time in Settings → Billing."
+              />
+              <div className="grid gap-3 lg:grid-cols-2">
+                {planCard(
+                  "commission",
+                  "Commission",
+                  <Badge tone="blue">Recommended</Badge>,
+                  "5% per direct booking",
+                  "No monthly fee. Pay only when you earn.",
+                )}
+                {fixedFee.available
+                  ? planCard(
+                      "fixed_fee",
+                      "Fixed Fee",
+                      null,
+                      `${fixedFee.base} / month`,
+                      `${fixedFee.base} for the first active room + ${fixedFee.extraRoom} for each additional room.`,
+                    )
+                  : planCard(
+                      "fixed_fee",
+                      "Fixed Fee",
+                      null,
+                      `Not available in ${currency.code} yet.`,
+                      `Your hotel uses ${currencyName(currency.code)}. Commission works in every currency.`,
+                      true,
+                    )}
+              </div>
+              {plan === "fixed_fee" || checkoutPending ? (
+                <p className="flex gap-3 rounded-xl border border-primary-100 bg-primary-50 px-4 py-3 text-[13px] leading-5 text-primary-800">
+                  <InformationCircleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  {checkoutPending
+                    ? "Your Fixed Fee checkout is open in Stripe. Your booking page goes live once the subscription is active."
+                    : "You'll confirm the Fixed Fee in Stripe checkout. Your booking page goes live once the subscription is active."}
+                </p>
+              ) : null}
+            </section>
+            {submitError ? (
+              <p role="alert" className="text-sm text-red-700">
+                {submitError}
               </p>
             ) : null}
-          </section>
-          {submitError ? (
-            <p role="alert" className="text-sm text-red-700">
-              {submitError}
-            </p>
-          ) : null}
+          </fieldset>
         </form>
       </QuickSetupStepLayout>
     </QuickSetupShell>

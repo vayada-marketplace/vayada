@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { corsHeaders } from "../support/cors";
 import { watchPageHealth } from "../support/pageHealth";
 import { mockBookingDashboardExit } from "../support/setupExitHandoff";
 import {
@@ -19,6 +20,8 @@ test.skip(
 const heading = (page: Page, name: string) => page.getByRole("heading", { name, level: 1 });
 /** The footer renders once for desktop and once for phones; the desktop one is visible at 1280px. */
 const back = (page: Page) => page.getByRole("button", { name: "Back" }).first();
+// Only the visible footer's Continue is in the accessibility tree.
+const proceed = (page: Page) => page.getByRole("button", { name: "Continue", exact: true });
 /** The form's alert (Next's route announcer is an empty alert too). */
 const alert = (page: Page, text: string | RegExp) =>
   page.getByRole("alert").filter({ hasText: text });
@@ -259,4 +262,85 @@ test("Your hotel can't be changed while its save runs, and a failed save keeps e
       ]),
     },
   });
+});
+
+// VAY-2399: a plan picked while the first run ran was never sent, and the step then left without a word.
+// The choices are disabled while it runs, as the buttons are; a failed run gives them back as they were,
+// and focus returns to Continue.
+// No page-health watch: the refused first run (409) is part of this test and logs to the console.
+test("How guests pay can't be changed while the first run runs, and a failed run keeps the choice", async ({
+  page,
+  baseURL,
+}) => {
+  await primeQuickSetupBrowserState(page);
+  await mockQuickSetupExistingHotel(page);
+  // A slow first run, refused the first time: it waits until the test lets it go.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let refuse = true;
+  const runs: Record<string, unknown>[] = [];
+  await page.route(
+    new RegExp(`/api/hotel-setup/properties/${QUICK_SETUP_PROPERTY_ID}/first-run$`),
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      runs.push(route.request().postDataJSON() as Record<string, unknown>);
+      await held;
+      if (refuse) {
+        return route.fulfill({
+          status: 409,
+          headers: corsHeaders(route),
+          json: { code: "first_run_in_progress" },
+        });
+      }
+      const steps = ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"];
+      return route.fulfill({
+        headers: corsHeaders(route),
+        json: {
+          state: {
+            contractVersion: "hotel-first-run.v1",
+            propertyId: QUICK_SETUP_PROPERTY_ID,
+            steps: steps.map((id) => ({ id, state: "done" })),
+            nextStep: null,
+          },
+          ran: steps,
+          checkout: null,
+        },
+      });
+    },
+  );
+  await page.goto(quickSetupUrl(baseURL));
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  await page.getByRole("textbox", { name: "Room type name", exact: true }).fill("Classic Double");
+  await page.getByRole("textbox", { name: "Rooms of this type", exact: true }).fill("2");
+  await page.getByRole("textbox", { name: "Price per night", exact: true }).fill("150");
+  await page.getByText("My prices include all mandatory taxes and fees", { exact: true }).click();
+  await proceed(page).click();
+  await expect(heading(page, "How guests pay")).toBeVisible();
+
+  const commission = page.getByRole("radio", { name: /^Commission\b/ });
+  const fixedFee = page.getByRole("radio", { name: /^Fixed Fee\b/ });
+  await expect(commission).toBeChecked();
+  await proceed(page).click();
+  await expect(commission).toBeDisabled();
+  await expect(fixedFee).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^Online card\b/ })).toBeDisabled();
+  // The browser takes focus off Continue as it is disabled; the step puts it back after a failure.
+  const busy = page.getByRole("button", { name: "Setting up your hotel…", exact: true });
+  await expect(busy).toBeDisabled();
+  await expect(busy).not.toBeFocused();
+  // Picking the Fixed Fee meanwhile changes nothing: it couldn't be part of this run.
+  await fixedFee.click({ force: true });
+  release();
+  await expect(alert(page, "Your hotel is being set up in another tab")).toBeVisible();
+  await expect(heading(page, "How guests pay")).toBeVisible();
+  await expect(fixedFee).toBeEnabled();
+  await expect(commission).toBeChecked();
+  await expect(fixedFee).not.toBeChecked();
+  // Focus is back on Continue, so Enter tries again.
+  await expect(proceed(page)).toBeFocused();
+  refuse = false;
+  await page.keyboard.press("Enter");
+  await expect(heading(page, "Does this look right?")).toBeVisible();
+  expect(runs).toHaveLength(2);
+  expect(runs.map((run) => run["plan"])).toEqual(["commission", "commission"]);
 });

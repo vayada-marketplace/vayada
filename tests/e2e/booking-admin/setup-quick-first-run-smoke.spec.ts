@@ -218,3 +218,66 @@ test("the smoke's first-run helpers take a new owner from About you to a live bo
     bed: "double",
   });
 });
+
+// VAY-2399: a change made while About you saved was never sent, and the step then left without a word.
+// The fields are disabled while the save runs, as the button is; a failed save gives them back with every
+// value, and focus returns to the field the owner was in.
+test("About you can't be changed while its save runs, and a failed save keeps every value", async ({
+  page,
+  baseURL,
+}) => {
+  await primeQuickSetupBrowserState(page, PROPERTY_ID);
+  const writes = await mockNewHotelFirstRun(page);
+  // A slow save, refused the first time: the account write waits until the test lets it go.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let refuse = true;
+  const saves: unknown[] = [];
+  await page.route(/\/auth\/profile$/, async (route) => {
+    if (route.request().method() === "OPTIONS") return route.fallback();
+    saves.push(route.request().postDataJSON());
+    await held;
+    if (!refuse) return route.fallback();
+    return json(route, { message: "We couldn't save your details. Try again." }, 503);
+  });
+  const setup = new URL(
+    "/setup?entryProduct=booking&returnProduct=booking&returnTo=/dashboard",
+    baseURL,
+  );
+  if (setup.hostname === "127.0.0.1") setup.hostname = "localhost";
+  await page.goto(setup.toString());
+
+  const firstName = page.getByRole("textbox", { name: "First name", exact: true });
+  const lastName = page.getByRole("textbox", { name: "Last name", exact: true });
+  const phone = page.getByRole("textbox", { name: "Your phone", exact: true });
+  await firstName.fill("Harper");
+  await lastName.fill("Smoke");
+  await phone.fill("+49 30 5550102");
+  await lastName.press("Enter");
+  await expect(firstName).toBeDisabled();
+  await expect(phone).toBeDisabled();
+  // The browser takes focus off the field as it is disabled; the step puts it back after a failure.
+  await expect(lastName).not.toBeFocused();
+  // Typing meanwhile changes nothing: it couldn't be part of this save.
+  await firstName.click({ force: true });
+  await page.keyboard.type(" Jr");
+  release();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "We couldn't save your details. Try again." }),
+  ).toBeVisible();
+  await expect(firstName).toBeEnabled();
+  await expect(firstName).toHaveValue("Harper");
+  await expect(lastName).toHaveValue("Smoke");
+  // Focus is back in the field, so Enter tries again.
+  await expect(lastName).toBeFocused();
+  refuse = false;
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Your hotel", level: 1 })).toBeVisible();
+  expect(saves).toHaveLength(2);
+  expect(saves[1]).toEqual(saves[0]);
+  expect(writes.account).toMatchObject({
+    firstName: "Harper",
+    lastName: "Smoke",
+    phone: "+49 30 5550102",
+  });
+});

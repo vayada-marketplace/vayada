@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
 import { HotelFirstRunError } from "@/services/api/hotelFirstRunClient";
@@ -85,6 +85,40 @@ describe("QuickPayStep (VAY-2247 step 4)", () => {
     expect(text(renderer)).toContain("You'll confirm the Fixed Fee in Stripe checkout.");
     await submit(renderer);
     expect(onSubmit).toHaveBeenCalledWith("fixed_fee");
+    renderer.unmount();
+  });
+
+  it("disables the choices while the first run runs, and a failed run gives them back as they were (VAY-2399)", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const onSubmit = vi.fn(() => new Promise<void>((_resolve, reject) => (fail = reject)));
+    const renderer = create(<QuickPayStep {...props({ onSubmit })} />);
+    // Every control of the form sits in the one fieldset.
+    const controls = (node: ReactTestInstance) =>
+      node.findAll((each) => ["input", "select", "textarea", "button"].includes(String(each.type)))
+        .length;
+    const fieldset = () => renderer.root.findByType("fieldset");
+    const plan = (value: string) =>
+      renderer.root.find((node) => node.type === "input" && node.props.value === value);
+    expect(controls(fieldset())).toBeGreaterThan(0);
+    expect(controls(fieldset())).toBe(controls(renderer.root.findByType("form")));
+    expect(fieldset().props.disabled).toBe(false);
+
+    await act(async () => plan("fixed_fee").props.onChange());
+    // A slow first run: the plan can't be changed while it runs, as the change wouldn't be part of it.
+    await act(async () => {
+      void renderer.root.findByType("form").props.onSubmit({ preventDefault() {} });
+    });
+    expect(onSubmit).toHaveBeenCalledWith("fixed_fee");
+    expect(fieldset().props.disabled).toBe(true);
+    expect(text(renderer)).toContain("Setting up your hotel…");
+
+    await act(async () => fail(new Error("We couldn't finish setting up your hotel.")));
+    expect(fieldset().props.disabled).toBe(false);
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
+      "We couldn't finish setting up your hotel.",
+    );
+    expect(plan("fixed_fee").props.checked).toBe(true);
+    expect(plan("commission").props.checked).toBe(false);
     renderer.unmount();
   });
 
