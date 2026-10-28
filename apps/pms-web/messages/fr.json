@@ -1145,5 +1145,7 @@
   "settings.currencyChange.blockedUnknownBody": "Veuillez réessayer dans un instant.",
   "pricing.currencyChanged.title": "Votre devise est passée en {code}. Vérifiez tous les prix.",
   "pricing.currencyChanged.body": "Chaque prix a gardé son chiffre : {before} vaut maintenant {after}. Votre page de réservation n’accepte pas de réservations tant que vous n’avez pas vérifié les prix et cliqué sur Enregistrer et publier.",
-  "pricing.currencyChanged.publishUnchanged": "Publiez d’abord vos prix sans changement dans la nouvelle devise, puis modifiez-les."
+  "pricing.currencyChanged.publishUnchanged": "Publiez d’abord vos prix sans changement dans la nouvelle devise, puis modifiez-les.",
+  "pricing.bar.from": "Clients à partir de {amount} par nuit sur votre page de réservation.",
+  "pricing.bar.seeFirst": "Ils voient d’abord ≈ {amount}."
 }

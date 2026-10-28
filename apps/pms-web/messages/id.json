@@ -1149,5 +1149,7 @@
   "settings.currencyChange.blockedUnknownBody": "Silakan coba lagi sebentar lagi.",
   "pricing.currencyChanged.title": "Mata uang Anda berubah menjadi {code}. Harap tinjau semua harga.",
   "pricing.currencyChanged.body": "Setiap harga mempertahankan angkanya, jadi {before} sekarang menjadi {after}. Halaman pemesanan Anda tidak menerima pemesanan sampai Anda memeriksa harga dan menekan Simpan dan terbitkan.",
-  "pricing.currencyChanged.publishUnchanged": "Terbitkan dulu harga Anda tanpa perubahan dalam mata uang baru, lalu ubah setelahnya."
+  "pricing.currencyChanged.publishUnchanged": "Terbitkan dulu harga Anda tanpa perubahan dalam mata uang baru, lalu ubah setelahnya.",
+  "pricing.bar.from": "Tamu mulai dari {amount} per malam di halaman pemesanan Anda.",
+  "pricing.bar.seeFirst": "Mereka melihat ≈ {amount} terlebih dahulu."
 }

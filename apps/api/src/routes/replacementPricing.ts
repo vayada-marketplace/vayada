@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { createReplacementPricingCommands } from "../domains/replacementPricingCommands.js";
 import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
 import type { PricingCardReadinessReadPort } from "../domains/pricingCardReadiness.js";
+import type { PricingGuestDisplayRateReadPort } from "../domains/pricingGuestDisplayRate.js";
 import {
   pricingPaymentsNow,
   pricingRateNotSelling,
@@ -34,6 +35,8 @@ export type ReplacementPricingRoutesOptions = {
   /** Whether the booking page takes bank transfer bookings (its bank-transfer operations are
    * configured), as the public catalog decides (VAY-2304). */
   bankTransfers?: boolean;
+  /** The currency guests see first and the booking page's rate to it (VAY-2390); none without the read. */
+  guestDisplayRate?: PricingGuestDisplayRateReadPort;
 };
 type Params = { propertyId: string; draftId?: string; roomTypeId?: string; offerId?: string };
 const uuid = (v: unknown): v is string =>
@@ -193,6 +196,16 @@ export async function registerReplacementPricingRoutes(
           card: { ready: false, reason: "switch_off", charge: "at_booking" },
           deposits: { ready: false },
         };
+  });
+  // VAY-2390: the Prices footer's "They see ≈ US$73 first", when guests start in another currency than the prices'.
+  // A read that fails says nothing rather than guess; it is logged, never shown.
+  route("GET", "/guest-display-rate", async (commands, id, request) => {
+    if (!(await commands.authorizeRead(id))) throw new PricingStorageError("denied");
+    const guestDisplay = await options.guestDisplayRate?.read(id).catch((error: unknown) => {
+      request.log.error({ err: error }, "pricing guest display rate read failed");
+      return null;
+    });
+    return { guestDisplay: guestDisplay ?? null };
   });
   // VAY-2304: the published rates guests can't pay now, why, and what fixes each, main fix first
   // (pricing-rates-not-selling.v1; the PMS rate cards show it). Every other rate sells.

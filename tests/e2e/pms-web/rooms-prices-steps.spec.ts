@@ -209,7 +209,12 @@ async function mockPricing(
   page: Page,
   initial: ReturnType<typeof publicationOf> | null,
   readyMethods: ("bank_transfer" | "paypal")[] = [],
-  { cardReady = false, payment = storedPayment, notSelling = [] as Record<string, unknown>[] } = {},
+  {
+    cardReady = false,
+    payment = storedPayment,
+    notSelling = [] as Record<string, unknown>[],
+    guestDisplay = null as Record<string, unknown> | null,
+  } = {},
 ) {
   const terms = new Map<string, Record<string, unknown>>([
     ["flexible", { revision: TERMS, cancellation: flexible }],
@@ -245,6 +250,8 @@ async function mockPricing(
         publishedRevision: state.publication?.revision ?? null,
         rates: state.publication ? notSelling : [],
       });
+    // The currency guests see first on the booking page, when a test makes it another than the prices' (VAY-2390).
+    if (suffix === "/guest-display-rate" && method === "GET") return ok(route, { guestDisplay });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
@@ -1016,6 +1023,28 @@ test("says on a rate's card when it isn't selling, why and how to fix it (VAY-23
     "Not selling",
   );
   await expect(main(page).getByText(/isn't selling$/)).toBeVisible();
+  await assertHealthy();
+});
+
+test("says what guests see first when they start in another currency, on desktop only (VAY-2390)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
+    guestDisplay: { base: "EUR", currency: "USD", rate: 1.16 },
+  });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  // The lowest night is €72; the booking page shows it as ≈ US$84 first, in whole units.
+  await expect(
+    main(page).getByText("Guests from €72 a night on your booking page. They see ≈ US$84 first.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  // The phone's bar has no room for it, as the board.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(main(page).getByText("Guests from €72 a night on your booking page.")).toBeVisible();
+  await expect(main(page).getByText("They see ≈ US$84 first.", { exact: true })).toBeHidden();
   await assertHealthy();
 });
 

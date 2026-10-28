@@ -3000,6 +3000,7 @@
   "pricing.mealText.placeholder": "z. B. Frühstücksbuffet jeden Morgen",
   "pricing.mealText.invalid": "Nutze eine Zeile einfachen Text, höchstens 200 Zeichen.",
   "pricing.bar.from": "Gäste ab {amount} pro Nacht auf Ihrer Buchungsseite.",
+  "pricing.bar.seeFirst": "Sie sehen zuerst ≈ {amount}.",
   "pricing.bar.discard": "Verwerfen",
   "pricing.bar.gaps.one": "1 offene Nacht hat keinen Preis",
   "pricing.bar.gaps.other": "{count} offene Nächte haben keinen Preis",

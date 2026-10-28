@@ -5,7 +5,7 @@ import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration, pri
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
-import { samePricingValue, type createReplacementPricingClient, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { samePricingValue, type createReplacementPricingClient, type PricingGuestDisplay, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
 import { baseAmounts, decimalAmount, editedSnapshot, errorText, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
@@ -101,6 +101,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const loadedRooms = useRef<readonly Room[]>([]);
   // The rates guests can't book now (VAY-2304), read again with each publication the editor loads.
   const notSelling = useLoadedPricingNotSelling(client, baseRevision);
+  const [guestDisplay, setGuestDisplay] = useState<PricingGuestDisplay | null>(null);
+  useEffect(() => {
+    let live = true;
+    // Unknown reads as none: the bar then only says what guests pay.
+    void Promise.resolve().then(() => client.guestDisplayRate()).then((value) => { if (live) setGuestDisplay(value); }, () => {});
+    return () => { live = false; };
+  }, [client]);
   const [inputs, setInputs] = useState<Record<string, string>>({}), [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(null), [notice, setNotice] = useState<MessageKey | "">("");
   const [needsReload, setNeedsReload] = useState(false), [done, setDone] = useState(false), [retry, setRetry] = useState(false);
@@ -357,14 +364,18 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
   // rates guests can book (VAY-2285).
   // The CEO's bar (VAY-2305) also counts the open nights no price covers, as "Pricing setup" does.
-  let guestsFrom = "", barGaps = 0;
+  // VAY-2390: guests start in Localization's display currency when it isn't the prices' own, so the bar also says what
+  // they see first, in whole units as the booking page shows it ("≈ US$73"). Desktop only, as the board.
+  let guestsFrom = "", seeFirst = "", barGaps = 0;
   if (display && editing) try {
     const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, rate = simpleRoom(shown, optionTerms)?.nonRefundable;
     const booked = [mainOffer(shown), ...(rate ? [rate] : [])].filter(pricingOfferOnBookingPage).map((offer) => offer.id);
     const minor = lowestNightMinor(shown, booked, sampleAdults(shown), String(new Date().getFullYear()));
     if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
+    if (minor && guestDisplay?.base === shown.currency) seeFirst = t("pricing.bar.seeFirst", { amount: new Intl.NumberFormat("en-GB", { style: "currency", currency: guestDisplay.currency, minimumFractionDigits: 0, maximumFractionDigits: 0 })
+      .format(Number(minor) / 10 ** (pricingCurrencyScale(shown.currency) ?? 2) * guestDisplay.rate) });
     barGaps = nightsWithoutPrice(shown, mainOffer(shown).id, sampleAdults(shown), localToday());
-  } catch { guestsFrom = ""; }
+  } catch { guestsFrom = ""; seeFirst = ""; }
   // This room's published rates guests can't book now (VAY-2304); their cards say why.
   const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
   const status = firstForm ? { key: "pricing.bar.noPrice", tone: "text-amber-700", icon: <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> }
@@ -601,7 +612,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
           {stopped.length > 0 && <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[12px] font-semibold text-amber-800">{stopped.length === 1 ? t("pricing.bar.notSelling.one", { name: names[stopped[0].offerId] ?? "" }) : t("pricing.bar.notSelling.other", { count: stopped.length })}</span>}
         </div>
         <p id={declarationId} className="text-[11px] text-gray-500">{t("pricing.editor.saveDeclaration")}</p></div>}
-      {!loading && editing && guestsFrom && <span className="w-full text-[13px] text-gray-600 md:w-auto md:max-w-[20rem] md:text-right">{guestsFrom}</span>}
+      {!loading && editing && guestsFrom && <span className={`w-full text-[13px] text-gray-600 md:w-auto md:text-right ${seeFirst ? "md:max-w-[30rem]" : "md:max-w-[20rem]"}`}>{guestsFrom}{seeFirst && <span className="hidden md:inline">{` ${seeFirst}`}</span>}</span>}
       <button type="button" className={ui.actionBarButton} disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t(cancels ? "pricing.bar.discard" : "pricing.editor.reload")}</button>
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>

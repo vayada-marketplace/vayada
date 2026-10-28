@@ -251,6 +251,9 @@ async function mockPricing(page: Page) {
         publishedRevision: null,
         rates: [],
       });
+    // Guests start in the prices' currency (VAY-2390).
+    if (suffix === "/guest-display-rate" && method === "GET")
+      return ok(route, { guestDisplay: null });
     if (suffix === "" && method === "GET") return ok(route, state.publication);
     const step = suffix === "/prepare" ? "prepare" : suffix === "/publish" ? "publish" : null;
     if (step && state.refuse?.step === step) {

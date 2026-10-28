@@ -1145,5 +1145,7 @@
   "settings.currencyChange.blockedUnknownBody": "Попробуйте ещё раз через минуту.",
   "pricing.currencyChanged.title": "Ваша валюта изменена на {code}. Проверьте все цены.",
   "pricing.currencyChanged.body": "Каждая цена сохранила своё число, поэтому {before} теперь {after}. Страница бронирования не принимает бронирования, пока вы не проверите цены и не нажмёте «Сохранить и опубликовать».",
-  "pricing.currencyChanged.publishUnchanged": "Сначала опубликуйте цены без изменений в новой валюте, затем меняйте их."
+  "pricing.currencyChanged.publishUnchanged": "Сначала опубликуйте цены без изменений в новой валюте, затем меняйте их.",
+  "pricing.bar.from": "Гости — от {amount} за ночь на вашей странице бронирования.",
+  "pricing.bar.seeFirst": "Сначала они видят ≈ {amount}."
 }

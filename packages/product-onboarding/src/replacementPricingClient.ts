@@ -61,6 +61,9 @@ export type PricingRateNotSelling = {
   reason: (typeof PRICING_RATE_NOT_SELLING_REASONS)[number];
   fixes: (typeof PRICING_RATE_FIXES)[number][];
 };
+/** The currency guests see first on the booking page and the booking page's rate to it from the prices' currency
+ * (VAY-2390): an approximation for display, never a price. */
+export type PricingGuestDisplay = { base: string; currency: string; rate: number };
 export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = {
   currency: string;
@@ -314,6 +317,27 @@ export function createReplacementPricingClient(
       )
         return bad();
       return structuredClone(value) as PricingCardReadiness;
+    },
+    /** The currency guests see first when it isn't the prices' own, with its rate (VAY-2390); null when they see the
+     * prices' currency, there is no rate, or the API has no read. */
+    async guestDisplayRate(): Promise<PricingGuestDisplay | null> {
+      const value = await optionalRead(`${base}/guest-display-rate`);
+      if (value === missing) return null;
+      if (!exact(value, ["guestDisplay"])) return bad();
+      const display = value.guestDisplay;
+      if (display === null) return null;
+      const code = (v: unknown): v is string => typeof v === "string" && /^[A-Z]{3}$/.test(v);
+      if (
+        !exact(display, ["base", "currency", "rate"]) ||
+        !code(display.base) ||
+        !code(display.currency) ||
+        display.base === display.currency ||
+        typeof display.rate !== "number" ||
+        !Number.isFinite(display.rate) ||
+        display.rate <= 0
+      )
+        return bad();
+      return { base: display.base, currency: display.currency, rate: display.rate };
     },
     /** The published rates guests can't book now, and why (VAY-2304); every other rate sells. An API without the read
      * lists none. */

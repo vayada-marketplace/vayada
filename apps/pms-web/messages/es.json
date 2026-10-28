@@ -1149,5 +1149,7 @@
   "settings.currencyChange.blockedUnknownBody": "Inténtalo de nuevo en un momento.",
   "pricing.currencyChanged.title": "Tu moneda cambió a {code}. Revisa todos los precios.",
   "pricing.currencyChanged.body": "Cada precio mantuvo su cifra, así que {before} ahora es {after}. Tu página de reservas no acepta reservas hasta que revises los precios y pulses Guardar y publicar.",
-  "pricing.currencyChanged.publishUnchanged": "Publica primero tus precios sin cambios en la nueva moneda y cámbialos después."
+  "pricing.currencyChanged.publishUnchanged": "Publica primero tus precios sin cambios en la nueva moneda y cámbialos después.",
+  "pricing.bar.from": "Huéspedes desde {amount} por noche en tu página de reservas.",
+  "pricing.bar.seeFirst": "Primero ven ≈ {amount}."
 }

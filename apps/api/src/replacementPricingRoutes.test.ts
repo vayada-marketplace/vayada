@@ -104,6 +104,7 @@ async function fixture(
   auth: RequestContext | null = context,
   manualPayments?: ReplacementPricingRoutesOptions["manualPayments"],
   cardReadiness?: ReplacementPricingRoutesOptions["cardReadiness"],
+  guestDisplayRate?: ReplacementPricingRoutesOptions["guestDisplayRate"],
 ) {
   const app = Fastify();
   apps.push(app);
@@ -132,6 +133,7 @@ async function fixture(
     commands: factory,
     ...(manualPayments ? { manualPayments } : {}),
     ...(cardReadiness ? { cardReadiness } : {}),
+    ...(guestDisplayRate ? { guestDisplayRate } : {}),
   });
   return {
     app,
@@ -190,6 +192,36 @@ describe("replacement pricing HTTP boundary", () => {
     expect((await get(await fixture(reader, undefined, { read }))).statusCode).toBe(200);
     expect((await get(await fixture(null, undefined, { read }))).statusCode).toBe(401);
     const denied = await fixture(context, undefined, { read });
+    denied.commands.authorizeRead.mockResolvedValue(false);
+    read.mockClear();
+    expect((await get(denied)).statusCode).toBe(403);
+    expect(read).not.toHaveBeenCalled();
+  });
+  it("tells the Prices footer which currency guests see first, and says nothing without a rate (VAY-2390)", async () => {
+    const get = (f: Awaited<ReturnType<typeof fixture>>) =>
+      f.app.inject({
+        method: "GET",
+        url: `/api/pms/properties/${id}/pricing-v2/guest-display-rate`,
+        headers: { authorization: "Bearer valid" },
+      });
+    expect((await get(await fixture())).json()).toEqual({ guestDisplay: null });
+    const usd = { base: "EUR", currency: "USD", rate: 1.16 };
+    const read = vi.fn().mockResolvedValue(usd);
+    const reader = {
+      ...context,
+      membership: { ...context.membership, permissions: ["pms.rooms_rates.read"] },
+    } as RequestContext;
+    const shown = await get(await fixture(reader, undefined, undefined, { read }));
+    expect(shown.statusCode).toBe(200);
+    expect(shown.json()).toEqual({ guestDisplay: usd });
+    expect(read).toHaveBeenCalledWith(id);
+    // A read that fails hides the line rather than failing the Prices tab.
+    read.mockRejectedValueOnce(new Error("database unavailable"));
+    expect((await get(await fixture(context, undefined, undefined, { read }))).json()).toEqual({
+      guestDisplay: null,
+    });
+    expect((await get(await fixture(null, undefined, undefined, { read }))).statusCode).toBe(401);
+    const denied = await fixture(context, undefined, undefined, { read });
     denied.commands.authorizeRead.mockResolvedValue(false);
     read.mockClear();
     expect((await get(denied)).statusCode).toBe(403);

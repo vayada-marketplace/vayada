@@ -76,6 +76,18 @@ describe("replacement pricing browser workflow", () => {
       http.get.mockResolvedValue(value); await expect(client().notSellingRates()).rejects.toThrow();
     }
   });
+  it("reads the currency guests see first and its rate, only when it isn't the prices' own (VAY-2390)", async () => {
+    const usd = { base: "EUR", currency: "USD", rate: 1.16 };
+    http.get.mockResolvedValue({ guestDisplay: usd }); expect(await client().guestDisplayRate()).toEqual(usd);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/guest-display-rate`);
+    http.get.mockResolvedValue({ guestDisplay: null }); expect(await client().guestDisplayRate()).toBeNull();
+    // An API without the read says nothing.
+    http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" })); expect(await client().guestDisplayRate()).toBeNull();
+    for (const guestDisplay of [{ ...usd, currency: "EUR" }, { ...usd, rate: 0 }, { ...usd, rate: "1.16" }, { ...usd, currency: "usd" }, { ...usd, extra: 1 }]) {
+      http.get.mockResolvedValue({ guestDisplay }); await expect(client().guestDisplayRate()).rejects.toThrow();
+    }
+    http.get.mockResolvedValue({}); await expect(client().guestDisplayRate()).rejects.toThrow();
+  });
   it("reads exact saved data and only expected missing responses become null", async () => {
     const api = client(), stored = { snapshot, sources, revision: 1, baseRevision: 0, stale: false };
     http.get.mockResolvedValue(stored); expect(await api.readDraft(draftId)).toEqual(draft);
