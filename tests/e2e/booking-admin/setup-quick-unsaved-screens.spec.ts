@@ -324,6 +324,10 @@ test("How guests pay can't be changed while the first run runs, and a failed run
   await expect(commission).toBeDisabled();
   await expect(fixedFee).toBeDisabled();
   await expect(page.getByRole("button", { name: /^Online card\b/ })).toBeDisabled();
+  // The browser takes focus off Continue as it is disabled; the step puts it back after a failure.
+  const busy = page.getByRole("button", { name: "Setting up your hotel…", exact: true });
+  await expect(busy).toBeDisabled();
+  await expect(busy).not.toBeFocused();
   // Picking the Fixed Fee meanwhile changes nothing: it couldn't be part of this run.
   await fixedFee.click({ force: true });
   release();

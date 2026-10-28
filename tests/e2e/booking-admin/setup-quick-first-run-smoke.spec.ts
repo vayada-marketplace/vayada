@@ -256,6 +256,8 @@ test("About you can't be changed while its save runs, and a failed save keeps ev
   await lastName.press("Enter");
   await expect(firstName).toBeDisabled();
   await expect(phone).toBeDisabled();
+  // The browser takes focus off the field as it is disabled; the step puts it back after a failure.
+  await expect(lastName).not.toBeFocused();
   // Typing meanwhile changes nothing: it couldn't be part of this save.
   await firstName.click({ force: true });
   await page.keyboard.type(" Jr");
