@@ -72,13 +72,29 @@ const routes = [
   ],
   ["PUT", "bank-transfer-destination", { action: "delete", commandId: itemId, expectedVersion: 1 }],
 ] as const;
+// Billing is what the hotel pays Vayada; only the owner's finance.billing.manage reaches it (VAY-2401).
+const billingRoutes = new Set<string>([
+  "select-commission",
+  "fixed-plan/checkout",
+  "customer-portal",
+  "fixed-plan/invoice",
+  "fixed-plan/card",
+  "switch-to-commission",
+  "switch-to-commission-now",
+  "billing-details",
+  "payment-method",
+]);
 
 function state() {
   const context = structuredClone(
     requestContextFixtureCases.find(({ scope }) => scope === "hotel")!.context,
   );
   context.membership.roleKey = "finance_manager";
-  context.membership.permissions = ["pms.operations.manage", "booking.settings.manage"];
+  context.membership.permissions = [
+    "pms.operations.manage",
+    "booking.settings.manage",
+    "finance.billing.manage",
+  ];
   context.linkedResources = [
     { ...native, relationship: "finance_manager", status: "active" },
     {
@@ -313,7 +329,10 @@ describe("Finance property write scope", () => {
         for (const link of value.context.linkedResources) link.relationship = "owner";
       }
       if (mode === "booking-only") {
-        value.context.membership.permissions = ["booking.settings.manage"];
+        value.context.membership.permissions = [
+          "booking.settings.manage",
+          "finance.billing.manage",
+        ];
         value.context.entitlements[0]!.product = "booking";
         value.context.entitlements[0]!.key = "direct-booking-finance";
       }
@@ -370,4 +389,58 @@ describe("Finance property write scope", () => {
       }
     },
   );
+});
+
+describe("Finance billing access (VAY-2401)", () => {
+  it.each([
+    ["booking settings managers", ["booking.settings.manage"], "booking"],
+    ["operations managers", ["pms.operations.manage"], "pms"],
+    [
+      "staff with every other finance key",
+      ["pms.finance.read", "pms.operations.manage", "booking.settings.manage"],
+      "pms",
+    ],
+  ] as const)(
+    "refuses billing to %s without finance.billing.manage",
+    async (_name, permissions, product) => {
+      const value = state();
+      value.context.membership.permissions = [...permissions];
+      if (product === "booking") {
+        value.context.entitlements[0]!.product = "booking";
+        value.context.entitlements[0]!.key = "direct-booking-finance";
+      }
+      const { app, service } = fixture(value);
+      const headers = { authorization: "Bearer valid-token" };
+      try {
+        const overview = await app.inject({ method: "GET", url: `${root}/billing`, headers });
+        expect(overview.statusCode).toBe(403);
+        for (const [method, route, payload] of routes) {
+          const response = await app.inject({ method, url: `${root}/${route}`, payload, headers });
+          if (billingRoutes.has(route)) expect(response.statusCode, route).toBe(403);
+        }
+        for (const port of Object.values(service)) expect(port).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it("lets the owner's finance.billing.manage read and change billing", async () => {
+    const value = state();
+    value.context.membership.permissions = ["finance.billing.manage"];
+    const { app, service } = fixture(value);
+    const headers = { authorization: "Bearer valid-token" };
+    try {
+      const overview = await app.inject({ method: "GET", url: `${root}/billing`, headers });
+      expect(overview.statusCode).toBe(200);
+      for (const [method, route, payload] of routes) {
+        const response = await app.inject({ method, url: `${root}/${route}`, payload, headers });
+        expect(response.statusCode, route).toBe(billingRoutes.has(route) ? 409 : 403);
+      }
+      for (const [name, port] of Object.entries(service))
+        if (name !== "getPlanStatus") expect(port, name).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
 });

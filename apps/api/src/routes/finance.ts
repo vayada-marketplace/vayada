@@ -6010,13 +6010,19 @@ function toFinanceCommandError(
   } satisfies FinanceCommandError;
 }
 
+/** Billing is what the hotel pays Vayada: `billing` routes take finance.billing.manage, which only
+ * the account's owner holds (no team role or override can carry it), instead of the finance read and
+ * booking/operations manage keys staff may have (VAY-2401). */
+type FinancePolicyOptions = { billing?: boolean };
+
 export async function enforceFinancePropertyReadPolicy(
   request: FastifyRequest,
   reply: FastifyReply,
   propertyId: string,
   propertyAccessRepository: PropertyAccessRepository | undefined,
+  options: FinancePolicyOptions = {},
 ): Promise<boolean> {
-  const policies = financePropertyReadPolicies(propertyId);
+  const policies = financePropertyReadPolicies(propertyId, options);
   try {
     enforceAnyFinancePropertyReadPolicy(request, policies);
     if (!propertyAccessRepository) throw new AuthorizationError();
@@ -6039,8 +6045,9 @@ export async function enforceFinancePropertyWritePolicy(
   reply: FastifyReply,
   propertyId: string,
   propertyAccessRepository: PropertyAccessRepository | undefined,
+  options: FinancePolicyOptions = {},
 ): Promise<boolean> {
-  const policies = financePropertyWritePolicies(propertyId);
+  const policies = financePropertyWritePolicies(propertyId, options);
   try {
     enforceAnyFinancePropertyReadPolicy(request, policies);
     if (!propertyAccessRepository) throw new AuthorizationError();
@@ -6058,11 +6065,15 @@ export async function enforceFinancePropertyWritePolicy(
   }
 }
 
-function financePropertyReadPolicies(propertyId: string): RouteAuthorizationPolicy[] {
+function financePropertyReadPolicies(
+  propertyId: string,
+  { billing = false }: FinancePolicyOptions = {},
+): RouteAuthorizationPolicy[] {
+  const permission = billing ? "finance.billing.manage" : "pms.finance.read";
   const resourceTypes = ["pms_property", "property"] as const;
   return resourceTypes.flatMap((resourceType) => [
     {
-      permission: "pms.finance.read",
+      permission,
       entitlement: {
         product: "pms",
         key: "property-management",
@@ -6080,7 +6091,7 @@ function financePropertyReadPolicies(propertyId: string): RouteAuthorizationPoli
       },
     },
     {
-      permission: "pms.finance.read",
+      permission,
       entitlement: {
         product: "booking",
         key: "direct-booking-finance",
@@ -6100,11 +6111,14 @@ function financePropertyReadPolicies(propertyId: string): RouteAuthorizationPoli
   ]);
 }
 
-function financePropertyWritePolicies(propertyId: string): RouteAuthorizationPolicy[] {
+function financePropertyWritePolicies(
+  propertyId: string,
+  { billing = false }: FinancePolicyOptions = {},
+): RouteAuthorizationPolicy[] {
   const resourceTypes = ["pms_property", "property"] as const;
   return resourceTypes.flatMap((resourceType) => [
     {
-      permission: "pms.operations.manage",
+      permission: billing ? "finance.billing.manage" : "pms.operations.manage",
       entitlement: {
         product: "pms",
         key: "property-management",
@@ -6122,7 +6136,7 @@ function financePropertyWritePolicies(propertyId: string): RouteAuthorizationPol
       },
     },
     {
-      permission: "booking.settings.manage",
+      permission: billing ? "finance.billing.manage" : "booking.settings.manage",
       entitlement: {
         product: "booking",
         key: "direct-booking-finance",

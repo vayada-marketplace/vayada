@@ -47,7 +47,7 @@ describe("Finance subscription route authorization", () => {
 
   it("allows linked Finance reads and settings writes with the target entitlement", async () => {
     const fixture = createApp({
-      permissions: ["pms.finance.read", "booking.settings.manage"],
+      permissions: ["pms.finance.read", "finance.billing.manage"],
     });
     apps.push(fixture.app);
     const read = await fixture.app.inject({
@@ -115,7 +115,7 @@ describe("Finance subscription route authorization", () => {
 
   it("denies unassigned subscription reads and checkout before calling Finance", async () => {
     const fixture = createApp({
-      permissions: ["pms.finance.read", "booking.settings.manage"],
+      permissions: ["pms.finance.read", "finance.billing.manage"],
       propertyAccessRepository: {
         findMembershipPropertyScope: async () => ({
           mode: "assigned",
