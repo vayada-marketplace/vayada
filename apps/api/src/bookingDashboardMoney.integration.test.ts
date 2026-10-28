@@ -104,8 +104,55 @@ describe.skipIf(!url)("dashboard unverified booking money", () => {
         unverifiedBookingCount: 1,
         totalRevenue: { amountDecimal: "0.00" },
       });
+      // VAY-2390: amounts are in the PMS pricing currency, not Booking settings' default. An OTA
+      // booking in another currency is counted, but not added to revenue or rates.
+      await pool.query(
+        `INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')`,
+        [property],
+      );
+      await pool.query(
+        `INSERT INTO booking.booking_settings(property_id,default_currency) VALUES($1,'LKR')`,
+        [property],
+      );
+      const ota = randomUUID();
+      await pool.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,currency,total_amount,room_count,adults,children,booking_metadata) VALUES($1::uuid,$2,$1::text,'booking_com','confirmed','2026-10-01','2026-10-03','GBP',500,1,2,0,'{"channel":"booking_com"}')`,
+        [ota, property],
+      );
+      const mixed = await port.getDashboardMetrics({
+        ...period,
+        previousPeriodStart: "2026-09-01",
+        previousPeriodEnd: "2026-09-07",
+      });
+      expect(mixed?.current).toMatchObject({
+        bookingCount: 2,
+        unverifiedBookingCount: 1,
+        otherCurrencyBookingCount: 1,
+        totalRevenue: { amountDecimal: "0.00", currency: "EUR" },
+        avgNightlyRate: { amountDecimal: "0.00", currency: "EUR" },
+      });
+      const mixedSources = await port.getSourceMix(period);
+      expect(mixedSources.items.find((item) => item.source === "booking_com")).toMatchObject({
+        bookingCount: 1,
+        otherCurrencyBookingCount: 1,
+        revenue: { amountDecimal: "0.00", currency: "EUR" },
+      });
+      const mixedSpark = await port.getSparklines({
+        propertyId: property,
+        windowStart: period.periodStart,
+        windowEnd: period.periodEnd,
+      });
+      expect(mixedSpark.points[0]).toMatchObject({
+        bookingCount: 2,
+        otherCurrencyBookingCount: 1,
+        revenue: { amountDecimal: "0.00", currency: "EUR" },
+      });
     } finally {
       await pool.query("DELETE FROM booking.guest_bookings WHERE property_id=$1", [property]);
+      await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [property]);
+      await pool.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [
+        property,
+      ]);
       await pool.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [
         property,
       ]);

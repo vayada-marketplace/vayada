@@ -185,6 +185,7 @@
   "dashboard.noDepartures": "Keine Abreisen heute",
   "dashboard.revenueThisMonth": "Umsatz diesen Monat",
   "dashboard.monthToDate": "Seit Monatsbeginn",
+  "dashboard.monthToDateOtherCurrencies": "Seit Monatsbeginn, ohne Buchungen in anderen Währungen",
   "dashboard.viewAll": "Alle anzeigen",
   "dashboard.confirmed": "Bestätigt",
   "dashboard.settled": "Abgerechnet",

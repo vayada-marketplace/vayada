@@ -1,5 +1,6 @@
 {
   "dashboard.stats.incompleteAmounts": "Einige Buchungsbeträge sind nicht bestätigt. Sie werden bei Umsatz und Durchschnittsraten nicht berücksichtigt, bei der Anzahl der Buchungen jedoch schon. Finanzielle Vergleiche sind nicht verfügbar.",
+  "dashboard.stats.otherCurrencies": "Einige Buchungen sind in einer anderen Währung als {currency}, zum Beispiel von Buchungsportalen. Sie werden bei Umsatz und Durchschnittsraten nicht berücksichtigt, bei der Anzahl der Buchungen jedoch schon.",
   "reservations.amountUnverified": "Betrag nicht bestätigt",
   "auth.login.sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
   "auth.login.emailLabel": "E-Mail-Adresse",

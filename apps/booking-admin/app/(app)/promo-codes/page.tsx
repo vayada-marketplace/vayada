@@ -13,7 +13,7 @@ import { getBookingLocalizationSettings } from "@/services/api/bookingLocalizati
 import {
   createBookingPromoCode,
   deleteBookingPromoCode,
-  listBookingPromoCodes,
+  readBookingPromoCodes,
   updateBookingPromoCode,
   type BookingPromoCode,
   type CreateBookingPromoCodeBody,
@@ -68,7 +68,7 @@ export default function PromoCodesPage() {
     setError(null);
     try {
       const [promos, localization, propertyLink, propertySettings] = await Promise.all([
-        listBookingPromoCodes({ hotelId: selectedHotelId }),
+        readBookingPromoCodes({ hotelId: selectedHotelId }),
         getBookingLocalizationSettings({ hotelId: selectedHotelId }),
         getBookingHotelPropertyLink({ hotelId: selectedHotelId }),
         settingsService.getPropertySettings(selectedHotelId),
@@ -76,8 +76,9 @@ export default function PromoCodesPage() {
       const roomTypeResponse = await apiClient.get<RoomTypesResponse>(
         `/api/pms/properties/${encodeURIComponent(propertyLink.propertyId)}/room-types`,
       );
-      setPromoCodes(promos);
-      setPropertyCurrency(localization.defaultCurrency);
+      setPromoCodes(promos.promoCodes);
+      // The PMS pricing currency guests pay in; Localization's default only on an older API.
+      setPropertyCurrency(promos.propertyCurrency ?? localization.defaultCurrency);
       setPropertyTimeZone(propertySettings.time_zone || "Etc/UTC");
       setRoomTypes(roomTypeResponse.items.filter((room) => room.roomTypeId && room.name));
     } catch {
