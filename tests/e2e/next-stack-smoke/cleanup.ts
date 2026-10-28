@@ -30,6 +30,9 @@ export type HotelResource = {
   workosOrganizationId?: string;
 };
 
+/** How long cleanup waits for WorkOS to confirm a deletion (tests shorten it). */
+export type DeletionTiming = { pollIntervalMs: number; timeoutMs: number };
+
 export async function cleanupSmokeResources(
   request: APIRequestContext,
   environment: SmokeEnvironment,
@@ -38,6 +41,7 @@ export async function cleanupSmokeResources(
   hotel?: HotelResource,
   platformAdmin?: SyntheticPlatformAdmin,
   retirementPropertyIds: string[] = [],
+  deletionTiming: DeletionTiming = { pollIntervalMs: 2_000, timeoutMs: 30_000 },
 ): Promise<unknown[]> {
   const errors: unknown[] = [];
   const publicClient = publicApi(request);
@@ -112,15 +116,23 @@ export async function cleanupSmokeResources(
 
   const workos = workosApi(request, environment.workosApiKey);
   const userRoles = new Map(users.map(({ id, role }) => [id, role]));
-  for (const [role, qualifier] of [
-    ["hotel", ""],
-    ["hotel", "foreign-"],
-    ["staff", ""],
-  ] as const) {
+  const userLabels = new Map(users.map((user) => [user.id, syntheticUserLabel(user)]));
+  const syntheticEmails = (
+    [
+      ["hotel", "", "hotel owner"],
+      ["hotel", "foreign-", "foreign hotel owner"],
+      ["staff", "", "staff member"],
+    ] as const
+  ).map(([role, qualifier, label]) => ({
+    role,
+    label,
+    email: `qa-next-${qualifier}${role}-${environment.runId}@${environment.emailDomain}`,
+  }));
+  for (const { role, label, email } of syntheticEmails) {
     try {
-      const email = `qa-next-${qualifier}${role}-${environment.runId}@${environment.emailDomain}`;
       for (const userId of await workosUserIdsForEmail(request, environment.workosApiKey, email)) {
         userRoles.set(userId, role);
+        userLabels.set(userId, label);
       }
     } catch (error) {
       errors.push(error);
@@ -227,7 +239,14 @@ export async function cleanupSmokeResources(
           `Refusing to delete WorkOS organization ${organizationId}: synthetic ownership could not be proven.`,
         );
       }
-      await workos.deleteIfPresent(`/organizations/${encodeURIComponent(organizationId)}`);
+      // Confirmed gone before any user is deleted, so WorkOS has finished with the group first.
+      await deleteUntilGone(
+        workos,
+        `/organizations/${encodeURIComponent(organizationId)}`,
+        `the ${userLabels.get(owner.userId) ?? "hotel owner"}'s hotel group ${organizationId}`,
+        environment.runId,
+        deletionTiming,
+      );
     } catch (error) {
       errors.push(error);
     }
@@ -245,14 +264,66 @@ export async function cleanupSmokeResources(
   } catch (error) {
     errors.push(error);
   }
+  // WorkOS once kept a hotel owner whose DELETE it had answered, so the run passed and the owner
+  // stayed (run 40672258806). A user counts as gone only when WorkOS answers 404 for it (VAY-2357).
   for (const userId of [...userRoles.keys()].reverse()) {
     try {
-      await workos.deleteIfPresent(`/user_management/users/${encodeURIComponent(userId)}`);
+      await deleteUntilGone(
+        workos,
+        `/user_management/users/${encodeURIComponent(userId)}`,
+        `the synthetic ${userLabels.get(userId) ?? "user"} ${userId}`,
+        environment.runId,
+        deletionTiming,
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  // No synthetic email may keep a user, which also catches one that never made the list above.
+  for (const { label, email } of syntheticEmails) {
+    try {
+      const remaining = await workosUserIdsForEmail(request, environment.workosApiKey, email);
+      if (remaining.length) {
+        errors.push(
+          new Error(
+            `Recovery required: WorkOS still has the synthetic ${label} ${remaining.join(", ")} (run ${environment.runId}).`,
+          ),
+        );
+      }
     } catch (error) {
       errors.push(error);
     }
   }
   return errors;
+}
+
+function syntheticUserLabel(user: SyntheticUser): string {
+  if (user.role === "staff") return "staff member";
+  return user.email.startsWith("qa-next-foreign-") ? "foreign hotel owner" : "hotel owner";
+}
+
+/** Deletes a synthetic WorkOS resource, sends the DELETE once more if WorkOS still has it, and
+ * fails with every status WorkOS answered if it is still there. Never names an email. */
+async function deleteUntilGone(
+  workos: JsonApi,
+  route: string,
+  what: string,
+  runId: string,
+  timing: DeletionTiming,
+): Promise<void> {
+  const statuses: number[] = [];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    statuses.push(await workos.deleteIfPresent(route));
+    const deadline = Date.now() + timing.timeoutMs / 2;
+    for (;;) {
+      if ((await workos.status(route)) === 404) return;
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, timing.pollIntervalMs));
+    }
+  }
+  throw new Error(
+    `Recovery required: WorkOS still has ${what} after DELETE answered ${statuses.join(", ")} (run ${runId}).`,
+  );
 }
 
 export async function recoverSmokeProperty(

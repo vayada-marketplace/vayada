@@ -76,13 +76,20 @@ export class JsonApi {
     }
   }
 
-  async deleteIfPresent(route: string): Promise<void> {
+  /** Deletes the resource unless it is already gone, and returns the status the API answered. */
+  async deleteIfPresent(route: string): Promise<number> {
     const response = await this.send("DELETE", route);
     if (!response.ok && response.status !== 404) {
       throw new Error(
         `DELETE ${route} returned ${response.status}: ${safeError(await response.text(), this.authorization ? [this.authorization] : [])}`,
       );
     }
+    return response.status;
+  }
+
+  /** The status a read answers, without its body: used to confirm a deletion (404). */
+  async status(route: string): Promise<number> {
+    return (await this.send("GET", route)).status;
   }
 
   private async send(

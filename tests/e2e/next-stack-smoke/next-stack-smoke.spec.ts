@@ -251,6 +251,9 @@ test("cleanup refreshes hotel authentication before PMS fallback", async () => {
     if (url.pathname.startsWith("/user_management/users/") && method === "DELETE") {
       return new Response(null, { status: 204 });
     }
+    if (url.pathname.startsWith("/user_management/users/") && method === "GET") {
+      return new Response(null, { status: 404 });
+    }
     throw new Error(`Unexpected test request: ${method} ${url}`);
   }) as typeof globalThis.fetch;
   const request = {
@@ -394,6 +397,69 @@ test("ordinary cleanup reconciles an untracked synthetic booking before retireme
     runId,
   });
 });
+
+// Run 40672258806 passed while WorkOS kept the hotel owner whose DELETE it had answered (VAY-2357).
+for (const answer of [202, 404]) {
+  test(`cleanup fails when WorkOS keeps a synthetic user after answering ${answer}`, async () => {
+    const runId = "20261028103613-deadbeef";
+    const environment: SmokeEnvironment = {
+      emailDomain: "example.test",
+      password: "synthetic-password",
+      runId,
+      workosApiKey: "sk_test_synthetic",
+    };
+    const owner: SyntheticUser = {
+      id: "user_kept",
+      email: `qa-next-hotel-${runId}@example.test`,
+      firstName: "Hotel",
+      lastName: "Owner",
+      role: "hotel",
+    };
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      );
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/user_management/users" && method === "GET") {
+        return jsonResponse({ data: [] });
+      }
+      if (url.pathname === "/user_management/organization_memberships" && method === "GET") {
+        return jsonResponse({ data: [] });
+      }
+      if (url.pathname === `/user_management/users/${owner.id}`) {
+        calls.push(method);
+        return method === "DELETE"
+          ? new Response(null, { status: answer })
+          : jsonResponse({ id: owner.id, email: owner.email });
+      }
+      throw new Error(`Unexpected test request: ${method} ${url}`);
+    }) as typeof globalThis.fetch;
+
+    let errors: unknown[];
+    try {
+      errors = await cleanupSmokeResources(
+        {} as APIRequestContext,
+        environment,
+        [owner],
+        [],
+        undefined,
+        undefined,
+        [],
+        { pollIntervalMs: 1, timeoutMs: 20 },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(errors.map(errorMessage)).toEqual([
+      `Recovery required: WorkOS still has the synthetic hotel owner user_kept after DELETE answered ${answer}, ${answer} (run ${runId}).`,
+    ]);
+    expect(errors.map(errorMessage).join(" ")).not.toContain(owner.email);
+    expect(calls.filter((method) => method === "DELETE")).toHaveLength(2);
+  });
+}
 
 smokeTest(
   "a new hotel's first run goes live, takes a guest booking and hands off to PMS and staff",
