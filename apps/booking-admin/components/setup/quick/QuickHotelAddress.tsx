@@ -27,6 +27,8 @@ type AddressDraft = Pick<
 export type QuickHotelAddressProps = {
   draft: AddressDraft;
   onChange: (patch: Partial<AddressDraft>) => void;
+  /** A pin looked up for a complete address without one, not placed by the owner; `onChange` by default. */
+  onPinLookedUp?: ((patch: Partial<AddressDraft>) => void) | null;
   error?: string;
   /** Google Maps key; without it the address is typed in and the map is left out. */
   apiKey?: string | null;
@@ -52,6 +54,7 @@ const hasPin = (draft: AddressDraft) =>
 export function QuickHotelAddress({
   draft,
   onChange,
+  onPinLookedUp,
   error,
   apiKey,
   currency,
@@ -83,7 +86,7 @@ export function QuickHotelAddress({
           if (!current || !found) return;
           // An area isn't the entrance: the map opens to drag the pin there.
           if (!found.precise) setAdjusting(true);
-          onChange({
+          (onPinLookedUp ?? onChange)({
             latitude: found.position.lat,
             longitude: found.position.lng,
             ...(timezoneFollowsAddress.current
@@ -99,7 +102,7 @@ export function QuickHotelAddress({
       current = false;
       clearTimeout(timer);
     };
-  }, [key, lookupFor, onChange]);
+  }, [key, lookupFor, onChange, onPinLookedUp]);
 
   const select = (address: GooglePlacesAddress) => {
     const timezone =
