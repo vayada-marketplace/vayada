@@ -270,6 +270,22 @@ describe("adaptive hotel setup contracts", () => {
       ["another property's task", { tasks: [{ ...basics, propertyId: "other-property" }] }],
       // The retired Marketplace tasks are unknown task IDs now.
       ["a retired Marketplace task", { tasks: [basics, { ...basics, taskId: "public_profile" }] }],
+      // So are the Hotel Operations tasks the API stopped computing in release 2 (VAY-2175).
+      [
+        "a retired Hotel Operations task",
+        {
+          tasks: [
+            basics,
+            {
+              ...basics,
+              taskId: "payment",
+              track: "hotel_operations",
+              requirementOwnerDomain: "finance",
+              destinationRouteKey: "finance.payment",
+            },
+          ],
+        },
+      ],
       ["an unknown plan key", { tasks: [basics], marketplacePublish: "not_applicable" }],
       // The old full plan's keys: the API stopped sending them in release 2 (VAY-2175).
       ["the old planRevision", { tasks: [basics], planRevision: "tracks:1" }],

@@ -60,7 +60,6 @@ export {
 export {
   ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
   SETUP_TRACKS,
-  SETUP_TASK_IDS,
   parseAdaptiveHotelSetupStatus,
   parsePropertyProfileResponse,
   parsePublicPropertyProfileResponse,
