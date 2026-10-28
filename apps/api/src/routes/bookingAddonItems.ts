@@ -12,6 +12,15 @@ import {
   readAddonLeadTime,
   type AddonLeadTimeHours,
 } from "../domains/addonLeadTime.js";
+import {
+  ADDON_SCHEDULE_MODES,
+  ADDON_WEEKDAYS,
+  isAddonScheduleMode,
+  parseBookableWeekdays,
+  readAddonSchedule,
+  resolveAddonScheduleMode,
+  type AddonScheduleMode,
+} from "../domains/addonSchedule.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 const ADDON_CATEGORIES = new Set(["dining", "experience", "transport", "wellness", "other"]);
@@ -31,6 +40,24 @@ type AddonDetails = {
   leadTime?: string | null;
   maxQuantity?: number;
 };
+
+/** VAY-2391: when it happens. A per-night price is always daily, and daily needs one. */
+type AddonSchedule = {
+  scheduleMode: AddonScheduleMode;
+  /** ISO weekdays (1 Monday … 7 Sunday) a guest can pick for a guest_pick add-on. */
+  bookableWeekdays: number[];
+};
+const SCHEDULE_PRICE_RULE =
+  "scheduleMode daily goes with a per-night price, and a per-night price is always daily.";
+const WEEKDAYS_RULE =
+  "bookableWeekdays must list one to seven different weekdays, from 1 (Monday) to 7 (Sunday).";
+
+/** The weekdays to save, sorted (every day when left out); throws on an invalid list. */
+function weekdaysToSave(value: number[] | undefined): number[] {
+  const days = value === undefined ? [...ADDON_WEEKDAYS] : parseBookableWeekdays(value);
+  if (!days) throw new BookingAddonImageInvalidError(WEEKDAYS_RULE);
+  return days;
+}
 
 export type BookingAddonItemStatus = "active" | "disabled" | "retired";
 
@@ -53,7 +80,8 @@ export type BookingAddonItem = {
   createdAt: string;
   updatedAt: string;
 } & AddonEconomicTerms &
-  AddonDetails;
+  AddonDetails &
+  AddonSchedule;
 
 export type CreateBookingAddonItemBody = {
   name: string;
@@ -68,7 +96,9 @@ export type CreateBookingAddonItemBody = {
   status: Exclude<BookingAddonItemStatus, "retired">;
   sortOrder: number;
 } & AddonEconomicTerms &
-  AddonDetails;
+  AddonDetails &
+  // Without a mode the price and category pick one (defaultAddonScheduleMode); every weekday by default.
+  Partial<AddonSchedule>;
 
 type UpdateAddonEconomicTerms =
   | { ownershipKind?: never; partnerCommissionRate?: never }
@@ -361,13 +391,21 @@ export function createPgTargetBookingAddonItemsRepository(config: {
           [propertyId],
         );
         body = { ...body, photos, sortOrder: order.rows[0]?.nextOrder ?? 0 };
+        const scheduleMode = resolveAddonScheduleMode({
+          pricingModel: body.pricingModel,
+          category: body.category,
+          chosen: body.scheduleMode,
+        });
+        if (!scheduleMode) throw new BookingAddonImageInvalidError(SCHEDULE_PRICE_RULE);
         const insertResult = await client.query<{ addonItemId: string }>(
           `INSERT INTO booking.addon_definitions (
              property_id, name, description, category, pricing_model,
              price_amount, currency, public_visible, status,
-             ownership_kind, partner_commission_rate, metadata
+             ownership_kind, partner_commission_rate, metadata,
+             schedule_mode, bookable_weekdays
            )
-           VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10, $11::numeric, $12::jsonb)
+           VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10, $11::numeric, $12::jsonb,
+             $13, $14::smallint[])
            RETURNING id::text AS "addonItemId"`,
           [
             propertyId,
@@ -382,6 +420,8 @@ export function createPgTargetBookingAddonItemsRepository(config: {
             body.ownershipKind,
             body.partnerCommissionRate,
             JSON.stringify(metadataFromBody(body, image)),
+            scheduleMode,
+            weekdaysToSave(body.bookableWeekdays),
           ],
         );
         const addonItemId = insertResult.rows[0]?.addonItemId;
@@ -429,6 +469,37 @@ export function createPgTargetBookingAddonItemsRepository(config: {
           ? await resolveAddonImage(pool, propertyId, body.imageMediaObjectId)
           : (photos.find((photo) => photo.isCover) ?? null);
       body = { ...body, photos };
+      // The price a mode was resolved against, when it was read rather than sent.
+      let readPricingModel: string | undefined;
+      if (body.pricingModel !== undefined || body.scheduleMode !== undefined) {
+        // The mode follows the price (VAY-2391): read what is saved when the body changes only one of them.
+        const saved =
+          body.pricingModel === undefined || body.scheduleMode === undefined
+            ? (
+                await pool.query<{
+                  pricingModel: string;
+                  category: string | null;
+                  scheduleMode: AddonScheduleMode;
+                }>(
+                  `SELECT pricing_model AS "pricingModel", category, schedule_mode AS "scheduleMode"
+                   FROM booking.addon_definitions
+                   WHERE property_id = $1 AND id::text = $2 AND status <> 'retired'`,
+                  [propertyId, addonItemId],
+                )
+              ).rows[0]
+            : undefined;
+        const pricingModel = body.pricingModel ?? saved?.pricingModel;
+        if (!pricingModel) return null;
+        if (body.pricingModel === undefined) readPricingModel = pricingModel;
+        const scheduleMode = resolveAddonScheduleMode({
+          pricingModel,
+          category: body.category ?? saved?.category,
+          chosen: body.scheduleMode,
+          saved: saved?.scheduleMode,
+        });
+        if (!scheduleMode) throw new BookingAddonImageInvalidError(SCHEDULE_PRICE_RULE);
+        body = { ...body, scheduleMode };
+      }
       const values: unknown[] = [propertyId, addonItemId];
       const sets: string[] = [];
       addSet(sets, values, "name", body.name);
@@ -439,6 +510,15 @@ export function createPgTargetBookingAddonItemsRepository(config: {
       addSet(sets, values, "currency", body.currency);
       addSet(sets, values, "public_visible", body.publicVisible);
       addSet(sets, values, "status", body.status);
+      addSet(sets, values, "schedule_mode", body.scheduleMode);
+      if (body.bookableWeekdays !== undefined)
+        addSet(
+          sets,
+          values,
+          "bookable_weekdays",
+          weekdaysToSave(body.bookableWeekdays),
+          "::smallint[]",
+        );
       if (body.ownershipKind !== undefined) {
         addSet(sets, values, "ownership_kind", body.ownershipKind);
         addSet(sets, values, "partner_commission_rate", body.partnerCommissionRate, "::numeric");
@@ -458,6 +538,13 @@ export function createPgTargetBookingAddonItemsRepository(config: {
       }
       values.push(new Date());
       sets.push(`updated_at = $${values.length}`);
+      // A price saved meanwhile by another request would leave this mode beside the wrong price: the
+      // update then finds no row, like an add-on removed meanwhile.
+      let guard = "";
+      if (readPricingModel !== undefined) {
+        values.push(readPricingModel);
+        guard = ` AND pricing_model = $${values.length}`;
+      }
 
       // The saved row comes from RETURNING: a query beside the UPDATE in the same statement
       // would still read the row as it was before it.
@@ -465,7 +552,7 @@ export function createPgTargetBookingAddonItemsRepository(config: {
         `WITH updated AS (
            UPDATE booking.addon_definitions
            SET ${sets.join(", ")}
-           WHERE property_id = $1 AND id::text = $2 AND status <> 'retired'
+           WHERE property_id = $1 AND id::text = $2 AND status <> 'retired'${guard}
            RETURNING *
          )
          ${addonItemSelectSql("updated AS addon_definitions")}`,
@@ -506,6 +593,8 @@ type AddonItemRow = {
   ownershipKind: string;
   partnerCommissionRate: string | null;
   metadata: unknown;
+  scheduleMode: unknown;
+  bookableWeekdays: unknown;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -525,6 +614,8 @@ function addonItemSelectSql(source = "booking.addon_definitions"): string {
     addon_definitions.ownership_kind AS "ownershipKind",
     addon_definitions.partner_commission_rate::text AS "partnerCommissionRate",
     addon_definitions.metadata,
+    addon_definitions.schedule_mode AS "scheduleMode",
+    addon_definitions.bookable_weekdays AS "bookableWeekdays",
     addon_definitions.created_at AS "createdAt",
     addon_definitions.updated_at AS "updatedAt"
    FROM ${source}`;
@@ -595,6 +686,8 @@ function toAddonItem(row: AddonItemRow, hotelId: string): BookingAddonItem {
   const duration = nullableString(metadata.duration);
   const sortOrder = typeof metadata.sortOrder === "number" ? metadata.sortOrder : 0;
   const leadTime = readAddonLeadTime(metadata);
+  const schedule = readAddonSchedule(row.pricingModel, row.scheduleMode, row.bookableWeekdays);
+  if (!schedule) throw new Error("Stored add-on schedule is invalid");
   return {
     addonItemId: row.addonItemId,
     hotelId,
@@ -623,6 +716,7 @@ function toAddonItem(row: AddonItemRow, hotelId: string): BookingAddonItem {
     sortOrder,
     createdAt: new Date(row.createdAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
+    ...schedule,
     ...economicTerms,
   };
 }
@@ -670,6 +764,7 @@ function parseCreateBody(body: unknown): ValidationResult<CreateBookingAddonItem
   const status = optionalEnum(input, "status", WRITABLE_STATUSES, details) ?? "active";
   const sortOrder = optionalInteger(input, "sortOrder", details) ?? 0;
   const extra = parseAddonDetails(input, details);
+  const schedule = parseAddonSchedule(input, details);
   const economicTerms = parseEconomicTerms(input, details, true) ?? {
     ownershipKind: "property",
     partnerCommissionRate: null,
@@ -691,6 +786,7 @@ function parseCreateBody(body: unknown): ValidationResult<CreateBookingAddonItem
       sortOrder,
       ...economicTerms,
       ...extra,
+      ...schedule,
     },
   };
 }
@@ -702,7 +798,10 @@ function parseUpdateBody(body: unknown): ValidationResult<UpdateBookingAddonItem
   const details = unknownFields(input);
   if (Object.keys(input).length === 0) details.push("At least one add-on item field is required.");
 
-  const value: UpdateBookingAddonItemBody = parseAddonDetails(input, details);
+  const value: UpdateBookingAddonItemBody = {
+    ...parseAddonDetails(input, details),
+    ...parseAddonSchedule(input, details),
+  };
   if ("name" in input) value.name = requiredString(input, "name", details);
   if ("description" in input) value.description = optionalString(input, "description", details);
   if ("price" in input) value.price = requiredPrice(input, details);
@@ -763,7 +862,26 @@ const KNOWN_FIELDS = new Set([
   "sortOrder",
   "ownershipKind",
   "partnerCommissionRate",
+  "scheduleMode",
+  "bookableWeekdays",
 ]);
+
+function parseAddonSchedule(
+  input: Record<string, unknown>,
+  details: string[],
+): Partial<AddonSchedule> {
+  const value: Partial<AddonSchedule> = {};
+  if ("scheduleMode" in input) {
+    if (isAddonScheduleMode(input.scheduleMode)) value.scheduleMode = input.scheduleMode;
+    else details.push(`scheduleMode must be one of ${ADDON_SCHEDULE_MODES.join(", ")}.`);
+  }
+  if ("bookableWeekdays" in input) {
+    const days = parseBookableWeekdays(input.bookableWeekdays);
+    if (days) value.bookableWeekdays = days;
+    else details.push(WEEKDAYS_RULE);
+  }
+  return value;
+}
 
 function parseEconomicTerms(
   input: Record<string, unknown>,

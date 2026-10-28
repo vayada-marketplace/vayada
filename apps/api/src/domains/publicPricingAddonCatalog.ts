@@ -84,6 +84,9 @@ export function createPublicPricingAddonCatalog(pool: Pool) {
               // The first property-local check-in date the quote accepts it for; null when it
               // needs no notice, or when that date is unknown (then it can't be added).
               bookableFrom: addon.leadTimeHours === null ? null : firstDate(addon.leadTimeHours),
+              // VAY-2391: when it happens; only guest_pick asks for a day, on these weekdays.
+              scheduleMode: addon.scheduleMode,
+              bookableWeekdays: addon.bookableWeekdays,
             })),
         };
       } finally {

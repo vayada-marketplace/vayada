@@ -7,6 +7,7 @@ import {
 import { isMinorAmount } from "@vayada/domain-pms";
 import { lockReplacementAddons } from "./replacementAddons.js";
 import { addonLeadTimeAllows } from "./addonLeadTime.js";
+import { addonScheduledDates } from "./addonSchedule.js";
 import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 
 /** Caller must already own authorization and validated room allocation in this transaction.
@@ -83,7 +84,12 @@ export async function lockReplacementAddonAmounts(client: PoolClient, value: unk
           (_, i) => new Date(Date.parse(stay.checkIn) + i * 86400000).toISOString().slice(0, 10),
         );
       if (dates.some((date) => date >= stay.checkOut)) return null;
-    } else if (dates !== null && dates.length !== 1) return null;
+    } else if (dates === null) {
+      // VAY-2391: the add-on's own day (check-in, check-out, or none for anytime). Guest-pick add-ons stay
+      // undated, which the booking refuses. Days today's booking page sends still count, on any weekday,
+      // until the page that sends none is live (VAY-2391 part 4 refuses them).
+      dates = addonScheduledDates(definition.scheduleMode, stay);
+    } else if (dates.length !== 1) return null;
     const peopleMultiplier = perPerson ? participants : 1,
       daysMultiplier = perNight ? dates!.length : 1;
     const amount =

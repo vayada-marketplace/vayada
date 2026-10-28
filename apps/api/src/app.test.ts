@@ -819,6 +819,8 @@ const bookingAddonItem: BookingAddonItem = {
   sortOrder: 0,
   ownershipKind: "property",
   partnerCommissionRate: null,
+  scheduleMode: "arrival",
+  bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
   createdAt: "2026-06-01T10:00:00.000Z",
   updatedAt: "2026-06-01T10:00:00.000Z",
 };
@@ -8081,6 +8083,9 @@ describe("vayada-api", () => {
           sortOrder: 0,
           ownershipKind: "property",
           partnerCommissionRate: null,
+          // Rows without the 0525 columns read as their defaults.
+          scheduleMode: "guest_pick",
+          bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
           createdAt: "2026-06-01T10:00:00.000Z",
           updatedAt: "2026-06-01T10:00:00.000Z",
         },

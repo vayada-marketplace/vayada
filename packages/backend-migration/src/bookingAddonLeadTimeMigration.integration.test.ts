@@ -135,3 +135,99 @@ describe.skipIf(!URL)("add-on lead time conversion 0491", () => {
     }
   }, 120_000);
 });
+
+// VAY-2391: when each add-on happens. Existing add-ons keep what they do today.
+describe.skipIf(!URL)("add-on schedule backfill 0525", () => {
+  it("makes per-night prices every day and one-off transport the arrival day", async () => {
+    assertSafeTestDatabase(URL!);
+    const database = "vayada_addon_schedule_test";
+    const admin = new pg.Client({ connectionString: URL });
+    const targetUrl = new globalThis.URL(URL!);
+    targetUrl.pathname = `/${database}`;
+    const before = await mkdtemp(join(tmpdir(), "vayada-2391-schedule-"));
+    const run = () =>
+      runMigrations({
+        connectionString: targetUrl.href,
+        migrationsDir: before,
+        environment: "local",
+      });
+    let target: pg.Client | undefined;
+    await admin.connect();
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+      await admin.query(`CREATE DATABASE ${database}`);
+      for (const file of await readdir(MIGRATIONS))
+        if (/^\d{4}_/.test(file) && Number(file.slice(0, 4)) < 525)
+          await cp(join(MIGRATIONS, file), join(before, file));
+      expect((await run()).failed).toBeNull();
+      target = new pg.Client({ connectionString: targetUrl.href });
+      await target.connect();
+      const db = target;
+      const hotel = randomUUID();
+      await db.query(
+        "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Schedule hotel')",
+        [hotel],
+      );
+      const addon = async (pricingModel: string, category: string | null, status = "active") => {
+        const id = randomUUID();
+        await db.query(
+          `INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,category,currency,status)
+           VALUES($1,$2,'Extra',$3,$4,'EUR',$5)`,
+          [id, hotel, pricingModel, category, status],
+        );
+        return id;
+      };
+      const expected: [string, string][] = [
+        [await addon("per_night", "dining"), "daily"],
+        [await addon("per_guest_night", "transport"), "daily"],
+        [await addon("per_stay", "transport"), "arrival"],
+        [await addon("per_guest", " Transport "), "arrival"],
+        [await addon("per_stay", "transport", "retired"), "arrival"],
+        [await addon("per_stay", "dining"), "guest_pick"],
+        [await addon("per_guest", null), "guest_pick"],
+      ];
+
+      await cp(
+        join(MIGRATIONS, "0525_booking_addon_schedule.sql"),
+        join(before, "0525_booking_addon_schedule.sql"),
+      );
+      expect((await run()).failed).toBeNull();
+
+      for (const [id, mode] of expected)
+        expect(
+          (
+            await db.query(
+              "SELECT schedule_mode, bookable_weekdays FROM booking.addon_definitions WHERE id=$1",
+              [id],
+            )
+          ).rows[0],
+        ).toEqual({ schedule_mode: mode, bookable_weekdays: [1, 2, 3, 4, 5, 6, 7] });
+      // New rows get the defaults; the checks refuse unknown modes and weekdays.
+      expect(
+        (
+          await db.query("SELECT schedule_mode FROM booking.addon_definitions WHERE id=$1", [
+            await addon("per_stay", "dining"),
+          ])
+        ).rows[0].schedule_mode,
+      ).toBe("guest_pick");
+      for (const [column, value, constraint] of [
+        ["schedule_mode", "weekly", "chk_addon_definitions_schedule_mode"],
+        ["bookable_weekdays", "{}", "chk_addon_definitions_bookable_weekdays"],
+        ["bookable_weekdays", "{0,1}", "chk_addon_definitions_bookable_weekdays"],
+        ["bookable_weekdays", "{1,NULL}", "chk_addon_definitions_bookable_weekdays"],
+        ["bookable_weekdays", "{{1,2},{3,4}}", "chk_addon_definitions_bookable_weekdays"],
+      ])
+        await expect(
+          db.query(`UPDATE booking.addon_definitions SET ${column}=$1 WHERE id=$2`, [
+            value,
+            expected[0][0],
+          ]),
+        ).rejects.toMatchObject({ constraint });
+    } finally {
+      await target?.end();
+      await admin.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+      await admin.end();
+      await rm(before, { recursive: true, force: true });
+    }
+  }, 120_000);
+});

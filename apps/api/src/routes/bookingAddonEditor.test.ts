@@ -77,4 +77,32 @@ describe("add-on editor payload", () => {
   it("allows removing the complete gallery", async () => {
     expect((await request({ ...body, photos: [] })).response.statusCode).toBe(201);
   });
+  // VAY-2391: when it happens. Whether a mode fits the price is checked when it is saved.
+  it.each([
+    { scheduleMode: "weekly" },
+    { scheduleMode: null },
+    { bookableWeekdays: [] },
+    { bookableWeekdays: [0, 1] },
+    { bookableWeekdays: [1, 1] },
+    { bookableWeekdays: "1,2" },
+  ])("rejects invalid schedule values before persistence: %j", async (invalid) => {
+    const { response, create } = await request({ ...body, ...invalid });
+    expect(response.statusCode).toBe(422);
+    expect(create).not.toHaveBeenCalled();
+  });
+  it("accepts a schedule that fits the price, with weekdays in order", async () => {
+    const daily = await request({ ...body, scheduleMode: "daily" });
+    expect(daily.response.statusCode).toBe(201);
+    const pick = await request({
+      ...body,
+      pricingModel: "per_stay",
+      scheduleMode: "guest_pick",
+      bookableWeekdays: [6, 5],
+    });
+    expect(pick.response.statusCode).toBe(201);
+    expect(pick.create.mock.calls[0][1]).toMatchObject({
+      scheduleMode: "guest_pick",
+      bookableWeekdays: [5, 6],
+    });
+  });
 });

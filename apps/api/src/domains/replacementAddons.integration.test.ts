@@ -53,6 +53,8 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
         maxGuests: null,
         leadTimeHours: null,
         legacyLeadTime: false,
+        scheduleMode: "guest_pick",
+        bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
         ownershipKind: "property",
         partnerCommissionRate: null,
       },
@@ -358,6 +360,44 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
       [f.id],
     );
     expect((await f.amounts(stayFrom(0)))?.totalMinor).toBe("1250");
+  });
+  it("dates an add-on by when it happens and keeps a guest's day to its weekdays (VAY-2391)", async () => {
+    const f = await amountFixture(),
+      a = f.stay.addons[0];
+    const schedule = (mode: string, weekdays = "{1,2,3,4,5,6,7}", model = "per_stay") =>
+      pool.query(
+        "UPDATE booking.addon_definitions SET schedule_mode=$2,bookable_weekdays=$3,pricing_model=$4 WHERE id=$1",
+        [f.id, mode, weekdays, model],
+      );
+    const dates = async (value: unknown = f.stay) => (await f.amounts(value))?.lines[0]?.dates;
+    // The stay runs Thursday 1 to Sunday 4 October. A guest-pick add-on without a day stays undated.
+    expect(await dates()).toBeNull();
+    await schedule("arrival");
+    expect(await dates()).toEqual(["2026-10-01"]);
+    expect((await f.amounts())?.totalMinor).toBe("1250");
+    await schedule("departure");
+    expect(await dates()).toEqual(["2026-10-04"]);
+    await schedule("anytime");
+    expect(await dates()).toEqual([]);
+    // Today's booking page sends a day for every one-off extra and offers every day of the stay. Until
+    // the page that sends none is live, those days still count; VAY-2391 part 4 refuses them.
+    expect(await dates({ ...f.stay, addons: [{ ...a, dates: ["2026-10-02"] }] })).toEqual([
+      "2026-10-02",
+    ]);
+    // Friday and Saturday only, yet Thursday and the check-out day are still accepted.
+    await schedule("guest_pick", "{5,6}");
+    for (const day of ["2026-10-02", "2026-10-01", "2026-10-04"])
+      expect(await dates({ ...f.stay, addons: [{ ...a, dates: [day] }] })).toEqual([day]);
+    // A per-night price is every night, whatever was stored by an older writer.
+    await schedule("guest_pick", "{5}", "per_night");
+    expect(await dates()).toEqual(["2026-10-01", "2026-10-02", "2026-10-03"]);
+    expect((await f.amounts())?.lines[0].definition).toMatchObject({ scheduleMode: "daily" });
+    await expect(schedule("weekly")).rejects.toMatchObject({
+      constraint: "chk_addon_definitions_schedule_mode",
+    });
+    await expect(schedule("arrival", "{0}")).rejects.toMatchObject({
+      constraint: "chk_addon_definitions_bookable_weekdays",
+    });
   });
   it("bounds aggregate arithmetic and uses exact saved KWD unit prices", async () => {
     const f = await amountFixture();

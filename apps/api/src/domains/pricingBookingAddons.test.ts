@@ -112,6 +112,34 @@ it("uses explicit resolved dates for all-night selections without inventing a mi
   current.calculation.addons.lines[0].dates = null;
   expect(project(current)).toBeNull();
 });
+it("books an anytime extra as one line without a day, and nothing else without one (VAY-2391)", () => {
+  const anytime = (patch: (line: Current["calculation"]["addons"]["lines"][number]) => void) => {
+    const current = fixture(),
+      line = current.calculation.addons.lines[0],
+      selected = current.quote.stay.addons[0];
+    Object.assign(line.definition, { pricingModel: "per_stay", scheduleMode: "anytime" });
+    line.people = null;
+    if (selected.version === "addon-selection.v2") selected.people = null;
+    selected.dates = null;
+    line.dates = [];
+    line.peopleMultiplier = line.daysMultiplier = 1;
+    patch(line);
+    rebind(current);
+    return project(current);
+  };
+  const rows = anytime(() => {})!;
+  expect(rows.map((row) => [row.serviceDate, row.totalAmount])).toEqual([[null, "24.00"]]);
+  expect(rows[0].addonSnapshot).toMatchObject({ serviceDate: null, amountMinor: "2400" });
+  for (const patch of [
+    (line: Current["calculation"]["addons"]["lines"][number]) => {
+      Object.assign(line.definition, { scheduleMode: "guest_pick" });
+    },
+    (line: Current["calculation"]["addons"]["lines"][number]) => {
+      Object.assign(line.definition, { pricingModel: "per_night" });
+    },
+  ])
+    expect(anytime(patch)).toBeNull();
+});
 it("supports property-owned quantity extras and a checkout-day one-time service", () => {
   for (const model of ["per_stay", "per_night", "per_guest"] as const) {
     const current = fixture(),
