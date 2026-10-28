@@ -132,10 +132,11 @@
       "partialRefund": "Pengembalian sebagian",
       "mealNonRefundable": "{meal}, tidak dapat dikembalikan",
       "mealPartialRefund": "{meal}, pengembalian sebagian",
-      "freeUntil": "Pembatalan gratis hingga {date}",
+      "freeUntil": "Pembatalan gratis hingga {date}, 23.59 (waktu setempat)",
       "noRefund": "Tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "partialRefundTerms": "Jika Anda membatalkan, kami mengembalikan sebagian harga. Lihat ketentuan kami di langkah berikutnya",
-      "noLongerFree": "Pembatalan gratis tidak lagi tersedia untuk tanggal ini",
+      "windowPassed": "Pembatalan gratis berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
+      "freeEnded": "Pembatalan gratis sudah berakhir",
       "meal": {
         "room_only": "Hanya kamar",
         "breakfast": "Termasuk sarapan",

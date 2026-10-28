@@ -22,6 +22,7 @@ import RoomCard from "@/components/booking/RoomCard";
 import RoomsBar from "@/components/booking/RoomsBar";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import { serverNow } from "@/lib/serverClock";
 import {
   encodePick,
   MAX_ROOMS,
@@ -379,6 +380,8 @@ function HomePageContent() {
         null,
       )
     : null;
+  // The server's clock, as checkout judges free cancellation's deadline (VAY-2392).
+  const now = new Date(serverNow());
   const barSlots = slots.map((guests, index) => {
     const pick = picks[index];
     const room = pick && rooms?.find((r) => r.roomTypeId === pick.roomTypeId);
@@ -388,9 +391,10 @@ function HomePageContent() {
     const rate =
       room && offerIndex >= 0
         ? choiceText(
-            choiceKeys(room.offers)[offerIndex]!,
+            choiceKeys(room.offers, { checkIn, timezone: hotel.timezone }, now)[offerIndex]!,
             { checkIn, timezone: hotel.timezone, formatDate: (date) => date },
             t,
+            now,
           ).name
         : null;
     return {

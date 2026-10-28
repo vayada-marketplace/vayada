@@ -132,10 +132,11 @@
       "partialRefund": "Teilerstattung",
       "mealNonRefundable": "{meal}, nicht erstattbar",
       "mealPartialRefund": "{meal}, Teilerstattung",
-      "freeUntil": "Kostenlose Stornierung bis {date}",
+      "freeUntil": "Kostenlose Stornierung bis {date}, 23:59 Uhr (Ortszeit)",
       "noRefund": "Keine Erstattung bei Stornierung oder Nichterscheinen",
       "partialRefundTerms": "Bei Stornierung erstatten wir einen Teil des Preises. Unsere Bedingungen sehen Sie im nächsten Schritt",
-      "noLongerFree": "Für diese Daten ist keine kostenlose Stornierung mehr möglich",
+      "windowPassed": "Die kostenlose Stornierung endet {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
+      "freeEnded": "Die kostenlose Stornierung ist abgelaufen",
       "meal": {
         "room_only": "Nur Zimmer",
         "breakfast": "Frühstück inklusive",
