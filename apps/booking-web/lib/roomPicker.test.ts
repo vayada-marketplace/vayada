@@ -165,6 +165,13 @@ describe("pick drafts", () => {
     const identity = pickIdentity(stay);
     savePickDraft("hotel", identity, { split: [3, 1], picks: [pick, null] });
     expect(readPickDraft("hotel", identity)).toEqual({ split: [3, 1], picks: [pick, null] });
+    // Children the guest placed come back while they match the rooms.
+    savePickDraft("hotel", identity, { split: [2, 2], picks: [pick, null], children: [0, 1] });
+    expect(readPickDraft("hotel", identity)).toEqual({
+      split: [2, 2],
+      picks: [pick, null],
+      children: [0, 1],
+    });
     expect(readPickDraft("hotel", pickIdentity({ ...stay, checkOut: "2026-11-13" }))).toBeNull();
     expect(readPickDraft("hotel", pickIdentity({ ...stay, promoCode: "SUMMER" }))).toBeNull();
   });

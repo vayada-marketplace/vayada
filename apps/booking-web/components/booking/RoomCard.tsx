@@ -40,6 +40,7 @@ export default function RoomCard({
   onView: onViewed,
   detailsRequest = 0,
   pick,
+  bookPart,
   place = null,
   locationLine = null,
   compact = false,
@@ -80,6 +81,9 @@ export default function RoomCard({
     /** Every room is chosen (Back from the next step): nothing to pick until a pill opens one. */
     allChosen: boolean;
   };
+  /** VAY-2393, one room for the whole party: a room too small for it is booked for the adults it
+   * takes, and the guest picks a second room for the rest. `guests` is the whole party. */
+  bookPart?: { guests: number; onBook: (publicOfferKey: string, adults: number) => void };
   /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
   place?: GuestPlace | null;
   /** Where the room is next to the main house, while its rooms are in several places (VAY-2324). */
@@ -133,6 +137,8 @@ export default function RoomCard({
   const left = pick && prices?.roomsFree != null ? prices.roomsFree - pick.takenBy.length : null;
   const usedUp = !!pick && left !== null && left <= 0 && !soldOut;
   const tooSmall = doesNotFit && !soldOut && !usedUp;
+  // VAY-2393: too small for the whole party but free: priced for the adults it takes.
+  const part = !pick && bookPart && tooSmall ? (prices?.part ?? null) : null;
   // Who sleeps where moves adults: it helps a too-small room only when the adults are what
   // doesn't fit, and says how many adults the room takes next to this room's children.
   const adultsFit =
@@ -160,7 +166,9 @@ export default function RoomCard({
   const now = new Date(serverNow());
   const keys = choiceKeys(room.offers, { checkIn, timezone }, now);
   const all = room.offers.map((offer, index) => {
-    const price = prices?.offers.find((p) => p.publicOfferKey === offer.publicOfferKey);
+    const price = (part?.offers ?? prices?.offers)?.find(
+      (p) => p.publicOfferKey === offer.publicOfferKey,
+    );
     return {
       offer,
       text: choiceText(
@@ -173,7 +181,7 @@ export default function RoomCard({
       unavailable: !!prices && price?.status !== "priced" && price?.status !== "unpriced",
       bookable:
         !soldOut &&
-        !tooSmall &&
+        (!tooSmall || !!part) &&
         !usedUp &&
         !paidDifferently(offer) &&
         (unpricedRoom || price?.status === "priced" || price?.status === "unpriced"),
@@ -302,7 +310,21 @@ export default function RoomCard({
       {promoCode && selected?.priced && !selected.priced.promoApplied && (
         <p className="text-xs text-gray-500 mt-2">{t("promoNotApplied", { code: promoCode })}</p>
       )}
-      {pick && splitHelps ? (
+      {part && bookPart ? (
+        // VAY-2393: the whole party doesn't fit: book it for part of it, then a second room.
+        <button
+          type="button"
+          data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+          onClick={act(
+            inDetails,
+            () => selected && bookPart.onBook(selected.offer.publicOfferKey, part.adults),
+          )}
+          disabled={!selected}
+          className="w-full mt-4 py-3 bg-white text-primary-700 font-semibold rounded-xl border-[1.5px] border-primary-600 hover:bg-primary-50 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {t("pickRoom.bookPart", { adults: part.adults, rest: bookPart.guests - part.adults })}
+        </button>
+      ) : pick && splitHelps ? (
         // VAY-2393: too small for this room's guests: another split may fit it.
         <button
           type="button"
@@ -365,7 +387,12 @@ export default function RoomCard({
       {pick && currentRate && !pick.allChosen && (
         <p className="text-sm mt-3 text-gray-600">{t("pickRoom.swapHint")}</p>
       )}
-      {tooSmall && room.occupancy && !pick?.allChosen && (
+      {part && bookPart && (
+        <p className="text-sm mt-3 text-gray-600">
+          {t("pickRoom.partNote", { count: part.adults, guests: bookPart.guests })}
+        </p>
+      )}
+      {tooSmall && !part && room.occupancy && !pick?.allChosen && (
         <p className="text-sm mt-3 text-gray-600">
           {(pick ? pick.guests.children : childGuests) > 0 && room.occupancy.maxChildren === 0
             ? t("noChildren")
@@ -376,9 +403,13 @@ export default function RoomCard({
       )}
       {/* Free rooms but no choice priced for the stay: say why the button reads "Not available".
           Room by room, a type the group used up or paid another way says so instead (VAY-2320). */}
-      {prices && !soldOut && !tooSmall && !usedUp && all.every((choice) => choice.unavailable) && (
-        <p className="text-sm mt-3 text-gray-600">{t("notBookableForDates")}</p>
-      )}
+      {prices &&
+        !soldOut &&
+        (!tooSmall || part) &&
+        !usedUp &&
+        all.every((choice) => choice.unavailable) && (
+          <p className="text-sm mt-3 text-gray-600">{t("notBookableForDates")}</p>
+        )}
       {/* Rooms left only matter when a choice can be booked; never beside "Not available" (VAY-2319). */}
       {!soldOut && selected && fewLeft !== null && (
         <p
@@ -491,7 +522,7 @@ export default function RoomCard({
               <span className="text-sm font-semibold text-gray-500">
                 {t("pickRoom.alreadyYours", { number: pick!.takenBy.join(" & ") })}
               </span>
-            ) : tooSmall || (prices && !selected) ? (
+            ) : (tooSmall && !part) || (prices && !selected) ? (
               <span className="text-sm font-semibold text-gray-500">{t("notAvailable")}</span>
             ) : pricesState === "loading" ? (
               <span className="block h-5 w-16 animate-pulse rounded bg-gray-200" />
@@ -503,6 +534,12 @@ export default function RoomCard({
                 {tc("perNight")}
                 {nightly.paid && (
                   <span className="block text-xs">{t("youPay", { price: nightly.paid })}</span>
+                )}
+                {/* VAY-2393: a part's price is for the adults the place takes. */}
+                {part && bookPart && (
+                  <span className="block text-xs">
+                    {t("pickRoom.partNote", { count: part.adults, guests: bookPart.guests })}
+                  </span>
                 )}
               </p>
             ) : (

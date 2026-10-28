@@ -183,7 +183,8 @@
       "readyForExtras": "Bereit für die Extras",
       "readyForDetails": "Bereit für Ihre Angaben",
       "continueToExtras": "Weiter zu den Extras",
-      "continueToDetails": "Weiter zu Ihren Angaben"
+      "continueToDetails": "Weiter zu Ihren Angaben",
+      "partChosen": "Zimmer 1: {name} für {count}. Wählen Sie jetzt eine Unterkunft für die anderen {rest}."
     },
     "pickRoom": {
       "selectFor": "Für Zimmer {number} wählen",
@@ -195,9 +196,18 @@
       "updateRoom": "Zimmer {number} ändern",
       "soldOut": "Für diese Daten ausgebucht",
       "allChosen": "Alle Zimmer gewählt",
-      "swapHint": "Wählen Sie eine andere Unterkunft, um sie zu tauschen."
+      "swapHint": "Wählen Sie eine andere Unterkunft, um sie zu tauschen.",
+      "bookPart": "Für {adults} buchen + 2. Zimmer für {rest} wählen",
+      "partNote": "Bietet Platz für {count} Ihrer {guests} Gäste."
     },
-    "pricesPerRoom": "Preise gelten pro Zimmer für die Erwachsenen darin. Kinder kommen dazu, sobald Sie im nächsten Schritt ihr Alter angeben."
+    "pricesPerRoom": "Preise gelten pro Zimmer für die Erwachsenen darin. Kinder kommen dazu, sobald Sie im nächsten Schritt ihr Alter angeben.",
+    "oneRoom": {
+      "together": "Wir zeigen Unterkünfte für alle {count} Gäste zusammen.",
+      "preferSeparate": "Lieber getrennte Zimmer?",
+      "noneFits": "Keine Unterkunft bietet allein Platz für {count} Gäste.",
+      "splitHint": "Teilen Sie Ihre Gruppe auf und wählen Sie für jeden Teil eine Unterkunft.",
+      "bookRooms": "{count} Zimmer buchen"
+    }
   },
   "rooms": {
     "title": "Unsere Zimmer",

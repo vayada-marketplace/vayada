@@ -12,8 +12,9 @@ interface GuestSelectorProps {
   onUpdate: (adults: number, children: number) => void;
   adultAgeThreshold?: number;
   childrenEnabled?: boolean;
-  /** VAY-2320: the group's rooms. It starts at the fewest the group needs and can't go below.
-   * VAY-2393: with two or more, "Who sleeps where" sets each room's adults (`split`). */
+  /** VAY-2320: the group's rooms; `fewest` is what the group needs here, said as a hint
+   * (VAY-2393: one room stays possible, for a place booked for part of the group). With two or
+   * more, "Who sleeps where" sets each room's adults (`split`). */
   rooms?: {
     count: number;
     fewest: number;
@@ -159,7 +160,7 @@ export default function GuestSelector({
                   : t("roomsHint")
               }
               value={rooms.count}
-              min={fewestRooms}
+              min={1}
               max={mostRooms}
               onChange={rooms.onChange}
             />
