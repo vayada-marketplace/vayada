@@ -5,6 +5,7 @@ import { PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS } from "./platform/propert
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgPlatformMediaRepository } from "./platform/platformMediaRepository.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import {
@@ -1023,6 +1024,113 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
     });
   }, 30_000);
 
+  it("counts a room type as priced through the active pricing-v2 publication (VAY-2087)", async () => {
+    const pricingOnly = await repository.createPropertyProfile({
+      organizationId,
+      idempotencyKey: "pricing-v2-room-readiness-create",
+      correlationId: "pricing-v2-room-readiness-create",
+      profile: { ...profile, displayName: "Pricing V2 Room Readiness Hotel" },
+    });
+    const legacy = await repository.createPropertyProfile({
+      organizationId,
+      idempotencyKey: "legacy-room-readiness-create",
+      correlationId: "legacy-room-readiness-create",
+      profile: { ...profile, displayName: "Legacy Room Readiness Hotel" },
+    });
+    const pricingOnlyRoomTypeId = randomUUID();
+    const legacyRoomTypeId = randomUUID();
+    const unbuiltRoomTypeId = randomUUID();
+    // One sellable room type per hotel (a room and future inventory); only the legacy one has a plan.
+    for (const [propertyId, roomTypeId] of [
+      [pricingOnly.propertyId, pricingOnlyRoomTypeId],
+      [legacy.propertyId, legacyRoomTypeId],
+    ] as const) {
+      await client.query(
+        `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active)
+         VALUES ($2::uuid, $1::uuid, 'Double', 100, 'EUR', TRUE)`,
+        [propertyId, roomTypeId],
+      );
+      await client.query(
+        `INSERT INTO pms.rooms (id, property_id, room_type_id, room_number, status)
+         VALUES ($3::uuid, $1::uuid, $2::uuid, '101', 'available')`,
+        [propertyId, roomTypeId, randomUUID()],
+      );
+      await client.query(
+        `INSERT INTO pms.inventory_days (
+           property_id,
+           room_type_id,
+           stay_date,
+           total_count,
+           available_count,
+           status
+         )
+         VALUES ($1::uuid, $2::uuid, CURRENT_DATE + 1, 1, 1, 'open')`,
+        [propertyId, roomTypeId],
+      );
+    }
+    await client.query(
+      `INSERT INTO pms.rate_plans (
+         id,
+         property_id,
+         room_type_id,
+         code,
+         name,
+         base_rate_amount,
+         currency,
+         active
+       )
+       VALUES ($3::uuid, $1::uuid, $2::uuid, 'LEGACY', 'Legacy', 100, 'EUR', TRUE)`,
+      [legacy.propertyId, legacyRoomTypeId, randomUUID()],
+    );
+    // Active but without rooms yet: the legacy hotel's publication below prices only this one.
+    await client.query(
+      `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active)
+       VALUES ($2::uuid, $1::uuid, 'Suite', 100, 'EUR', TRUE)`,
+      [legacy.propertyId, unbuiltRoomTypeId],
+    );
+    const readRooms = async (read: typeof repository = repository) =>
+      (
+        await read.getHotelSetupStatus({
+          organizationId,
+          propertyIds: [pricingOnly.propertyId, legacy.propertyId],
+        })
+      ).properties.map(({ taskFacts }) => taskFacts.rooms_rates_availability);
+    const unpriced = {
+      ownerProgress: "in_progress",
+      readiness: "actionable",
+      reasonCodes: ["missing_active_rate_plan", "missing_future_inventory"],
+    };
+    const priced = { ownerProgress: "owner_complete", readiness: "complete", reasonCodes: [] };
+
+    const before = await readRooms();
+    expect(before).toMatchObject([unpriced, priced]);
+
+    // Saving a pricing-v2 draft creates the head at revision 0. That's no publication: unchanged.
+    await client.query(
+      "INSERT INTO pms.pricing_v2_heads (property_id) VALUES ($1::uuid), ($2::uuid)",
+      [pricingOnly.propertyId, legacy.propertyId],
+    );
+    expect(await readRooms()).toEqual(before);
+
+    await publishPricing(pricingOnly.propertyId, [pricingOnlyRoomTypeId]);
+    // A publication replaces the legacy plans, as for calendar auto-open: Double has no offer.
+    await publishPricing(legacy.propertyId, [unbuiltRoomTypeId]);
+    const published = await readRooms();
+    expect(published).toMatchObject([priced, unpriced]);
+
+    // The production API login reads the pricing-v2 tables too.
+    const login = await createHotelSetupOrdinaryLoginFixture(client, TEST_DATABASE_URL!);
+    const restricted = createPgSharedHotelSetupStatusRepository({
+      connectionString: login.connectionString,
+    });
+    try {
+      expect(await readRooms(restricted)).toEqual(published);
+    } finally {
+      await restricted.close?.();
+      await login.drop();
+    }
+  }, 30_000);
+
   it.each([
     { methods: ["pay_at_property"], enabled: true, complete: true },
     { methods: ["pay_at_property", "cash"], enabled: true, complete: true },
@@ -1123,6 +1231,15 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
           propertyId,
         ]);
         await client.query("DELETE FROM pms.rate_plans WHERE property_id = $1::uuid", [propertyId]);
+        await client.query("DELETE FROM pms.pricing_v2_rooms WHERE property_id = $1::uuid", [
+          propertyId,
+        ]);
+        await client.query("DELETE FROM pms.pricing_v2_revisions WHERE property_id = $1::uuid", [
+          propertyId,
+        ]);
+        await client.query("DELETE FROM pms.pricing_v2_heads WHERE property_id = $1::uuid", [
+          propertyId,
+        ]);
         await client.query("DELETE FROM pms.rooms WHERE property_id = $1::uuid", [propertyId]);
         await client.query("DELETE FROM pms.room_types WHERE property_id = $1::uuid", [propertyId]);
         await client.query(
@@ -1164,6 +1281,54 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       await client.query("DELETE FROM identity.users WHERE id = ANY($1::uuid[])", [
         [actorUserId, secondActorUserId],
       ]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** Publishes the head's next pricing-v2 revision with one offer per room type. */
+  async function publishPricing(propertyId: string, roomTypeIds: string[]): Promise<void> {
+    await client.query("BEGIN");
+    try {
+      const head = await client.query<{ revision: number }>(
+        "SELECT revision + 1 AS revision FROM pms.pricing_v2_heads WHERE property_id = $1::uuid",
+        [propertyId],
+      );
+      const revision = head.rows[0]!.revision;
+      await client.query(
+        `INSERT INTO pms.pricing_v2_revisions
+           (property_id, revision, room_count, currency, source_revisions, owner_references,
+            request_id, request_hash, actor_user_id)
+         VALUES ($1::uuid, $2, $3, 'EUR', '{}', '{}', $4, $5, $6::uuid)`,
+        [propertyId, revision, roomTypeIds.length, randomUUID(), "a".repeat(64), actorUserId],
+      );
+      for (const roomTypeId of roomTypeIds) {
+        await client.query(
+          `INSERT INTO pms.pricing_v2_rooms
+             (property_id, revision, room_type_id, currency, configuration)
+           VALUES ($1::uuid, $2, $3::uuid, 'EUR', $4::jsonb)`,
+          [
+            propertyId,
+            revision,
+            roomTypeId,
+            JSON.stringify({
+              version: "pricing.v2",
+              propertyId,
+              roomTypeId,
+              currency: "EUR",
+              revision,
+              capacity: { total: 2, adults: 2, children: 0 },
+              offers: [{ id: "flex" }],
+            }),
+          ],
+        );
+      }
+      await client.query(
+        "UPDATE pms.pricing_v2_heads SET revision = $2 WHERE property_id = $1::uuid",
+        [propertyId, revision],
+      );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
