@@ -201,17 +201,10 @@ const addons = [
   },
 ];
 
-// The legacy availability routes answer 410 like the real API does now (VAY-1543 C.2);
-// booking-web must never request them. Specs assert on this through `legacyPricingRequests`.
-export const PRICING_RETIRED = {
-  status: 410,
-  json: {
-    statusCode: 410,
-    code: "PRICING_RETIRED",
-    message:
-      "The old booking flow has been retired. Price and book through the room-and-price flow.",
-  },
-};
+// The legacy availability routes (offers, calendar) were removed in VAY-2387, so they answer
+// 404 like the real API; booking-web must never request them. Specs assert on this through
+// `legacyPricingRequests`.
+const REMOVED_PRICING_ROUTE = { status: 404 };
 
 /** A one-room catalogue so the room-and-price page renders its form. */
 export async function mockPricingCatalogue(page: Page) {
@@ -389,7 +382,7 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
 
   for (const retired of ["offers", "calendar"]) {
     await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/${retired}**`, (route) =>
-      route.fulfill(PRICING_RETIRED),
+      route.fulfill(REMOVED_PRICING_ROUTE),
     );
   }
 

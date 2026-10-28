@@ -386,46 +386,6 @@ export type RecurringPricingMaterializationResult =
   | { readonly ok: true; readonly receipt: RecurringPricingMaterializationReceipt }
   | { readonly ok: false; readonly error: PmsRecurringPricingCommandError };
 
-export type PmsRecurringPricingCommandPort = {
-  /**
-   * Each method authorizes the current organization/property scope before
-   * idempotency replay. A completed matching key replays byte-for-byte; a
-   * changed business fingerprint returns idempotency_key_conflict. The same
-   * transaction persists source/revision/lifecycle, audit, domain event,
-   * outbox intent, and completed idempotency result.
-   *
-   * Upsert creates, edits, or re-enables exactly one caller-identified source.
-   * The adapter locks and verifies VAY-1069 currency/flexible-plan evidence and
-   * room-facts revisions. It also validates case-insensitive season-name
-   * uniqueness, annual overlap, and additional-guest capacity applicability.
-   */
-  upsertRecurringSeason(
-    command: UpsertRecurringSeasonCommand,
-  ): Promise<PmsRecurringPricingCommandResult>;
-  upsertWeekendSurcharge(
-    command: UpsertWeekendSurchargeCommand,
-  ): Promise<PmsRecurringPricingCommandResult>;
-  upsertAdditionalGuestPricing(
-    command: UpsertAdditionalGuestPricingCommand,
-  ): Promise<PmsRecurringPricingCommandResult>;
-  upsertNonRefundablePricing(
-    command: UpsertNonRefundablePricingCommand,
-  ): Promise<PmsRecurringPricingCommandResult>;
-  /** Disable preserves the definition and stable ID while advancing its revision. */
-  disableRecurringPricingSource(
-    command: DisableRecurringPricingSourceCommand,
-  ): Promise<PmsRecurringPricingCommandResult>;
-  /**
-   * Materialization replaces derived dated rows for every optional source in
-   * the requested bounded horizon under aggregate compare-and-set. It never
-   * edits source identity, revision, definition, or lifecycle and records
-   * skipped disabled/invalid sources in the receipt.
-   */
-  materializeRecurringPricing(
-    command: MaterializeRecurringPricingCommand,
-  ): Promise<RecurringPricingMaterializationResult>;
-};
-
 export type PmsRecurringPricingReadPort = {
   getRecurringPricingSource(
     propertyId: string,

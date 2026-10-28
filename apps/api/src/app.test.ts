@@ -42,13 +42,6 @@ import Fastify from "fastify";
 import type { QueryResult, QueryResultRow } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createTargetPublicHotelQuoteRepository,
-  serializePublicHotelQuoteProjection,
-  toUnavailablePublicHotelQuoteProjection,
-  type PublicHotelQuoteReadPool,
-  type PublicHotelQuoteRepository,
-} from "./routes/aiHotelQuotes.js";
 import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import { loadConfig } from "./config.js";
@@ -94,11 +87,7 @@ import {
   type BookingCustomDomainPool,
   type BookingCustomDomainRepository,
 } from "./routes/bookingCustomDomain.js";
-import {
-  createTargetBookingWebCalendarRepository,
-  type BookingWebCalendarReadPool,
-  type BookingHotelChangeRequestRepository,
-} from "./routes/bookingWebPublic.js";
+import { type BookingHotelChangeRequestRepository } from "./routes/bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.fixtures.js";
 import type {
   PlatformAdminDashboardRepository,
@@ -173,7 +162,6 @@ import type {
   PmsRoomOrderCommand,
   PmsRoomType,
   PmsRoomTypeCommandResponse,
-  PmsRoomTypeCreateCommand,
   PmsRoomTypeUpdateCommand,
 } from "./routes/pmsOperations.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
@@ -1545,7 +1533,6 @@ function createPmsOperationsCommandRepository(
   noteCreates: PmsPrivateNoteCreateCommand[];
   noteDeletes: PmsPrivateNoteDeleteCommand[];
   noteUpdates: PmsPrivateNoteUpdateCommand[];
-  roomTypeCreates: PmsRoomTypeCreateCommand[];
   roomTypeUpdates: PmsRoomTypeUpdateCommand[];
   roomBlockCreates: PmsRoomBlockCreateCommand[];
   roomOrderCommands: PmsRoomOrderCommand[];
@@ -1568,7 +1555,6 @@ function createPmsOperationsCommandRepository(
   const noteCreates: PmsPrivateNoteCreateCommand[] = [];
   const noteDeletes: PmsPrivateNoteDeleteCommand[] = [];
   const noteUpdates: PmsPrivateNoteUpdateCommand[] = [];
-  const roomTypeCreates: PmsRoomTypeCreateCommand[] = [];
   const roomTypeUpdates: PmsRoomTypeUpdateCommand[] = [];
   const roomBlockCreates: PmsRoomBlockCreateCommand[] = [];
   const roomOrderCommands: PmsRoomOrderCommand[] = [];
@@ -1646,7 +1632,6 @@ function createPmsOperationsCommandRepository(
     noteCreates,
     noteDeletes,
     noteUpdates,
-    roomTypeCreates,
     roomTypeUpdates,
     roomBlockCreates,
     roomOrderCommands,
@@ -1742,76 +1727,6 @@ function createPmsOperationsCommandRepository(
         ok: true as const,
         items: [structuredClone(item)],
         commandMeta: roomBlockCommandMeta(command, "2026-08-14T18:02:00.000Z"),
-      };
-    },
-    async createRoomType(command) {
-      roomTypeCreates.push(command);
-      if (command.idempotencyKey === "room-type-create-conflict") {
-        return {
-          ok: false,
-          statusCode: 409,
-          code: "idempotency_conflict",
-          message: "Room type create idempotency key was already used.",
-        };
-      }
-      const ratePlans: PmsRoomType["ratePlans"] = [
-        {
-          ratePlanId: "f6855200-0000-0000-0000-000000000003",
-          code: "FLEX",
-          name: "Flexible",
-          rateType: "flexible",
-          mealPlan: null,
-          baseRate: command.baseRate,
-          cancellationPolicySnapshot: command.flexibleCancellationPolicy ?? {},
-          active: true,
-        },
-      ];
-      if (command.nonRefundableRate) {
-        ratePlans.push({
-          ratePlanId: "f6855200-0000-0000-0000-000000000004",
-          code: "NRF",
-          name: "Non-refundable",
-          rateType: "non_refundable",
-          mealPlan: null,
-          baseRate: command.nonRefundableRate,
-          active: true,
-        });
-      }
-      const roomType: PmsRoomType = {
-        roomTypeId: "f6855000-0000-0000-0000-000000000003",
-        version: "room-type-facts-v1",
-        name: command.name,
-        description: command.description,
-        category: command.category,
-        occupancyLimits: command.occupancyLimits,
-        attributes: command.attributes,
-        amenities: command.amenities,
-        media: command.media,
-        baseRate: command.baseRate,
-        active: command.active,
-        sortOrder: command.sortOrder,
-        ratePlans,
-        rateRulesSummary: {
-          minStayNights: null,
-          maxStayNights: null,
-          closedToArrival: false,
-          closedToDeparture: false,
-          activeRuleCount: 0,
-        },
-        roomCount: command.roomCount,
-      };
-      auditEvents.push(`room_type_created:${roomType.roomTypeId}`);
-      outboxEnqueues.push(`ari_changed:${roomType.roomTypeId}`);
-      return {
-        ok: true,
-        roomType,
-        commandMeta: {
-          contractVersion: "pms-operations.v1",
-          commandId: command.commandId,
-          idempotencyKey: command.idempotencyKey,
-          acceptedAt: "2026-08-14T17:40:00.000Z",
-          sideEffects: ["ari_changed", "audit_event"],
-        },
       };
     },
     async updateRoomTypeLocation(command) {
@@ -2482,9 +2397,6 @@ const seededPublicProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
 const seededPublicQuote = PUBLIC_BOOKABILITY_FIXTURES.find(
   (fixture) => fixture.caseId === "bookable",
 )!.quote!;
-const seededUnavailableQuote = PUBLIC_BOOKABILITY_FIXTURES.find(
-  (fixture) => fixture.caseId === "unavailable",
-)!.quote!;
 const seededCustomDomainProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
   (fixture) => fixture.caseId === "custom_domain",
 )!.profile;
@@ -2584,16 +2496,6 @@ function targetPublicHotelProfileRow(): QueryResultRow {
     expiresAt: null,
   };
 }
-
-const publicHotelQuoteRepository: PublicHotelQuoteRepository = {
-  async findQuoteBySlug(slug, query) {
-    if (slug !== seededPublicQuote.request.hotelSlug) return null;
-    if (query.check_in === "2026-09-12" && query.check_out === "2026-09-15") {
-      return seededPublicQuote;
-    }
-    return seededUnavailableQuote;
-  },
-};
 
 function identityRepositoryWithResources(
   hotelId: string | null = "booking_hotel_alpenrose",
@@ -3380,17 +3282,6 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("does not expose public AI hotel quotes until a distribution read model is configured", async () => {
-    app = buildApp({ logger: false });
-
-    const response = await injectJson(app, {
-      method: "GET",
-      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2",
-    });
-
-    expect(response.statusCode).toBe(404);
-  });
-
   it("returns the public AI hotel profile contract from the distribution read model", async () => {
     app = buildApp({
       logger: false,
@@ -3426,57 +3317,6 @@ describe("vayada-api", () => {
     expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
   });
 
-  it("returns the public AI hotel quote contract from the distribution read model", async () => {
-    app = buildApp({
-      logger: false,
-      publicHotelQuoteRepository,
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
-    });
-    const body = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["cache-control"]).toBe("public, max-age=15, stale-while-revalidate=60");
-    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-ai-quote-read");
-    expect(response.headers["x-robots-tag"]).toBe("noindex");
-    expect(body).toMatchObject({
-      contractVersion: "public-bookability.v1",
-      publicVisibility: "public_safe",
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        checkIn: "2026-09-12",
-        checkOut: "2026-09-15",
-        nights: 3,
-        adults: 2,
-        currency: "EUR",
-        locale: "en",
-      },
-      status: "bookable",
-      quote: {
-        priceGuarantee: "expires_at",
-        offers: [
-          {
-            roomTypeId: "room_deluxe",
-            totals: {
-              roomTotal: 540,
-              taxesAndFees: 54,
-              grandTotal: 594,
-            },
-            paymentOptions: ["card", "pay_at_property"],
-          },
-        ],
-      },
-      deepLink: {
-        url: "https://hotel-alpenrose.booking.localhost/en/book?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&referral_code=creator-anna&quote_id=quote_alpenrose_001",
-      },
-      dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
-    });
-    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
-  });
-
   it("requires the target checkout adapter when Booking Web public routes are mounted", () => {
     expect(() =>
       buildApp({
@@ -3486,33 +3326,10 @@ describe("vayada-api", () => {
     ).toThrow("Booking Web checkout adapter is required when public routes are mounted");
   });
 
-  it("returns stable unavailable reason codes for public AI hotel quotes", async () => {
-    app = buildApp({
-      logger: false,
-      publicHotelQuoteRepository,
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-10-01&check_out=2026-10-02&adults=2",
-    });
-    const body = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      status: "unavailable",
-      unavailableReasons: [
-        { code: "sold_out", detail: "No public inventory for requested dates." },
-      ],
-    });
-    expect(body).not.toHaveProperty("quote");
-  });
-
   it("returns Booking Web host resolution for known booking subdomains", async () => {
     app = buildApp({
       logger: false,
       publicHotelProfileRepository,
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3550,7 +3367,6 @@ describe("vayada-api", () => {
     app = buildApp({
       logger: false,
       publicHotelProfileRepository,
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3591,7 +3407,6 @@ describe("vayada-api", () => {
           return domain === "book.alpenrose.example" ? seededCustomDomainProfile : null;
         },
       },
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3631,7 +3446,6 @@ describe("vayada-api", () => {
           return domain === "book.alpenrose.example" ? seededCustomDomainProfile : null;
         },
       },
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3714,7 +3528,6 @@ describe("vayada-api", () => {
           return null;
         },
       },
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3730,7 +3543,6 @@ describe("vayada-api", () => {
     app = buildApp({
       logger: false,
       publicHotelProfileRepository,
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3762,7 +3574,6 @@ describe("vayada-api", () => {
     app = buildApp({
       logger: false,
       publicHotelProfileRepository,
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3806,7 +3617,6 @@ describe("vayada-api", () => {
     app = buildApp({
       logger: false,
       publicHotelProfileRepository,
-      publicHotelQuoteRepository,
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     });
 
@@ -3834,214 +3644,6 @@ describe("vayada-api", () => {
     expect(read.headers["access-control-allow-origin"]).toBe(
       "https://hotel-alpenrose.next-booking.vayada.com",
     );
-  });
-
-  it("returns Booking Web offers from the public quote contract", async () => {
-    app = buildApp({
-      logger: false,
-      publicHotelProfileRepository,
-      publicHotelQuoteRepository,
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en",
-    });
-    const body = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-booking-web-offers-read");
-    expect(response.headers["x-robots-tag"]).toBe("noindex");
-    expect(body).toMatchObject({
-      contractVersion: "public-bookability.v1",
-      publicVisibility: "public_safe",
-      status: "bookable",
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        checkIn: "2026-09-12",
-        checkOut: "2026-09-15",
-      },
-      quote: {
-        offers: [
-          {
-            roomTypeId: "room_deluxe",
-          },
-        ],
-      },
-    });
-    expect(body.quote.offers[0].bookingUrl).toContain(
-      "https://hotel-alpenrose.booking.localhost/en/book?",
-    );
-    expect(body.quote.offers[0].bookingUrl).toContain("room_type=room_deluxe");
-    expect(body.quote.offers[0].bookingUrl).toContain("quote_id=quote_alpenrose_001");
-    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
-  });
-
-  it("returns unavailable Booking Web calendar when no target calendar read model is configured", async () => {
-    app = buildApp({
-      logger: false,
-      publicHotelProfileRepository,
-      publicHotelQuoteRepository,
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-20",
-    });
-    const body = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-booking-web-calendar-read");
-    expect(body).toEqual({
-      contractVersion: "public-bookability.v1",
-      generatedAt: "2026-06-06T11:00:00.000Z",
-      publicVisibility: "public_safe",
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        start: "2026-09-12",
-        end: "2026-09-20",
-      },
-      calendar: {
-        unavailableDates: [
-          "2026-09-12",
-          "2026-09-13",
-          "2026-09-14",
-          "2026-09-15",
-          "2026-09-16",
-          "2026-09-17",
-          "2026-09-18",
-          "2026-09-19",
-        ],
-        minStayByArrival: {},
-        maxStayByArrival: {},
-      },
-      freshness: {
-        status: "unavailable",
-        generatedAt: "2026-06-06T11:00:00.000Z",
-        sources: [
-          {
-            owner: "pms",
-            status: "unavailable",
-            reasonCode: "source_unavailable",
-          },
-          {
-            owner: "distribution",
-            lastUpdatedAt: "2026-06-06T11:00:00.000Z",
-            status: "fresh",
-          },
-        ],
-      },
-      dataSources: ["pms", "distribution"],
-    });
-    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
-  });
-
-  it("serves quote, offers, and calendar routes from target repositories with PMS public API unset", async () => {
-    app = buildApp({
-      logger: false,
-      publicHotelProfileRepository,
-      publicHotelQuoteRepository,
-      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebCalendarRepository: {
-        async findCalendarByHotel(hotel, query) {
-          return {
-            contractVersion: "public-bookability.v1",
-            generatedAt: "2026-06-09T09:00:00.000Z",
-            publicVisibility: "public_safe",
-            request: {
-              hotelSlug: hotel.slug,
-              start: query.start ?? "",
-              end: query.end ?? "",
-            },
-            calendar: {
-              unavailableDates: ["2026-09-14"],
-              minStayByArrival: {},
-              maxStayByArrival: {},
-            },
-            freshness: {
-              status: "fresh",
-              generatedAt: "2026-06-09T09:00:00.000Z",
-              sources: [
-                {
-                  owner: "pms",
-                  lastUpdatedAt: "2026-06-09T09:00:00.000Z",
-                  status: "fresh",
-                },
-                {
-                  owner: "distribution",
-                  lastUpdatedAt: "2026-06-09T09:00:00.000Z",
-                  status: "fresh",
-                },
-              ],
-            },
-            dataSources: ["pms", "distribution"],
-          };
-        },
-      },
-    });
-
-    const quote = await app.inject({
-      method: "GET",
-      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
-    });
-    const offers = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
-    });
-    const calendar = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-15",
-    });
-
-    expect(quote.statusCode).toBe(200);
-    expect(quote.json()).toMatchObject({ status: "bookable" });
-    expect(offers.statusCode).toBe(200);
-    expect(offers.json()).toMatchObject({ status: "bookable" });
-    expect(calendar.statusCode).toBe(200);
-    expect(calendar.json()).toMatchObject({
-      calendar: { unavailableDates: ["2026-09-14"] },
-      freshness: { status: "fresh" },
-    });
-  });
-
-  it("strips non-contract fields before returning public AI hotel quotes", async () => {
-    const pollutedQuote = {
-      ...seededPublicQuote,
-      quote: {
-        ...seededPublicQuote.quote!,
-        providerAccountId: "acct_private",
-        offers: [
-          {
-            ...seededPublicQuote.quote!.offers[0],
-            internalRatePlanPayload: "private",
-          },
-        ],
-      },
-      debugPayload: { webhookPayload: "private" },
-    } as unknown as typeof seededPublicQuote;
-    app = buildApp({
-      logger: false,
-      publicHotelQuoteRepository: {
-        async findQuoteBySlug() {
-          return pollutedQuote;
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2",
-    });
-    const body = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(body).not.toHaveProperty("debugPayload");
-    expect(body.quote).not.toHaveProperty("providerAccountId");
-    expect(body.quote.offers[0]).not.toHaveProperty("internalRatePlanPayload");
-    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
   });
 
   it("strips non-contract fields before returning public AI hotel profiles", async () => {
@@ -4142,79 +3744,6 @@ describe("vayada-api", () => {
       },
     });
     expect(serializePublicHotelProfileProjection(projection)).toEqual(projection);
-  });
-
-  it("normalizes invalid public AI quote requests through the compatibility adapter", () => {
-    const projection = toUnavailablePublicHotelQuoteProjection(
-      seededPublicProfile.hotel,
-      {
-        check_in: "2026-09-15",
-        check_out: "2026-09-12",
-        adults: "2",
-        currency: "EUR",
-        locale: "en",
-      },
-      new Date("2026-06-06T11:00:00.000Z"),
-    );
-
-    expect(projection).toMatchObject({
-      status: "unavailable",
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        checkIn: "2026-09-15",
-        checkOut: "2026-09-12",
-        nights: 0,
-        adults: 2,
-        currency: "EUR",
-        locale: "en",
-      },
-      unavailableReasons: [{ code: "invalid_request" }],
-    });
-    expect(serializePublicHotelQuoteProjection(projection)).toEqual(projection);
-  });
-
-  it("uses hotel quote limits for public AI quote unavailable reasons", () => {
-    const projection = toUnavailablePublicHotelQuoteProjection(
-      seededPublicProfile.hotel,
-      {
-        check_in: "2026-06-07",
-        check_out: "2026-06-09",
-        adults: "20",
-        children: "1",
-        rooms: "6",
-        currency: "USD",
-        locale: "it",
-      },
-      new Date("2026-06-06T11:00:00.000Z"),
-    );
-
-    expect(projection.unavailableReasons.map((reason) => reason.code)).toEqual([
-      "unsupported_occupancy",
-      "currency_not_supported",
-      "locale_not_supported",
-    ]);
-    expect(findForbiddenPublicBookabilityKeys(projection)).toEqual([]);
-  });
-
-  it("does not silently default malformed public AI quote counts", () => {
-    const projection = toUnavailablePublicHotelQuoteProjection(
-      seededPublicProfile.hotel,
-      {
-        check_in: "2026-09-12",
-        check_out: "2026-09-15",
-        adults: "two",
-        children: "-1",
-        rooms: "1.5",
-      },
-      new Date("2026-06-06T11:00:00.000Z"),
-    );
-
-    expect(projection.unavailableReasons).toEqual([
-      {
-        code: "invalid_request",
-        detail: "adults, children, and rooms must be non-negative integers.",
-      },
-    ]);
   });
 
   it("wires authorization into authenticated API context resolution", async () => {
@@ -4322,23 +3851,6 @@ describe("vayada-api", () => {
     expect(JSON.stringify(auditFailureResponse.body)).not.toContain(
       "sensitive audit storage failure",
     );
-  });
-
-  it("returns unavailable data instead of shifting quote dates for an invalid timezone", () => {
-    const projection = toUnavailablePublicHotelQuoteProjection(
-      { ...seededPublicProfile.hotel, timezone: "Mars/Olympus_Mons" },
-      {
-        check_in: "2026-09-12",
-        check_out: "2026-09-15",
-        adults: "2",
-      },
-      new Date("2026-06-06T11:00:00.000Z"),
-    );
-
-    expect(projection).toMatchObject({
-      status: "unavailable",
-      unavailableReasons: [{ code: "unavailable_data" }],
-    });
   });
 
   it("returns booking addon settings with auth, policy, and the documented legacy-compatible shape", async () => {
@@ -11205,68 +10717,6 @@ describe("vayada-api", () => {
     expect(hiddenPropertyDenials.size).toBe(1);
   });
 
-  it("uses centralized property plan limits in PMS room photo errors", async () => {
-    const commandRepository = createPmsOperationsCommandRepository();
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-          resource: {
-            product: "pms",
-            resourceType: "pms_property",
-            resourceId: pmsPropertyId,
-          },
-        },
-      ],
-      pmsOperationsCommandRepository: commandRepository,
-      propertyPlanReadRepository: {
-        async getPropertyPlan(propertyId) {
-          return {
-            propertyId,
-            plan: "commission",
-            limits: {
-              maxRoomPhotosPerType: 1,
-              maxAddons: 3,
-              guestContactAccess: "after_acceptance",
-            },
-          };
-        },
-      },
-    });
-
-    const response = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload: {
-        commandId: "cmd-room-type-photo-limit",
-        idempotencyKey: "room-type-photo-limit",
-        name: "Loft Suite",
-        bathroomType: "private",
-        bathrooms: 1,
-        baseRate: 240,
-        currency: "EUR",
-        operatingPeriods: [{ from: "01-01", to: "12-31" }],
-        seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
-        images: [
-          "https://cdn.vayada.example/loft.jpg",
-          "https://cdn.vayada.example/loft-balcony.jpg",
-        ],
-      },
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(response.body).toMatchObject({
-      code: "room_photo_plan_limit_reached",
-      message:
-        "You've reached the 1-photo limit. Upgrade to the paid plan for up to 15 photos per room.",
-    });
-    expect(commandRepository.roomTypeCreates).toHaveLength(0);
-  });
-
   it("returns PMS rooms using the P1a route contract fixture", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.room_status.read"],
@@ -14892,206 +14342,6 @@ describe("vayada-api", () => {
     expect(new Set(hiddenPropertyDenials.map((body) => JSON.stringify(body))).size).toBe(1);
   });
 
-  it.each([undefined, "Free until 7 days before", "Custom cancellation terms"])(
-    "creates a PMS room type through the target property-scoped route with policy %s",
-    async (cancellationPolicy) => {
-      const commandRepository = createPmsOperationsCommandRepository();
-      app = buildAuthenticatedApp({
-        permissions: ["pms.operations.manage"],
-        entitlements: [
-          {
-            product: "pms",
-            key: "property-management",
-            status: "active",
-            resource: {
-              product: "pms",
-              resourceType: "pms_property",
-              resourceId: pmsPropertyId,
-            },
-          },
-        ],
-        pmsOperationsCommandRepository: commandRepository,
-      });
-
-      for (const bathroomType of [null, "", "ensuite"]) {
-        const invalid = await injectJson(app, {
-          method: "POST",
-          url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-          payload: {
-            commandId: "cmd-room-type-invalid-bathroom",
-            idempotencyKey: "room-type-invalid-bathroom",
-            name: "Invalid Bathroom Suite",
-            bathroomType,
-            baseRate: "240.00",
-            operatingPeriods: [{ from: "01-01", to: "12-31" }],
-            seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31" }],
-          },
-          headers: { authorization: "Bearer valid-token" },
-        });
-        expect(invalid.statusCode).toBe(400);
-      }
-      expect(commandRepository.roomTypeCreates).toHaveLength(0);
-
-      const response = await injectJson(app, {
-        method: "POST",
-        url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-        payload: {
-          commandId: "cmd-room-type-create-001",
-          idempotencyKey: "room-type-create-001",
-          initialSetupOnly: true,
-          ...(cancellationPolicy ? { cancellationPolicy } : {}),
-          name: "Loft Suite",
-          category: "suite",
-          description: "Top-floor suite.",
-          maxAdults: 2,
-          maxChildren: 2,
-          maxOccupancy: 4,
-          bedType: "1 King Bed",
-          bedrooms: 1,
-          bathrooms: 1,
-          bathroomType: "private",
-          size: 32,
-          baseRate: 0,
-          currency: "eur",
-          operatingPeriods: [{ from: "01-01", to: "12-31" }],
-          seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
-          nonRefundableEnabled: true,
-          nonRefundableRate: 216,
-          amenities: ["wifi", "terrace"],
-          images: [
-            { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
-            "https://cdn.vayada.example/loft-balcony.jpg",
-          ],
-          totalRooms: 3,
-          sortOrder: 7,
-        },
-        headers: {
-          authorization: "Bearer valid-token",
-          "x-hotel-id": "legacy-booking-hotel-should-be-ignored",
-        },
-      });
-      const body = response.body as PmsRoomTypeCommandResponse;
-
-      expect(response.statusCode).toBe(200);
-      expect(body).toMatchObject({
-        contractVersion: "pms-operations.v1",
-        propertyId: pmsPropertyId,
-        item: {
-          name: "Loft Suite",
-          category: "suite",
-          baseRate: { amountDecimal: "240.00", currency: "EUR" },
-          ratePlans: [
-            { code: "FLEX", baseRate: { amountDecimal: "240.00", currency: "EUR" } },
-            { code: "NRF", baseRate: { amountDecimal: "216.00", currency: "EUR" } },
-          ],
-          media: [
-            { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
-            { url: "https://cdn.vayada.example/loft-balcony.jpg" },
-          ],
-          roomCount: 3,
-        },
-        commandMeta: {
-          commandId: "cmd-room-type-create-001",
-          idempotencyKey: "room-type-create-001",
-          sideEffects: ["ari_changed", "audit_event"],
-        },
-      });
-      if (cancellationPolicy === "Custom cancellation terms") {
-        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy).not.toHaveProperty(
-          "freeCancellationDeadlineDays",
-        );
-        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy?.text).toBe(
-          cancellationPolicy,
-        );
-      } else {
-        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy).toMatchObject({
-          type: "free_until_days_before_arrival",
-          freeCancellationDeadlineDays: 7,
-          afterDeadlinePenalty: "full_booking_amount",
-          noShowPenalty: "full_booking_amount",
-        });
-      }
-      expect(commandRepository.roomTypeCreates).toHaveLength(1);
-      expect(commandRepository.roomTypeCreates[0]).toMatchObject({
-        propertyId: pmsPropertyId,
-        initialSetupOnly: true,
-        name: "Loft Suite",
-        baseRate: { amountDecimal: "240.00", currency: "EUR" },
-        nonRefundableRate: { amountDecimal: "216.00", currency: "EUR" },
-        attributes: {
-          bedType: "1 King Bed",
-          bedrooms: 1,
-          bathrooms: 1,
-          bathroomType: "private",
-          size: 32,
-        },
-        roomCount: 3,
-        operatingPeriods: [{ from: "01-01", to: "12-31" }],
-        seasons: [
-          {
-            from: "01-01",
-            to: "12-31",
-            rate: { amountDecimal: "240.00", currency: "EUR" },
-            minStayNights: 1,
-          },
-        ],
-        audit: {
-          actor: {
-            kind: "user",
-            userId: "user_hotel_owner",
-          },
-        },
-      });
-      expect(commandRepository.outboxEnqueues).toEqual([
-        "ari_changed:f6855000-0000-0000-0000-000000000003",
-      ]);
-      expect(commandRepository.auditEvents).toEqual([
-        "room_type_created:f6855000-0000-0000-0000-000000000003",
-      ]);
-    },
-  );
-
-  it("defaults omitted bathroom facts for room-type create clients", async () => {
-    const commandRepository = createPmsOperationsCommandRepository();
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-          resource: {
-            product: "pms",
-            resourceType: "pms_property",
-            resourceId: pmsPropertyId,
-          },
-        },
-      ],
-      pmsOperationsCommandRepository: commandRepository,
-    });
-
-    const response = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload: {
-        commandId: "cmd-room-type-default-bathroom",
-        idempotencyKey: "room-type-default-bathroom",
-        name: "Simple Room",
-        baseRate: "120.00",
-        operatingPeriods: [{ from: "01-01", to: "12-31" }],
-        seasons: [{ name: "Default", rate: "120", from: "01-01", to: "12-31" }],
-      },
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(commandRepository.roomTypeCreates).toHaveLength(1);
-    expect(commandRepository.roomTypeCreates[0]?.attributes).toMatchObject({
-      bathroomType: "private",
-      bathrooms: 1,
-    });
-  });
-
   it("creates, updates, and releases target room blocks with refresh and ARI metadata", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
@@ -15315,84 +14565,6 @@ describe("vayada-api", () => {
     expect(forbidden.statusCode).toBe(403);
     expect(forbidden.body).toMatchObject({ code: "missing_permission" });
     expect(commandRepository.roomBlockCreates).toHaveLength(0);
-  });
-
-  it("rejects stale currency before creating an onboarding room", async () => {
-    const commandRepository = createPmsOperationsCommandRepository();
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-          resource: {
-            product: "pms",
-            resourceType: "pms_property",
-            resourceId: pmsPropertyId,
-          },
-        },
-      ],
-      settingsRepository: {
-        ...bookingSettingsRepository,
-        async findPropertySettingsByHotelId(propertyId) {
-          expect(propertyId).toBe(pmsPropertyId);
-          return { id: propertyId, defaultCurrency: "IDR" };
-        },
-      },
-      pmsOperationsCommandRepository: commandRepository,
-    });
-
-    const payload = {
-      commandId: "cmd-onboarding-room-type-create",
-      idempotencyKey: "onboarding-room-type-create",
-      onboardingSetup: true,
-      initialSetupOnly: false,
-      name: "Pool Villa",
-      bathroomType: "private",
-      bathrooms: 1,
-      maxOccupancy: 4,
-      baseRate: "280.00",
-      currency: "USD",
-      operatingPeriods: [{ from: "01-01", to: "12-31" }],
-      seasons: [{ name: "Year-round", rate: "280.00", from: "01-01", to: "12-31", minStay: 1 }],
-      totalRooms: 2,
-    };
-    const staleResponse = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload,
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(staleResponse.statusCode).toBe(409);
-    expect(staleResponse.body).toMatchObject({ code: "property_currency_conflict" });
-    expect(commandRepository.roomTypeCreates).toHaveLength(0);
-
-    const currentResponse = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload: {
-        ...payload,
-        commandId: "cmd-onboarding-room-type-create-idr",
-        idempotencyKey: "onboarding-room-type-create-idr",
-        currency: "IDR",
-      },
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(currentResponse.statusCode).toBe(200);
-    expect(commandRepository.roomTypeCreates).toHaveLength(1);
-    expect(commandRepository.roomTypeCreates[0]).toMatchObject({
-      initialSetupOnly: false,
-      baseRate: { amountDecimal: "280.00", currency: "IDR" },
-      seasons: [
-        expect.objectContaining({
-          rate: { amountDecimal: "280.00", currency: "IDR" },
-          minStayNights: 1,
-        }),
-      ],
-    });
   });
 
   it("updates and reads back PMS room-type location and every partial-refund tier", async () => {
@@ -15743,229 +14915,6 @@ describe("vayada-api", () => {
       message: "Room type update has nothing to save.",
     });
     expect(commandRepository.roomTypeUpdates).toHaveLength(0);
-  });
-
-  it("rejects PMS room-type create payloads without command metadata", async () => {
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-        },
-      ],
-      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
-    });
-
-    const response = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload: { name: "Loft Suite", baseRate: 240, currency: "EUR" },
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.body).toMatchObject({
-      code: "invalid_body",
-      message: "Room type create requires commandId, idempotencyKey, and name.",
-    });
-  });
-
-  it("rejects invalid PMS room-type create numeric inputs", async () => {
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-          resource: {
-            product: "pms",
-            resourceType: "pms_property",
-            resourceId: pmsPropertyId,
-          },
-        },
-      ],
-      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
-    });
-
-    const cases = [
-      {
-        patch: { totalRooms: "1.5" },
-        message: "Room type create totalRooms must be a non-negative integer.",
-      },
-      {
-        patch: { nonRefundableEnabled: true },
-        message:
-          "Room type create non-refundable rate requires a valid nonRefundableRate or nonRefundableDiscount.",
-      },
-      {
-        patch: {
-          baseRate: "240.999",
-          seasons: [{ name: "Default", rate: "240.999", from: "01-01", to: "12-31", minStay: 1 }],
-        },
-        message: "Room type create requires a valid baseRate.",
-      },
-    ];
-
-    for (const [index, testCase] of cases.entries()) {
-      const response = await injectJson(app, {
-        method: "POST",
-        url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-        payload: {
-          commandId: `cmd-room-type-invalid-${index}`,
-          idempotencyKey: `room-type-invalid-${index}`,
-          name: "Loft Suite",
-          baseRate: "240.00",
-          currency: "EUR",
-          operatingPeriods: [{ from: "01-01", to: "12-31" }],
-          seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
-          ...testCase.patch,
-        },
-        headers: { authorization: "Bearer valid-token" },
-      });
-
-      expect(response.statusCode).toBe(400);
-      expect(response.body).toMatchObject({
-        code: "invalid_body",
-        message: testCase.message,
-      });
-    }
-  });
-
-  it("returns idempotency conflicts from PMS room-type create", async () => {
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-        },
-      ],
-      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
-    });
-
-    const response = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload: {
-        commandId: "cmd-room-type-create-conflict",
-        idempotencyKey: "room-type-create-conflict",
-        name: "Loft Suite",
-        bathroomType: "private",
-        bathrooms: 1,
-        baseRate: 240,
-        currency: "EUR",
-        operatingPeriods: [{ from: "01-01", to: "12-31" }],
-        seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
-      },
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(response.body).toMatchObject({
-      code: "idempotency_conflict",
-      category: "conflict",
-    });
-  });
-
-  it("enforces the PMS room-type create authorization matrix", async () => {
-    const pmsEntitlement: ProductEntitlement = {
-      product: "pms",
-      key: "property-management",
-      status: "active",
-      resource: {
-        product: "pms",
-        resourceType: "pms_property",
-        resourceId: pmsPropertyId,
-      },
-    };
-    const payload = {
-      commandId: "cmd-room-type-auth",
-      idempotencyKey: "room-type-auth",
-      name: "Loft Suite",
-      baseRate: 240,
-      currency: "EUR",
-      operatingPeriods: [{ from: "01-01", to: "12-31" }],
-      seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
-    };
-    const cases = [
-      {
-        name: "missing auth",
-        appOptions: { pmsOperationsCommandRepository: createPmsOperationsCommandRepository() },
-        headers: undefined,
-        status: 401,
-        code: "unauthenticated",
-      },
-      {
-        name: "invalid auth",
-        appOptions: { pmsOperationsCommandRepository: createPmsOperationsCommandRepository() },
-        headers: { authorization: "Bearer invalid-token" },
-        status: 401,
-        code: "unauthenticated",
-      },
-      {
-        name: "missing permission",
-        appOptions: {
-          permissions: [] as PermissionKey[],
-          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
-        },
-        headers: { authorization: "Bearer valid-token" },
-        status: 403,
-        code: "missing_permission",
-      },
-      {
-        name: "missing entitlement",
-        appOptions: {
-          permissions: ["pms.operations.manage"] as PermissionKey[],
-          entitlements: [] as ProductEntitlement[],
-          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
-        },
-        headers: { authorization: "Bearer valid-token" },
-        status: 403,
-        code: "missing_entitlement",
-      },
-      {
-        name: "inactive entitlement",
-        appOptions: {
-          permissions: ["pms.operations.manage"] as PermissionKey[],
-          entitlements: [{ ...pmsEntitlement, status: "suspended" as const }],
-          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
-        },
-        headers: { authorization: "Bearer valid-token" },
-        status: 403,
-        code: "inactive_entitlement",
-      },
-      {
-        name: "missing property link",
-        appOptions: {
-          permissions: ["pms.operations.manage"] as PermissionKey[],
-          entitlements: [pmsEntitlement],
-          linkedPmsPropertyId: "f6853000-0000-0000-0000-000000000099",
-          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
-        },
-        headers: { authorization: "Bearer valid-token" },
-        status: 403,
-        code: "missing_resource_access",
-      },
-    ];
-
-    for (const testCase of cases) {
-      app = buildAuthenticatedApp(testCase.appOptions);
-      const response = await injectJson(app, {
-        method: "POST",
-        url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-        payload,
-        headers: testCase.headers,
-      });
-      await app.close();
-      app = null;
-
-      expect(response.statusCode, testCase.name).toBe(testCase.status);
-      expect((response.body as { code: string }).code, testCase.name).toBe(testCase.code);
-    }
   });
 
   it("returns PMS calendar days and room blocks using the P1b route contract fixture", async () => {

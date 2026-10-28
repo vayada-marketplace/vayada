@@ -153,7 +153,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
       );
       return id;
     }
-    it("rejects pricing edits and new checkout without changing the historical request or holds", async () => {
+    it("rejects pricing edits without changing the historical request or holds", async () => {
       const details = await edit("details", {});
       expect(details.revision).toBe(0);
       expect(details.input.addonIds).toEqual(["spa_partner"]);
@@ -171,11 +171,6 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         });
         expect(await snapshot()).toEqual(before);
       }
-      await expect(adapter.createBooking("vay-959-hotel", input, command())).rejects.toMatchObject({
-        statusCode: 410,
-        code: "PRICING_RETIRED",
-      });
-      expect(await snapshot()).toEqual(before);
       expect(intents.size).toBe(0);
     });
     it("replays a committed historical save after acceptance and still requires credentials", async () => {
@@ -328,7 +323,8 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         `INSERT INTO booking.edit_authorization_releases(provider_payment_intent_id,provider_account_ref,property_id) VALUES($1,'acct_vay959',$2)`,
         [recovery.paymentIntentId, propertyId],
       );
-      await releaseAbandonedBookingEdits(pool, { externalChanges: externalBookingChanges,
+      await releaseAbandonedBookingEdits(pool, {
+        externalChanges: externalBookingChanges,
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         stripePaymentProvider: {
@@ -397,7 +393,8 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         ],
       );
       const before = await snapshot();
-      await releaseAbandonedBookingEdits(pool, { externalChanges: externalBookingChanges,
+      await releaseAbandonedBookingEdits(pool, {
+        externalChanges: externalBookingChanges,
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         stripePaymentProvider: {

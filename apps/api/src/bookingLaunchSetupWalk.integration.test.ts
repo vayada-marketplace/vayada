@@ -1259,17 +1259,11 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             targetDatabaseUrl: cs,
             replacementPricingManualPaymentAcceptanceEnabled: false,
           } as ApiConfig,
-          {
-            publicHotelProfilePool: pool,
-            publicHotelQuotePool: pool,
-            bookingWebCalendarPool: pool,
-          },
+          { publicHotelProfilePool: pool },
         );
         await site.register(registerBookingWebPublicRoutes, {
           prefix: "/api/booking-web",
           profileRepository: publicRuntime.publicHotelProfileRepository,
-          quoteRepository: publicRuntime.publicHotelQuoteRepository,
-          calendarRepository: publicRuntime.bookingWebCalendarRepository,
           checkoutAdapter: createTargetBookingWebCheckoutAdapter({
             externalChanges: externalBookingChanges,
             connectionString: cs,

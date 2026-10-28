@@ -30,7 +30,6 @@ import {
   serializePmsPricingSourceEntityRevision,
   serializeRecurringPricingMaterializationFingerprint,
   serializeRecurringPricingUpsertFingerprint,
-  type PmsRecurringPricingCommandPort,
   type PmsRecurringPricingReadPort,
 } from "./recurringPricing.js";
 
@@ -921,46 +920,12 @@ describe("recurring pricing command results and ports", () => {
     ).toBeNull();
   });
 
-  it("keeps the command and read ports narrow and free of quote/payment/calendar/publication operations", () => {
-    const commandPort: PmsRecurringPricingCommandPort = {
-      upsertRecurringSeason: async () => ({
-        ok: false,
-        error: { code: "setup_scope_unavailable" },
-      }),
-      upsertWeekendSurcharge: async () => ({
-        ok: false,
-        error: { code: "setup_scope_unavailable" },
-      }),
-      upsertAdditionalGuestPricing: async () => ({
-        ok: false,
-        error: { code: "setup_scope_unavailable" },
-      }),
-      upsertNonRefundablePricing: async () => ({
-        ok: false,
-        error: { code: "setup_scope_unavailable" },
-      }),
-      disableRecurringPricingSource: async () => ({
-        ok: false,
-        error: { code: "source_not_found" },
-      }),
-      materializeRecurringPricing: async () => ({
-        ok: false,
-        error: { code: "command_in_progress" },
-      }),
-    };
+  it("keeps the read port narrow and free of quote/payment/calendar/publication operations", () => {
     const readPort: PmsRecurringPricingReadPort = {
       getRecurringPricingSource: async () => null,
       listRecurringPricingSources: async () => [],
       getRecurringPricingBookingEvidence: async () => null,
     };
-    expect(Object.keys(commandPort)).toEqual([
-      "upsertRecurringSeason",
-      "upsertWeekendSurcharge",
-      "upsertAdditionalGuestPricing",
-      "upsertNonRefundablePricing",
-      "disableRecurringPricingSource",
-      "materializeRecurringPricing",
-    ]);
     expect(Object.keys(readPort)).toEqual([
       "getRecurringPricingSource",
       "listRecurringPricingSources",

@@ -12,9 +12,7 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createPgHotelMediaResolutionPort } from "../platform/hotelMediaResolver.js";
-import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { createPmsRoomAmenityVocabularyValidationPort } from "./pmsRoomAmenityVocabulary.js";
-import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
 import { createPgPmsRoomFactsCommandRepository } from "./pmsRoomFactsCommandRepository.js";
 import { createPgPmsRoomFactsReadModel } from "./pmsRoomFactsReadModel.js";
 import { createPgPmsRoomPublicationCommandRepository } from "./pmsRoomPublicationCommandRepository.js";
@@ -33,30 +31,6 @@ const serving = {
   cdnBaseUrl: "https://cdn.example.test",
   publicPathPrefix: "media",
 } as const;
-
-const readRepository: PmsOperationsReadRepository = {
-  async listRoomsByPropertyId() {
-    return { items: [] };
-  },
-  async listRoomTypesByPropertyId() {
-    return { items: [] };
-  },
-  async findRoomTypeById() {
-    return null;
-  },
-  async listCalendarDaysByPropertyId() {
-    return { items: [] };
-  },
-  async listRoomBlocksByPropertyId() {
-    return { items: [] };
-  },
-  async listReservationsByPropertyId() {
-    return { items: [], total: 0 };
-  },
-  async findReservationByGuestBookingId() {
-    return null;
-  },
-};
 
 describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-publication adapters", () => {
   const admin = new pg.Client({
@@ -99,12 +73,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-publication adapters", 
     amenityVocabulary,
     max: 3,
   });
-  const legacyRepository = createTargetPmsOperationsCommandRepository({
-    connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
-    max: 3,
-    readRepository,
-    now: () => new Date(acceptedAt),
-  });
 
   beforeAll(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
@@ -121,7 +89,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-publication adapters", 
     await publicationReadModel.close();
     await factsReadModel.close();
     await factsRepository.close();
-    await legacyRepository.close?.();
     await mediaAdapter.close?.();
     await cleanup();
     await admin.end();
@@ -357,58 +324,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-publication adapters", 
         },
       ],
     });
-  });
-
-  it("rejects legacy room creation without seeding room facts or prices", async () => {
-    await expect(
-      legacyRepository.createRoomType({
-        propertyId,
-        commandId: "legacy-room-command",
-        idempotencyKey: "legacy-room-command",
-        initialSetupOnly: true,
-        name: "Legacy Suite",
-        description: "Legacy command fixture",
-        category: "double",
-        occupancyLimits: { adults: 2, children: 0, total: 2 },
-        attributes: {},
-        amenities: ["balcony", "minibar"],
-        media: [],
-        baseRate: { amountDecimal: "120.00", currency: "EUR" },
-        nonRefundableRate: null,
-        operatingPeriods: [{ from: "01-01", to: "12-31" }],
-        seasons: [
-          {
-            name: "Year-round",
-            tier: "standard",
-            from: "01-01",
-            to: "12-31",
-            rate: { amountDecimal: "120.00", currency: "EUR" },
-            minStayNights: 1,
-            maxStayNights: null,
-          },
-        ],
-        active: true,
-        sortOrder: 0,
-        roomCount: 1,
-        audit: {
-          actor: { kind: "user", userId: actorUserId, organizationId },
-          requestId: "legacy-room-command",
-          correlationId: "legacy-room-command",
-          reason: "Verify legacy amenity review defaults",
-          requestedAt: acceptedAt,
-        },
-      }),
-    ).rejects.toMatchObject({ code: "PRICING_UNAVAILABLE", statusCode: 503 });
-    for (const table of ["pms.room_types", "pms.rate_plans", "pms.rate_rules"]) {
-      expect(
-        (
-          await admin.query(
-            `SELECT count(*)::int AS count FROM ${table} WHERE property_id=$1::uuid`,
-            [propertyId],
-          )
-        ).rows,
-      ).toEqual([{ count: 0 }]);
-    }
   });
 
   it("keeps historical legacy amenities unreviewed at revision one", async () => {

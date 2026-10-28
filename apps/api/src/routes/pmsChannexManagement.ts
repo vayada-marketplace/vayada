@@ -10,7 +10,6 @@ import {
 } from "@vayada/domain-pms-channex";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { ChannelDatePricesPort } from "../domains/pmsChannelDatePrices.js";
 
 import type { PmsChannexManagementCommandPort } from "../domains/pmsChannexManagementCommands.js";
 import type { PmsChannexIframeSessionPort } from "../domains/pmsChannexIframeSession.js";
@@ -27,7 +26,6 @@ export type PmsChannexManagementRoutesOptions = {
   connectionOnly?: boolean;
   commandPort?: PmsChannexManagementCommandPort;
   iframeSessionPort?: PmsChannexIframeSessionPort;
-  datePrices?: ChannelDatePricesPort;
   publishedOfferProvisioningEnabled?: boolean;
   publishedOfferProvisioningPropertyId?: string;
   /** VAY-2108 D7: the claimed scope's owned hotels may provision their published offers. */
@@ -46,57 +44,6 @@ export async function registerPmsChannexManagementRoutes(
     await options.repository.close?.();
     await options.commandPort?.close?.();
     await options.iframeSessionPort?.close?.();
-    await options.datePrices?.close();
-  });
-
-  const dateScope = z.object({
-    propertyId: z.uuid(),
-    roomTypeId: z.uuid(),
-    ratePlanId: z.uuid(),
-    stayDate: z.iso.date(),
-  });
-  const dateBody = z.strictObject({
-    commandId: z.uuid(),
-    expectedRevision: z.number().int().min(0).max(2147483646),
-    amountDecimal: z
-      .string()
-      .regex(/^(0|[1-9]\d{0,12})\.\d{2}$/)
-      .refine((value) => Number(value) > 0)
-      .nullable(),
-    currency: z.string().regex(/^[A-Z]{3}$/),
-  });
-  const datePath =
-    "/properties/:propertyId/channex/room-types/:roomTypeId/rate-plans/:ratePlanId/date-prices/:stayDate";
-  app.get<{ Params: { propertyId: string } }>(datePath, async (request, reply) => {
-    enforcePmsChannexPolicy(request, request.params.propertyId, "pms.operations.read");
-    const scope = dateScope.safeParse(request.params);
-    if (!scope.success) return reply.code(400).send({ code: "invalid_date_price" });
-    if (!options.datePrices) return reply.code(503).send({ code: "date_prices_unavailable" });
-    return (
-      (await options.datePrices.get(scope.data)) ??
-      reply.code(404).send({ code: "date_price_not_found" })
-    );
-  });
-  app.put<{ Params: { propertyId: string }; Body: unknown }>(datePath, async (request, reply) => {
-    const context = enforcePmsChannexPolicy(
-      request,
-      request.params.propertyId,
-      "pms.operations.manage",
-    );
-    const scope = dateScope.safeParse(request.params);
-    const body = dateBody.safeParse(request.body);
-    if (!scope.success || !body.success)
-      return reply.code(400).send({ code: "invalid_date_price" });
-    if (options.capabilityModes.ariSync !== "mutating")
-      return reply.code(409).send({ code: "channex_capability_not_mutating" });
-    if (!options.datePrices) return reply.code(503).send({ code: "date_prices_unavailable" });
-    return (
-      (await options.datePrices.put(context, { ...scope.data, ...body.data })) ??
-      reply.code(409).send({
-        code: "date_price_conflict",
-        message: "Refresh the date price and canonical rate plan before retrying.",
-      })
-    );
   });
 
   const reportingEnabled = (propertyId: string) =>

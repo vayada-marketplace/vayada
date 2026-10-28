@@ -180,7 +180,6 @@ import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicatio
 import { createPgPropertySetupFinanceOwnerScopePort } from "./domains/propertySetupFinanceOwnerScope.js";
 import { createPgPropertySetupPmsOwnerRepository } from "./domains/propertySetupPmsOwnerRepository.js";
 import { createPgPmsPricingReadModel } from "./domains/pmsPricingReadModel.js";
-import { createPgChannelDatePrices } from "./domains/pmsChannelDatePrices.js";
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import {
   PMS_PRICING_CURRENCY_CAPABILITIES_PORT,
@@ -194,7 +193,6 @@ import { createPgPmsRoomAssignmentSettingsPort } from "./domains/pmsRoomAssignme
 import { createPgPmsRoomAssignmentOptimizationHistoryPort } from "./domains/pmsRoomAssignmentOptimizationHistory.js";
 import { createPgPmsCalendarAutoOpenSettingsRepository } from "./domains/pmsCalendarAutoOpenSettingsRepository.js";
 import { createPgPmsRecurringPricingReadModel } from "./domains/pmsRecurringPricingReadModel.js";
-import { createPgPmsRecurringPricingCommandRepository } from "./domains/pmsRecurringPricingCommandRepository.js";
 import { createPgPmsMandatoryChargeConfirmationReadModel } from "./domains/pmsMandatoryChargeConfirmationReadModel.js";
 import { createPgPmsMandatoryChargeConfirmationCommandRepository } from "./domains/pmsMandatoryChargeConfirmationCommandRepository.js";
 import {
@@ -399,8 +397,7 @@ if (!targetDatabaseUrl) {
   throw new Error("TARGET_DATABASE_URL is required because Marketplace is always enabled");
 }
 
-const { publicHotelProfileRepository, publicHotelQuoteRepository, bookingWebCalendarRepository } =
-  createPublicRuntimeRepositories(config);
+const { publicHotelProfileRepository } = createPublicRuntimeRepositories(config);
 
 const bookingSettingsRepository = createPgTargetBookingSettingsRepository({
   connectionString: targetDatabaseUrl,
@@ -1389,9 +1386,6 @@ const pmsGuestPolicySetupCommands =
             config.channexManagement.capabilityModes.provisioning === "mutating" &&
             config.channexManagement.scope !== "claimed",
         }),
-        recurringPricing: createPgPmsRecurringPricingCommandRepository({
-          connectionString: targetDatabaseUrl,
-        }),
         mandatoryCharges: createPgPmsMandatoryChargeConfirmationCommandRepository({
           connectionString: targetDatabaseUrl,
         }),
@@ -1936,7 +1930,6 @@ const app = buildApp({
         noShowReportingPropertyId: config.channexManagement.stagingNoShowEnabled
           ? config.channexManagement.stagingRestrictionsPropertyId
           : undefined,
-        datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         // VAY-2108: under the claimed scope booking sync is per hotel and pull-driven, so the routes
         // offer no sync_bookings command or booking-alert recovery nobody would ever process.
         capabilityModes:
@@ -2008,10 +2001,7 @@ const app = buildApp({
       }
     : undefined,
   pmsRecurringPricing: pmsGuestPolicySetupCommands
-    ? {
-        commandPort: pmsGuestPolicySetupCommands.recurringPricing,
-        readPort: propertySetupPmsRuntime.recurringPricing,
-      }
+    ? { readPort: propertySetupPmsRuntime.recurringPricing }
     : undefined,
   pmsMandatoryChargeConfirmation: pmsGuestPolicySetupCommands
     ? {
@@ -2279,8 +2269,6 @@ const app = buildApp({
   staffInvitations: staffInvitationRuntime,
   identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
-  publicHotelQuoteRepository,
-  bookingWebCalendarRepository,
   bookingWebCheckoutAdapter,
   bookingWebDisplayRates: createBookingWebDisplayRates(),
   bookingWebAttributionSink:
@@ -2430,7 +2418,6 @@ app.addHook("onClose", async () => {
     pmsRoomPublicationRuntime?.readModel.close(),
     pmsManualBookingCommandRepository?.close(),
     pmsGuestPolicySetupCommands?.pricing.close(),
-    pmsGuestPolicySetupCommands?.recurringPricing.close(),
     pmsGuestPolicySetupCommands?.mandatoryCharges.close(),
     pmsRoomSetupRuntime?.roomFactsCommands.close(),
     pmsRoomSetupRuntime?.physicalUnits.close(),
