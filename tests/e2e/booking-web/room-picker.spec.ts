@@ -172,6 +172,13 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("room-pill-2")).toContainText("✓ Garden Double Room");
     // Every room here sleeps 2: each offers to change who sleeps where instead.
     await expect(garden).toContainText("Room 1 is for 3 adults right now.");
+    // None of the Family Room is free: sold out, not "change who sleeps where", and last.
+    await expect(
+      page
+        .getByTestId("room-card-family")
+        .getByRole("button", { name: "Sold out for these dates" }),
+    ).toBeDisabled();
+    await expect.poll(() => cardOrder(page).then((order) => order.at(-1))).toBe("room-card-family");
     await page.screenshot({
       path: testInfo.outputPath(`too-small-${width}.png`),
       fullPage: true,

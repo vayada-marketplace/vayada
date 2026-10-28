@@ -122,8 +122,9 @@ export default function RoomCard({
   // choices stay choosable and /book prices the stay.
   const unpricedRoom =
     pricesState === "failed" || pricesState === "missing" || (pricesState === "ready" && !prices);
-  // A room the party doesn't fit isn't sold out: it says how many guests it takes instead.
-  const tooSmall = prices !== null && prices.roomCount === null;
+  // A room the party doesn't fit isn't sold out: it says how many guests it takes instead,
+  // unless none of its kind is free (VAY-2393).
+  const tooSmall = prices !== null && prices.roomCount === null && prices.roomsFree !== 0;
   const soldOut = prices?.availability === "sold_out" && !tooSmall;
   const roomCount = pick ? 1 : (prices?.roomCount ?? 1);
   // Room by room: free rooms of this type the group's other rooms haven't taken.
@@ -279,7 +280,10 @@ export default function RoomCard({
           onClick={pick.onChangeGuests}
           className="w-full mt-4 py-3 bg-white text-primary-700 font-semibold rounded-xl border-[1.5px] border-primary-600 hover:bg-primary-50 transition-colors text-sm"
         >
-          {t("pickRoom.fitsChangeSplit", { count: room.occupancy.maxGuests })}
+          {t("pickRoom.fitsChangeSplit", {
+            // The split moves adults: say how many adults it takes.
+            count: Math.min(room.occupancy.maxAdults, room.occupancy.maxGuests),
+          })}
         </button>
       ) : pick ? (
         // VAY-2393, room by room: what the room being chosen can do with this place.

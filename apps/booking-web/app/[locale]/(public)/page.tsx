@@ -352,7 +352,8 @@ function HomePageContent() {
   const pickOrder = (room: PricingRoom) => {
     const prices = roomPrices(room);
     if (!pickMode || !prices) return 0;
-    if (prices.availability === "sold_out" && prices.roomCount !== null) return 4;
+    if (prices.availability === "sold_out" && (prices.roomCount !== null || prices.roomsFree === 0))
+      return 4;
     if (allChosen) return 1;
     if (prices.roomCount === null) return 2;
     return prices.roomsFree != null && prices.roomsFree - takenBy(room).length <= 0 ? 3 : 0;
