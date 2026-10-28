@@ -220,6 +220,9 @@ export type PublicBookabilityBranding = {
   /** Display-only currencies a guest may switch to, defaultCurrency first; present only with
    * more than one. Quotes and charges stay in the pricing currency (supportedCurrencies). */
   displayCurrencies?: string[];
+  /** VAY-2390: the guest display currency Booking settings set, shown first; one of
+   * displayCurrencies and never defaultCurrency. Display only, like displayCurrencies. */
+  displayDefaultCurrency?: string;
   heroImage: string | null;
   heroHeading: string | null;
   heroSubtext: string | null;
