@@ -214,6 +214,7 @@ import {
   reconcilePricingCardPayments,
 } from "./domains/pricingCardReconciliation.js";
 import { createPricingCardReadinessReader } from "./domains/pricingCardReadiness.js";
+import { createPricingGuestDisplayRateReader } from "./domains/pricingGuestDisplayRate.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
@@ -1054,6 +1055,8 @@ const financePaymentReadinessReadModel = createPgFinancePaymentReadinessReadMode
   connectionString: targetDatabaseUrl,
   pricingReadPort: pmsPricingReadModel,
 });
+// Display-only guest rates, shared by the booking page and the PMS Prices footer (VAY-2114, VAY-2390).
+const bookingWebDisplayRates = createBookingWebDisplayRates();
 const propertySetupOwnerPool = new pg.Pool({
   connectionString: targetDatabaseUrl,
   connectionTimeoutMillis: 5_000,
@@ -1981,6 +1984,11 @@ const app = buildApp({
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
           manualPayments: financeManualPaymentReadiness,
           bankTransfers: !!bankTransferBookings,
+          // The booking page's own rates and cache (VAY-2390): no second provider.
+          guestDisplayRate: createPricingGuestDisplayRateReader({
+            pool: propertySetupOwnerPool,
+            displayRates: bookingWebDisplayRates,
+          }),
           cardReadiness: createPricingCardReadinessReader({
             pool: propertySetupOwnerPool,
             finance: financePaymentReadinessReadModel,
@@ -2278,7 +2286,7 @@ const app = buildApp({
   identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
   bookingWebCheckoutAdapter,
-  bookingWebDisplayRates: createBookingWebDisplayRates(),
+  bookingWebDisplayRates,
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
       ? createPgBookingWebEventSink({

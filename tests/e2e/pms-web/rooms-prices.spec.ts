@@ -105,6 +105,9 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
         publishedRevision: null,
         rates: [],
       });
+    // Guests start in the prices' currency (VAY-2390).
+    if (suffix === "/guest-display-rate" && method === "GET")
+      return ok(route, { guestDisplay: null });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);

@@ -103,6 +103,7 @@ const client = {
   paymentMethods: vi.fn(),
   cardReadiness: vi.fn(),
   notSellingRates: vi.fn(),
+  guestDisplayRate: vi.fn(),
 };
 /** A button by its text; icons beside the text (e.g. "+ Add linked offer") are ignored. */
 const button = (label: string) =>
@@ -4633,4 +4634,25 @@ it("names a deposit and counts it as a kept setting, and prices by adult count f
   await click("Save and publish");
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { mode: "occupancy", amountsMinor: ["12000", "12000"] } } });
   expect(client.termsAction).not.toHaveBeenCalled();
+});
+it("adds what guests see first, desktop only, when they start in another currency than the prices' (VAY-2390)", async () => {
+  const bar = () => view.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("md:text-right") && node.type === "span")[0]!;
+  const hint = () => view.root.findAll((node) => node.props.className === "hidden md:inline");
+  const text = (node: ReturnType<typeof bar>): string => node.children.map((child) => typeof child === "string" ? child : text(child)).join("");
+  client.guestDisplayRate.mockResolvedValue({ base: "EUR", currency: "USD", rate: 1.16 });
+  await mount();
+  const [, from] = text(bar()).match(/^Guests from €(\d+) a night on your booking page\. /)!;
+  // Whole units, as the booking page rounds its "≈" amounts.
+  expect(text(hint()[0]!)).toBe(` They see ≈ US$${Math.round(Number(from) * 1.16)} first.`);
+  act(() => view.unmount());
+  // Guests start in the prices' currency, the rate is for another base, or the read fails: the bar only says what they pay.
+  for (const answer of [() => client.guestDisplayRate.mockResolvedValue(null), () => client.guestDisplayRate.mockResolvedValue({ base: "CHF", currency: "USD", rate: 1.1 }),
+    () => client.guestDisplayRate.mockRejectedValue(new Error("offline"))]) {
+    answer();
+    await mount();
+    expect(text(bar())).toMatch(/^Guests from €\d+ a night on your booking page\.$/);
+    expect(hint()).toHaveLength(0);
+    act(() => view.unmount());
+  }
+  await mount();
 });

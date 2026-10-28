@@ -590,6 +590,12 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
         json: { version: "pricing-rates-not-selling.v1", publishedRevision: null, rates: [] },
       }),
     );
+  // Guests start in the prices' currency (VAY-2390: no "They see ≈ … first" in the Prices bar).
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/guest-display-rate`, (route) =>
+      route.fulfill({ json: { guestDisplay: null } }),
+    );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/plan-limits`, (route) =>
     route.fulfill({
       json: {

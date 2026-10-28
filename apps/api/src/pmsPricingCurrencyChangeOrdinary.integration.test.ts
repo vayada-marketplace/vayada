@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import { PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD } from "./domains/pmsPricingCurrencyCapabilities.js";
+import { createPricingGuestDisplayRateReader } from "./domains/pricingGuestDisplayRate.js";
 import {
   createHotelSetupOrdinaryLoginFixture,
   listOrdinaryPostureViolations,
@@ -257,6 +258,34 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
     }
     // The pricing row, the cascaded Finance row and the add-on all kept their old currency.
     expect(await snapshot()).toEqual(before);
+  });
+
+  // VAY-2390: the Prices footer's "They see ≈ US$73 first" reads on the same login, SELECT only.
+  it("reads the currency guests see first, and nothing while it is the pricing currency or the selector is off", async () => {
+    const runtime = new pg.Pool({ connectionString: fixture.connectionString, max: 1 });
+    try {
+      const guestDisplay = createPricingGuestDisplayRateReader({
+        pool: runtime,
+        displayRates: { rates: async () => ({ USD: 1.16 }) },
+      });
+      await expect(guestDisplay.read(hotel)).resolves.toBeNull();
+      await admin.query(
+        "UPDATE booking.booking_settings SET default_currency='USD' WHERE property_id=$1",
+        [hotel],
+      );
+      await expect(guestDisplay.read(hotel)).resolves.toEqual({
+        base: "EUR",
+        currency: "USD",
+        rate: 1.16,
+      });
+      await admin.query(
+        "UPDATE booking.booking_settings SET show_currency_selector=false WHERE property_id=$1",
+        [hotel],
+      );
+      await expect(guestDisplay.read(hotel)).resolves.toBeNull();
+    } finally {
+      await runtime.end();
+    }
   });
 
   function command(key: string, expectedRevision: number, currency: string) {

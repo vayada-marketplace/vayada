@@ -2986,6 +2986,7 @@
   "pricing.mealText.placeholder": "e.g. Breakfast buffet every morning",
   "pricing.mealText.invalid": "Use one line of plain text, up to 200 characters.",
   "pricing.bar.from": "Guests from {amount} a night on your booking page.",
+  "pricing.bar.seeFirst": "They see ≈ {amount} first.",
   "pricing.bar.discard": "Discard",
   "pricing.bar.gaps.one": "1 open night has no price",
   "pricing.bar.gaps.other": "{count} open nights have no price",
