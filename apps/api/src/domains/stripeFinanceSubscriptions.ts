@@ -11,6 +11,8 @@ import {
   type StripeSubscriptionSnapshot,
 } from "@vayada/domain-finance";
 
+import { STRIPE_REQUEST_TIMEOUT_MS } from "./stripeRequestTimeout.js";
+
 type StripeFetch = typeof globalThis.fetch;
 type StripeObject = Record<string, unknown>;
 
@@ -19,9 +21,12 @@ export function createStripeFinanceSubscriptionProvider(config: {
   fixedPlanPriceId?: string;
   endpoint?: string;
   fetch?: StripeFetch;
+  /** Tests only: production keeps STRIPE_REQUEST_TIMEOUT_MS. */
+  timeoutMs?: number;
 }): StripeFinanceSubscriptionProvider {
   const endpoint = config.endpoint ?? "https://api.stripe.com/v1";
   const fetchImpl = config.fetch ?? globalThis.fetch;
+  const timeoutMs = config.timeoutMs ?? STRIPE_REQUEST_TIMEOUT_MS;
   const fixedPriceIds = new Map<string, string>();
   const configuredPriceIds = new Map<string, string>();
   const verifiedPriceIds = new Set<string>();
@@ -45,6 +50,8 @@ export function createStripeFinanceSubscriptionProvider(config: {
           ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         },
         ...(method !== "GET" ? { body: query.toString() } : {}),
+        // Plan changes hold the hotel's plan-mutation lock while Stripe answers (VAY-2297).
+        signal: AbortSignal.timeout(timeoutMs),
       },
     );
     const payload = asObject(await response.json());

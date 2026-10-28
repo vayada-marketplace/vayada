@@ -114,6 +114,11 @@ either (table or column level, including PUBLIC or inherited grants).
 | `finance.expense_generation_dispatches`                                                                                                                                                                                               | yes                          | Finance worker discovery state, written by source-writer triggers and the worker      |
 | `pms.channex_room_availability_attempts`, `pms.channex_room_availability_receipts`, `pms.channex_room_availability_reconciliation_attestations`, `pms.channex_ari_schedule_sources`, `pms.channel_sync_status`                        | yes                          | Channex management worker-only state                                                  |
 
+The source-writer triggers that fill `finance.expense_generation_dispatches` (0099, on OTA
+commission and provider fee evidence) run with their owner's rights since 0522 (VAY-2108), so the
+API login's evidence writes queue Finance discovery without a write grant on that table. No login
+can EXECUTE those functions; a trigger fires without it.
+
 Name patterns are a safety net for future tables: in `platform`, anything
 matching `^(production_|source_extraction_|legacy_|channex_adoption_|channex_management_worker_|identity_migration_)`
 is write-protected (`channex_management_worker_` covers the owner-managed Channex worker scope

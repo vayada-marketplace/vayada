@@ -217,7 +217,7 @@ async function applyMappings(
   job: ChannexManagementJob,
   result: ChannexManagementProviderSuccess,
 ) {
-  // VAY-2108 D7b: the worker may insert a room mapping (0522 policy) but never edit one (0408
+  // VAY-2108 D7b: the worker may insert a room mapping (0523 policy) but never edit one (0408
   // lock-only), so a provisioning job only adds rows; a room that already has a mapping was
   // left out of its plan.
   const insertOnly = job.input.operationType === "provision";

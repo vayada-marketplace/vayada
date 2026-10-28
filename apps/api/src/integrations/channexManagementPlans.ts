@@ -263,7 +263,7 @@ type RoomRow = {
  * has no pricing to draw on. Rooms with an active mapping, including the adopted rooms of a
  * taken-over hotel, are left alone; a room is looked up by its exact provider title before it is
  * created, so a retried job never creates it twice. The worker records the mapping through the
- * 0522 insert policy (claimed hotel, connected binding, active room, no edits). */
+ * 0523 insert policy (claimed hotel, connected binding, active room, no edits). */
 async function provisioningPlan(
   pool: Pool,
   job: ChannexManagementJob,

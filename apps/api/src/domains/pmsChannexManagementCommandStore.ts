@@ -361,7 +361,7 @@ async function recoverAlert(
         [alertId, propertyId],
       )
     ).rows[0];
-    if (!alert || alert.resolvedAt) {
+    if (!alert || alert.resolvedAt || alert.eventType === "booking_on_closed_night") {
       await client.query("ROLLBACK");
       return { ok: false, code: "alert_not_actionable" };
     }
@@ -424,9 +424,12 @@ async function recoverAlert(
       );
       jobs.push(stagingJob.id);
     } else if (
-      ["booking_unmapped_room", "booking_unmapped_rate", "non_acked_booking"].includes(
-        alert.eventType,
-      )
+      [
+        "booking_unmapped_room",
+        "booking_unmapped_rate",
+        "non_acked_booking",
+        "booking_not_imported",
+      ].includes(alert.eventType)
     ) {
       if (!alert.impact.bookingId || !alert.impact.revisionId) {
         await client.query("ROLLBACK");
