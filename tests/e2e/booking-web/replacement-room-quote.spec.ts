@@ -146,26 +146,22 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   const total = page.getByRole("status", { name: "Your stay total" });
   await expect(total).toContainText("€315");
   const extras = page.getByRole("region", { name: "Optional extras" });
-  const toPayment = page.getByRole("button", { name: "Continue to your details" });
-  // Added for every guest it can take and every night, like the old page.
+  const toPayment = page.getByRole("button", {
+    name: /^Continue (to your details|without extras)$/,
+  });
+  // Added for every guest it can take; a per-night extra is every night (VAY-2391), so there are
+  // no nights to choose.
   await extras.getByRole("button", { name: "Add Extra breakfast" }).click();
-  const night = (day: string) => extras.getByRole("button", { name: `Extra breakfast on ${day}` });
   await expect(extras.getByText("4/4", { exact: true })).toBeVisible();
-  await expect(night("Thu 1 Oct")).toHaveAttribute("aria-pressed", "true");
-  await expect(night("Fri 2 Oct")).toHaveAttribute("aria-pressed", "true");
-  await expect(night("Sat 3 Oct")).toHaveCount(0);
-  await night("Thu 1 Oct").click();
-  await expect(night("Thu 1 Oct")).toHaveAttribute("aria-pressed", "false");
-  // The last night stays: a nightly extra needs one.
-  await night("Fri 2 Oct").click();
-  await expect(night("Fri 2 Oct")).toHaveAttribute("aria-pressed", "true");
+  await expect(extras).toContainText("Every day of your stay2 nights");
+  await expect(extras.getByRole("button", { name: /^Extra breakfast on / })).toHaveCount(0);
   for (let i = 0; i < 3; i++)
     await extras.getByRole("button", { name: "Fewer for Extra breakfast" }).click();
   await expect(extras.getByText("1/4", { exact: true })).toBeVisible();
   await expect(extras.getByRole("button", { name: "Fewer for Extra breakfast" })).toBeDisabled();
   await expect(toPayment).toBeEnabled();
   await expect(total).toContainText("€320");
-  await expect(extras.getByText("Your extras (1)")).toBeVisible();
+  await expect(page.getByText("Your extras (1)")).toBeVisible();
   await toPayment.click();
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();
@@ -196,7 +192,8 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
       id: breakfastId,
       quantity: 1,
       people: [{ selectionId: submitted.selection.rooms[0].selectionId, kind: "adult", index: 0 }],
-      dates: ["2026-10-02"],
+      // The server dates every night.
+      dates: null,
     },
   ]);
   expect(new Set(submitted.selection.rooms.map((room: any) => room.selectionId)).size).toBe(2);

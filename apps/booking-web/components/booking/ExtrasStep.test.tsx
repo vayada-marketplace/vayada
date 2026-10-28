@@ -2,7 +2,6 @@
 import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import { replacementExtrasScope } from "@/services/api/replacementAddonSelection";
 import { newExtraItem } from "@/lib/extrasChoices";
 import ExtrasStep from "./ExtrasStep";
@@ -29,12 +28,15 @@ const breakfast = {
   maxGuests: null,
   leadTimeHours: null,
   bookableFrom: null,
+  scheduleMode: "daily" as const,
+  bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
 };
 const transfer = {
   ...breakfast,
   id: "transfer",
   name: "Late check-out",
   pricingModel: "per_stay" as const,
+  scheduleMode: "guest_pick" as const,
 };
 const catalogue = [breakfast, transfer];
 const display = {
@@ -57,10 +59,6 @@ const display = {
     price: 30,
   },
 };
-const quote = (extrasMinor: string) =>
-  ({
-    lines: [{ kind: "addon", selectionId: null, amountMinor: extrasMinor }],
-  }) as unknown as PublicBookingQuote;
 
 let root: Root;
 let host: HTMLDivElement;
@@ -110,38 +108,68 @@ it("shows each extra with its price and adds it for every guest and night", () =
   });
 });
 
-it("asks for the day of a one-day extra and lists the extras with the quote's total", () => {
+it("shows when each added extra happens: a line, or the days to pick (VAY-2391)", () => {
   const scope = replacementExtrasScope(catalogue, selection, 0);
   const items = [newExtraItem(breakfast, selection), newExtraItem(transfer, selection)];
-  render({ value: { scope, items }, quote: quote("7200") });
+  render({ value: { scope, items } });
   expect(host.textContent).toContain("2/2");
-  expect(host.textContent).toContain("Which nights?");
-  expect(host.textContent).toContain("Choose a day for this extra");
-  expect(host.textContent).toContain("Your extras (2)");
-  expect(host.textContent).toContain("2 guests · 2 nights");
-  expect(host.textContent).toContain("day not chosen");
-  expect(host.textContent).toContain("Extras total€72");
-  // The per-extra amounts don't add up to the quote here (the day is missing), so they stay hidden.
-  expect(host.textContent).not.toContain("€72€");
+  // Every night of the stay, with nothing to choose.
+  expect(host.textContent).toContain("Every day of your stay2 nights");
+  expect(host.textContent).not.toContain("Which nights?");
+  // The nights of the stay to pick from; never the check-out day (8 Nov).
+  expect(host.textContent).toContain("Which day?");
+  expect(button("Late check-out on Day 06")).toBeTruthy();
+  expect(button("Late check-out on Day 07")).toBeTruthy();
+  expect(button("Late check-out on Day 08")).toBeNull();
+  expect(host.querySelector('article[aria-label="Late check-out"]')!.className).toContain(
+    "border-primary-500",
+  );
+  // Continue was pressed without a day: the card says so.
+  render({ value: { scope, items }, attention: true });
+  expect(host.textContent).toContain("Choose a day to continue");
+  expect(host.querySelector('article[aria-label="Late check-out"]')!.className).toContain(
+    "border-amber-400",
+  );
+  // The summary box under the cards is gone: the page's bar lists the extras.
+  expect(host.textContent).not.toContain("Your extras");
 });
 
-it("shows per-extra amounts only when they add up to the quote", () => {
+it("picks the guest's day, and dates the other extras from the stay", () => {
+  const onChange = vi.fn();
   const scope = replacementExtrasScope(catalogue, selection, 0);
-  render({ value: { scope, items: [newExtraItem(breakfast, selection)] }, quote: quote("7200") });
-  expect(host.querySelector("li")!.textContent).toContain("€72");
-  render({ value: { scope, items: [newExtraItem(breakfast, selection)] }, quote: quote("7000") });
-  expect(host.querySelector("li")!.textContent).not.toContain("€");
+  render({ onChange, value: { scope, items: [newExtraItem(transfer, selection)] } });
+  act(() => button("Late check-out on Day 07").click());
+  expect(onChange).toHaveBeenCalledWith({
+    scope,
+    items: [{ ...newExtraItem(transfer, selection), dates: ["2026-11-07"] }],
+  });
+  for (const [mode, text] of [
+    ["arrival", "Day 06 · your arrival dayScheduled automatically"],
+    ["departure", "Day 08 · your departure dayScheduled automatically"],
+    ["anytime", "Anytime during your stayNo date needed"],
+  ] as const) {
+    const extra = { ...transfer, scheduleMode: mode };
+    const list = [breakfast, extra];
+    render({
+      catalogue: list,
+      value: {
+        scope: replacementExtrasScope(list, selection, 0),
+        items: [newExtraItem(extra, selection)],
+      },
+    });
+    expect(host.textContent).toContain(text);
+    expect(host.textContent).not.toContain("Which day?");
+  }
 });
 
-it("asks for a missing day instead of waiting for a total that can't come", () => {
-  const scope = replacementExtrasScope(catalogue, selection, 0);
-  const breakfastOnly = { scope, items: [newExtraItem(breakfast, selection)] };
-  render({ value: { scope, items: [...breakfastOnly.items, newExtraItem(transfer, selection)] } });
-  expect(host.textContent).toContain("Extras totalChoose a day");
-  render({ value: breakfastOnly });
-  expect(host.textContent).toContain("Extras totalUpdating…");
-  render({ value: breakfastOnly, priceFailed: true });
-  expect(host.textContent).toContain("Extras total—");
+it("doesn't let a guest add an extra none of whose days falls in the stay", () => {
+  // The stay's nights are a Friday and a Saturday; the dinner is on Mondays only.
+  const dinner = { ...transfer, name: "Sunset dinner", bookableWeekdays: [1] };
+  render({ catalogue: [breakfast, dinner] });
+  expect(button("Add Sunset dinner").disabled).toBe(true);
+  expect(host.textContent).toContain("Not offered on the days of your stay.");
+  seeDetails("Sunset dinner");
+  expect(dialogButton("Add").disabled).toBe(true);
 });
 
 it("shows an extra that needs more notice than the stay gives, but doesn't let it be added", () => {
@@ -208,7 +236,7 @@ it("shows an added extra as added in its details and removes it there", () => {
   const scope = replacementExtrasScope(catalogue, selection, 0);
   render({ onChange, value: { scope, items: [newExtraItem(breakfast, selection)] } });
   seeDetails("Garden breakfast");
-  expect(details()!.textContent).toContain("In your stay: 2 guests · 2 nights");
+  expect(details()!.textContent).toContain("In your stay: 2 guests · Every day of your stay");
   expect(details()!.textContent).toContain("Added");
   act(() => dialogButton("Remove").click());
   expect(onChange).toHaveBeenCalledWith(null);

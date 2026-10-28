@@ -2,28 +2,25 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import type {
-  PublicBookingQuote,
-  PublicBookingQuoteRequest,
-} from "@vayada/domain-booking/replacement-pricing";
+import type { PublicBookingQuoteRequest } from "@vayada/domain-booking/replacement-pricing";
 import type { PricingAddon } from "@/services/api/replacementAddons";
 import type { ExtraDisplay } from "@/services/api/bookingPagePaymentMethods";
 import {
   addonNeedsNotice,
   addonPerNight,
   addonPerPerson,
+  addonPickDates,
   replacementExtraDates,
   replacementExtrasScope,
   type ReplacementExtrasValue,
 } from "@/services/api/replacementAddonSelection";
 import {
-  extraAmountMinor,
   extraCount,
   extraCountLimit,
   extraFitsParty,
   extraGuests,
+  extraNeedsDay,
   newExtraItem,
-  quoteExtrasMinor,
   toggleExtraDate,
   unitMinor,
   withCount,
@@ -31,10 +28,13 @@ import {
 } from "@/lib/extrasChoices";
 import {
   GuestAddonCard,
+  GuestAddonDayChips,
   GuestAddonDetail,
+  GuestAddonScheduledLine,
   guestAddonAddClass,
   guestAddonCategories,
   guestAddonPrimaryClass,
+  guestAddonScheduleText,
   guestAddonText,
   guestAddonUnit,
 } from "@vayada/product-onboarding/GuestAddon";
@@ -43,18 +43,26 @@ import ExtraDetailsDialog from "./ExtraDetailsDialog";
 type Selection = PublicBookingQuoteRequest["selection"];
 /** The words the cards and details use beyond the English defaults; BookPageClient passes the
  * page's translations (VAY-2231). */
-export type ExtrasLabels = typeof guestAddonText & {
-  close: string;
-  inYourStay: (detail: string) => string;
-  groupsUpTo: (count: number) => string;
-  tooSoon: (notice: string) => string;
-};
+export type ExtrasLabels = typeof guestAddonText &
+  typeof guestAddonScheduleText & {
+    close: string;
+    inYourStay: (detail: string) => string;
+    groupsUpTo: (count: number) => string;
+    tooSoon: (notice: string) => string;
+    /** VAY-2391: a "guest_pick" extra none of whose days falls in the stay. */
+    notOnYourDates: string;
+    /** "Sunset Dinner on Wed 4 Nov", a day chip's name. */
+    dayOn: (name: string, day: string) => string;
+  };
 const englishLabels: ExtrasLabels = {
   ...guestAddonText,
+  ...guestAddonScheduleText,
   close: "Close add-on details",
   inYourStay: (detail) => `In your stay: ${detail}`,
   groupsUpTo: (count) => `For groups of up to ${count} guests.`,
   tooSoon: (notice) => `${notice}, so it can’t be added to this stay.`,
+  notOnYourDates: "Not offered on the days of your stay.",
+  dayOn: (name, day) => `${name} on ${day}`,
 };
 const round =
   "w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors";
@@ -70,8 +78,9 @@ const cross = "M6 18L18 6M6 6l12 12";
 const unit = (addon: PricingAddon) => guestAddonUnit(addonPerPerson(addon), addonPerNight(addon));
 
 /** The old add-ons page on pricing v2 (VAY-2195): the hotel's extras as cards with photo, words
- * and price; a counter for guests or items, night chips (all nights to begin with) and, for a
- * one-day extra, the day the guest picks. The caller prices the stay from the result. */
+ * and price; a counter for guests or items and, once added, when it happens (VAY-2391): one line
+ * for an extra the hotel schedules, the days to pick from for one the guest schedules. The caller
+ * prices the stay from the result and shows the chosen extras in its bar. */
 export default function ExtrasStep({
   catalogue,
   display,
@@ -79,8 +88,7 @@ export default function ExtrasStep({
   allocationRevision,
   value,
   onChange,
-  quote,
-  priceFailed = false,
+  attention = false,
   formatMoney,
   formatDay,
   formatNotice,
@@ -93,9 +101,8 @@ export default function ExtrasStep({
   allocationRevision: number;
   value: ReplacementExtrasValue | null;
   onChange: (value: ReplacementExtrasValue | null) => void;
-  quote?: PublicBookingQuote;
-  /** The stay couldn't be priced: there is no extras total to wait for. */
-  priceFailed?: boolean;
+  /** Continue was pressed while an extra still needs its day: those cards say so. */
+  attention?: boolean;
   formatMoney: (minor: string, currency: string) => string;
   formatDay: (date: string) => { weekday: string; day: string };
   /** "Needs 24 hours’ notice", in the page's language. */
@@ -116,18 +123,19 @@ export default function ExtrasStep({
   const set = (next: ExtraItem[]) => onChange(next.length ? { scope, items: next } : null);
   const replace = (item: ExtraItem) =>
     set(items.map((current) => (current.id === item.id ? item : current)));
-  const chosen = extras.filter((addon) => items.some((item) => item.id === addon.id));
-  const lineMinor = chosen.map((addon) =>
-    extraAmountMinor(addon, items.find((item) => item.id === addon.id)!, display[addon.id]?.price),
-  );
-  const quoted = quote ? quoteExtrasMinor(quote) : null;
-  // An extra without its day isn't priced yet.
-  const dayMissing = items.some((item) => item.dates.length === 0);
-  // Display maths only when it adds up to what the quote charges for the extras.
-  const showLines =
-    quoted !== null &&
-    lineMinor.every((amount) => amount !== null) &&
-    lineMinor.reduce<bigint>((sum, amount) => sum + amount!, BigInt(0)) === quoted;
+  const day = (date: string) => `${formatDay(date).weekday} ${formatDay(date).day}`;
+  const noDayFor = (addon: PricingAddon) =>
+    addon.scheduleMode === "guest_pick" && !addonPickDates(selection, addon).length;
+  const nights = replacementExtraDates(selection, true).length;
+  // VAY-2391: when an added extra happens, as the line under its card says it.
+  const schedule = (addon: PricingAddon): [string, string] => {
+    if (addon.scheduleMode === "arrival")
+      return [labels.arrivalDay(day(selection.checkIn)), labels.scheduledAutomatically];
+    if (addon.scheduleMode === "departure")
+      return [labels.departureDay(day(selection.checkOut)), labels.scheduledAutomatically];
+    if (addon.scheduleMode === "daily") return [labels.everyDay, labels.nights(nights)];
+    return [labels.anytime, labels.noDateNeeded];
+  };
   const detail = (addon: PricingAddon, item: ExtraItem) =>
     [
       addonPerPerson(addon)
@@ -135,11 +143,11 @@ export default function ExtrasStep({
         : Number(item.quantity) > 1
           ? `×${item.quantity}`
           : null,
-      addonPerNight(addon)
-        ? `${item.dates.length} ${item.dates.length === 1 ? "night" : "nights"}`
+      addon.scheduleMode !== "guest_pick"
+        ? schedule(addon)[0]
         : item.dates[0]
-          ? `${formatDay(item.dates[0]).weekday} ${formatDay(item.dates[0]).day}`
-          : "day not chosen",
+          ? day(item.dates[0])
+          : labels.whichDay,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -177,8 +185,11 @@ export default function ExtrasStep({
             const tooSoon = addonNeedsNotice(addon, selection.checkIn);
             const limit = extraCountLimit(addon, selection);
             const count = item ? extraCount(addon, item) : 0;
-            const days = replacementExtraDates(selection, addonPerNight(addon));
-            const missingDay = !!item && item.dates.length === 0;
+            const days =
+              addon.scheduleMode === "guest_pick" ? addonPickDates(selection, addon) : [];
+            // None of the days it is offered on falls in this stay.
+            const noDay = addon.scheduleMode === "guest_pick" && !days.length;
+            const missingDay = !!item && extraNeedsDay(addon, item);
             const price = unitMinor(facts?.price, addon.currency);
             return (
               <GuestAddonCard
@@ -188,7 +199,7 @@ export default function ExtrasStep({
                 photo={facts?.image ?? null}
                 price={price !== null ? formatMoney(String(price), addon.currency) : null}
                 unit={unit(addon)}
-                tone={item ? (missingDay ? "attention" : "chosen") : "idle"}
+                tone={item ? (missingDay && attention ? "attention" : "chosen") : "idle"}
                 onOpenDetails={() => setOpen(addon.id)}
                 detailsLabel={labels.seeDetails}
                 renderPhoto={(src) => (
@@ -236,9 +247,9 @@ export default function ExtrasStep({
                   ) : (
                     <button
                       type="button"
-                      disabled={!fits || tooSoon || items.length >= 99}
+                      disabled={!fits || tooSoon || noDay || items.length >= 99}
                       aria-label={`Add ${addon.name}`}
-                      aria-describedby={tooSoon ? `extra-notice-${addon.id}` : undefined}
+                      aria-describedby={tooSoon || noDay ? `extra-notice-${addon.id}` : undefined}
                       onClick={() => set([...items, newExtraItem(addon, selection)])}
                       className={guestAddonAddClass}
                     >
@@ -257,44 +268,24 @@ export default function ExtrasStep({
                     {formatNotice(addon.leadTimeHours)}
                   </p>
                 )}
-                {item && (
-                  <fieldset className="mt-3 pt-3 border-t border-gray-100">
-                    <legend
-                      className={`text-xs mb-2 ${missingDay ? "text-amber-700 font-medium" : "text-gray-500"}`}
-                    >
-                      {addonPerNight(addon)
-                        ? "Which nights?"
-                        : missingDay
-                          ? "Choose a day for this extra"
-                          : "Which day?"}
-                    </legend>
-                    <div className="flex flex-wrap gap-1.5">
-                      {days.map((date) => {
-                        const on = item.dates.includes(date);
-                        const { weekday, day } = formatDay(date);
-                        return (
-                          <button
-                            key={date}
-                            type="button"
-                            aria-pressed={on}
-                            aria-label={`${addon.name} on ${weekday} ${day}`}
-                            onClick={() => replace(toggleExtraDate(addon, item, date))}
-                            className={`px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                              on
-                                ? "bg-primary-50 text-primary-700 border-primary-300"
-                                : missingDay
-                                  ? "bg-white text-gray-600 border-amber-300"
-                                  : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
-                            }`}
-                          >
-                            <span className="block leading-tight">{weekday}</span>
-                            <span className="block leading-tight text-[10px]">{day}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </fieldset>
+                {!tooSoon && noDay && !item && (
+                  <p id={`extra-notice-${addon.id}`} className="mt-2 text-xs text-gray-500">
+                    {labels.notOnYourDates}
+                  </p>
                 )}
+                {item &&
+                  (addon.scheduleMode === "guest_pick" ? (
+                    <GuestAddonDayChips
+                      legend={missingDay && attention ? labels.chooseADay : labels.whichDay}
+                      attention={missingDay && attention}
+                      days={days.map((date) => ({ date, ...formatDay(date) }))}
+                      selected={item.dates[0] ?? null}
+                      onPick={(date) => replace(toggleExtraDate(item, date))}
+                      dayLabel={(weekday, date) => labels.dayOn(addon.name, `${weekday} ${date}`)}
+                    />
+                  ) : (
+                    <GuestAddonScheduledLine line={schedule(addon)[0]} sub={schedule(addon)[1]} />
+                  ))}
               </GuestAddonCard>
             );
           })}
@@ -342,7 +333,9 @@ export default function ExtrasStep({
                       ? { text: labels.groupsUpTo(opened.maxGuests), warning: true }
                       : tooSoon && notice
                         ? { text: labels.tooSoon(notice), warning: true }
-                        : null
+                        : noDayFor(opened)
+                          ? { text: labels.notOnYourDates, warning: true }
+                          : null
                 }
                 action={
                   item ? (
@@ -360,11 +353,11 @@ export default function ExtrasStep({
                       </span>
                     </>
                   ) : (
-                    // Adding closes the details: nights and days are picked on the card.
+                    // Adding closes the details: a day is picked on the card.
                     <button
                       type="button"
                       className={guestAddonPrimaryClass}
-                      disabled={!fits || tooSoon || items.length >= 99}
+                      disabled={!fits || tooSoon || noDayFor(opened) || items.length >= 99}
                       onClick={() => {
                         set([...items, newExtraItem(opened, selection)]);
                         close();
@@ -378,74 +371,6 @@ export default function ExtrasStep({
             );
           }}
         </ExtraDetailsDialog>
-      )}
-      {chosen.length > 0 && (
-        <div className="bg-gradient-to-br from-primary-50 to-white border border-primary-100 rounded-2xl p-6 mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white">
-              {icon("M5 13l4 4L19 7", "w-4 h-4")}
-            </div>
-            <h2 className="text-lg font-bold text-gray-900">Your extras ({chosen.length})</h2>
-          </div>
-          <ul className="space-y-3 mb-5">
-            {chosen.map((addon, index) => {
-              const item = items.find((current) => current.id === addon.id)!;
-              const image = display[addon.id]?.image;
-              return (
-                <li
-                  key={addon.id}
-                  className="flex items-center justify-between gap-3 bg-white rounded-xl px-4 py-3 border border-gray-100"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
-                      {image && (
-                        <Image src={image} alt="" fill className="object-cover" sizes="48px" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">{addon.name}</p>
-                      <p className="text-xs text-gray-500">{detail(addon, item)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    {showLines && (
-                      <p className="text-sm font-bold text-gray-900">
-                        {formatMoney(String(lineMinor[index]), addon.currency)}
-                      </p>
-                    )}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${addon.name} from your extras`}
-                      onClick={() => set(items.filter((current) => current.id !== addon.id))}
-                      className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
-                    >
-                      {icon(cross, "w-3.5 h-3.5")}
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          <div className="flex items-center justify-between pt-4 border-t border-primary-100">
-            <p className="text-sm text-gray-500">Extras total</p>
-            <p
-              className={
-                quoted !== null
-                  ? "text-xl font-bold text-gray-900"
-                  : `text-sm ${dayMissing ? "font-medium text-amber-700" : "text-gray-500"}`
-              }
-              aria-live="polite"
-            >
-              {quoted !== null
-                ? formatMoney(String(quoted), selection.currency)
-                : dayMissing
-                  ? "Choose a day"
-                  : priceFailed
-                    ? "—"
-                    : "Updating…"}
-            </p>
-          </div>
-        </div>
       )}
     </section>
   );

@@ -7,7 +7,9 @@ export async function continueToPayment(
   { method, extras = false }: { method?: string; extras?: boolean } = {},
 ) {
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  if (extras) await page.getByRole("button", { name: "Continue to your details" }).click();
+  // VAY-2391: "Continue without extras" until one is added.
+  if (extras)
+    await page.getByRole("button", { name: /^Continue (to your details|without extras)$/ }).click();
   await expect(page).toHaveURL(/[?&]step=details/);
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();

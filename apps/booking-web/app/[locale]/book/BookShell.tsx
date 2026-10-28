@@ -16,12 +16,15 @@ export default function BookShell({
   title,
   subtitle,
   children,
+  bar,
 }: {
   steps: readonly BookStep[];
   current: BookStep;
   title: string;
   subtitle?: string;
   children: ReactNode;
+  /** A bar sticky at the bottom of the screen until it settles above the footer (VAY-2391). */
+  bar?: ReactNode;
 }) {
   const t = useTranslations("steps");
   const { hotel } = useHotel();
@@ -51,6 +54,7 @@ export default function BookShell({
         </div>
         {children}
       </main>
+      {bar}
       <BookingFooter />
     </div>
   );

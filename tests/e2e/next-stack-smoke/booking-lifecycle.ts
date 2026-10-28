@@ -117,7 +117,10 @@ export async function bookOnLivePage(input: {
 
     // A hotel without extras opens on the guest's details; with extras, Extras comes first.
     const details = page.getByRole("heading", { name: "Who’s staying?" });
-    const extras = page.getByRole("button", { name: "Continue to your details" });
+    // VAY-2391: the Extras step's Continue says "Continue without extras" until one is added.
+    const extras = page.getByRole("button", {
+      name: /^Continue (to your details|without extras)$/,
+    });
     await expect(details.or(extras)).toBeVisible({ timeout: 45_000 });
     if (await extras.isVisible()) await extras.click();
     await expect(details).toBeVisible();
