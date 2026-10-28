@@ -238,9 +238,6 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
                 "missing_email_contact",
               ]),
             },
-            direct_booking_publication: {
-              readiness: "actionable",
-            },
           },
         },
       ]);

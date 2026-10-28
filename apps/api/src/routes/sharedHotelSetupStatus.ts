@@ -9,7 +9,6 @@ import {
 } from "@vayada/backend-authorization";
 import {
   ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
-  isSetupTaskLaunchable,
   parseUpdateTracksRequest,
   PROPERTY_PROFILE_CHANNEL_TYPES,
   PROPERTY_PROFILE_CONTACT_PURPOSES,
@@ -30,7 +29,6 @@ import {
   type PublicPropertyProfileMediaPatchItem,
   type PublicPropertyProfileResponse,
   type SetupTask,
-  type SetupTaskId,
   type SharedPropertyTypeOption,
   type SetupTrack,
   type TrackStatus,
@@ -87,7 +85,8 @@ export type AdaptivePropertySetupFacts = {
   publicId: string;
   displayName: string | null;
   locationSummary: string | null;
-  taskFacts: Record<SetupTaskId, AdaptiveSetupTaskFact>;
+  /** The hotel-basics task's facts: the only task the setup plan carries (VAY-2175). */
+  taskFacts: { shared_identity: AdaptiveSetupTaskFact };
 };
 
 export type SharedHotelSetupStatusRepository = {
@@ -293,13 +292,11 @@ export async function registerSharedHotelSetupStatusRoutes(
             context: access.context,
             property: selectedProperty,
             selectedTracks: rawTrackStatus.selectedTracks,
-            trackRevision: rawTrackStatus.trackRevision,
-            tracks,
             evaluatedAt,
           })
         : null,
       updatedAt: evaluatedAt,
-    } satisfies SharedHotelSetupStatusResponse;
+    } satisfies AdaptiveHotelSetupStatus;
   });
 
   app.get("/properties/:propertyId/profile", async (request, reply) => {
@@ -1882,86 +1879,6 @@ function selectionState(
   return propertyIds.length === 1 ? "single_property" : "multiple_properties";
 }
 
-type SetupLaunchReadiness = "not_applicable" | "blocked" | "pending" | "ready";
-
-/** The old full plan, still sent until VAY-2175 release 2; the frontends read only its tasks. */
-type SetupPlanResponse = PropertySetupPlan & {
-  planRevision: string;
-  recommendedTaskId: SetupTaskId | null;
-  ownerProgress: { complete: number; total: number };
-  launchReadiness: {
-    operationsUse: SetupLaunchReadiness;
-    directBookingPublish: SetupLaunchReadiness;
-  };
-};
-
-export type SharedHotelSetupStatusResponse = Omit<AdaptiveHotelSetupStatus, "setupPlan"> & {
-  setupPlan: SetupPlanResponse | null;
-};
-
-type SetupTaskDefinition = Pick<SetupTask, "taskId" | "track" | "requirementOwnerDomain"> & {
-  permissions: PermissionKey[];
-  actionableBy: Exclude<SetupTask["actionableBy"], null>;
-  dependencies: SetupTaskId[];
-};
-
-const SETUP_TASK_REGISTRY: readonly SetupTaskDefinition[] = [
-  {
-    taskId: "shared_identity",
-    track: "shared",
-    requirementOwnerDomain: "hotel_catalog",
-    permissions: ["hotel_catalog.setup.manage"],
-    actionableBy: "operator",
-    dependencies: [],
-  },
-  {
-    taskId: "rooms_rates_availability",
-    track: "hotel_operations",
-    requirementOwnerDomain: "pms",
-    permissions: ["pms.operations.manage"],
-    actionableBy: "operator",
-    dependencies: ["shared_identity"],
-  },
-  {
-    taskId: "guest_settings_policies",
-    track: "hotel_operations",
-    requirementOwnerDomain: "booking",
-    permissions: ["booking.settings.manage"],
-    actionableBy: "owner",
-    dependencies: ["shared_identity", "rooms_rates_availability"],
-  },
-  {
-    taskId: "billing_plan",
-    track: "hotel_operations",
-    requirementOwnerDomain: "finance",
-    permissions: ["booking.settings.manage"],
-    actionableBy: "owner",
-    dependencies: ["shared_identity", "rooms_rates_availability"],
-  },
-  {
-    taskId: "payment",
-    track: "hotel_operations",
-    requirementOwnerDomain: "finance",
-    permissions: ["booking.settings.manage"],
-    actionableBy: "owner",
-    dependencies: ["shared_identity", "billing_plan"],
-  },
-  {
-    taskId: "direct_booking_publication",
-    track: "hotel_operations",
-    requirementOwnerDomain: "distribution",
-    permissions: ["booking.settings.manage"],
-    actionableBy: "owner",
-    dependencies: [
-      "shared_identity",
-      "rooms_rates_availability",
-      "guest_settings_policies",
-      "billing_plan",
-      "payment",
-    ],
-  },
-];
-
 const ENTRY_PRODUCT_WORKSPACE_PERMISSIONS: Record<
   SharedHotelSetupEntryProduct,
   readonly PermissionKey[]
@@ -2070,313 +1987,55 @@ function entryDecision(input: {
   };
 }
 
+/**
+ * The selected property's setup plan: the hotel-basics task, the only one the setup flow reads
+ * (VAY-2175). Every track includes it, so a hotel with no track selected has none.
+ */
 export function buildPropertySetupPlan(input: {
   context: ReturnType<typeof enforceRoutePolicy>;
   property: AdaptivePropertySetupFacts;
   selectedTracks: SetupTrack[];
-  trackRevision: number;
-  tracks: TrackStatus[];
   evaluatedAt: string;
-}): SetupPlanResponse {
-  const { context, property, selectedTracks, trackRevision, tracks, evaluatedAt } = input;
-  const definitions = SETUP_TASK_REGISTRY.filter(({ track }) =>
-    track === "shared" ? selectedTracks.length > 0 : selectedTracks.includes(track),
-  );
-  const includedTaskIds = new Set(definitions.map(({ taskId }) => taskId));
-  const tasks = definitions.map((definition): SetupTask => {
-    const fact = property.taskFacts[definition.taskId];
-    const requiredProduct = setupTaskProduct(definition.taskId);
-    const productAccessBlocked =
-      requiredProduct !== null &&
-      (tracks
-        .flatMap(({ components }) => components)
-        .find(({ product }) => product === requiredProduct)?.access !== "active" ||
-        !hasProductPropertyAccess(context, requiredProduct, property.propertyId));
-    const blockedDependencies = definition.dependencies.filter(
-      (taskId) =>
-        includedTaskIds.has(taskId) &&
-        property.taskFacts[taskId].ownerProgress !== "owner_complete",
-    );
-    const factReadiness =
-      fact.freshness === "stale" && fact.readiness === "complete" ? "pending_sync" : fact.readiness;
-    const dependencyBlocked =
-      blockedDependencies.length > 0 &&
-      (factReadiness === "actionable" || factReadiness === "complete");
-    const readiness = productAccessBlocked
-      ? "blocked"
-      : dependencyBlocked
-        ? "blocked"
-        : factReadiness;
-    const callerCapability = productAccessBlocked
-      ? "forbidden"
-      : readiness === "pending_review" || readiness === "pending_sync"
-        ? "waiting"
-        : definition.permissions.every((permission) => hasPermission(context, permission))
-          ? "allowed"
-          : "ask_owner";
-    const actionableBy =
-      readiness === "complete"
-        ? null
-        : readiness === "pending_review"
-          ? "support"
-          : readiness === "pending_sync"
-            ? "system"
-            : readiness === "blocked"
-              ? null
-              : definition.actionableBy;
-
-    return {
-      taskId: definition.taskId,
-      propertyId: property.propertyId,
-      track: definition.track,
-      requirementOwnerDomain: definition.requirementOwnerDomain,
-      destinationRouteKey: SETUP_TASK_DESTINATION_ROUTE_KEYS[definition.taskId],
-      callerCapability,
-      ownerProgress: fact.ownerProgress,
-      readiness,
-      actionableBy,
-      reasonCodes: unique([
-        ...fact.reasonCodes,
-        ...(fact.freshness === "stale" && fact.readiness === "complete"
-          ? ["source_facts_stale"]
-          : []),
-        ...(factReadiness === "blocked" ? ["domain_readiness_blocked"] : []),
-        ...(productAccessBlocked ? ["task_product_access_blocked"] : []),
-        ...(dependencyBlocked ? ["task_dependencies_incomplete"] : []),
-        ...blockedDependencies.map((taskId) => `${taskId}_incomplete`),
-      ]),
-      sourceRevision: fact.sourceRevision,
-      freshness: fact.freshness,
-      evaluatedAt,
-    };
-  });
-  const recommendedTask = tasks.find(isSetupTaskLaunchable) ?? null;
-  const ownerComplete = tasks.filter(
-    ({ ownerProgress }) => ownerProgress === "owner_complete",
-  ).length;
-  const ownerProgress = { complete: ownerComplete, total: tasks.length };
-  const launchReadinessByUse = {
-    operationsUse: launchReadiness(tasks, selectedTracks, "hotel_operations", [
-      "shared_identity",
-      "rooms_rates_availability",
-    ]),
-    directBookingPublish: launchReadiness(tasks, selectedTracks, "hotel_operations", [
-      "shared_identity",
-      "rooms_rates_availability",
-      "guest_settings_policies",
-      "billing_plan",
-      "payment",
-      "direct_booking_publication",
-    ]),
-  };
-
-  return {
+}): PropertySetupPlan {
+  const { context, property, selectedTracks, evaluatedAt } = input;
+  if (selectedTracks.length === 0) return { propertyId: property.propertyId, tasks: [] };
+  const fact = property.taskFacts.shared_identity;
+  const stale = fact.freshness === "stale" && fact.readiness === "complete";
+  const readiness = stale ? "pending_sync" : fact.readiness;
+  const callerCapability =
+    readiness === "pending_review" || readiness === "pending_sync"
+      ? "waiting"
+      : hasPermission(context, "hotel_catalog.setup.manage")
+        ? "allowed"
+        : "ask_owner";
+  const actionableBy =
+    readiness === "complete" || readiness === "blocked"
+      ? null
+      : readiness === "pending_review"
+        ? "support"
+        : readiness === "pending_sync"
+          ? "system"
+          : "operator";
+  const task: SetupTask = {
+    taskId: "shared_identity",
     propertyId: property.propertyId,
-    planRevision: propertySetupPlanRevision({
-      context,
-      property,
-      selectedTracks,
-      trackRevision,
-      tracks,
-      definitions,
-      tasks,
-      recommendedTaskId: recommendedTask?.taskId ?? null,
-      ownerProgress,
-      launchReadiness: launchReadinessByUse,
-    }),
-    tasks,
-    recommendedTaskId: recommendedTask?.taskId ?? null,
-    ownerProgress,
-    launchReadiness: launchReadinessByUse,
+    track: "shared",
+    requirementOwnerDomain: "hotel_catalog",
+    destinationRouteKey: SETUP_TASK_DESTINATION_ROUTE_KEYS.shared_identity,
+    callerCapability,
+    ownerProgress: fact.ownerProgress,
+    readiness,
+    actionableBy,
+    reasonCodes: unique([
+      ...fact.reasonCodes,
+      ...(stale ? ["source_facts_stale"] : []),
+      ...(readiness === "blocked" ? ["domain_readiness_blocked"] : []),
+    ]),
+    sourceRevision: fact.sourceRevision,
+    freshness: fact.freshness,
+    evaluatedAt,
   };
-}
-
-function propertySetupPlanRevision(input: {
-  context: ReturnType<typeof enforceRoutePolicy>;
-  property: AdaptivePropertySetupFacts;
-  selectedTracks: SetupTrack[];
-  trackRevision: number;
-  tracks: TrackStatus[];
-  definitions: readonly SetupTaskDefinition[];
-  tasks: SetupTask[];
-  recommendedTaskId: SetupTaskId | null;
-  ownerProgress: SetupPlanResponse["ownerProgress"];
-  launchReadiness: SetupPlanResponse["launchReadiness"];
-}): string {
-  const {
-    context,
-    property,
-    selectedTracks,
-    trackRevision,
-    tracks,
-    definitions,
-    tasks,
-    recommendedTaskId,
-    ownerProgress,
-    launchReadiness,
-  } = input;
-  const selectedTrackSet = new Set(selectedTracks);
-  const relevantProducts = new Set<string>();
-  if (selectedTrackSet.has("hotel_operations")) {
-    relevantProducts.add("pms");
-    relevantProducts.add("booking");
-  }
-
-  const revisionState = {
-    revisionContract: "property-setup-plan-revision.v2",
-    property: {
-      propertyId: property.propertyId,
-      publicId: property.publicId,
-      displayName: property.displayName,
-      locationSummary: property.locationSummary,
-    },
-    trackSelection: {
-      trackRevision,
-      selectedTracks: [...selectedTracks].sort(),
-      statuses: tracks
-        .filter(({ track }) => selectedTrackSet.has(track))
-        .map(({ track, provisioning, components }) => ({
-          track,
-          provisioning,
-          components: components
-            .map(({ product, access }) => ({ product, access }))
-            .sort((left, right) => compareCanonicalText(left.product, right.product)),
-        }))
-        .sort((left, right) => compareCanonicalText(left.track, right.track)),
-    },
-    authorization: {
-      permissions: unique(definitions.flatMap(({ permissions }) => permissions))
-        .sort()
-        .map((permission) => ({
-          permission,
-          granted: hasPermission(context, permission),
-        })),
-      entitlements: context.entitlements
-        .filter(
-          ({ product, resource }) =>
-            relevantProducts.has(product) &&
-            (!resource || resource.resourceId === property.propertyId),
-        )
-        .map(({ product, key, status, resource }) => ({
-          product,
-          key,
-          status,
-          resource: resource
-            ? {
-                product: resource.product,
-                resourceType: resource.resourceType,
-                resourceId: resource.resourceId,
-              }
-            : null,
-        }))
-        .sort(compareCanonicalValues),
-      propertyLinks: context.linkedResources
-        .filter(
-          ({ product, resourceId }) =>
-            resourceId === property.propertyId &&
-            (product === "hotel_catalog" || relevantProducts.has(product)),
-        )
-        .map(({ product, resourceType, resourceId, relationship, status }) => ({
-          product,
-          resourceType,
-          resourceId,
-          relationship,
-          status,
-        }))
-        .sort(compareCanonicalValues),
-    },
-    taskDefinitions: definitions.map(
-      ({ taskId, track, requirementOwnerDomain, permissions, actionableBy, dependencies }) => ({
-        taskId,
-        track,
-        requirementOwnerDomain,
-        destinationRouteKey: SETUP_TASK_DESTINATION_ROUTE_KEYS[taskId],
-        permissions: [...permissions].sort(),
-        actionableBy,
-        dependencies: [...dependencies].sort(),
-      }),
-    ),
-    tasks: tasks.map(
-      ({
-        taskId,
-        propertyId,
-        track,
-        requirementOwnerDomain,
-        destinationRouteKey,
-        callerCapability,
-        ownerProgress: taskOwnerProgress,
-        readiness,
-        actionableBy,
-        reasonCodes,
-        sourceRevision,
-        freshness,
-      }) => ({
-        taskId,
-        propertyId,
-        track,
-        requirementOwnerDomain,
-        destinationRouteKey,
-        callerCapability,
-        ownerProgress: taskOwnerProgress,
-        readiness,
-        actionableBy,
-        reasonCodes: [...reasonCodes].sort(),
-        sourceRevision,
-        freshness,
-      }),
-    ),
-    recommendedTaskId,
-    ownerProgress,
-    launchReadiness,
-  };
-  const digest = createHash("sha256").update(JSON.stringify(revisionState)).digest("base64url");
-  return `plan.v2:${digest}`;
-}
-
-function compareCanonicalValues(left: unknown, right: unknown): number {
-  return compareCanonicalText(JSON.stringify(left), JSON.stringify(right));
-}
-
-function compareCanonicalText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function launchReadiness(
-  tasks: SetupTask[],
-  selectedTracks: SetupTrack[],
-  track: SetupTrack,
-  requiredTaskIds: SetupTaskId[],
-): SetupLaunchReadiness {
-  if (!selectedTracks.includes(track)) return "not_applicable";
-  const required = requiredTaskIds.map((taskId) => tasks.find((task) => task.taskId === taskId)!);
-  if (
-    required.some(
-      (task) =>
-        task.readiness === "rejected" ||
-        task.reasonCodes.includes("domain_readiness_blocked") ||
-        task.reasonCodes.includes("task_product_access_blocked"),
-    )
-  ) {
-    return "blocked";
-  }
-  return required.every(
-    ({ readiness, freshness }) => readiness === "complete" && freshness === "fresh",
-  )
-    ? "ready"
-    : "pending";
-}
-
-function setupTaskProduct(taskId: SetupTaskId): SharedHotelSetupEntryProduct | null {
-  if (taskId === "rooms_rates_availability") return "pms";
-  if (
-    taskId === "guest_settings_policies" ||
-    taskId === "billing_plan" ||
-    taskId === "payment" ||
-    taskId === "direct_booking_publication"
-  ) {
-    return "booking";
-  }
-  return null;
+  return { propertyId: property.propertyId, tasks: [task] };
 }
 
 function hasProductPropertyAccess(

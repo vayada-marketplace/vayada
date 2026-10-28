@@ -23,12 +23,6 @@ const membershipId = "77777777-7777-4777-8777-777777777976";
 const secondActorUserId = "77777777-7777-4777-8777-777777777977";
 const secondMembershipId = "77777777-7777-4777-8777-777777777978";
 const uploadSessionId = "77777777-7777-4777-8777-777777777969";
-const roomTypeWithRoomId = "77777777-7777-4777-8777-777777777970";
-const roomTypeWithRateId = "77777777-7777-4777-8777-777777777971";
-const roomTypeWithInventoryId = "77777777-7777-4777-8777-777777777972";
-const physicalRoomId = "77777777-7777-4777-8777-777777777973";
-const fragmentedRatePlanId = "77777777-7777-4777-8777-777777777974";
-const coherentRatePlanId = "77777777-7777-4777-8777-777777777975";
 
 const profile: SharedPropertyProfileInput = {
   displayName: "Profile Revision Test Hotel",
@@ -924,272 +918,49 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
     });
   });
 
-  it("does not combine room, rate, and inventory artifacts from different room types", async () => {
+  it("reads the hotel-basics facts on the production API login (VAY-2175)", async () => {
     const created = await repository.createPropertyProfile({
       organizationId,
-      idempotencyKey: "fragmented-room-readiness-create",
-      correlationId: "fragmented-room-readiness-create",
-      profile: { ...profile, displayName: "Fragmented Room Readiness Hotel" },
+      idempotencyKey: "hotel-basics-facts-create",
+      correlationId: "hotel-basics-facts-create",
+      profile: { ...profile, displayName: "Hotel Basics Facts Hotel" },
     });
-
-    await client.query(
-      `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active)
-       VALUES
-         ($2::uuid, $1::uuid, 'Room only', 100, 'EUR', TRUE),
-         ($3::uuid, $1::uuid, 'Rate only', 100, 'EUR', TRUE),
-         ($4::uuid, $1::uuid, 'Inventory only', 100, 'EUR', TRUE)`,
-      [created.propertyId, roomTypeWithRoomId, roomTypeWithRateId, roomTypeWithInventoryId],
-    );
-    await client.query(
-      `INSERT INTO pms.rooms (id, property_id, room_type_id, room_number, status)
-       VALUES ($2::uuid, $1::uuid, $3::uuid, 'ROOM-ONLY-1', 'available')`,
-      [created.propertyId, physicalRoomId, roomTypeWithRoomId],
-    );
-    await client.query(
-      `INSERT INTO pms.rate_plans (
-         id,
-         property_id,
-         room_type_id,
-         code,
-         name,
-         base_rate_amount,
-         currency,
-         active
-       )
-       VALUES ($2::uuid, $1::uuid, $3::uuid, 'FRAGMENTED', 'Fragmented', 100, 'EUR', TRUE)`,
-      [created.propertyId, fragmentedRatePlanId, roomTypeWithRateId],
-    );
-    await client.query(
-      `INSERT INTO pms.inventory_days (
-         property_id,
-         room_type_id,
-         stay_date,
-         total_count,
-         available_count,
-         status
-       )
-       VALUES ($1::uuid, $2::uuid, CURRENT_DATE + 1, 1, 1, 'open')`,
-      [created.propertyId, roomTypeWithInventoryId],
-    );
-
-    const fragmented = (
-      await repository.getHotelSetupStatus({
-        organizationId,
-        propertyIds: [created.propertyId],
-      })
-    ).properties[0]!.taskFacts.rooms_rates_availability;
-    expect(fragmented).toMatchObject({
-      ownerProgress: "in_progress",
-      readiness: "actionable",
-      reasonCodes: ["missing_active_rate_plan", "missing_future_inventory"],
-    });
-
-    await client.query(
-      `INSERT INTO pms.rate_plans (
-         id,
-         property_id,
-         room_type_id,
-         code,
-         name,
-         base_rate_amount,
-         currency,
-         active
-       )
-       VALUES ($2::uuid, $1::uuid, $3::uuid, 'COHERENT', 'Coherent', 100, 'EUR', TRUE)`,
-      [created.propertyId, coherentRatePlanId, roomTypeWithRoomId],
-    );
-    await client.query(
-      `INSERT INTO pms.inventory_days (
-         property_id,
-         room_type_id,
-         stay_date,
-         total_count,
-         available_count,
-         status
-       )
-       VALUES ($1::uuid, $2::uuid, CURRENT_DATE + 1, 1, 1, 'open')`,
-      [created.propertyId, roomTypeWithRoomId],
-    );
-
-    const coherent = (
-      await repository.getHotelSetupStatus({
-        organizationId,
-        propertyIds: [created.propertyId],
-      })
-    ).properties[0]!.taskFacts.rooms_rates_availability;
-    expect(coherent).toMatchObject({
-      ownerProgress: "owner_complete",
-      readiness: "complete",
-      reasonCodes: [],
-    });
-  }, 30_000);
-
-  it("counts a room type as priced through the active pricing-v2 publication (VAY-2087)", async () => {
-    const pricingOnly = await repository.createPropertyProfile({
-      organizationId,
-      idempotencyKey: "pricing-v2-room-readiness-create",
-      correlationId: "pricing-v2-room-readiness-create",
-      profile: { ...profile, displayName: "Pricing V2 Room Readiness Hotel" },
-    });
-    const legacy = await repository.createPropertyProfile({
-      organizationId,
-      idempotencyKey: "legacy-room-readiness-create",
-      correlationId: "legacy-room-readiness-create",
-      profile: { ...profile, displayName: "Legacy Room Readiness Hotel" },
-    });
-    const pricingOnlyRoomTypeId = randomUUID();
-    const legacyRoomTypeId = randomUUID();
-    const unbuiltRoomTypeId = randomUUID();
-    // One sellable room type per hotel (a room and future inventory); only the legacy one has a plan.
-    for (const [propertyId, roomTypeId] of [
-      [pricingOnly.propertyId, pricingOnlyRoomTypeId],
-      [legacy.propertyId, legacyRoomTypeId],
-    ] as const) {
-      await client.query(
-        `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active)
-         VALUES ($2::uuid, $1::uuid, 'Double', 100, 'EUR', TRUE)`,
-        [propertyId, roomTypeId],
-      );
-      await client.query(
-        `INSERT INTO pms.rooms (id, property_id, room_type_id, room_number, status)
-         VALUES ($3::uuid, $1::uuid, $2::uuid, '101', 'available')`,
-        [propertyId, roomTypeId, randomUUID()],
-      );
-      await client.query(
-        `INSERT INTO pms.inventory_days (
-           property_id,
-           room_type_id,
-           stay_date,
-           total_count,
-           available_count,
-           status
-         )
-         VALUES ($1::uuid, $2::uuid, CURRENT_DATE + 1, 1, 1, 'open')`,
-        [propertyId, roomTypeId],
-      );
-    }
-    await client.query(
-      `INSERT INTO pms.rate_plans (
-         id,
-         property_id,
-         room_type_id,
-         code,
-         name,
-         base_rate_amount,
-         currency,
-         active
-       )
-       VALUES ($3::uuid, $1::uuid, $2::uuid, 'LEGACY', 'Legacy', 100, 'EUR', TRUE)`,
-      [legacy.propertyId, legacyRoomTypeId, randomUUID()],
-    );
-    // Active but without rooms yet: the legacy hotel's publication below prices only this one.
-    await client.query(
-      `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active)
-       VALUES ($2::uuid, $1::uuid, 'Suite', 100, 'EUR', TRUE)`,
-      [legacy.propertyId, unbuiltRoomTypeId],
-    );
-    const readRooms = async (read: typeof repository = repository) =>
+    const read = async (statusRepository: typeof repository) =>
       (
-        await read.getHotelSetupStatus({
+        await statusRepository.getHotelSetupStatus({
           organizationId,
-          propertyIds: [pricingOnly.propertyId, legacy.propertyId],
+          propertyIds: [created.propertyId],
         })
-      ).properties.map(({ taskFacts }) => taskFacts.rooms_rates_availability);
-    const unpriced = {
-      ownerProgress: "in_progress",
-      readiness: "actionable",
-      reasonCodes: ["missing_active_rate_plan", "missing_future_inventory"],
-    };
-    const priced = { ownerProgress: "owner_complete", readiness: "complete", reasonCodes: [] };
+      ).properties;
 
-    const before = await readRooms();
-    expect(before).toMatchObject([unpriced, priced]);
+    const facts = await read(repository);
+    expect(facts).toEqual([
+      {
+        propertyId: created.propertyId,
+        publicId: expect.any(String),
+        displayName: "Hotel Basics Facts Hotel",
+        locationSummary: "Berlin, DE",
+        taskFacts: {
+          shared_identity: expect.objectContaining({
+            ownerProgress: "owner_complete",
+            readiness: "complete",
+            reasonCodes: [],
+          }),
+        },
+      },
+    ]);
 
-    // Saving a pricing-v2 draft creates the head at revision 0. That's no publication: unchanged.
-    await client.query(
-      "INSERT INTO pms.pricing_v2_heads (property_id) VALUES ($1::uuid), ($2::uuid)",
-      [pricingOnly.propertyId, legacy.propertyId],
-    );
-    expect(await readRooms()).toEqual(before);
-
-    await publishPricing(pricingOnly.propertyId, [pricingOnlyRoomTypeId]);
-    // A publication replaces the legacy plans, as for calendar auto-open: Double has no offer.
-    await publishPricing(legacy.propertyId, [unbuiltRoomTypeId]);
-    const published = await readRooms();
-    expect(published).toMatchObject([priced, unpriced]);
-
-    // The production API login reads the pricing-v2 tables too.
     const login = await createHotelSetupOrdinaryLoginFixture(client, TEST_DATABASE_URL!);
     const restricted = createPgSharedHotelSetupStatusRepository({
       connectionString: login.connectionString,
     });
     try {
-      expect(await readRooms(restricted)).toEqual(published);
+      expect(await read(restricted)).toEqual(facts);
     } finally {
       await restricted.close?.();
       await login.drop();
     }
-  }, 30_000);
-
-  it.each([
-    { methods: ["pay_at_property"], enabled: true, complete: true },
-    { methods: ["pay_at_property", "cash"], enabled: true, complete: true },
-    { methods: ["pay_at_property"], enabled: false, complete: false },
-    { methods: ["cash", "manual_card"], enabled: true, complete: false },
-    { methods: ["card"], enabled: true, complete: false },
-    { methods: ["bank_transfer"], enabled: true, complete: false },
-    { methods: ["paypal"], enabled: true, complete: false },
-    { methods: [], enabled: true, complete: false },
-  ])(
-    "evaluates payment readiness for $methods with enabled=$enabled",
-    async ({ methods, enabled, complete }) => {
-      const key = `payment-readiness-${methods.join("-")}-${enabled}`;
-      const created = await repository.createPropertyProfile({
-        organizationId,
-        idempotencyKey: key,
-        correlationId: key,
-        profile,
-      });
-      try {
-        await client.query(
-          `INSERT INTO finance.payment_settings (
-           property_id, payments_enabled, accepted_methods, default_currency,
-           requires_manual_review
-         ) VALUES ($1::uuid, $2, $3::text[], 'EUR', FALSE)`,
-          [created.propertyId, enabled, methods],
-        );
-        const payment = (
-          await repository.getHotelSetupStatus({
-            organizationId,
-            propertyIds: [created.propertyId],
-          })
-        ).properties[0]!.taskFacts.payment;
-        expect(payment.readiness).toBe(complete ? "complete" : "actionable");
-        expect(payment.ownerProgress).toBe(
-          complete
-            ? "owner_complete"
-            : enabled && methods.length > 0
-              ? "in_progress"
-              : "not_started",
-        );
-        expect(payment.reasonCodes).toEqual(
-          complete
-            ? []
-            : [
-                !enabled
-                  ? "payments_not_enabled"
-                  : methods.length === 0
-                    ? "missing_accepted_payment_method"
-                    : "no_supported_checkout_payment_method",
-              ],
-        );
-      } finally {
-        await client.query("DELETE FROM finance.payment_settings WHERE property_id = $1::uuid", [
-          created.propertyId,
-        ]);
-      }
-    },
-  );
+  });
 
   async function cleanup(): Promise<void> {
     await client.query("BEGIN");
@@ -1231,15 +1002,6 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
           propertyId,
         ]);
         await client.query("DELETE FROM pms.rate_plans WHERE property_id = $1::uuid", [propertyId]);
-        await client.query("DELETE FROM pms.pricing_v2_rooms WHERE property_id = $1::uuid", [
-          propertyId,
-        ]);
-        await client.query("DELETE FROM pms.pricing_v2_revisions WHERE property_id = $1::uuid", [
-          propertyId,
-        ]);
-        await client.query("DELETE FROM pms.pricing_v2_heads WHERE property_id = $1::uuid", [
-          propertyId,
-        ]);
         await client.query("DELETE FROM pms.rooms WHERE property_id = $1::uuid", [propertyId]);
         await client.query("DELETE FROM pms.room_types WHERE property_id = $1::uuid", [propertyId]);
         await client.query(
@@ -1281,54 +1043,6 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       await client.query("DELETE FROM identity.users WHERE id = ANY($1::uuid[])", [
         [actorUserId, secondActorUserId],
       ]);
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    }
-  }
-
-  /** Publishes the head's next pricing-v2 revision with one offer per room type. */
-  async function publishPricing(propertyId: string, roomTypeIds: string[]): Promise<void> {
-    await client.query("BEGIN");
-    try {
-      const head = await client.query<{ revision: number }>(
-        "SELECT revision + 1 AS revision FROM pms.pricing_v2_heads WHERE property_id = $1::uuid",
-        [propertyId],
-      );
-      const revision = head.rows[0]!.revision;
-      await client.query(
-        `INSERT INTO pms.pricing_v2_revisions
-           (property_id, revision, room_count, currency, source_revisions, owner_references,
-            request_id, request_hash, actor_user_id)
-         VALUES ($1::uuid, $2, $3, 'EUR', '{}', '{}', $4, $5, $6::uuid)`,
-        [propertyId, revision, roomTypeIds.length, randomUUID(), "a".repeat(64), actorUserId],
-      );
-      for (const roomTypeId of roomTypeIds) {
-        await client.query(
-          `INSERT INTO pms.pricing_v2_rooms
-             (property_id, revision, room_type_id, currency, configuration)
-           VALUES ($1::uuid, $2, $3::uuid, 'EUR', $4::jsonb)`,
-          [
-            propertyId,
-            revision,
-            roomTypeId,
-            JSON.stringify({
-              version: "pricing.v2",
-              propertyId,
-              roomTypeId,
-              currency: "EUR",
-              revision,
-              capacity: { total: 2, adults: 2, children: 0 },
-              offers: [{ id: "flex" }],
-            }),
-          ],
-        );
-      }
-      await client.query(
-        "UPDATE pms.pricing_v2_heads SET revision = $2 WHERE property_id = $1::uuid",
-        [propertyId, revision],
-      );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
