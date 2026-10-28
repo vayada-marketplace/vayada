@@ -122,6 +122,50 @@ describe("QuickPayStep (VAY-2247 step 4)", () => {
     renderer.unmount();
   });
 
+  it("stays disabled after a run that opens Stripe, until the browser brings the page back (VAY-2402)", async () => {
+    // The Fixed Fee run worked and the browser is on its way to Stripe: the step is still on screen.
+    const page = new EventTarget();
+    vi.stubGlobal("window", page);
+    const onSubmit = vi.fn(async () => undefined);
+    const renderer = create(<QuickPayStep {...props({ onSubmit })} />);
+    const fieldset = () => renderer.root.findByType("fieldset");
+    const inFieldset = (node: ReactTestInstance | null): boolean =>
+      node !== null && (node.type === "fieldset" || inFieldset(node.parent));
+    // Back, Continue (desktop and phone footers) and Save & exit sit outside the form's fieldset.
+    const footer = () =>
+      new Set(
+        renderer.root
+          .findAllByType("button")
+          .filter((each) => !inFieldset(each))
+          .map((each) => each.props.disabled),
+      );
+    const pageshow = (persisted: boolean) =>
+      act(async () => {
+        page.dispatchEvent(Object.assign(new Event("pageshow"), { persisted }));
+      });
+
+    await act(async () =>
+      renderer.root
+        .find((node) => node.type === "input" && node.props.value === "fixed_fee")
+        .props.onChange(),
+    );
+    await submit(renderer);
+    expect(onSubmit).toHaveBeenCalledWith("fixed_fee");
+    expect(fieldset().props.disabled).toBe(true);
+    expect(footer()).toEqual(new Set([true]));
+    expect(text(renderer)).toContain("Setting up your hotel…");
+
+    await pageshow(false);
+    expect(fieldset().props.disabled).toBe(true);
+    // Back from Stripe, the page comes out of the back/forward cache as it left.
+    await pageshow(true);
+    expect(fieldset().props.disabled).toBe(false);
+    expect(footer()).toEqual(new Set([false]));
+    expect(text(renderer)).not.toContain("Setting up your hotel…");
+    renderer.unmount();
+    vi.unstubAllGlobals();
+  });
+
   it("keeps a checkout that is already open in Stripe", () => {
     const markup = renderToStaticMarkup(
       <QuickPayStep {...props({ checkoutPending: true, initialPlan: "fixed_fee" })} />,

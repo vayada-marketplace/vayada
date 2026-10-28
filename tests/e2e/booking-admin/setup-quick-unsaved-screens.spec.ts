@@ -344,3 +344,72 @@ test("How guests pay can't be changed while the first run runs, and a failed run
   expect(runs).toHaveLength(2);
   expect(runs.map((run) => run["plan"])).toEqual(["commission", "commission"]);
 });
+
+// VAY-2402: a Fixed Fee run that works opens Stripe, and the step stays on screen until Stripe's page
+// loads. It stays disabled meanwhile: a plan picked then wasn't sent, and Continue sent a second run.
+// Playwright's Chromium runs without the back/forward cache, so coming back from Stripe is a unit test.
+test("How guests pay stays disabled while Stripe's checkout opens", async ({ page, baseURL }) => {
+  await primeQuickSetupBrowserState(page);
+  await mockQuickSetupExistingHotel(page);
+  const checkout = "https://checkout.stripe.com/c/pay/cs_test";
+  const runs: Record<string, unknown>[] = [];
+  await page.route(
+    new RegExp(`/api/hotel-setup/properties/${QUICK_SETUP_PROPERTY_ID}/first-run$`),
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      runs.push(route.request().postDataJSON() as Record<string, unknown>);
+      const steps = ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"];
+      return route.fulfill({
+        headers: corsHeaders(route),
+        json: {
+          state: {
+            contractVersion: "hotel-first-run.v1",
+            propertyId: QUICK_SETUP_PROPERTY_ID,
+            steps: steps.map((id) => ({ id, state: id === "plan" ? "awaiting_checkout" : "done" })),
+            nextStep: "plan",
+          },
+          ran: steps,
+          checkout: { url: checkout },
+        },
+      });
+    },
+  );
+  // Stripe's page is slow to load: the browser stays on the step until the test lets it go.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(checkout, async (route) => {
+    await held;
+    await route.fulfill({ contentType: "text/html", body: "<title>Stripe Checkout</title>" });
+  });
+  await page.goto(quickSetupUrl(baseURL));
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  await page.getByRole("textbox", { name: "Room type name", exact: true }).fill("Classic Double");
+  await page.getByRole("textbox", { name: "Rooms of this type", exact: true }).fill("2");
+  await page.getByRole("textbox", { name: "Price per night", exact: true }).fill("150");
+  await page.getByText("My prices include all mandatory taxes and fees", { exact: true }).click();
+  await proceed(page).click();
+  await expect(heading(page, "How guests pay")).toBeVisible();
+
+  const commission = page.getByRole("radio", { name: /^Commission\b/ });
+  const fixedFee = page.getByRole("radio", { name: /^Fixed Fee\b/ });
+  await fixedFee.check();
+  const leaving = page.waitForRequest(checkout);
+  await proceed(page).click();
+  await leaving;
+  // The run is done and the browser is on its way to Stripe: nothing on the step can be used.
+  await expect(heading(page, "How guests pay")).toBeVisible();
+  await expect(commission).toBeDisabled();
+  await expect(fixedFee).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^Online card\b/ })).toBeDisabled();
+  const busy = page.getByRole("button", { name: "Setting up your hotel…", exact: true });
+  await expect(busy).toBeDisabled();
+  await expect(back(page)).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save & exit" })).toBeDisabled();
+  await commission.click({ force: true });
+  await busy.click({ force: true });
+  await expect(fixedFee).toBeChecked();
+  release();
+  await expect(page).toHaveURL(checkout);
+  expect(runs).toHaveLength(1);
+  expect(runs[0]).toMatchObject({ plan: "fixed_fee" });
+});
