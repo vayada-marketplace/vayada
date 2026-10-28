@@ -38,6 +38,7 @@ export function createAdminTransferCoordinator(options: {
       code: string;
       ipAddress?: string;
       userAgent?: string;
+      onError?: (error: unknown) => void;
     }) {
       const resolved = await resolveAdminTransferSource(options.pool, input.source);
       if (!resolved) return null;

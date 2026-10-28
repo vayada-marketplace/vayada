@@ -68,6 +68,8 @@ export function createWorkOSAdminReauthentication(config: Config) {
       source: SourceSession;
       ipAddress?: string;
       userAgent?: string;
+      /** Hears why verification failed; log only the error's name and code (VAY-2396). */
+      onError?: (error: unknown) => void;
     }): Promise<{ proofId: string; binding: AdminTransferBinding } | null> {
       try {
         if (
@@ -115,8 +117,9 @@ export function createWorkOSAdminReauthentication(config: Config) {
         if (response.impersonator) return null;
         const proofId = await config.verifyProof(binding, input.state, response.accessToken);
         return proofId ? { proofId, binding } : null;
-      } catch {
+      } catch (error) {
         // Provider errors can contain authorization codes/tokens; callers receive no raw diagnostics.
+        input.onError?.(error);
         return null;
       }
     },

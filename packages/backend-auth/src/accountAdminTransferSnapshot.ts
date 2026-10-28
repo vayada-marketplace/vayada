@@ -31,7 +31,11 @@ export async function lockAdminTransferSnapshot(
   },
 ): Promise<AdminTransferSnapshot | null> {
   if (input.actorMembershipId.toLowerCase() === input.targetMembershipId.toLowerCase()) return null;
-  // Match ordinary staff writers: organization first, then member/user locks, then roles/properties.
+  // Match ordinary staff writers: organization first, then member/user locks, then roles/links.
+  // The only writers of property assignments (staff access update, invitation acceptance, this
+  // transfer) and of delegations (this transfer) lock the organization row first, so its lock below
+  // covers those rows. The identity login can't lock them itself: a row lock needs UPDATE, and it
+  // may only read properties (VAY-2396). The assignment insert's foreign key still keeps each property.
   const org = await client.query(
     `SELECT id FROM identity.organizations
     WHERE id = $1 AND kind = 'hotel_group' AND status = 'active' AND workos_org_id = $2 FOR UPDATE`,
@@ -133,7 +137,7 @@ export async function lockAdminTransferSnapshot(
   }>(
     `SELECT subject_membership_id, delegator_membership_id
     FROM identity.membership_delegations WHERE organization_id = $1
-      AND (subject_membership_id = ANY($2::uuid[]) OR delegator_membership_id = $3) FOR UPDATE`,
+      AND (subject_membership_id = ANY($2::uuid[]) OR delegator_membership_id = $3)`,
     [input.organizationId, [actor.id, target.id], target.id],
   );
   if (
@@ -149,15 +153,11 @@ export async function lockAdminTransferSnapshot(
     !["agency", "external_owner"].includes(target.access_origin)
   )
     return null;
-  await client.query(
-    "SELECT membership_id FROM identity.membership_property_assignments WHERE membership_id = ANY($1::uuid[]) FOR UPDATE",
-    [[actor.id, target.id]],
-  );
   const properties = await client.query<{ id: string }>(
     `SELECT p.id FROM identity.organization_resource_links l
     JOIN hotel_catalog.properties p ON p.id::text = l.resource_id
     WHERE l.organization_id = $1 AND l.product = 'hotel_catalog' AND l.resource_type = 'property'
-      AND l.relationship IN ('owner', 'operator') AND l.status = 'active' FOR SHARE OF l, p`,
+      AND l.relationship IN ('owner', 'operator') AND l.status = 'active' FOR SHARE OF l`,
     [input.organizationId],
   );
   return {

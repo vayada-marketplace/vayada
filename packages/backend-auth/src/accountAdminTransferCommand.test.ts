@@ -22,6 +22,48 @@ const readyMadeRoles = new URL(
   "../../backend-migration/fixtures/ready-made-team-roles.sql",
   import.meta.url,
 );
+// Production's identity login and its privileges, as granted by vayada-platform
+// scripts/grant-target-database-identity-runtime.mjs (which refuses anything broader). Keep in step.
+const identityRuntimeRole = "vayada_next_identity_runtime";
+const identityRuntimeGrants = [
+  ["hotel_catalog.properties", "SELECT"],
+  ["identity.users", "SELECT, INSERT, UPDATE"],
+  ["identity.external_identities", "SELECT, INSERT, UPDATE"],
+  ["identity.organizations", "SELECT, INSERT, UPDATE"],
+  ["identity.organization_memberships", "SELECT, INSERT, UPDATE"],
+  ["identity.organization_resource_links", "SELECT, INSERT, UPDATE"],
+  ["identity.role_permission_grants", "SELECT, INSERT"],
+  ["identity.permission_catalog", "SELECT"],
+  ["identity.product_entitlements", "SELECT"],
+  ["identity.auth_reconciliation_events", "SELECT, INSERT"],
+  ["identity.auth_session_handoffs", "SELECT, INSERT, UPDATE, DELETE"],
+  ["identity.staff_invitations", "SELECT, INSERT, UPDATE"],
+  ["identity.staff_invitation_property_assignments", "SELECT, INSERT"],
+  ["identity.membership_property_assignments", "SELECT, INSERT, DELETE"],
+  ["identity.membership_delegations", "SELECT, DELETE"],
+  ["identity.organization_roles", "SELECT, INSERT, UPDATE, DELETE"],
+  ["identity.account_admin_guards", "SELECT, INSERT"],
+  ["identity.account_admin_transfer_proofs", "SELECT, INSERT, UPDATE"],
+  ["identity.cookie_consents", "SELECT, INSERT, UPDATE"],
+  ["identity.user_consent_status", "SELECT, INSERT, UPDATE"],
+  ["identity.consent_history", "SELECT, INSERT"],
+  ["identity.gdpr_requests", "SELECT, INSERT, UPDATE"],
+  ["platform.external_webhook_events", "SELECT, INSERT, UPDATE"],
+  ["platform.idempotency_keys", "SELECT, INSERT, UPDATE"],
+  ["platform.jobs", "SELECT, INSERT, UPDATE"],
+  ["platform.dead_letter_events", "SELECT, INSERT, UPDATE"],
+  ["platform.product_audit_events", "SELECT, INSERT"],
+] as const;
+
+async function dropIdentityRuntimeRole(client: pg.PoolClient) {
+  const existing = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [
+    identityRuntimeRole,
+  ]);
+  if (!existing.rowCount) return;
+  await client.query(`DROP OWNED BY ${identityRuntimeRole}`);
+  await client.query(`DROP ROLE ${identityRuntimeRole}`);
+}
+
 describe.skipIf(!url)("atomic administrator transfer", () => {
   let pool: pg.Pool;
   let source: Parameters<typeof runAdminTransfer>[1];
@@ -349,6 +391,65 @@ describe.skipIf(!url)("atomic administrator transfer", () => {
     expect((await rows()).find((r) => r.id === request.targetMembershipId).access_origin).toBe(
       "agency",
     );
+  });
+  // VAY-2396: the snapshot locked delegations, assignments and properties, and a row lock needs
+  // UPDATE on them, so production's identity login failed every transfer with 42501.
+  it("prepares and completes a transfer as the restricted identity login", async () => {
+    const password = "identity_runtime_test_only";
+    const admin = await pool.connect();
+    let restricted: pg.Pool | undefined;
+    try {
+      await dropIdentityRuntimeRole(admin);
+      await admin.query(
+        `CREATE ROLE ${identityRuntimeRole} LOGIN PASSWORD '${password}' NOINHERIT NOBYPASSRLS`,
+      );
+      await admin.query(
+        `GRANT USAGE ON SCHEMA hotel_catalog, identity, platform TO ${identityRuntimeRole}`,
+      );
+      for (const [table, privileges] of identityRuntimeGrants) {
+        await admin.query(`GRANT ${privileges} ON ${table} TO ${identityRuntimeRole}`);
+      }
+      const login = new URL(url!);
+      login.username = identityRuntimeRole;
+      login.password = password;
+      restricted = new pg.Pool({ connectionString: login.toString() });
+
+      const { actorMembershipId: _, ...sessionSource } = source;
+      expect(await resolveAdminTransferSource(restricted, sessionSource)).toEqual(source);
+      const prepared = await prepareAdminTransferProof(restricted, source, request);
+      if (prepared.outcome !== "prepared") throw new Error(prepared.reason);
+      const client = await restricted.connect();
+      try {
+        expect(
+          await verifyAdminTransferProof(
+            client,
+            prepared.binding,
+            prepared.state,
+            "local-test-token",
+            async () => ({
+              workosUserId: source.workosUserId,
+              workosOrgId: source.workosOrgId,
+              sessionId: "fresh",
+              authenticatedAt: Math.floor(Date.now() / 1000),
+              expiresAt: Math.floor(Date.now() / 1000) + 300,
+            }),
+          ),
+        ).toBe(prepared.proofId);
+      } finally {
+        client.release();
+      }
+      expect(await runAdminTransfer(restricted, source, request, prepared.proofId)).toEqual({
+        outcome: "transferred",
+      });
+      expect((await rows()).find((r) => r.id === request.targetMembershipId)).toMatchObject({
+        role_key: "hotel_owner",
+        property_access_mode: "all",
+      });
+    } finally {
+      await restricted?.end();
+      await dropIdentityRuntimeRole(admin);
+      admin.release();
+    }
   });
   it("rolls back ownership, proof, enrollment and jobs when audit fails", async () => {
     await pool.query(`CREATE FUNCTION platform.reject_transfer_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected audit failure'; END $$;

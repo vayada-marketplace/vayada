@@ -616,6 +616,8 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         code: typeof query.code === "string" ? query.code : "",
         ipAddress: request.ip,
         userAgent: request.headers["user-agent"],
+        onError: (error) =>
+          request.log.warn(safeErrorLog(error), "Administrator transfer reauthentication failed"),
       });
       const returnUrl = new URL("/settings/team", surfacePolicy.publicOrigin);
       returnUrl.searchParams.set("adminTransfer", completed ? "verified" : "failed");
@@ -3617,7 +3619,8 @@ async function resolveLiveAdminTransferSession(
         })))
     )
       session = null;
-  } catch {
+  } catch (error) {
+    request.log.warn(safeErrorLog(error), "Administrator transfer session check failed");
     reply.code(503).send({ error: "reauthentication_unavailable" });
     return;
   }
@@ -3633,7 +3636,8 @@ async function resolveLiveAdminTransferSession(
       surfacePolicy,
       organizationAccessOptionsFromRequest(request, surfacePolicy),
     );
-  } catch {
+  } catch (error) {
+    request.log.warn(safeErrorLog(error), "Administrator transfer identity check failed");
     reply.code(403).send({ error: "forbidden" });
     return;
   }

@@ -132,4 +132,13 @@ describe("WorkOS admin reauthentication", () => {
     verifyProof.mockRejectedValueOnce(new Error("repository unavailable"));
     expect(await adapter.complete(input(flow.flowCookie))).toBeNull();
   });
+  it("hands the swallowed cause to the caller's error hook", async () => {
+    const adapter = createWorkOSAdminReauthentication(config);
+    const flow = await adapter.start(binding, state, "admin@example.com");
+    const denied = Object.assign(new Error("permission denied"), { code: "42501" });
+    verifyProof.mockRejectedValueOnce(denied);
+    const onError = vi.fn();
+    expect(await adapter.complete({ ...input(flow.flowCookie), onError })).toBeNull();
+    expect(onError).toHaveBeenCalledWith(denied);
+  });
 });
