@@ -118,12 +118,6 @@ export type SetupTask = {
   evaluatedAt: string;
 };
 
-export function isSetupTaskLaunchable(
-  task: Pick<SetupTask, "track" | "callerCapability" | "readiness"> | null | undefined,
-): boolean {
-  return task?.callerCapability === "allowed" && task.readiness === "actionable";
-}
-
 export type ProductEntryDecision = {
   requestedProduct: (typeof PRODUCT_ENTRY_PRODUCTS)[number];
   propertyId: string | null;
@@ -132,10 +126,7 @@ export type ProductEntryDecision = {
   reasonCode: string | null;
 };
 
-/**
- * The selected property's setup plan: the hotel-basics task the setup flow reads (VAY-2175). Until
- * the API stops sending them, the parser also accepts the old plan's other tasks and keys.
- */
+/** The selected property's setup plan: the hotel-basics task the setup flow reads (VAY-2175). */
 export type PropertySetupPlan = {
   propertyId: string;
   tasks: SetupTask[];
@@ -404,21 +395,13 @@ function isProductEntryDecision(value: unknown): value is ProductEntryDecision {
   );
 }
 
-// The old full plan's keys: accepted and not read until the API stops sending them (VAY-2175).
-const RETIRED_SETUP_PLAN_KEYS = [
-  "planRevision",
-  "recommendedTaskId",
-  "ownerProgress",
-  "launchReadiness",
-] as const;
-
 function isPropertySetupPlan(
   value: unknown,
   selectedTracks: SetupTrack[],
 ): value is PropertySetupPlan {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["propertyId", "tasks", ...RETIRED_SETUP_PLAN_KEYS]) ||
+    !hasOnlyKeys(value, ["propertyId", "tasks"]) ||
     !isNonEmptyString(value["propertyId"]) ||
     !isArrayOf(value["tasks"], isSetupTask)
   ) {
