@@ -66,7 +66,7 @@ export type QuickHotelStepProps = {
   initialPart?: QuickHotelPart;
   /** After the last screen, with everything checked. */
   onSubmit: (draft: QuickHotelDraft) => Promise<void>;
-  /** Back from the first screen. */
+  /** Back from the first screen; with `onExitSave`, it saves first as Save & exit does (VAY-2394). */
   onBack?: (() => void) | null;
   /** The footer's note on where the answers are, which must be true (VAY-2383): e.g. kept on this device. */
   footerNote: string;
@@ -143,7 +143,6 @@ export function QuickHotelStep({
   };
 
   const index = PARTS.indexOf(part);
-  const back = index === 0 ? (onBack ?? null) : () => setPart(PARTS[index - 1]!);
 
   /** The first screen with a gap, after checking the whole hotel; the gaps are shown and that screen opened. */
   function screenWithGap(): QuickHotelPart | null {
@@ -183,16 +182,24 @@ export function QuickHotelStep({
     await save(onSubmit);
   }
 
-  /** Save & exit: the same save as Continue on the last screen, then leave; never leave an edit behind. */
-  async function handleSaveAndExit() {
-    if (!onExitSave) return onSaveAndExit();
+  /** Save & exit, and Back from the first screen: the same save as Continue on the last screen, then leave;
+   * never leave an edit behind. */
+  async function saveThenLeave(leave: () => void) {
+    if (!onExitSave) return leave();
     setSubmitError(null);
     if (screenWithGap()) {
       setSubmitError("Your hotel can't be saved yet: fill in what is marked, then try again.");
       return;
     }
-    if (await save(onExitSave)) onSaveAndExit();
+    if (await save(onExitSave)) leave();
   }
+
+  const back =
+    index === 0
+      ? onBack
+        ? () => void saveThenLeave(onBack)
+        : null
+      : () => setPart(PARTS[index - 1]!);
 
   const typeCard = (option: SharedPropertyTypeOption) => {
     const selected = draft.propertyType === option.value;
@@ -234,7 +241,7 @@ export function QuickHotelStep({
   return (
     <QuickSetupShell
       step={PART_STEP[part]}
-      onSaveAndExit={() => void handleSaveAndExit()}
+      onSaveAndExit={() => void saveThenLeave(onSaveAndExit)}
       saveAndExitDisabled={submitting}
     >
       <QuickSetupStepLayout

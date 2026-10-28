@@ -233,6 +233,52 @@ describe("QuickHotelStep (VAY-2247 steps 2–4, the approved split)", () => {
     gap.unmount();
   });
 
+  it("saves through Back from the first screen like Save & exit, then goes back; stays with why when it can't (VAY-2394)", async () => {
+    const onBack = vi.fn();
+    const onSaveAndExit = vi.fn();
+    const onExitSave = vi
+      .fn<(draft: QuickHotelDraft) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("That hotel name is already taken."))
+      .mockResolvedValueOnce(undefined);
+    const renderer = create(
+      <QuickHotelStep
+        {...props({ draft: FILLED, onBack, onSaveAndExit, onExitSave, initialPart: "where" })}
+      />,
+    );
+    // Back between the three screens keeps the edit on the screen, without a save.
+    await act(async () => button(renderer, "Back").props.onClick());
+    expect(text(renderer)).toContain("Step 2 of 7");
+    expect(onExitSave).not.toHaveBeenCalled();
+    // A refused save: the edit stays on this screen with the reason.
+    await act(async () => button(renderer, "Back").props.onClick());
+    expect(onExitSave).toHaveBeenCalledWith(FILLED);
+    expect(onBack).not.toHaveBeenCalled();
+    expect(text(renderer)).toContain("Step 2 of 7");
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
+      "That hotel name is already taken.",
+    );
+    // Then it saves once more and goes back.
+    await act(async () => button(renderer, "Back").props.onClick());
+    expect(onExitSave).toHaveBeenCalledTimes(2);
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(onSaveAndExit).not.toHaveBeenCalled();
+    renderer.unmount();
+
+    // A hotel with a gap can't be saved yet: the screen with the gap opens and says so, nothing leaves.
+    const gap = create(
+      <QuickHotelStep
+        {...props({ draft: { ...FILLED, contactEmail: "" }, onBack, onSaveAndExit, onExitSave })}
+      />,
+    );
+    await act(async () => button(gap, "Back").props.onClick());
+    expect(text(gap)).toContain("Step 4 of 7");
+    expect(text(gap)).toContain("Enter an email guests can write to.");
+    expect(text(gap)).toContain("Your hotel can't be saved yet");
+    expect(onExitSave).toHaveBeenCalledTimes(2);
+    expect(onBack).toHaveBeenCalledOnce();
+    gap.unmount();
+  });
+
   it("passes the chosen logo file on", async () => {
     const onLogoSelected = vi.fn();
     const renderer = create(<QuickHotelStep {...props({ onLogoSelected })} />);
