@@ -228,12 +228,88 @@ describe("QuickHotelEdit", () => {
     untouched.renderer.unmount();
   });
 
-  it("goes back to step 5 without saving on Back from its first screen", async () => {
+  it("goes back to step 5 without a write on Back from its first screen with no edit, or one typed back", async () => {
     const { renderer, updatePropertyProfile, onDone } = await mount();
     for (let screen = 0; screen < 3; screen += 1)
       await act(async () => back(renderer).props.onClick());
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(updatePropertyProfile).not.toHaveBeenCalled();
     renderer.unmount();
+
+    const typedBack = await mount();
+    await act(async () => back(typedBack.renderer).props.onClick());
+    await act(async () => back(typedBack.renderer).props.onClick());
+    await act(async () =>
+      nameField(typedBack.renderer).props.onChange({ target: { value: "Hotel Alpenrose Munich" } }),
+    );
+    // Typed back to what it was: no edit.
+    await act(async () =>
+      typedBack.renderer.root
+        .findAllByType("input")
+        .find((input) => input.props.value === "Hotel Alpenrose Munich")!
+        .props.onChange({ target: { value: "Hotel Alpenrose" } }),
+    );
+    await act(async () => back(typedBack.renderer).props.onClick());
+    expect(typedBack.onDone).toHaveBeenCalledTimes(1);
+    expect(typedBack.updatePropertyProfile).not.toHaveBeenCalled();
+    typedBack.renderer.unmount();
+  });
+
+  it("saves an edit on Back from its first screen with the same save as Continue, then goes back to step 5 (VAY-2394)", async () => {
+    const { renderer, updatePropertyProfile, onDone, onSaveAndExit } = await mount();
+    await act(async () => back(renderer).props.onClick());
+    await act(async () => back(renderer).props.onClick());
+    await act(async () =>
+      nameField(renderer).props.onChange({ target: { value: "Hotel Alpenrose Munich" } }),
+    );
+    await act(async () => back(renderer).props.onClick());
+    expect(updatePropertyProfile).toHaveBeenCalledOnce();
+    expect(updatePropertyProfile).toHaveBeenCalledWith(
+      PROPERTY,
+      {
+        expectedProfileRevision: 4,
+        patch: expect.objectContaining({ displayName: "Hotel Alpenrose Munich" }),
+      },
+      `quick-setup:edit:${PROPERTY}:4`,
+    );
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onSaveAndExit).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
+  it("stays with the reason when Back from its first screen can't save the edit (VAY-2394)", async () => {
+    const { renderer, updatePropertyProfile, onDone } = await mount();
+    updatePropertyProfile.mockRejectedValueOnce(new Error("Someone else changed this hotel."));
+    await act(async () => back(renderer).props.onClick());
+    await act(async () => back(renderer).props.onClick());
+    await act(async () =>
+      nameField(renderer).props.onChange({ target: { value: "Hotel Alpenrose Munich" } }),
+    );
+    await act(async () => back(renderer).props.onClick());
+    expect(updatePropertyProfile).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+    expect(textOf(renderer.root)).toContain("Step 2 of 7");
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
+      "Someone else changed this hotel.",
+    );
+    // The edit is still on the screen.
+    expect(
+      renderer.root
+        .findAllByType("input")
+        .some((input) => input.props.value === "Hotel Alpenrose Munich"),
+    ).toBe(true);
+    renderer.unmount();
+
+    // An edit with a gap can't be saved yet: it stays, says so, and writes nothing.
+    const gap = await mount();
+    await act(async () => back(gap.renderer).props.onClick());
+    await act(async () => back(gap.renderer).props.onClick());
+    await act(async () => nameField(gap.renderer).props.onChange({ target: { value: "" } }));
+    await act(async () => back(gap.renderer).props.onClick());
+    expect(textOf(gap.renderer.root)).toContain("Enter your hotel's name.");
+    expect(textOf(gap.renderer.root)).toContain("Your hotel can't be saved yet");
+    expect(gap.updatePropertyProfile).not.toHaveBeenCalled();
+    expect(gap.onDone).not.toHaveBeenCalled();
+    gap.renderer.unmount();
   });
 });

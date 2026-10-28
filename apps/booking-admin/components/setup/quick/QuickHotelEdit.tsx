@@ -96,14 +96,14 @@ export function QuickHotelEdit({
 
   const change = (patch: Partial<QuickHotelDraft>) =>
     setDraft((current) => (current ? { ...current, ...patch } : current));
-  // Whether the screen differs from the hotel as loaded (or last saved): Save & exit without an edit leaves
-  // without a write, and typing a value back to what it was counts as no edit.
+  // Whether the screen differs from the hotel as loaded (or last saved): Save & exit, or Back from the first
+  // screen, without an edit leaves without a write, and typing a value back to what it was counts as no edit.
   const dirty =
     logo !== null ||
     JSON.stringify(draft) !==
       JSON.stringify(quickHotelDraftFromProfile(loaded.profile.profile, loaded.savedCurrency));
 
-  /** The one save of this screen, for Continue and for Save & exit alike: the profile, a new logo, the currency. */
+  /** The one save of this screen, for Continue, Save & exit and Back alike: the profile, a new logo, the currency. */
   const save = async (next: QuickHotelDraft) => {
     if (!currency) throw new Error("Choose your address from the list, or enter it manually.");
     const { profile, savedCurrency } = loaded;
@@ -169,11 +169,12 @@ export function QuickHotelEdit({
       onLogoSelected={(file) => setLogo({ file, url: URL.createObjectURL(file) })}
       // Back from the rooms step lands on the last of the three hotel screens.
       initialPart="contacts"
+      // Back from the first screen saves an edit first, as Save & exit does (VAY-2394).
       onBack={onDone}
       // The edits live in this screen only (VAY-2383): Continue on the last screen or Save & exit saves them.
       footerNote="Not saved yet: finish with Continue, or use Save & exit"
       onSaveAndExit={onSaveAndExit}
-      // Nothing edited: leave at once, without a write.
+      // Nothing edited: Save & exit and Back from the first screen leave at once, without a write.
       onExitSave={dirty ? save : null}
       onSubmit={async (next) => {
         await save(next);

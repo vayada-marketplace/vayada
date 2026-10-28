@@ -119,3 +119,83 @@ test("Save & exit without an edit leaves without a save, and an incomplete edit 
   // Nothing changed against the loaded hotel, so nothing was written.
   expect(state.profileWrites).toHaveLength(0);
 });
+
+// VAY-2394: Back from the first "Your hotel" edit screen saves an edit with the same save as Save & exit
+// (or stays and says why), instead of dropping it on the way back to the first room.
+test("Back from the first Your hotel screen saves the edit, then goes back to the first room", async ({
+  page,
+  baseURL,
+}, testInfo) => {
+  const state = await openYourHotelEdit(page, baseURL);
+  const assertHealthy = watchPageHealth(page, testInfo, {
+    expectedMissingUrls: [new RegExp(`/pricing-source$`)],
+  });
+  await page.getByRole("textbox", { name: /Hotel name/ }).fill("Alpenrose Munich Old Town");
+  await back(page).click();
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  expect(state.profileWrites).toHaveLength(1);
+  expect(state.profileWrites[0]).toMatchObject({
+    expectedProfileRevision: 4,
+    patch: { displayName: "Alpenrose Munich Old Town", propertyType: "hotel" },
+  });
+  // Opening "Your hotel" again shows the saved name.
+  await back(page).click();
+  await expect(heading(page, "How guests reach you")).toBeVisible();
+  await back(page).click();
+  await back(page).click();
+  await expect(heading(page, "Your hotel")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: /Hotel name/ })).toHaveValue(
+    "Alpenrose Munich Old Town",
+  );
+  expect(state.profileWrites).toHaveLength(1);
+  await assertHealthy();
+});
+
+test("Back from the first Your hotel screen without an edit, or with one typed back, leaves without a save", async ({
+  page,
+  baseURL,
+}, testInfo) => {
+  const state = await openYourHotelEdit(page, baseURL);
+  const assertHealthy = watchPageHealth(page, testInfo, {
+    expectedMissingUrls: [new RegExp(`/pricing-source$`)],
+  });
+  await back(page).click();
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  expect(state.profileWrites).toHaveLength(0);
+  await back(page).click();
+  await expect(heading(page, "How guests reach you")).toBeVisible();
+  await back(page).click();
+  await back(page).click();
+  await expect(heading(page, "Your hotel")).toBeVisible();
+  const name = page.getByRole("textbox", { name: /Hotel name/ });
+  await name.fill("Alpenrose Munich Old Town");
+  await name.fill("Alpenrose Munich");
+  await back(page).click();
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  expect(state.profileWrites).toHaveLength(0);
+  await assertHealthy();
+});
+
+// No page-health watch: the refused profile write (409) is part of this test and logs to the console.
+test("Back from the first Your hotel screen stays and says why when the edit can't be saved", async ({
+  page,
+  baseURL,
+}) => {
+  const state = await openYourHotelEdit(page, baseURL);
+  const name = page.getByRole("textbox", { name: /Hotel name/ });
+  // A gap: nothing is written and the screen names it.
+  await name.fill("");
+  await back(page).click();
+  await expect(page.getByText("Enter your hotel's name.")).toBeVisible();
+  await expect(alert(page, "Your hotel can't be saved yet")).toBeVisible();
+  await expect(heading(page, "Your hotel")).toBeVisible();
+  expect(state.profileWrites).toHaveLength(0);
+  // A refused save: the edit stays with the reason.
+  state.profilePutStatus = 409;
+  await name.fill("Alpenrose Munich Old Town");
+  await back(page).click();
+  await expect(alert(page, "Someone else changed this hotel meanwhile")).toBeVisible();
+  await expect(heading(page, "Your hotel")).toBeVisible();
+  expect(state.profileWrites).toHaveLength(1);
+  await expect(name).toHaveValue("Alpenrose Munich Old Town");
+});
