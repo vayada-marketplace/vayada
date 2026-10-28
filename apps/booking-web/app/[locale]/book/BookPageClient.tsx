@@ -17,6 +17,15 @@ import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ExtrasStep from "@/components/booking/ExtrasStep";
+import ExtrasBar, { type ExtrasBarRow } from "@/components/booking/ExtrasBar";
+import {
+  extraAmountMinor,
+  extraDates,
+  extraLinesMinor,
+  extraNeedsDay,
+  formatExtraDay,
+  quoteExtrasMinor,
+} from "@/lib/extrasChoices";
 import PaymentStep from "@/components/booking/PaymentStep";
 import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
 import GuestDetailsForm, {
@@ -96,14 +105,6 @@ const formatStayDate = (date: string) =>
         timeZone: "UTC",
       })
     : date;
-/** "Fri", "6 Nov" for a stay date (YYYY-MM-DD). */
-const formatDay = (date: string) => {
-  const day = new Date(`${date}T00:00:00Z`);
-  return {
-    weekday: day.toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" }),
-    day: day.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }),
-  };
-};
 const newRoom = (): RoomChoice => ({
   selectionId: crypto.randomUUID(),
   publicOfferKey: "",
@@ -146,6 +147,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [addonCatalogue, setAddonCatalogue] = useState<PricingAddon[] | null>(null);
   const [addonError, setAddonError] = useState(false);
   const [addonReload, setAddonReload] = useState(0);
+  // VAY-2391: Continue was pressed while an extra still needs its day; the next change clears it.
+  const [extrasTried, setExtrasTried] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     setAddonCatalogue(null);
@@ -770,6 +773,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       extras?.items.some((item) => item.id === addon.id),
     );
     const item = (id: string) => extras?.items.find((current) => current.id === id);
+    const stay = request?.selection;
     const context = {
       hotelName: hotel.name,
       // Each kind of room once: the page puts "2×" in front when more rooms are booked. The meal
@@ -787,7 +791,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           item(addon.id)!.people.length || Number(item(addon.id)!.quantity) || 1,
         ]),
       ),
-      addonDates: Object.fromEntries(chosen.map((addon) => [addon.id, item(addon.id)!.dates])),
+      // The days as the booking stores them (VAY-2391): the server dates all but a guest's pick.
+      addonDates: Object.fromEntries(
+        chosen.map((addon) => [
+          addon.id,
+          stay ? extraDates(addon, item(addon.id)!, stay) : item(addon.id)!.dates,
+        ]),
+      ),
     };
     // What the server has for the booking, if it answers quickly; otherwise what this booking knows.
     const answer = await Promise.race([
@@ -835,8 +845,81 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     router.replace(`/booking/${encodeURIComponent(bookingReference)}`);
   };
   const missingDay = (addonCatalogue ?? []).find((addon) =>
-    extras?.items.some((item) => item.id === addon.id && item.dates.length === 0),
+    extras?.items.some((item) => item.id === addon.id && extraNeedsDay(addon, item)),
   )?.name;
+  // VAY-2391: the chosen extras for the bar, by when they happen: those without a day first, those
+  // still waiting for the guest's day last.
+  const pageDay = (date: string) => formatExtraDay(date, locale);
+  const chosenExtras =
+    baseRequest &&
+    extras?.scope ===
+      replacementExtrasScope(addonCatalogue ?? [], baseRequest.selection, allocationRevision)
+      ? (addonCatalogue ?? []).flatMap((addon) => {
+          const item = extras.items.find((current) => current.id === addon.id);
+          return item
+            ? [{ addon, item, dates: extraDates(addon, item, baseRequest.selection) }]
+            : [];
+        })
+      : [];
+  const extrasQuoted = quote ? quoteExtrasMinor(quote) : null;
+  // Each extra's price only when the shown prices add up to what the quote charges for them.
+  const extrasLines = extraLinesMinor(
+    chosenExtras.map(({ addon, item }) =>
+      extraAmountMinor(addon, item, pagePayment.extras[addon.id]?.price, baseRequest!.selection),
+    ),
+    extrasQuoted,
+  );
+  const badgeMonth = (date: string) =>
+    new Date(`${date}T00:00:00Z`).toLocaleDateString(locale, { month: "short", timeZone: "UTC" });
+  const badgeDay = (date: string) => String(Number(date.slice(8)));
+  const sortKey = ({ addon, item, dates }: (typeof chosenExtras)[number]) =>
+    extraNeedsDay(addon, item) ? "~" : (dates[0] ?? "");
+  const extrasRows: ExtrasBarRow[] = chosenExtras
+    .map((chosen, index) => ({ chosen, index }))
+    // Dates as text sort by day; "~" comes after every date.
+    .sort((a, b) =>
+      sortKey(a.chosen) < sortKey(b.chosen) ? -1 : sortKey(a.chosen) > sortKey(b.chosen) ? 1 : 0,
+    )
+    .map(({ chosen: { addon, item, dates }, index }) => {
+      const needsDay = extraNeedsDay(addon, item);
+      const first = dates[0],
+        last = dates[dates.length - 1];
+      return {
+        id: addon.id,
+        name: addon.name,
+        needsDay,
+        badge: needsDay
+          ? { top: "?", bottom: tAddons("badgeDay") }
+          : !first || !last
+            ? { top: "—", bottom: tAddons("badgeStay") }
+            : {
+                top: first === last ? badgeDay(first) : `${badgeDay(first)}–${badgeDay(last)}`,
+                // A stay across two months names both.
+                bottom:
+                  badgeMonth(first) === badgeMonth(last)
+                    ? badgeMonth(first)
+                    : `${badgeMonth(first)}–${badgeMonth(last)}`,
+              },
+        sub: needsDay
+          ? tAddons("chooseADayShort")
+          : addon.scheduleMode === "arrival"
+            ? tAddons("onArrival")
+            : addon.scheduleMode === "departure"
+              ? tAddons("onDeparture")
+              : addon.scheduleMode === "daily"
+                ? tAddons("nights", { count: dates.length })
+                : addon.scheduleMode === "anytime"
+                  ? tAddons("anytimeShort")
+                  : pageDay(first!).weekday,
+        price: extrasLines ? money(String(extrasLines[index]), addon.currency) : null,
+        onRemove: () =>
+          setExtras((value) =>
+            value && value.items.length > 1
+              ? { ...value, items: value.items.filter((current) => current.id !== addon.id) }
+              : null,
+          ),
+      };
+    });
   // Each step continues with a price: a refused one says so above the step's buttons.
   const priceFailed = !!error && !quote;
   // The last price for these choices stays in the summary, struck through, once it has run out.
@@ -948,6 +1031,75 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       </div>
     );
   };
+  // VAY-2391: the Extras step's bar, sticky at the bottom of the screen. With an extra still
+  // waiting for its day, Continue says what's missing instead of going on.
+  const extrasBar = (
+    <ExtrasBar
+      rows={extrasRows}
+      extrasTotal={
+        extrasQuoted !== null && quote ? money(String(extrasQuoted), quote.currency) : null
+      }
+      stay={{
+        line: stayLine,
+        total: (
+          <p
+            role="status"
+            aria-label={tAddons("stayTotalLabel")}
+            className={
+              quote || loading ? "text-lg font-bold text-gray-900" : "text-sm text-gray-600"
+            }
+          >
+            {quote
+              ? money(quote.totalMinor, quote.currency)
+              : loading
+                ? tReview("checkingPrice")
+                : missingDay
+                  ? tAddons("chooseDayForTotal")
+                  : ""}
+            {quote && (
+              <span className="text-xs font-normal text-gray-500"> {tAddons("totalIncludes")}</span>
+            )}
+          </p>
+        ),
+      }}
+      continueLabel={
+        addonError || !chosenExtras.length
+          ? tAddons("continueWithoutExtras")
+          : tAddons("continueToDetails")
+      }
+      waiting={!!missingDay}
+      continueDisabled={!missingDay && (addons === null || !quote)}
+      onContinue={() => {
+        if (missingDay) {
+          setExtrasTried(true);
+          // The card that still needs its day may be out of view.
+          document
+            .querySelector(`article[aria-label="${CSS.escape(missingDay)}"]`)
+            ?.scrollIntoView({ block: "center", behavior: "smooth" });
+          return;
+        }
+        trackEvent(slug, "addons_step_passed", {
+          extrasShown: true,
+          extrasChosen: !!addons?.length,
+        });
+        go(next);
+      }}
+      hint={extrasTried && missingDay ? tAddons("chooseDayFor", { name: missingDay }) : null}
+      // A refused price says so right above Continue, in view (VAY-2309).
+      notice={priceNotice}
+      onBack={backToRooms}
+      labels={{
+        backToRooms: tDetails("backToRooms"),
+        yourExtras: (count) => tAddons("yourExtrasCount", { count }),
+        yourExtrasTitle: tAddons("yourExtras"),
+        extrasTotal: tAddons("extrasTotal"),
+        toSchedule: (count) => tAddons("toSchedule", { count }),
+        showExtras: tAddons("showExtras"),
+        close: tAddons("closeExtras"),
+        removeExtra: (name) => tAddons("removeExtra", { name }),
+      }}
+    />
+  );
   const titles: Record<BookStep, string> = {
     rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
     extras: "Enhance Your Stay",
@@ -959,6 +1111,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     <BookShell
       steps={steps}
       current={step}
+      bar={settled && step === "extras" ? extrasBar : undefined}
       title={titles[step]}
       subtitle={
         step === "extras"
@@ -1246,11 +1399,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   selection={baseRequest.selection}
                   allocationRevision={allocationRevision}
                   value={extras}
-                  onChange={setExtras}
-                  quote={quote}
-                  priceFailed={priceFailed || noWayToPay}
+                  onChange={(value) => {
+                    setExtras(value);
+                    setExtrasTried(false);
+                  }}
+                  attention={extrasTried}
                   formatMoney={money}
-                  formatDay={formatDay}
+                  formatDay={pageDay}
                   formatNotice={(hours) => tAddons("needsNotice", { hours })}
                   labels={{
                     seeDetails: tAddons("seeDetails"),
@@ -1265,81 +1420,21 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     inYourStay: (detail) => tAddons("inYourStay", { detail }),
                     groupsUpTo: (count) => tAddons("groupsUpTo", { count }),
                     tooSoon: (notice) => tAddons("tooSoonForStay", { notice }),
+                    scheduledAutomatically: tAddons("scheduledAutomatically"),
+                    arrivalDay: (day) => tAddons("arrivalDay", { day }),
+                    departureDay: (day) => tAddons("departureDay", { day }),
+                    everyDay: tAddons("everyDay"),
+                    nights: (count) => tAddons("nights", { count }),
+                    anytime: tAddons("anytime"),
+                    noDateNeeded: tAddons("noDateNeeded"),
+                    whichDay: tAddons("whichDay"),
+                    chooseADay: tAddons("chooseDayToContinue"),
+                    notOnYourDates: tAddons("notOnYourDates"),
+                    dayOn: (name, day) => tAddons("dayOn", { name, day }),
                   }}
                 />
               )
             )}
-            {priceNotice}
-            <div className="flex flex-col-reverse md:flex-row md:items-center justify-between gap-4 border-t border-gray-200 pt-6">
-              <button
-                type="button"
-                className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1"
-                onClick={backToRooms}
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-                Back to rooms
-              </button>
-              <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-6">
-                <div className="md:text-right">
-                  <p className="text-xs text-gray-500">{stayLine}</p>
-                  <p
-                    role="status"
-                    aria-label="Your stay total"
-                    className={
-                      quote || loading ? "text-lg font-bold text-gray-900" : "text-sm text-gray-600"
-                    }
-                  >
-                    {quote
-                      ? money(quote.totalMinor, quote.currency)
-                      : loading
-                        ? tReview("checkingPrice")
-                        : missingDay
-                          ? "Choose a day to see your total"
-                          : ""}
-                    {quote && (
-                      <span className="text-xs font-normal text-gray-500">
-                        {" "}
-                        total, includes taxes &amp; fees
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <div className="flex flex-col items-start md:items-end gap-1">
-                  <button
-                    type="button"
-                    className={button}
-                    disabled={addons === null || !quote}
-                    onClick={() => {
-                      trackEvent(slug, "addons_step_passed", {
-                        extrasShown: true,
-                        extrasChosen: !!addons?.length,
-                      });
-                      go(next);
-                    }}
-                  >
-                    {addonError ? "Continue without extras" : "Continue to your details"}
-                  </button>
-                  {missingDay && (
-                    <p className="text-xs text-amber-700">
-                      Choose a day for {missingDay}, or remove it.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
           </>
         )}
         {settled && step === "details" && (
