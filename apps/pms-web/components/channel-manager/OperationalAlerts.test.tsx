@@ -205,3 +205,179 @@ it("waits for both reconnection jobs and verified scope before showing resolutio
     vi.unstubAllGlobals();
   }
 });
+
+// VAY-2108 W1d: the alerts booking intake raises when an OTA booking is refused or lands on closed nights.
+it.each([
+  ["inventory_not_open", "Open the calendar for those dates"],
+  ["operational_mapping_unavailable", "Fix the mapping in channel settings"],
+  ["handler_failed", "Something stopped the import."],
+])(
+  "tells the hotel a %s booking is missing and lets it retry the import",
+  async (reason, advice) => {
+    vi.stubGlobal("window", { setInterval: () => 1, clearInterval: () => {} });
+    vi.mocked(channexService.alertAction).mockReset();
+    vi.mocked(channexService.getAlerts).mockResolvedValue([
+      {
+        id: "missing",
+        eventType: "booking_not_imported",
+        impact: {
+          bookingId: "chx-booking",
+          revisionId: "chx-revision",
+          channel: "BookingCom",
+          reference: "BDC-4711",
+          dateFrom: "2026-12-01",
+          dateTo: "2026-12-03",
+          roomTypeId: "chx-room",
+          errorType: reason,
+        },
+        firstOccurredAt: "2026-10-27T10:00:00Z",
+        lastOccurredAt: "2026-10-27T10:00:00Z",
+        acknowledgedAt: null,
+        resolvedAt: null,
+        recoveryRound: 0,
+        occurrences: 0,
+        recovery: [],
+      } as ChannexAlert,
+    ]);
+    const snapshot = {
+      sync: { booking: { retryAfter: null }, ari: { retryAfter: null } },
+      capabilityModes: { bookingSync: "mutating", ariSync: "observe_only", iframe: "mutating" },
+    } as ChannexSnapshot;
+    let view!: ReturnType<typeof create>;
+    try {
+      await act(async () => {
+        view = create(createElement(OperationalAlerts, { snapshot, openSettings: async () => {} }));
+      });
+      const text = JSON.stringify(view.toJSON());
+      expect(text).toContain("A booking is missing from your PMS");
+      expect(text).toContain("Booking.com confirmed this booking, but it is not in your PMS");
+      expect(text).toContain(advice);
+      expect(text).toContain("BDC-4711");
+      expect(text).not.toContain("occurrence");
+      const retry = view.root
+        .findAllByType("button")
+        .find((b) => b.children.join("") === "Retry import")!;
+      expect(retry.props.disabled).toBe(false);
+      await act(async () => {
+        retry.props.onClick();
+      });
+      expect(channexService.alertAction).toHaveBeenCalledWith("missing", "recover", 0);
+    } finally {
+      if (view) act(() => view.unmount());
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+it("asks the hotel to check a booking that landed on closed nights, without a retry", async () => {
+  vi.stubGlobal("window", { setInterval: () => 1, clearInterval: () => {} });
+  vi.mocked(channexService.alertAction).mockReset();
+  let alert = {
+    id: "closed",
+    eventType: "booking_on_closed_night",
+    impact: {
+      bookingId: "chx-booking",
+      channel: "Airbnb",
+      reference: "HM-42",
+      dateFrom: "2026-11-05",
+      dateTo: "2026-11-07",
+      roomTypeNames: "Garden villa",
+      errorType: "inventory_closed",
+    },
+    firstOccurredAt: "2026-10-27T10:00:00Z",
+    lastOccurredAt: "2026-10-27T10:00:00Z",
+    acknowledgedAt: null,
+    resolvedAt: null,
+    recoveryRound: 0,
+    occurrences: 0,
+    recovery: [],
+  } as ChannexAlert;
+  vi.mocked(channexService.getAlerts).mockImplementation(async () => [alert]);
+  const snapshot = {
+    sync: { booking: { retryAfter: null }, ari: { retryAfter: null } },
+    capabilityModes: { bookingSync: "mutating", ariSync: "mutating", iframe: "mutating" },
+  } as ChannexSnapshot;
+  let view!: ReturnType<typeof create>;
+  const labels = () => view.root.findAllByType("button").map((b) => b.children.join(""));
+  try {
+    await act(async () => {
+      view = create(createElement(OperationalAlerts, { snapshot, openSettings: async () => {} }));
+    });
+    const text = JSON.stringify(view.toJSON());
+    expect(text).toContain("A booking arrived on closed nights");
+    expect(text).toContain(
+      "Airbnb sold nights that are closed in your calendar. The booking is saved.",
+    );
+    expect(text).toContain("Garden villa");
+    expect(labels()).not.toContain("Retry recovery");
+    expect(labels()).not.toContain("Retry import");
+    vi.mocked(channexService.alertAction).mockImplementationOnce(async () => {
+      alert = {
+        ...alert,
+        acknowledgedAt: "2026-10-27T11:00:00Z",
+        resolvedAt: "2026-10-27T11:00:00Z",
+      };
+    });
+    await act(async () => {
+      view.root
+        .findAllByType("button")
+        .find((b) => b.children.join("") === "Mark checked")!
+        .props.onClick();
+    });
+    expect(channexService.alertAction).toHaveBeenCalledWith("closed", "acknowledge", 0);
+    expect(JSON.stringify(view.toJSON())).toContain("Marked checked.");
+    expect(labels()).not.toContain("Mark checked");
+  } finally {
+    if (view) act(() => view.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps Retry import off when the alert names no revision, and says a closed alert was not checked", async () => {
+  vi.stubGlobal("window", { setInterval: () => 1, clearInterval: () => {} });
+  const base = {
+    firstOccurredAt: "2026-10-27T10:00:00Z",
+    lastOccurredAt: "2026-10-27T10:00:00Z",
+    acknowledgedAt: null,
+    recoveryRound: 0,
+    occurrences: 0,
+    recovery: [],
+  };
+  vi.mocked(channexService.getAlerts).mockResolvedValue([
+    {
+      ...base,
+      id: "no-revision",
+      eventType: "booking_not_imported",
+      impact: { bookingId: "chx-booking", errorType: "worker_lease_expired" },
+      resolvedAt: null,
+    } as ChannexAlert,
+    {
+      ...base,
+      id: "moved",
+      eventType: "booking_on_closed_night",
+      impact: { bookingId: "chx-other", errorType: "inventory_closed" },
+      resolvedAt: "2026-10-27T12:00:00Z",
+    } as ChannexAlert,
+  ]);
+  const snapshot = {
+    sync: { booking: { retryAfter: null }, ari: { retryAfter: null } },
+    capabilityModes: { bookingSync: "mutating", ariSync: "mutating", iframe: "mutating" },
+  } as ChannexSnapshot;
+  let view!: ReturnType<typeof create>;
+  try {
+    await act(async () => {
+      view = create(createElement(OperationalAlerts, { snapshot, openSettings: async () => {} }));
+    });
+    const text = JSON.stringify(view.toJSON());
+    expect(
+      view.root.findAllByType("button").find((b) => b.children.join("") === "Retry import")!.props
+        .disabled,
+    ).toBe(true);
+    expect(text).toContain("cannot be retried from here");
+    expect(text).toContain("Closed: a later update of this booking replaced this alert.");
+    expect(text).not.toContain("Marked checked.");
+  } finally {
+    if (view) act(() => view.unmount());
+    vi.unstubAllGlobals();
+  }
+});

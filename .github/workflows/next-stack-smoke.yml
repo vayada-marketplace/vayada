@@ -1,5 +1,14 @@
 name: Next-stack onboarding and checkout smoke
 
+# Trigger (VAY-2357, Flamur 2026-10-27): the release coordinator dispatches this by hand on main
+# after each release train has deployed and verified, as a non-blocking check:
+#   gh workflow run next-stack-smoke.yml --repo vayada-marketplace/vayada --ref main
+# A red smoke changes nothing about the release. No schedule and no platform hook: every run
+# deploys to the `next-smoke` environment, which requires a reviewer's approval and allows only
+# main, so a run waits in "Review deployments" until Flamur approves it. The recovery inputs below
+# are only for retiring a property a failed run left behind. The smoke uses live WorkOS and creates
+# and retires a synthetic property, so it never runs for a pull request.
+
 on:
   workflow_dispatch:
     inputs:

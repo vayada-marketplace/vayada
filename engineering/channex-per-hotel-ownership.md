@@ -62,6 +62,21 @@ An audited executor, run through a reviewed platform runner mode with Flamur's g
   same rooms; on switch day the Booking.com and Airbnb rate mapping inside Channex moves from
   the old plans to the new ones before full ARI goes out. The old Channex rate plans stay:
   never delete them, bookings made under them keep arriving through the adopted mappings.
+  Booking intake also resolves the offer-owned plans (VAY-2108 W2c). When no active legacy
+  mapping matches a stay's Channex room and rate plan, and the 0314 registry names an offer
+  target as the plan's owner, the stay lands on the target's room type if the booking's Channex
+  room maps to that room type (active mapping, active and not closed room type) and the plan is
+  the target's active version on the connection's current binding. A modification of a stay that
+  already landed on that target also accepts the target's earlier versions and bindings, so OTA
+  changes to accepted bookings keep arriving after an offer moves to a new Channex plan. The
+  stay's rate plan stays empty (`pms.rate_plans` holds legacy plans only); the assignment keeps
+  `channexOffer` (target, version, offer, Channex plan). The reservation page names the offer
+  while the stay keeps that room type and plan and the offer is still published. Everything else
+  still refuses with `operational_mapping_unavailable`: an unknown plan, a plan of a disabled
+  legacy mapping (the registry keeps it legacy-owned), a new booking on a superseded version's
+  plan, a target without an active version, a version from an earlier binding, a retired or
+  closed room type, or a Channex room that maps to another room type. So remap the OTAs only to
+  published, active offer plans, and remap them again when an offer gets a new Channex plan.
 - `target:channex:handover revoke` is the inverse of both, also in one transaction: the connection goes back to `disconnected`
   with a `NULL` external id, mappings are disabled, then the claim becomes `released`. A second
   `attach` reuses the retained rows. Every command writes an audit row; re-running an applied
@@ -99,6 +114,27 @@ webhook (runbook P17) comes later. Before it does, `CHANNEX_WEBHOOK_INTAKE_MODE`
 `observe_only`: in `mutating` mode, a claimed hotel whose connection is down would get booking
 and message jobs that retry and then dead-letter.
 
+### When intake refuses a booking
+
+The OTA has already confirmed the booking, so a refusal must never be silent (VAY-2108 W1d):
+
+- Every dead-lettered ingest job writes a `booking_not_imported` alert in the same transaction
+  (PMS → Channel manager → Channel alerts), with the OTA, its reservation code, the stay, the
+  Channex room and rate ids and the reason. The worker logs each one with the property id and
+  reason. "Retry import" re-ingests the revision once the cause is fixed. An applied later
+  revision of the same booking, or its cancellation, closes the alert.
+- A refused revision is **not** acknowledged, so Channex keeps flagging it too. Both feed readers
+  (the scheduled pull and the webhook-hint load) page through the whole feed, at most 20 pages of
+  100 per run; a longer feed is logged with the hotel. Refused revisions never hide newer ones.
+- A booking on `closed` or `linked_stop_sell` nights is saved (VAY-1981 refused it): its rooms get
+  `inventoryWarning` in the assignment payload, and the hotel gets a `booking_on_closed_night`
+  alert to check it can host the guest ("Mark checked" closes it; so does a later revision that
+  moves the stay or cancels it). The switch-day booking copy uses the same path. The
+  property-scoped Airbnb alteration runtime (off in production) still refuses closed nights.
+- Still refused, now with the alert: more rooms than physically exist, nights beyond the open
+  calendar (no inventory day yet), unmapped rooms or rates, and a stay change on a room the host
+  chose by hand (VAY-2385).
+
 ## Rollout
 
 1. Gate and executor ship inert. Production next-api keeps booking sync, ARI and provisioning
@@ -110,6 +146,18 @@ and message jobs that retry and then dead-letter.
 3. Per hotel: legacy disable and readback, then `attach` (or `activate` for an imported row),
    then the booking copy and the first pull within minutes. Then the offers create their rate
    plans, the OTA rate mapping in Channex moves to them, and only then full ARI.
+   - **Before attach, check the hotel's calendar**, so its OTA bookings land without warnings:
+     the operating calendar is year-round, or its seasons match what the OTAs sell; calendar
+     auto-open is On (rolling 12 months); no mapped room type is retired; room types share a
+     linked inventory group only if the OTAs sell them the same way; and a read-only count shows
+     0 `closed` and 0 `linked_stop_sell` inventory days for every mapped room type over the open
+     calendar, including the nights of the bookings the copy brings in. Every one of those nights
+     must have an inventory day, past nights of guests already in house included, or the copy
+     refuses that booking (with the alert).
+   - **Before full ARI, make sure Booking.com and Airbnb cannot sell beyond our open calendar.**
+     Legacy's last push may reach further than our 12 months: read the hotel's furthest open
+     night in Channex, and if it lies past our last inventory day, close those nights in Channex
+     (a Channex write, so Flamur's go). A booking there is refused, with the alert.
 4. ARI and published offers (D7): `PMS_CHANNEX_ARI_SYNC_MODE` and `PMS_CHANNEX_PROVISIONING_MODE`
    turn `mutating` together under the claimed scope, on top of booking sync. The worker then runs
    under the claimed DB scope (0519: new RLS helper, the pinned scope functions untouched, digests
@@ -117,9 +165,9 @@ and message jobs that retry and then dead-letter.
    `provision` jobs only for the owned hotels that pass the gate, plus unbound `enable` jobs.
    Provisioning (D7b) creates the missing Channex room types of a hotel that pressed "Enable
    connection": rooms without any mapping row, looked up by exact provider title first. The
-   worker records each mapping through the 0522 insert policy (owned hotel, connected binding,
+   worker records each mapping through the 0523 insert policy (owned hotel, connected binding,
    active room, insert only: 0408's lock-only policy still forbids edits) with the INSERT grant
-   from the platform's claimed grant mode. Order: 0522 first, then the grant, then an image
+   from the platform's claimed grant mode. Order: 0523 first, then the grant, then an image
    that asserts the claimed scope; the preflight refuses the grant without the policy
    (`claimed_grant_before_policy`) and, once the scope is asserted, the policy without the grant
    (`grant_missing`). A room whose only mapping is disabled or stale fails the job

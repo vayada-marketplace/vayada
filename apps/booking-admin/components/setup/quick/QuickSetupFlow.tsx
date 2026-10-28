@@ -308,7 +308,7 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
         view.resumed ? (
           <p className="flex gap-3 rounded-xl border border-primary-100 bg-primary-50 px-4 py-3 text-[13px] leading-5 text-primary-800">
             <InformationCircleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            {`Welcome back${firstName ? `, ${firstName}` : ""}. Everything you entered is saved — you're on step 2 of 7.`}
+            {`Welcome back${firstName ? `, ${firstName}` : ""}. Everything you entered is still here — you're on step 2 of 7.`}
           </p>
         ) : null
       }
@@ -334,6 +334,8 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
       contactsNote={stored.contactsFromAccount ? <QuickContactsFromAccountNote /> : null}
       logoPreviewUrl={logo?.url ?? null}
       onLogoSelected={(file) => setLogo({ file, url: URL.createObjectURL(file) })}
+      // The draft lives on this device until the last screen's Continue creates the hotel (VAY-2383).
+      footerNote="Kept on this device until you finish “How guests reach you”"
       onSubmit={async (draft) => {
         if (!status || !currency)
           throw new Error("Choose your address from the list, or enter it manually.");

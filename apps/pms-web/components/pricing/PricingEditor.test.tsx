@@ -329,7 +329,7 @@ it("retains an uncertain draft save and serializes repeated clicks", async () =>
   expect(publish).toHaveBeenCalledTimes(2);
 });
 it.each([
-  ["payments_disabled", "Payments are switched off for this property"],
+  ["payments_disabled", "payments are switched off for this property"],
   ["deposit_execution_unavailable", "Deposit payment terms cannot be saved yet"],
 ])(
   "explains a Finance denial (%s), keeps the edits editable and saves again into a fresh draft",
@@ -4213,6 +4213,42 @@ it("starts an unpriced room with the first setup in the property currency and pu
   await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
   expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
   expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 4 }); expect(policy).toHaveBeenCalledOnce();
+});
+it("says before the first price that payments aren't set up, and after a refused save that nothing was saved (VAY-2383)", async () => {
+  vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: false, onlineCardPayment: false, defaultCurrency: "EUR" } } as never);
+  client.read.mockResolvedValue({ ...snapshot, revision: 3, sources, stale: false });
+  const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
+  client.prepare.mockRejectedValue(new ApiErrorResponse(403, { code: "denied", reason: "payments_disabled" } as never));
+  await mountRoom();
+  await act(async () => {});
+  const shown = () => JSON.stringify(view.toJSON());
+  // Payment settings were read and nothing is on: the page says so before any typing, with the payment currency.
+  // The facade answers EUR for a hotel without any settings row, so the notice never names a currency.
+  expect(shown()).toContain("Payments aren't set up for this property yet, so prices can't be saved.");
+  expect(shown()).not.toContain("(now EUR)");
+  const first = familyInput("90");
+  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
+  // The refusal says nothing was saved and where to set payments up; the typed prices live on this page only.
+  expect(shown()).toContain("Your prices were not saved: payments are switched off for this property.");
+  expect(shown()).toContain("Booking Admin (Settings → Payments)");
+  expect(shown()).toContain("What you typed stays on this page only until you leave or reload it.");
+  expect(shown()).not.toContain("edits are kept");
+  expect(shown()).not.toContain("so prices can't be saved.");
+  expect(client.publicationAction).not.toHaveBeenCalled();
+});
+it("names the payment currency when the first prices are refused for another one (VAY-2383)", async () => {
+  vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "EUR" } } as never);
+  client.read.mockResolvedValue(null);
+  const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
+  client.prepare.mockRejectedValue(new ApiErrorResponse(403, { code: "denied", reason: "currency_mismatch" } as never));
+  await mountRoom();
+  await act(async () => {});
+  const shown = () => JSON.stringify(view.toJSON());
+  expect(shown()).not.toContain("so prices can't be saved.");
+  const first = firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"], room: familyId, currency: "IDR", base: "1500000", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "flexible", freeDays: "3", payment: "full" });
+  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
+  expect(shown()).toContain("Your prices were not saved: the property takes payments in EUR. Enter the prices in EUR");
+  expect(shown()).not.toContain("edits are kept");
 });
 it("on a room page, offers only that room for the first setup and asks to finish room details when it cannot have prices", async () => {
   client.read.mockResolvedValueOnce(null); await mountRoom();

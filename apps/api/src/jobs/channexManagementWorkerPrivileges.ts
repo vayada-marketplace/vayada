@@ -47,7 +47,7 @@ export const channexManagementWorkerPrivileges: Record<string, Record<string, tr
   "pms.inventory_materialization_coverage": { SELECT: true, UPDATE: ["property_id"] },
   "pms.channel_binding_claims": { SELECT: true, INSERT: ["property_id", "provider", "external_property_id", "claim_state", "claim_source", "updated_at"], UPDATE: ["id"] },
   "pms.channel_connections": { SELECT: true, INSERT: ["property_id", "provider", "connection_status", "external_property_id"], UPDATE: ["connection_status", "external_property_id", "messaging_app_installed", "last_booking_sync_at", "last_ari_sync_at", "connection_metadata", "updated_at"] },
-  // VAY-2108 D7b: provisioning records the room types it created (insert only, 0522 policy).
+  // VAY-2108 D7b: provisioning records the room types it created (insert only, 0523 policy).
   "pms.channel_room_type_mappings": { SELECT: true, INSERT: ["property_id", "connection_id", "room_type_id", "external_room_type_id", "status"], UPDATE: ["id"] },
   "pms.channel_rate_plan_mappings": { SELECT: true },
   "pms.channel_sync_status": { SELECT: true, INSERT: ["property_id", "connection_id", "sync_domain", "status", "last_attempt_at", "last_success_at", "last_error_code", "last_error_message", "retry_after"], UPDATE: ["status", "last_attempt_at", "last_success_at", "last_error_code", "last_error_message", "retry_after", "updated_at"] },

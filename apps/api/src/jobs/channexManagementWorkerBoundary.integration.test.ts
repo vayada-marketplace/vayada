@@ -35,7 +35,7 @@ const key = randomUUID(),
 
 describe.skipIf(!url)("Channex worker effective permissions", () => {
   const owner = new pg.Client({ connectionString: url });
-  /** Migration 0522's insert policy on the mapping table (VAY-2108 D7b). */
+  /** Migration 0523's insert policy on the mapping table (VAY-2108 D7b). */
   const mappingInsertPolicy = async () =>
     (
       await owner.query<{ present: boolean }>(
@@ -70,7 +70,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     await owner.query(
       `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
     );
-    // The claimed-only grants (D7b) follow their insert policy (0522), as the platform does.
+    // The claimed-only grants (D7b) follow their insert policy (0523), as the platform does.
     const claimedPolicies = await mappingInsertPolicy();
     for (const [table, grants] of Object.entries(privileges))
       for (const [kind, columns] of Object.entries(grants)) {
@@ -796,7 +796,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
       // An image that does not ask for the claimed scope still starts after the grant. One that
       // asks for it also needs the D7b mapping insert grant, which the fixture gives only with
-      // migration 0522's policy.
+      // migration 0523's policy.
       await boundary(false);
       if (await mappingInsertPolicy()) await boundary(true);
       else await expect(boundary(true)).rejects.toThrow("channex_worker_grant_missing");
@@ -927,7 +927,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
         values,
       );
     };
-    // Migration 0522 adds the insert policy and the plain provisioning queue shape.
+    // Migration 0523 adds the insert policy and the plain provisioning queue shape.
     const secured = await mappingInsertPolicy();
     const mappingGrant = `INSERT(${(privileges["pms.channel_room_type_mappings"]!.INSERT as string[]).join(",")}) ON pms.channel_room_type_mappings`;
     const boundary = async (claimedScope: boolean) => {
@@ -942,7 +942,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       await owner.query(`GRANT SELECT ON ${claimedTable} TO ${role}`);
       await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
       if (!secured) {
-        // Before 0522 a plain provisioning job is not a claimed queue shape, and the mapping
+        // Before 0523 a plain provisioning job is not a claimed queue shape, and the mapping
         // insert grant must not arrive before the policy: the preflight refuses it.
         expect(await jobs()).toEqual([]);
         await boundary(false);

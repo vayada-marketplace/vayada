@@ -11,9 +11,9 @@ import {
 // delivery scope (0521), both checked on PG16 and PG17. This image lists the 0520 delivery tables
 // in its privilege matrix, so it needs 0519 and 0520 (cloud job 6dc8de37 computed both values on
 // that base); accepting both lets it start on either side of 0521, so it is released before 0521
-// and stays a safe rollback target once 0521 ships. VAY-2108 D7b adds the value after 0522
+// and stays a safe rollback target once 0521 ships. VAY-2108 D7b adds the value after 0523
 // (claimed room-type provisioning: jobs shape and mapping insert policy; cloud job 25364544 on
-// 0521 + 0522, PG16 = PG17), so this image also starts once 0522 is applied.
+// 0521 + 0523, PG16 = PG17), so this image also starts once 0523 is applied.
 const POLICY_DIGESTS = new Set([
   "f9a53a613884875be8387bfb59bf5772038eda202d0f213c32854585d247b7be",
   "4b14279a210c9f240ea9fefbc8c78dd3886dcccd5e42c1f7f67a436fe6685e3a",
@@ -192,7 +192,7 @@ export async function assertChannexManagementWorkerBoundary(
     : "";
   if (claimed !== "provision,sync_ari" && (options.claimedScope || claimed !== ""))
     fail("claimed_scope_mismatch");
-  // D7b: a claimed-only grant must never outrun its insert policy (0522); until the policy exists
+  // D7b: a claimed-only grant must never outrun its insert policy (0523); until the policy exists
   // 0408's scope policy alone would admit the write.
   for (const [name, privileges] of optionalChannexClaimedGrants)
     for (const privilege of privileges)

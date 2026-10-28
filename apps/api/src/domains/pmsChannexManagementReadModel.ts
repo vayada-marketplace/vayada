@@ -71,7 +71,10 @@ export function createPgPmsChannexManagementReadRepository(config: {
       listChannexAlerts(pool, propertyId, propertyId === config.stagingAlertPropertyId),
     async acknowledgeAlert(propertyId, alertId, userId) {
       const result = await pool.query(
-        `UPDATE pms.channel_operational_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),acknowledged_by=COALESCE(acknowledged_by,$3::uuid) WHERE property_id=$1::uuid AND id=$2::uuid RETURNING id`,
+        // VAY-2108 W1d: a closed-night booking already landed; the hotel's check is what closes it.
+        `UPDATE pms.channel_operational_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),acknowledged_by=COALESCE(acknowledged_by,$3::uuid),
+           resolved_at=CASE WHEN event_type='booking_on_closed_night' THEN COALESCE(resolved_at,now()) ELSE resolved_at END
+         WHERE property_id=$1::uuid AND id=$2::uuid RETURNING id`,
         [propertyId, alertId, userId],
       );
       return result.rows.length === 1;

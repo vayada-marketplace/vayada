@@ -120,10 +120,121 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * VAY-2108 W1d: alerts our own booking intake raises, never a Channex webhook. "Not imported"
+ * means the booking is not in the PMS (recover re-ingests it); "on a closed night" means it landed
+ * on nights the hotel does not sell, so the hotel checks it can host the guest.
+ */
+export const CHANNEX_BOOKING_ALERT_EVENTS = [
+  "booking_not_imported",
+  "booking_on_closed_night",
+] as const;
+export type ChannexBookingAlertEvent = (typeof CHANNEX_BOOKING_ALERT_EVENTS)[number];
+export type ChannexBookingAlertImpact = ReturnType<typeof alertImpact> & {
+  /** The OTA's own reservation code, the one the hotel finds in its extranet. */
+  reference: string | null;
+  /** The provider's revision timestamp; a newer applied revision of the booking resolves the alert. */
+  revisionInsertedAt: string | null;
+  /** Closed-night alerts: the hotel's own room types the booking landed in, comma-separated. */
+  roomTypeNames?: string | null;
+};
+
+/**
+ * Raises (or refreshes) the open alert for one booking revision. `unbound` when no binding has the
+ * provider id; `superseded` when a not-imported revision is older than one the PMS already holds
+ * (a dead letter that waited on the connection lock while a newer revision was applied).
+ */
+export async function raiseChannexBookingAlert(
+  client: Pick<pg.PoolClient, "query">,
+  input: {
+    propertyId: string;
+    providerPropertyId: string;
+    eventType: ChannexBookingAlertEvent;
+    impact: ChannexBookingAlertImpact;
+  },
+): Promise<"raised" | "superseded" | "unbound"> {
+  const binding = (
+    await client.query<{ id: string; generation: string }>(
+      `SELECT id::text,binding_generation::text AS generation FROM pms.channel_connections
+       WHERE property_id=$1::uuid AND provider='channex' AND external_property_id=$2 FOR SHARE`,
+      [input.propertyId, input.providerPropertyId],
+    )
+  ).rows[0];
+  if (!binding) return "unbound";
+  // A hint job that never loaded its revision knows only the revision id, not its time.
+  if (
+    input.eventType === "booking_not_imported" &&
+    (input.impact.revisionInsertedAt || input.impact.revisionId) &&
+    (
+      await client.query(
+        `SELECT 1 FROM pms.channel_booking_mappings WHERE connection_id=$1::uuid AND external_booking_id=$2
+           AND (mapping_metadata->>'providerInsertedAt'>=$3 OR external_revision_id=$5)
+         UNION ALL
+         SELECT 1 FROM pms.channel_booking_revision_tombstones WHERE connection_id=$1::uuid
+           AND binding_generation=$4::uuid AND external_booking_id=$2
+           AND (inserted_at>=$3::timestamptz OR authoritative_revision_id=$5)
+         LIMIT 1`,
+        [
+          binding.id,
+          input.impact.bookingId,
+          input.impact.revisionInsertedAt,
+          binding.generation,
+          input.impact.revisionId,
+        ],
+      )
+    ).rows.length
+  )
+    return "superseded";
+  const problemKey = createHash("sha256")
+    .update(JSON.stringify([input.eventType, input.impact.bookingId, input.impact.revisionId]))
+    .digest("hex");
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `channex-alert:${binding.id}:${problemKey}`,
+  ]);
+  await client.query(
+    `INSERT INTO pms.channel_operational_alerts(property_id,connection_id,binding_generation,problem_key,event_type,impact,first_occurred_at,last_occurred_at)
+     VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::jsonb,now(),now())
+     ON CONFLICT(connection_id,binding_generation,problem_key) WHERE resolved_at IS NULL DO UPDATE
+     SET impact=pms.channel_operational_alerts.impact||jsonb_strip_nulls(EXCLUDED.impact),
+         last_occurred_at=EXCLUDED.last_occurred_at`,
+    [
+      input.propertyId,
+      binding.id,
+      binding.generation,
+      problemKey,
+      input.eventType,
+      JSON.stringify(input.impact),
+    ],
+  );
+  return "raised";
+}
+
+/**
+ * A revision of the booking reached the PMS: its earlier alerts of these types no longer apply.
+ * Not-imported alerts close on any applied revision; closed-night alerts only when the stay was
+ * rewritten or cancelled (an unchanged stay still sits on the closed nights).
+ */
+export async function resolveSupersededChannexBookingAlerts(
+  client: Pick<pg.PoolClient, "query">,
+  input: {
+    connectionId: string;
+    bookingId: string;
+    revisionInsertedAt: string;
+    eventTypes: readonly ChannexBookingAlertEvent[];
+  },
+): Promise<void> {
+  await client.query(
+    `UPDATE pms.channel_operational_alerts SET resolved_at=now()
+     WHERE connection_id=$1::uuid AND resolved_at IS NULL AND event_type=ANY($4::text[])
+       AND impact->>'bookingId'=$2 AND impact->>'revisionInsertedAt'<=$3`,
+    [input.connectionId, input.bookingId, input.revisionInsertedAt, input.eventTypes],
+  );
+}
+
 export type ChannexAlert = {
   id: string;
   eventType: string;
-  impact: ReturnType<typeof alertImpact>;
+  impact: ReturnType<typeof alertImpact> & Partial<ChannexBookingAlertImpact>;
   firstOccurredAt: string;
   lastOccurredAt: string;
   acknowledgedAt: string | null;

@@ -68,7 +68,12 @@ export type QuickHotelStepProps = {
   onSubmit: (draft: QuickHotelDraft) => Promise<void>;
   /** Back from the first screen. */
   onBack?: (() => void) | null;
+  /** The footer's note on where the answers are, which must be true (VAY-2383): e.g. kept on this device. */
+  footerNote: string;
+  /** "Save & exit" leaves at once; with `onExitSave`, it first checks every screen and saves through it, and
+   * stays with the reason when the hotel can't be saved yet or the save fails (VAY-2383). */
   onSaveAndExit: () => void;
+  onExitSave?: ((draft: QuickHotelDraft) => Promise<void>) | null;
 };
 
 /** Hotel first, then the rest of the catalogue's types in its order. */
@@ -107,7 +112,9 @@ export function QuickHotelStep({
   initialPart = "hotel",
   onSubmit,
   onBack,
+  footerNote,
   onSaveAndExit,
+  onExitSave = null,
 }: QuickHotelStepProps) {
   const [part, setPart] = useState<QuickHotelPart>(initialPart);
   const [errors, setErrors] = useState<QuickHotelErrors>({});
@@ -138,6 +145,29 @@ export function QuickHotelStep({
   const index = PARTS.indexOf(part);
   const back = index === 0 ? (onBack ?? null) : () => setPart(PARTS[index - 1]!);
 
+  /** The first screen with a gap, after checking the whole hotel; the gaps are shown and that screen opened. */
+  function screenWithGap(): QuickHotelPart | null {
+    const all = quickHotelErrors(draft);
+    const first = PARTS.find((each) => PART_ERRORS[each].some((key) => all[key]));
+    if (!first) return null;
+    setErrors(all);
+    setPart(first);
+    return first;
+  }
+
+  async function save(action: (draft: QuickHotelDraft) => Promise<void>) {
+    setSubmitting(true);
+    try {
+      await action(draft);
+      return true;
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "We couldn't save your hotel.");
+      return false;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitError(null);
@@ -149,21 +179,19 @@ export function QuickHotelStep({
       return;
     }
     // The earlier screens were checked when they were left; check them again before the save.
-    const all = quickHotelErrors(draft);
-    const earlier = PARTS.find((each) => PART_ERRORS[each].some((key) => all[key]));
-    if (earlier && earlier !== part) {
-      setErrors(all);
-      setPart(earlier);
+    if (screenWithGap()) return;
+    await save(onSubmit);
+  }
+
+  /** Save & exit: the same save as Continue on the last screen, then leave; never leave an edit behind. */
+  async function handleSaveAndExit() {
+    if (!onExitSave) return onSaveAndExit();
+    setSubmitError(null);
+    if (screenWithGap()) {
+      setSubmitError("Your hotel can't be saved yet: fill in what is marked, then try again.");
       return;
     }
-    setSubmitting(true);
-    try {
-      await onSubmit(draft);
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "We couldn't save your hotel.");
-    } finally {
-      setSubmitting(false);
-    }
+    if (await save(onExitSave)) onSaveAndExit();
   }
 
   const typeCard = (option: SharedPropertyTypeOption) => {
@@ -206,7 +234,7 @@ export function QuickHotelStep({
   return (
     <QuickSetupShell
       step={PART_STEP[part]}
-      onSaveAndExit={onSaveAndExit}
+      onSaveAndExit={() => void handleSaveAndExit()}
       saveAndExitDisabled={submitting}
     >
       <QuickSetupStepLayout
@@ -214,7 +242,7 @@ export function QuickHotelStep({
         subtitle={subtitle}
         banner={part === "hotel" ? banner : null}
         footer={{
-          note: "Saved as you type",
+          note: footerNote,
           onBack: back,
           backDisabled: submitting,
           formId: FORM_ID,

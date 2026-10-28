@@ -277,7 +277,8 @@ export function QuickRoomStep({
         title="Your first room and price"
         subtitle="Start with one room type. Add the rest whenever you like."
         footer={{
-          note: "Saved as you type",
+          // The answers live on this device until "How guests pay" sends the first run (VAY-2383).
+          note: "Kept on this device until you finish “How guests pay”",
           onBack: onBack ?? null,
           backDisabled: submitting,
           formId: FORM_ID,

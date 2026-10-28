@@ -33,6 +33,8 @@ type InventoryDay = {
 };
 
 export class PmsOccupiedInventoryInvariantError extends Error {}
+/** Some of the stay's nights have no inventory day yet: they lie beyond the opened calendar. */
+export class PmsOccupiedInventoryCoverageError extends PmsOccupiedInventoryInvariantError {}
 
 export async function reconcilePmsOccupiedInventory(
   client: PmsOccupiedInventoryClient,
@@ -180,7 +182,7 @@ export async function readPmsOccupiedInventory(
     [propertyId, JSON.stringify(targetDays)],
   );
   if (result.rows.length !== targetDays.length) {
-    throw new PmsOccupiedInventoryInvariantError("Canonical inventory coverage is incomplete");
+    throw new PmsOccupiedInventoryCoverageError("Canonical inventory coverage is incomplete");
   }
   return result.rows;
 }

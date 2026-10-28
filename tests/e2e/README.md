@@ -37,10 +37,13 @@ E2E_START_SERVERS=1 npm run e2e
 ## Deployed Next-stack Smoke
 
 `npm run e2e:next-stack-smoke` is the production-safe browser and API smoke for
-the deployed TypeScript stack. It signs new hotel owners up in Booking Admin
-(the email code is read from WorkOS), creates unique synthetic WorkOS staff and
-platform-admin identities, publishes a direct-booking property, and exercises
-both instant and request acceptance with a pay-at-property quote.
+the deployed TypeScript stack. It signs a new hotel owner up in Booking Admin
+(the email code is read from WorkOS) and clicks through the owner's first run:
+the hotel, its first room and price, paying at the hotel on the Commission plan,
+then Publish. A guest then books that room on the live booking page and cancels
+it there, the owner opens the booking in PMS, and a synthetic WorkOS staff
+invitation checks restricted staff access. A second synthetic hotel group and a
+temporary platform admin support the access and lifecycle checks.
 
 The command is guarded: it accepts only the fixed `next-*.vayada.com` origins
 and requires `NEXT_STACK_SMOKE_ENV=next`. The deployed next API shares the live
@@ -64,9 +67,9 @@ npm run e2e:next-stack-smoke
 
 The `next-smoke` environment accepts reviewed `main` runs only, releases its secrets only after
 FlamurMaliqi approves the deployment, and does not let administrators bypass that approval. Each run
-creates a temporary Platform Admin for the production lifecycle command. Cleanup restores inventory
-and disables public offers, reauthenticates the temporary admin to retire the synthetic property,
-then deletes its membership and user. If retirement fails, cleanup reports `recovery_run_id`,
+creates a temporary Platform Admin for the production lifecycle command. Cleanup cancels the open
+synthetic bookings, reauthenticates the temporary admin to retire the synthetic property, then
+deletes its membership and user. If retirement fails, cleanup reports `recovery_run_id`,
 `recovery_property_id`, and a signed `recovery_receipt` while still deleting the temporary admin.
 Supply all three values to a later protected workflow run; the receipt binds recovery to that exact
 synthetic property. Recovery creates a fresh temporary admin, retires the property, and deletes the
@@ -83,12 +86,12 @@ the verified local download instead of blocking the product test. The browser
 is saved immediately after setup even if the product smoke later fails, and the
 smoke receives its own 25-minute timeout.
 
-Cleanup runs even after a failed assertion. It cancels or withdraws every
-synthetic booking, changes the synthetic property to the non-checkout `other`
-payment method and waits until public quotes disappear, then deletes the
-WorkOS staging organizations and users. Target database rows and product audit
-events are deliberately retained for traceability, but the property is left
-unbookable and inventory is restored. A cleanup failure fails the workflow.
+Cleanup runs even after a failed assertion. It cancels every synthetic booking
+still open, retires the synthetic properties (public pricing serves active
+hotels only, so a retired one takes no bookings), then deletes the WorkOS
+staging organizations and users. Target database rows and product audit events
+are deliberately retained for traceability. A cleanup failure fails the
+workflow.
 
 Real card payments are intentionally outside this command. Stripe coverage must
 use a separate test-mode-only environment and test payment methods; do not add a
