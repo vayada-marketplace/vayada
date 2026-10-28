@@ -6,6 +6,7 @@ import {
 import {
   convertPricingConfigurationCurrency as convert,
   isCompletePricingCurrencyConversion as complete,
+  isSamePricingNumbersInCurrency as sameNumbers,
   type PricingConversionRate,
 } from "./replacementPricingConversion.js";
 const now = Date.parse("2026-09-10T12:00:00.000Z");
@@ -342,5 +343,41 @@ describe("complete PMS pricing currency conversion", () => {
     expect(complete([before[0], before[0]], after, fx, now)).toBe(false);
     expect(complete(before, after, null, now)).toBe(false);
     expect(complete([], [], fx, now)).toBe(false);
+  });
+});
+
+// VAY-2390 P5 (D2): an Owner's currency change publishes the same numbers again, no FX.
+describe("the same numbers in another currency", () => {
+  const room = (currency: string, revision = 4, roomTypeId = "room-1"): PricingConfiguration => ({
+    ...fixture(),
+    currency,
+    revision,
+    roomTypeId,
+  });
+
+  it("accepts every room unchanged but for its currency and revision", () => {
+    expect(
+      sameNumbers(
+        [room("EUR"), room("EUR", 4, "room-2")],
+        [room("CHF", 5, "room-2"), room("CHF", 5)],
+        "EUR",
+        "CHF",
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a changed amount, another room set, a currency of another scale or no change", () => {
+    const changed = room("CHF", 5);
+    changed.children.bands[0]!.nightlyMinor = "600";
+    expect(sameNumbers([room("EUR")], [changed], "EUR", "CHF")).toBe(false);
+    expect(
+      sameNumbers([room("EUR"), room("EUR", 4, "room-2")], [room("CHF", 5)], "EUR", "CHF"),
+    ).toBe(false);
+    expect(sameNumbers([room("EUR")], [room("CHF", 5, "room-2")], "EUR", "CHF")).toBe(false);
+    // JPY has no minor unit: the same minor amounts would be a hundred times the price.
+    expect(sameNumbers([room("EUR")], [room("JPY", 5)], "EUR", "JPY")).toBe(false);
+    expect(sameNumbers([room("EUR")], [room("EUR", 5)], "EUR", "EUR")).toBe(false);
+    expect(sameNumbers([room("EUR")], [room("USD", 5)], "EUR", "CHF")).toBe(false);
+    expect(sameNumbers([], [], "EUR", "CHF")).toBe(false);
   });
 });

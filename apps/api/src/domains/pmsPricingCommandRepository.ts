@@ -185,7 +185,10 @@ export function createPgPmsPricingCommandRepository(
     try {
       const inScope = await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!inScope || !(await lockAuthorizedScope(client, command, acceptedAt, setupOwnerScope, ownerChange))) {
+      if (
+        !inScope ||
+        !(await lockAuthorizedScope(client, command, acceptedAt, setupOwnerScope, ownerChange))
+      ) {
         await rollbackQuietly(client);
         return spec.scopeFailure();
       }
@@ -307,7 +310,10 @@ export function createPgPmsPricingCommandRepository(
     try {
       const inScope = await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!inScope || !(await lockAuthorizedScope(client, command, at, setupOwnerScope, ownerChange))) {
+      if (
+        !inScope ||
+        !(await lockAuthorizedScope(client, command, at, setupOwnerScope, ownerChange))
+      ) {
         await rollbackQuietly(client);
         return { kind: "result", result: CURRENCY_SPEC.scopeFailure() };
       }

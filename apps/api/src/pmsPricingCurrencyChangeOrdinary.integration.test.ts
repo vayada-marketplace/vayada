@@ -71,19 +71,28 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
 
     expect(result).toMatchObject({
       ok: true,
-      response: { outcome: "updated", pricingCurrency: { currency: "CHF", pricingCurrencyRevision: 2 } },
+      response: {
+        outcome: "updated",
+        pricingCurrency: { currency: "CHF", pricingCurrencyRevision: 2 },
+      },
     });
     // The bound row moved although the explicit update skips bound rows: the cascade did it, in the
     // pricing row's own UPDATE statement. A new currency also retires old card readiness evidence.
     expect(await finance(hotel)).toMatchObject({
       default_currency: "CHF",
       source_pricing_currency_revision: "2",
-      online_card_readiness_revision: String(Number(hotelBefore.online_card_readiness_revision) + 1),
+      online_card_readiness_revision: String(
+        Number(hotelBefore.online_card_readiness_revision) + 1,
+      ),
     });
     expect(await finance(otherHotel)).toEqual(otherBefore);
     expect(
-      (await admin.query("SELECT currency::text, price_amount::text AS price FROM booking.addon_definitions WHERE id=$1", [addonId]))
-        .rows[0],
+      (
+        await admin.query(
+          "SELECT currency::text, price_amount::text AS price FROM booking.addon_definitions WHERE id=$1",
+          [addonId],
+        )
+      ).rows[0],
     ).toEqual({ currency: "CHF", price: "25.00" });
     const promos = await admin.query(
       "SELECT id::text, currency::text, discount_value::text FROM booking.promo_definitions WHERE property_id=$1 ORDER BY discount_type",
@@ -94,19 +103,32 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       { id: percentPromoId, currency: null, discount_value: "15.00" },
     ]);
     expect(
-      (await admin.query("SELECT default_currency::text FROM booking.booking_settings WHERE property_id=$1", [hotel]))
-        .rows[0],
+      (
+        await admin.query(
+          "SELECT default_currency::text FROM booking.booking_settings WHERE property_id=$1",
+          [hotel],
+        )
+      ).rows[0],
     ).toEqual({ default_currency: "CHF" });
   });
 
   it("keeps a Booking display default the Owner chose apart from the pricing currency", async () => {
-    await admin.query("UPDATE booking.booking_settings SET default_currency='USD' WHERE property_id=$1", [hotel]);
-    await expect(repository.upsertPropertyPricingCurrency(command("display", 1, "CHF"))).resolves.toMatchObject({
+    await admin.query(
+      "UPDATE booking.booking_settings SET default_currency='USD' WHERE property_id=$1",
+      [hotel],
+    );
+    await expect(
+      repository.upsertPropertyPricingCurrency(command("display", 1, "CHF")),
+    ).resolves.toMatchObject({
       ok: true,
     });
     expect(
-      (await admin.query("SELECT default_currency::text FROM booking.booking_settings WHERE property_id=$1", [hotel]))
-        .rows[0],
+      (
+        await admin.query(
+          "SELECT default_currency::text FROM booking.booking_settings WHERE property_id=$1",
+          [hotel],
+        )
+      ).rows[0],
     ).toEqual({ default_currency: "USD" });
   });
 
@@ -135,7 +157,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
     await admin.query("COMMIT");
     const before = await snapshot();
 
-    const result = await repository.upsertPropertyPricingCurrency(command(`blocked-${code}`, 1, "CHF"));
+    const result = await repository.upsertPropertyPricingCurrency(
+      command(`blocked-${code}`, 1, "CHF"),
+    );
 
     expect(result).toMatchObject({
       ok: false,
@@ -177,9 +201,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       "CREATE TRIGGER vay2390_fail_promo BEFORE UPDATE ON booking.promo_definitions FOR EACH ROW EXECUTE FUNCTION public.vay2390_fail_promo()",
     );
     try {
-      await expect(repository.upsertPropertyPricingCurrency(command("failing", 1, "CHF"))).rejects.toThrow(
-        /injected VAY-2390 failure/,
-      );
+      await expect(
+        repository.upsertPropertyPricingCurrency(command("failing", 1, "CHF")),
+      ).rejects.toThrow(/injected VAY-2390 failure/);
     } finally {
       await admin.query("DROP TRIGGER IF EXISTS vay2390_fail_promo ON booking.promo_definitions");
       await admin.query("DROP FUNCTION IF EXISTS public.vay2390_fail_promo()");
@@ -323,10 +347,15 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       ]) {
         await client.query(statement, [properties]);
       }
-      await client.query("DELETE FROM identity.organization_memberships WHERE organization_id = $1", [organizationId]);
+      await client.query(
+        "DELETE FROM identity.organization_memberships WHERE organization_id = $1",
+        [organizationId],
+      );
       await client.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);
       await client.query("DELETE FROM identity.users WHERE id = $1", [actorUserId]);
-      await client.query("DELETE FROM identity.role_permission_grants WHERE role_key = $1", [ROLE_KEY]);
+      await client.query("DELETE FROM identity.role_permission_grants WHERE role_key = $1", [
+        ROLE_KEY,
+      ]);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
