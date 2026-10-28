@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
@@ -53,6 +54,20 @@ function props(overrides: Partial<QuickHotelStepProps> = {}): QuickHotelStepProp
     onSaveAndExit: vi.fn(),
     ...overrides,
   };
+}
+
+/** The step with its draft kept by a host, as the setup flow and the hotel edit keep it. */
+function Hosted(overrides: Partial<QuickHotelStepProps>) {
+  const [draft, setDraft] = useState(FILLED);
+  return (
+    <QuickHotelStep
+      {...props({
+        draft,
+        onChange: (patch) => setDraft((current) => ({ ...current, ...patch })),
+        ...overrides,
+      })}
+    />
+  );
 }
 
 async function submit(renderer: ReactTestRenderer) {
@@ -277,6 +292,79 @@ describe("QuickHotelStep (VAY-2247 steps 2–4, the approved split)", () => {
     expect(onExitSave).toHaveBeenCalledTimes(2);
     expect(onBack).toHaveBeenCalledOnce();
     gap.unmount();
+  });
+
+  it("disables the fields while a save runs, and a failed save gives them back with every value (VAY-2397)", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const onSubmit = vi.fn<(draft: QuickHotelDraft) => Promise<void>>(
+      () => new Promise((_resolve, reject) => (fail = reject)),
+    );
+    // Every control of the form sits in the one fieldset, on both screens with fields of their own.
+    const controls = (node: ReactTestInstance) =>
+      node.findAll((each) => ["input", "select", "textarea", "button"].includes(String(each.type)))
+        .length;
+    for (const initialPart of ["hotel", "contacts"] as const) {
+      const screen = create(<QuickHotelStep {...props({ draft: FILLED, initialPart })} />);
+      expect(controls(screen.root.findByType("fieldset"))).toBeGreaterThan(0);
+      expect(controls(screen.root.findByType("fieldset"))).toBe(
+        controls(screen.root.findByType("form")),
+      );
+      screen.unmount();
+    }
+
+    const renderer = create(<Hosted onSubmit={onSubmit} initialPart="contacts" />);
+    const fieldset = () => renderer.root.findByType("fieldset");
+    const email = () => renderer.root.findByProps({ type: "email" });
+    expect(fieldset().props.disabled).toBe(false);
+
+    await act(async () => email().props.onChange({ target: { value: "desk@alpenrose.example" } }));
+    // A slow save: a change can't be made while it runs, as it wouldn't be part of the save.
+    await act(async () => {
+      void renderer.root.findByType("form").props.onSubmit({ preventDefault() {} });
+    });
+    expect(onSubmit).toHaveBeenCalledWith({ ...FILLED, contactEmail: "desk@alpenrose.example" });
+    expect(fieldset().props.disabled).toBe(true);
+    expect(text(renderer)).toContain("Saving…");
+
+    await act(async () => fail(new Error("We couldn't reach the server.")));
+    expect(fieldset().props.disabled).toBe(false);
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toBe(
+      "We couldn't reach the server.",
+    );
+    expect(email().props.value).toBe("desk@alpenrose.example");
+    renderer.unmount();
+  });
+
+  it("puts Google's map and address search out of reach while Save & exit saves Where it is (VAY-2397)", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const onExitSave = vi.fn<(draft: QuickHotelDraft) => Promise<void>>(
+      () => new Promise((_resolve, reject) => (fail = reject)),
+    );
+    const inert: boolean[] = [];
+    let renderer!: ReactTestRenderer;
+    // In act, so the effects run on mount.
+    await act(async () => {
+      renderer = create(
+        <QuickHotelStep {...props({ draft: FILLED, onExitSave, initialPart: "where" })} />,
+        {
+          // The only element with a ref on this screen: the wrapper around the address slot.
+          createNodeMock: () => ({
+            toggleAttribute: (name: string, force: boolean) => {
+              if (name === "inert") inert.push(force);
+            },
+          }),
+        },
+      );
+    });
+    expect(inert).toEqual([false]);
+    await act(async () => button(renderer, "Save & exit").props.onClick());
+    expect(renderer.root.findByType("fieldset").props.disabled).toBe(true);
+    expect(inert).toEqual([false, true]);
+    await act(async () => fail(new Error("That hotel name is already taken.")));
+    expect(renderer.root.findByType("fieldset").props.disabled).toBe(false);
+    expect(inert).toEqual([false, true, false]);
+    expect(text(renderer)).toContain("address slot");
+    renderer.unmount();
   });
 
   it("passes the chosen logo file on", async () => {

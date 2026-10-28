@@ -206,3 +206,57 @@ test("Back from the first Your hotel screen stays and says why when the edit can
   expect(state.profileWrites).toHaveLength(1);
   await expect(name).toHaveValue("Alpenrose Munich Old Town");
 });
+
+// VAY-2397: a change made while a save ran was never sent, and the screen then left without a word. The
+// fields are disabled while the save runs, as the buttons are; a failed save gives them back with every
+// value, and focus returns to the field the owner was in.
+// No page-health watch: the refused profile write (409) is part of this test and logs to the console.
+test("Your hotel can't be changed while its save runs, and a failed save keeps every value", async ({
+  page,
+  baseURL,
+}) => {
+  await primeQuickSetupBrowserState(page);
+  const state = await mockQuickSetupExistingHotel(page);
+  // A slow save: the profile write waits until the test lets it go.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    new RegExp(`/api/hotel-setup/properties/${QUICK_SETUP_PROPERTY_ID}/profile$`),
+    async (route) => {
+      if (route.request().method() === "PUT") await held;
+      await route.fallback();
+    },
+  );
+  await page.goto(quickSetupUrl(baseURL));
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  await back(page).click();
+  await expect(heading(page, "How guests reach you")).toBeVisible();
+
+  state.profilePutStatus = 409;
+  const email = page.getByRole("textbox", { name: /Reception email/ });
+  await email.fill("desk@alpenrose.example");
+  await email.press("Enter");
+  await expect(email).toBeDisabled();
+  await expect(page.getByRole("textbox", { name: /Reception phone/ })).toBeDisabled();
+  // Typing meanwhile changes nothing: it couldn't be part of this save.
+  await email.click({ force: true });
+  await page.keyboard.type(" annex");
+  release();
+  await expect(alert(page, "Someone else changed this hotel meanwhile")).toBeVisible();
+  await expect(heading(page, "How guests reach you")).toBeVisible();
+  await expect(email).toBeEnabled();
+  await expect(email).toHaveValue("desk@alpenrose.example");
+  // Focus is back in the field, so Enter tries again.
+  await expect(email).toBeFocused();
+  state.profilePutStatus = 200;
+  await page.keyboard.press("Enter");
+  await expect(heading(page, "Your first room and price")).toBeVisible();
+  expect(state.profileWrites).toHaveLength(2);
+  expect(state.profileWrites[1]).toMatchObject({
+    patch: {
+      contacts: expect.arrayContaining([
+        expect.objectContaining({ channelType: "email", value: "desk@alpenrose.example" }),
+      ]),
+    },
+  });
+});
