@@ -331,6 +331,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     void paymentSettingsDefaults(client).then((defaults) => { if (live) setPaymentDefaults(defaults); });
     return () => { live = false; };
   }, [firstTime, client]);
+  // A first price is in the published prices' currency, else the pricing currency Payment settings give (VAY-2390): never
+  // typed, so it can't drift from what the hotel is paid in. Asked only when neither can be read.
+  const firstCurrency = display?.currency ?? paymentDefaults?.currency ?? undefined;
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
   // rates guests can book (VAY-2285).
@@ -386,7 +389,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             <p className="text-[14px] leading-5 text-gray-600">{t("pricing.calendar.emptyText")}</p>
           </section>
         </div>;
-      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} id={firstFormId} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={firstCurrency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} id={firstFormId} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
       const main = mainOffer(room), mi = room.offers.indexOf(main), mainLabel = offerLabel(room.roomTypeId, ri, mi);
