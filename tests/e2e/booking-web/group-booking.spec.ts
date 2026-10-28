@@ -101,6 +101,21 @@ for (const width of [1440, 390]) {
   });
 }
 
+// VAY-2393: with no children's ages to give, the last room chosen goes straight past the rooms
+// step (to Extras, or here, without extras, to the guest's details).
+test("goes straight on after a group without children chooses its last room", async ({ page }) => {
+  await mockGroupCheckout(page);
+  await page.goto("/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4&rooms=2");
+  for (const number of [1, 2])
+    await page
+      .getByTestId("room-card-garden")
+      .getByRole("button", { name: `Select for Room ${number}` })
+      .click();
+  await expect(page).toHaveURL(/[?&]step=details/);
+  await expect(page.getByRole("heading", { name: "Who’s staying?" })).toBeVisible();
+  await expect(page.getByTestId("room-guests-step")).toHaveCount(0);
+});
+
 test("says when the rooms can't be priced and sends the group back to choose them", async ({
   page,
 }) => {

@@ -43,7 +43,12 @@ export default function RoomsProgress({
             ? t("allChosen", { count: rooms.length })
             : t("roomOf", { number: current + 1, count: rooms.length })}
         </p>
-        <h3 className="text-xl font-bold text-gray-900 md:text-2xl">
+        {/* Focused after each pick, so keyboard and screen-reader users follow the next room. */}
+        <h3
+          id="rooms-progress-title"
+          tabIndex={-1}
+          className="text-xl font-bold text-gray-900 outline-none md:text-2xl"
+        >
           {current === null
             ? t(hasExtras ? "readyForExtras" : "readyForDetails")
             : t("pickFor", guests)}

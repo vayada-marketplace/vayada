@@ -25,8 +25,9 @@ export default function Toast({
     <div
       aria-live="polite"
       aria-atomic="true"
-      // Above the privacy settings pill on a phone.
-      className="pointer-events-none fixed inset-x-4 bottom-[calc(4rem+var(--fixed-bottom-bar,0px))] z-50 flex justify-center md:bottom-8"
+      // Above the privacy settings pill and the floating Map button on a phone, and over any
+      // open dialog.
+      className="pointer-events-none fixed inset-x-4 bottom-[calc(7.5rem+var(--fixed-bottom-bar,0px))] z-[110] flex justify-center md:bottom-8"
     >
       {toast && (
         <p

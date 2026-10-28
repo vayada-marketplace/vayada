@@ -106,16 +106,29 @@ export default function GuestSelector({
     if (open) document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open, onClose]);
+  // VAY-2393: opened from a room card ("change who sleeps where") too, so focus moves in and
+  // Escape closes it.
+  useEffect(() => {
+    if (open) ref.current?.focus({ preventScroll: true });
+  }, [open]);
 
   if (!open) return null;
 
   return (
     <div
       ref={ref}
+      role="dialog"
+      aria-labelledby="guest-selector-title"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
       data-testid="guest-selector"
-      className="absolute right-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-5 z-50 w-80 max-w-[calc(100vw-2rem)]"
+      className="absolute right-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-5 z-50 w-80 max-w-[calc(100vw-2rem)] outline-none"
     >
-      <h3 className="text-base font-bold text-gray-900 mb-4">{t("title")}</h3>
+      <h3 id="guest-selector-title" className="text-base font-bold text-gray-900 mb-4">
+        {t("title")}
+      </h3>
 
       <div className="space-y-4">
         <Stepper

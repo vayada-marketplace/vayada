@@ -233,3 +233,30 @@ test("starts at the fewest rooms the group needs and lets it add rooms", async (
   await expect(page.getByTestId("room-pill-3")).toContainText("✓ Garden Double Room");
   await assertHealthy();
 });
+
+// Independent review (VAY-2393): picking inside "View details" closes it first, so the page's
+// own feedback shows; pressing a reopened room's pill again keeps its choice.
+test("picks from inside a room's details and keeps a reopened room from its pill", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockGroup(page, []);
+  await openHotelPage(page, STAY);
+  await page.getByTestId("room-card-deluxe").getByRole("button", { name: "View Details" }).click();
+  const details = page.getByRole("dialog", { name: "Deluxe Double Room" });
+  await details.getByRole("button", { name: "Select for Room 1" }).click();
+  await expect(details).toHaveCount(0);
+  await expect(page.getByTestId("toast")).toHaveText(
+    "Room 1: Deluxe Double Room. Now pick Room 2.",
+  );
+  await expect(page.getByTestId("rooms-progress")).toContainText("Room 2 of 2");
+  await expect(page.locator("#rooms-progress-title")).toBeFocused();
+
+  await page.getByTestId("room-pill-1").click();
+  await expect(page.getByTestId("room-pill-1")).toContainText("changing…");
+  await page.getByTestId("room-pill-1").click();
+  await expect(page.getByTestId("room-pill-1")).toContainText("✓ Deluxe Double Room");
+  await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
+  await assertHealthy();
+});

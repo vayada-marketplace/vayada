@@ -321,10 +321,15 @@ function HomePageContent() {
     for (const [name, value] of Object.entries(wanted))
       if (value === null) params.delete(name);
       else params.set(name, value);
+    // The picks are kept per promo: an applied one stays in the address (removing it drops it).
+    if (appliedPromo) params.set("promoCode", appliedPromo.code);
     const search = params.toString();
     if (search !== window.location.search.slice(1))
       window.history.replaceState(null, "", `${window.location.pathname}?${search}`);
-  }, [checkIn, checkOut, adults, effectiveChildren, roomCount, pickMode]);
+  }, [checkIn, checkOut, adults, effectiveChildren, roomCount, pickMode, appliedPromo]);
+  // Other guests or dates: the room the guest reopened closes again, so a room the new split
+  // makes too small comes up first (VAY-2393).
+  useEffect(() => setChanging(null), [adults, effectiveChildren, checkIn, checkOut]);
   const [sortOption, setSortOption] = useState("recommended");
   const roomPrices = (room: PricingRoom) =>
     stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
@@ -403,6 +408,11 @@ function HomePageContent() {
     trackEvent(slug, "rate_selected", { entry: "room_card" });
     router.push(`/book?${params}`);
   };
+  // Back to the top of the room list, without animation for guests who asked for less motion.
+  const toRoomList = () =>
+    document.getElementById("rooms")?.scrollIntoView({
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
   // Room by room: the card's rate becomes the active room's choice, replacing any earlier one;
   // then the next open room, or straight on once every room is chosen (VAY-2393).
   const chooseRoom = (room: PricingRoom, publicOfferKey: string) => {
@@ -413,7 +423,11 @@ function HomePageContent() {
     setChanging(null);
     const open = done.findIndex((isDone, index) => index !== activeRoom && !isDone);
     if (open === -1) return continueWithRooms(next as RoomPick[]);
-    document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+    toRoomList();
+    // Keyboard and screen-reader users continue at "ROOM 2 OF 2", not on a card that moved.
+    requestAnimationFrame(() =>
+      document.getElementById("rooms-progress-title")?.focus({ preventScroll: true }),
+    );
     setToast({
       id: Date.now(),
       message: t("roomsProgress.chosen", {
@@ -423,10 +437,12 @@ function HomePageContent() {
       }),
     });
   };
-  // A pill opens its room again; its choice stays until another one replaces it.
+  // A pill opens its room again; its choice stays until another one replaces it. Pressing the
+  // reopened room's pill again keeps its choice and closes it.
   const openRoom = (index: number) => {
+    if (index === activeRoom && changing !== null) return setChanging(null);
     setChanging(index);
-    document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+    toRoomList();
   };
   const progressRooms: RoomsProgressRoom[] = picks.map((pick, index) => {
     const room = pickedRoom(pick);
@@ -735,6 +751,15 @@ function HomePageContent() {
                         setAppliedPromo(null);
                         setPromoCode("");
                         setPromoError("");
+                        const params = new URLSearchParams(window.location.search);
+                        if (params.has("promoCode")) {
+                          params.delete("promoCode");
+                          window.history.replaceState(
+                            null,
+                            "",
+                            `${window.location.pathname}?${params}`,
+                          );
+                        }
                       }}
                       className="text-gray-400 hover:text-gray-600 transition-colors"
                     >
@@ -921,12 +946,15 @@ function HomePageContent() {
               notices={notices}
               renderCard={roomCard}
             />
-            <p className="mt-8 text-center text-gray-600">
-              {t("severalRooms")}{" "}
-              <Link href={bookTarget} className="font-semibold text-primary-600 underline">
-                {t("chooseRoomsAndPrice")}
-              </Link>
-            </p>
+            {/* A group picks room by room above; the old room form is only the one-room fallback. */}
+            {!pickMode && (
+              <p className="mt-8 text-center text-gray-600">
+                {t("severalRooms")}{" "}
+                <Link href={bookTarget} className="font-semibold text-primary-600 underline">
+                  {t("chooseRoomsAndPrice")}
+                </Link>
+              </p>
+            )}
           </>
         ) : (
           /* Without room cards, rooms and prices live on the room-and-price page. */
