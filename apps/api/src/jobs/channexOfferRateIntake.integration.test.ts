@@ -2,7 +2,10 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveChannexOfferRatePlan } from "../domains/channexOfferRateResolution.js";
 import { createTargetPmsOperationsReadRepository } from "../domains/pmsOperationsReadModel.js";
-import { createHotelSetupOrdinaryLoginFixture } from "../hotelSetupOrdinaryLogin.fixture.js";
+import {
+  createHotelSetupOrdinaryLoginFixture,
+  type HotelSetupOrdinaryLoginFixture,
+} from "../hotelSetupOrdinaryLogin.fixture.js";
 import {
   clearChannexAssignmentFixture,
   seedChannexAssignmentFixture,
@@ -31,6 +34,9 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
   let roomA = "";
   let legacyRate = "";
   const targets: Record<string, string> = {};
+  // Production runs intake on the ordinary API login (VAY-2054); 0522 lets its finance evidence
+  // triggers queue the expense worker's discovery rows on that login.
+  let login: HotelSetupOrdinaryLoginFixture | undefined;
   const fetcher: typeof fetch = async (_input, init) =>
     (init?.method ?? "GET") === "GET"
       ? Response.json({ data: [] })
@@ -149,9 +155,11 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
       [{ room: "provider-room-b", rate: "offer-rate-later-1" }],
       1,
     );
+    login = await createHotelSetupOrdinaryLoginFixture(db, URL!);
   }, 60_000);
 
   afterAll(async () => {
+    await login?.drop();
     await cleanup();
     await db.end();
   });
@@ -260,6 +268,23 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
         channexOffer: link("moved", "2", "moved", roomA, "offer-rate-new"),
       },
     ]);
+    // Each OTA night's commission evidence queued exactly one Finance discovery row (0522).
+    expect(await dispatches("side-by-side")).toEqual({ evidence: 6, dispatched: 6 });
+  });
+
+  it("queues Finance discovery for a legacy and an offer booking on the API login", async () => {
+    await job(
+      "dispatch-legacy",
+      revision("dispatch-legacy-1", "dispatch-legacy", [["provider-room", "provider-rate"]]),
+    );
+    await job(
+      "dispatch-offer",
+      revision("dispatch-offer-1", "dispatch-offer", [["provider-room-b", "offer-rate-b"]]),
+    );
+    expect(await run()).toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(await run()).toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(await dispatches("dispatch-legacy")).toEqual({ evidence: 2, dispatched: 2 });
+    expect(await dispatches("dispatch-offer")).toEqual({ evidence: 2, dispatched: 2 });
   });
 
   it("keeps taking OTA changes to an accepted booking after its offer moves to a new plan", async () => {
@@ -428,8 +453,7 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
   });
 
   it("resolves on a login shaped like the production API role, without a new grant", async () => {
-    const login = await createHotelSetupOrdinaryLoginFixture(db, URL!);
-    const pool = new pg.Pool({ connectionString: login.connectionString, max: 1 });
+    const pool = new pg.Pool({ connectionString: login!.connectionString, max: 1 });
     try {
       const client = await pool.connect();
       try {
@@ -454,7 +478,6 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
       }
     } finally {
       await pool.end();
-      await login.drop();
     }
   });
 
@@ -572,7 +595,7 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
   }
 
   function run() {
-    return runChannexBookingJobs(URL!, {
+    return runChannexBookingJobs(login!.connectionString, {
       apiBaseUrl: "https://app.channex.io",
       apiKey: "secret",
       ownsMutation: () => true,
@@ -657,6 +680,19 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
     ).rows;
   }
 
+  async function dispatches(channelBookingId: string) {
+    return (
+      await db.query<{ evidence: number; dispatched: number }>(
+        `SELECT count(*)::int AS evidence,count(dispatch.evidence_id)::int AS dispatched
+         FROM finance.ota_commission_evidence evidence
+         LEFT JOIN finance.expense_generation_dispatches dispatch
+           ON dispatch.family='ota_commission' AND dispatch.evidence_id=evidence.id
+         WHERE evidence.guest_booking_id=$1::uuid`,
+        [await bookingId(channelBookingId)],
+      )
+    ).rows[0];
+  }
+
   async function stay(channelBookingId: string) {
     return (
       await db.query(
@@ -729,6 +765,7 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
       for (const statement of [
         "DELETE FROM pms.channel_booking_revision_tombstones WHERE property_id=$1::uuid",
         "DELETE FROM pms.channel_booking_mappings WHERE property_id=$1::uuid",
+        "DELETE FROM finance.expense_generation_dispatches WHERE property_id=$1::uuid",
         "DELETE FROM finance.ota_commission_evidence WHERE property_id=$1::uuid",
         "DELETE FROM booking.guest_bookings WHERE property_id=$1::uuid",
         "DELETE FROM pms.channel_connections WHERE property_id=$1::uuid",
