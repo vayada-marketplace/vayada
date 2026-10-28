@@ -4219,7 +4219,9 @@ it("drops this room's edits when someone else changed the room, so a later save 
   expect(input().props.value).toBe("100.00"); expect(JSON.stringify(view.toJSON())).toContain("Someone else changed this room"); expect(button("Save and publish").props.disabled).toBe(true);
 });
 it("starts an unpriced room with the first setup in the property currency and publishes it next to the other rooms", async () => {
-  vi.spyOn(bookingsService, "getPaymentSettings").mockRejectedValueOnce(new Error("offline"));
+  // Both of the editor's reads fail (the first-price defaults and, since VAY-2390, the currency banner): a one-time
+  // rejection went to the banner and left the first-price read to the real service, which settles when it likes.
+  vi.spyOn(bookingsService, "getPaymentSettings").mockRejectedValue(new Error("offline"));
   client.read.mockResolvedValue({ ...snapshot, revision: 3, sources, stale: false });
   const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
   await mountRoom();
@@ -4229,7 +4231,8 @@ it("starts an unpriced room with the first setup in the property currency and pu
   const form = view.root.findByType("form");
   expect(saves()).toHaveLength(1); expect(saves()[0].props).toMatchObject({ type: "submit", form: form.props.id }); expect(form.props.id).toBeTruthy();
   expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0); expect(JSON.stringify(view.toJSON())).toContain("No price yet: guests can't book this room");
-  await act(async () => {}); expect(saves()[0].props.disabled).toBe(false); // Payment settings can't be read here: the form asks.
+  // Payment settings can't be read here: the form asks, once the failed read has settled.
+  await vi.waitFor(async () => { await act(async () => {}); expect(saves()[0].props.disabled).toBe(false); });
   expect(JSON.stringify(view.toJSON())).toContain("names anything else still missing");
   await act(async () => form.props.onSubmit({ preventDefault() {} })); expect(JSON.stringify(view.toJSON())).toContain("Fill in what is still missing:"); expect(client.publicationAction).not.toHaveBeenCalled();
   const first = familyInput("90");
