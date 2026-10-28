@@ -16,6 +16,7 @@ import {
   parsePmsDecimalAmount,
   parsePmsPricingCurrency,
   parsePmsPricingCurrencyCapabilities,
+  parsePmsPricingCurrencyChangeBlockers,
   parsePmsPricingSourceSnapshot,
   parsePropertyPricingCurrencyCommandResult,
   parsePropertyPricingCurrencySnapshot,
@@ -463,6 +464,27 @@ describe("PMS pricing command contract", () => {
         blockers: [{ code: "legacy_room_type_price", affectedCount: 1 }],
       },
     });
+  });
+
+  it("reads a preview's blockers as the change's, where none is an empty list (VAY-2390)", () => {
+    expect(parsePmsPricingCurrencyChangeBlockers([])).toEqual([]);
+    expect(
+      parsePmsPricingCurrencyChangeBlockers([
+        { code: "booking_reference", affectedCount: 3 },
+        { code: "channel_connection", affectedCount: 1 },
+      ]),
+    ).toEqual([
+      { code: "booking_reference", affectedCount: 3 },
+      { code: "channel_connection", affectedCount: 1 },
+    ]);
+    expect(
+      parsePmsPricingCurrencyChangeBlockers([
+        { code: "channel_connection" },
+        { code: "booking_reference" },
+      ]),
+    ).toBeNull();
+    expect(parsePmsPricingCurrencyChangeBlockers([{ code: "unknown" }])).toBeNull();
+    expect(parsePmsPricingCurrencyChangeBlockers({ blockers: [] })).toBeNull();
   });
 
   it("rejects stored result envelopes with extra or malformed data", () => {

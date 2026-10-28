@@ -39,6 +39,15 @@ export const pricingCurrencyService = {
     };
   },
 
+  /** What would refuse a change right now, read without locks for the dialog to say up front; the
+   * change checks again in its own transaction. Empty when nothing is in the way. */
+  async blockers(state: PricingCurrencyState): Promise<PmsPricingCurrencyChangeBlocker[]> {
+    const response = await pmsOperationsClient.get<{
+      blockers: PmsPricingCurrencyChangeBlocker[];
+    }>(`${endpoint(state.propertyId)}/currency-change/blockers`, pmsOperationsRequestOptions);
+    return response.blockers;
+  },
+
   /** A refusal for upcoming bookings, channels or older records comes back as `blocked`, with
    * nothing changed; another change since the state was read comes back as `stale`. */
   async change(

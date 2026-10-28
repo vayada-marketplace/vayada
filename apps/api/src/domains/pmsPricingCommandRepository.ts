@@ -17,6 +17,7 @@ import {
   type PmsPricingCommandPort,
   type PmsPricingCurrency,
   type PmsPricingCurrencyChangeBlocker,
+  type PmsPricingCurrencyChangeBlockersReadPort,
   type PmsPricingCurrencyChangeGuardPort,
   type PmsPricingSourceChangedEvent,
   type PropertyPricingCurrencyCommandError,
@@ -67,7 +68,8 @@ export type PmsPricingCommandRepositoryConfig = {
   randomId?: () => string;
 };
 
-export type PmsPricingCommandRepository = PmsPricingCommandPort & { close(): Promise<void> };
+export type PmsPricingCommandRepository = PmsPricingCommandPort &
+  PmsPricingCurrencyChangeBlockersReadPort & { close(): Promise<void> };
 
 type AnyCommand = UpsertPropertyPricingCurrencyCommand | UpsertFlexibleRatePlanCommand;
 type AnyResult = PropertyPricingCurrencyCommandResult | FlexibleRatePlanCommandResult;
@@ -383,6 +385,20 @@ export function createPgPmsPricingCommandRepository(
         }
       }
       return execute(false, []);
+    },
+
+    /** VAY-2390: the Owner's change's own scans, without its locks; the change checks again. */
+    async getCurrencyChangeBlockers(propertyId) {
+      if (!ownerChange) throw new Error("Currency change blockers are read for the Owner's change");
+      const client = await pool.connect();
+      try {
+        return mergeBlockers([
+          ...(await inspectLocalCurrencyBlockers(client, propertyId)),
+          ...(await inspectOwnerChangeBlockers(client, propertyId)),
+        ]);
+      } finally {
+        client.release();
+      }
     },
 
     async close() {

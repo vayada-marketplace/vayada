@@ -291,6 +291,14 @@ export type PmsPricingCurrencyChangeGuardPort = {
   ): Promise<Result>;
 };
 
+/** VAY-2390: what an Owner's currency change would be refused for right now, read without locks
+ * so the dialog can say it up front. The change itself checks again in its locked transaction. */
+export type PmsPricingCurrencyChangeBlockersReadPort = {
+  getCurrencyChangeBlockers(
+    propertyId: string,
+  ): Promise<readonly PmsPricingCurrencyChangeBlocker[]>;
+};
+
 /** Secret-safe change notification; consumers obtain current values through PmsPricingReadPort. */
 export type PmsPricingSourceChangedEvent = {
   readonly contractVersion: PmsPricingContractVersion;
@@ -310,6 +318,14 @@ export function parsePmsPricingCurrency(value: unknown): PmsPricingCurrency | nu
   return typeof value === "string" && CURRENCY_PATTERN.test(value)
     ? (value as PmsPricingCurrency)
     : null;
+}
+
+/** The change's blocker list, in code order, where no blockers is an empty list. */
+export function parsePmsPricingCurrencyChangeBlockers(
+  value: unknown,
+): readonly PmsPricingCurrencyChangeBlocker[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.length === 0 ? Object.freeze([]) : parseCurrencyChangeBlockers(value);
 }
 
 export function parsePmsPricingCurrencyCapabilities(

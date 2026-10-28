@@ -8,11 +8,13 @@ import {
   parseFlexibleRatePlanSnapshot,
   parsePmsPricingSourceSnapshot,
   parsePmsPricingCurrencyCapabilities,
+  parsePmsPricingCurrencyChangeBlockers,
   parsePropertyPricingCurrencyCommandResult,
   parseUpsertPropertyPricingCurrencyCommand,
   type PmsPricingCommandAudit,
   type PmsPricingCommandPort,
   type PmsPricingCurrencyCapabilitiesReadPort,
+  type PmsPricingCurrencyChangeBlockersReadPort,
   type PmsPricingReadPort,
   type PropertyPricingCurrencyCommandError,
 } from "@vayada/domain-pms";
@@ -31,8 +33,10 @@ export type PmsPricingRoutesOptions = {
   /** Owner-only first-currency and currency saves on the ordinary login (VAY-2056); replaces
    * commandPort for the currency route. Requires propertyAccessRepository. */
   currencyCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
-  /** VAY-2390 P5: the Owner's protected currency change (`ownerCurrencyChange` on the API login). */
-  currencyChangeCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  /** VAY-2390 P5: the Owner's protected currency change (`ownerCurrencyChange` on the API login),
+   * and what it would be refused for right now. */
+  currencyChangeCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency"> &
+    PmsPricingCurrencyChangeBlockersReadPort;
   propertyAccessRepository?: PropertyAccessRepository;
   commandPort: PmsPricingCommandPort;
   readPort: PmsPricingReadPort;
@@ -129,6 +133,32 @@ export async function registerPmsPricingRoutes(
       path: "/properties/:propertyId/pricing-source/currency-change",
       permission: "finance.billing.manage",
     });
+    const changePort = options.currencyChangeCommandPort;
+    const propertyAccessRepository = options.propertyAccessRepository;
+    const ownerOnly = new WeakMap<FastifyRequest, AuthorizedScope>();
+    // A read-only preview for the dialog: the same Owner gate, no locks; the change checks again.
+    app.get<{ Params: PropertyParams }>(
+      "/properties/:propertyId/pricing-source/currency-change/blockers",
+      {
+        onRequest: async (request, reply) => {
+          const scope = await authorizeRequest(
+            request,
+            reply,
+            true,
+            propertyAccessRepository,
+            "finance.billing.manage",
+          );
+          if (scope) ownerOnly.set(request, scope);
+        },
+      },
+      async (request, reply) => {
+        const scope = requireAuthorizedScope(ownerOnly, request);
+        const blockers = parsePmsPricingCurrencyChangeBlockers(
+          await changePort.getCurrencyChangeBlockers(scope.propertyId),
+        );
+        return blockers ? reply.status(200).send({ blockers }) : invalidPortResult(reply);
+      },
+    );
   }
 
   app.get<{ Params: PropertyParams }>(
