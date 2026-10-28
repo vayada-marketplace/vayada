@@ -175,32 +175,25 @@ function status(input: {
     },
     setupPlan: {
       propertyId,
-      planRevision: "plan-2",
       tasks: input.withIncompleteTask
         ? [
             {
-              taskId: "direct_booking_publication",
+              taskId: "shared_identity",
               propertyId,
-              track: "hotel_operations",
-              requirementOwnerDomain: "distribution",
-              destinationRouteKey: "distribution.direct_booking_publication",
-              callerCapability: "waiting",
+              track: "shared",
+              requirementOwnerDomain: "hotel_catalog",
+              destinationRouteKey: "hotel_catalog.shared_identity",
+              callerCapability: "allowed",
               ownerProgress: "in_progress",
-              readiness: "pending_sync",
-              actionableBy: "system",
-              reasonCodes: ["publication_pending"],
-              sourceRevision: "publication-1",
+              readiness: "actionable",
+              actionableBy: "operator",
+              reasonCodes: ["missing_phone_contact"],
+              sourceRevision: "identity-1",
               freshness: "fresh",
               evaluatedAt: "2026-07-26T10:00:00.000Z",
             },
           ]
         : [],
-      recommendedTaskId: null,
-      ownerProgress: { complete: 0, total: input.withIncompleteTask ? 1 : 0 },
-      launchReadiness: {
-        operationsUse: "ready",
-        directBookingPublish: input.withIncompleteTask ? "pending" : "ready",
-      },
     },
     updatedAt: "2026-07-26T10:00:00.000Z",
   };

@@ -11,7 +11,6 @@ import {
   parseAdaptiveHotelSetupStatus,
   parseUpdateTracksRequest,
   type AdaptiveHotelSetupStatus,
-  type SetupTask,
   type UpdateTracksRequest,
 } from "./adaptiveHotelSetup.js";
 
@@ -205,8 +204,30 @@ describe("adaptive hotel setup contracts", () => {
     expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
   });
 
-  it("validates setup tasks and launch readiness against the selected tracks", () => {
-    const value = {
+  describe("setup plan (VAY-2175)", () => {
+    const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const task = (taskId: string, track: string, owner: string, route: string) => ({
+      taskId,
+      propertyId,
+      track,
+      requirementOwnerDomain: owner,
+      destinationRouteKey: route,
+      callerCapability: "allowed",
+      ownerProgress: "not_started",
+      readiness: "actionable",
+      actionableBy: "owner",
+      reasonCodes: [],
+      sourceRevision: "1",
+      freshness: "fresh",
+      evaluatedAt: "2026-07-26T12:00:00.000Z",
+    });
+    const basics = task(
+      "shared_identity",
+      "shared",
+      "hotel_catalog",
+      "hotel_catalog.shared_identity",
+    );
+    const status = (setupPlan: Record<string, unknown>): Record<string, any> => ({
       contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
       organization: {
         organizationId: "11111111-1111-4111-8111-111111111111",
@@ -229,10 +250,10 @@ describe("adaptive hotel setup contracts", () => {
       },
       propertySelection: {
         state: "single_property",
-        selectedPropertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        selectedPropertyId: propertyId,
         availableProperties: [
           {
-            propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            propertyId,
             publicId: "hotel-alpenrose",
             displayName: "Hotel Alpenrose",
             locationSummary: "Munich, DE",
@@ -240,103 +261,60 @@ describe("adaptive hotel setup contracts", () => {
         ],
       },
       entryDecision: null,
-      setupPlan: {
-        propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      setupPlan: { propertyId, ...setupPlan },
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    });
+
+    it("accepts the hotel-basics plan", () => {
+      const value = status({ tasks: [basics] });
+      expect(parseAdaptiveHotelSetupStatus(value)).toEqual(value);
+    });
+
+    it("accepts the old full plan the API still sends, without reading its other tasks and keys", () => {
+      const value = status({
         planRevision: "tracks:1",
         tasks: [
-          {
-            taskId: "shared_identity",
-            track: "shared",
-            requirementOwnerDomain: "hotel_catalog",
-            destinationRouteKey: "hotel_catalog.shared_identity",
-            actionableBy: "operator",
-          },
-          {
-            taskId: "rooms_rates_availability",
-            track: "hotel_operations",
-            requirementOwnerDomain: "pms",
-            destinationRouteKey: "pms.rooms_rates_availability",
-            actionableBy: "operator",
-          },
-          {
-            taskId: "guest_settings_policies",
-            track: "hotel_operations",
-            requirementOwnerDomain: "booking",
-            destinationRouteKey: "booking.guest_settings_policies",
-            actionableBy: "owner",
-          },
-          {
-            taskId: "billing_plan",
-            track: "hotel_operations",
-            requirementOwnerDomain: "finance",
-            destinationRouteKey: "finance.billing_plan",
-            actionableBy: "owner",
-          },
-          {
-            taskId: "payment",
-            track: "hotel_operations",
-            requirementOwnerDomain: "finance",
-            destinationRouteKey: "finance.payment",
-            actionableBy: "owner",
-          },
-          {
-            taskId: "direct_booking_publication",
-            track: "hotel_operations",
-            requirementOwnerDomain: "distribution",
-            destinationRouteKey: "distribution.direct_booking_publication",
-            actionableBy: "owner",
-          },
-        ].map(
-          (
-            { taskId, track, requirementOwnerDomain, destinationRouteKey, actionableBy },
-            index,
-          ) => ({
-            taskId,
-            propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            track,
-            requirementOwnerDomain,
-            destinationRouteKey,
-            callerCapability: "allowed",
-            ownerProgress: "not_started",
-            readiness: index === 0 ? "not_a_readiness" : "actionable",
-            actionableBy,
-            reasonCodes: [],
-            sourceRevision: "1",
-            freshness: "fresh",
-            evaluatedAt: "2026-07-26T12:00:00.000Z",
-          }),
-        ),
-        recommendedTaskId: "shared_identity",
-        ownerProgress: { complete: 0, total: 6 },
-        launchReadiness: {
-          operationsUse: "pending",
-          directBookingPublish: "pending",
-        },
-      },
-      updatedAt: "2026-07-26T12:00:00.000Z",
-    };
-
-    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
-
-    value.setupPlan.tasks[0]!.readiness = "actionable";
-    expect(parseAdaptiveHotelSetupStatus(value)).not.toBeNull();
-
-    value.setupPlan.tasks[0]!.readiness = "complete";
-    value.setupPlan.tasks[0]!.ownerProgress = "owner_complete";
-    value.setupPlan.ownerProgress.complete = 1;
-    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
-
-    value.setupPlan.tasks[0]!.actionableBy = null as never;
-    value.setupPlan.recommendedTaskId = "rooms_rates_availability";
-    expect(parseAdaptiveHotelSetupStatus(value)).not.toBeNull();
-
-    // The retired Marketplace tasks are unknown task IDs now.
-    value.setupPlan.tasks.push({
-      ...value.setupPlan.tasks[0]!,
-      taskId: "public_profile",
+          basics,
+          task(
+            "rooms_rates_availability",
+            "hotel_operations",
+            "pms",
+            "pms.rooms_rates_availability",
+          ),
+          task(
+            "guest_settings_policies",
+            "hotel_operations",
+            "booking",
+            "booking.guest_settings_policies",
+          ),
+          task("billing_plan", "hotel_operations", "finance", "finance.billing_plan"),
+          task("payment", "hotel_operations", "finance", "finance.payment"),
+          task(
+            "direct_booking_publication",
+            "hotel_operations",
+            "distribution",
+            "distribution.direct_booking_publication",
+          ),
+        ],
+        // No longer checked against the tasks: nothing reads them.
+        recommendedTaskId: "payment",
+        ownerProgress: { complete: 3, total: 6 },
+        launchReadiness: { operationsUse: "ready", directBookingPublish: "ready" },
+      });
+      expect(parseAdaptiveHotelSetupStatus(value)).toEqual(value);
     });
-    value.setupPlan.ownerProgress.total = 7;
-    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
+
+    it.each([
+      ["a malformed task", { tasks: [{ ...basics, readiness: "not_a_readiness" }] }],
+      ["no hotel-basics task while a track is selected", { tasks: [] }],
+      ["the same task twice", { tasks: [basics, basics] }],
+      ["another property's task", { tasks: [{ ...basics, propertyId: "other-property" }] }],
+      // The retired Marketplace tasks are unknown task IDs now.
+      ["a retired Marketplace task", { tasks: [basics, { ...basics, taskId: "public_profile" }] }],
+      ["an unknown plan key", { tasks: [basics], marketplacePublish: "not_applicable" }],
+    ])("rejects a plan with %s", (_, setupPlan) => {
+      expect(parseAdaptiveHotelSetupStatus(status(setupPlan))).toBeNull();
+    });
   });
 
   it("rejects the retired Marketplace track entry the API stopped sending (VAY-2270)", () => {
@@ -386,101 +364,6 @@ describe("adaptive hotel setup contracts", () => {
     selected.organization.tracks.pop();
     selected.organization.selectedTracks = ["hotel_operations", "creator_marketplace"];
     expect(parseAdaptiveHotelSetupStatus(selected)).toBeNull();
-  });
-
-  it("rejects the retired Marketplace launch state the API stopped sending (VAY-2270)", () => {
-    const task = (taskId: string, track: string, owner: string, route: string) => ({
-      taskId,
-      propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      track,
-      requirementOwnerDomain: owner,
-      destinationRouteKey: route,
-      callerCapability: "allowed",
-      ownerProgress: "not_started",
-      readiness: "actionable",
-      actionableBy: "owner",
-      reasonCodes: [],
-      sourceRevision: "1",
-      freshness: "fresh",
-      evaluatedAt: "2026-07-26T12:00:00.000Z",
-    });
-    const value: Record<string, any> = {
-      contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
-      organization: {
-        organizationId: "11111111-1111-4111-8111-111111111111",
-        displayName: "Alpenrose Hotel Group",
-        websiteUrl: null,
-        selectedTracks: ["hotel_operations"],
-        trackRevision: 1,
-        canManageTracks: false,
-        tracks: [
-          {
-            track: "hotel_operations",
-            provisioning: "active",
-            components: [
-              { product: "pms", access: "active" },
-              { product: "booking", access: "active" },
-            ],
-            allowedActions: [],
-          },
-        ],
-      },
-      propertySelection: {
-        state: "single_property",
-        selectedPropertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        availableProperties: [
-          {
-            propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            publicId: "hotel-alpenrose",
-            displayName: "Hotel Alpenrose",
-            locationSummary: "Munich, DE",
-          },
-        ],
-      },
-      entryDecision: null,
-      setupPlan: {
-        propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        planRevision: "tracks:1",
-        tasks: [
-          task("shared_identity", "shared", "hotel_catalog", "hotel_catalog.shared_identity"),
-          task(
-            "rooms_rates_availability",
-            "hotel_operations",
-            "pms",
-            "pms.rooms_rates_availability",
-          ),
-          task(
-            "guest_settings_policies",
-            "hotel_operations",
-            "booking",
-            "booking.guest_settings_policies",
-          ),
-          task("billing_plan", "hotel_operations", "finance", "finance.billing_plan"),
-          task("payment", "hotel_operations", "finance", "finance.payment"),
-          task(
-            "direct_booking_publication",
-            "hotel_operations",
-            "distribution",
-            "distribution.direct_booking_publication",
-          ),
-        ],
-        recommendedTaskId: "shared_identity",
-        ownerProgress: { complete: 0, total: 6 },
-        launchReadiness: {
-          operationsUse: "pending",
-          directBookingPublish: "pending",
-          marketplacePublish: "not_applicable",
-        },
-      },
-      updatedAt: "2026-07-26T12:00:00.000Z",
-    };
-    expect(parseAdaptiveHotelSetupStatus(value)).toBeNull();
-
-    delete value.setupPlan.launchReadiness.marketplacePublish;
-    expect(parseAdaptiveHotelSetupStatus(value)?.setupPlan?.launchReadiness).toEqual({
-      operationsUse: "pending",
-      directBookingPublish: "pending",
-    });
   });
 
   it("recommends only actionable tasks the caller may start", () => {

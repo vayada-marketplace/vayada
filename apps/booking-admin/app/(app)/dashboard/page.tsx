@@ -231,7 +231,8 @@ export default function DashboardPage() {
         actions={<DashboardSetupChecklistChip setup={setupChecklist} />}
       />
 
-      <ResumeSetupBanner hidden={setupChecklist.state.kind === "ready"} />
+      {/* Only when the checklist can't say what's left; not while it loads, so it doesn't flash. */}
+      <ResumeSetupBanner hidden={setupChecklist.state.kind !== "unavailable"} />
 
       <BookingPageStatusCard />
 

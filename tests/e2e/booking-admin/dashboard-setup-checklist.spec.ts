@@ -23,14 +23,6 @@ async function mockUnfinishedSetup(page: Page) {
         selectedTracks: ["hotel_operations"],
         propertyId: BOOKING_ADMIN_PROPERTY_ID,
         propertyDisplayName: "Alpenrose",
-        taskOverrides: {
-          rooms_rates_availability: {
-            ownerProgress: "in_progress",
-            readiness: "actionable",
-            actionableBy: "owner",
-            reasonCodes: ["rooms_missing"],
-          },
-        },
       }),
     }),
   );

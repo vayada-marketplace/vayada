@@ -76,17 +76,7 @@ const status: AdaptiveHotelSetupStatus = {
     destinationRouteKey: "pms.workspace",
     reasonCode: "ready",
   },
-  setupPlan: {
-    propertyId,
-    planRevision: "plan-1",
-    tasks: [],
-    recommendedTaskId: null,
-    ownerProgress: { complete: 0, total: 0 },
-    launchReadiness: {
-      operationsUse: "ready",
-      directBookingPublish: "pending",
-    },
-  },
+  setupPlan: { propertyId, tasks: [] },
   updatedAt: "2026-07-22T10:00:00.000Z",
 };
 

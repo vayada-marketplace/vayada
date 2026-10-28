@@ -17,7 +17,6 @@ import type {
 import { AuthorizationError } from "@vayada/backend-authorization";
 import { injectJson } from "@vayada/backend-test";
 import type {
-  AdaptiveHotelSetupStatus,
   PublicPropertyProfileResponse,
   SetupCommandError,
   SetupTask,
@@ -43,6 +42,7 @@ import {
   type SharedPropertyLaunchSettingsRepository,
   type SharedPropertyProfile,
   type SharedPropertyProfileInput,
+  type SharedHotelSetupStatusResponse,
   buildPropertySetupPlan,
 } from "./routes/sharedHotelSetupStatus.js";
 
@@ -114,7 +114,7 @@ describe("shared hotel setup status route", () => {
       },
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=booking&returnTo=/dashboard",
       headers: { authorization: "Bearer valid-token" },
@@ -179,7 +179,7 @@ describe("shared hotel setup status route", () => {
       repository: repositoryWith([]),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/property-types",
       headers: { authorization: "Bearer valid-token" },
@@ -194,7 +194,7 @@ describe("shared hotel setup status route", () => {
       repository: repositoryWith([]),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/property-types",
     });
@@ -232,7 +232,7 @@ describe("shared hotel setup status route", () => {
       ),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -251,7 +251,7 @@ describe("shared hotel setup status route", () => {
 
     await app.close();
     app = buildSharedSetupApp({ repository: repositoryWith([adaptiveProperty(propertyId)]) });
-    const single = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const single = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -443,7 +443,7 @@ describe("shared hotel setup status route", () => {
         trackCommandRepository: trackRepository([...selectedTracks]),
       });
 
-      const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+      const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
         method: "GET",
         url: "/api/hotel-setup/status",
         headers: { authorization: "Bearer valid-token" },
@@ -474,7 +474,7 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -527,7 +527,7 @@ describe("shared hotel setup status route", () => {
       repository: repositoryWith([adaptiveProperty(propertyId, { taskFacts: completedFacts })]),
     });
 
-    const repairable = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const repairable = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -552,7 +552,7 @@ describe("shared hotel setup status route", () => {
       ]),
     });
 
-    const dependencyBlocked = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const dependencyBlocked = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -736,7 +736,7 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=booking",
       headers: { authorization: "Bearer valid-token" },
@@ -779,7 +779,7 @@ describe("shared hotel setup status route", () => {
         trackCommandRepository: trackRepository(["hotel_operations"]),
       });
 
-      const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+      const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
         method: "GET",
         url: `/api/hotel-setup/status?entryProduct=${entryProduct}`,
         headers: { authorization: "Bearer valid-token" },
@@ -802,7 +802,7 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=pms",
       headers: { authorization: "Bearer valid-token" },
@@ -860,7 +860,7 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository,
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=booking",
       headers: { authorization: "Bearer valid-token" },
@@ -894,7 +894,7 @@ describe("shared hotel setup status route", () => {
         trackCommandRepository: trackRepository([selectedTrack]),
       });
 
-      const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+      const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
         method: "GET",
         url: `/api/hotel-setup/status?entryProduct=${entryProduct}`,
         headers: { authorization: "Bearer valid-token" },
@@ -968,7 +968,7 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
+    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -3358,7 +3358,7 @@ function buildSharedSetupApp(options: {
 
 function getSharedSetupStatus(target: FastifyInstance, requestedPropertyId?: string) {
   const suffix = requestedPropertyId ? `?propertyId=${requestedPropertyId}` : "";
-  return injectJson<AdaptiveHotelSetupStatus>(target, {
+  return injectJson<SharedHotelSetupStatusResponse>(target, {
     method: "GET",
     url: `/api/hotel-setup/status${suffix}`,
     headers: { authorization: "Bearer valid-token" },

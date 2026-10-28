@@ -5,11 +5,13 @@ import {
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
+import { corsHeaders } from "../support/cors";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 
 const EXIT_URL = `/dashboard?setup=incomplete&propertyId=${BOOKING_ADMIN_PROPERTY_ID}`;
 
-async function mockSetupStatus(page: Page, unfinished: boolean) {
+// The layout's entry guard reads the status; the banner itself doesn't (VAY-2175).
+async function mockSetupStatus(page: Page) {
   await page.route("**/api/hotel-setup/status**", (route) =>
     route.fulfill({
       json: createAdaptiveHotelSetupStatusMock({
@@ -19,16 +21,6 @@ async function mockSetupStatus(page: Page, unfinished: boolean) {
         selectedTracks: ["hotel_operations"],
         propertyId: BOOKING_ADMIN_PROPERTY_ID,
         propertyDisplayName: "Alpenrose",
-        taskOverrides: unfinished
-          ? {
-              rooms_rates_availability: {
-                ownerProgress: "in_progress",
-                readiness: "actionable",
-                actionableBy: "owner",
-                reasonCodes: ["rooms_missing"],
-              },
-            }
-          : {},
       }),
     }),
   );
@@ -43,7 +35,7 @@ test.beforeEach(async ({ page }) => {
 test("a hotel that left setup unfinished lands on the dashboard with a way back (VAY-2249)", async ({
   page,
 }, testInfo) => {
-  await mockSetupStatus(page, true);
+  await mockSetupStatus(page);
   await page.goto(EXIT_URL);
 
   const banner = page.getByRole("status").filter({ hasText: "Your property setup isn't complete" });
@@ -57,16 +49,36 @@ test("a hotel that left setup unfinished lands on the dashboard with a way back 
   await page.screenshot({ path: testInfo.outputPath("dashboard-resume-setup.png") });
 });
 
-test("no banner after Finish for now when setup is complete", async ({ page }) => {
-  await mockSetupStatus(page, false);
+// Without a status read, the banner waits for the checklist instead: it shows what's left when it
+// loads, so the banner appears only once the checklist can't (VAY-2175).
+test("shows the banner from the exit marker alone, once the checklist can't load (VAY-2175)", async ({
+  page,
+}) => {
+  await mockSetupStatus(page);
+  let answerChecklist = () => {};
+  const checklistAsked = new Promise<void>((asked) => {
+    void page.route(/\/api\/hotel-setup\/properties\/[^/]+\/checklist$/, async (route) => {
+      const headers = corsHeaders(route);
+      if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+      await new Promise<void>((answer) => {
+        answerChecklist = answer;
+        asked();
+      });
+      return route.fulfill({ status: 404, headers, json: { error: "Not Found" } });
+    });
+  });
   await page.goto(EXIT_URL);
+
+  await checklistAsked;
   await expect(page.getByRole("heading", { name: "Booking Engine" })).toBeVisible();
-  await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByText("Your property setup isn't complete")).toHaveCount(0);
+  const banner = page.getByRole("status").filter({ hasText: "Your property setup isn't complete" });
+  await expect(banner).toHaveCount(0);
+  answerChecklist();
+  await expect(banner).toBeVisible();
 });
 
 test("the dashboard shows no resume banner on a normal visit", async ({ page }) => {
-  await mockSetupStatus(page, true);
+  await mockSetupStatus(page);
   await page.goto("/dashboard");
   await expect(page.getByRole("heading", { name: "Booking Engine" })).toBeVisible();
   await expect(page.getByText("Your property setup isn't complete")).toHaveCount(0);
