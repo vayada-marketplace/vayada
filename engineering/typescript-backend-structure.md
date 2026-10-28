@@ -109,7 +109,7 @@ apps/api
 This app can expose route groups for existing products:
 
 ```text
-/api/marketplace/*   (hotel account invites only, VAY-2272)
+/api/marketplace/*   (old hotel invite paths, gone one release after VAY-2302)
 /api/booking/*
 /api/pms/*
 /api/platform/*

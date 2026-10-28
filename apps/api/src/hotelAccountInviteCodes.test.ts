@@ -48,7 +48,7 @@ describe("hotel account invite code routes", () => {
 
     const response = await injectJson(app, {
       method: "GET",
-      url: "/api/marketplace/admin/invite-codes",
+      url: "/api/platform/admin/invite-codes",
       headers: { authorization: "Bearer hotel-token" },
     });
 
@@ -61,7 +61,7 @@ describe("hotel account invite code routes", () => {
 
     const list = await injectJson<HotelAccountInviteCode[]>(app, {
       method: "GET",
-      url: "/api/marketplace/admin/invite-codes",
+      url: "/api/platform/admin/invite-codes",
       headers: { authorization: "Bearer platform-token" },
     });
 
@@ -81,7 +81,7 @@ describe("hotel account invite code routes", () => {
       const payload = hotelInviteRequest(routeCase.selectedTracks);
       const created = await injectJson<HotelAccountInviteCode>(app, {
         method: "POST",
-        url: "/api/marketplace/admin/invite-codes",
+        url: "/api/platform/admin/invite-codes",
         headers: { authorization: "Bearer platform-token" },
         payload,
       });
@@ -109,12 +109,51 @@ describe("hotel account invite code routes", () => {
 
     const deleted = await app.inject({
       method: "DELETE",
-      url: "/api/marketplace/admin/invite-codes/invite_801",
+      url: "/api/platform/admin/invite-codes/invite_801",
       headers: { authorization: "Bearer platform-token" },
     });
 
     expect(deleted.statusCode).toBe(204);
     expect(repository.calls.revokeInviteCode).toEqual(["invite_801"]);
+  });
+
+  it("still answers on the old /api/marketplace path for one release (VAY-2302)", async () => {
+    const repository = createMemoryHotelAccountInviteCodeRepository();
+    app = buildInviteCodeApp(repository);
+
+    const list = await injectJson<HotelAccountInviteCode[]>(app, {
+      method: "GET",
+      url: "/api/marketplace/admin/invite-codes",
+      headers: { authorization: "Bearer platform-token" },
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.body[0]).toMatchObject({ code: "VAY-INVITE" });
+
+    const unauthorized = await injectJson(app, {
+      method: "DELETE",
+      url: "/api/marketplace/admin/invite-codes/invite_801",
+      headers: { authorization: "Bearer hotel-token" },
+    });
+    expect(unauthorized.statusCode).toBe(403);
+    expect(repository.calls.revokeInviteCode).toHaveLength(0);
+  });
+
+  it("ends its pool once although both route prefixes close it (VAY-2302)", async () => {
+    let ended = 0;
+    const repository = createPgHotelAccountInviteCodeRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        ...createAdminPgPool([]),
+        async end() {
+          ended += 1;
+        },
+      } as never,
+    });
+    const inviteCodeApp = buildInviteCodeApp(repository);
+    await inviteCodeApp.ready();
+    await inviteCodeApp.close();
+
+    expect(ended).toBe(1);
   });
 
   it("rejects retired setup payloads and invalid setup tracks", async () => {
@@ -123,7 +162,7 @@ describe("hotel account invite code routes", () => {
 
     const retiredPayload = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/admin/invite-codes",
+      url: "/api/platform/admin/invite-codes",
       headers: { authorization: "Bearer platform-token" },
       payload: {
         ...hotelInviteRequest(["hotel_operations"]),
@@ -135,7 +174,7 @@ describe("hotel account invite code routes", () => {
 
     const invalidTrack = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/admin/invite-codes",
+      url: "/api/platform/admin/invite-codes",
       headers: { authorization: "Bearer platform-token" },
       payload: {
         ...hotelInviteRequest(["hotel_operations"]),
@@ -152,7 +191,7 @@ describe("hotel account invite code routes", () => {
     ]) {
       const retiredTrack = await injectJson(app, {
         method: "POST",
-        url: "/api/marketplace/admin/invite-codes",
+        url: "/api/platform/admin/invite-codes",
         headers: { authorization: "Bearer platform-token" },
         payload: { ...hotelInviteRequest(["hotel_operations"]), selectedTracks },
       });
@@ -179,14 +218,14 @@ describe("hotel account invite code routes", () => {
 
     const unauthenticated = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/admin/invite-codes",
+      url: "/api/platform/admin/invite-codes",
       payload,
     });
     expect(unauthenticated.statusCode).toBe(401);
 
     const unauthorized = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/admin/invite-codes",
+      url: "/api/platform/admin/invite-codes",
       headers: { authorization: "Bearer hotel-token" },
       payload,
     });

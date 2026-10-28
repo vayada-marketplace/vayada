@@ -567,22 +567,27 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       });
     }
   }
+  // VAY-2302: the invite routes moved off /api/marketplace. The old prefix still answers for one
+  // release, for admin tabs that loaded the previous build.
   if (options.hotelAccountInviteCodeRepository) {
-    // Vayada Admin still calls /api/marketplace/admin/invite-codes (VAY-2270).
-    app.register(registerHotelAccountInviteCodeRoutes, {
-      prefix: "/api/marketplace",
-      repository: options.hotelAccountInviteCodeRepository,
-    });
+    for (const prefix of ["/api/platform", "/api/marketplace"]) {
+      app.register(registerHotelAccountInviteCodeRoutes, {
+        prefix,
+        repository: options.hotelAccountInviteCodeRepository,
+      });
+    }
   }
   if (options.hotelAccountInvites) {
     if (!options.hotelSetupTrackCommandRepository) {
       throw new Error("hotelSetupTrackCommandRepository is required with hotelAccountInvites");
     }
-    app.register(registerHotelAccountInviteRoutes, {
-      prefix: "/api/marketplace",
-      ...options.hotelAccountInvites,
-      trackCommandRepository: options.hotelSetupTrackCommandRepository,
-    });
+    for (const prefix of ["/api/hotel-setup", "/api/marketplace"]) {
+      app.register(registerHotelAccountInviteRoutes, {
+        prefix,
+        ...options.hotelAccountInvites,
+        trackCommandRepository: options.hotelSetupTrackCommandRepository,
+      });
+    }
   }
   if (options.propertyNearbyRepository) {
     if (!options.auth?.propertyAccessRepository) {

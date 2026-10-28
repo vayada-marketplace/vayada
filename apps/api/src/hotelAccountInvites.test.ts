@@ -60,7 +60,7 @@ describe("hotel account invite routes", () => {
 
     const response = await injectJson<HotelAccountInviteLookupResponse>(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/lookup",
+      url: "/api/hotel-setup/hotel-account-invites/lookup",
       payload: { code: INVITE_CODE },
     });
 
@@ -87,12 +87,12 @@ describe("hotel account invite routes", () => {
 
       const lookup = await injectJson(app, {
         method: "POST",
-        url: "/api/marketplace/hotel-account-invites/lookup",
+        url: "/api/hotel-setup/hotel-account-invites/lookup",
         payload: { code: INVITE_CODE },
       });
       const redeem = await injectJson(app, {
         method: "POST",
-        url: "/api/marketplace/hotel-account-invites/redeem",
+        url: "/api/hotel-setup/hotel-account-invites/redeem",
         headers: { authorization: "Bearer owner-token" },
         payload: { code: INVITE_CODE },
       });
@@ -111,17 +111,17 @@ describe("hotel account invite routes", () => {
 
     const malformed = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/lookup",
+      url: "/api/hotel-setup/hotel-account-invites/lookup",
       payload: { code: INVITE_CODE, email: "owner@example.test" },
     });
     const unknown = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/lookup",
+      url: "/api/hotel-setup/hotel-account-invites/lookup",
       payload: { code: "VAY-unknown00" },
     });
     const wrongIdentity = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer other-owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -137,6 +137,51 @@ describe("hotel account invite routes", () => {
     expect(tracks.calls).toHaveLength(0);
   });
 
+  it("still answers on the old /api/marketplace path for one release (VAY-2302)", async () => {
+    const repository = createMemoryInviteRepository();
+    const tracks = createMemoryTrackCommands();
+    app = buildInviteApp(repository, tracks.repository);
+
+    const lookup = await injectJson<HotelAccountInviteLookupResponse>(app, {
+      method: "POST",
+      url: "/api/marketplace/hotel-account-invites/lookup",
+      payload: { code: INVITE_CODE },
+    });
+    const unauthenticated = await injectJson(app, {
+      method: "POST",
+      url: "/api/marketplace/hotel-account-invites/redeem",
+      payload: { code: INVITE_CODE },
+    });
+
+    expect(lookup.statusCode).toBe(200);
+    expect(lookup.body.property).toEqual({ displayName: "Hotel Alpenrose" });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(repository.calls.redeem).toHaveLength(0);
+  });
+
+  it("ends its pool once although both route prefixes close it (VAY-2302)", async () => {
+    let ended = 0;
+    const repository = createPgHotelAccountInviteRepository({
+      connectionString: "postgresql://unused",
+      pool: {
+        async connect() {
+          throw new Error("unexpected transaction");
+        },
+        async query() {
+          throw new Error("unexpected query");
+        },
+        async end() {
+          ended += 1;
+        },
+      } as never,
+    });
+    const inviteApp = buildInviteApp(repository, createMemoryTrackCommands().repository);
+    await inviteApp.ready();
+    await inviteApp.close();
+
+    expect(ended).toBe(1);
+  });
+
   it("requires an authenticated active hotel account before reading the redemption token", async () => {
     const repository = createMemoryInviteRepository();
     const tracks = createMemoryTrackCommands();
@@ -144,12 +189,12 @@ describe("hotel account invite routes", () => {
 
     const unauthenticated = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       payload: { code: INVITE_CODE },
     });
     const platform = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer platform-token" },
       payload: { code: INVITE_CODE },
     });
@@ -167,7 +212,7 @@ describe("hotel account invite routes", () => {
 
     const response = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -187,7 +232,7 @@ describe("hotel account invite routes", () => {
 
       const response = await injectJson<HotelAccountInviteRedemptionResponse>(app, {
         method: "POST",
-        url: "/api/marketplace/hotel-account-invites/redeem",
+        url: "/api/hotel-setup/hotel-account-invites/redeem",
         headers: { authorization: "Bearer owner-token" },
         payload: { code: INVITE_CODE },
       });
@@ -222,7 +267,7 @@ describe("hotel account invite routes", () => {
 
     const first = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -231,7 +276,7 @@ describe("hotel account invite routes", () => {
 
     const retry = await injectJson<HotelAccountInviteRedemptionResponse>(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -258,7 +303,7 @@ describe("hotel account invite routes", () => {
 
     const response = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -276,7 +321,7 @@ describe("hotel account invite routes", () => {
 
     const first = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -287,7 +332,7 @@ describe("hotel account invite routes", () => {
 
     const retry = await injectJson<HotelAccountInviteRedemptionResponse>(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -304,19 +349,19 @@ describe("hotel account invite routes", () => {
 
     const first = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
     const replay = await injectJson<HotelAccountInviteRedemptionResponse>(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer owner-token" },
       payload: { code: INVITE_CODE },
     });
     const otherActor = await injectJson(app, {
       method: "POST",
-      url: "/api/marketplace/hotel-account-invites/redeem",
+      url: "/api/hotel-setup/hotel-account-invites/redeem",
       headers: { authorization: "Bearer other-owner-token" },
       payload: { code: INVITE_CODE },
     });
@@ -337,13 +382,13 @@ describe("hotel account invite routes", () => {
     const [owner, other] = await Promise.all([
       injectJson(app, {
         method: "POST",
-        url: "/api/marketplace/hotel-account-invites/redeem",
+        url: "/api/hotel-setup/hotel-account-invites/redeem",
         headers: { authorization: "Bearer owner-token" },
         payload: { code: INVITE_CODE },
       }),
       injectJson(app, {
         method: "POST",
-        url: "/api/marketplace/hotel-account-invites/redeem",
+        url: "/api/hotel-setup/hotel-account-invites/redeem",
         headers: { authorization: "Bearer other-owner-token" },
         payload: { code: INVITE_CODE },
       }),
@@ -377,7 +422,7 @@ describe("Postgres hotel account invite repository", () => {
     try {
       const response = await injectJson(app, {
         method: "POST",
-        url: "/api/marketplace/hotel-account-invites/lookup",
+        url: "/api/hotel-setup/hotel-account-invites/lookup",
         payload: { code: INVITE_CODE },
       });
       expect(response.statusCode).toBe(200);

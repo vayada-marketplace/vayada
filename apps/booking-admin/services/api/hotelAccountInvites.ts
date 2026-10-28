@@ -1,7 +1,6 @@
 import { apiClient, ApiErrorResponse } from "./client";
 
 // Hotel account invitations (codes issued in Vayada Admin), moved from marketplace-web (VAY-2262).
-// The API routes keep their /api/marketplace prefix until the Marketplace removal retires it.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.localhost";
 
 export const HOTEL_ACCOUNT_INVITE_STORAGE_KEY = "vayada.hotel-account-invite.v1";
@@ -28,7 +27,7 @@ export type HotelAccountInviteRedemption = {
 export const hotelAccountInvitesService = {
   /** Unauthenticated: the page shows the invitation before the owner signs in. */
   async lookup(code: string): Promise<HotelAccountInviteLookup> {
-    const response = await fetch(`${API_BASE_URL}/api/marketplace/hotel-account-invites/lookup`, {
+    const response = await fetch(`${API_BASE_URL}/api/hotel-setup/hotel-account-invites/lookup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code }),
@@ -52,7 +51,7 @@ export const hotelAccountInvitesService = {
 
   redeem(code: string): Promise<HotelAccountInviteRedemption> {
     return apiClient.post<HotelAccountInviteRedemption>(
-      "/api/marketplace/hotel-account-invites/redeem",
+      "/api/hotel-setup/hotel-account-invites/redeem",
       { code },
     );
   },
