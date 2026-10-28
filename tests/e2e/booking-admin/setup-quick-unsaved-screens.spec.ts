@@ -396,18 +396,43 @@ test("How guests pay stays disabled while Stripe's checkout opens", async ({ pag
   const leaving = page.waitForRequest(checkout);
   await proceed(page).click();
   await leaving;
-  // The run is done and the browser is on its way to Stripe: nothing on the step can be used.
-  await expect(heading(page, "How guests pay")).toBeVisible();
-  await expect(commission).toBeDisabled();
-  await expect(fixedFee).toBeDisabled();
-  await expect(page.getByRole("button", { name: /^Online card\b/ })).toBeDisabled();
-  const busy = page.getByRole("button", { name: "Setting up your hotel…", exact: true });
-  await expect(busy).toBeDisabled();
-  await expect(back(page)).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Save & exit" })).toBeDisabled();
+  // The run is done and the browser is on its way to Stripe. Playwright's checks wait for that navigation
+  // to finish, so the step is read in the page, a moment after the run returned.
+  const step = () =>
+    page.evaluate(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const controls = Array.from(
+        document.querySelectorAll<HTMLInputElement | HTMLButtonElement>("main input, main button"),
+      );
+      const label = (each: HTMLInputElement | HTMLButtonElement) =>
+        each instanceof HTMLInputElement ? each.value : each.textContent?.trim();
+      return {
+        heading: document.querySelector("main h1")?.textContent,
+        enabled: controls.filter((each) => !each.matches(":disabled")).map(label),
+        disabled: controls.filter((each) => each.matches(":disabled")).map(label),
+        plan: document.querySelector<HTMLInputElement>('input[name="quick-setup-plan"]:checked')
+          ?.value,
+      };
+    });
+  const stillDisabled = {
+    heading: "How guests pay",
+    enabled: [],
+    disabled: expect.arrayContaining([
+      "commission",
+      "fixed_fee",
+      "Setting up your hotel…",
+      "Back",
+      "Save & exit",
+    ]),
+    plan: "fixed_fee",
+  };
+  expect(await step()).toEqual(stillDisabled);
+  // Clicks don't get through either (forced clicks don't wait for the navigation).
   await commission.click({ force: true });
-  await busy.click({ force: true });
-  await expect(fixedFee).toBeChecked();
+  await page
+    .getByRole("button", { name: "Setting up your hotel…", exact: true })
+    .click({ force: true });
+  expect(await step()).toEqual(stillDisabled);
   release();
   await expect(page).toHaveURL(checkout);
   expect(runs).toHaveLength(1);
