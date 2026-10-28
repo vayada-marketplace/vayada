@@ -1258,10 +1258,11 @@ async function mockManageSelfAccess(page: Page) {
   );
 }
 
-// Room prices are published from the room's Prices tab; the room form must not touch the retired writes.
+// Room prices are published from the room's Prices tab; the room form must not call the old
+// pricing-source routes (their writes were removed in VAY-2387).
 async function watchLegacyPricingCalls(page: Page, calls: string[]) {
-  await page.route(/\/pricing-source|\/flexible-rate-plan/, (route) => {
+  await page.route(/\/pricing-source/, (route) => {
     calls.push(`${route.request().method()} ${route.request().url()}`);
-    return route.fulfill({ status: 503, json: { code: "PRICING_RETIRED" } });
+    return route.fulfill({ status: 404 });
   });
 }

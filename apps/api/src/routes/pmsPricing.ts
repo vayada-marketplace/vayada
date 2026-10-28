@@ -5,21 +5,17 @@ import {
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
 import {
-  parseFlexibleRatePlanCommandResult,
   parseFlexibleRatePlanSnapshot,
   parsePmsPricingSourceSnapshot,
   parsePmsPricingCurrencyCapabilities,
   parsePropertyPricingCurrencyCommandResult,
-  parseUpsertFlexibleRatePlanCommand,
   parseUpsertPropertyPricingCurrencyCommand,
-  type FlexibleRatePlanCommandError,
   type PmsPricingCommandAudit,
   type PmsPricingCommandPort,
   type PmsPricingCurrencyCapabilitiesReadPort,
   type PmsPricingReadPort,
   type PropertyPricingCurrencyCommandError,
 } from "@vayada/domain-pms";
-import type { PmsInventoryPublicOfferProjectionPort } from "@vayada/domain-distribution";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { enforceRoutePolicy } from "./policy.js";
@@ -39,7 +35,6 @@ export type PmsPricingRoutesOptions = {
   commandPort: PmsPricingCommandPort;
   readPort: PmsPricingReadPort;
   currencyCapabilitiesReadPort: PmsPricingCurrencyCapabilitiesReadPort;
-  inventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -119,79 +114,6 @@ export async function registerPmsPricingRoutes(
       propertyAccessRepository: options.propertyAccessRepository,
     });
   } else registerPmsPricingCurrencyCommand(app, options.commandPort);
-
-  app.put<{ Params: RoomTypeParams; Body: unknown }>(
-    "/properties/:propertyId/room-types/:roomTypeId/flexible-rate-plan",
-    { onRequest: authorize },
-    async (request, reply) => {
-      const scope = requireAuthorizedScope(authorized, request);
-      const roomTypeId = readRoomTypeId(request.params, reply);
-      if (!roomTypeId) return reply;
-      const idempotencyKey = readIdempotencyKey(request);
-      if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
-      if (
-        !isExactObject(request.body, [
-          "expectedRoomFactsRevision",
-          "expectedPricingCurrencyRevision",
-          "expectedFlexibleRatePlanRevision",
-          "baseAmountDecimal",
-          "cancellationTerms",
-          ...(typeof request.body === "object" &&
-          request.body !== null &&
-          Object.hasOwn(request.body, "mealPlan")
-            ? ["mealPlan"]
-            : []),
-        ])
-      ) {
-        return invalidRequest(reply, "The flexible rate plan body is invalid.");
-      }
-      const command = parseUpsertFlexibleRatePlanCommand({
-        organizationId: scope.context.selectedOrganization.organizationId,
-        propertyId: scope.propertyId,
-        roomTypeId,
-        idempotencyKey,
-        audit: commandAudit(scope.context),
-        expectedRoomFactsRevision: request.body["expectedRoomFactsRevision"],
-        expectedPricingCurrencyRevision: request.body["expectedPricingCurrencyRevision"],
-        expectedFlexibleRatePlanRevision: request.body["expectedFlexibleRatePlanRevision"],
-        baseAmountDecimal: request.body["baseAmountDecimal"],
-        cancellationTerms: request.body["cancellationTerms"],
-        ...(Object.hasOwn(request.body, "mealPlan") ? { mealPlan: request.body["mealPlan"] } : {}),
-      });
-      if (!command) return invalidRequest(reply, "The flexible rate plan body is invalid.");
-
-      const result = parseFlexibleRatePlanCommandResult(
-        await options.commandPort.upsertFlexibleRatePlan(command),
-      );
-      if (
-        !result ||
-        (result.ok &&
-          (result.response.flexibleRatePlan.propertyId !== scope.propertyId ||
-            result.response.flexibleRatePlan.roomTypeId !== roomTypeId ||
-            result.response.flexibleRatePlan.sourceRoomFactsRevision !==
-              command.expectedRoomFactsRevision ||
-            result.response.flexibleRatePlan.flexibleRatePlanRevision !==
-              command.expectedFlexibleRatePlanRevision + 1))
-      ) {
-        return invalidPortResult(reply);
-      }
-      if (result.ok && options.inventoryPublicOfferProjector) {
-        try {
-          await options.inventoryPublicOfferProjector.projectPending({
-            propertyId: scope.propertyId,
-          });
-        } catch (error) {
-          request.log.error(
-            { error, propertyId: scope.propertyId, roomTypeId },
-            "PMS pricing public-offer projection remains pending",
-          );
-        }
-      }
-      return result.ok
-        ? reply.status(result.response.outcome === "created" ? 201 : 200).send(result.response)
-        : sendPlanError(reply, result.error);
-    },
-  );
 
   app.get<{ Params: PropertyParams }>(
     "/properties/:propertyId/pricing-source/currency-capabilities",
@@ -355,13 +277,6 @@ function sendCurrencyError(
 ): FastifyReply {
   if (error.code === "setup_scope_unavailable") return reply.status(404).send(error);
   if (error.code === "unsupported_pricing_currency") return reply.status(422).send(error);
-  return reply.status(409).send(error);
-}
-
-function sendPlanError(reply: FastifyReply, error: FlexibleRatePlanCommandError): FastifyReply {
-  if (error.code === "setup_scope_unavailable" || error.code === "room_type_not_found") {
-    return reply.status(404).send(error);
-  }
   return reply.status(409).send(error);
 }
 

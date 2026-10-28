@@ -402,12 +402,6 @@ export function createTargetPmsOperationsCommandRepository(
     releaseRoomBlock(command) {
       return executeRoomBlockCommand(pool, now, "room_block_release", command);
     },
-    async createRoomType(command) {
-      throw Object.assign(
-        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-      );
-    },
 
     async updateRoomTypeLocation(command) {
       const client = await pool.connect();

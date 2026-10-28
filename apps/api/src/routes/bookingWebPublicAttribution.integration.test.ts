@@ -4,23 +4,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../app.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
-import type { DirectBookingInventoryReservationPort } from "../platform/inventoryReservation.js";
 import {
   createTargetBookingWebCheckoutAdapter,
   resolveTargetCheckoutProperty,
-  type BookingWebCheckoutCommandContext,
 } from "./bookingWebPublic.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const uuid = (suffix: number) => `11880000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
 const propertyId = uuid(1);
 const roomTypeId = uuid(2);
-const successfulQuoteId = uuid(3);
-const rollbackQuoteId = uuid(4);
 const addonId = uuid(5);
-const missingAddonId = uuid(6);
 const occurredAt = new Date("2027-01-01T10:00:00.000Z");
-const completedReservationQuoteIds = new Set<string>();
 
 describe.skipIf(!TEST_DATABASE_URL)(
   "Booking Web canonical attribution PostgreSQL persistence",
@@ -36,68 +30,14 @@ describe.skipIf(!TEST_DATABASE_URL)(
       if (!/(^|[_-])(test|verify)([_-]|$)/i.test(databaseName)) {
         throw new Error("Unsafe test database");
       }
-      completedReservationQuoteIds.clear();
       await cleanup();
       await seedProperty();
-      await seedQuote(successfulQuoteId, "VAY-1188-SUCCESS", addonId);
-      await seedQuote(rollbackQuoteId, "VAY-1188-ROLLBACK", missingAddonId);
     });
 
     afterAll(async () => {
       await cleanup();
       await checkoutPool.end();
       await admin.end();
-    });
-
-    it("rejects new bookings and replay without changing stored quotes or inventory", async () => {
-      const adapter = createAdapter(checkoutPool);
-      for (const reference of ["VAY-1188-SUCCESS", "VAY-1188-ROLLBACK", "VAY-1188-SUCCESS"]) {
-        await expect(
-          adapter.createBooking(
-            "vay-1188-hotel",
-            checkoutRequest(reference),
-            command("unavailable"),
-          ),
-        ).rejects.toMatchObject({ code: "PRICING_RETIRED", statusCode: 410 });
-      }
-      expect(completedReservationQuoteIds.size).toBe(0);
-      for (const table of [
-        "booking.guest_bookings",
-        "booking.checkout_contexts",
-        "booking.booking_addon_selections",
-        "platform.idempotency_keys",
-      ]) {
-        expect(
-          (
-            await admin.query(
-              `SELECT count(*)::int AS count FROM ${table} WHERE property_id=$1::uuid`,
-              [propertyId],
-            )
-          ).rows,
-        ).toEqual([{ count: 0 }]);
-      }
-      expect(
-        (
-          await admin.query(
-            "SELECT status, totals->>'totalAmount' AS total FROM booking.quote_sessions WHERE property_id=$1 ORDER BY id",
-            [propertyId],
-          )
-        ).rows,
-      ).toEqual([
-        { status: "active", total: "220.50" },
-        { status: "active", total: "220.50" },
-      ]);
-      expect(
-        (
-          await admin.query(
-            "SELECT available_count, assigned_count FROM pms.inventory_days WHERE property_id=$1 ORDER BY stay_date",
-            [propertyId],
-          )
-        ).rows,
-      ).toEqual([
-        { available_count: 2, assigned_count: 0 },
-        { available_count: 2, assigned_count: 0 },
-      ]);
     });
 
     it("reads the committed same-day policy after waiting for its property lock", async () => {
@@ -295,52 +235,6 @@ describe.skipIf(!TEST_DATABASE_URL)(
       );
     }
 
-    async function seedQuote(id: string, reference: string, quotedAddonId: string): Promise<void> {
-      await admin.query(
-        `INSERT INTO booking.quote_sessions
-         (id, property_id, request_hash, public_quote_reference,
-          requested_check_in, requested_check_out, adults, children,
-          requested_room_count, currency, selected_offer_snapshot, totals,
-          policy_snapshot, expires_at)
-       VALUES (
-         $1::uuid, $2::uuid, $3, $4,
-         DATE '2027-02-01', DATE '2027-02-03', 2, 0,
-         1, 'EUR',
-         jsonb_build_object(
-           'roomTypeId', $5::text,
-           'publicOfferKey', 'vay-1188-flex',
-           'paymentMethod', 'pay_at_property',
-           'acceptanceMode', 'request',
-           'addonRequest', jsonb_build_object(
-             'addonIds', jsonb_build_array('spa_partner'),
-             'addonQuantities', '{"spa_partner":2}'::jsonb,
-             'addonDates', '{}'::jsonb
-           ),
-           'addonPurchases', jsonb_build_array(jsonb_build_object(
-             'addonDefinitionId', $6::text,
-             'addonSnapshot', jsonb_build_object(
-               'addonDefinitionId', $6::text,
-               'sourceAddonId', 'spa_partner',
-               'name', 'Partner spa',
-               'pricingModel', 'per_guest',
-               'unitAmount', '10.25',
-               'currency', 'EUR'
-             ),
-             'quantity', 2,
-             'serviceDate', '2027-02-01',
-             'totalAmount', '20.50',
-             'currency', 'EUR',
-             'ownershipKind', 'partner',
-             'partnerCommissionRate', '18.7500'
-           ))
-         ),
-         '{"roomTotal":"200.00","addonTotal":"20.50","totalAmount":"220.50","balanceAmount":"220.50"}'::jsonb,
-         '{}'::jsonb, TIMESTAMPTZ '2027-01-02T10:00:00Z'
-       )`,
-        [id, propertyId, `hash-${reference}`, reference, roomTypeId, quotedAddonId],
-      );
-    }
-
     async function cleanup(): Promise<void> {
       const client = await admin.connect();
       try {
@@ -392,17 +286,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
   },
 );
 
-const realInventoryReservationPort = createTargetPmsInventoryReservationPort();
-const inventoryReservationPort: DirectBookingInventoryReservationPort = {
-  async reserve(input) {
-    const reservation = await realInventoryReservationPort.reserve(input);
-    if (reservation) completedReservationQuoteIds.add(input.quoteSessionId);
-    return reservation;
-  },
-  async release(input) {
-    await realInventoryReservationPort.release(input);
-  },
-};
+const inventoryReservationPort = createTargetPmsInventoryReservationPort();
 
 async function backendPid(client: pg.Client): Promise<number> {
   const result = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
@@ -419,38 +303,4 @@ async function waitForLockWaiter(observer: pg.Pool, pid: number): Promise<void> 
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error("Timed out waiting for checkout to acquire the property lock");
-}
-
-function checkoutRequest(quoteId: string): Record<string, unknown> {
-  return {
-    quoteId,
-    checkIn: "2027-02-01",
-    checkOut: "2027-02-03",
-    adults: 2,
-    children: 0,
-    numberOfRooms: 1,
-    currency: "EUR",
-    paymentMethod: "pay_at_property",
-    addonIds: ["spa_partner"],
-    addonQuantities: { spa_partner: 2 },
-    expectedTotalAmount: "220.50",
-    firstName: "Ada",
-    lastName: "Lovelace",
-    guestEmail: "ada@example.test",
-    bookingChannel: "ota",
-    directBookingSource: "phone",
-    booking_channel: "ota",
-    direct_booking_source: "email",
-  };
-}
-
-function command(suffix: string): BookingWebCheckoutCommandContext {
-  return {
-    operation: "booking-create",
-    requestId: `vay-1188-${suffix}`,
-    correlationId: `vay-1188-${suffix}-correlation`,
-    idempotencyKey: `vay-1188-${suffix}-idempotency`,
-    fingerprint: suffix.padEnd(64, "0"),
-    occurredAt,
-  };
 }

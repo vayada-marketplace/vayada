@@ -1,17 +1,8 @@
 import { UnauthorizedError } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import {
-  parseDisableRecurringPricingSourceCommand,
-  parseMaterializeRecurringPricingCommand,
   parsePmsRecurringPricingBookingEvidence,
-  parsePmsRecurringPricingCommandResult,
   parsePmsRecurringPricingSourceSnapshot,
-  parseRecurringPricingMaterializationResult,
-  parseUpsertRecurringPricingSourceCommand,
-  type PmsPricingCommandAudit,
-  type PmsRecurringPricingCommandError,
-  type PmsRecurringPricingCommandPort,
-  type PmsRecurringPricingCommandResponse,
   type PmsRecurringPricingReadPort,
   type PmsRecurringPricingSourceKind,
 } from "@vayada/domain-pms";
@@ -27,7 +18,6 @@ type AuthorizedScope = {
 };
 
 export type PmsRecurringPricingRoutesOptions = {
-  commandPort: PmsRecurringPricingCommandPort;
   readPort: PmsRecurringPricingReadPort;
 };
 
@@ -49,141 +39,6 @@ export async function registerPmsRecurringPricingRoutes(
     const scope = authorizeRequest(request, reply);
     if (scope) authorized.set(request, scope);
   };
-
-  app.put<{ Params: SourceParams; Body: unknown }>(
-    "/properties/:propertyId/pricing-source/recurring/:sourceId",
-    { onRequest: authorize },
-    async (request, reply) => {
-      const scope = requireAuthorizedScope(authorized, request);
-      const sourceId = readSourceId(request.params, reply);
-      if (!sourceId) return reply;
-      const idempotencyKey = readIdempotencyKey(request);
-      if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
-      if (!isRecord(request.body)) {
-        return invalidRequest(reply, "The recurring pricing source body is invalid.");
-      }
-
-      const command = parseUpsertRecurringPricingSourceCommand({
-        ...request.body,
-        organizationId: scope.context.selectedOrganization.organizationId,
-        propertyId: scope.propertyId,
-        sourceId,
-        idempotencyKey,
-        audit: commandAudit(scope.context),
-      });
-      if (!command) {
-        return invalidRequest(reply, "The recurring pricing source body is invalid.");
-      }
-
-      const rawResult = await upsert(options.commandPort, command);
-      const result = parsePmsRecurringPricingCommandResult(rawResult);
-      if (
-        !result ||
-        (result.ok &&
-          (result.response.source.propertyId !== scope.propertyId ||
-            result.response.source.sourceId !== sourceId ||
-            result.response.source.sourceKind !== command.sourceKind ||
-            result.response.source.sourceRevision !== command.expectedSourceRevision + 1 ||
-            result.response.source.configuredState !== "active" ||
-            result.response.source.lifecycle !== "active" ||
-            result.response.source.pricingCurrencyRevision !==
-              command.expectedPricingCurrencyRevision ||
-            !isExpectedUpsertOutcome(command.expectedSourceRevision, result.response.outcome)))
-      ) {
-        return invalidPortResult(reply);
-      }
-      return result.ok
-        ? reply.status(result.response.outcome === "created" ? 201 : 200).send(result.response)
-        : sendCommandError(reply, result.error);
-    },
-  );
-
-  app.post<{ Params: SourceParams; Body: unknown }>(
-    "/properties/:propertyId/pricing-source/recurring/:sourceId/disable",
-    { onRequest: authorize },
-    async (request, reply) => {
-      const scope = requireAuthorizedScope(authorized, request);
-      const sourceId = readSourceId(request.params, reply);
-      if (!sourceId) return reply;
-      const idempotencyKey = readIdempotencyKey(request);
-      if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
-      if (!isRecord(request.body)) {
-        return invalidRequest(reply, "The recurring pricing disable body is invalid.");
-      }
-      const command = parseDisableRecurringPricingSourceCommand({
-        ...request.body,
-        organizationId: scope.context.selectedOrganization.organizationId,
-        propertyId: scope.propertyId,
-        sourceId,
-        idempotencyKey,
-        audit: commandAudit(scope.context),
-      });
-      if (!command) {
-        return invalidRequest(reply, "The recurring pricing disable body is invalid.");
-      }
-
-      const result = parsePmsRecurringPricingCommandResult(
-        await options.commandPort.disableRecurringPricingSource(command),
-      );
-      if (
-        !result ||
-        (result.ok &&
-          (result.response.outcome !== "disabled" ||
-            result.response.source.propertyId !== scope.propertyId ||
-            result.response.source.sourceId !== sourceId ||
-            result.response.source.sourceKind !== command.sourceKind ||
-            result.response.source.sourceRevision !== command.expectedSourceRevision + 1 ||
-            result.response.source.configuredState !== "disabled" ||
-            result.response.source.lifecycle !== "disabled"))
-      ) {
-        return invalidPortResult(reply);
-      }
-      return result.ok
-        ? reply.status(200).send(result.response)
-        : sendCommandError(reply, result.error);
-    },
-  );
-
-  app.post<{ Params: PropertyParams; Body: unknown }>(
-    "/properties/:propertyId/pricing-source/recurring/materializations",
-    { onRequest: authorize },
-    async (request, reply) => {
-      const scope = requireAuthorizedScope(authorized, request);
-      const idempotencyKey = readIdempotencyKey(request);
-      if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
-      if (!isRecord(request.body)) {
-        return invalidRequest(reply, "The recurring pricing materialization body is invalid.");
-      }
-      const command = parseMaterializeRecurringPricingCommand({
-        ...request.body,
-        organizationId: scope.context.selectedOrganization.organizationId,
-        propertyId: scope.propertyId,
-        idempotencyKey,
-        audit: commandAudit(scope.context),
-      });
-      if (!command) {
-        return invalidRequest(reply, "The recurring pricing materialization body is invalid.");
-      }
-
-      const result = parseRecurringPricingMaterializationResult(
-        await options.commandPort.materializeRecurringPricing(command),
-      );
-      if (
-        !result ||
-        (result.ok &&
-          (result.receipt.propertyId !== scope.propertyId ||
-            result.receipt.fromDate !== command.fromDate ||
-            result.receipt.throughDate !== command.throughDate ||
-            result.receipt.optionalPricingAggregateRevision !==
-              command.expectedOptionalPricingAggregateRevision))
-      ) {
-        return invalidPortResult(reply);
-      }
-      return result.ok
-        ? reply.status(200).send(result.receipt)
-        : sendCommandError(reply, result.error);
-    },
-  );
 
   app.get<{ Params: PropertyParams }>(
     "/properties/:propertyId/pricing-source/recurring",
@@ -240,31 +95,6 @@ export async function registerPmsRecurringPricingRoutes(
   );
 }
 
-async function upsert(
-  port: PmsRecurringPricingCommandPort,
-  command: NonNullable<ReturnType<typeof parseUpsertRecurringPricingSourceCommand>>,
-) {
-  switch (command.sourceKind) {
-    case "season":
-      return port.upsertRecurringSeason(command);
-    case "weekend_surcharge":
-      return port.upsertWeekendSurcharge(command);
-    case "additional_guest":
-      return port.upsertAdditionalGuestPricing(command);
-    case "non_refundable":
-      return port.upsertNonRefundablePricing(command);
-  }
-}
-
-function isExpectedUpsertOutcome(
-  expectedSourceRevision: number,
-  outcome: PmsRecurringPricingCommandResponse["outcome"],
-): boolean {
-  return expectedSourceRevision === 0
-    ? outcome === "created"
-    : outcome === "updated" || outcome === "re_enabled";
-}
-
 function authorizeRequest(request: FastifyRequest, reply: FastifyReply): AuthorizedScope | null {
   const permission = request.method === "GET" ? "pms.operations.read" : "pms.operations.manage";
   try {
@@ -303,15 +133,6 @@ function authorizeRequest(request: FastifyRequest, reply: FastifyReply): Authori
   }
 }
 
-function commandAudit(context: AuthorizedScope["context"]): PmsPricingCommandAudit {
-  return {
-    actor: { kind: "user", userId: context.actor.internalUserId },
-    requestId: context.audit.requestId,
-    correlationId: context.audit.correlationId ?? null,
-    requestedAt: context.audit.receivedAt,
-  };
-}
-
 function requireAuthorizedScope(
   authorized: WeakMap<FastifyRequest, AuthorizedScope>,
   request: FastifyRequest,
@@ -331,20 +152,6 @@ function readSourceId(params: SourceParams, reply: FastifyReply): string | null 
   return params.sourceId.toLowerCase();
 }
 
-function readIdempotencyKey(request: FastifyRequest): string | null {
-  const occurrences = request.raw.rawHeaders.filter(
-    (value, index) => index % 2 === 0 && value.toLowerCase() === "idempotency-key",
-  ).length;
-  const header = request.headers["idempotency-key"];
-  if (occurrences !== 1 || typeof header !== "string") return null;
-  const key = header.trim();
-  return key.length >= 1 && key.length <= 200 ? key : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isStrictlySortedSources(
   sources: readonly ReturnType<typeof parsePmsRecurringPricingSourceSnapshot>[],
 ): boolean {
@@ -356,29 +163,6 @@ function isStrictlySortedSources(
     previous = key;
   }
   return true;
-}
-
-function sendCommandError(
-  reply: FastifyReply,
-  error: PmsRecurringPricingCommandError,
-): FastifyReply {
-  if (
-    error.code === "setup_scope_unavailable" ||
-    error.code === "source_not_found" ||
-    error.code === "room_type_not_found" ||
-    error.code === "flexible_rate_plan_not_found"
-  ) {
-    return reply.status(404).send(error);
-  }
-  if (
-    error.code === "season_name_conflict" ||
-    error.code === "season_overlap" ||
-    error.code === "additional_guest_capacity_inapplicable" ||
-    error.code === "recurring_pricing_room_plan_set_incomplete"
-  ) {
-    return reply.status(422).send(error);
-  }
-  return reply.status(409).send(error);
 }
 
 function invalidRequest(reply: FastifyReply, message: string): FastifyReply {

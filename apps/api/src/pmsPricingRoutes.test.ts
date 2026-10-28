@@ -10,7 +10,6 @@ import {
   parsePmsDecimalAmount,
   parsePmsPricingCurrency,
   type PmsPricingCurrencyCapabilitiesReadPort,
-  type UpsertFlexibleRatePlanCommand,
   type UpsertPropertyPricingCurrencyCommand,
 } from "@vayada/domain-pms";
 import Fastify from "fastify";
@@ -41,10 +40,8 @@ type AuthOptions = {
 
 type FakePorts = PmsPricingRoutesOptions & {
   currencyCalls: UpsertPropertyPricingCurrencyCommand[];
-  planCalls: UpsertFlexibleRatePlanCommand[];
   reads: Array<readonly unknown[]>;
   capabilityReads: string[];
-  projectedPropertyIds: string[];
 };
 
 function currencySnapshot(requestPropertyId = propertyId, revision = 1) {
@@ -86,23 +83,13 @@ function fakePorts(
   } = {},
 ): FakePorts {
   const currencyCalls: UpsertPropertyPricingCurrencyCommand[] = [];
-  const planCalls: UpsertFlexibleRatePlanCommand[] = [];
   const reads: Array<readonly unknown[]> = [];
   const capabilityReads: string[] = [];
-  const projectedPropertyIds: string[] = [];
   const responsePropertyId = overrides.responsePropertyId ?? propertyId;
   return {
     currencyCalls,
-    planCalls,
     reads,
     capabilityReads,
-    projectedPropertyIds,
-    inventoryPublicOfferProjector: {
-      async projectPending({ propertyId: projectedPropertyId }) {
-        projectedPropertyIds.push(projectedPropertyId);
-        return { profileAvailable: true, pendingEvents: 1, projectedOfferDays: 2 };
-      },
-    },
     commandPort: {
       async upsertPropertyPricingCurrency(command) {
         currencyCalls.push(command);
@@ -114,24 +101,6 @@ function fakePorts(
             pricingCurrency: {
               ...currencySnapshot(responsePropertyId, command.expectedPricingCurrencyRevision + 1),
               currency: command.currency,
-            },
-            acceptedAt: now,
-          },
-        };
-      },
-      async upsertFlexibleRatePlan(command) {
-        planCalls.push(command);
-        return {
-          ok: true,
-          response: {
-            contractVersion: PMS_PRICING_CONTRACT_VERSION,
-            outcome: command.expectedFlexibleRatePlanRevision === 0 ? "created" : "updated",
-            flexibleRatePlan: {
-              ...planSnapshot(responsePropertyId, command.roomTypeId),
-              flexibleRatePlanRevision: command.expectedFlexibleRatePlanRevision + 1,
-              sourceRoomFactsRevision: command.expectedRoomFactsRevision,
-              baseAmount: { amountDecimal: command.baseAmountDecimal, currency: eur },
-              cancellationTerms: command.cancellationTerms,
             },
             acceptedAt: now,
           },
@@ -337,70 +306,6 @@ describe("PMS pricing routes", () => {
     expect(setup.currencyCalls).toHaveLength(1);
     expect(ports.currencyCalls).toHaveLength(0);
     app = await testApp(ports);
-  });
-
-  it("accepts only scale-2 string money and exact structured cancellation terms", async () => {
-    const ports = fakePorts();
-    app = await testApp(ports);
-    const valid = await injectJson(app, {
-      method: "PUT",
-      url: `/properties/${propertyId}/room-types/${roomTypeId}/flexible-rate-plan`,
-      headers: headers("plan-key"),
-      payload: {
-        expectedRoomFactsRevision: 2,
-        expectedPricingCurrencyRevision: 1,
-        expectedFlexibleRatePlanRevision: 0,
-        baseAmountDecimal: "175.25",
-        cancellationTerms: partialCancellationTerms(),
-      },
-    });
-    expect(valid.statusCode).toBe(201);
-    expect(ports.planCalls[0]).toMatchObject({
-      propertyId,
-      roomTypeId,
-      baseAmountDecimal: "175.25",
-      cancellationTerms: partialCancellationTerms(),
-    });
-    expect(ports.projectedPropertyIds).toEqual([propertyId]);
-
-    const numericMoney = await injectJson(app, {
-      method: "PUT",
-      url: `/properties/${propertyId}/room-types/${roomTypeId}/flexible-rate-plan`,
-      headers: headers("bad-plan-key"),
-      payload: {
-        expectedRoomFactsRevision: 2,
-        expectedPricingCurrencyRevision: 1,
-        expectedFlexibleRatePlanRevision: 0,
-        baseAmountDecimal: 175.25,
-        cancellationTerms: cancellationTerms(),
-      },
-    });
-    expect(numericMoney.statusCode).toBe(400);
-    expect(ports.planCalls).toHaveLength(1);
-  });
-
-  it("accepts explicit meals and rejects unsupported values before delegation", async () => {
-    const ports = fakePorts();
-    app = await testApp(ports);
-    for (const mealPlan of ["breakfast", "room_only", null, "half_board", ""]) {
-      const response = await injectJson(app, {
-        method: "PUT",
-        url: `/properties/${propertyId}/room-types/${roomTypeId}/flexible-rate-plan`,
-        headers: headers("meal-" + String(mealPlan)),
-        payload: {
-          expectedRoomFactsRevision: 2,
-          expectedPricingCurrencyRevision: 1,
-          expectedFlexibleRatePlanRevision: 0,
-          baseAmountDecimal: "120.00",
-          cancellationTerms: cancellationTerms(),
-          mealPlan,
-        },
-      });
-      expect(response.statusCode).toBe(
-        mealPlan === "breakfast" || mealPlan === "room_only" ? 201 : 400,
-      );
-    }
-    expect(ports.planCalls.map((command) => command.mealPlan)).toEqual(["breakfast", "room_only"]);
   });
 
   it("serves narrow source evidence and rejects escaped port scope", async () => {
