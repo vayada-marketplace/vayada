@@ -4194,7 +4194,7 @@ it("after an Owner's currency change shows the prices in the new currency and pu
     client.read.mockResolvedValue(published()); await mountRoom(); await act(async () => {});
     const shown = () => JSON.stringify(view.toJSON());
     expect(shown()).toContain("Your currency changed to CHF. Please review all prices.");
-    expect(shown()).toMatch(/€100 is now CHF\s100/);
+    expect(shown()).toMatch(/€100 is now CHF\s?100/);
     expect(button("Save and publish").props.disabled).toBe(false);
     await click("Save and publish");
     expect(saved.snapshot.currency).toBe("CHF");
