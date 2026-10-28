@@ -56,6 +56,7 @@ export async function registerFinanceBankTransferRoutes(
                 reply,
                 request.params.propertyId,
                 options.propertyAccessRepository,
+                { ownerOnly: true },
               );
         if (!allowed) return reply;
       },

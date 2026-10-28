@@ -598,6 +598,8 @@
   "settings.tabs.notifications": "Meldingen",
   "settings.tabs.security": "Beveiliging",
   "settings.tabs.billing": "Facturering",
+  "settings.ownerOnly.billing": "Alleen de accounteigenaar kan de facturering bekijken en wijzigen.",
+  "settings.ownerOnly.payouts": "Alleen de accounteigenaar kan uitbetalingsrekeningen koppelen, bankoverschrijving aan- of uitzetten of de bankrekening wijzigen waarop gasten betalen.",
   "settings.feedback.saveSuccess": "Instellingen succesvol opgeslagen",
   "settings.feedback.saveError": "Kon instellingen niet opslaan",
   "settings.feedback.propertyNameNotSaved": "De andere wijzigingen zijn opgeslagen, maar de naam van de accommodatie is niet gewijzigd. Alleen de eigenaar kan de naam wijzigen en de hotelgegevens moeten volledig zijn.",

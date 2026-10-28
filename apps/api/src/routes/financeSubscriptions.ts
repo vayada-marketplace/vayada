@@ -57,7 +57,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -78,7 +78,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -109,7 +109,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -145,7 +145,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -179,7 +179,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -201,7 +201,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -223,7 +223,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -254,7 +254,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -280,7 +280,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -310,7 +310,7 @@ export async function registerFinanceSubscriptionRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
-          { billing: true },
+          { ownerOnly: true },
         ))
       )
         return reply;

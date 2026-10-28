@@ -1889,3 +1889,58 @@ test("says what went wrong when payments don't save, and offers Try again", asyn
   expect(writes).toHaveLength(3);
   await expect(page.getByText("Failed to save", { exact: true })).toHaveCount(0);
 });
+
+// VAY-2401: billing, payout accounts and the bank account guests pay into are the owner's.
+const staffAccess = {
+  membershipId: "booking-admin-staff-membership",
+  roleKey: "hotel_manager",
+  permissions: ["booking.settings.manage"],
+};
+
+test("lets staff set how guests pay, but not turn bank transfer on or off", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockPaymentWrites(page, ["pay_at_property", "cash", "manual_card"]);
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({ json: staffAccess }),
+  );
+  await page.goto("/settings/payments");
+  await expect(page.getByRole("note")).toHaveText(
+    "Only the account owner can connect payout accounts, turn bank transfer on or off, or change the bank account guests pay into.",
+  );
+  const methods = page.locator('fieldset[aria-labelledby="payment-methods-heading"]');
+  await expect(methods).toHaveAttribute("aria-disabled", "false");
+  await expect(methods.getByRole("button", { name: /^Bank Transfer/ })).toBeDisabled();
+  await testInfo.attach("settings-payments-staff", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved")).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "manual_card"] }]);
+  await assertHealthy();
+});
+
+test("tells staff that only the owner sees billing", async ({ page }, testInfo) => {
+  test.skip(
+    !PROD,
+    "Requires a production booking-admin build so the authenticated shell hydrates.",
+  );
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockPaymentWrites(page, ["pay_at_property", "cash", "manual_card"]);
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({ json: staffAccess }),
+  );
+  await page.goto("/settings/billing");
+  await expect(page.getByRole("note")).toHaveText(
+    "Only the account owner can see and change billing.",
+  );
+  await expect(page.getByRole("heading", { name: "Commission" })).toHaveCount(0);
+  await testInfo.attach("settings-billing-staff", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await assertHealthy();
+});

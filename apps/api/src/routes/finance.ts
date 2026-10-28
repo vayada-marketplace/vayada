@@ -547,6 +547,7 @@ export async function registerFinanceRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -589,6 +590,7 @@ export async function registerFinanceRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -679,6 +681,7 @@ export async function registerFinanceRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -763,6 +766,7 @@ export async function registerFinanceRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -812,6 +816,7 @@ export async function registerFinanceRoutes(
           reply,
           propertyId,
           options.propertyAccessRepository,
+          { ownerOnly: true },
         ))
       )
         return reply;
@@ -6010,10 +6015,11 @@ function toFinanceCommandError(
   } satisfies FinanceCommandError;
 }
 
-/** Billing is what the hotel pays Vayada: `billing` routes take finance.billing.manage, which only
- * the account's owner holds (no team role or override can carry it), instead of the finance read and
- * booking/operations manage keys staff may have (VAY-2401). */
-type FinancePolicyOptions = { billing?: boolean };
+/** `ownerOnly` routes take finance.billing.manage, which only the account's owner holds (no team
+ * role or override can carry it), instead of the finance read and booking/operations manage keys
+ * staff may have: billing, which is what the hotel pays Vayada, and where guests' money goes (the
+ * payout accounts, payouts and the bank account guests transfer to) (VAY-2401). */
+type FinancePolicyOptions = { ownerOnly?: boolean };
 
 export async function enforceFinancePropertyReadPolicy(
   request: FastifyRequest,
@@ -6067,9 +6073,9 @@ export async function enforceFinancePropertyWritePolicy(
 
 function financePropertyReadPolicies(
   propertyId: string,
-  { billing = false }: FinancePolicyOptions = {},
+  { ownerOnly = false }: FinancePolicyOptions = {},
 ): RouteAuthorizationPolicy[] {
-  const permission = billing ? "finance.billing.manage" : "pms.finance.read";
+  const permission = ownerOnly ? "finance.billing.manage" : "pms.finance.read";
   const resourceTypes = ["pms_property", "property"] as const;
   return resourceTypes.flatMap((resourceType) => [
     {
@@ -6113,12 +6119,12 @@ function financePropertyReadPolicies(
 
 function financePropertyWritePolicies(
   propertyId: string,
-  { billing = false }: FinancePolicyOptions = {},
+  { ownerOnly = false }: FinancePolicyOptions = {},
 ): RouteAuthorizationPolicy[] {
   const resourceTypes = ["pms_property", "property"] as const;
   return resourceTypes.flatMap((resourceType) => [
     {
-      permission: billing ? "finance.billing.manage" : "pms.operations.manage",
+      permission: ownerOnly ? "finance.billing.manage" : "pms.operations.manage",
       entitlement: {
         product: "pms",
         key: "property-management",
@@ -6136,7 +6142,7 @@ function financePropertyWritePolicies(
       },
     },
     {
-      permission: billing ? "finance.billing.manage" : "booking.settings.manage",
+      permission: ownerOnly ? "finance.billing.manage" : "booking.settings.manage",
       entitlement: {
         product: "booking",
         key: "direct-booking-finance",

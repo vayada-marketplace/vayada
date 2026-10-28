@@ -598,6 +598,8 @@
   "settings.tabs.notifications": "Notifikasi",
   "settings.tabs.security": "Keamanan",
   "settings.tabs.billing": "Tagihan",
+  "settings.ownerOnly.billing": "Hanya pemilik akun yang dapat melihat dan mengubah tagihan.",
+  "settings.ownerOnly.payouts": "Hanya pemilik akun yang dapat menghubungkan akun pencairan dana, mengaktifkan atau menonaktifkan transfer bank, atau mengubah rekening bank tujuan pembayaran tamu.",
   "settings.feedback.saveSuccess": "Pengaturan berhasil disimpan",
   "settings.feedback.saveError": "Gagal menyimpan pengaturan",
   "settings.feedback.propertyNameNotSaved": "Perubahan lainnya telah disimpan, tetapi nama properti tidak diubah. Hanya pemilik properti yang dapat mengganti nama, dan data hotel harus lengkap.",

@@ -598,6 +598,8 @@
   "settings.tabs.notifications": "Benachrichtigungen",
   "settings.tabs.security": "Sicherheit",
   "settings.tabs.billing": "Abrechnung",
+  "settings.ownerOnly.billing": "Nur der Kontoinhaber kann die Abrechnung sehen und ändern.",
+  "settings.ownerOnly.payouts": "Nur der Kontoinhaber kann Auszahlungskonten verbinden, Banküberweisung ein- oder ausschalten oder das Bankkonto ändern, auf das Gäste zahlen.",
   "settings.feedback.saveSuccess": "Einstellungen erfolgreich gespeichert",
   "settings.feedback.saveError": "Einstellungen konnten nicht gespeichert werden",
   "settings.feedback.propertyNameNotSaved": "Die anderen Änderungen wurden gespeichert, der Name der Unterkunft aber nicht. Nur der Eigentümer kann ihn ändern, und die Hoteldaten müssen vollständig sein.",

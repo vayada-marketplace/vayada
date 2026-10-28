@@ -61,7 +61,12 @@ it.each([
         permissions:
           variant === "permission"
             ? []
-            : ["pms.finance.read", "pms.operations.manage", "booking.settings.manage"],
+            : [
+                "pms.finance.read",
+                "pms.operations.manage",
+                "booking.settings.manage",
+                "finance.billing.manage",
+              ],
       },
       linkedResources:
         variant === "link"
