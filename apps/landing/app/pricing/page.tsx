@@ -55,7 +55,7 @@ const faqs = [
   {
     question: "Can we use only the booking engine?",
     answer:
-      "Yes. The standalone booking engine is available for properties that already have a PMS and want embeddable checkout, referral tracking, guest data export, and API access.",
+      "Yes. The standalone booking engine is available for properties that already have a PMS and want embeddable checkout, guest data export, and API access.",
   },
   {
     question: "Is the channel manager included in every plan?",
@@ -186,7 +186,7 @@ export default function PricingPage() {
                 </h2>
                 <p className="mt-4 text-sm leading-relaxed text-gray-500 md:text-base">
                   Use vayada&apos;s booking engine on top of your existing PMS with embeddable
-                  checkout, referral tracking, guest data export, and full API access.
+                  checkout, guest data export, and full API access.
                 </p>
               </div>
               <Link

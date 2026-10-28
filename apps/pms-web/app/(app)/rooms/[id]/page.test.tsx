@@ -11,6 +11,17 @@ const mocks = vi.hoisted(() => ({
   reload: vi.fn(),
   stale: false,
 }));
+// Next runs the page on its own React 19; the tests get the workspace's React 18, which has no
+// `use`. React 19's `use` returns an already-resolved promise's value at once, so do that here.
+vi.mock("react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react")>()),
+  use: (thenable: { status?: string; value?: unknown }) => {
+    if (thenable.status !== "fulfilled") throw new Error("pass params from resolved()");
+    return thenable.value;
+  },
+}));
+const resolved = <T,>(value: T) =>
+  Object.assign(Promise.resolve(value), { status: "fulfilled", value });
 vi.mock("@/lib/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("next/link", () => ({ default: "a" }));
 vi.mock("next/navigation", () => ({
@@ -66,7 +77,7 @@ const strip = () => view.root.findAllByProps({ "aria-label": "strip" });
 
 it("keeps the Prices tab mounted across tab switches and room-details saves, refreshing it after a save (VAY-2093)", async () => {
   await act(async () => {
-    view = create(createElement(EditRoomPage, { params: Promise.resolve({ id: "room-1" }) }));
+    view = create(createElement(EditRoomPage, { params: resolved({ id: "room-1" }) }));
   });
   expect(mocks.form.tab).toBe("details");
   expect(mocks.mounts).toBe(0);
@@ -98,7 +109,7 @@ it("keeps the Prices tab mounted across tab switches and room-details saves, ref
 it("shows the one-click republish when the room page opens on stale prices", async () => {
   mocks.stale = true;
   await act(async () => {
-    view = create(createElement(EditRoomPage, { params: Promise.resolve({ id: "room-1" }) }));
+    view = create(createElement(EditRoomPage, { params: resolved({ id: "room-1" }) }));
   });
   expect(strip()).toHaveLength(1);
 });

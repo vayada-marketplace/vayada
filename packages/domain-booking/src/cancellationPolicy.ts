@@ -1,12 +1,49 @@
-import {
-  isManualPricingPaymentMethod,
-  type PublicBookingQuote,
-} from "@vayada/domain-booking/replacement-pricing";
-import type { StayCancellation } from "@/lib/bookingStay";
-import { refundSteps, type TermsStay } from "@/lib/checkoutTerms";
-import { freeCancellationUntil } from "@/lib/roomChoices";
+import { isManualPricingPaymentMethod } from "./pricingPaymentMethods.js";
+import type { PublicBookingQuote } from "./publicBookingQuote.js";
+
+// VAY-2392: moved from booking-web so the confirmation email words a stay's cancellation as the
+// booking pages do.
 
 type Cancellation = PublicBookingQuote["rooms"][number]["cancellation"];
+type Tier = { minDaysBeforeCheckIn: number; refundPercent: number };
+/** The stay the terms are worded for: its arrival and the hotel's date today (YYYY-MM-DD). The
+ * server refunds by the hotel's calendar day, the deadline day included (VAY-2347). */
+export type TermsStay = { checkIn: string; today: string };
+/** A booked stay's terms as the cancel route works from them (VAY-2360), with each room's name. */
+export type BookedStayCancellation = {
+  checkIn: string;
+  totalMinor: string;
+  rooms: ReadonlyArray<{
+    roomName: string | null;
+    cancellation: Cancellation;
+    subtotalMinor: string;
+  }>;
+};
+
+/** The last day free cancellation is possible for a stay (YYYY-MM-DD): the cutoff day itself
+ * still counts, as on the old booking page. */
+export function freeCancellationUntil(checkIn: string, days: number): string {
+  const date = new Date(`${checkIn}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+const dayAfter = (date: string) => freeCancellationUntil(date, -1);
+
+/** A partial refund's steps, most notice first, each with the days it covers: from the day after
+ * the step before (none for the first) to its last day, as the server picks the step with the
+ * most notice the guest still meets. */
+export function refundSteps(tiers: readonly Tier[], stay: TermsStay) {
+  let previous: string | null = null;
+  return [...tiers]
+    .sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+    .map((tier) => {
+      const until = freeCancellationUntil(stay.checkIn, tier.minDaysBeforeCheckIn);
+      const from = previous && dayAfter(previous);
+      previous = until;
+      return { ...tier, percent: tier.refundPercent, from, until, passed: stay.today > until };
+    });
+}
 
 /** When a row applies: dates are the hotel's calendar days (YYYY-MM-DD). */
 export type PolicyWhen =
@@ -72,8 +109,6 @@ export type Policy = {
 /** One policy and the rooms it covers (VAY-2347, D7: one block per policy). `key` tells blocks
  * apart; `today` is the hotel's date, so dates in another year can say theirs. */
 export type PolicyBlock = { key: string; rooms: string[]; policy: Policy; today: string };
-
-const dayAfter = (date: string) => freeCancellationUntil(date, -1);
 
 /** One rate's cancellation for this stay as step 3 shows it (VAY-2347): the rate's real terms
  * (D2), dated on the hotel's calendar and judged against the hotel's date today, as the server
@@ -298,7 +333,7 @@ export function policyBlocks(
 /** A booked stay's policies (VAY-2360), from the terms the cancel route works from. `request`: the hotel has
  * yet to accept it; `bankTransfer`: its transfer has yet to arrive. */
 export function bookedPolicyBlocks(
-  stay: StayCancellation,
+  stay: BookedStayCancellation,
   { today, ...mode }: { today: string; request: boolean; card: boolean; bankTransfer: boolean },
 ): PolicyBlock[] {
   const shares = shareTotal(

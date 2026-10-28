@@ -48,7 +48,6 @@ import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflic
 import {
   bestBookingPromotion,
   BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
-  evaluateSameDayBooking,
   isFunnelId,
   isManualPricingPaymentMethod,
   parseBookingFlexibleCancellationTerms,
@@ -66,8 +65,6 @@ import {
   PUBLIC_BOOKABILITY_CONTRACT_VERSION,
   PUBLIC_BOOKABILITY_VISIBILITY,
   type PublicBookabilityDataSourceOwner,
-  type PublicBookabilityFreshness,
-  type PublicBookabilityHotelProfile,
   type PublicBookabilityProfileProjection,
 } from "@vayada/domain-distribution";
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
@@ -115,15 +112,13 @@ import {
 import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservation.js";
 import {
   cancelAcceptedPricingStay,
+  loadOpenPricingBookingCancellationTerms,
   loadPricingBookingCancellation,
-  loadPricingBookingCancellationTerms,
-  pricingBookingCancellationOutcome,
   type PricingBookingCancellationTerms,
 } from "../domains/pricingBookingCancellation.js";
 import { loadStayPlaces, type StayPlace } from "../domains/stayPlaces.js";
 import {
   enqueueBookingLifecycleEmailJob,
-  enqueueBookingTransitionNotifications,
   loadBookingNotificationSnapshot,
   normalizeEmail,
 } from "../jobs/bookingEmails.js";
@@ -141,11 +136,6 @@ import {
 } from "../platform/inventoryReservation.js";
 import type { PlatformMediaServingConfig } from "../platform/mediaServing.js";
 import {
-  serializePublicHotelQuoteProjection,
-  type PublicHotelQuoteQuery,
-  type PublicHotelQuoteRepository,
-} from "./aiHotelQuotes.js";
-import {
   serializePublicHotelProfileProjection,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
@@ -156,13 +146,6 @@ type BookingWebHostParams = {
 type BookingWebHotelParams = {
   slug: string;
 };
-
-type BookingWebCalendarQuery = {
-  start?: string;
-  end?: string;
-};
-
-export const BOOKING_WEB_CALENDAR_MAX_RANGE_DAYS = 370;
 
 type BookingWebBookingHandleParams = BookingWebHotelParams & {
   handle: string;
@@ -292,11 +275,6 @@ export type BookingWebCheckoutAdapter = {
     action: string,
     request: BookingWebCheckoutRequest,
     context: BookingWebCheckoutCommandContext,
-  ): Promise<unknown>;
-  createBooking(
-    slug: string,
-    request: BookingWebCheckoutRequest,
-    context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
   confirmAuthorization(
     slug: string,
@@ -456,33 +434,6 @@ export type BookingWebHostResolution = {
   dataSources: PublicBookabilityDataSourceOwner[];
 };
 
-export type BookingWebCalendarProjection = {
-  contractVersion: typeof PUBLIC_BOOKABILITY_CONTRACT_VERSION;
-  generatedAt: string;
-  publicVisibility: typeof PUBLIC_BOOKABILITY_VISIBILITY;
-  request: {
-    hotelSlug: string;
-    start: string;
-    end: string;
-  };
-  calendar: {
-    unavailableDates: string[];
-    validCheckOutsByArrival?: Record<string, string[]>;
-    minStayByArrival: Record<string, number>;
-    maxStayByArrival: Record<string, number>;
-  };
-  freshness: PublicBookabilityFreshness;
-  dataSources: PublicBookabilityDataSourceOwner[];
-};
-
-export type BookingWebCalendarRepository = {
-  findCalendarByHotel(
-    hotel: Pick<PublicBookabilityHotelProfile, "propertyId" | "slug">,
-    query: BookingWebCalendarQuery,
-  ): Promise<BookingWebCalendarProjection>;
-  close?(): Promise<void>;
-};
-
 export type BookingWebQueryExecutor = {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -490,15 +441,9 @@ export type BookingWebQueryExecutor = {
   ): Promise<Pick<QueryResult<T>, "rows">>;
 };
 
-export type BookingWebCalendarReadPool = BookingWebQueryExecutor & {
-  end(): Promise<void>;
-};
-
 export type BookingWebPublicRoutesOptions = {
   nearby?: import("./publicNearby.js").PublicNearbyOptions;
   profileRepository: PublicHotelProfileRepository;
-  quoteRepository?: PublicHotelQuoteRepository;
-  calendarRepository?: BookingWebCalendarRepository;
   checkoutAdapter: BookingWebCheckoutAdapter;
   attributionSink?: BookingWebAttributionSink;
   now?: () => Date;
@@ -526,11 +471,6 @@ export async function registerBookingWebPublicRoutes(
     await registerPublicNearbyRoute(app, options.profileRepository, options.nearby);
   }
 
-  if (options.calendarRepository) {
-    app.addHook("onClose", async () => {
-      await options.calendarRepository?.close?.();
-    });
-  }
   if (checkoutAdapter.close) {
     app.addHook("onClose", async () => {
       await checkoutAdapter.close?.();
@@ -680,66 +620,6 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 
-  app.get<{ Params: BookingWebHotelParams; Querystring: PublicHotelQuoteQuery }>(
-    "/hotels/:slug/offers",
-    async (request, reply) => {
-      if (!options.quoteRepository) {
-        throw createHttpError(404, "Booking Web offers read model not configured.");
-      }
-
-      const quote = await options.quoteRepository.findQuoteBySlug(
-        request.params.slug,
-        request.query,
-      );
-      if (!quote) {
-        throw createHttpError(404, "Booking Web offers not found.");
-      }
-
-      const response = serializePublicHotelQuoteProjection(quote);
-      assertPublicBookabilityPublicSafe(response);
-      reply.header("Cache-Control", "public, max-age=15, stale-while-revalidate=60");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-offers-read");
-      reply.header("X-Robots-Tag", "noindex");
-      return response;
-    },
-  );
-
-  app.get<{ Params: BookingWebHotelParams; Querystring: BookingWebCalendarQuery }>(
-    "/hotels/:slug/calendar",
-    async (request, reply) => {
-      const calendarStart = normalizeDateOnly(request.query.start);
-      const calendarEnd = normalizeDateOnly(request.query.end);
-      if (
-        calendarStart &&
-        calendarEnd &&
-        calendarStart < calendarEnd &&
-        dateRangeLength(calendarStart, calendarEnd) > BOOKING_WEB_CALENDAR_MAX_RANGE_DAYS
-      ) {
-        throw createHttpError(
-          400,
-          `Booking Web calendar ranges cannot exceed ${BOOKING_WEB_CALENDAR_MAX_RANGE_DAYS} days.`,
-        );
-      }
-
-      const profile = await options.profileRepository.findProfileBySlug(request.params.slug);
-      if (!profile) {
-        throw createHttpError(404, "Booking Web hotel calendar not found.");
-      }
-
-      const response = await fetchCalendarProjection({
-        hotel: profile.hotel,
-        query: request.query,
-        repository: options.calendarRepository,
-        now: now(),
-      });
-      assertPublicBookabilityPublicSafe(response);
-      reply.header("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-calendar-read");
-      reply.header("X-Robots-Tag", "noindex");
-      return response;
-    },
-  );
-
   app.get<{ Params: BookingWebHotelParams }>(
     "/hotels/:slug/checkout-config",
     async (request, reply) => {
@@ -773,22 +653,6 @@ export async function registerBookingWebPublicRoutes(
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-quote");
-      reply.header("X-Robots-Tag", "noindex");
-      return response;
-    },
-  );
-
-  app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
-    "/hotels/:slug/bookings",
-    async (request, reply) => {
-      const body = request.body ?? {};
-      const response = await checkoutAdapter.createBooking(
-        request.params.slug,
-        body,
-        checkoutCommandContext(request, "booking-create", request.params.slug, body, now),
-      );
-      reply.header("Cache-Control", "no-store");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
       reply.header("X-Robots-Tag", "noindex");
       return response;
     },
@@ -1257,30 +1121,6 @@ function isAllowedBookingWebOrigin(origin: unknown): origin is string {
     host === "booking.localhost" ||
     host.endsWith(".booking.localhost")
   );
-}
-
-export function createTargetBookingWebCalendarRepository(config: {
-  connectionString: string;
-  max?: number;
-  pool?: BookingWebCalendarReadPool;
-  now?: () => Date;
-}): BookingWebCalendarRepository {
-  const now = config.now ?? (() => new Date());
-  const pool =
-    config.pool ??
-    new pg.Pool({
-      connectionString: config.connectionString,
-      max: config.max ?? 5,
-    });
-
-  return {
-    async findCalendarByHotel() {
-      throw pricingRetiredError();
-    },
-    async close() {
-      await pool.end();
-    },
-  };
 }
 
 export type TargetCheckoutPropertyRow = QueryResultRow & {
@@ -1965,145 +1805,6 @@ export function createTargetBookingWebCheckoutAdapter(
     },
     async editRequest(slug, bookingId, action, request, context) {
       return pendingBookingEdit(pool, config, slug, bookingId, action, request, context);
-    },
-    async createBooking(slug, request, context) {
-      if (!context) {
-        throw createHttpError(400, "Checkout command context is required.");
-      }
-      return withTargetCheckoutTransaction(pool, async (client) => {
-        const property = await resolveTargetCheckoutProperty(client, slug, true);
-        const reservation = await reserveTargetCheckoutCommand(
-          client,
-          property.propertyId,
-          context,
-        );
-        if (reservation.status === "replay") {
-          return hydrateTargetCardCheckoutReplay(
-            client,
-            config,
-            property.propertyId,
-            reservation.body,
-            context,
-          );
-        }
-        const guestPhone = await resolveTargetGuestPhone(client, property.propertyId, request);
-        const quote = await loadTargetCheckoutQuoteSnapshot(
-          client,
-          property.propertyId,
-          request,
-          context.occurredAt,
-        );
-        if (
-          quote.selectedOfferSnapshot["roomSelection"] !== undefined &&
-          !config.mixedRoomSelectionsEnabled
-        )
-          throw createHttpError(409, "Room selection checkout is not available.");
-        if (quote.selectedOfferSnapshot["editBookingId"])
-          throw createHttpError(409, "Use the request editor to save this quote.");
-        const billingConfigReadPort = config.billingConfigReadPortFactory?.(client);
-        if (!billingConfigReadPort) {
-          throw createHttpError(503, "Finance billing configuration is not available.");
-        }
-        const billingConfig = await billingConfigReadPort.getBillingConfig(property.propertyId);
-        if (!billingConfig) {
-          throw createHttpError(409, "Finance billing configuration is not available.");
-        }
-        const checkoutConfig = await loadTargetCheckoutConfig(client, property.propertyId);
-        assertTargetCheckoutConfigMatchesQuote(checkoutConfig, quote);
-        resolveTargetCheckoutAmountSnapshot(request, quote);
-        assertTargetSameDayBookingOpen(property, quote.checkIn, config.now?.() ?? new Date());
-        const booking = await createTargetGuestBooking(
-          client,
-          config.inventoryReservationPort,
-          property,
-          request,
-          context,
-          quote,
-          guestPhone,
-          billingConfig,
-          checkoutConfig,
-        );
-        if (quote.paymentMethod === "bank_transfer") {
-          if (!config.bankTransfers) throw createHttpError(503, "Bank transfer is not configured.");
-          await config.bankTransfers.bind(client, property.propertyId, booking.guestBookingId);
-        }
-        await redeemTargetPromo(client, property, booking, quote, context.occurredAt);
-        const confirmation = await issueTargetBookingConfirmationToken(
-          client,
-          booking,
-          context.occurredAt,
-        );
-        if (booking.lifecycleStatus === "confirmed") {
-          await captureDirectNightlyRevenueEvidence(client, booking, {
-            selectedOffer: quote.selectedOfferSnapshot,
-            fingerprint: context.fingerprint,
-            required: true,
-          });
-        }
-        await enqueueBookingTransitionNotifications(client, {
-          propertyId: property.propertyId,
-          guestBookingId: booking.guestBookingId,
-          occurredAt: context.occurredAt.toISOString(),
-          correlationId: context.correlationId,
-          causationId: context.requestId,
-          actor: { type: "system" },
-          source: "apps/api-booking-checkout",
-          transition: {
-            eventType: "guest_booking.created",
-            fromStatus: null,
-            toStatus: booking.lifecycleStatus,
-          },
-        });
-        const cardPayment =
-          quote.paymentMethod === "card"
-            ? await createTargetCardPayment(
-                client,
-                config,
-                booking,
-                checkoutConfig,
-                billingConfig,
-                quote.acceptanceMode,
-                context,
-              )
-            : null;
-        if (!cardPayment) {
-          await enqueuePmsReservationHandoff(
-            client,
-            property.propertyId,
-            booking,
-            context,
-            "create",
-          );
-        }
-        const responseBooking = await loadTargetBooking(
-          client,
-          property.propertyId,
-          booking.publicReference,
-          null,
-          sha256Hex(confirmation.token),
-        );
-        const body = {
-          bookingReference: booking.publicReference,
-          booking: serializeTargetBooking(responseBooking),
-          clientSecret: cardPayment?.clientSecret ?? null,
-          xenditInvoiceUrl: null,
-          paymentMethod: quote.paymentMethod,
-          confirmationToken: confirmation.token,
-          confirmationTokenExpiresAt: confirmation.expiresAt,
-          ...(cardPayment ? { draftId: booking.guestBookingId } : {}),
-          ...(cardPayment ? { providerPaymentIntentId: cardPayment.paymentIntentId } : {}),
-          ...(cardPayment ? { stripeAccountId: cardPayment.providerAccountRef } : {}),
-          pmsHandoff: { status: cardPayment ? "awaiting_payment" : "pending_handoff" },
-        };
-        await recordTargetCheckoutCommand(client, {
-          propertyId: property.propertyId,
-          context,
-          resourceType: "guest_booking",
-          resourceId: booking.guestBookingId,
-          body: cardPayment ? { ...body, clientSecret: null } : body,
-        });
-        return body;
-      });
     },
     async getQuoteGuestDisclosure(slug, quoteId) {
       let disclosure;
@@ -4121,81 +3822,6 @@ export function targetCardPaymentIdempotencyKey(propertyId: string, checkoutKey:
   return `booking-card:${propertyId}:${sha256Hex(checkoutKey)}`;
 }
 
-async function hydrateTargetCardCheckoutReplay(
-  client: BookingWebQueryExecutor,
-  config: PgTargetBookingWebCheckoutAdapterConfig,
-  propertyId: string,
-  value: unknown,
-  context: BookingWebCheckoutCommandContext,
-): Promise<unknown> {
-  const body = objectValue(value);
-  const paymentIntentId = stringValue(body["providerPaymentIntentId"]);
-  const stripeAccountId = stringValue(body["stripeAccountId"]);
-  if (!paymentIntentId) return value;
-  if (!config.stripePaymentProvider) {
-    throw createHttpError(503, "Target card authorization is not configured.");
-  }
-  const intent = await config.stripePaymentProvider.retrievePaymentIntent(
-    paymentIntentId,
-    stripeAccountId,
-  );
-  const bookingId = stringValue(body["draftId"]);
-  if (intent.status === "canceled") {
-    return {
-      ...body,
-      clientSecret: null,
-      authorizationComplete: false,
-      authorizationExpired: true,
-    };
-  }
-  if ((intent.status === "succeeded" || intent.status === "requires_capture") && bookingId) {
-    const booking = await loadTargetHotelBooking(client, propertyId, bookingId, true);
-    const payment = await loadTargetCardPayment(client, booking);
-    const acceptanceMode = targetAcceptanceMode(
-      objectValue(booking.bookingMetadata)["acceptanceMode"],
-    );
-    if (intent.status === "succeeded") {
-      if (acceptanceMode === "request" && booking.paymentStatus !== "paid") {
-        throw createHttpError(409, "Card payment was captured before booking acceptance.");
-      }
-      assertStripePaymentReady(booking, payment.providerAccountRef, intent, "instant");
-      if (booking.paymentStatus !== "paid") {
-        await settleStripeBookingPayment(client, {
-          paymentIntentId,
-          providerAccountRef: intent.providerAccountRef,
-          amountMinor: intent.amountMinor,
-          currency: intent.currency,
-          occurredAt: context.occurredAt,
-          correlationId: context.correlationId,
-        });
-      }
-    } else {
-      assertStripePaymentReady(booking, payment.providerAccountRef, intent, acceptanceMode);
-      await authorizeStripeBookingPayment(client, {
-        paymentIntentId,
-        providerAccountRef: intent.providerAccountRef,
-        amountMinor: intent.amountMinor,
-        currency: intent.currency,
-        occurredAt: context.occurredAt,
-      });
-    }
-    await reconcileStripeBookingPaymentProviderDetails(client, intent, context.occurredAt);
-    const finalized = await loadTargetHotelBooking(client, propertyId, bookingId);
-    return {
-      ...body,
-      booking: serializeTargetBooking(finalized),
-      clientSecret: null,
-      authorizationComplete: true,
-      pmsHandoff: {
-        status: acceptanceMode === "request" ? "awaiting_acceptance" : "pending_handoff",
-      },
-    };
-  }
-  if (!intent.clientSecret)
-    throw createHttpError(409, "Card payment authorization is unavailable.");
-  return { ...body, clientSecret: intent.clientSecret };
-}
-
 export async function loadTargetCardPayment(
   client: BookingWebQueryExecutor,
   booking: TargetBookingRow,
@@ -4869,30 +4495,25 @@ async function enqueueExtrasEmail(
 
 /** The booked terms the cancel route would apply now (VAY-2360), or null once a room has started or when the
  * route couldn't work them out. */
-async function loadStayCancellationTerms(
+function loadStayCancellationTerms(
   db: Pick<pg.PoolClient, "query">,
   ids: { propertyId: string; guestBookingId: string },
   booking: TargetBookingRow,
   at: Date,
 ): Promise<PricingBookingCancellationTerms | null> {
-  const started = await db.query(
-    `SELECT 1 FROM pms.operational_booking_assignments
-     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
-       AND assignment_status IN ('checked_in','in_house','checked_out')
-     LIMIT 1`,
-    [ids.propertyId, ids.guestBookingId],
-  );
-  if (started.rows.length > 0) return null;
-  const terms = await loadPricingBookingCancellationTerms(db, {
-    ...ids,
-    stay: {
-      checkIn: dateOnly(booking.checkIn),
-      checkOut: dateOnly(booking.checkOut),
-      roomCount: booking.roomCount,
-      currency: booking.currency,
+  return loadOpenPricingBookingCancellationTerms(
+    db,
+    {
+      ...ids,
+      stay: {
+        checkIn: dateOnly(booking.checkIn),
+        checkOut: dateOnly(booking.checkOut),
+        roomCount: booking.roomCount,
+        currency: booking.currency,
+      },
     },
-  });
-  return terms && pricingBookingCancellationOutcome(terms, at) ? terms : null;
+    at,
+  );
 }
 
 /** The confirmation page's extras (VAY-2360), `booking-stay.v1`: the booked cancellation terms (each room's raw
@@ -6558,75 +6179,6 @@ function serializeHostResolution(
   };
 }
 
-async function fetchCalendarProjection(config: {
-  hotel: Pick<PublicBookabilityHotelProfile, "propertyId" | "slug">;
-  query: BookingWebCalendarQuery;
-  repository?: BookingWebCalendarRepository;
-  now: Date;
-}): Promise<BookingWebCalendarProjection> {
-  const generatedAt = config.now.toISOString();
-  const start = normalizeDateOnly(config.query.start);
-  const end = normalizeDateOnly(config.query.end);
-  if (config.repository) {
-    return config.repository.findCalendarByHotel(config.hotel, config.query);
-  }
-  return unavailableCalendar(config.hotel.slug, start, end, generatedAt);
-}
-
-function unavailableCalendar(
-  slug: string,
-  start: string | null,
-  end: string | null,
-  generatedAt: string,
-): BookingWebCalendarProjection {
-  return {
-    contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
-    generatedAt,
-    publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
-    request: {
-      hotelSlug: slug,
-      start: start ?? "",
-      end: end ?? "",
-    },
-    calendar: {
-      unavailableDates:
-        start &&
-        end &&
-        start < end &&
-        dateRangeLength(start, end) <= BOOKING_WEB_CALENDAR_MAX_RANGE_DAYS
-          ? dateRange(start, end)
-          : [],
-      minStayByArrival: {},
-      maxStayByArrival: {},
-    },
-    freshness: freshness(generatedAt, "unavailable"),
-    dataSources: ["pms", "distribution"],
-  };
-}
-
-function freshness(
-  generatedAt: string,
-  pmsStatus: PublicBookabilityFreshness["status"],
-): PublicBookabilityFreshness {
-  return {
-    status: pmsStatus === "fresh" ? "fresh" : "unavailable",
-    generatedAt,
-    sources: [
-      {
-        owner: "pms",
-        lastUpdatedAt: pmsStatus === "fresh" ? generatedAt : undefined,
-        status: pmsStatus,
-        reasonCode: pmsStatus === "fresh" ? undefined : "source_unavailable",
-      },
-      {
-        owner: "distribution",
-        lastUpdatedAt: generatedAt,
-        status: "fresh",
-      },
-    ],
-  };
-}
-
 export function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -7200,28 +6752,6 @@ function targetPropertyDateOnly(timezone: string | undefined, instant: Date): st
   const month = parts.find((part) => part.type === "month")?.value ?? "01";
   const day = parts.find((part) => part.type === "day")?.value ?? "01";
   return `${year}-${month}-${day}`;
-}
-
-function assertTargetSameDayBookingOpen(
-  property: TargetCheckoutPropertyRow,
-  checkIn: string,
-  requestedAt: Date,
-): void {
-  const decision = evaluateSameDayBooking({
-    checkIn,
-    policy: {
-      enabled: property.sameDayBookingsEnabled ?? SAME_DAY_BOOKING_POLICY_DEFAULTS.enabled,
-      cutoffLocalTime:
-        property.sameDayBookingCutoffTime === undefined
-          ? SAME_DAY_BOOKING_POLICY_DEFAULTS.cutoffLocalTime
-          : property.sameDayBookingCutoffTime,
-    },
-    propertyTimeZone: property.timezone,
-    now: requestedAt,
-  });
-  if (!decision.eligible) {
-    throw createHttpError(409, "Same-day booking is no longer available for this property.");
-  }
 }
 
 export function canonicalTargetCheckoutRateType(value: string | null | undefined): string {

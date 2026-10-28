@@ -43,6 +43,42 @@ property's time zone, is at least that many hours away (the VAY-2145 bank-transf
 pricing-addons catalog names each add-on's first allowed check-in date (`bookableFrom`); the quote
 and its acceptance check the rule against the database clock. Unconverted free text stays hidden.
 
+"When does it happen?" (VAY-2391, migration 0525) is stored in two columns:
+
+- `schedule_mode`: `arrival`, `departure`, `guest_pick`, `daily` or `anytime`.
+- `bookable_weekdays`: ISO weekdays, 1 Monday to 7 Sunday, all seven by default.
+
+The API reads and writes them as `scheduleMode` and `bookableWeekdays`, and the pricing-addons
+catalog serves both.
+
+A per-night price is always `daily`, and `daily` needs a per-night price. A save that breaks
+this rule is refused with 422. A save without a mode picks one:
+
+- when the price changes and the saved mode no longer fits, the default takes over;
+- the default is `daily` for a per-night price, `arrival` for transport and `guest_pick`
+  otherwise;
+- readers treat a stored per-night price as `daily`.
+
+When the guest sends no day, the quote fills it in:
+
+- `arrival`: the check-in day;
+- `departure`: the check-out day;
+- `daily`: every night;
+- `anytime`: no day, booked as one line with a NULL `service_date`;
+- `guest_pick`: no day is filled in. Such a line stays unbookable until the guest picks one.
+
+Until the booking page that sends no day is live (VAY-2391 part 3), the quote still accepts what
+today's page sends. VAY-2391 part 4 refuses these; tests in `replacementAddons.integration.test.ts`
+pin them until then:
+
+- a day sent for an `arrival`, `departure` or `anytime` add-on, whatever the day;
+- a `guest_pick` day on a weekday the add-on isn't bookable on, or on the check-out day;
+- a subset of nights for a `daily` add-on.
+
+Quotes issued before 0525 have a stale add-ons source revision, so guests get a new quote.
+Booked `anytime` lines have no `service_date`: finance counts their revenue on the check-in day
+("inferred"), and a folio line can't reference them (folio lines need a date).
+
 The shared AddonEditor is used by Booking Flow settings. The unused onboarding
 AddonsStep was deleted in VAY-2174; restoring an onboarding navigation step is a
 separate product decision.

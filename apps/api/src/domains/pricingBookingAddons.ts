@@ -57,7 +57,11 @@ export function projectPricingBookingAddons(current: CurrentQuote) {
       !isDeepStrictEqual(line.people, selected.people) ||
       !isMinorAmount(line.amountMinor) ||
       quotedLines[index]?.amountMinor !== line.amountMinor ||
-      !line.dates?.length ||
+      // VAY-2391: only an anytime add-on has no day ([]); a guest-pick one without a day (null) isn't bookable.
+      !line.dates ||
+      (line.dates.length
+        ? !nightly && line.dates.length > 1
+        : nightly || definition.scheduleMode !== "anytime") ||
       new Set(line.dates).size !== line.dates.length ||
       line.dates.some(
         (date) =>
@@ -65,7 +69,6 @@ export function projectPricingBookingAddons(current: CurrentQuote) {
           date < quote.stay.checkIn ||
           (nightly ? date >= quote.stay.checkOut : date > quote.stay.checkOut),
       ) ||
-      (!nightly && line.dates.length !== 1) ||
       line.daysMultiplier !== (nightly ? line.dates.length : 1) ||
       (selected.dates !== null && !isDeepStrictEqual([...selected.dates].sort(), line.dates))
     )
@@ -73,14 +76,15 @@ export function projectPricingBookingAddons(current: CurrentQuote) {
     seen.add(definition.id);
     // Existing per-night owner lines use equal service-day amounts. Split that resolved
     // amount exactly; do not multiply the definition's unit price or round residual cents.
+    const serviceDates = line.dates.length ? line.dates : [null];
     const amount = BigInt(line.amountMinor),
-      days = BigInt(line.dates.length);
+      days = BigInt(serviceDates.length);
     if (amount % days !== 0n) return null;
     const amountMinor = (amount / days).toString(),
       totalAmount = decimal(amountMinor, scale);
     if (totalAmount === null) return null;
     total += amount;
-    for (const serviceDate of line.dates)
+    for (const serviceDate of serviceDates)
       rows.push({
         addonDefinitionId: definition.id,
         addonSnapshot: structuredClone({

@@ -3,6 +3,7 @@ import pg from "pg";
 import {
   BOOKING_EMAIL_QUEUE,
   enqueueBookingLifecycleEmailJob,
+  loadBookingEmailCancellation,
   loadBookingNotificationSnapshot,
 } from "../jobs/bookingEmails.js";
 
@@ -70,13 +71,18 @@ export function createPmsConfirmationEmails(connectionString: string) {
            ORDER BY created_at DESC LIMIT 1`,
           [propertyId, guestBookingId, BOOKING_EMAIL_QUEUE],
         );
+        const now = new Date();
         const result = await enqueueBookingLifecycleEmailJob(client, {
           resendKey: jobKey,
           kind: original.rows[0]?.kind ?? "final_confirmation",
-          occurredAt: new Date().toISOString(),
+          occurredAt: now.toISOString(),
           actor: { type: "user", userId: actorUserId },
           source: "pms-confirmation-resend",
-          booking,
+          // VAY-2392: how the stay cancels now, as its confirmation page says.
+          booking: {
+            ...booking,
+            cancellation: await loadBookingEmailCancellation(client, booking, now),
+          },
         });
         await client.query("COMMIT");
         return { jobId: result.jobId };

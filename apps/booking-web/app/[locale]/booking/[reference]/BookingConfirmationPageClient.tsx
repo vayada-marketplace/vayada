@@ -7,13 +7,15 @@ import ConfirmationExtras from "@/components/booking/ConfirmationExtras";
 import ConfirmationHotelCard from "@/components/booking/ConfirmationHotelCard";
 import StayDates from "@/components/booking/StayDates";
 import StayRange from "@/components/booking/StayRange";
-import { isManualPricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
+import {
+  bookedPolicyBlocks,
+  isManualPricingPaymentMethod,
+} from "@vayada/domain-booking/replacement-pricing";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
 import { bookedMeal, singleRoomMeal } from "@/lib/bookedMeal";
 import type { BookingStay } from "@/lib/bookingStay";
 import { stayCalendarFile } from "@/lib/calendarFile";
-import { bookedPolicyBlocks } from "@/lib/cancellationPolicy";
 import { hotelCountryName } from "@/lib/checkoutTerms";
 import {
   directionsUrl,

@@ -6,7 +6,6 @@ import {
   type IdentityRepository,
   type LinkedResource,
   type PermissionKey,
-  type ProductEntitlement,
   type RequestContext,
   type VerifiedSession,
 } from "@vayada/backend-auth";
@@ -16,13 +15,15 @@ import type {
 } from "@vayada/backend-authorization";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import { injectJson } from "@vayada/backend-test";
-import type {
-  PublicPropertyProfileResponse,
-  SetupCommandError,
-  SetupTask,
-  SetupTaskId,
-  TrackStatus,
-  UpdateTracksResponse,
+import {
+  parseAdaptiveHotelSetupStatus,
+  type AdaptiveHotelSetupStatus,
+  type PublicPropertyProfileResponse,
+  type SetupCommandError,
+  type SetupTask,
+  type SetupTaskId,
+  type TrackStatus,
+  type UpdateTracksResponse,
 } from "@vayada/domain-hotels";
 import type { FastifyInstance } from "fastify";
 import type { QueryResultRow } from "pg";
@@ -37,13 +38,12 @@ import type {
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import {
   type AdaptivePropertySetupFacts,
+  type AdaptiveSetupTaskFact,
   type SharedPropertyTypeCatalog,
   type SharedHotelSetupStatusRepository,
   type SharedPropertyLaunchSettingsRepository,
   type SharedPropertyProfile,
   type SharedPropertyProfileInput,
-  type SharedHotelSetupStatusResponse,
-  buildPropertySetupPlan,
 } from "./routes/sharedHotelSetupStatus.js";
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
@@ -114,7 +114,7 @@ describe("shared hotel setup status route", () => {
       },
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=booking&returnTo=/dashboard",
       headers: { authorization: "Bearer valid-token" },
@@ -179,7 +179,7 @@ describe("shared hotel setup status route", () => {
       repository: repositoryWith([]),
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/property-types",
       headers: { authorization: "Bearer valid-token" },
@@ -194,7 +194,7 @@ describe("shared hotel setup status route", () => {
       repository: repositoryWith([]),
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/property-types",
     });
@@ -232,7 +232,7 @@ describe("shared hotel setup status route", () => {
       ),
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -251,7 +251,7 @@ describe("shared hotel setup status route", () => {
 
     await app.close();
     app = buildSharedSetupApp({ repository: repositoryWith([adaptiveProperty(propertyId)]) });
-    const single = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const single = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
@@ -421,302 +421,113 @@ describe("shared hotel setup status route", () => {
     },
   );
 
-  it.each([
-    [
-      "operations",
-      ["hotel_operations"],
-      [
-        "shared_identity",
-        "rooms_rates_availability",
-        "guest_settings_policies",
-        "billing_plan",
-        "payment",
-        "direct_booking_publication",
-      ],
-    ],
-  ] as const)(
-    "filters setup tasks for %s selected tracks",
-    async (_name, selectedTracks, expectedTaskIds) => {
-      app = buildSharedSetupApp({
-        permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
-        repository: repositoryWith([adaptiveProperty(propertyId)]),
-        trackCommandRepository: trackRepository([...selectedTracks]),
-      });
-
-      const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
-        method: "GET",
-        url: "/api/hotel-setup/status",
-        headers: { authorization: "Bearer valid-token" },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.body.setupPlan?.tasks.map((task) => task.taskId)).toEqual(expectedTaskIds);
-    },
-  );
-
-  it("limits an operator to permitted tasks and recommends only an actionable allowed task", async () => {
+  it("carries only the hotel-basics task the frontends read (VAY-2175)", async () => {
     app = buildSharedSetupApp({
       permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
-      repository: repositoryWith([
-        adaptiveProperty(propertyId, {
-          taskFacts: taskFacts({
-            shared_identity: taskFact("shared_identity", {
-              ownerProgress: "owner_complete",
-              readiness: "complete",
-            }),
-            payment: taskFact("payment", {
-              readiness: "pending_review",
-              ownerProgress: "owner_complete",
-            }),
-          }),
-        }),
-      ]),
+      repository: repositoryWith([adaptiveProperty(propertyId)]),
       trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
     });
 
-    expect(response.body.setupPlan?.tasks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          taskId: "rooms_rates_availability",
-          callerCapability: "ask_owner",
+    expect(response.statusCode).toBe(200);
+    expect(response.body.setupPlan).toEqual({
+      propertyId,
+      tasks: [
+        {
+          taskId: "shared_identity",
+          propertyId,
+          track: "shared",
+          requirementOwnerDomain: "hotel_catalog",
+          destinationRouteKey: "hotel_catalog.shared_identity",
+          callerCapability: "allowed",
+          ownerProgress: "not_started",
+          readiness: "actionable",
           actionableBy: "operator",
-        }),
-        expect.objectContaining({
-          taskId: "payment",
-          callerCapability: "waiting",
-          actionableBy: "support",
-        }),
-      ]),
-    );
-    expect(response.body.setupPlan?.recommendedTaskId).toBeNull();
+          reasonCodes: ["shared_identity_incomplete"],
+          sourceRevision: "1",
+          freshness: "fresh",
+          evaluatedAt: expect.any(String),
+        },
+      ],
+    });
+    expect(parseAdaptiveHotelSetupStatus(response.body)).toEqual(response.body);
   });
 
-  it("keeps publication repair actionable only after its true dependencies are complete", async () => {
-    const completedFacts = taskFacts({
-      shared_identity: completedTaskFact("shared_identity"),
-      rooms_rates_availability: completedTaskFact("rooms_rates_availability"),
-      guest_settings_policies: completedTaskFact("guest_settings_policies"),
-      billing_plan: completedTaskFact("billing_plan"),
-      payment: completedTaskFact("payment"),
-      direct_booking_publication: taskFact("direct_booking_publication", {
-        ownerProgress: "in_progress",
-        readiness: "actionable",
-        reasonCodes: ["bookability_setup_missing"],
-      }),
-    });
-    const appOptions: {
-      permissions: PermissionKey[];
-      trackCommandRepository: HotelSetupTrackCommandRepository;
-    } = {
-      permissions: [
-        "hotel_catalog.setup.read",
-        "hotel_catalog.setup.manage",
-        "pms.operations.manage",
-        "booking.settings.manage",
-      ],
-      trackCommandRepository: trackRepository(["hotel_operations"]),
-    };
+  it("has no setup task before a track is selected (VAY-2175)", async () => {
     app = buildSharedSetupApp({
-      ...appOptions,
-      repository: repositoryWith([adaptiveProperty(propertyId, { taskFacts: completedFacts })]),
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: repositoryWith([adaptiveProperty(propertyId)]),
+      trackCommandRepository: trackRepository([]),
     });
 
-    const repairable = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
     });
-    expect(repairable.body.setupPlan?.recommendedTaskId).toBe("direct_booking_publication");
-    expect(
-      repairable.body.setupPlan?.tasks.find(
-        ({ taskId }) => taskId === "direct_booking_publication",
-      ),
-    ).toMatchObject({ readiness: "actionable", callerCapability: "allowed" });
 
-    await app.close();
+    expect(response.body.setupPlan).toEqual({ propertyId, tasks: [] });
+  });
+
+  it.each<[string, PermissionKey[], Partial<AdaptiveSetupTaskFact>, Partial<SetupTask>]>([
+    [
+      "a setup manager",
+      ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      {},
+      { readiness: "actionable", callerCapability: "allowed", actionableBy: "operator" },
+    ],
+    [
+      "a reader",
+      ["hotel_catalog.setup.read"],
+      {},
+      { readiness: "actionable", callerCapability: "ask_owner", actionableBy: "operator" },
+    ],
+    [
+      "basics under review",
+      ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      { readiness: "pending_review" },
+      { readiness: "pending_review", callerCapability: "waiting", actionableBy: "support" },
+    ],
+    [
+      "stale complete basics",
+      ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      { readiness: "complete", freshness: "stale", reasonCodes: [] },
+      {
+        readiness: "pending_sync",
+        callerCapability: "waiting",
+        actionableBy: "system",
+        reasonCodes: ["source_facts_stale"],
+      },
+    ],
+    [
+      "complete basics",
+      ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      { readiness: "complete", ownerProgress: "owner_complete", reasonCodes: [] },
+      { readiness: "complete", callerCapability: "allowed", actionableBy: null, reasonCodes: [] },
+    ],
+  ])("maps the hotel-basics facts for %s", async (_name, permissions, fact, expected) => {
     app = buildSharedSetupApp({
-      ...appOptions,
+      permissions,
       repository: repositoryWith([
         adaptiveProperty(propertyId, {
-          taskFacts: {
-            ...completedFacts,
-            payment: taskFact("payment"),
-          },
+          taskFacts: { shared_identity: taskFact("shared_identity", fact) },
         }),
       ]),
+      trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const dependencyBlocked = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status",
       headers: { authorization: "Bearer valid-token" },
     });
-    expect(
-      dependencyBlocked.body.setupPlan?.tasks.find(
-        ({ taskId }) => taskId === "direct_booking_publication",
-      ),
-    ).toMatchObject({
-      readiness: "blocked",
-      callerCapability: "allowed",
-      reasonCodes: expect.arrayContaining(["task_dependencies_incomplete", "payment_incomplete"]),
-    });
-  });
 
-  it("derives a stable plan revision from the complete authoritative plan state", () => {
-    const property = adaptiveProperty(propertyId, {
-      taskFacts: taskFacts({
-        shared_identity: completedTaskFact("shared_identity"),
-        rooms_rates_availability: completedTaskFact("rooms_rates_availability"),
-        guest_settings_policies: completedTaskFact("guest_settings_policies"),
-        billing_plan: completedTaskFact("billing_plan"),
-        payment: completedTaskFact("payment"),
-        direct_booking_publication: completedTaskFact("direct_booking_publication"),
-      }),
-    });
-    const tracks: TrackStatus[] = [
-      {
-        track: "hotel_operations",
-        provisioning: "active",
-        components: [
-          { product: "pms", access: "active" },
-          { product: "booking", access: "active" },
-        ],
-        allowedActions: ["manage_service"],
-      },
-    ];
-    const permissions: PermissionKey[] = [
-      "hotel_catalog.setup.read",
-      "hotel_catalog.setup.manage",
-      "pms.operations.manage",
-      "booking.settings.manage",
-    ];
-    const entitlements: ProductEntitlement[] = [
-      { product: "pms", key: "property-management", status: "active" },
-      { product: "booking", key: "booking-engine", status: "active" },
-    ];
-    const context = setupPlanContext({ permissions, entitlements });
-    const buildPlan = (overrides: Partial<Parameters<typeof buildPropertySetupPlan>[0]> = {}) =>
-      buildPropertySetupPlan({
-        context,
-        property,
-        selectedTracks: ["hotel_operations"],
-        trackRevision: 4,
-        tracks,
-        evaluatedAt: "2026-07-26T10:00:00.000Z",
-        ...overrides,
-      });
-    const original = buildPlan();
-
-    expect(original.launchReadiness.directBookingPublish).toBe("ready");
-    expect(buildPlan({ evaluatedAt: "2026-07-27T10:00:00.000Z" }).planRevision).toBe(
-      original.planRevision,
-    );
-    expect(
-      buildPlan({
-        context: setupPlanContext({
-          permissions,
-          entitlements: [...entitlements].reverse(),
-          linkedResources: [...setupPlanLinks()].reverse(),
-        }),
-        tracks: tracks.map((track) => ({
-          ...track,
-          components: [...track.components].reverse(),
-        })),
-      }).planRevision,
-    ).toBe(original.planRevision);
-    expect(original.planRevision).toMatch(/^plan\.v2:[A-Za-z0-9_-]{43}$/);
-
-    const changedPermission = buildPlan({
-      context: setupPlanContext({
-        permissions: permissions.filter((permission) => permission !== "pms.operations.manage"),
-        entitlements,
-      }),
-    });
-    expect(changedPermission.planRevision).not.toBe(original.planRevision);
-    expect(
-      changedPermission.tasks.find(({ taskId }) => taskId === "rooms_rates_availability"),
-    ).toMatchObject({ callerCapability: "ask_owner", sourceRevision: "1" });
-
-    const changedEntitlement = buildPlan({
-      context: setupPlanContext({
-        permissions,
-        entitlements: entitlements.map((entitlement) =>
-          entitlement.product === "pms"
-            ? { ...entitlement, status: "suspended" as const }
-            : entitlement,
-        ),
-      }),
-    });
-    expect(changedEntitlement.planRevision).not.toBe(original.planRevision);
-
-    const changedResourceLink = buildPlan({
-      context: setupPlanContext({
-        permissions,
-        entitlements,
-        linkedResources: setupPlanLinks().filter(({ product }) => product !== "pms"),
-      }),
-    });
-    expect(changedResourceLink.planRevision).not.toBe(original.planRevision);
-    expect(
-      changedResourceLink.tasks.find(({ taskId }) => taskId === "rooms_rates_availability"),
-    ).toMatchObject({
-      readiness: "blocked",
-      reasonCodes: expect.arrayContaining(["task_product_access_blocked"]),
-      sourceRevision: "1",
-    });
-
-    const changedComponentAccess = buildPlan({
-      tracks: tracks.map((track) => ({
-        ...track,
-        components: track.components.map((component) =>
-          component.product === "pms" ? { ...component, access: "suspended" as const } : component,
-        ),
-      })),
-    });
-    expect(changedComponentAccess.planRevision).not.toBe(original.planRevision);
-
-    const changedReadiness = buildPlan({
-      property: {
-        ...property,
-        taskFacts: {
-          ...property.taskFacts,
-          payment: {
-            ...property.taskFacts.payment,
-            ownerProgress: "in_progress",
-            readiness: "actionable",
-          },
-        },
-      },
-    });
-    expect(changedReadiness.planRevision).not.toBe(original.planRevision);
-    expect(changedReadiness.launchReadiness.directBookingPublish).toBe("pending");
-    expect(changedReadiness.tasks.find(({ taskId }) => taskId === "payment")?.sourceRevision).toBe(
-      property.taskFacts.payment.sourceRevision,
-    );
-
-    const changedReason = buildPlan({
-      property: {
-        ...property,
-        taskFacts: {
-          ...property.taskFacts,
-          payment: {
-            ...property.taskFacts.payment,
-            reasonCodes: ["payment_review_recommended"],
-          },
-        },
-      },
-    });
-    expect(changedReason.planRevision).not.toBe(original.planRevision);
-
-    expect(
-      buildPlan({ property: { ...property, displayName: "Alpenrose Berlin" } }).planRevision,
-    ).not.toBe(original.planRevision);
+    expect(response.body.setupPlan?.tasks).toEqual([expect.objectContaining(expected)]);
   });
 
   it("keeps entry decisions independent from property setup readiness", async () => {
@@ -736,7 +547,7 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=booking",
       headers: { authorization: "Bearer valid-token" },
@@ -779,7 +590,7 @@ describe("shared hotel setup status route", () => {
         trackCommandRepository: trackRepository(["hotel_operations"]),
       });
 
-      const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+      const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
         method: "GET",
         url: `/api/hotel-setup/status?entryProduct=${entryProduct}`,
         headers: { authorization: "Bearer valid-token" },
@@ -802,7 +613,7 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository: trackRepository(["hotel_operations"]),
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=pms",
       headers: { authorization: "Bearer valid-token" },
@@ -860,25 +671,13 @@ describe("shared hotel setup status route", () => {
       trackCommandRepository,
     });
 
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+    const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
       method: "GET",
       url: "/api/hotel-setup/status?entryProduct=booking",
       headers: { authorization: "Bearer valid-token" },
     });
 
     expect(response.body.entryDecision).toMatchObject({ decision: "enter", reasonCode: null });
-    expect(response.body.setupPlan?.tasks.find(({ taskId }) => taskId === "payment")).toMatchObject(
-      {
-        readiness: "actionable",
-        reasonCodes: expect.not.arrayContaining(["task_product_access_blocked"]),
-      },
-    );
-    expect(
-      response.body.setupPlan?.tasks.find(({ taskId }) => taskId === "rooms_rates_availability"),
-    ).toMatchObject({
-      readiness: "blocked",
-      reasonCodes: expect.arrayContaining(["task_product_access_blocked"]),
-    });
   });
 
   it.each([
@@ -894,7 +693,7 @@ describe("shared hotel setup status route", () => {
         trackCommandRepository: trackRepository([selectedTrack]),
       });
 
-      const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
+      const response = await injectJson<AdaptiveHotelSetupStatus>(app, {
         method: "GET",
         url: `/api/hotel-setup/status?entryProduct=${entryProduct}`,
         headers: { authorization: "Bearer valid-token" },
@@ -927,56 +726,6 @@ describe("shared hotel setup status route", () => {
     expect(response.body).toEqual({
       code: "invalid_entry_product",
       detail: "entryProduct must be booking or pms.",
-    });
-  });
-
-  it("reports a required domain failure as blocked launch readiness", async () => {
-    app = buildSharedSetupApp({
-      permissions: [
-        "hotel_catalog.setup.read",
-        "hotel_catalog.setup.manage",
-        "pms.operations.manage",
-        "booking.settings.manage",
-      ],
-      repository: repositoryWith([
-        adaptiveProperty(propertyId, {
-          taskFacts: taskFacts({
-            shared_identity: taskFact("shared_identity", {
-              readiness: "complete",
-              ownerProgress: "owner_complete",
-            }),
-            rooms_rates_availability: taskFact("rooms_rates_availability", {
-              readiness: "complete",
-              ownerProgress: "owner_complete",
-            }),
-            guest_settings_policies: taskFact("guest_settings_policies", {
-              readiness: "complete",
-              ownerProgress: "owner_complete",
-            }),
-            payment: taskFact("payment", {
-              readiness: "blocked",
-              ownerProgress: "in_progress",
-              reasonCodes: ["payment_provider_blocked"],
-            }),
-            direct_booking_publication: taskFact("direct_booking_publication", {
-              readiness: "complete",
-              ownerProgress: "owner_complete",
-            }),
-          }),
-        }),
-      ]),
-      trackCommandRepository: trackRepository(["hotel_operations"]),
-    });
-
-    const response = await injectJson<SharedHotelSetupStatusResponse>(app, {
-      method: "GET",
-      url: "/api/hotel-setup/status",
-      headers: { authorization: "Bearer valid-token" },
-    });
-
-    expect(response.body.setupPlan?.launchReadiness).toEqual({
-      operationsUse: "ready",
-      directBookingPublish: "blocked",
     });
   });
 
@@ -2756,171 +2505,54 @@ describe("shared hotel setup status route", () => {
     ]);
   });
 
-  it("makes publication actionable before its first distribution projection exists", async () => {
+  it("reads the hotel-basics facts only from hotel_catalog (VAY-2175)", async () => {
     const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
       if (text.includes("FROM identity.organizations")) {
         return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
       }
-      return {
-        rows: [
-          adaptiveStatusRow({
-            bookabilityStatus: null,
-            bookabilityFreshness: null,
-            bookabilitySetupReady: false,
-            bookabilityMissingEmpty: false,
-            bookabilityExpired: false,
-            bookabilityUpdatedAt: null,
+      return { rows: [adaptiveStatusRow()] };
+    });
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const status = await repository.getHotelSetupStatus({
+      organizationId,
+      propertyIds: [propertyId],
+    });
+
+    expect(status.properties).toEqual([
+      {
+        propertyId,
+        publicId: "property-aaaaaaaa",
+        displayName: "Alpenrose Munich",
+        locationSummary: "Munich, DE",
+        taskFacts: {
+          shared_identity: expect.objectContaining({
+            ownerProgress: "owner_complete",
+            readiness: "complete",
+            reasonCodes: [],
           }),
-        ],
-      };
-    });
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        query: async <T extends QueryResultRow = QueryResultRow>(
-          text: string,
-          values?: readonly unknown[],
-        ) => {
-          const result = await query(text, values);
-          return { rows: result.rows as unknown as T[] };
         },
-        end: vi.fn(async () => undefined),
       },
-    });
-
-    const publication = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.direct_booking_publication;
-
-    expect(publication).toMatchObject({
-      readiness: "actionable",
-      ownerProgress: "not_started",
-      freshness: "fresh",
-    });
-  });
-
-  it("keeps an incomplete attempted publication actionable for repair", async () => {
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        async query<T extends QueryResultRow = QueryResultRow>(text: string) {
-          const rows = text.includes("FROM identity.organizations")
-            ? [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }]
-            : [
-                adaptiveStatusRow({
-                  bookabilityStatus: "incomplete",
-                  bookabilityFreshness: "fresh",
-                  bookabilitySetupReady: false,
-                  bookabilityMissingEmpty: false,
-                  bookabilityExpired: false,
-                  bookabilityUpdatedAt: "2026-07-26T12:30:00.000Z",
-                }),
-              ];
-          return { rows: rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    const publication = (
-      await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] })
-    ).properties[0]!.taskFacts.direct_booking_publication;
-
-    expect(publication).toMatchObject({
-      readiness: "actionable",
-      ownerProgress: "in_progress",
-      reasonCodes: expect.arrayContaining([
-        "direct_booking_not_public",
-        "bookability_setup_not_ready",
-        "bookability_setup_missing",
-      ]),
-    });
-  });
-
-  it("reads adaptive readiness only from canonical target tables", async () => {
-    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
-      if (text.includes("FROM identity.organizations")) {
-        return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-      }
-      return { rows: [adaptiveStatusRow()] };
-    });
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        query: async <T extends QueryResultRow = QueryResultRow>(
-          text: string,
-          values?: readonly unknown[],
-        ) => {
-          const result = await query(text, values);
-          return { rows: result.rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] });
-
+    ]);
     const sql = query.mock.calls[1]![0];
-    expect(sql).toContain("FROM unnest($2::uuid[])");
+    expect(sql).toContain("FROM unnest($1::uuid[])");
     expect(sql).toContain("hotel_catalog.properties");
-    expect(sql).not.toContain("marketplace.");
-    expect(sql).toContain("pms.room_types");
-    expect(sql).toContain("finance.payment_settings");
-    expect(sql).toContain("finance.payment_provider_accounts");
-    expect(sql).toContain("payment_provider.onboarding_status = 'completed'");
-    expect(sql).toContain("payment_provider.charges_enabled = TRUE");
-    expect(sql).toContain("'card' = ANY(payment.accepted_methods)");
-    expect(sql).toContain("'bank_transfer'");
-    expect(sql).toContain("JOIN platform.media_objects media_object");
-    expect(sql).toContain("JOIN platform.media_variants media_variant");
-    expect(sql).toContain("media.source_system = 'platform'");
-    expect(sql).toContain("media_object.public_approved = TRUE");
-    expect(sql).toContain("media_object.lifecycle_status = 'active'");
-    expect(sql).toContain("media_variant.variant_name = 'original_safe'");
-    expect(sql).toContain("distribution.public_hotel_bookability_profiles");
-    expect(sql).not.toContain("identity.product_entitlements");
-    expect(sql).toContain("property_public_profile_read_model");
-    expect(query.mock.calls[1]![1]).toEqual([organizationId, [propertyId]]);
-  });
-
-  it("requires fragmented room artifacts to converge on the same active room type", async () => {
-    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
-      if (text.includes("FROM identity.organizations")) {
-        return { rows: [{ displayName: "Alpenrose Hotel Group", websiteUrl: null }] };
-      }
-      return { rows: [adaptiveStatusRow()] };
-    });
-    const repository = createPgSharedHotelSetupStatusRepository({
-      connectionString: "postgresql://target-db",
-      pool: {
-        query: async <T extends QueryResultRow = QueryResultRow>(
-          text: string,
-          values?: readonly unknown[],
-        ) => {
-          const result = await query(text, values);
-          return { rows: result.rows as unknown as T[] };
-        },
-        end: vi.fn(async () => undefined),
-      },
-    });
-
-    await repository.getHotelSetupStatus({ organizationId, propertyIds: [propertyId] });
-
-    const sql = query.mock.calls[1]![0];
-    expect(sql).toContain(") room_readiness ON TRUE");
-    expect(sql).toMatch(
-      /bool_or\(\s*candidate\.has_non_retired_room\s+AND candidate\.has_active_rate_plan\s*\)/,
-    );
-    expect(sql).toMatch(
-      /bool_or\(\s*candidate\.has_non_retired_room\s+AND candidate\.has_active_rate_plan\s+AND candidate\.has_future_inventory\s*\)/,
-    );
-    expect(sql).toContain("room.room_type_id = room_type.id");
-    expect(sql).toContain("rate_plan.room_type_id = room_type.id");
-    expect(sql).toContain("day.room_type_id = room_type.id");
-    expect(sql).toContain("room_type.active = TRUE");
-    expect(sql).not.toContain(") rooms ON TRUE");
-    expect(sql).not.toContain(") rate_plans ON TRUE");
-    expect(sql).not.toContain(") inventory ON TRUE");
+    expect(sql).toContain("hotel_catalog.property_locations");
+    expect(sql).toContain("hotel_catalog.property_contact_channels");
+    expect(sql).not.toMatch(/\b(pms|finance|distribution|platform|marketplace)\./);
+    expect(query.mock.calls[1]![1]).toEqual([[propertyId]]);
   });
 
   it("reads the nested canonical profile revision and explicit contact metadata", async () => {
@@ -3358,7 +2990,7 @@ function buildSharedSetupApp(options: {
 
 function getSharedSetupStatus(target: FastifyInstance, requestedPropertyId?: string) {
   const suffix = requestedPropertyId ? `?propertyId=${requestedPropertyId}` : "";
-  return injectJson<SharedHotelSetupStatusResponse>(target, {
+  return injectJson<AdaptiveHotelSetupStatus>(target, {
     method: "GET",
     url: `/api/hotel-setup/status${suffix}`,
     headers: { authorization: "Bearer valid-token" },
@@ -3663,7 +3295,6 @@ function adaptiveStatusRow(overrides: Record<string, unknown> = {}): Record<stri
     city: "Munich",
     countryCode: "DE",
     hasStreetAddress: true,
-    hasPostalCode: true,
     hasCity: true,
     hasCountryCode: true,
     hasTimezone: true,
@@ -3672,93 +3303,12 @@ function adaptiveStatusRow(overrides: Record<string, unknown> = {}): Record<stri
     propertyUpdatedAt: "2026-07-26T12:00:00.000Z",
     locationUpdatedAt: "2026-07-26T12:00:00.000Z",
     contactUpdatedAt: "2026-07-26T12:00:00.000Z",
-    hasDescription: true,
-    hasApprovedMedia: true,
-    localityPublic: true,
-    profileUpdatedAt: "2026-07-26T12:00:00.000Z",
-    mediaUpdatedAt: "2026-07-26T12:00:00.000Z",
-    hasActiveRoomType: true,
-    hasNonRetiredRoom: true,
-    hasActiveRatePlan: true,
-    hasFutureInventory: true,
-    roomTypeUpdatedAt: "2026-07-26T12:00:00.000Z",
-    roomUpdatedAt: "2026-07-26T12:00:00.000Z",
-    ratePlanUpdatedAt: "2026-07-26T12:00:00.000Z",
-    inventoryUpdatedAt: "2026-07-26T12:00:00.000Z",
-    hasCheckInPolicy: true,
-    hasCheckOutPolicy: true,
-    hasCancellationPolicy: true,
-    policyUpdatedAt: "2026-07-26T12:00:00.000Z",
-    billingPlanSelected: true,
-    billingPlanUpdatedAt: "2026-07-26T12:00:00.000Z",
-    paymentsEnabled: true,
-    paymentSettingsUpdatedAt: "2026-07-26T12:00:00.000Z",
-    hasAcceptedPaymentMethod: true,
-    hasEffectivePaymentMethod: true,
-    paymentRequiresManualReview: false,
-    bookabilityStatus: "public",
-    bookabilityFreshness: "fresh",
-    bookabilityExpired: false,
-    bookabilitySetupReady: true,
-    bookabilityMissingEmpty: true,
-    bookabilityUpdatedAt: "2026-07-26T12:00:00.000Z",
     ...overrides,
   };
 }
 
 function nonEmpty(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function setupPlanContext(input: {
-  permissions: PermissionKey[];
-  entitlements: ProductEntitlement[];
-  linkedResources?: LinkedResource[];
-}): RequestContext {
-  return {
-    actor: {
-      internalUserId: "user_hotel_owner",
-      providerIdentity: {
-        provider: "workos",
-        providerUserId: session.workosUserId,
-        sessionId: session.sessionId ?? undefined,
-        providerOrganizationId: session.workosOrgId ?? undefined,
-      },
-      email: "owner@example.com",
-      status: "active",
-    },
-    selectedOrganization: {
-      organizationId,
-      workosOrgId: session.workosOrgId ?? undefined,
-      kind: "hotel_group",
-      status: "active",
-    },
-    membership: {
-      membershipId: "membership_hotel_owner",
-      status: "active",
-      roleKey: "hotel_owner",
-      workosMembershipId: "om_hotel_owner",
-      workosRoleSlugs: ["hotel_owner"],
-      permissions: input.permissions,
-    },
-    linkedResources: input.linkedResources ?? setupPlanLinks(),
-    entitlements: input.entitlements,
-    locale: "en",
-    currency: "EUR",
-    audit: {
-      requestId: "request-plan-revision",
-      source: "api",
-      receivedAt: "2026-07-26T10:00:00.000Z",
-    },
-  };
-}
-
-function setupPlanLinks(): LinkedResource[] {
-  return [
-    propertyLink(propertyId),
-    productLink("pms", "pms_property", propertyId),
-    productLink("booking", "booking_hotel", propertyId),
-  ];
 }
 
 function adaptiveProperty(
@@ -3778,28 +3328,13 @@ function adaptiveProperty(
 function taskFacts(
   overrides: Partial<AdaptivePropertySetupFacts["taskFacts"]> = {},
 ): AdaptivePropertySetupFacts["taskFacts"] {
-  const defaults = Object.fromEntries(
-    [
-      "shared_identity",
-      "rooms_rates_availability",
-      "guest_settings_policies",
-      "billing_plan",
-      "payment",
-      "direct_booking_publication",
-    ].map((taskId) => [
-      taskId,
-      taskId === "billing_plan"
-        ? completedTaskFact("billing_plan")
-        : taskFact(taskId as SetupTaskId),
-    ]),
-  ) as AdaptivePropertySetupFacts["taskFacts"];
-  return { ...defaults, ...overrides };
+  return { shared_identity: taskFact("shared_identity"), ...overrides };
 }
 
 function taskFact(
   taskId: SetupTaskId,
-  overrides: Partial<AdaptivePropertySetupFacts["taskFacts"][SetupTaskId]> = {},
-): AdaptivePropertySetupFacts["taskFacts"][SetupTaskId] {
+  overrides: Partial<AdaptiveSetupTaskFact> = {},
+): AdaptiveSetupTaskFact {
   return {
     taskId,
     ownerProgress: "not_started",
@@ -3809,16 +3344,6 @@ function taskFact(
     freshness: "fresh",
     ...overrides,
   };
-}
-
-function completedTaskFact(
-  taskId: SetupTaskId,
-): AdaptivePropertySetupFacts["taskFacts"][SetupTaskId] {
-  return taskFact(taskId, {
-    ownerProgress: "owner_complete",
-    readiness: "complete",
-    reasonCodes: [],
-  });
 }
 
 function trackRepository(

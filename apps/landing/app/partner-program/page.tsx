@@ -225,7 +225,7 @@ export default function PartnerProgramPage() {
             </p>
             <p>
               vayada gives them a modern booking engine, PMS and channel manager in one system, plus
-              referral tracking and upselling for more direct revenue.
+              upselling for more direct revenue.
             </p>
             <p>
               As a partner, you bring trusted introductions. We handle product, onboarding and

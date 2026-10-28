@@ -119,8 +119,7 @@ export default function PricingSection() {
               </h3>
               <p className="mt-3 text-sm leading-relaxed text-gray-500 md:text-base">
                 For properties that want to use vayada&apos;s booking engine on top of their
-                existing PMS with embeddable checkout, referral tracking, guest data export, and
-                full API access.
+                existing PMS with embeddable checkout, guest data export, and full API access.
               </p>
             </div>
             <a

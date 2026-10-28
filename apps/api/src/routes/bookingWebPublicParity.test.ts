@@ -1,20 +1,11 @@
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
-import {
-  buildPublicBookabilityQuoteProjection,
-  findForbiddenPublicBookabilityKeys,
-  PUBLIC_BOOKABILITY_CONTRACT_VERSION,
-  PUBLIC_BOOKABILITY_VISIBILITY,
-  type PublicBookabilityAvailabilityOfferInput,
-  type PublicBookabilityHotelProfile,
-  type PublicBookabilityQuoteProjection,
-} from "@vayada/domain-distribution";
+import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../app.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
-import type { PublicHotelQuoteQuery, PublicHotelQuoteRepository } from "./aiHotelQuotes.js";
 import {
   toPublicHotelProfileProjection,
   type BookingHotelProfileRow,
@@ -25,10 +16,8 @@ import {
   recordTargetCheckoutCommand,
   resolveTargetCheckoutAmountSnapshot,
   targetCardPaymentIdempotencyKey,
-  type BookingWebCalendarProjection,
-  type BookingWebCalendarRepository,
-  type BookingWebCalendarReadPool,
   type BookingWebCheckoutAdapter,
+  type BookingWebQueryExecutor,
 } from "./bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js";
 
@@ -53,29 +42,6 @@ type LegacyHotelResponse = {
   defaultLanguage: string;
   supportedLanguages: string[];
   instantBook: boolean;
-};
-
-type LegacyRoomResponse = {
-  id: string;
-  name: string;
-  maxOccupancy: number;
-  maxAdults: number;
-  maxChildren: number;
-  nightlyRates: number[];
-  nonRefundableNightlyRates?: number[];
-  currency: string;
-  remainingRooms: number;
-  flexibleRateEnabled: boolean;
-  cancellationPolicy: string;
-  nonRefundableCancellationPolicy?: string;
-  ratePaymentMethods?: Record<string, string[]>;
-  rateDepositSettings?: Record<string, { enabled: boolean; percentage: number | null }>;
-};
-
-type LegacyUnavailableDatesResponse = {
-  dates: string[];
-  min_stay_by_arrival: Record<string, number>;
-  max_stay_by_arrival: Record<string, number>;
 };
 
 type ParityMismatch = {
@@ -161,37 +127,6 @@ const legacyRenamedHotel: LegacyHotelResponse = {
   slug: "alpenrose-resort",
   canonicalUrl: "https://alpenrose-resort.booking.localhost/de",
   bookingBaseUrl: "https://alpenrose-resort.booking.localhost",
-};
-
-const legacyRooms: LegacyRoomResponse[] = [
-  {
-    id: "room_deluxe",
-    name: "Deluxe Double Room",
-    maxOccupancy: 3,
-    maxAdults: 2,
-    maxChildren: 1,
-    nightlyRates: [210, 220, 230],
-    nonRefundableNightlyRates: [189, 198, 207],
-    currency: "CHF",
-    remainingRooms: 2,
-    flexibleRateEnabled: true,
-    cancellationPolicy: "Free cancellation until 7 days before arrival.",
-    nonRefundableCancellationPolicy: "Non-refundable from booking",
-    ratePaymentMethods: {
-      flexible: ["card", "pay_at_property"],
-      nonrefundable: ["card", "bank_transfer"],
-    },
-    rateDepositSettings: {
-      flexible: { enabled: false, percentage: null },
-      nonrefundable: { enabled: true, percentage: 50 },
-    },
-  },
-];
-
-const legacyUnavailableDates: LegacyUnavailableDatesResponse = {
-  dates: ["2026-09-14"],
-  min_stay_by_arrival: { "2026-09-12": 2 },
-  max_stay_by_arrival: { "2026-09-15": 7 },
 };
 
 describe("Booking Web public bootstrap parity", () => {
@@ -548,8 +483,6 @@ describe("Booking Web public bootstrap parity", () => {
   it("preserves hotel page bootstrap fields across the target adapter", async () => {
     const app = buildParityApp({
       hotel: legacyHotel,
-      rooms: legacyRooms,
-      unavailableDates: legacyUnavailableDates,
     });
 
     const response = await app.inject({
@@ -569,8 +502,6 @@ describe("Booking Web public bootstrap parity", () => {
   it("preserves host and custom-domain canonical behavior", async () => {
     const app = buildParityApp({
       hotel: legacyCustomDomainHotel,
-      rooms: legacyRooms,
-      unavailableDates: legacyUnavailableDates,
     });
 
     const response = await app.inject({
@@ -590,8 +521,6 @@ describe("Booking Web public bootstrap parity", () => {
   it("preserves old-host canonical redirects when the projection is already canonical", async () => {
     const app = buildParityApp({
       hotel: legacyRenamedHotel,
-      rooms: legacyRooms,
-      unavailableDates: legacyUnavailableDates,
       slugAliases: {
         "hotel-alpenrose": legacyRenamedHotel,
       },
@@ -605,65 +534,6 @@ describe("Booking Web public bootstrap parity", () => {
 
     expect(response.statusCode).toBe(200);
     expect(compareCanonicalRedirectParity("renamed-property-canonical", target)).toEqual([]);
-    expect(findForbiddenPublicBookabilityKeys(target)).toEqual([]);
-    await app.close();
-  });
-
-  it("maps legacy rooms to target offers for localized currency searches", async () => {
-    const app = buildParityApp({
-      hotel: legacyHotel,
-      rooms: legacyRooms,
-      unavailableDates: legacyUnavailableDates,
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=CHF&locale=de",
-    });
-    const target = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(compareOffersParity("rooms-offers-localized-currency", legacyRooms, target)).toEqual([]);
-    expect(findForbiddenPublicBookabilityKeys(target)).toEqual([]);
-    await app.close();
-  });
-
-  it("maps sold-out or empty legacy room responses to unavailable target offers", async () => {
-    const app = buildParityApp({
-      hotel: legacyHotel,
-      rooms: [],
-      unavailableDates: { dates: [], min_stay_by_arrival: {}, max_stay_by_arrival: {} },
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-10-01&check_out=2026-10-02&adults=2&children=0&rooms=1&currency=CHF&locale=de",
-    });
-    const target = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(compareSoldOutParity("sold-out-empty-rooms", target)).toEqual([]);
-    expect(findForbiddenPublicBookabilityKeys(target)).toEqual([]);
-    await app.close();
-  });
-
-  it("maps legacy unavailable dates to target calendar summaries", async () => {
-    const app = buildParityApp({
-      hotel: legacyHotel,
-      rooms: legacyRooms,
-      unavailableDates: legacyUnavailableDates,
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-20",
-    });
-    const target = response.json();
-
-    expect(response.statusCode).toBe(200);
-    expect(
-      compareCalendarParity("calendar-unavailable-dates", legacyUnavailableDates, target),
-    ).toEqual([]);
     expect(findForbiddenPublicBookabilityKeys(target)).toEqual([]);
     await app.close();
   });
@@ -700,14 +570,6 @@ describe("Booking Web public bootstrap parity", () => {
           paymentMethod: "pay_at_property",
           totalAmount: 562.5,
           currency: "EUR",
-        };
-      },
-      async createBooking(_slug, _request, context) {
-        record(context);
-        return {
-          bookingReference: "VAY-TARGET-1",
-          booking: { bookingReference: "VAY-TARGET-1", status: "confirmed" },
-          paymentInstructions: { bankTransfer: { enabled: true, details: null } },
         };
       },
       async confirmAuthorization(_slug, _handle, context) {
@@ -783,14 +645,8 @@ describe("Booking Web public bootstrap parity", () => {
       app.inject({ method: "GET", url: "/api/booking-web/hotels/hotel-alpenrose/checkout-config" }),
       app.inject({
         method: "POST",
-        url: "/api/booking-web/hotels/hotel-alpenrose/bookings",
-        headers: { "Idempotency-Key": "guest-create-1", "X-Correlation-Id": "corr-create-1" },
-        payload: { guestEmail: "guest@example.com", checkIn: "2026-09-12", checkOut: "2026-09-15" },
-      }),
-      app.inject({
-        method: "POST",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/quote",
-        headers: { "Idempotency-Key": "guest-quote-1" },
+        headers: { "Idempotency-Key": "guest-quote-1", "X-Correlation-Id": "corr-quote-1" },
         payload: { guestEmail: "guest@example.com", checkIn: "2026-09-12", checkOut: "2026-09-15" },
       }),
       app.inject({
@@ -871,12 +727,11 @@ describe("Booking Web public bootstrap parity", () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(18).fill(200));
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(17).fill(200));
     expect(operations.map((entry) => entry.operation)).toEqual(
       expect.arrayContaining([
         "checkout-config",
         "booking-quote",
-        "booking-create",
         "booking-confirm-authorization",
         "booking-status",
         "booking-lookup",
@@ -892,12 +747,10 @@ describe("Booking Web public bootstrap parity", () => {
         "promo-validate",
       ]),
     );
-    expect(operations).toHaveLength(18);
-    expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
-      "guest-create-1",
-    );
-    expect(operations.find((entry) => entry.operation === "booking-create")).toMatchObject({
-      correlationId: "corr-create-1",
+    expect(operations).toHaveLength(17);
+    expect(operations.find((entry) => entry.operation === "booking-quote")).toMatchObject({
+      idempotencyKey: "guest-quote-1",
+      correlationId: "corr-quote-1",
       occurredAt: "2026-06-06T11:00:00.000Z",
     });
     expect(
@@ -1052,7 +905,7 @@ describe("Booking Web public bootstrap parity", () => {
         calls.push({ text, values });
         return { rows: [] };
       },
-    } as unknown as BookingWebCalendarReadPool;
+    } as unknown as BookingWebQueryExecutor;
 
     await recordTargetCheckoutCommand(pool, {
       propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
@@ -1079,95 +932,6 @@ describe("Booking Web public bootstrap parity", () => {
     expect(JSON.parse(String(calls[0]?.values?.[10]))).toMatchObject({
       responseBody: { bookingReference: "VAY-123" },
     });
-  });
-
-  it("replays an identical completed checkout response without repeating side effects", async () => {
-    const replayBody = {
-      bookingReference: "B-REPLAY123",
-      booking: { bookingReference: "B-REPLAY123", paymentStatus: "unpaid" },
-      pmsHandoff: { status: "pending_handoff" },
-    };
-    const calls: string[] = [];
-    const pool = {
-      async query(text: string) {
-        calls.push(text);
-        if (text.includes("FROM hotel_catalog.property_slugs")) {
-          return {
-            rows: [
-              {
-                propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
-                displayName: "Hotel Alpenrose",
-                defaultLocale: "en",
-              },
-            ],
-          };
-        }
-        if (text.includes("FROM hotel_catalog.properties p")) {
-          return { rows: [{ phoneRequired: false, acceptedMethods: ["pay_at_property"] }] };
-        }
-        if (text.includes("FROM booking.guest_bookings booking")) {
-          return {
-            rows: [
-              {
-                guestBookingId: "b9fccec2-eb4c-4c35-bfd3-02a748c2e952",
-                propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
-                publicReference: "B-PAYPAL-1",
-                lifecycleStatus: "pending_payment",
-                paymentStatus: "unpaid",
-                checkIn: "2026-09-12",
-                checkOut: "2026-09-15",
-                adults: 2,
-                children: 0,
-                roomCount: 1,
-                currency: "EUR",
-                totalAmount: "600.00",
-                balanceAmount: "600.00",
-                bookingMetadata: { paymentMethod: "paypal" },
-                createdAt: "2026-09-01T10:00:00.000Z",
-              },
-            ],
-          };
-        }
-        if (text.includes("INSERT INTO platform.idempotency_keys")) return { rows: [] };
-        if (text.includes("FROM platform.idempotency_keys")) {
-          return {
-            rows: [
-              {
-                requestFingerprintHash: "c".repeat(64),
-                status: "completed",
-                idempotencyMetadata: { responseBody: replayBody },
-              },
-            ],
-          };
-        }
-        return { rows: [] };
-      },
-      async end() {},
-    };
-    const adapter = createTargetBookingWebCheckoutAdapter({
-      externalChanges: externalBookingChanges,
-      connectionString: "postgres://unused",
-      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
-      pool: pool as never,
-    });
-
-    await expect(
-      adapter.createBooking(
-        "hotel-alpenrose",
-        { guestEmail: "guest@example.test" },
-        {
-          operation: "booking-create",
-          requestId: "req-replay",
-          correlationId: "corr-replay",
-          idempotencyKey: "idem-replay",
-          fingerprint: "c".repeat(64),
-          occurredAt: new Date("2026-09-01T10:00:00.000Z"),
-        },
-      ),
-    ).resolves.toEqual(replayBody);
-    expect(calls.some((text) => text.includes("FROM booking.quote_sessions"))).toBe(false);
-    expect(calls.some((text) => text.includes("INSERT INTO booking.guest_bookings"))).toBe(false);
-    expect(calls.some((text) => text.includes("INSERT INTO platform.jobs"))).toBe(false);
   });
 
   it("exposes target checkout phone required settings", async () => {
@@ -1950,17 +1714,9 @@ describe("Booking Web public bootstrap parity", () => {
   afterEach(() => vi.useRealTimers());
 
   it("reports actionable parity mismatches by fixture case and field", () => {
-    const mismatches = compareCalendarParity("calendar-unavailable-dates", legacyUnavailableDates, {
-      calendar: {
-        unavailableDates: [],
-        minStayByArrival: {},
-        maxStayByArrival: {},
-      },
-    });
+    const mismatches = compareHostParity("host-canonical", legacyHotel, { slug: "other-hotel" });
 
-    expect(formatParityMismatches(mismatches)).toContain(
-      "calendar-unavailable-dates: calendar.unavailableDates",
-    );
+    expect(formatParityMismatches(mismatches)).toContain("host-canonical: slug");
   });
 
   it("documents accepted intentional differences from legacy bootstrap payloads", () => {
@@ -1996,19 +1752,13 @@ describe("Booking Web public bootstrap parity", () => {
 
 function buildParityApp(config: {
   hotel: LegacyHotelResponse;
-  rooms: LegacyRoomResponse[];
-  unavailableDates: LegacyUnavailableDatesResponse;
   slugAliases?: Record<string, LegacyHotelResponse>;
 }): ReturnType<typeof buildApp> {
   const profileRepository = createProfileRepository(config.hotel, config.slugAliases ?? {});
-  const quoteRepository = createQuoteRepository(profileRepository, config.rooms);
-  const calendarRepository = createCalendarRepository(config.unavailableDates);
 
   return buildApp({
     logger: false,
     publicHotelProfileRepository: profileRepository,
-    publicHotelQuoteRepository: quoteRepository,
-    bookingWebCalendarRepository: calendarRepository,
     bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
     bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
   });
@@ -2047,200 +1797,6 @@ function createProfileRepository(
         : null;
     },
   };
-}
-
-function createQuoteRepository(
-  profileRepository: PublicHotelProfileRepository,
-  rooms: LegacyRoomResponse[],
-): PublicHotelQuoteRepository {
-  return {
-    async findQuoteBySlug(slug, query) {
-      const profile = await profileRepository.findProfileBySlug(slug);
-      if (!profile) return null;
-      return parityQuoteProjection(profile.hotel, rooms, query);
-    },
-  };
-}
-
-function createCalendarRepository(
-  unavailableDates: LegacyUnavailableDatesResponse,
-): BookingWebCalendarRepository {
-  return {
-    async findCalendarByHotel(hotel, query): Promise<BookingWebCalendarProjection> {
-      return {
-        contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
-        generatedAt: "2026-06-06T11:00:00.000Z",
-        publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
-        request: {
-          hotelSlug: hotel.slug,
-          start: query.start ?? "",
-          end: query.end ?? "",
-        },
-        calendar: {
-          unavailableDates: unavailableDates.dates,
-          minStayByArrival: unavailableDates.min_stay_by_arrival,
-          maxStayByArrival: unavailableDates.max_stay_by_arrival,
-        },
-        freshness: {
-          status: "fresh",
-          generatedAt: "2026-06-06T11:00:00.000Z",
-          sources: [
-            {
-              owner: "pms",
-              lastUpdatedAt: "2026-06-06T11:00:00.000Z",
-              status: "fresh",
-            },
-            {
-              owner: "distribution",
-              lastUpdatedAt: "2026-06-06T11:00:00.000Z",
-              status: "fresh",
-            },
-          ],
-        },
-        dataSources: ["pms", "distribution"],
-      };
-    },
-  };
-}
-
-function parityQuoteProjection(
-  hotel: PublicBookabilityHotelProfile,
-  rooms: LegacyRoomResponse[],
-  query: PublicHotelQuoteQuery,
-): PublicBookabilityQuoteProjection {
-  const generatedAt = "2026-06-06T11:00:00.000Z";
-  const request = {
-    hotelSlug: hotel.slug,
-    checkIn: query.check_in ?? "2026-09-12",
-    checkOut: query.check_out ?? "2026-09-15",
-    nights: nightsBetween(query.check_in ?? "2026-09-12", query.check_out ?? "2026-09-15"),
-    adults: Number(query.adults ?? 2),
-    children: Number(query.children ?? 0),
-    rooms: Number(query.rooms ?? 1),
-    currency: query.currency ?? hotel.defaultCurrency,
-    locale: query.locale ?? hotel.defaultLocale,
-    promoCode: query.promo_code ?? null,
-    referralCode: query.referral_code ?? null,
-  };
-
-  return buildPublicBookabilityQuoteProjection(generatedAt, {
-    request,
-    hotelCatalog: { lastUpdatedAt: generatedAt },
-    booking: {
-      lastUpdatedAt: generatedAt,
-      offerPolicies: rooms.flatMap((room) => [
-        {
-          roomTypeId: room.id,
-          ratePlanId: "flexible",
-          cancellation: room.cancellationPolicy,
-          deposit: "No deposit required.",
-        },
-        {
-          roomTypeId: room.id,
-          ratePlanId: "nonrefundable",
-          cancellation: room.nonRefundableCancellationPolicy ?? room.cancellationPolicy,
-          deposit: "50% deposit required.",
-        },
-      ]),
-    },
-    pms: {
-      availabilityReady: true,
-      lastUpdatedAt: generatedAt,
-      offers: rooms.flatMap((room) => parityOffers(room)),
-    },
-    finance: {
-      lastUpdatedAt: generatedAt,
-      publicPaymentOptions: ["card", "pay_at_property", "bank_transfer", "paypal"],
-      supportedCurrencies: hotel.supportedCurrencies,
-    },
-    bookingWeb: {
-      offerBookingUrlBase: `${hotel.bookingBaseUrl}/${request.locale}/book`,
-    },
-    quote: {
-      quoteId: "quote_parity_001",
-      quoteHash: "sha256:parity",
-      expiresAt: "2026-06-06T11:15:00.000Z",
-      priceGuarantee: "expires_at",
-    },
-  });
-}
-
-function parityOffers(room: LegacyRoomResponse): PublicBookabilityAvailabilityOfferInput[] {
-  const flexibleTotal = sum(room.nightlyRates);
-  const nonRefundableTotal = sum(room.nonRefundableNightlyRates ?? []);
-  const flexible = {
-    offerId: `${room.id}:flexible`,
-    roomTypeId: room.id,
-    ratePlanId: "flexible",
-    name: room.name,
-    occupancy: {
-      maxAdults: room.maxAdults,
-      maxChildren: room.maxChildren,
-    },
-    availableRooms: room.remainingRooms,
-    refundable: true,
-    paymentOptions: parityPaymentOptions(room.ratePaymentMethods?.flexible, [
-      "card",
-      "pay_at_property",
-    ]),
-    totals: {
-      currency: room.currency,
-      roomTotal: flexibleTotal,
-      taxesAndFees: 0,
-      discounts: 0,
-      grandTotal: flexibleTotal,
-    },
-  };
-
-  if (!room.nonRefundableNightlyRates || room.nonRefundableNightlyRates.length === 0) {
-    return [flexible];
-  }
-
-  return [
-    flexible,
-    {
-      offerId: `${room.id}:nonrefundable`,
-      roomTypeId: room.id,
-      ratePlanId: "nonrefundable",
-      name: room.name,
-      occupancy: {
-        maxAdults: room.maxAdults,
-        maxChildren: room.maxChildren,
-      },
-      availableRooms: room.remainingRooms,
-      refundable: false,
-      paymentOptions: parityPaymentOptions(room.ratePaymentMethods?.nonrefundable, ["card"]),
-      totals: {
-        currency: room.currency,
-        roomTotal: nonRefundableTotal,
-        taxesAndFees: 0,
-        discounts: 0,
-        grandTotal: nonRefundableTotal,
-      },
-    },
-  ];
-}
-
-function parityPaymentOptions(
-  values: string[] | undefined,
-  fallback: NonNullable<PublicBookabilityAvailabilityOfferInput["paymentOptions"]>,
-): PublicBookabilityAvailabilityOfferInput["paymentOptions"] {
-  const allowed = new Set(["card", "pay_at_property", "bank_transfer", "paypal"]);
-  const options = (values ?? fallback).filter((value) => allowed.has(value));
-  return options as PublicBookabilityAvailabilityOfferInput["paymentOptions"];
-}
-
-function nightsBetween(checkIn: string, checkOut: string): number {
-  return Math.max(
-    0,
-    Math.round(
-      (Date.parse(`${checkOut}T00:00:00.000Z`) - Date.parse(`${checkIn}T00:00:00.000Z`)) / 86400000,
-    ),
-  );
-}
-
-function sum(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0);
 }
 
 function toProfileRow(hotel: LegacyHotelResponse): BookingHotelProfileRow {
@@ -2330,82 +1886,6 @@ function compareCanonicalRedirectParity(caseId: string, target: unknown): Parity
   ]);
 }
 
-function compareOffersParity(
-  caseId: string,
-  legacy: LegacyRoomResponse[],
-  target: unknown,
-): ParityMismatch[] {
-  const firstLegacyRoom = legacy[0]!;
-  const actual = target as {
-    status?: unknown;
-    request?: Record<string, unknown>;
-    quote?: { offers?: Array<Record<string, unknown>> };
-  };
-  const firstOffer = actual.quote?.offers?.[0];
-  const secondOffer = actual.quote?.offers?.[1];
-  return compareFields(caseId, [
-    ["status", "bookable", actual.status],
-    ["request.currency", firstLegacyRoom.currency, actual.request?.["currency"]],
-    ["request.locale", "de", actual.request?.["locale"]],
-    ["quote.offers.length", 2, actual.quote?.offers?.length],
-    ["quote.offers[0].roomTypeId", firstLegacyRoom.id, firstOffer?.["roomTypeId"]],
-    ["quote.offers[0].name", firstLegacyRoom.name, firstOffer?.["name"]],
-    [
-      "quote.offers[0].availableRooms",
-      firstLegacyRoom.remainingRooms,
-      firstOffer?.["availableRooms"],
-    ],
-    ["quote.offers[0].totals.roomTotal", 660, nested(firstOffer, "totals.roomTotal")],
-    ["quote.offers[0].paymentOptions", ["card", "pay_at_property"], firstOffer?.["paymentOptions"]],
-    [
-      "quote.offers[0].policies.deposit",
-      "No deposit required.",
-      nested(firstOffer, "policies.deposit"),
-    ],
-    ["quote.offers[1].ratePlanId", "nonrefundable", secondOffer?.["ratePlanId"]],
-    ["quote.offers[1].totals.roomTotal", 594, nested(secondOffer, "totals.roomTotal")],
-    ["quote.offers[1].paymentOptions", ["card", "bank_transfer"], secondOffer?.["paymentOptions"]],
-    [
-      "quote.offers[1].policies.deposit",
-      "50% deposit required.",
-      nested(secondOffer, "policies.deposit"),
-    ],
-  ]);
-}
-
-function compareSoldOutParity(caseId: string, target: unknown): ParityMismatch[] {
-  const actual = target as {
-    status?: unknown;
-    unavailableReasons?: Array<Record<string, unknown>>;
-    quote?: unknown;
-  };
-  return compareFields(caseId, [
-    ["status", "unavailable", actual.status],
-    ["unavailableReasons[0].code", "sold_out", actual.unavailableReasons?.[0]?.["code"]],
-    ["quote", undefined, actual.quote],
-  ]);
-}
-
-function compareCalendarParity(
-  caseId: string,
-  legacy: LegacyUnavailableDatesResponse,
-  target: unknown,
-): ParityMismatch[] {
-  return compareFields(caseId, [
-    ["calendar.unavailableDates", legacy.dates, nested(target, "calendar.unavailableDates")],
-    [
-      "calendar.minStayByArrival",
-      legacy.min_stay_by_arrival,
-      nested(target, "calendar.minStayByArrival"),
-    ],
-    [
-      "calendar.maxStayByArrival",
-      legacy.max_stay_by_arrival,
-      nested(target, "calendar.maxStayByArrival"),
-    ],
-  ]);
-}
-
 function compareFields(
   caseId: string,
   fields: Array<[field: string, expected: unknown, actual: unknown]>,
@@ -2432,10 +1912,3 @@ function nested(value: unknown, path: string): unknown {
     return (current as Record<string, unknown>)[segment];
   }, value);
 }
-const nights = (...amounts: string[]) =>
-  (amounts.length === 1 ? [amounts[0]!, amounts[0]!, amounts[0]!] : amounts).map(
-    (grossRoomAmount, day) => ({
-      stayDate: `2026-09-${day + 12}`,
-      grossRoomAmount,
-    }),
-  );

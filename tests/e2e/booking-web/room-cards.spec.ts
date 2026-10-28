@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockBookingApis, mockStayPrices } from "../support/bookingMocks";
+import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
+import { mockBookingApis, mockStayPrices, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 import { mockAnyPrice } from "../support/bookFlow";
 
@@ -11,7 +12,11 @@ const PHOTO = Buffer.from(
 );
 const STAY = "/?checkIn=2026-11-06&checkOut=2026-11-08&adults=2";
 
-async function mockRooms(page: Page, breakfastText?: string) {
+async function mockRooms(
+  page: Page,
+  breakfastText?: string,
+  gardenCancellation: Record<string, unknown> = { kind: "non_refundable" },
+) {
   // Free cancellation reads as a date that must not have passed yet.
   await page.clock.setFixedTime(new Date("2026-10-14T08:00:00Z"));
   await page.route("https://images.vayada.com/**", (route) =>
@@ -72,7 +77,7 @@ async function mockRooms(page: Page, breakfastText?: string) {
                 publicOfferKey: key("e"),
                 currency: "EUR",
                 mealPlan: "room_only",
-                cancellation: { kind: "non_refundable" },
+                cancellation: gardenCancellation,
               },
             ],
           },
@@ -116,6 +121,21 @@ for (const width of [1440, 390]) {
     await expect(choices).toHaveCount(3);
     await expect(choices.nth(0)).toContainText("Non-refundable");
     await expect(choices.nth(0)).toContainText("-10% OFF");
+    // VAY-2389: rate names sit on 20px lines, 6px above the description, badge or not. The 18px
+    // badge is centered on the name's line at 1440; at 390 it wraps and starts flush below it.
+    const box = async (choice: number, p: number) =>
+      (await choices.nth(choice).locator("p").nth(p).boundingBox())!;
+    const badge = (await choices.nth(0).getByText("-10% OFF").boundingBox())!;
+    const [title, terms] = [await box(0, 0), await box(0, 1)];
+    const line = width === 390 ? title.y + 20 : title.y;
+    expect(badge.height).toBe(18);
+    expect(title.height).toBe(width === 390 ? 40 : 20);
+    expect(badge.y).toBe(line + 1);
+    if (width === 390) expect(badge.x).toBe(title.x);
+    expect(terms.y - (title.y + title.height)).toBe(6);
+    const [plainTitle, plainTerms] = [await box(1, 0), await box(1, 1)];
+    expect(plainTitle.height).toBe(20);
+    expect(plainTerms.y - (plainTitle.y + plainTitle.height)).toBe(6);
     await expect(choices.nth(0)).toContainText("€268");
     await expect(choices.nth(0)).toContainText("€134 / per night");
     await expect(choices.nth(0)).toHaveAttribute("aria-pressed", "true");
@@ -144,6 +164,54 @@ for (const width of [1440, 390]) {
         `/(en/)?book\\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&offer=${encodeURIComponent(key("a")).replace(/[.]/g, "\\.")}(&step=[a-z]+)?$`,
       ),
     );
+    await assertHealthy();
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`names free cancellation non-refundable once its last day has passed at ${width}px (VAY-2392)`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    await page.addInitScript(
+      ({ slug, version }) =>
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: false }),
+        ),
+      { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+    );
+    await mockBookingApis(page);
+    // The Garden Suite's one choice is free cancellation until 3 days before arrival.
+    await mockRooms(page, undefined, { kind: "free_until_days_before_arrival", days: 3 });
+    // 4 Nov: for a stay from 6 Nov, free cancellation ended with 3 Nov.
+    await page.clock.setFixedTime(new Date("2026-11-04T08:00:00Z"));
+    await page.goto(STAY);
+
+    // Free cancellation now has the same terms as non-refundable at a higher price: only the
+    // cheaper one shows, with its saving.
+    const deluxe = page.getByTestId("room-card-deluxe").locator("[data-offer-key]");
+    await expect(deluxe).toHaveCount(2);
+    await expect(deluxe.nth(0)).toContainText("Non-refundable");
+    await expect(deluxe.nth(0)).toContainText("-10% OFF");
+    await expect(deluxe.nth(1)).toContainText("Breakfast included, non-refundable");
+    await expect(deluxe.nth(1)).toContainText(
+      "Free cancellation ends 3 days before arrival. For these dates, no refund if you cancel or don't arrive",
+    );
+    await expect(deluxe.nth(1)).not.toContainText("OFF");
+    // A room whose one choice is free cancellation reads non-refundable, never "Room only".
+    const garden = page.getByTestId("room-card-garden").locator("[data-offer-key]");
+    await expect(garden).toHaveCount(1);
+    await expect(garden).toContainText("Non-refundable");
+    await expect(garden).toContainText("Free cancellation ends 3 days before arrival.");
+    await expect(garden).not.toContainText("Room only");
+    await expect(garden).not.toContainText("OFF");
+    await page.screenshot({
+      path: testInfo.outputPath(`room-cards-window-passed-${width}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
     await assertHealthy();
   });
 }

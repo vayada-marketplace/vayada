@@ -42,7 +42,11 @@ export function useBookedRoomLine() {
       noMeals: tc2("noMeals"),
       meal: (plan) => th(`choice.meal.${plan}`),
     });
-    return [meal, rate?.cancellationTerms].filter(Boolean).join(" · ");
+    // A booked stay's free cancellation that is over has simply ended (VAY-2392).
+    const cancellation = rate?.cancellationPassed
+      ? th("choice.freeEnded")
+      : rate?.cancellationTerms;
+    return [meal, cancellation].filter(Boolean).join(" · ");
   };
 }
 

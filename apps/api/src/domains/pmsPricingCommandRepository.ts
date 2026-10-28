@@ -358,15 +358,6 @@ export function createPgPmsPricingCommandRepository(
       return execute(false, []);
     },
 
-    async upsertFlexibleRatePlan(command) {
-      throw Object.assign(
-        new Error(
-          "Legacy rate-plan writes are retired. Set prices in PMS → Pricing (pricing editor).",
-        ),
-        { statusCode: 503, code: "PRICING_RETIRED" },
-      );
-    },
-
     async close() {
       if (!ownsPool || closed) return;
       await pool.end();

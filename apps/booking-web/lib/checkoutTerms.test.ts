@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { hotelCountryName, refundSteps } from "./checkoutTerms";
+import { refundSteps } from "@vayada/domain-booking/replacement-pricing";
+import { hotelCountryName } from "./checkoutTerms";
 import { hotelToday } from "./roomChoices";
 
 it("names the hotel's country for local hotel time, never a zone name", () => {

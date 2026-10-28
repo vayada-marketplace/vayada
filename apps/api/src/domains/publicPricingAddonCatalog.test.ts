@@ -21,7 +21,11 @@ const definition = () => ({
   commission: "10",
   source: "private owner source",
 });
-function fixture(rows = [definition()], show = true, module = true) {
+function fixture(
+  rows: (ReturnType<typeof definition> & Record<string, unknown>)[] = [definition()],
+  show = true,
+  module = true,
+) {
   const query = vi.fn(async (sql: string) => {
     if (sql.includes("SELECT show_addons_step"))
       return { rows: [{ show_addons_step: show, addons_enabled: module }], rowCount: 1 };
@@ -63,6 +67,9 @@ it("projects only current public selection metadata through the real add-on owne
         maxGuests: 4,
         leadTimeHours: null,
         bookableFrom: null,
+        // VAY-2391: a per-night price is every day.
+        scheduleMode: "daily",
+        bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
       },
     ],
   });
@@ -171,6 +178,7 @@ it("validates a catalogue larger than one quote selection without truncating or 
   for (const addon of result!.addons)
     expect(Object.keys(addon).sort()).toEqual([
       "bookableFrom",
+      "bookableWeekdays",
       "currency",
       "id",
       "leadTimeHours",
@@ -178,10 +186,37 @@ it("validates a catalogue larger than one quote selection without truncating or 
       "maxQuantity",
       "name",
       "pricingModel",
+      "scheduleMode",
     ]);
   expect(
     f.query.mock.calls.filter(([sql]) => sql.includes("FROM booking.addon_definitions a")),
   ).toHaveLength(2);
   rows[99].amount = "1.001";
   expect(await fixture(rows).read()).toBeNull();
+});
+
+it("serves when each add-on happens and the weekdays a guest can pick (VAY-2391)", async () => {
+  const transfer = {
+    ...definition(),
+    pricing_model: "per_stay",
+    schedule_mode: "arrival",
+    bookable_weekdays: [1, 2, 3, 4, 5, 6, 7],
+  };
+  const dinner = {
+    ...definition(),
+    id: "33333333-3333-4333-8333-333333333333",
+    pricing_model: "per_guest",
+    schedule_mode: "guest_pick",
+    bookable_weekdays: [5, 6],
+  };
+  expect((await fixture([transfer, dinner]).read())?.addons).toMatchObject([
+    { id, scheduleMode: "arrival", bookableWeekdays: [1, 2, 3, 4, 5, 6, 7] },
+    { id: dinner.id, scheduleMode: "guest_pick", bookableWeekdays: [5, 6] },
+  ]);
+  // A one-off price is never every day: the guest picks the day.
+  expect(
+    (await fixture([{ ...transfer, schedule_mode: "daily" }]).read())?.addons[0].scheduleMode,
+  ).toBe("guest_pick");
+  for (const broken of [{ schedule_mode: "weekly" }, { bookable_weekdays: [0] }])
+    expect(await fixture([{ ...dinner, ...broken }]).read()).toBeNull();
 });
