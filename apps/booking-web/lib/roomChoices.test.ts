@@ -1,17 +1,20 @@
+import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
-import messages from "../messages/en.json";
 import { freeCancellationUntil } from "@vayada/domain-booking/replacement-pricing";
+import de from "../messages/de.json";
+import en from "../messages/en.json";
+import es from "../messages/es.json";
+import fr from "../messages/fr.json";
+import id from "../messages/id.json";
 import { choiceKeys, choiceText, hotelToday } from "./roomChoices";
 import type { PricingOffer } from "@/services/api/replacementOffers";
 
-const choice = messages.home.choice as unknown as Record<string, unknown>;
-const t = (key: string, values: Record<string, string | number> = {}) => {
-  const text = key
-    .split(".")
-    .slice(1)
-    .reduce<unknown>((node, part) => (node as Record<string, unknown>)[part], choice) as string;
-  return text.replace(/\{(\w+)\}/g, (_, name: string) => String(values[name]));
-};
+function translator(locale: string, messages: unknown) {
+  const tr = createTranslator({ locale, messages: messages as typeof en, namespace: "home" });
+  return (key: string, values?: Record<string, string | number>) =>
+    tr(key as never, values as never);
+}
+const t = translator("en", en);
 const offer = (
   mealPlan: PricingOffer["mealPlan"],
   cancellation?: PricingOffer["cancellation"],
@@ -41,9 +44,9 @@ describe("room choices", () => {
         offer("room_only"),
       ]),
     ).toEqual([
-      "Free cancellation | Free cancellation until 2026-11-03",
+      "Free cancellation | Free cancellation until 2026-11-03, 23:59 (local time)",
       "Non-refundable | No refund if you cancel or don't arrive",
-      "Breakfast included | Breakfast every morning · Free cancellation until 2026-11-03",
+      "Breakfast included | Breakfast every morning · Free cancellation until 2026-11-03, 23:59 (local time)",
       "Breakfast included, non-refundable | Breakfast every morning · No refund if you cancel or don't arrive",
       "Half board, partial refund | Breakfast and dinner every day · Part of the price is refunded if you cancel. See our terms on the next step",
       "Room only | ",
@@ -57,7 +60,7 @@ describe("room choices", () => {
         offer("breakfast", { kind: "non_refundable" }),
       ]),
     ).toEqual([
-      "Breakfast included | Buffet breakfast, 7:00–10:30 · Free cancellation until 2026-11-03",
+      "Breakfast included | Buffet breakfast, 7:00–10:30 · Free cancellation until 2026-11-03, 23:59 (local time)",
       "Breakfast included, non-refundable | Breakfast every morning · No refund if you cancel or don't arrive",
     ]);
   });
@@ -72,29 +75,72 @@ describe("room choices", () => {
     ).toEqual(["Free cancellation", "Free cancellation 2", "Free cancellation 3"]);
   });
 
-  it("drops free cancellation once its last day has passed in the hotel's time zone", () => {
+  it("names free cancellation non-refundable once its last day has passed in the hotel's time zone (VAY-2392)", () => {
     const keys = choiceKeys([offer("breakfast", free(3))])[0]!;
     // The last free day itself still counts, as on the old booking page.
     expect(choiceText(keys, { ...stay, checkIn: "2026-10-17" }, t, now)).toMatchObject({
       name: "Breakfast included",
+      refundable: true,
       cancellationPassed: false,
     });
+    const passed =
+      "Free cancellation ends 3 days before arrival. For these dates, no refund if you cancel or don't arrive";
     expect(choiceText(keys, { ...stay, checkIn: "2026-10-16" }, t, now)).toEqual({
-      name: "Breakfast included",
-      terms: "Breakfast every morning · Free cancellation is no longer available for these dates",
+      name: "Breakfast included, non-refundable",
+      terms: `Breakfast every morning · ${passed}`,
       meal: "Breakfast included",
-      cancellationTerms: "Free cancellation is no longer available for these dates",
-      refundable: null,
+      cancellationTerms: passed,
+      refundable: false,
       cancellationPassed: true,
     });
+    // Never the meal as the name: a room-only rate reads "Non-refundable", whatever the language.
+    const roomOnly = (days: number) => choiceKeys([offer("room_only", free(days))])[0]!;
+    expect(choiceText(roomOnly(3), { ...stay, checkIn: "2026-10-16" }, t, now)).toMatchObject({
+      name: "Non-refundable",
+      terms: passed,
+    });
+    expect(choiceText(roomOnly(1), { ...stay, checkIn: "2026-10-14" }, t, now).terms).toBe(
+      "Free cancellation ends 1 day before arrival. For these dates, no refund if you cancel or don't arrive",
+    );
+    for (const [locale, messages] of Object.entries({ de, es, fr, id })) {
+      const tl = translator(locale, messages);
+      const text = choiceText(roomOnly(3), { ...stay, checkIn: "2026-10-16" }, tl, now);
+      expect(text.name, locale).toBe(tl("choice.nonRefundable"));
+      expect(text.terms, locale).toMatch(/3/);
+      expect(text.terms, locale).not.toMatch(/[{}#]/);
+    }
+  });
+
+  it("numbers a passed free cancellation after the room's own non-refundable choice (VAY-2392)", () => {
+    const inside = { ...stay, checkIn: "2026-10-16" };
+    const names = (offers: PricingOffer[], forStay?: typeof stay) =>
+      choiceKeys(offers, forStay, now).map(
+        (keys) => choiceText(keys, forStay ?? stay, t, now).name,
+      );
     expect(
-      choiceText(
-        choiceKeys([offer("room_only", free(3))])[0]!,
-        { ...stay, checkIn: "2026-10-16" },
-        t,
-        now,
-      ).name,
-    ).toBe("Room only");
+      names([offer("room_only", free(3)), offer("room_only", { kind: "non_refundable" })], inside),
+    ).toEqual(["Non-refundable 2", "Non-refundable"]);
+    // A free cancellation that is still open keeps the plain name once the other has passed.
+    expect(names([offer("room_only", free(7)), offer("room_only", free(1))], inside)).toEqual([
+      "Non-refundable",
+      "Free cancellation",
+    ]);
+    // Without the stay, the names are numbered as before.
+    expect(names([offer("room_only", free(7)), offer("room_only", free(1))])).toEqual([
+      "Free cancellation",
+      "Free cancellation 2",
+    ]);
+  });
+
+  it("judges the deadline on the hotel's calendar, not UTC's (VAY-2392)", () => {
+    // Free until the 15th; 20:00 UTC on the 15th is already the 16th in Colombo.
+    const keys = choiceKeys([offer("room_only", free(3))])[0]!;
+    const at = new Date("2026-10-15T20:00:00Z");
+    const passed = (timezone: string) =>
+      choiceText(keys, { ...stay, checkIn: "2026-10-18", timezone }, t, at).cancellationPassed;
+    expect(passed("Asia/Colombo")).toBe(true);
+    expect(passed("Etc/UTC")).toBe(false);
+    expect(passed("America/Los_Angeles")).toBe(false);
   });
 
   it("names a choice before the stay's dates are known", () => {

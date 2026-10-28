@@ -7,6 +7,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { choiceKeys, choiceText } from "@/lib/roomChoices";
 import { combinable, type RoomGuests } from "@/lib/roomPicker";
+import { serverNow } from "@/lib/serverClock";
 import { resolveLocale } from "@/lib/utils";
 import type { PricingOffer, PricingRoom } from "@/services/api/replacementOffers";
 import { quoteMoneyAmount } from "@/services/api/replacementOffers";
@@ -132,7 +133,9 @@ export default function RoomCard({
         ...(pick.guests.children ? [tc("children", { count: pick.guests.children })] : []),
       ].join(", ")
     : "";
-  const keys = choiceKeys(room.offers);
+  // The server's clock, as checkout judges the deadline (VAY-2392).
+  const now = new Date(serverNow());
+  const keys = choiceKeys(room.offers, { checkIn, timezone }, now);
   const all = room.offers.map((offer, index) => {
     const price = prices?.offers.find((p) => p.publicOfferKey === offer.publicOfferKey);
     return {
@@ -141,6 +144,7 @@ export default function RoomCard({
         keys[index]!,
         { checkIn, timezone, formatDate: (date) => shortDate(date, locale) },
         t,
+        now,
       ),
       priced: price?.status === "priced" ? price : null,
       unavailable: !!prices && price?.status !== "priced" && price?.status !== "unpriced",
@@ -152,8 +156,9 @@ export default function RoomCard({
         (unpricedRoom || price?.status === "priced" || price?.status === "unpriced"),
     };
   });
-  // A choice whose free cancellation has passed is hidden while the same meal is still bookable
-  // in another choice (old VAY-370 rule); otherwise it stays, saying cancellation has passed.
+  // A choice whose free cancellation has passed is hidden while another choice of the same meal
+  // isn't ruled out (old VAY-370 rule, also while prices load); otherwise it stays, named
+  // non-refundable with the reason.
   const shown = all
     .filter(
       (choice) =>
@@ -162,7 +167,8 @@ export default function RoomCard({
           (other) =>
             other !== choice &&
             !other.text.cancellationPassed &&
-            other.bookable &&
+            !other.unavailable &&
+            !paidDifferently(other.offer) &&
             other.offer.mealPlan === choice.offer.mealPlan,
         ),
     )
@@ -190,11 +196,16 @@ export default function RoomCard({
     const approx = approximate(value, currency);
     return approx ? `${exact} (${approx})` : exact;
   };
+  // A no-refund rate's saving on the same meal's cheapest refundable rate, else on one whose free
+  // cancellation has passed and is hidden (VAY-2392, as Timo's prototype shows); never on the
+  // passed rate itself.
   const discount = (choice: (typeof shown)[number]) => {
-    if (choice.text.refundable !== false) return undefined;
-    const refundable = shown.find(
-      (other) => other.text.refundable === true && other.offer.mealPlan === choice.offer.mealPlan,
-    );
+    if (choice.text.refundable !== false || choice.text.cancellationPassed) return undefined;
+    const sameMeal = (other: (typeof shown)[number]) =>
+      other.offer.mealPlan === choice.offer.mealPlan && !!other.priced;
+    const refundable =
+      shown.find((other) => other.text.refundable === true && sameMeal(other)) ??
+      all.find((other) => other.text.cancellationPassed && sameMeal(other));
     const own = amount(choice),
       base = refundable ? amount(refundable) : null;
     return own !== null && base ? Math.round((1 - own / base) * 100) : undefined;

@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import { Link } from "@/i18n/navigation";
 import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import { serverNow } from "@/lib/serverClock";
 import { resolveLocale } from "@/lib/utils";
 import { roomGuestProblem } from "@/lib/roomPicker";
 import type { PricingRoom, RoomChoice } from "@/services/api/replacementOffers";
@@ -88,6 +89,8 @@ export default function RoomGuestsStep({
   const th = useTranslations("home");
   const tc = useTranslations("common");
   const locale = useLocale();
+  // The server's clock, as the rest of checkout judges free cancellation's deadline (VAY-2392).
+  const now = new Date(serverNow());
   return (
     <div className="space-y-4" data-testid="room-guests-step">
       <p className="text-gray-600">{t("intro")}</p>
@@ -100,7 +103,7 @@ export default function RoomGuestsStep({
         const rate =
           room && offerIndex >= 0
             ? choiceText(
-                choiceKeys(room.offers)[offerIndex]!,
+                choiceKeys(room.offers, { checkIn, timezone }, now)[offerIndex]!,
                 {
                   checkIn,
                   timezone,
@@ -112,6 +115,7 @@ export default function RoomGuestsStep({
                     }),
                 },
                 th,
+                now,
               )
             : null;
         const problem = roomGuestProblem(room, choice);

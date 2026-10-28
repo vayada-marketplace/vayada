@@ -132,10 +132,11 @@
       "partialRefund": "Reembolso parcial",
       "mealNonRefundable": "{meal}, no reembolsable",
       "mealPartialRefund": "{meal}, reembolso parcial",
-      "freeUntil": "Cancelación gratuita hasta el {date}",
+      "freeUntil": "Cancelación gratuita hasta el {date}, 23:59 (hora local)",
       "noRefund": "Sin reembolso si cancela o no se presenta",
       "partialRefundTerms": "Si cancela, le devolvemos parte del precio. Verá nuestras condiciones en el siguiente paso",
-      "noLongerFree": "Para estas fechas ya no hay cancelación gratuita",
+      "windowPassed": "La cancelación gratuita termina {days, plural, one {# día} other {# días}} antes de la llegada. Para estas fechas, no hay reembolso si cancela o no se presenta",
+      "freeEnded": "La cancelación gratuita ha terminado",
       "meal": {
         "room_only": "Solo alojamiento",
         "breakfast": "Desayuno incluido",
