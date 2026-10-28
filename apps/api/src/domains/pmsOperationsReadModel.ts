@@ -212,6 +212,10 @@ export type PmsOperationalReservation = {
   cancellationOutcome?: BookedCancellationOutcome | null;
   /** The stay's latest automatic card refund (VAY-2205): failed ones need the hotel. */
   cardRefund?: PmsCardRefund;
+  /** When the booking row was made (Booking Detail only): booked after free cancellation's last
+   * day, it was never free to cancel (VAY-2392). Right for PMS manual bookings, the only ones the
+   * reservation's cancellation panel shows; a booking-page stay's row predates its acceptance. */
+  bookedAt?: PmsUtcDateTime;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: ReturnType<typeof projectBookingRoomSelection>["roomLines"];
@@ -911,6 +915,7 @@ type TargetPmsOperationalReservationRow = {
   additionalGuestCount: string | number;
   cancellationOutcome?: unknown;
   cardRefund?: unknown;
+  bookedAt?: Date | string | null;
   bookedRoomTypeId: string;
   selectedRoomOffer?: unknown;
   bookedRoomName: string;
@@ -1080,7 +1085,8 @@ function pmsOperationalReservationSelectSql(
   COALESCE(private_notes.note_count, 0) AS "privateNoteCount",
   COALESCE(additional_guests.guest_count, 0) AS "additionalGuestCount",
   ${bookedCancellation ? CANCELLATION_OUTCOME_SQL : "NULL::jsonb"} AS "cancellationOutcome",
-  ${bookedCancellation ? CARD_REFUND_SQL : "NULL::jsonb"} AS "cardRefund"
+  ${bookedCancellation ? CARD_REFUND_SQL : "NULL::jsonb"} AS "cardRefund",
+  ${bookedCancellation ? "booking.created_at" : "NULL::timestamptz"} AS "bookedAt"
 FROM booking.guest_bookings booking
 LEFT JOIN booking.quote_sessions quote
   ON quote.id = booking.quote_session_id
@@ -1571,6 +1577,9 @@ function toPmsOperationalReservation(
       ? { cancellationOutcome: toCancellationOutcome(row.cancellationOutcome) }
       : {}),
     ...(toCardRefund(row.cardRefund) ? { cardRefund: toCardRefund(row.cardRefund)! } : {}),
+    ...(toIsoDateTimeOrNull(row.bookedAt ?? null)
+      ? { bookedAt: toIsoDateTimeOrNull(row.bookedAt ?? null)! }
+      : {}),
     ...(bookedRoomTypeId && bookedRoomName
       ? { bookedOffer: { roomTypeId: bookedRoomTypeId, roomName: bookedRoomName } }
       : {}),

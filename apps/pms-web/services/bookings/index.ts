@@ -87,6 +87,8 @@ export interface Booking {
   /** Recorded when the guest's cancellation applied the booked terms. */
   cancellationOutcome?: BookingCancellationOutcome | null;
   cardRefund?: BookingCardRefund | null;
+  /** When the booking was made, when the PMS sends it (Booking Detail, VAY-2392). */
+  bookedAt?: string | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -408,6 +410,8 @@ type PmsOperationalReservation = {
   checkout: { completedAt: string | null; pendingFlags: string[] };
   cancellationOutcome?: BookingCancellationOutcome | null;
   cardRefund?: BookingCardRefund;
+  /** When the booking was made; Booking Detail only (VAY-2392). */
+  bookedAt?: string;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: Array<{
@@ -1535,6 +1539,7 @@ function toBooking(
     awaitingPaymentConfirmation: reservation.awaitingHotelPaymentConfirmation === true,
     cancellationOutcome: reservation.cancellationOutcome ?? null,
     cardRefund: reservation.cardRefund ?? null,
+    bookedAt: reservation.bookedAt ?? null,
     platformFeeAmount: null,
     affiliateCommissionAmount: null,
     propertyPayoutAmount: null,

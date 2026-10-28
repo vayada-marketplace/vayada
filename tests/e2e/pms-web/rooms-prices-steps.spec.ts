@@ -421,6 +421,14 @@ test("edits a priced room on the simple card and publishes only what changed (VA
     "aria-checked",
     "true",
   );
+  // VAY-2392: what guests booking inside those 7 days get.
+  await main(page).getByRole("button", { name: "7 days", exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("rates-last-minute-hint.png") });
+  await expect(
+    main(page).getByText(
+      "Guests booking less than 7 days before arrival can't cancel for free. The booking engine shows this rate as Non-refundable for those dates.",
+    ),
+  ).toBeVisible();
   // The Save bar: the lowest night is the Low season's €80, 10% less on the Non-refundable rate.
   await expect(
     main(page).getByText("Guests from €72 a night on your booking page.", { exact: true }),
