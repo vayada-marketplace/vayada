@@ -11,6 +11,7 @@ import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommand
 import { PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD } from "./domains/pmsPricingCurrencyCapabilities.js";
 import {
   createHotelSetupOrdinaryLoginFixture,
+  listOrdinaryPostureViolations,
   type HotelSetupOrdinaryLoginFixture,
 } from "./hotelSetupOrdinaryLogin.fixture.js";
 
@@ -60,6 +61,56 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       if (TEST_DATABASE_URL) await cleanup();
     } finally {
       await admin.end();
+    }
+  });
+
+  // VAY-2395's lesson: FOR SHARE / FOR UPDATE need UPDATE on the locked table. The fixture carries the
+  // platform runtime grant contract (grant-target-database-runtime-product-dml.mjs, #594); this pins
+  // every table the change writes, locks or reads on that login.
+  it("runs on the runtime grant contract: UPDATE wherever it writes or locks, SELECT where it counts", async () => {
+    expect(await listOrdinaryPostureViolations(admin)).toEqual([]);
+    const tables = {
+      "hotel_catalog.properties": ["SELECT", "UPDATE"],
+      "pms.property_pricing_settings": ["SELECT", "UPDATE"],
+      "finance.payment_settings": ["SELECT", "UPDATE"],
+      "booking.addon_definitions": ["SELECT", "UPDATE"],
+      "booking.promo_definitions": ["SELECT", "UPDATE"],
+      "booking.booking_settings": ["SELECT", "UPDATE"],
+      "booking.guest_bookings": ["SELECT"],
+      "pms.channel_connections": ["SELECT"],
+      "pms.channel_binding_claims": ["SELECT"],
+      "finance.expenses": ["SELECT"],
+      "finance.folio_revisions": ["SELECT"],
+      "finance.recurring_expense_rules": ["SELECT"],
+      "platform.product_audit_events": ["INSERT"],
+    } as const;
+    for (const [table, privileges] of Object.entries(tables)) {
+      for (const privilege of privileges) {
+        const granted = await admin.query<{ granted: boolean }>(
+          "SELECT has_table_privilege($1, $2, $3) AS granted",
+          [fixture.login, table, privilege],
+        );
+        expect({ table, privilege, granted: granted.rows[0]?.granted }).toEqual({
+          table,
+          privilege,
+          granted: true,
+        });
+      }
+    }
+    // The identity rows the scope check locks FOR SHARE / FOR KEY SHARE need an UPDATE-able column too.
+    for (const table of [
+      "identity.organizations",
+      "identity.users",
+      "identity.organization_memberships",
+      "identity.organization_resource_links",
+      "identity.product_entitlements",
+      "identity.role_permission_grants",
+    ]) {
+      const granted = await admin.query<{ granted: boolean }>(
+        "SELECT has_any_column_privilege($1, $2, 'UPDATE') AS granted",
+        [fixture.login, table],
+      );
+      expect({ table, granted: granted.rows[0]?.granted }).toEqual({ table, granted: true });
     }
   });
 
