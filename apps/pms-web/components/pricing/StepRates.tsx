@@ -430,6 +430,12 @@ function FlexibleParts({
                 </button>
               ))}
             </div>
+            {/* VAY-2392: what last-minute guests get (nobody, when it's free until arrival). */}
+            {days > 0 && (
+              <p className="text-[12px] text-gray-500">
+                {t("pricing.rates.freeUntilHint", { days: dayText(days) })}
+              </p>
+            )}
           </div>
         ) : (
           <p className="text-[13px] text-gray-700">
