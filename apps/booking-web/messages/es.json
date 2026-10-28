@@ -53,7 +53,6 @@
   },
   "nav": {
     "contact": "Contacto",
-    "referGuest": "Referir un Huésped",
     "phone": "Teléfono",
     "whatsapp": "WhatsApp",
     "email": "Correo electrónico"
@@ -626,33 +625,6 @@
         "per_guest_night": "{amount} por huésped y noche"
       }
     }
-  },
-  "refer": {
-    "title": "Referir un Huésped",
-    "step1Desc": "Gana un 5% de comisión en cada reserva realizada a través de tu enlace.",
-    "step2Desc": "Conecta tu cuenta de Stripe para recibir comisiones automáticamente.",
-    "step3Desc": "¡Comparte tu enlace único para empezar a ganar!",
-    "fullName": "Nombre Completo",
-    "emailAddress": "Correo Electrónico",
-    "socialMedia": "Redes Sociales / Canal (Opcional)",
-    "iAmA": "Soy un/a...",
-    "guest": "Huésped",
-    "creator": "Creador/a",
-    "paymentMethod": "Configurar pagos",
-    "connectWithStripe": "Conectar con Stripe",
-    "stripeOnboardingOpened": "Onboarding de Stripe abierto — complétalo en la nueva pestaña",
-    "paypal": "PayPal",
-    "bankTransfer": "Transferencia Bancaria",
-    "paypalEmail": "Correo de PayPal",
-    "iban": "IBAN / Número de Cuenta",
-    "accountHolder": "Titular de la Cuenta",
-    "swiftBic": "SWIFT / BIC",
-    "bankName": "Nombre del Banco",
-    "bankCountry": "País",
-    "generateLink": "Generar Enlace",
-    "yourReferralLink": "Tu Enlace de Referido",
-    "commissionInfo": "Recibirás el <strong>5%</strong> de los ingresos totales de la reserva por cada reserva directa exitosa realizada a través de tu enlace.",
-    "pendingReview": "Tu solicitud está pendiente de revisión. Te notificaremos en <strong>{email}</strong> una vez aprobada."
   },
   "requestChange": {
     "title": "Solicitar un cambio de reserva",

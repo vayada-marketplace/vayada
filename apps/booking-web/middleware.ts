@@ -48,10 +48,9 @@ function isLocalHost(hostname: string): boolean {
 
 // The room list, add-on and payment pages of the retired booking flow (VAY-1543 C.2)
 // answer a real permanent redirect to the room-and-price page, so crawlers and other
-// clients without JavaScript see it too. Only what /book reads carries over, plus the
-// referral code so old shared links keep their attribution.
+// clients without JavaScript see it too. Only what /book reads carries over.
 const retiredBookingPagePath = /^(?:\/([^/]+))?\/(?:rooms|addons|payment)\/?$/;
-const bookPageParams = ["checkIn", "checkOut", "adults", "children", "promoCode", "ref"];
+const bookPageParams = ["checkIn", "checkOut", "adults", "children", "promoCode"];
 
 async function retiredBookingPageRedirect(request: NextRequest): Promise<NextResponse | null> {
   const match = retiredBookingPagePath.exec(request.nextUrl.pathname);

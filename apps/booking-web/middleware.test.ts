@@ -52,13 +52,13 @@ describe("Booking Web retired booking pages", () => {
     return middleware(new NextRequest(`https://${host}${path}`, { headers }));
   }
 
-  it("permanently redirects the retired pages to /book, keeping only what /book reads and the referral", async () => {
+  it("permanently redirects the retired pages to /book, keeping only what /book reads", async () => {
     const response = await visit(
       "/en/rooms?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&ref=FRIEND&room=alpine&rateType=flexible",
     );
     expect(response.status).toBe(308);
     expect(response.headers.get("location")).toBe(
-      `https://${host}/book?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&ref=FRIEND`,
+      `https://${host}/book?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20`,
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(bookingWebPublicApi.resolveHost).not.toHaveBeenCalled();

@@ -26,7 +26,6 @@ export interface HotelBranding {
 
 export interface HotelHeaderSettings {
   showContactButton: boolean;
-  showReferAGuestButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
 }
@@ -73,7 +72,6 @@ export interface Hotel {
   defaultLanguage: string;
   supportedLanguages: string[];
   guestTypeSettings?: GuestTypeSettings;
-  referAGuestEnabled?: boolean;
   instantBook?: boolean;
   /** Guests can enter a promo code: the hotel's Promos switch is on and a code is live (VAY-2200). */
   promoCodesEnabled?: boolean;

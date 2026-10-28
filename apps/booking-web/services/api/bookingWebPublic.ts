@@ -28,7 +28,6 @@ export type BookingWebPublicHotelResponse = {
     branding?: {
       logoUrl?: string | null;
       showContactButton?: boolean;
-      showReferAGuestButton?: boolean;
       showLanguageSelector?: boolean;
       showCurrencySelector?: boolean;
       displayCurrencies?: string[];
@@ -58,7 +57,6 @@ export type BookingWebPublicHotelResponse = {
       onlinePayment: boolean;
       payAtProperty: boolean;
       promoCodes: boolean;
-      referralCodes: boolean;
       bookingDeepLinks: boolean;
     };
     supportedQuoteParameters: {
@@ -192,7 +190,6 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
       : undefined,
     headerSettings: {
       showContactButton: hotel.branding?.showContactButton ?? true,
-      showReferAGuestButton: hotel.branding?.showReferAGuestButton ?? false,
       showLanguageSelector: hotel.branding?.showLanguageSelector ?? true,
       showCurrencySelector: hotel.branding?.showCurrencySelector ?? true,
     },
@@ -202,8 +199,6 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
       adultAgeThreshold: hotel.supportedQuoteParameters.adultAgeThreshold ?? 18,
       childrenEnabled: hotel.supportedQuoteParameters.childrenSupported,
     },
-    // New public enrolment is retired; existing referral-code attribution remains supported.
-    referAGuestEnabled: false,
     instantBook: hotel.capabilities.instantBook,
     promoCodesEnabled: hotel.capabilities.promoCodes,
   };

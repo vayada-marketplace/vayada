@@ -41,7 +41,6 @@ function publicHotelResponse(
         onlinePayment: false,
         payAtProperty: true,
         promoCodes: false,
-        referralCodes: false,
         bookingDeepLinks: true,
       },
       supportedQuoteParameters: {
@@ -112,12 +111,11 @@ describe("Booking Web public hotel adapter", () => {
     expect(hotel.currency).toBe("EUR");
   });
 
-  it("maps header visibility and keeps Refer a Guest behind the active module", () => {
+  it("maps header visibility", () => {
     const response = publicHotelResponse();
     response.hotel.branding = {
       logoUrl: null,
       showContactButton: false,
-      showReferAGuestButton: true,
       showLanguageSelector: false,
       showCurrencySelector: true,
       heroImage: null,
@@ -133,11 +131,7 @@ describe("Booking Web public hotel adapter", () => {
         showLanguageSelector: false,
         showCurrencySelector: true,
       },
-      referAGuestEnabled: false,
     });
-
-    response.hotel.capabilities.referralCodes = true;
-    expect(toLegacyHotel(response).referAGuestEnabled).toBe(false);
   });
 
   it("tells the booking pages whether guests can use promo codes (VAY-2200)", () => {
