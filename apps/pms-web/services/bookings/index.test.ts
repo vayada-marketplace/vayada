@@ -23,6 +23,7 @@ vi.mock("../api/unsupported", () => ({
 }));
 
 import { assignedRoomName, bookingsService, HIDDEN_GUEST_CONTACT } from ".";
+import { ApiErrorResponse } from "../api/client";
 import { calendarService } from "../calendar";
 import { createElement } from "react";
 import { create } from "react-test-renderer";
@@ -99,6 +100,25 @@ describe("PMS target booking projection", () => {
     expect(bookingSettlementLabel({ ...booking, balanceAmount: 0, paymentStatus: "paid" })).toBe(
       "Amount unverified",
     );
+  });
+
+  it("loads bookings for a role without Rooms & rates, named after the booked offer (VAY-2168)", async () => {
+    mocks.get.mockImplementation(async (requested: string) => {
+      if (requested.endsWith("/room-types")) throw new ApiErrorResponse(403, { detail: "No" });
+      return requested.includes("/reservations/")
+        ? { item: reservation }
+        : reservationPage(reservation);
+    });
+    expect((await bookingsService.list()).bookings.map((booking) => booking.roomName)).toEqual([
+      "Munich Booking Room",
+    ]);
+    expect((await bookingsService.get("booking-1")).roomName).toBe("Munich Booking Room");
+    // Any other failure still fails the list.
+    mocks.get.mockImplementation(async (requested: string) => {
+      if (requested.endsWith("/room-types")) throw new ApiErrorResponse(503, { detail: "Down" });
+      return reservationPage(reservation);
+    });
+    await expect(bookingsService.list()).rejects.toThrow(ApiErrorResponse);
   });
 
   it("labels what a part-paid booking still owes, not its total", () => {

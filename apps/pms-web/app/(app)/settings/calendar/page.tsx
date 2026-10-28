@@ -13,6 +13,7 @@ import { CalendarSection } from "@/components/settings/CalendarSection";
 import { SettingsFeedback } from "@/components/settings/SettingsFeedback";
 import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import { humanizeApiError } from "@/components/settings/constants";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 
 export default function CalendarSettingsPage() {
   const { t } = useTranslation();
@@ -28,6 +29,10 @@ export default function CalendarSettingsPage() {
   const [calendarLoading, setCalendarLoading] = useState(true);
   const [calendarSaving, setCalendarSaving] = useState(false);
   const [calendarLoadError, setCalendarLoadError] = useState("");
+  // Room assignment and auto-open take operations access, even to read; same-day booking can be
+  // read with settings access and changed only with settings manage (VAY-2154).
+  const canEditAssignments = useHasPmsPermission("pms.operations.manage");
+  const canEditSameDay = useHasPmsPermission("pms.settings.manage");
 
   const loadCalendarSettings = useCallback(async () => {
     setCalendarLoading(true);
@@ -70,9 +75,9 @@ export default function CalendarSettingsPage() {
   }, [t]);
 
   useEffect(() => {
-    void loadCalendarSettings();
+    if (canEditAssignments) void loadCalendarSettings();
     void loadSameDayBooking();
-  }, [loadCalendarSettings, loadSameDayBooking]);
+  }, [canEditAssignments, loadCalendarSettings, loadSameDayBooking]);
 
   const saveAutoRearrange = async (enabled: boolean) => {
     setCalendarSaving(true);
@@ -113,13 +118,15 @@ export default function CalendarSettingsPage() {
     >
       <SettingsFeedback error={error} success={success} />
       <CalendarSection
+        canEditAssignments={canEditAssignments}
+        canEditSameDay={canEditSameDay}
         enabled={autoRearrangeEnabled}
         loading={calendarLoading}
         saving={calendarSaving}
         loadError={calendarLoadError}
         onToggle={(next) => void saveAutoRearrange(next)}
         onRetry={() => void loadCalendarSettings()}
-        autoOpenEditor={<CalendarAutoOpenEditor />}
+        autoOpenEditor={canEditAssignments ? <CalendarAutoOpenEditor /> : null}
         sameDayEnabled={sameDayEnabled}
         sameDayCutoffTime={sameDayCutoffTime}
         sameDayTimeZone={sameDayTimeZone}

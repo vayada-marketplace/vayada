@@ -20,3 +20,9 @@ export function usePmsAccess(): PmsSelfAccess {
   if (!access) throw new Error("PMS access was not loaded");
   return access;
 }
+
+/** Whether this member holds `permission`. Settings saves check the same key in the API, so a page
+ * shows a section read-only, or not at all, when the role lacks it (VAY-2154). */
+export function useHasPmsPermission(permission: string): boolean {
+  return usePmsAccess().permissions.includes(permission);
+}

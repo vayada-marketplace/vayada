@@ -254,6 +254,9 @@ export const PMS_WEB_OWNER_PERMISSIONS = [
   "booking.settings.manage",
   "booking.settings.read",
   "finance.billing.manage",
+  // Real owners hold both (0024, 0025); Settings → Property checks the manage key (VAY-2154).
+  "hotel_catalog.setup.manage",
+  "hotel_catalog.setup.read",
   "identity.staff.manage",
   "pms.calendar.manage",
   "pms.calendar.read",

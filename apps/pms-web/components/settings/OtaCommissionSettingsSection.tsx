@@ -14,6 +14,8 @@ import {
   otaCommissionFormErrors,
 } from "@/lib/settings/otaCommissions";
 import { useTranslation } from "@/lib/i18n";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
+import { SettingsAccessNote } from "./SettingsAccessNote";
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500";
@@ -28,6 +30,9 @@ export function OtaCommissionSettingsSection() {
   const [saveError, setSaveError] = useState("");
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
+  // Reading the rates takes finance read; changing them, finance manage (VAY-2154).
+  const canRead = useHasPmsPermission("pms.finance.read");
+  const canEdit = useHasPmsPermission("pms.finance.manage");
   const load = useCallback(async () => {
     setStatus("loading");
     try {
@@ -37,7 +42,9 @@ export function OtaCommissionSettingsSection() {
       setStatus("error");
     }
   }, []);
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    if (canRead) void load();
+  }, [canRead, load]);
   const beginEditing = (setting: OtaCommissionSetting) => {
     setEditing(setting);
     setPercentageRate(
@@ -86,7 +93,8 @@ export function OtaCommissionSettingsSection() {
   return (
     <div id="ota-commissions" className="space-y-4">
       <SettingsCard>
-        {status === "loading" && (
+        {!canRead && <SettingsAccessNote access="none" />}
+        {canRead && status === "loading" && (
           <p className="text-sm text-gray-600" role="status">
             {t("settings.ota.loading")}
           </p>
@@ -106,8 +114,9 @@ export function OtaCommissionSettingsSection() {
             </button>
           </div>
         )}
-        {status === "ready" && (
+        {canRead && status === "ready" && (
           <div className="space-y-4">
+            {!canEdit && <SettingsAccessNote access="view" />}
             <ul className="divide-y divide-gray-100" aria-label={t("settings.ota.channels")}>
               {OTA_COMMISSION_CHANNELS.map(([channel, label]) => {
                 const setting = settings.find((item) => item.channel === channel)!;
@@ -132,16 +141,18 @@ export function OtaCommissionSettingsSection() {
                         </p>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => beginEditing(setting)}
-                      disabled={saving}
-                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                    >
-                      {setting.status === "configured"
-                        ? t("settings.ota.change")
-                        : t("rooms.configure")}
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => beginEditing(setting)}
+                        disabled={saving}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        {setting.status === "configured"
+                          ? t("settings.ota.change")
+                          : t("rooms.configure")}
+                      </button>
+                    )}
                   </li>
                 );
               })}

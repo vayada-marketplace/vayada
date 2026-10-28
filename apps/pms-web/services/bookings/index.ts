@@ -1,3 +1,4 @@
+import { ApiErrorResponse } from "../api/client";
 import { pmsOperationsClient, pmsOperationsRequestOptions } from "../api/pmsOperationsClient";
 import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
 import { unsupportedPmsNextStackFeature } from "../api/unsupported";
@@ -1251,19 +1252,13 @@ const pmsOperationsBookingsReadService = {
   list: async (params?: BookingListParams): Promise<BookingListResponse> => {
     const propertyId = await resolveSelectedPmsPropertyId("loading bookings");
     const query = buildPmsReservationsQuery(params);
-    const [reservations, roomTypes] = await Promise.all([
+    const [reservations, roomTypesById] = await Promise.all([
       pmsOperationsClient.get<PmsOperationsReservationListResponse>(
         `${propertyEndpoint(propertyId, "reservations")}${query}`,
         pmsOperationsRequestOptions,
       ),
-      pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
-        propertyEndpoint(propertyId, "room-types"),
-        pmsOperationsRequestOptions,
-      ),
+      readRoomTypesById(propertyId),
     ]);
-    const roomTypesById = new Map(
-      roomTypes.items.map((roomType) => [roomType.roomTypeId, roomType]),
-    );
     return {
       bookings: reservations.items.map((reservation) => toBooking(reservation, roomTypesById)),
       total: reservations.pagination.total,
@@ -1274,22 +1269,30 @@ const pmsOperationsBookingsReadService = {
 
   get: async (id: string): Promise<Booking> => {
     const propertyId = await resolveSelectedPmsPropertyId("loading booking details");
-    const [reservation, roomTypes] = await Promise.all([
+    const [reservation, roomTypesById] = await Promise.all([
       pmsOperationsClient.get<PmsOperationsReservationDetailResponse>(
         propertyEndpoint(propertyId, `reservations/${encodeURIComponent(id)}`),
         pmsOperationsRequestOptions,
       ),
-      pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
-        propertyEndpoint(propertyId, "room-types"),
-        pmsOperationsRequestOptions,
-      ),
+      readRoomTypesById(propertyId),
     ]);
-    const roomTypesById = new Map(
-      roomTypes.items.map((roomType) => [roomType.roomTypeId, roomType]),
-    );
     return toBooking(reservation.item, roomTypesById);
   },
 };
+
+/** Room types name the booked rooms. A role without Rooms & rates (pms.rooms_rates.read) still
+ * gets its bookings, named after the booked offer where the reservation has one (VAY-2168). */
+async function readRoomTypesById(propertyId: string): Promise<Map<string, PmsOperationsRoomType>> {
+  try {
+    const roomTypes = await pmsOperationsClient.get<
+      PmsOperationsListResponse<PmsOperationsRoomType>
+    >(propertyEndpoint(propertyId, "room-types"), pmsOperationsRequestOptions);
+    return new Map(roomTypes.items.map((roomType) => [roomType.roomTypeId, roomType]));
+  } catch (error) {
+    if (error instanceof ApiErrorResponse && error.status === 403) return new Map();
+    throw error;
+  }
+}
 
 // The status tabs use the display statuses from toBookingStatus; the API filters on stored ones.
 const STORED_RESERVATION_STATUSES: Record<string, string> = {
