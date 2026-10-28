@@ -12,9 +12,14 @@ const url = process.env.TEST_DATABASE_URL;
 // and immutable quote lookup are fixture seams; all staging SQL and the addon
 // projection are real. This does not exercise owner locks or full acceptance.
 describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
-  it.each([false, true])(
-    "stages or rolls back booking/booker/addon (missing definition: %s)",
-    async (missingDefinition) => {
+  it.each([
+    [false, "guest_pick"],
+    [true, "guest_pick"],
+    // VAY-2391: an anytime extra is booked as one line without a day.
+    [false, "anytime"],
+  ] as const)(
+    "stages or rolls back booking/booker/addon (missing definition: %s, %s)",
+    async (missingDefinition, scheduleMode) => {
       if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
         throw new Error("test database required");
       const propertyId = randomUUID(),
@@ -24,7 +29,7 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
         id: addonId,
         quantity: 1,
         people: null,
-        dates: ["2026-10-01"],
+        dates: scheduleMode === "anytime" ? null : ["2026-10-01"],
       };
       const input: Parameters<typeof stagePricingBookingDraft>[2] = pricingDraftFixture((quote) => {
         Object.assign(quote, { quoteId: randomUUID() });
@@ -64,12 +69,14 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
                   maxGuests: null,
                   leadTimeHours: null,
                   legacyLeadTime: false,
+                  scheduleMode,
+                  bookableWeekdays: [1, 2, 3, 4, 5, 6, 7],
                   ownershipKind: "partner",
                   partnerCommissionRate: "12.5000",
                 },
                 quantity: 1,
                 people: null,
-                dates: selected.dates,
+                dates: selected.dates ?? [],
                 peopleMultiplier: 1,
                 daysMultiplier: 1,
                 amountMinor: "1250",
@@ -111,8 +118,8 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
         );
         if (!missingDefinition)
           await db.query(
-            "INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,price_amount,currency,ownership_kind,partner_commission_rate) VALUES($1,$2,'Synthetic extra','per_stay',12.5,'EUR','partner',12.5)",
-            [addonId, propertyId],
+            "INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,price_amount,currency,ownership_kind,partner_commission_rate,schedule_mode) VALUES($1,$2,'Synthetic extra','per_stay',12.5,'EUR','partner',12.5,$3)",
+            [addonId, propertyId, scheduleMode],
           );
         if (missingDefinition) {
           // Real composite definition FK fails after the booking/booker CTE.
@@ -177,13 +184,14 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
           ]);
           const addons = (
             await db.query(
-              "SELECT total_amount::text,ownership_kind_snapshot,partner_commission_rate_snapshot::text,addon_snapshot FROM booking.booking_addon_selections WHERE guest_booking_id=$1",
+              "SELECT total_amount::text,service_date::text,ownership_kind_snapshot,partner_commission_rate_snapshot::text,addon_snapshot FROM booking.booking_addon_selections WHERE guest_booking_id=$1",
               [input.bookingId],
             )
           ).rows;
           expect(addons).toHaveLength(1);
           expect(addons[0]).toMatchObject({
             total_amount: "12.50",
+            service_date: scheduleMode === "anytime" ? null : "2026-10-01",
             ownership_kind_snapshot: "partner",
             partner_commission_rate_snapshot: "12.5000",
             addon_snapshot: {

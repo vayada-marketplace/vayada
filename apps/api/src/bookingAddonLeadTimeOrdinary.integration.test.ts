@@ -13,8 +13,9 @@ const url = process.env.TEST_DATABASE_URL;
  * VAY-2232: hosts pick an add-on's lead time from fixed choices, stored as
  * metadata.leadTimeHours. Saving a choice drops the free text older editors wrote; other saves
  * keep it until the data migration converts it.
+ * VAY-2391: when the add-on happens, in the schedule_mode and bookable_weekdays columns.
  */
-describe.skipIf(!url)("Booking add-on lead time on the ordinary API login", () => {
+describe.skipIf(!url)("Booking add-on lead time and schedule on the ordinary API login", () => {
   const admin = new pg.Client({ connectionString: url });
   let fixture: Awaited<ReturnType<typeof createHotelSetupOrdinaryLoginFixture>>;
   let pool: pg.Pool;
@@ -120,5 +121,60 @@ describe.skipIf(!url)("Booking add-on lead time on the ordinary API login", () =
       addons.updateAddonItemByHotelId(propertyId, id, { leadTime: "2 hours" }),
     ).resolves.toMatchObject({ leadTimeHours: null, leadTime: "2 hours" });
     expect(await metadata(id)).not.toHaveProperty("leadTimeHours");
+  });
+
+  it("stores when an add-on happens and keeps a per-night price every day (VAY-2391)", async () => {
+    const addons = createPgTargetBookingAddonItemsRepository({
+      connectionString: fixture.connectionString,
+      pool,
+    });
+    const columns = async (id: string) =>
+      (
+        await admin.query(
+          "SELECT schedule_mode, bookable_weekdays FROM booking.addon_definitions WHERE id=$1::uuid",
+          [id],
+        )
+      ).rows[0];
+    const every = [1, 2, 3, 4, 5, 6, 7];
+    // Without a choice, transport happens on the arrival day.
+    const created = await addons.createAddonItemByHotelId(propertyId, transfer);
+    if (created?.outcome !== "created") throw new Error("Add-on was not created");
+    const id = created.addonItem.addonItemId;
+    const update = (body: Parameters<typeof addons.updateAddonItemByHotelId>[2]) =>
+      addons.updateAddonItemByHotelId(propertyId, id, body);
+    expect(created.addonItem).toMatchObject({ scheduleMode: "arrival", bookableWeekdays: every });
+    expect(await columns(id)).toEqual({ schedule_mode: "arrival", bookable_weekdays: every });
+
+    await expect(
+      update({ scheduleMode: "guest_pick", bookableWeekdays: [6, 5] }),
+    ).resolves.toMatchObject({ scheduleMode: "guest_pick", bookableWeekdays: [5, 6] });
+    expect(await columns(id)).toEqual({ schedule_mode: "guest_pick", bookable_weekdays: [5, 6] });
+    // A per-night price is every day; back on one price, the saved day no longer fits, so transport
+    // happens on arrival again.
+    await expect(update({ pricingModel: "per_night" })).resolves.toMatchObject({
+      scheduleMode: "daily",
+    });
+    await expect(update({ pricingModel: "per_stay" })).resolves.toMatchObject({
+      scheduleMode: "arrival",
+      bookableWeekdays: [5, 6],
+    });
+    await expect(update({ scheduleMode: "daily" })).rejects.toThrow("per-night price");
+    await expect(
+      addons.createAddonItemByHotelId(propertyId, { ...transfer, scheduleMode: "daily" }),
+    ).rejects.toThrow("per-night price");
+    expect(await columns(id)).toEqual({ schedule_mode: "arrival", bookable_weekdays: [5, 6] });
+
+    const breakfast = await addons.createAddonItemByHotelId(propertyId, {
+      ...transfer,
+      name: "Breakfast",
+      category: "dining",
+      pricingModel: "per_guest_night",
+    });
+    if (breakfast?.outcome !== "created") throw new Error("Add-on was not created");
+    expect(breakfast.addonItem).toMatchObject({ scheduleMode: "daily", bookableWeekdays: every });
+    const listed = (await addons.listAddonItemsByHotelId(propertyId))?.addonItems ?? [];
+    expect(listed.find((addon) => addon.addonItemId === id)).toMatchObject({
+      scheduleMode: "arrival",
+    });
   });
 });
