@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 26, 2026
+              <strong>Effective Date:</strong> October 28, 2026
             </p>
           </div>
 
@@ -520,9 +520,8 @@ export default function PrivacyPage() {
                   <a href="/terms/dpa" className={LINK}>
                     data processing agreement
                   </a>{" "}
-                  for this. vayada is the controller for its own server logs and for the
-                  partner-link records described below. The hotel&apos;s contact details are shown
-                  at the bottom of its booking site.
+                  for this. vayada is the controller for its own server logs. The hotel&apos;s
+                  contact details are shown at the bottom of its booking site.
                 </p>
               </div>
 
@@ -571,12 +570,6 @@ export default function PrivacyPage() {
                     your IP address, or anything derived from it, with them. We keep them for 13
                     months (Article 6(1) lit. a GDPR). Your choice is saved in your browser&apos;s
                     local storage, for that hotel&apos;s booking site only.
-                  </li>
-                  <li>
-                    <strong>Partner links: </strong>if you arrive through a link from one of the
-                    hotel&apos;s referral partners, we record the partner code, the page you arrived
-                    on and the site you came from, so the partner can be credited (Article 6(1) lit.
-                    f GDPR).
                   </li>
                   <li>
                     <strong>Your browser:</strong> the booking site also keeps a few necessary items

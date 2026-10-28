@@ -32,17 +32,6 @@ const FEATURES = [
     },
   },
   {
-    title: "Refer a Guest",
-    body: "Turn guests into promoters with trackable referral links that drive more direct bookings and reward successful recommendations.",
-    image: {
-      src: "/be-referaguest.png",
-      alt: "Refer a Guest flow in the Vayada booking engine",
-      width: 1920,
-      height: 1197,
-    },
-    reverse: true,
-  },
-  {
     title: "Upsell services, experiences & transportation",
     body: "Offer your own add-ons directly in the booking journey, from breakfast and airport transfers to wellness and local experiences.",
     image: {
@@ -51,6 +40,7 @@ const FEATURES = [
       width: 1920,
       height: 1084,
     },
+    reverse: true,
   },
 ];
 
