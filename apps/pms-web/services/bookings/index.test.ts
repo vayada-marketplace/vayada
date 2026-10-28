@@ -249,6 +249,56 @@ describe("PMS target booking projection", () => {
     });
   });
 
+  it("lists a per-night extra once, with its nights (VAY-2391)", async () => {
+    const detailed = {
+      ...reservation,
+      addOns: [
+        {
+          selectionId: "night-2",
+          addonId: "breakfast",
+          name: "Breakfast",
+          quantity: 2,
+          serviceDates: ["2026-11-07"],
+        },
+        {
+          selectionId: "night-1",
+          addonId: "breakfast",
+          name: "Breakfast",
+          quantity: 2,
+          serviceDates: ["2026-11-06"],
+        },
+        { selectionId: "bottle", addonId: "bottle", name: "Welcome bottle", quantity: 1 },
+      ],
+    };
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types") ? { items: [] } : { item: detailed },
+    );
+    await expect(bookingsService.get("booking-1")).resolves.toMatchObject({
+      addonIds: ["breakfast", "bottle"],
+      addonNames: ["Breakfast", "Welcome bottle"],
+      addonQuantities: { breakfast: 2, bottle: 1 },
+      addonDates: { breakfast: ["2026-11-06", "2026-11-07"], bottle: [] },
+    });
+    // Lines whose quantities differ add up.
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types")
+        ? { items: [] }
+        : {
+            item: {
+              ...detailed,
+              addOns: [
+                { selectionId: "a", addonId: "spa", name: "Spa", quantity: 1 },
+                { selectionId: "b", addonId: "spa", name: "Spa", quantity: 2 },
+              ],
+            },
+          },
+    );
+    await expect(bookingsService.get("booking-1")).resolves.toMatchObject({
+      addonIds: ["spa"],
+      addonQuantities: { spa: 3 },
+    });
+  });
+
   it("submits the explicitly fulfilled add-on selections at check-out", async () => {
     mocks.post.mockResolvedValue({});
     mocks.get.mockImplementation(async (endpoint: string) =>

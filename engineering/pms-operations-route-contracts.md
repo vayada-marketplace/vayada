@@ -216,7 +216,14 @@ type PmsOperationalReservation = {
     phone: string | null;
     specialRequests: string | null;
   };
-  addOns: { addonId: string; name: string; quantity: number }[];
+  // One line per booked selection; a per-night extra has one line per night (VAY-2391).
+  addOns: {
+    selectionId: string;
+    addonId: string;
+    name: string;
+    quantity: number;
+    serviceDates: PmsDate[];
+  }[];
   assignments: PmsOperationalAssignment[];
   checkin: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
   checkout: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };

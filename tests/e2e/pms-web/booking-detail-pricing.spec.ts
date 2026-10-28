@@ -247,3 +247,39 @@ test("lists the refund steps of partial-refund terms instead of a free window", 
   await expect(main.getByText("Free cancellation", { exact: true })).toHaveCount(0);
   await expect(main.getByText("Cancellation policy", { exact: true })).toBeVisible();
 });
+
+// VAY-2391: each extra once, with the day or days it happens on (in PMS's own date style); a
+// per-night extra is one line per night in the read model.
+for (const width of [1440, 390]) {
+  test(`shows each extra once with when it happens at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const addOn = (selectionId: string, addonId: string, name: string, serviceDates: string[]) => ({
+      selectionId,
+      addonId,
+      name,
+      quantity: 1,
+      serviceDates,
+    });
+    await mockBooking(page, {
+      ...manualBooking({ ratePlanId: null, pricingOfferId: null }),
+      addOns: [
+        addOn("s1", "transfer", "Airport transfer", ["2026-11-16"]),
+        addOn("s2", "breakfast", "Garden breakfast", ["2026-11-16"]),
+        addOn("s3", "breakfast", "Garden breakfast", ["2026-11-17"]),
+        addOn("s4", "bottle", "Welcome bottle", []),
+      ],
+    });
+    await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+    const main = page.locator("main");
+    await expect(main.getByText("Garden breakfast", { exact: true })).toHaveCount(1);
+    await expect(main.getByText("Airport transfer", { exact: true }).locator("..")).toContainText(
+      "Mon, Nov 16",
+    );
+    await expect(main.getByText("Garden breakfast", { exact: true }).locator("..")).toContainText(
+      "Nov 16 – Nov 17",
+    );
+    await expect(main.getByText("Welcome bottle", { exact: true })).toBeVisible();
+    await main.getByText("Airport transfer", { exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`pms-extras-dates-${width}.png`) });
+  });
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addonScheduledDates,
   defaultAddonScheduleMode,
+  isoWeekday,
   parseBookableWeekdays,
   readAddonSchedule,
   resolveAddonScheduleMode,
@@ -78,5 +79,7 @@ describe("add-on schedule (VAY-2391)", () => {
     expect(addonScheduledDates("departure", stay)).toEqual(["2026-11-06"]);
     expect(addonScheduledDates("anytime", stay)).toEqual([]);
     expect(addonScheduledDates("guest_pick", stay)).toBeNull();
+    // 2026-11-02 is a Monday, 2026-11-08 a Sunday.
+    expect(["2026-11-02", "2026-11-06", "2026-11-08"].map(isoWeekday)).toEqual([1, 5, 7]);
   });
 });
