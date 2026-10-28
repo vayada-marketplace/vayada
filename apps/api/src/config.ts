@@ -1264,13 +1264,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         : readPropertyIdAllowlistEnv(env, "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS"),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
-    // VAY-2270: the list has its own name; the old Terraform variable is still read until the
-    // platform renames it.
-    identityPrivacyAllowedOrigins: readOptionalCsvEnv(
-      env,
-      "IDENTITY_PRIVACY_ALLOWED_ORIGINS",
-      readOptionalCsvEnv(env, "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS"),
-    ),
+    identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),
     // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
     contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [
       "https://landing.localhost",

@@ -185,7 +185,11 @@ describe("api config", () => {
       PMS_CHANNEX_PROVISIONING_MODE: "mutating",
       PMS_CHANNEX_OFFER_ARI_DELIVERY_ENABLED: "true",
     }).channexManagement;
-    expect(ari).toMatchObject({ scope: "claimed", workerEnabled: true, offerAriDeliveryEnabled: true });
+    expect(ari).toMatchObject({
+      scope: "claimed",
+      workerEnabled: true,
+      offerAriDeliveryEnabled: true,
+    });
     expect(channexClaimedScope(ari)).toBe(true);
     expect(channexClaimedAriScope(ari)).toBe(true);
     expect(channexClaimedAriScope(config)).toBe(false);
@@ -1165,25 +1169,19 @@ describe("api config", () => {
     ).toThrow("FINANCE_SOURCE must be one of: legacy, target");
   });
 
-  it("loads identity privacy allowed origins from either setting name", () => {
+  it("loads identity privacy allowed origins", () => {
     expect(
       loadConfig({
         IDENTITY_PRIVACY_ALLOWED_ORIGINS:
           "https://admin.booking.localhost, https://admin.localhost,",
       }).identityPrivacyAllowedOrigins,
     ).toEqual(["https://admin.booking.localhost", "https://admin.localhost"]);
-    // The old Terraform variable name still works until the platform renames it (VAY-2270).
+    // The platform renamed the old Marketplace variable (VAY-2302); it is no longer read.
     expect(
       loadConfig({
         MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
       }).identityPrivacyAllowedOrigins,
-    ).toEqual(["https://admin.localhost"]);
-    expect(
-      loadConfig({
-        IDENTITY_PRIVACY_ALLOWED_ORIGINS: "https://admin.booking.localhost",
-        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS: "https://admin.localhost",
-      }).identityPrivacyAllowedOrigins,
-    ).toEqual(["https://admin.booking.localhost"]);
+    ).toEqual([]);
   });
 
   it("keeps the contact form origins apart from the identity privacy origins", () => {
