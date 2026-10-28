@@ -1031,7 +1031,12 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           linkedResources: ownerLinks,
           membership: {
             ...context.membership,
-            permissions: ["booking.settings.manage", "pms.finance.read", "pms.operations.manage"],
+            permissions: [
+              "booking.settings.manage",
+              "pms.finance.read",
+              "pms.operations.manage",
+              "finance.billing.manage",
+            ],
           },
           audit: requestAudit("plan"),
         } as RequestContext;
