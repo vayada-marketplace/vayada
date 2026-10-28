@@ -4,7 +4,7 @@ import { fillGuestDetails, mockAnyPrice, orderTotal } from "../support/bookFlow"
 import { watchPageHealth } from "../support/pageHealth";
 import { mockGroup, STAY } from "../support/roomPickerMocks";
 
-// VAY-2320: after choosing its rooms on the hotel page, a group says who sleeps in each room,
+// VAY-2320: after choosing its rooms on the hotel page, a group gives its children's ages,
 // books them in one booking, and sees each room on its confirmation and My booking.
 const hotelApi = `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}`;
 
@@ -21,26 +21,23 @@ async function mockGroupCheckout(page: Page) {
   await mockAnyPrice(page);
 }
 
-async function chooseTwoRooms(page: Page, width: number) {
+// VAY-2393: the last room chosen goes straight to /book.
+async function chooseTwoRooms(page: Page) {
   await page.goto(STAY);
   await page
     .getByTestId("room-card-deluxe")
-    .getByRole("button", { name: "Choose for room 1" })
+    .getByRole("button", { name: "Select for Room 1" })
     .click();
   await page
     .getByTestId("room-card-garden")
-    .getByRole("button", { name: "Choose for room 2" })
-    .click();
-  await page
-    .getByTestId(width === 390 ? "rooms-bar-mobile" : "rooms-bar")
-    .getByRole("button", { name: "Continue" })
+    .getByRole("button", { name: "Select for Room 2" })
     .click();
   await expect(page).toHaveURL(/\/(en\/)?book\?/);
 }
 
 for (const width of [1440, 390]) {
   // No page-health watch: the browser logs the sold-out 409 as a console error.
-  test(`asks who sleeps in each room and sends a sold-out room back to the hotel page at ${width}px`, async ({
+  test(`asks the children's ages and sends a sold-out room back to the hotel page at ${width}px`, async ({
     page,
   }) => {
     if (width === 390) await page.setViewportSize({ width: 390, height: 844 });
@@ -59,7 +56,7 @@ for (const width of [1440, 390]) {
         },
       });
     });
-    await chooseTwoRooms(page, width);
+    await chooseTwoRooms(page);
 
     // Who's staying: each room with its rate and the guests the hotel page split.
     await expect(page.getByRole("heading", { name: "Who's staying in each room" })).toBeVisible();
@@ -68,6 +65,10 @@ for (const width of [1440, 390]) {
     await expect(room1).toContainText("Deluxe Double Room");
     await expect(room2).toContainText("Garden Double Room");
     await expect(room1.getByText("Sleeps up to 2")).toBeVisible();
+    await expect(room1).toContainText("2 Adults");
+    await expect(room2).toContainText("1 Adult, 1 Child");
+    // VAY-2393: who sleeps where is set on the hotel page, not here.
+    await expect(page.getByRole("button", { name: "More Adults" })).toHaveCount(0);
     const next = page.getByRole("button", { name: "Continue", exact: true });
     // The child's age is still to choose.
     await expect(next).toBeDisabled();
@@ -75,28 +76,13 @@ for (const width of [1440, 390]) {
     await expect(room1).toContainText("€100");
     await expect(room2).toContainText("€100");
     await expect(next).toBeEnabled();
-
-    // Each room's guests are checked against that room's limits.
-    await room1.getByRole("button", { name: "More Children" }).click();
-    await expect(room1.getByRole("alert")).toHaveText(
-      "The Deluxe Double Room sleeps up to 2. Move a guest to another room, or add a room.",
-    );
-    await expect(next).toBeDisabled();
-    await room1.getByRole("button", { name: "Fewer Children" }).click();
-    await room2.getByRole("button", { name: "More Adults" }).click();
-    await expect(room2.getByRole("alert")).toHaveText(
-      "The Garden Double Room sleeps up to 2. Move a guest to another room, or add a room.",
-    );
-    await expect(next).toBeDisabled();
-    await room2.getByRole("button", { name: "Fewer Adults" }).click();
-    await expect(page.getByTestId("room-guests-step").getByRole("alert")).toHaveCount(0);
     await next.click();
 
     await expect(page).toHaveURL(/[?&]step=details/);
     await fillGuestDetails(page);
     await page.getByRole("button", { name: "Continue to review" }).click();
     await expect(orderTotal(page)).toHaveText("€200");
-    await page.getByLabel(/^I agree to the cancellation policy/).check();
+    await page.getByLabel(/I agree to the cancellation policy/).check();
     await page.getByRole("button", { name: "Confirm booking" }).click();
 
     // Another booking took the last Garden room: say which, and keep room 1.
@@ -107,17 +93,28 @@ for (const width of [1440, 390]) {
     await notice.getByRole("button", { name: "Choose another room for room 2" }).click();
 
     await expect(page).toHaveURL(/\/(en)?\?checkIn=2026-11-10/);
-    const bar = page.getByTestId(width === 390 ? "rooms-bar-mobile" : "rooms-bar");
-    await expect(bar.getByRole("button", { name: "Continue" })).toBeDisabled();
+    await expect(page.getByTestId("room-pill-1")).toContainText("✓ Deluxe Double Room");
+    await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
     await expect(
-      page.getByTestId("room-card-garden").getByRole("button", { name: "Choose for room 2" }),
+      page.getByTestId("room-card-garden").getByRole("button", { name: "Select for Room 2" }),
     ).toBeVisible();
-    if (width === 1440) {
-      await expect(bar.getByTestId("rooms-bar-slot-1")).toContainText("Deluxe Double Room");
-      await expect(bar.getByTestId("rooms-bar-slot-2")).toContainText("Choose a room below");
-    }
   });
 }
+
+// VAY-2393: with no children's ages to give, the last room chosen goes straight past the rooms
+// step (to Extras, or here, without extras, to the guest's details).
+test("goes straight on after a group without children chooses its last room", async ({ page }) => {
+  await mockGroupCheckout(page);
+  await page.goto("/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4&rooms=2");
+  for (const number of [1, 2])
+    await page
+      .getByTestId("room-card-garden")
+      .getByRole("button", { name: `Select for Room ${number}` })
+      .click();
+  await expect(page).toHaveURL(/[?&]step=details/);
+  await expect(page.getByRole("heading", { name: "Who’s staying?" })).toBeVisible();
+  await expect(page.getByTestId("room-guests-step")).toHaveCount(0);
+});
 
 test("says when the rooms can't be priced and sends the group back to choose them", async ({
   page,
@@ -133,13 +130,13 @@ test("says when the rooms can't be priced and sends the group back to choose the
       },
     }),
   );
-  await chooseTwoRooms(page, 1440);
+  await chooseTwoRooms(page);
   await page.getByTestId("room-guests-2").getByLabel("Child 1: age at check-in").selectOption("5");
   const notice = page.getByText("No booking was made and nothing was charged.").locator("..");
   await expect(notice).toBeVisible();
   await notice.getByRole("button", { name: "Choose another room" }).click();
   await expect(page).toHaveURL(/\/(en)?\?checkIn=2026-11-10.*rooms=2/);
-  await expect(page.getByTestId("rooms-bar")).toContainText("Deluxe Double Room");
+  await expect(page.getByTestId("room-pill-1")).toContainText("✓ Deluxe Double Room");
 });
 
 const groupBooking = {

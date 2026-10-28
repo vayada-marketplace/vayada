@@ -6,7 +6,6 @@ import {
   OFFERED_SETUP_TRACKS,
   SETUP_TRACKS,
   isSetupTrack,
-  isSetupTaskLaunchable,
   normalizeStoredSetupTracks,
   parseAdaptiveHotelSetupStatus,
   parseUpdateTracksRequest,
@@ -206,12 +205,12 @@ describe("adaptive hotel setup contracts", () => {
 
   describe("setup plan (VAY-2175)", () => {
     const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const task = (taskId: string, track: string, owner: string, route: string) => ({
-      taskId,
+    const basics = {
+      taskId: "shared_identity",
       propertyId,
-      track,
-      requirementOwnerDomain: owner,
-      destinationRouteKey: route,
+      track: "shared",
+      requirementOwnerDomain: "hotel_catalog",
+      destinationRouteKey: "hotel_catalog.shared_identity",
       callerCapability: "allowed",
       ownerProgress: "not_started",
       readiness: "actionable",
@@ -220,13 +219,7 @@ describe("adaptive hotel setup contracts", () => {
       sourceRevision: "1",
       freshness: "fresh",
       evaluatedAt: "2026-07-26T12:00:00.000Z",
-    });
-    const basics = task(
-      "shared_identity",
-      "shared",
-      "hotel_catalog",
-      "hotel_catalog.shared_identity",
-    );
+    };
     const status = (setupPlan: Record<string, unknown>): Record<string, any> => ({
       contractVersion: ADAPTIVE_HOTEL_SETUP_CONTRACT_VERSION,
       organization: {
@@ -270,40 +263,6 @@ describe("adaptive hotel setup contracts", () => {
       expect(parseAdaptiveHotelSetupStatus(value)).toEqual(value);
     });
 
-    it("accepts the old full plan the API still sends, without reading its other tasks and keys", () => {
-      const value = status({
-        planRevision: "tracks:1",
-        tasks: [
-          basics,
-          task(
-            "rooms_rates_availability",
-            "hotel_operations",
-            "pms",
-            "pms.rooms_rates_availability",
-          ),
-          task(
-            "guest_settings_policies",
-            "hotel_operations",
-            "booking",
-            "booking.guest_settings_policies",
-          ),
-          task("billing_plan", "hotel_operations", "finance", "finance.billing_plan"),
-          task("payment", "hotel_operations", "finance", "finance.payment"),
-          task(
-            "direct_booking_publication",
-            "hotel_operations",
-            "distribution",
-            "distribution.direct_booking_publication",
-          ),
-        ],
-        // No longer checked against the tasks: nothing reads them.
-        recommendedTaskId: "payment",
-        ownerProgress: { complete: 3, total: 6 },
-        launchReadiness: { operationsUse: "ready", directBookingPublish: "ready" },
-      });
-      expect(parseAdaptiveHotelSetupStatus(value)).toEqual(value);
-    });
-
     it.each([
       ["a malformed task", { tasks: [{ ...basics, readiness: "not_a_readiness" }] }],
       ["no hotel-basics task while a track is selected", { tasks: [] }],
@@ -311,7 +270,34 @@ describe("adaptive hotel setup contracts", () => {
       ["another property's task", { tasks: [{ ...basics, propertyId: "other-property" }] }],
       // The retired Marketplace tasks are unknown task IDs now.
       ["a retired Marketplace task", { tasks: [basics, { ...basics, taskId: "public_profile" }] }],
+      // So are the Hotel Operations tasks the API stopped computing in release 2 (VAY-2175).
+      [
+        "a retired Hotel Operations task",
+        {
+          tasks: [
+            basics,
+            {
+              ...basics,
+              taskId: "payment",
+              track: "hotel_operations",
+              requirementOwnerDomain: "finance",
+              destinationRouteKey: "finance.payment",
+            },
+          ],
+        },
+      ],
       ["an unknown plan key", { tasks: [basics], marketplacePublish: "not_applicable" }],
+      // The old full plan's keys: the API stopped sending them in release 2 (VAY-2175).
+      ["the old planRevision", { tasks: [basics], planRevision: "tracks:1" }],
+      ["the old recommendedTaskId", { tasks: [basics], recommendedTaskId: "shared_identity" }],
+      ["the old ownerProgress", { tasks: [basics], ownerProgress: { complete: 0, total: 1 } }],
+      [
+        "the old launchReadiness",
+        {
+          tasks: [basics],
+          launchReadiness: { operationsUse: "ready", directBookingPublish: "ready" },
+        },
+      ],
     ])("rejects a plan with %s", (_, setupPlan) => {
       expect(parseAdaptiveHotelSetupStatus(status(setupPlan))).toBeNull();
     });
@@ -364,13 +350,5 @@ describe("adaptive hotel setup contracts", () => {
     selected.organization.tracks.pop();
     selected.organization.selectedTracks = ["hotel_operations", "creator_marketplace"];
     expect(parseAdaptiveHotelSetupStatus(selected)).toBeNull();
-  });
-
-  it("recommends only actionable tasks the caller may start", () => {
-    const task = { track: "shared", callerCapability: "allowed", readiness: "actionable" } as const;
-    expect(isSetupTaskLaunchable(task)).toBe(true);
-    expect(isSetupTaskLaunchable({ ...task, readiness: "rejected" })).toBe(false);
-    expect(isSetupTaskLaunchable({ ...task, callerCapability: "ask_owner" })).toBe(false);
-    expect(isSetupTaskLaunchable(null)).toBe(false);
   });
 });

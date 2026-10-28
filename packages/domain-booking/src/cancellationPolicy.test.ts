@@ -425,6 +425,81 @@ it("words one free cancellation as its deadline and the full amount after it", (
   });
 });
 
+it("says a stay booked after free cancellation's last day was never refundable (VAY-2392)", () => {
+  // Booked on 25 Oct for the next night: free until 3 days before arrival ended on 23 Oct.
+  const late = cancellationPolicy(
+    free(3),
+    { checkIn: "2026-10-26", today: "2026-10-25", bookedOn: "2026-10-25" },
+    "17500",
+    instant,
+  );
+  expect(late.badge).toEqual({ kind: "nonRefundable" });
+  expect(late.tone).toBe("amber");
+  expect(late.note).toEqual({ kind: "lateBooking", date: "2026-10-23", days: 3 });
+  // Booked on the last free day itself, it is still free until its end.
+  expect(
+    cancellationPolicy(
+      free(3),
+      { checkIn: "2026-10-26", today: "2026-10-23", bookedOn: "2026-10-23" },
+      "17500",
+      instant,
+    ).badge,
+  ).toEqual({ kind: "freeUntil", date: "2026-10-23" });
+  // A bank transfer: free until its money arrives, then the late terms.
+  const transfer = cancellationPolicy(
+    free(3),
+    { checkIn: "2026-10-26", today: "2026-10-25", bookedOn: "2026-10-25" },
+    "17500",
+    { request: false, card: false, bankTransfer: true },
+  );
+  expect(transfer.badge).toEqual({ kind: "notRefundableOncePaid" });
+  expect(transfer.rows[0]).toMatchObject({ when: { kind: "beforeTransfer" }, now: true });
+  expect(transfer.note).toEqual({ kind: "paidLateBooking", date: "2026-10-23", days: 3 });
+  // Step 3 books today; the deadline day itself still counts.
+  const quote = (checkIn: string) =>
+    ({
+      checkIn,
+      totalMinor: "17500",
+      acceptanceMode: "instant",
+      paymentMethod: "pay_at_property",
+      lines: [{ kind: "room", selectionId: "s", amountMinor: "17500" }],
+      rooms: [{ selectionId: "s", cancellation: free(3) }],
+    }) as unknown as PublicBookingQuote;
+  expect(
+    policyBlocks(quote("2026-10-26"), { today: "2026-10-25", roomNames: {} })[0]!.policy.note,
+  ).toEqual({ kind: "lateBooking", date: "2026-10-23", days: 3 });
+  expect(
+    policyBlocks(quote("2026-10-28"), { today: "2026-10-25", roomNames: {} })[0]!.policy.badge,
+  ).toEqual({ kind: "freeUntil", date: "2026-10-25" });
+  // Booked in time, its deadline passed later: free cancellation ended. Without the booking date
+  // (an older lookup) it reads the same way.
+  for (const bookedOn of ["2026-10-20", undefined]) {
+    const stay = booked([{ roomName: "Suite", cancellation: free(1), subtotalMinor: "1" }]);
+    expect(
+      cancellationLine(bookedPolicyBlocks({ ...stay, bookedOn }, { today: "2026-11-06", ...mode })),
+    ).toEqual({
+      tone: "amber",
+      lead: { key: "freeEnded", date: "2026-11-05" },
+      rest: [{ key: "payFull", amountMinor: "20000" }],
+    });
+  }
+  expect(
+    cancellationLine(
+      bookedPolicyBlocks(
+        {
+          ...booked([{ roomName: "Suite", cancellation: free(1), subtotalMinor: "1" }]),
+          bookedOn: "2026-11-06",
+        },
+        { today: "2026-11-06", ...mode },
+      ),
+    ),
+  ).toEqual({
+    tone: "amber",
+    lead: { key: "lateBooking", days: 1 },
+    rest: [{ key: "payFull", amountMinor: "20000" }],
+  });
+});
+
 it("words refunds, ended refunds and non-refundable rates", () => {
   const steps = partial([{ minDaysBeforeCheckIn: 10, refundPercent: 50 }]);
   const line = (cancellation: Cancellation, today: string) =>

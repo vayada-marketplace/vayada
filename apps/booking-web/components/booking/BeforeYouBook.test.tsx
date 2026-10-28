@@ -93,11 +93,13 @@ it("shows the quick facts, local hotel time and the policy for this stay (VAY-23
     "MealsRoom only",
     "ChildrenWelcome · 18+ count as adults",
     "All times are local hotel time (Sri Lanka).",
-    "Free cancellation ended",
+    // VAY-2392: booked after free cancellation's last day (23 Oct), it was never refundable.
+    "Non-refundable",
     "From now until check-in· applies nowFull amount (US$175)",
-    "Free cancellation ended on Fri, 23 Oct 2026. If you cancel or don’t arrive, you pay the full amount.",
+    "You’re booking less than 3 days before arrival, so this booking can’t be cancelled for free. If you cancel or don’t arrive, you pay the full amount.",
   ])
     expect(text()).toContain(part);
+  expect(text()).not.toContain("Free cancellation ended");
   const now = document.querySelector('[role="row"][aria-current="true"]')!;
   expect(now.textContent).toContain("From now until check-in");
 });
@@ -117,7 +119,7 @@ it("keeps the guest rules and terms closed until opened", () => {
 });
 
 it("agrees to everything with one tick and says why when it was missed", () => {
-  render();
+  render({ today: "2026-10-01" });
   const box = document.querySelector<HTMLInputElement>("input[data-consent]")!;
   expect(box.closest("label")!.textContent).toBe(
     "I agree to the cancellation policy, guest rules and terms & conditions above.",
@@ -129,9 +131,36 @@ it("agrees to everything with one tick and says why when it was missed", () => {
     "Tick the box to agree before you book.",
   );
   expect(box.getAttribute("aria-invalid")).toBe("true");
-  render({ termsText: null });
+  render({ termsText: null, today: "2026-10-01" });
   expect(document.querySelector("input[data-consent]")!.closest("label")!.textContent).toBe(
     "I agree to the cancellation policy and guest rules above.",
+  );
+});
+
+it("says first in the consent when rooms can't be refunded (VAY-2392)", () => {
+  const label = () => document.querySelector("input[data-consent]")!.closest("label")!.textContent;
+  render();
+  expect(label()).toBe(
+    "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged. I agree to the cancellation policy, guest rules and terms & conditions above.",
+  );
+  // One room still free to cancel, one not.
+  const mixed = {
+    ...quote,
+    lines: [...quote.lines, { kind: "room", selectionId: "b", amountMinor: "17500" }],
+    totalMinor: "35000",
+    rooms: [
+      ...quote.rooms,
+      { selectionId: "b", mealPlan: "room_only", cancellation: { kind: "non_refundable" } },
+    ],
+  } as unknown as PublicBookingQuote;
+  // While a request waits for us, cancelling is still free: no such sentence.
+  render({ quote: { ...quote, acceptanceMode: "request" } });
+  expect(label()).toBe(
+    "I agree to the cancellation policy, guest rules and terms & conditions above.",
+  );
+  render({ quote: mixed, today: "2026-10-01", roomNames: { a: "Villa Four", b: "Garden" } });
+  expect(label()).toBe(
+    "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged. I agree to the cancellation policy, guest rules and terms & conditions above.",
   );
 });
 
@@ -148,6 +177,6 @@ it("offers a retry when the guest rules couldn't be checked", () => {
 it("speaks the page's language", () => {
   render({}, "de");
   expect(text()).toContain("Vor der Buchung");
-  expect(text()).toContain("Kostenlose Stornierung abgelaufen");
+  expect(text()).toContain("Nicht erstattbar");
   expect(text()).toContain("Alle Zeiten in Ortszeit des Hotels (Sri Lanka).");
 });

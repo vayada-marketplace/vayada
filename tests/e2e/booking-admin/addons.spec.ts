@@ -261,6 +261,7 @@ test.describe("booking-admin add-ons settings cutover", () => {
           maxQuantity: 1,
           duration: "90 min",
           pricingModel: "per_guest",
+          // No schedule chosen: the API's own default (VAY-2391) applies.
           publicVisible: true,
           status: "active",
           sortOrder: 2,

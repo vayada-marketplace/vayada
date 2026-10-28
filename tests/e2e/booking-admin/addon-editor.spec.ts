@@ -93,7 +93,9 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
   await dialog.getByLabel(/^Price per guest per night \(EUR\) \*/).fill("15.00");
   // 2 guests × 3 nights × €15.00 in the price example, and the preview follows the form.
   await expect(dialog.getByText(/Example: 2 guests, 3 nights → €90\.00 total/)).toBeVisible();
-  await expect(dialog.getByText("/ person / night", { exact: true })).toBeVisible();
+  await expect(
+    dialog.locator("article").getByText("/ person / night", { exact: true }),
+  ).toBeVisible();
   await expect(dialog.getByLabel("Max quantity", { exact: true })).toBeHidden();
   await dialog.getByText("More options", { exact: true }).click();
   await dialog.getByLabel("Max quantity", { exact: true }).fill("2");
@@ -260,3 +262,94 @@ for (const width of [1440, 390]) {
     ).toBeVisible();
   });
 }
+
+test("picks when an add-on happens, and the preview shows the card once added (VAY-2391)", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await mockBookingAdminBookingFlow(page);
+  const writes: Record<string, unknown>[] = [];
+  let items: Record<string, unknown>[] = [];
+  await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, async (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({
+        json: {
+          addonItems: items,
+          propertyCurrency: "USD",
+          propertyPlan: { plan: "fixed", limits: { maxAddons: 9 } },
+        },
+      });
+    const body = route.request().postDataJSON();
+    writes.push(body);
+    items = [
+      { ...body, addonItemId: "dinner", imageUrl: null, imageMediaObjectId: null, sortOrder: 0 },
+    ];
+    return route.fulfill({ status: 201, json: items[0] });
+  });
+  await page.goto("/add-ons");
+  await page.getByRole("button", { name: "New add-on" }).click();
+  const dialog = page.getByRole("dialog");
+  const mode = (name: string) => dialog.getByRole("radio", { name, exact: true });
+  const shot = async (anchor: string, name: string) => {
+    await dialog.getByText(anchor).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(name), animations: "disabled" });
+  };
+  await dialog.getByLabel(/^Name \*/).fill("Airport Transfer");
+  await dialog.locator("textarea").fill("We will pick you up from the airport");
+  await dialog.getByLabel(/^Price per booking/).fill("30.00");
+  await expect(mode("Guest picks a day")).toBeChecked();
+  // Transport happens on the arrival day, and the preview shows it under the added card.
+  await dialog.getByRole("radio", { name: "Transport", exact: true }).check();
+  await expect(mode("Arrival day")).toBeChecked();
+  await expect(dialog.getByText("Tue 3 Nov · your arrival day")).toBeVisible();
+  await expect(
+    dialog.getByText("Scheduled automatically on the check-in day. Guests aren’t asked."),
+  ).toBeVisible();
+  await shot("When does it happen?", "addon-schedule-arrival-1440.png");
+  // A per-night price is every day, and nothing else can be picked.
+  await dialog.getByRole("radio", { name: /^Per night/ }).check();
+  await expect(mode("Every day")).toBeChecked();
+  for (const name of ["Arrival day", "Departure day", "Guest picks a day", "Anytime"])
+    await expect(mode(name)).toBeDisabled();
+  await expect(
+    dialog.getByText("Priced per night, so it happens every day of the stay. Guests aren’t asked."),
+  ).toBeVisible();
+  await expect(dialog.getByText("Every day of your stay")).toBeVisible();
+  // Back on one price for the stay: the arrival day again, and every day can't be picked.
+  await dialog.getByRole("radio", { name: /^Flat price/ }).check();
+  await expect(mode("Arrival day")).toBeChecked();
+  await expect(mode("Every day")).toBeDisabled();
+  // A dinner the guest books for one evening, Friday to Sunday.
+  await dialog.getByLabel(/^Name \*/).fill("Sunset Dinner");
+  await dialog.locator("textarea").fill("Three courses on the terrace");
+  await mode("Guest picks a day").check();
+  for (const day of ["Mon", "Tue", "Wed", "Thu"])
+    await dialog.getByRole("button", { name: day, exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Fri", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(dialog.getByText("Which day?", { exact: true })).toBeVisible();
+  await shot("When does it happen?", "addon-schedule-pick-1440.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot("When does it happen?", "addon-schedule-pick-390.png");
+  await shot("AFTER TAPPING ADD", "addon-schedule-preview-390.png");
+  await dialog.getByRole("button", { name: "Create add-on", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({
+    name: "Sunset Dinner",
+    category: "transport",
+    pricingModel: "per_stay",
+    scheduleMode: "guest_pick",
+    bookableWeekdays: [5, 6, 7],
+  });
+  // A copy keeps when it happens and its days.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "Duplicate Sunset Dinner", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toMatchObject({
+    name: "Sunset Dinner (copy)",
+    scheduleMode: "guest_pick",
+    bookableWeekdays: [5, 6, 7],
+  });
+});

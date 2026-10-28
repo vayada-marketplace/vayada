@@ -1,20 +1,22 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  BOOKING_ADMIN_PROPERTY_SETTINGS_PATH,
+  defaultBookingAdminPropertySettings,
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
 
 const STATS_ROUTE = "**/api/booking/properties/*/dashboard/stats**";
-const money = (amountDecimal: string) => ({ amountDecimal, currency: "EUR" });
+const money = (amountDecimal: string, currency = "EUR") => ({ amountDecimal, currency });
 
-function stats(revenue: string, bookingCount: number, pageViewCount: number) {
+function stats(revenue: string, bookingCount: number, pageViewCount: number, currency = "EUR") {
   const zero = { totalRevenue: money("0.00"), bookingCount: 0, avgNightlyRate: money("0.00") };
   return {
     metrics: {
       current: {
-        totalRevenue: money(revenue),
+        totalRevenue: money(revenue, currency),
         bookingCount,
-        avgNightlyRate: money("120.00"),
+        avgNightlyRate: money("120.00", currency),
         pageViewCount,
       },
       previous: { ...zero, pageViewCount: 0 },
@@ -67,6 +69,21 @@ test("keeps all zeros for a new property", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/settings");
   await expect(strip(page)).toContainText("€0 revenue · 0 bookings · 0 page views");
+});
+
+test("shows revenue in the currency guests pay in, not Localization's default (VAY-2390)", async ({
+  page,
+}) => {
+  // The stats come in the PMS pricing currency; Booking settings' default (LKR) is only what
+  // guests see first on the booking page.
+  await page.route(`**${BOOKING_ADMIN_PROPERTY_SETTINGS_PATH}*`, (route) =>
+    route.fulfill({ json: { ...defaultBookingAdminPropertySettings, default_currency: "LKR" } }),
+  );
+  await page.route(STATS_ROUTE, (route) => route.fulfill({ json: stats("240.00", 2, 18, "USD") }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/settings");
+
+  await expect(strip(page)).toContainText("$240 revenue · 2 bookings · 18 page views");
 });
 
 test("leaves the strip out when today's stats can't be read", async ({ page }) => {

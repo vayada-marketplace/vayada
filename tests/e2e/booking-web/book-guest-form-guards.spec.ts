@@ -194,5 +194,5 @@ async function openDetails(page: Page, { rulesStatus = 200 } = {}) {
 }
 
 async function acknowledge(page: Page) {
-  await page.getByLabel(/^I agree to the cancellation policy/).check();
+  await page.getByLabel(/I agree to the cancellation policy/).check();
 }

@@ -261,6 +261,14 @@ describe("booking lifecycle email jobs", () => {
     expect(
       await text("final_confirmation", stay(["Double", free]), "2026-10-09T18:30:00.000Z"),
     ).toContain(`Cancellation: Free cancellation ended on Fri, 9 Oct 2026. ${payFull}`);
+    // Booked that late, it never had free cancellation (VAY-2392).
+    expect(
+      await text(
+        "final_confirmation",
+        { ...stay(["Double", free]), bookedOn: "2026-10-10" },
+        "2026-10-09T18:30:00.000Z",
+      ),
+    ).toContain(`Cancellation: Non-refundable: booked less than 3 days before arrival. ${payFull}`);
     expect(await text("final_confirmation", stay(["Double", none]))).toContain(
       `Cancellation: Non-refundable. ${payFull}`,
     );

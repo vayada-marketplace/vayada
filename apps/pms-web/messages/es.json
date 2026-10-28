@@ -176,6 +176,7 @@
   "dashboard.noDepartures": "Sin salidas hoy",
   "dashboard.revenueThisMonth": "Ingresos este mes",
   "dashboard.monthToDate": "Mes hasta la fecha",
+  "dashboard.monthToDateOtherCurrencies": "Mes hasta la fecha, sin reservas en otras monedas",
   "dashboard.viewAll": "Ver todo",
   "dashboard.clickGuestToStartCheckIn": "Haz clic en un huesped para iniciar el check-in",
   "dashboard.confirmed": "Confirmada",

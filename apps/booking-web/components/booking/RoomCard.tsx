@@ -73,6 +73,12 @@ export default function RoomCard({
     takenBy: number[];
     /** The rates chosen for the group's other rooms: one booking is paid one way. */
     chosen: PricingOffer[];
+    /** VAY-2393: the rate the room being chosen has now, when it is this room type. */
+    current: string | null;
+    /** Opens "Who sleeps where", for a room too small for this room's guests. */
+    onChangeGuests: () => void;
+    /** Every room is chosen (Back from the next step): nothing to pick until a pill opens one. */
+    allChosen: boolean;
   };
   /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
   place?: GuestPlace | null;
@@ -92,6 +98,13 @@ export default function RoomCard({
   const { approximate } = useCurrency();
   const [imageIndex, setImageIndex] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
+  const current = pick?.current ?? null;
+  // A rate clicked while choosing one room isn't the next room's choice (VAY-2393).
+  const [pickedFor, setPickedFor] = useState(pick?.room);
+  if (pickedFor !== pick?.room) {
+    setPickedFor(pick?.room);
+    setPicked(null);
+  }
   const [detailsOpen, setDetailsOpen] = useState(false);
   const onView = () => {
     setDetailsOpen(true);
@@ -110,13 +123,23 @@ export default function RoomCard({
   // choices stay choosable and /book prices the stay.
   const unpricedRoom =
     pricesState === "failed" || pricesState === "missing" || (pricesState === "ready" && !prices);
-  // A room the party doesn't fit isn't sold out: it says how many guests it takes instead.
-  const tooSmall = prices !== null && prices.roomCount === null;
-  const soldOut = prices?.availability === "sold_out" && !tooSmall;
+  // A room the party doesn't fit isn't sold out: it says how many guests it takes instead,
+  // unless none of its kind is free (VAY-2393).
+  const doesNotFit = prices !== null && prices.roomCount === null;
+  const soldOut = prices?.availability === "sold_out" && (!doesNotFit || prices.roomsFree === 0);
   const roomCount = pick ? 1 : (prices?.roomCount ?? 1);
-  // Room by room: free rooms of this type the group's other rooms haven't taken.
+  // Room by room: free rooms of this type the group's other rooms haven't taken. Used up by
+  // them comes before too small, as in Timo's prototype (VAY-2393).
   const left = pick && prices?.roomsFree != null ? prices.roomsFree - pick.takenBy.length : null;
-  const usedUp = !!pick && left !== null && left <= 0 && !soldOut && !tooSmall;
+  const usedUp = !!pick && left !== null && left <= 0 && !soldOut;
+  const tooSmall = doesNotFit && !soldOut && !usedUp;
+  // Who sleeps where moves adults: it helps a too-small room only when the adults are what
+  // doesn't fit, and says how many adults the room takes next to this room's children.
+  const adultsFit =
+    pick && room.occupancy && pick.guests.children <= room.occupancy.maxChildren
+      ? Math.min(room.occupancy.maxAdults, room.occupancy.maxGuests - pick.guests.children)
+      : 0;
+  const splitHelps = !!pick && tooSmall && !pick.allChosen && adultsFit >= 1;
   // "Only 2 left": room by room, what the group's other rooms left of this type.
   const fewLeft = usedUp
     ? null
@@ -180,8 +203,13 @@ export default function RoomCard({
       );
     });
   const selectable = shown.filter(({ bookable }) => bookable);
-  // The cheapest choice starts selected, as the old card did with non-refundable.
-  const selected = selectable.find(({ offer }) => offer.publicOfferKey === picked) ?? selectable[0];
+  // The cheapest choice starts selected, as the old card did with non-refundable; a room the group
+  // chose starts on its rate (VAY-2393).
+  const selected =
+    selectable.find(({ offer }) => offer.publicOfferKey === (picked ?? current)) ?? selectable[0];
+  // VAY-2393: this room type is the room's choice now: the button keeps it, or updates its rate.
+  const isCurrent = !!current && !!selected;
+  const currentRate = isCurrent && selected.offer.publicOfferKey === current;
 
   const amount = (choice: (typeof shown)[number]) =>
     choice.priced ? quoteMoneyAmount(choice.priced.totalMinor, choice.priced.currency) : null;
@@ -215,6 +243,11 @@ export default function RoomCard({
   };
 
   // The choices and "Select This Rate", on the card and again in "View Details".
+  // In "View details", acting closes the details first, so the page's own feedback shows.
+  const act = (inDetails: boolean, action: () => void) => () => {
+    if (inDetails) setDetailsOpen(false);
+    action();
+  };
   const rates = (inDetails: boolean) => (
     <div className="border-t border-gray-100 pt-4">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -269,38 +302,81 @@ export default function RoomCard({
       {promoCode && selected?.priced && !selected.priced.promoApplied && (
         <p className="text-xs text-gray-500 mt-2">{t("promoNotApplied", { code: promoCode })}</p>
       )}
-      <button
-        type="button"
-        data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
-        onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
-        disabled={!selected || tooSmall || usedUp}
-        className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
-      >
-        {soldOut
-          ? t("soldOut")
-          : usedUp
-            ? t("noneLeftForRoom", { number: pick!.room })
+      {pick && splitHelps ? (
+        // VAY-2393: too small for this room's guests: another split may fit it.
+        <button
+          type="button"
+          data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+          onClick={act(inDetails, pick.onChangeGuests)}
+          className="w-full mt-4 py-3 bg-white text-primary-700 font-semibold rounded-xl border-[1.5px] border-primary-600 hover:bg-primary-50 transition-colors text-sm"
+        >
+          {t("pickRoom.fitsChangeSplit", { count: adultsFit })}
+        </button>
+      ) : pick ? (
+        // VAY-2393, room by room: what the room being chosen can do with this place.
+        <button
+          type="button"
+          data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+          onClick={act(
+            inDetails,
+            () => selected && onSelect(selected.offer.publicOfferKey, roomCount),
+          )}
+          disabled={!selected || soldOut || usedUp || tooSmall || pick.allChosen || currentRate}
+          className={`w-full mt-4 py-3 font-semibold rounded-xl transition-colors text-sm ${
+            currentRate && !pick.allChosen
+              ? "bg-success-50 text-success-800 border border-success-200 cursor-default"
+              : !selected || soldOut || usedUp || tooSmall || pick.allChosen
+                ? "bg-gray-100 text-gray-600 border border-gray-200 cursor-not-allowed"
+                : "bg-primary-600 text-white hover:bg-primary-700"
+          }`}
+        >
+          {soldOut
+            ? t("pickRoom.soldOut")
+            : pick.allChosen
+              ? t("pickRoom.allChosen")
+              : usedUp
+                ? t("pickRoom.alreadyYours", { number: pick.takenBy.join(" & ") })
+                : tooSmall || (prices && !selected)
+                  ? t("notAvailable")
+                  : currentRate
+                    ? t("pickRoom.yourRoom", { number: pick.room })
+                    : isCurrent
+                      ? t("pickRoom.updateRoom", { number: pick.room })
+                      : t("pickRoom.selectFor", { number: pick.room })}
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+          onClick={act(
+            inDetails,
+            () => selected && onSelect(selected.offer.publicOfferKey, roomCount),
+          )}
+          disabled={!selected || tooSmall}
+          className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
+        >
+          {soldOut
+            ? t("soldOut")
             : tooSmall || (prices && !selected)
               ? t("notAvailable")
-              : pick
-                ? t("chooseForRoom", { number: pick.room })
-                : t("selectThisRate")}
-      </button>
-      {usedUp && (
-        <p className="text-sm mt-3 text-gray-600">
-          {t("lastOneChosen", { number: pick!.takenBy[pick!.takenBy.length - 1]! })}
-        </p>
+              : t("selectThisRate")}
+        </button>
       )}
-      {tooSmall && room.occupancy && (
+      {pick && currentRate && !pick.allChosen && (
+        <p className="text-sm mt-3 text-gray-600">{t("pickRoom.swapHint")}</p>
+      )}
+      {tooSmall && room.occupancy && !pick?.allChosen && (
         <p className="text-sm mt-3 text-gray-600">
-          {childGuests > 0 && room.occupancy.maxChildren === 0
+          {(pick ? pick.guests.children : childGuests) > 0 && room.occupancy.maxChildren === 0
             ? t("noChildren")
-            : t("tooManyGuests", { count: room.occupancy.maxGuests })}
+            : pick
+              ? t("pickRoom.roomIsFor", { number: pick.room, ...pick.guests })
+              : t("tooManyGuests", { count: room.occupancy.maxGuests })}
         </p>
       )}
       {/* Free rooms but no choice priced for the stay: say why the button reads "Not available".
           Room by room, a type the group used up or paid another way says so instead (VAY-2320). */}
-      {prices && !soldOut && !tooSmall && all.every((choice) => choice.unavailable) && (
+      {prices && !soldOut && !tooSmall && !usedUp && all.every((choice) => choice.unavailable) && (
         <p className="text-sm mt-3 text-gray-600">{t("notBookableForDates")}</p>
       )}
       {/* Rooms left only matter when a choice can be booked; never beside "Not available" (VAY-2319). */}
@@ -352,7 +428,7 @@ export default function RoomCard({
         <div
           data-testid={`room-card-${room.roomTypeId}`}
           onClick={onActivate}
-          className={`grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 rounded-2xl border-2 bg-white p-3 transition-colors sm:grid-cols-[112px_minmax(0,1fr)_auto] sm:gap-x-4 ${active ? "border-primary-600" : "border-gray-100 hover:border-gray-200"} ${soldOut ? "opacity-60" : ""} ${onActivate ? "cursor-pointer" : ""}`}
+          className={`grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 rounded-2xl border-2 bg-white p-3 transition-colors sm:grid-cols-[112px_minmax(0,1fr)_auto] sm:gap-x-4 ${active ? "border-primary-600" : "border-gray-100 hover:border-gray-200"} ${soldOut || usedUp ? "opacity-60" : ""} ${onActivate ? "cursor-pointer" : ""}`}
         >
           <div className="relative h-[72px] overflow-hidden rounded-xl bg-gray-100 sm:h-[84px]">
             {images.length > 0 && (
@@ -363,6 +439,15 @@ export default function RoomCard({
                 className="object-cover"
                 sizes={bookingImageSizes.roomThumb}
               />
+            )}
+            {pick && !soldOut && (current || pick.takenBy.length > 0) && (
+              <span
+                className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold text-white shadow ${current ? "bg-success-700" : "bg-gray-900"}`}
+              >
+                {t("pickRoom.yourRoomChip", {
+                  number: current ? pick.room : pick.takenBy.join(" & "),
+                })}
+              </span>
             )}
           </div>
           <div className="min-w-0">
@@ -397,7 +482,15 @@ export default function RoomCard({
           {/* Across the card's foot on a phone, on the right from sm up. */}
           <div className="col-span-2 mt-2 flex items-center justify-between gap-3 sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:mt-0 sm:flex-col sm:items-end sm:text-right">
             {soldOut ? (
-              <span className="text-sm font-semibold text-gray-500">{t("soldOut")}</span>
+              <span className="text-sm font-semibold text-gray-500">
+                {pick ? t("pickRoom.soldOut") : t("soldOut")}
+              </span>
+            ) : pick?.allChosen ? (
+              <span className="text-sm font-semibold text-gray-500">{t("pickRoom.allChosen")}</span>
+            ) : usedUp ? (
+              <span className="text-sm font-semibold text-gray-500">
+                {t("pickRoom.alreadyYours", { number: pick!.takenBy.join(" & ") })}
+              </span>
             ) : tooSmall || (prices && !selected) ? (
               <span className="text-sm font-semibold text-gray-500">{t("notAvailable")}</span>
             ) : pricesState === "loading" ? (
@@ -435,7 +528,7 @@ export default function RoomCard({
   return (
     <div
       data-testid={`room-card-${room.roomTypeId}`}
-      className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut || usedUp ? "opacity-60" : "hover:shadow-lg"}`}
+      className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut || usedUp ? "opacity-60" : "hover:shadow-lg"} ${isCurrent ? "ring-2 ring-primary-600" : ""}`}
     >
       <div className="flex flex-col md:flex-row">
         <div
@@ -466,12 +559,22 @@ export default function RoomCard({
               />
             </svg>
           )}
-          {(soldOut || usedUp) && (
+          {soldOut && (
             <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">
               <span className="bg-white text-gray-900 text-sm font-bold px-5 py-2 rounded-full shadow">
-                {soldOut ? t("soldOut") : t("inYourRoom", { number: pick!.takenBy[0]! })}
+                {t("soldOut")}
               </span>
             </div>
+          )}
+          {/* VAY-2393: the room being chosen has this place (green), or the group's other rooms do. */}
+          {pick && !soldOut && (current || pick.takenBy.length > 0) && (
+            <span
+              className={`absolute left-4 top-4 z-20 rounded-full px-3.5 py-2 text-[13px] font-bold shadow ${current ? "bg-success-700 text-white" : "bg-gray-900 text-white"}`}
+            >
+              {t("pickRoom.yourRoomChip", {
+                number: current ? pick.room : pick.takenBy.join(" & "),
+              })}
+            </span>
           )}
           {images.length > 1 && (
             <>

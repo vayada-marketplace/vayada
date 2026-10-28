@@ -82,7 +82,6 @@ export default function DashboardPage() {
   const [funnelError, setFunnelError] = useState(false);
   const [funnel, setFunnel] = useState<ConversionFunnel | null>(null);
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
-  const [currency, setCurrency] = useState("EUR");
   const [propertyTimeZone, setPropertyTimeZone] = useState<string | null>(null);
   const [hotelName, setHotelName] = useState("");
   // VAY-2247 wave 2: the setup checklist, where the server offers it.
@@ -96,7 +95,6 @@ export default function DashboardPage() {
     settingsService
       .getPropertySettings()
       .then((settings: PropertySettings) => {
-        if (settings.default_currency) setCurrency(settings.default_currency);
         setPropertyTimeZone(settings.time_zone || null);
         setHotelName(settings.property_name || "");
       })
@@ -199,6 +197,9 @@ export default function DashboardPage() {
   const incompleteAmounts = Boolean(
     stats && (stats.unverified_bookings > 0 || stats.unverified_bookings_previous > 0),
   );
+  // Amounts are in the property's currency, the one guests pay in (VAY-2390), not Localization's.
+  const currency = stats?.currency ?? sources?.currency ?? "EUR";
+  const otherCurrencyAmounts = Boolean(stats && stats.other_currency_bookings > 0);
   const money = (value: number) => formatCurrency(value, currency, locale);
   const count = ({ amount }: SummaryChange) => formatNumber(amount, locale);
   // Revenue reads as a percentage; after an empty previous period, or when the percentage
@@ -262,6 +263,14 @@ export default function DashboardPage() {
           className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
         >
           {t("dashboard.stats.incompleteAmounts")}
+        </p>
+      )}
+      {otherCurrencyAmounts && (
+        <p
+          role="status"
+          className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+        >
+          {t("dashboard.stats.otherCurrencies", { currency })}
         </p>
       )}
       {/* Stats Cards */}

@@ -8,6 +8,8 @@ type Pin = { latitude: number; longitude: number };
  * lines, the stay's total in minor units and the hotel's time zone. */
 export type StayCancellation = {
   checkIn: string;
+  /** The hotel's date it was booked on (VAY-2392); absent from older APIs. */
+  bookedOn?: string;
   currency: string;
   timeZone: string;
   totalMinor: string;
@@ -229,6 +231,7 @@ export function parseBookingStay(value: unknown): BookingStay {
     cancellation: valid
       ? {
           checkIn: terms.checkIn as string,
+          ...(day(terms.bookedOn) && { bookedOn: terms.bookedOn }),
           currency: terms.currency as string,
           timeZone: terms.timeZone as string,
           totalMinor: terms.totalMinor as string,

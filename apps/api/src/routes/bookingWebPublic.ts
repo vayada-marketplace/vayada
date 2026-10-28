@@ -4528,6 +4528,7 @@ function serializeBookingStay(
     version: "booking-stay.v1",
     cancellation: terms && {
       checkIn: terms.checkIn,
+      bookedOn: terms.bookedOn,
       currency: terms.currency,
       timeZone: terms.timeZone,
       totalMinor: terms.totalMinor,

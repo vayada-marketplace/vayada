@@ -65,7 +65,10 @@ export default function CancellationPolicy({
   const noteText = [
     policy.request ? t("note.request") : null,
     "date" in note
-      ? t(`note.${note.kind}`, { date: formatStayDate(note.date, locale) })
+      ? t(`note.${note.kind}`, {
+          date: formatStayDate(note.date, locale),
+          ...("days" in note && { days: note.days }),
+        })
       : t(`note.${note.kind}`),
     policy.bankTransfer ? t("note.bankTransfer") : null,
   ]

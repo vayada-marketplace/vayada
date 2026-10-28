@@ -38,6 +38,8 @@ export interface BookingPromoCode {
 
 export interface ListBookingPromoCodesResponse {
   promoCodes: BookingPromoCode[];
+  /** The currency promo amounts are in: the PMS pricing currency guests pay in (VAY-2390). */
+  propertyCurrency?: string;
 }
 
 export type CreateBookingPromoCodeBody = {
@@ -78,12 +80,18 @@ export async function listBookingPromoCodes(
   input: { hotelId: string },
   client: ReadClient = apiClient,
 ): Promise<BookingPromoCode[]> {
+  return (await readBookingPromoCodes(input, client)).promoCodes;
+}
+
+export async function readBookingPromoCodes(
+  input: { hotelId: string },
+  client: ReadClient = apiClient,
+): Promise<ListBookingPromoCodesResponse> {
   try {
-    const response = await client.get<ListBookingPromoCodesResponse>(
+    return await client.get<ListBookingPromoCodesResponse>(
       buildBookingPromoCodesEndpoint(input.hotelId),
       omitHotelContext,
     );
-    return response.promoCodes;
   } catch (error) {
     throw toBookingPromoCodesClientError(error, "read");
   }

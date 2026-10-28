@@ -499,12 +499,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   };
   // The step last reported as shown; a room card's hand-off never shows the rooms.
   const viewed = useRef<BookStep | null>(null);
-  // A room card's complete choice opens at the first step after the rooms.
+  // A room card's complete choice opens at the first step after the rooms; so does a group's,
+  // once it chose its last room (VAY-2393). Children's ages still to give keep the rooms step.
   useEffect(() => {
     if (!settled || handedOver.current) return;
     handedOver.current = true;
-    if (wanted === "rooms" && new URLSearchParams(window.location.search).get("offer"))
-      if (roomsComplete) {
+    const params = new URLSearchParams(window.location.search);
+    if (wanted === "rooms" && (params.get("offer") || params.has("pick")))
+      if (roomsComplete && !guestProblems) {
         viewed.current = "rooms";
         passMissingExtras();
         go(steps[1] ?? "payment", true);
@@ -910,12 +912,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           pickIdentity({
             checkIn: params.get("checkIn") ?? "",
             checkOut: params.get("checkOut") ?? "",
-            adults: Number(params.get("adults")) || 0,
-            children:
-              hotel?.guestTypeSettings?.childrenEnabled === false
-                ? 0
-                : Number(params.get("children")) || 0,
-            rooms: Number(params.get("rooms")) || choices.length,
             promoCode: params.get("promoCode"),
           }),
           roomTypeIds,
@@ -994,7 +990,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 checkIn={checkIn}
                 timezone={hotel?.timezone}
                 childMaxAge={Math.max(0, (hotel?.guestTypeSettings?.adultAgeThreshold ?? 18) - 1)}
-                childrenEnabled={hotel?.guestTypeSettings?.childrenEnabled !== false}
                 changeRoomsHref={`/?${homeSearch}`}
                 formatMoney={money}
                 onChange={(selectionId, patch) =>

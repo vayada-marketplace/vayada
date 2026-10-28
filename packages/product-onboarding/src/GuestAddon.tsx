@@ -171,6 +171,113 @@ export function GuestAddonCard({
   );
 }
 
+/** VAY-2391: the words under an added extra about when it happens, for previews outside the
+ * booking page (the page passes its translations). */
+export const guestAddonScheduleText = {
+  scheduledAutomatically: "Scheduled automatically",
+  arrivalDay: (day: string) => `${day} · your arrival day`,
+  departureDay: (day: string) => `${day} · your departure day`,
+  everyDay: "Every day of your stay",
+  nights: (count: number) => `${count} ${count === 1 ? "night" : "nights"}`,
+  anytime: "Anytime during your stay",
+  noDateNeeded: "No date needed",
+  whichDay: "Which day?",
+  chooseADay: "Choose a day to continue",
+};
+
+/** VAY-2391: under an added extra the guest doesn't schedule: when it happens, in one line. */
+export function GuestAddonScheduledLine({ line, sub }: { line: string; sub: string }) {
+  return (
+    <div className="mt-3 flex items-center gap-2.5 border-t border-gray-100 pt-3">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-700">
+        <svg
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          {path(
+            "M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z",
+          )}
+        </svg>
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-gray-900">{line}</span>
+        <span className="block text-xs text-gray-500">{sub}</span>
+      </span>
+    </div>
+  );
+}
+
+/** VAY-2391: the days a guest can pick for an added extra, weekday over date. Without `onPick`
+ * (Booking Admin's preview) the chips are pictures, not buttons. */
+export function GuestAddonDayChips({
+  legend,
+  attention = false,
+  days,
+  selected,
+  onPick,
+  dayLabel,
+}: {
+  legend: string;
+  /** Continue was pressed while no day is picked. */
+  attention?: boolean;
+  days: { date: string; weekday: string; day: string }[];
+  selected: string | null;
+  onPick?: (date: string) => void;
+  /** The chip's accessible name, e.g. "Sunset Dinner on Wed 4 Nov". */
+  dayLabel?: (weekday: string, day: string) => string;
+}) {
+  const chip = (on: boolean) =>
+    `flex h-[52px] flex-col items-center justify-center rounded-[10px] border text-xs transition-colors ${
+      on
+        ? "border-gray-900 bg-gray-900 text-gray-200"
+        : `bg-white text-gray-500 ${attention ? "border-amber-400" : "border-gray-300 hover:border-gray-400"}`
+    }`;
+  const label = (on: boolean, weekday: string, day: string) => (
+    <>
+      <span className={`text-[15px] font-bold leading-5 ${on ? "text-white" : "text-gray-900"}`}>
+        {weekday}
+      </span>
+      {day}
+    </>
+  );
+  // The line goes above the fieldset: a fieldset draws its own border through the legend.
+  return (
+    <div className="mt-3 border-t border-gray-100 pt-3">
+      <fieldset>
+        <legend
+          className={`mb-2 text-sm font-semibold ${attention ? "text-amber-700" : "text-gray-900"}`}
+        >
+          {legend}
+        </legend>
+        <div className="grid grid-cols-3 gap-1.5">
+          {days.map(({ date, weekday, day }) => {
+            const on = date === selected;
+            return onPick ? (
+              <button
+                key={date}
+                type="button"
+                aria-pressed={on}
+                aria-label={dayLabel?.(weekday, day)}
+                onClick={() => onPick(date)}
+                className={chip(on)}
+              >
+                {label(on, weekday, day)}
+              </button>
+            ) : (
+              <span key={date} className={chip(on)}>
+                {label(on, weekday, day)}
+              </span>
+            );
+          })}
+        </div>
+      </fieldset>
+    </div>
+  );
+}
+
 const sizes = {
   // A popup from md up, a bottom sheet below.
   responsive: {
