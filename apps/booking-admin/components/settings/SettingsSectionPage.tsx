@@ -301,6 +301,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     setSupportedCurrencies,
     supportedLanguages,
     setSupportedLanguages,
+    propertyCurrency,
     savingCurrencyLang,
     applyLocalizationSettings,
     handleSaveCurrencyLang,
@@ -1579,6 +1580,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               setSupportedCurrencies={setSupportedCurrencies}
               supportedLanguages={supportedLanguages}
               setSupportedLanguages={setSupportedLanguages}
+              propertyCurrency={propertyCurrency}
               onSave={handleSaveCurrencyLang}
               saving={savingCurrencyLang}
             />

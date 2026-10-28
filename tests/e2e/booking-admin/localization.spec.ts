@@ -263,3 +263,48 @@ test.describe("booking-admin localization settings cutover", () => {
     await assertRoomFiltersHealthy();
   });
 });
+
+test.describe("booking-admin guest display currency (VAY-2390)", () => {
+  test("shows the property currency guests pay in next to the display currency", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    await mockBookingAdminBookingFlow(page);
+    await page.route(`**${BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        json: {
+          defaultCurrency: "USD",
+          defaultLanguage: "en",
+          supportedCurrencies: ["GBP", "CHF"],
+          supportedLanguages: [],
+          propertyCurrency: "EUR",
+        },
+      });
+    });
+    const assertHealthy = watchPageHealth(page, testInfo);
+
+    await page.goto("/settings/general#localization");
+    await expect(page.getByText("Guest display currency", { exact: false })).toBeVisible();
+    await expect(
+      page.getByText(
+        "The currency guests see first. Prices are converted from your property currency (EUR), and guests always pay in EUR.",
+      ),
+    ).toBeVisible();
+    const note = page.getByRole("note").filter({ hasText: "Guests see USD first" });
+    await expect(note).toContainText("converted from your EUR prices");
+    await expect(note).toContainText("Checkout, payment and emails stay in EUR.");
+    await expect(page.getByText("More currencies guests can switch to")).toBeVisible();
+    await expect(page.getByText("Guests can switch to:")).toBeVisible();
+    await expect(page.getByText("EUR · your property currency")).toBeVisible();
+    // The property currency is always offered: it has no remove button, the others do.
+    await expect(page.getByRole("button", { name: /EUR/ }).filter({ hasText: "×" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /GBP/ }).filter({ hasText: "×" })).toHaveCount(1);
+    await page.screenshot({ path: testInfo.outputPath("localization-display-currency.png") });
+    await assertHealthy();
+  });
+});

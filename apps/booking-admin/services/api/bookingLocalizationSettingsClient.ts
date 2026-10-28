@@ -19,13 +19,19 @@ export interface GetBookingLocalizationSettingsInput {
 }
 
 export interface BookingLocalizationSettings {
+  /** The guest display currency: what guests see first, not what they pay in (VAY-2390). */
   defaultCurrency: string;
   defaultLanguage: string;
   supportedCurrencies: string[];
   supportedLanguages: string[];
+  /** The PMS pricing currency guests pay in. Read only; older APIs leave it out. */
+  propertyCurrency?: string;
 }
 
-export type UpdateBookingLocalizationSettingsBody = BookingLocalizationSettings;
+export type UpdateBookingLocalizationSettingsBody = Omit<
+  BookingLocalizationSettings,
+  "propertyCurrency"
+>;
 
 export interface UpdateBookingLocalizationSettingsInput {
   hotelId: string;

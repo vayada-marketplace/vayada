@@ -214,6 +214,8 @@ export type BookingLocalizationSettingsReadModel = {
   defaultLanguage?: string | null;
   supportedCurrencies?: unknown;
   supportedLanguages?: unknown;
+  /** VAY-2390: the PMS pricing currency guests pay in; defaultCurrency is only what they see first. */
+  propertyCurrency?: string | null;
 };
 
 export type BookingRoomFilterSettingsReadModel = {
@@ -306,6 +308,11 @@ export type BookingLocalizationSettingsResponse = {
   defaultLanguage: string;
   supportedCurrencies: string[];
   supportedLanguages: string[];
+};
+
+/** The Localization page's read: also the property currency guests pay in (VAY-2390). */
+export type BookingLocalizationSettingsRouteResponse = BookingLocalizationSettingsResponse & {
+  propertyCurrency: string;
 };
 
 export type BookingRoomFilterSettingsResponse = {
@@ -871,6 +878,8 @@ type TargetBookingSettingsRow = {
   font_pairing: string | null;
   last_minute_discount: unknown;
   updated_at: string | Date | null;
+  /** VAY-2390: the PMS pricing currency guests pay in, when the hotel has one. */
+  pricing_currency?: string | null;
 };
 
 type TargetBookingSettingsQueryRow = TargetBookingSettingsRow & {
@@ -1203,7 +1212,9 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     settings.primary_color,
     settings.font_pairing,
     settings.last_minute_discount,
-    settings.updated_at
+    settings.updated_at,
+    (SELECT pricing.currency::text FROM pms.property_pricing_settings pricing
+      WHERE pricing.property_id = source_link_status.property_id) AS pricing_currency
   FROM source_link_status
   LEFT JOIN booking.booking_settings settings
     ON source_link_status.source_link_count = 1
@@ -1595,6 +1606,7 @@ function toTargetLocalizationSettings(
     defaultLanguage: row.default_language,
     supportedCurrencies: row.supported_currencies,
     supportedLanguages: row.supported_languages,
+    propertyCurrency: row.pricing_currency ?? null,
   };
 }
 
@@ -1899,7 +1911,9 @@ export function createPgTargetBookingSettingsRepository(config: {
           updated_settings.primary_color,
           updated_settings.font_pairing,
           updated_settings.last_minute_discount,
-          updated_settings.updated_at
+          updated_settings.updated_at,
+          (SELECT pricing.currency::text FROM pms.property_pricing_settings pricing
+            WHERE pricing.property_id = source_link_status.property_id) AS pricing_currency
         FROM source_link_status
         LEFT JOIN updated_settings ON TRUE
         LEFT JOIN LATERAL (
@@ -2485,7 +2499,7 @@ export async function registerBookingSettingsRoutes(
         });
       }
 
-      return toLocalizationSettingsResponse(settings);
+      return toLocalizationSettingsRouteResponse(settings);
     },
   );
 
@@ -2916,7 +2930,7 @@ export async function registerBookingSettingsRoutes(
               }
             }
           : undefined,
-        toResponse: toLocalizationSettingsResponse,
+        toResponse: toLocalizationSettingsRouteResponse,
       }),
   );
 
@@ -3637,6 +3651,15 @@ export function toBenefitsSettingsResponse(
   return {
     benefits: parseBenefitsValue(settings?.benefits),
   };
+}
+
+// VAY-2390: the guest display currency (defaultCurrency) is only what guests see first; they pay
+// in the PMS pricing currency, or in the display currency before the hotel has prices.
+function toLocalizationSettingsRouteResponse(
+  settings: BookingLocalizationSettingsReadModel,
+): BookingLocalizationSettingsRouteResponse {
+  const response = toLocalizationSettingsResponse(settings);
+  return { ...response, propertyCurrency: settings.propertyCurrency ?? response.defaultCurrency };
 }
 
 export function toLocalizationSettingsResponse(

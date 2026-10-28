@@ -145,9 +145,12 @@ export function useLocalizationSettingsTab({
   const [defaultLanguage, setDefaultLanguage] = useState("en");
   const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([]);
   const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
+  // VAY-2390: the currency guests pay in; null until loaded or from an older API.
+  const [propertyCurrency, setPropertyCurrency] = useState<string | null>(null);
   const [savingCurrencyLang, setSavingCurrencyLang] = useState(false);
 
   const applyLocalizationSettings = useCallback((settings: BookingLocalizationSettings) => {
+    setPropertyCurrency(settings.propertyCurrency ?? null);
     setDefaultCurrency(settings.defaultCurrency);
     setDefaultLanguage(settings.defaultLanguage);
     setSupportedCurrencies(settings.supportedCurrencies);
@@ -188,6 +191,7 @@ export function useLocalizationSettingsTab({
     setSupportedCurrencies,
     supportedLanguages,
     setSupportedLanguages,
+    propertyCurrency,
     savingCurrencyLang,
     applyLocalizationSettings,
     handleSaveCurrencyLang,
