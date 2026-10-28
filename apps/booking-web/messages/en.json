@@ -183,7 +183,11 @@
       "readyForDetails": "Ready for your details",
       "continueToExtras": "Continue to extras",
       "continueToDetails": "Continue to your details",
-      "partChosen": "Room 1: {name} for {count}. Now pick a place for the other {rest}."
+      "partChosen": "Room 1: {name} for {count}. Now pick a place for the other {rest}.",
+      "remove": "Remove Room {number} from booking",
+      "removedToOne": "Room {number} removed. All {adults} adults are now in one room.",
+      "removed": "Room {number} removed.",
+      "undo": "Undo"
     },
     "pickRoom": {
       "selectFor": "Select for Room {number}",
@@ -197,7 +201,9 @@
       "allChosen": "All rooms chosen",
       "swapHint": "Pick another place to swap it.",
       "bookPart": "Book for {adults} + pick a 2nd room for {rest}",
-      "partNote": "Sleeps {count} of your {guests} guests."
+      "partNote": "Sleeps {count} of your {guests} guests.",
+      "yourChoice": "Your choice",
+      "continueWithPlace": "Continue with this place"
     },
     "pricesPerRoom": "Prices are per room, for the adults in it. We add children once you tell us their ages on the next step.",
     "oneRoom": {

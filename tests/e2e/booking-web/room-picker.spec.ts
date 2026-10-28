@@ -375,3 +375,101 @@ test("books part of a group with a child and puts the child in the second room",
   ]);
   await assertHealthy();
 });
+
+for (const width of [1440, 390]) {
+  test(`removes a room from its pill and can undo it at ${width}px`, async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await mockBookingApis(page);
+    await mockGroup(page, []);
+    await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4&rooms=2");
+    const garden = page.getByTestId("room-card-garden");
+    await garden.getByRole("button", { name: "Select for Room 1" }).click();
+    await expect(page.getByTestId("rooms-progress")).toContainText("Room 2 of 2");
+
+    // One click removes room 2: all 4 adults are in one room again, and Garden is their choice.
+    await page.getByRole("button", { name: "Remove Room 2 from booking" }).click();
+    const toast = page.getByTestId("toast");
+    await expect(toast).toContainText("Room 2 removed. All 4 adults are now in one room.");
+    await expect(page.getByTestId("rooms-progress")).toHaveCount(0);
+    await expect(page.getByTestId("none-fits")).toContainText("No single place fits 4 guests.");
+    await expect(garden).toContainText("Your choice");
+    // It sleeps 2, so it isn't moved to the top: booked for 2 again, with a second room for the
+    // others.
+    await expect(
+      garden.getByRole("button", { name: "Book for 2 + pick a 2nd room for 2" }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: testInfo.outputPath(`removed-to-one-room-${width}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+
+    // Undo brings room 2 back with room 1's choice.
+    await toast.getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByTestId("rooms-progress")).toContainText("Room 2 of 2");
+    await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
+    await expect(toast).toHaveCount(0);
+    await assertHealthy();
+  });
+}
+
+test("keeps the place that sleeps everyone and continues with it", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockGroup(page, []);
+  await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=2&rooms=2");
+  await page
+    .getByTestId("room-card-garden")
+    .getByRole("button", { name: "Select for Room 1" })
+    .click();
+  await page.getByRole("button", { name: "Remove Room 2 from booking" }).click();
+  await expect(page.getByTestId("toast")).toContainText(
+    "Room 2 removed. All 2 adults are now in one room.",
+  );
+  const choice = page.getByTestId("select-rate-garden");
+  await expect(choice).toHaveText("Continue with this place");
+  await expect(page.getByTestId("room-card-garden")).toContainText("Your choice");
+  // It sleeps both adults: listed first.
+  await expect.poll(() => cardOrder(page).then((order) => order[0])).toBe("room-card-garden");
+  await choice.click();
+  await expect(page).toHaveURL(/\/(en\/)?book\?/);
+  const params = new URL(page.url()).searchParams;
+  expect(params.get("offer")).toBe(key("f"));
+  expect(params.getAll("pick")).toEqual([]);
+  await assertHealthy();
+});
+
+// Independent review (VAY-2393): removing from the keyboard puts focus on Undo, which stays up
+// while it has focus; removing a room of three keeps the others' choices in order.
+test("removes rooms from the keyboard and from the middle of three", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockGroup(page, []);
+  await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=3&rooms=3");
+  const garden = page.getByTestId("room-card-garden");
+  await garden.getByRole("button", { name: "Select for Room 1" }).click();
+  await garden.getByRole("button", { name: "Select for Room 2" }).click();
+  await expect(page.getByTestId("rooms-progress")).toContainText("Room 3 of 3");
+
+  // Room 1 goes: the old Room 2 (Garden) is Room 1 now, and Room 2 is still to choose.
+  await page.getByRole("button", { name: "Remove Room 1 from booking" }).click();
+  const toast = page.getByTestId("toast");
+  await expect(toast).toContainText("Room 1 removed.");
+  const progress = page.getByTestId("rooms-progress");
+  await expect(progress).toContainText("Room 2 of 2");
+  await expect(page.getByTestId("room-pill-1")).toContainText("✓ Garden Double Room");
+  await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
+
+  // From the keyboard: focus goes to Undo, and the toast waits while it has focus.
+  await page.getByRole("button", { name: "Remove Room 2 from booking" }).focus();
+  await page.keyboard.press("Enter");
+  const undo = toast.getByRole("button", { name: "Undo" });
+  await expect(undo).toBeFocused();
+  await page.waitForTimeout(6500);
+  await expect(undo).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(progress).toContainText("Room 2 of 2");
+  await expect(page.locator("#rooms-progress-title")).toBeFocused();
+  await assertHealthy();
+});

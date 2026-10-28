@@ -183,7 +183,11 @@
       "readyForDetails": "Siap untuk data Anda",
       "continueToExtras": "Lanjut ke tambahan",
       "continueToDetails": "Lanjut ke data Anda",
-      "partChosen": "Kamar 1: {name} untuk {count}. Sekarang pilih tempat untuk {rest} lainnya."
+      "partChosen": "Kamar 1: {name} untuk {count}. Sekarang pilih tempat untuk {rest} lainnya.",
+      "remove": "Hapus Kamar {number} dari pemesanan",
+      "removedToOne": "Kamar {number} dihapus. Semua {adults} dewasa kini di satu kamar.",
+      "removed": "Kamar {number} dihapus.",
+      "undo": "Urungkan"
     },
     "pickRoom": {
       "selectFor": "Pilih untuk Kamar {number}",
@@ -197,7 +201,9 @@
       "allChosen": "Semua kamar sudah dipilih",
       "swapHint": "Pilih tempat lain untuk menukarnya.",
       "bookPart": "Pesan untuk {adults} + pilih kamar ke-2 untuk {rest}",
-      "partNote": "Muat {count} dari {guests} tamu Anda."
+      "partNote": "Muat {count} dari {guests} tamu Anda.",
+      "yourChoice": "Pilihan Anda",
+      "continueWithPlace": "Lanjut dengan tempat ini"
     },
     "pricesPerRoom": "Harga per kamar, untuk orang dewasa di dalamnya. Anak-anak kami tambahkan setelah Anda memberi tahu usia mereka di langkah berikutnya.",
     "oneRoom": {
