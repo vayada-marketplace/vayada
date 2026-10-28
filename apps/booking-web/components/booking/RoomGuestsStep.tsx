@@ -9,57 +9,10 @@ import { resolveLocale } from "@/lib/utils";
 import { roomGuestProblem } from "@/lib/roomPicker";
 import type { PricingRoom, RoomChoice } from "@/services/api/replacementOffers";
 
-function Stepper({
-  label,
-  value,
-  min,
-  max,
-  invalid,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  invalid?: boolean;
-  onChange: (value: number) => void;
-}) {
-  const t = useTranslations("guestPicker");
-  const button =
-    "w-9 h-9 rounded-full border border-gray-300 bg-white flex items-center justify-center text-gray-600 hover:border-gray-400 disabled:opacity-30 disabled:cursor-not-allowed";
-  return (
-    <div className="flex flex-1 min-w-[150px] items-center justify-between gap-3">
-      <span className="text-sm font-medium text-gray-800">{label}</span>
-      <span className="flex items-center gap-3">
-        <button
-          type="button"
-          className={button}
-          aria-label={t("fewer", { label })}
-          disabled={value <= min}
-          onClick={() => onChange(value - 1)}
-        >
-          <span className="text-lg leading-none">-</span>
-        </button>
-        <span className={`w-6 text-center font-bold ${invalid ? "text-red-700" : "text-gray-900"}`}>
-          {value}
-        </span>
-        <button
-          type="button"
-          className={button}
-          aria-label={t("more", { label })}
-          disabled={value >= max}
-          onClick={() => onChange(value + 1)}
-        >
-          <span className="text-lg leading-none">+</span>
-        </button>
-      </span>
-    </div>
-  );
-}
-
-/** VAY-2320: the first /book step for a group that chose its rooms on the hotel page. The guest
- * says who sleeps in which room (and the children's ages), checked against each room's limits;
- * the quote then prices every room for its own guests. */
+/** VAY-2320: the first /book step for a group that chose its rooms on the hotel page, while
+ * children's ages are still to give. Who sleeps where is set on the hotel page (VAY-2393); here
+ * each room shows its guests and asks its children's ages, and the quote prices every room for
+ * its own guests. */
 export default function RoomGuestsStep({
   choices,
   rooms,
@@ -67,7 +20,6 @@ export default function RoomGuestsStep({
   checkIn,
   timezone,
   childMaxAge,
-  childrenEnabled,
   changeRoomsHref,
   formatMoney,
   onChange,
@@ -79,7 +31,6 @@ export default function RoomGuestsStep({
   checkIn: string;
   timezone?: string;
   childMaxAge: number;
-  childrenEnabled: boolean;
   changeRoomsHref: string;
   formatMoney: (minor: string, currency: string) => string;
   onChange: (selectionId: string, patch: Partial<RoomChoice>) => void;
@@ -172,33 +123,14 @@ export default function RoomGuestsStep({
                 )}
               </div>
             </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-3 border-t border-gray-100 pt-4">
-              <Stepper
-                label={t("adults")}
-                value={adults}
-                min={1}
-                max={99}
-                invalid={problem === "too_many" || problem === "too_many_adults"}
-                onChange={(value) => onChange(choice.selectionId, { adults: String(value) })}
-              />
-              {childrenEnabled && (
-                <Stepper
-                  label={t("children")}
-                  value={choice.childAges.length}
-                  min={0}
-                  max={Math.max(0, 99 - adults)}
-                  invalid={problem === "no_children" || problem === "too_many_children"}
-                  onChange={(value) =>
-                    onChange(choice.selectionId, {
-                      childAges:
-                        value > choice.childAges.length
-                          ? [...choice.childAges, ""]
-                          : choice.childAges.slice(0, value),
-                    })
-                  }
-                />
-              )}
-            </div>
+            <p className="border-t border-gray-100 pt-4 text-sm font-medium text-gray-800">
+              {[
+                tc("adults", { count: adults }),
+                ...(choice.childAges.length
+                  ? [tc("children", { count: choice.childAges.length })]
+                  : []),
+              ].join(", ")}
+            </p>
             {choice.childAges.map((age, child) => (
               <label key={child} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-gray-700">{t("childAge", { number: child + 1 })}</span>

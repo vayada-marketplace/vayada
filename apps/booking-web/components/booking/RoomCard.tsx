@@ -72,6 +72,10 @@ export default function RoomCard({
     takenBy: number[];
     /** The rates chosen for the group's other rooms: one booking is paid one way. */
     chosen: PricingOffer[];
+    /** VAY-2393: the rate the room being chosen has now, when it is this room type. */
+    current: string | null;
+    /** Opens "Who sleeps where", for a room too small for this room's guests. */
+    onChangeGuests: () => void;
   };
   /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
   place?: GuestPlace | null;
@@ -91,6 +95,13 @@ export default function RoomCard({
   const { approximate } = useCurrency();
   const [imageIndex, setImageIndex] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
+  const current = pick?.current ?? null;
+  // A rate clicked while choosing one room isn't the next room's choice (VAY-2393).
+  const [pickedFor, setPickedFor] = useState(pick?.room);
+  if (pickedFor !== pick?.room) {
+    setPickedFor(pick?.room);
+    setPicked(null);
+  }
   const [detailsOpen, setDetailsOpen] = useState(false);
   const onView = () => {
     setDetailsOpen(true);
@@ -174,8 +185,13 @@ export default function RoomCard({
       );
     });
   const selectable = shown.filter(({ bookable }) => bookable);
-  // The cheapest choice starts selected, as the old card did with non-refundable.
-  const selected = selectable.find(({ offer }) => offer.publicOfferKey === picked) ?? selectable[0];
+  // The cheapest choice starts selected, as the old card did with non-refundable; a room the group
+  // chose starts on its rate (VAY-2393).
+  const selected =
+    selectable.find(({ offer }) => offer.publicOfferKey === (picked ?? current)) ?? selectable[0];
+  // VAY-2393: this room type is the room's choice now: the button keeps it, or updates its rate.
+  const isCurrent = !!current && !!selected;
+  const currentRate = isCurrent && selected.offer.publicOfferKey === current;
 
   const amount = (choice: (typeof shown)[number]) =>
     choice.priced ? quoteMoneyAmount(choice.priced.totalMinor, choice.priced.currency) : null;
@@ -253,33 +269,48 @@ export default function RoomCard({
       {promoCode && selected?.priced && !selected.priced.promoApplied && (
         <p className="text-xs text-gray-500 mt-2">{t("promoNotApplied", { code: promoCode })}</p>
       )}
-      <button
-        type="button"
-        data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
-        onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
-        disabled={!selected || tooSmall || usedUp}
-        className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
-      >
-        {soldOut
-          ? t("soldOut")
-          : usedUp
-            ? t("noneLeftForRoom", { number: pick!.room })
-            : tooSmall || (prices && !selected)
-              ? t("notAvailable")
-              : pick
-                ? t("chooseForRoom", { number: pick.room })
-                : t("selectThisRate")}
-      </button>
-      {usedUp && (
-        <p className="text-sm mt-3 text-gray-600">
-          {t("lastOneChosen", { number: pick!.takenBy[pick!.takenBy.length - 1]! })}
-        </p>
+      {pick && tooSmall && room.occupancy ? (
+        // VAY-2393: too small for this room's guests: another split may fit it.
+        <button
+          type="button"
+          data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+          onClick={pick.onChangeGuests}
+          className="w-full mt-4 py-3 bg-white text-primary-700 font-semibold rounded-xl border border-primary-600 hover:bg-primary-50 transition-colors text-sm"
+        >
+          {t("pickRoom.fitsChangeSplit", { count: room.occupancy.maxGuests })}
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+          onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
+          disabled={!selected || tooSmall || usedUp}
+          className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
+        >
+          {soldOut
+            ? pick
+              ? t("pickRoom.soldOut")
+              : t("soldOut")
+            : usedUp
+              ? t("pickRoom.alreadyYours", { number: pick!.takenBy[0]! })
+              : tooSmall || (prices && !selected)
+                ? t("notAvailable")
+                : pick
+                  ? currentRate
+                    ? t("pickRoom.yourRoom", { number: pick.room })
+                    : isCurrent
+                      ? t("pickRoom.updateRoom", { number: pick.room })
+                      : t("pickRoom.selectFor", { number: pick.room })
+                  : t("selectThisRate")}
+        </button>
       )}
       {tooSmall && room.occupancy && (
         <p className="text-sm mt-3 text-gray-600">
-          {childGuests > 0 && room.occupancy.maxChildren === 0
+          {(pick ? pick.guests.children : childGuests) > 0 && room.occupancy.maxChildren === 0
             ? t("noChildren")
-            : t("tooManyGuests", { count: room.occupancy.maxGuests })}
+            : pick
+              ? t("pickRoom.roomIsFor", { number: pick.room, ...pick.guests })
+              : t("tooManyGuests", { count: room.occupancy.maxGuests })}
         </p>
       )}
       {/* Free rooms but no choice priced for the stay: say why the button reads "Not available".
@@ -416,7 +447,7 @@ export default function RoomCard({
   return (
     <div
       data-testid={`room-card-${room.roomTypeId}`}
-      className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut || usedUp ? "opacity-60" : "hover:shadow-lg"}`}
+      className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut || usedUp ? "opacity-60" : "hover:shadow-lg"} ${isCurrent ? "ring-2 ring-primary-600" : ""}`}
     >
       <div className="flex flex-col md:flex-row">
         <div
@@ -450,7 +481,7 @@ export default function RoomCard({
           {(soldOut || usedUp) && (
             <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">
               <span className="bg-white text-gray-900 text-sm font-bold px-5 py-2 rounded-full shadow">
-                {soldOut ? t("soldOut") : t("inYourRoom", { number: pick!.takenBy[0]! })}
+                {soldOut ? t("soldOut") : t("pickRoom.yourRoomChip", { number: pick!.takenBy[0]! })}
               </span>
             </div>
           )}

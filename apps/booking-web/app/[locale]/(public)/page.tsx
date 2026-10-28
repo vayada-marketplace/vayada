@@ -19,16 +19,19 @@ import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
-import RoomsBar from "@/components/booking/RoomsBar";
-import { useCurrency } from "@/contexts/CurrencyContext";
-import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import RoomsProgress, { type RoomsProgressRoom } from "@/components/booking/RoomsProgress";
+import Toast from "@/components/booking/Toast";
 import {
   encodePick,
+  evenSplit,
+  fitsRoom,
   MAX_ROOMS,
-  pickIdentity as searchIdentity,
+  mostRooms,
+  pickIdentity as stayIdentity,
   readPickDraft,
+  roomGuests,
   savePickDraft,
-  splitParty,
+  type PickDraft,
   type RoomPick,
 } from "@/lib/roomPicker";
 import RoomsLocationMap, {
@@ -228,33 +231,53 @@ function HomePageContent() {
   const [fewestRooms, setFewestRooms] = useState(1);
   const roomCount = Math.min(
     Math.max(roomsWanted ?? fewestRooms, fewestRooms),
-    Math.min(MAX_ROOMS, Math.max(adults, 1)),
+    mostRooms(Math.max(adults, 1), fewestRooms),
   );
   const pickMode = roomCount > 1;
-  const slots = splitParty(adults, effectiveChildren, roomCount);
-  const pickIdentity = searchIdentity({
+  // VAY-2393: the group's split and picks are kept per stay (dates and promo), so other guests or
+  // rooms keep the rooms chosen; Back from /book and a refresh find them again.
+  const pickIdentity = stayIdentity({
     checkIn,
     checkOut,
-    adults,
-    children: effectiveChildren,
-    rooms: roomCount,
     promoCode: appliedPromo?.code ?? null,
   });
-  const [pickState, setPickState] = useState<{ identity: string; picks: (RoomPick | null)[] }>({
+  const [pickState, setPickState] = useState<{ identity: string } & PickDraft>({
     identity: "",
+    split: [],
     picks: [],
   });
-  // Picks belong to one search: other dates, guests, rooms or promo start afresh, unless this
-  // tab already chose rooms for it (Back from /book).
   useEffect(() => {
-    if (!pickMode || pickState.identity === pickIdentity) return;
-    setPickState({ identity: pickIdentity, picks: readPickDraft(slug, pickIdentity) ?? [] });
-  }, [pickMode, pickIdentity, pickState.identity, slug]);
-  const picks = Array.from(
-    { length: roomCount },
-    (_, index) => (pickState.identity === pickIdentity ? pickState.picks[index] : null) ?? null,
-  );
-  const firstOpen = picks.findIndex((pick) => !pick);
+    if (pickState.identity === pickIdentity) return;
+    setPickState({
+      identity: pickIdentity,
+      ...(readPickDraft(slug, pickIdentity) ?? { split: [], picks: [] }),
+    });
+  }, [pickIdentity, pickState.identity, slug]);
+  const draft: PickDraft =
+    pickState.identity === pickIdentity ? pickState : { split: [], picks: [] };
+  const saveDraft = (next: PickDraft) => {
+    setPickState({ identity: pickIdentity, ...next });
+    savePickDraft(slug, pickIdentity, next);
+  };
+  // "Who sleeps where": the group's own split while it fits these guests and rooms, else even.
+  const split =
+    draft.split.length === roomCount && draft.split.reduce((sum, n) => sum + n, 0) === adults
+      ? draft.split
+      : evenSplit(adults, roomCount);
+  const slots = roomGuests(split, effectiveChildren);
+  const picks = Array.from({ length: roomCount }, (_, index) => draft.picks[index] ?? null);
+  // A chosen room is done while its rate is still offered and it sleeps the room's guests; one
+  // the split made too small is chosen again (VAY-2393).
+  const pickedRoom = (pick: RoomPick | null) => {
+    if (!pick) return null;
+    const room = rooms?.find(({ roomTypeId }) => roomTypeId === pick.roomTypeId);
+    return room?.offers.some((o) => o.publicOfferKey === pick.publicOfferKey) ? room : null;
+  };
+  const done = picks.map((pick, index) => {
+    const room = pickedRoom(pick);
+    return !!room && fitsRoom(room.occupancy, slots[index]!);
+  });
+  const firstOpen = done.indexOf(false);
   const [changing, setChanging] = useState<number | null>(null);
   const activeRoom =
     changing !== null && changing < roomCount
@@ -262,6 +285,7 @@ function HomePageContent() {
       : firstOpen === -1
         ? roomCount - 1
         : firstOpen;
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const stay = useStayPrices(
     slug,
     rooms?.length
@@ -280,6 +304,24 @@ function HomePageContent() {
     const suggested = stay.prices?.suggestedRooms;
     if (suggested !== undefined) setFewestRooms(suggested ?? 1);
   }, [stay.prices?.suggestedRooms]);
+  // VAY-2393: a group's address keeps the stay, guests and rooms, so a refresh keeps its rooms.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!pickMode && !params.has("rooms")) return;
+    const wanted: Record<string, string | null> = {
+      checkIn,
+      checkOut,
+      adults: String(adults),
+      children: effectiveChildren > 0 ? String(effectiveChildren) : null,
+      rooms: roomCount > 1 ? String(roomCount) : null,
+    };
+    for (const [name, value] of Object.entries(wanted))
+      if (value === null) params.delete(name);
+      else params.set(name, value);
+    const search = params.toString();
+    if (search !== window.location.search.slice(1))
+      window.history.replaceState(null, "", `${window.location.pathname}?${search}`);
+  }, [checkIn, checkOut, adults, effectiveChildren, roomCount, pickMode]);
   const [sortOption, setSortOption] = useState("recommended");
   const roomPrices = (room: PricingRoom) =>
     stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
@@ -294,14 +336,30 @@ function HomePageContent() {
     const [x, y] = [cheapest(a), cheapest(b)];
     return x === null || y === null ? Number(x === null) - Number(y === null) : (x - y) * direction;
   };
-  const shownRooms = [...(rooms ?? [])].sort((a, b) =>
-    sortOption === "priceLow"
-      ? byPrice(a, b, 1)
-      : sortOption === "priceHigh"
-        ? byPrice(a, b, -1)
-        : sortOption === "roomSize"
-          ? (b.size?.value ?? 0) - (a.size?.value ?? 0)
-          : 0,
+  // The group's other rooms (by number) that took a room type, for the room being chosen.
+  const takenBy = (room: PricingRoom) =>
+    picks.flatMap((pick, index) =>
+      pick && index !== activeRoom && pick.roomTypeId === room.roomTypeId ? [index + 1] : [],
+    );
+  // VAY-2393, room by room: rooms that fit first, then those the group's other rooms used up,
+  // those too small for this room's guests, and sold out last.
+  const pickOrder = (room: PricingRoom) => {
+    const prices = roomPrices(room);
+    if (!pickMode || !prices) return 0;
+    if (prices.roomCount === null) return 2;
+    if (prices.availability === "sold_out") return 3;
+    return prices.roomsFree != null && prices.roomsFree - takenBy(room).length <= 0 ? 1 : 0;
+  };
+  const shownRooms = [...(rooms ?? [])].sort(
+    (a, b) =>
+      pickOrder(a) - pickOrder(b) ||
+      (sortOption === "priceLow"
+        ? byPrice(a, b, 1)
+        : sortOption === "priceHigh"
+          ? byPrice(a, b, -1)
+          : sortOption === "roomSize"
+            ? (b.size?.value ?? 0) - (a.size?.value ?? 0)
+            : 0),
   );
   // Rooms in several places (VAY-2324, VAY-2325): the cards say where each one is, and the guest can see them on
   // a map next to the list (or full screen on a phone), which replaces the Location section below.
@@ -320,97 +378,62 @@ function HomePageContent() {
     if (roomCount > 1) params.set("rooms", String(roomCount));
     router.push(`/book?${params}`);
   };
-  const { formatPrice } = useCurrency();
   const offerOf = (pick: RoomPick) =>
-    rooms
-      ?.find((room) => room.roomTypeId === pick.roomTypeId)
-      ?.offers.find((offer) => offer.publicOfferKey === pick.publicOfferKey);
-  const setPicks = (next: (RoomPick | null)[]) => {
-    setPickState({ identity: pickIdentity, picks: next });
-    savePickDraft(slug, pickIdentity, next);
-  };
-  // Room by room: the card's rate becomes the active room's choice; then the next open room.
-  const chooseRoom = (room: PricingRoom, publicOfferKey: string) => {
-    const offer = room.offers.find((candidate) => candidate.publicOfferKey === publicOfferKey);
-    if (!offer) return;
-    const price = roomPrices(room)?.offers.find((p) => p.publicOfferKey === publicOfferKey);
-    const next = [...picks];
-    next[activeRoom] = {
-      ...slots[activeRoom]!,
-      roomTypeId: room.roomTypeId,
-      publicOfferKey,
-      totalMinor: price?.status === "priced" ? price.totalMinor : null,
-      currency: offer.currency,
-    };
-    setPicks(next);
-    setChanging(null);
-    if (next.some((pick) => !pick))
-      document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
-  };
-  const changeRoom = (index: number) => {
-    const next = [...picks];
-    next[index] = null;
-    setPicks(next);
-    setChanging(index);
-    document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
-  };
-  const continueWithRooms = () => {
-    if (picks.some((pick) => !pick)) return;
+    pickedRoom(pick)?.offers.find((offer) => offer.publicOfferKey === pick.publicOfferKey);
+  // Every room chosen: /book gets each room's rate and guests, and opens after the rooms.
+  const continueWithRooms = (chosen: RoomPick[]) => {
     // This page's history entry keeps the search, so Back finds the chosen rooms again.
     const here = new URLSearchParams(bookParams);
     here.set("rooms", String(roomCount));
     window.history.replaceState(null, "", `${window.location.pathname}?${here}`);
     const params = new URLSearchParams(bookParams);
     params.set("rooms", String(roomCount));
-    for (const pick of picks) params.append("pick", encodePick(pick!));
+    chosen.forEach((pick, index) =>
+      params.append("pick", encodePick({ ...slots[index]!, publicOfferKey: pick.publicOfferKey })),
+    );
     // One rate selection per booking, as from a single room card.
     trackEvent(slug, "rate_selected", { entry: "room_card" });
     router.push(`/book?${params}`);
   };
-  const chosenTotal = picks.every((pick) => !pick || pick.totalMinor !== null)
-    ? picks.reduce<{ amount: number; currency: string } | null>(
-        (sum, pick) =>
-          pick
-            ? {
-                amount: (sum?.amount ?? 0) + quoteMoneyAmount(pick.totalMinor!, pick.currency),
-                currency: pick.currency,
-              }
-            : sum,
-        null,
-      )
-    : null;
-  const barSlots = slots.map((guests, index) => {
-    const pick = picks[index];
-    const room = pick && rooms?.find((r) => r.roomTypeId === pick.roomTypeId);
-    const offerIndex = room
-      ? room.offers.findIndex((o) => o.publicOfferKey === pick.publicOfferKey)
-      : -1;
-    const rate =
-      room && offerIndex >= 0
-        ? choiceText(
-            choiceKeys(room.offers)[offerIndex]!,
-            { checkIn, timezone: hotel.timezone, formatDate: (date) => date },
-            t,
-          ).name
-        : null;
-    return {
-      guests,
-      chosen:
-        pick && room
-          ? {
-              roomName: room.name,
-              detail: [
-                rate,
-                pick.totalMinor === null
-                  ? null
-                  : formatPrice(quoteMoneyAmount(pick.totalMinor, pick.currency), pick.currency),
-              ]
-                .filter(Boolean)
-                .join(" · "),
-            }
-          : null,
-    };
+  // Room by room: the card's rate becomes the active room's choice, replacing any earlier one;
+  // then the next open room, or straight on once every room is chosen (VAY-2393).
+  const chooseRoom = (room: PricingRoom, publicOfferKey: string) => {
+    if (!room.offers.some((offer) => offer.publicOfferKey === publicOfferKey)) return;
+    const next = [...picks];
+    next[activeRoom] = { roomTypeId: room.roomTypeId, publicOfferKey };
+    saveDraft({ split, picks: next });
+    setChanging(null);
+    const open = done.findIndex((isDone, index) => index !== activeRoom && !isDone);
+    if (open === -1) return continueWithRooms(next as RoomPick[]);
+    document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+    setToast({
+      id: Date.now(),
+      message: t("roomsProgress.chosen", {
+        number: activeRoom + 1,
+        name: room.name,
+        next: open + 1,
+      }),
+    });
+  };
+  // A pill opens its room again; its choice stays until another one replaces it.
+  const openRoom = (index: number) => {
+    setChanging(index);
+    document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+  };
+  const progressRooms: RoomsProgressRoom[] = picks.map((pick, index) => {
+    const room = pickedRoom(pick);
+    return !room
+      ? { state: "open" }
+      : done[index]
+        ? { state: "done", name: room.name }
+        : { state: "too_small", name: room.name };
   });
+  // "Who sleeps where" lives in the guests picker, above the cards.
+  const openGuests = () => {
+    setCalendarOpen(false);
+    setGuestsOpen(true);
+    document.getElementById("stay-search")?.scrollIntoView({ block: "start" });
+  };
   const sortControl = (
     <>
       <svg
@@ -467,15 +490,16 @@ function HomePageContent() {
           ? {
               room: activeRoom + 1,
               guests: slots[activeRoom]!,
-              takenBy: picks.flatMap((pick, index) =>
-                pick && index !== activeRoom && pick.roomTypeId === room.roomTypeId
-                  ? [index + 1]
-                  : [],
-              ),
+              takenBy: takenBy(room),
               chosen: picks.flatMap((pick, index) => {
                 const offer = pick && index !== activeRoom ? offerOf(pick) : undefined;
                 return offer ? [offer] : [];
               }),
+              current:
+                picks[activeRoom]?.roomTypeId === room.roomTypeId
+                  ? picks[activeRoom]!.publicOfferKey
+                  : null,
+              onChangeGuests: openGuests,
             }
           : undefined
       }
@@ -499,25 +523,15 @@ function HomePageContent() {
         </div>
       )}
       {pickMode && (
-        <RoomsBar
-          slots={barSlots}
-          active={firstOpen === -1 && changing === null ? null : activeRoom}
-          total={chosenTotal ? formatPrice(chosenTotal.amount, chosenTotal.currency) : null}
-          summary={[
-            tc("adults", { count: adults }) +
-              (effectiveChildren > 0 ? `, ${tc("children", { count: effectiveChildren })}` : ""),
-            `${formatDateShort(checkIn, locale)} – ${formatDateShort(checkOut, locale)}`,
-          ].join(" · ")}
-          onChange={changeRoom}
-          onContinue={continueWithRooms}
+        <RoomsProgress
+          rooms={progressRooms}
+          current={activeRoom}
+          guests={slots[activeRoom]!}
+          onOpen={openRoom}
         />
       )}
-      {pickMode ? (
-        <p className="mb-5 text-sm text-gray-500">{t("pricesPerRoom")}</p>
-      ) : (
-        effectiveChildren > 0 && (
-          <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
-        )
+      {effectiveChildren > 0 && (
+        <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
       )}
     </>
   );
@@ -527,10 +541,7 @@ function HomePageContent() {
   const heroSubtext = hotel.branding?.heroSubtext || hotel.description;
 
   return (
-    // A group choosing room by room has its rooms bar pinned to the bottom of phone screens.
-    <div
-      className={`min-h-screen bg-white overflow-x-hidden ${pickMode && rooms?.length ? "pb-44 md:pb-0" : ""}`}
-    >
+    <div className="min-h-screen bg-white overflow-x-hidden">
       <PublicStructuredData hotel={hotel} rooms={[]} locale={locale} />
 
       {/* Hero Section */}
@@ -655,7 +666,21 @@ function HomePageContent() {
               }}
               rooms={
                 rooms?.length
-                  ? { count: roomCount, fewest: fewestRooms, onChange: setRoomsWanted }
+                  ? {
+                      count: roomCount,
+                      fewest: fewestRooms,
+                      onChange: (count) => {
+                        setRoomsWanted(count);
+                        setChanging(null);
+                        // Other rooms: an even split again, the first rooms' choices kept.
+                        saveDraft({ split: [], picks: draft.picks.slice(0, count) });
+                      },
+                      split: slots,
+                      onSplit: (next) => {
+                        setChanging(null);
+                        saveDraft({ split: next, picks });
+                      },
+                    }
                   : undefined
               }
             />
@@ -915,6 +940,7 @@ function HomePageContent() {
       ) : null}
 
       <BookingFooter />
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useRef, useEffect } from "react";
 import { useTranslations } from "next-intl";
+import { mostRooms as mostRoomsFor, moveAdult, type RoomGuests } from "@/lib/roomPicker";
 
 interface GuestSelectorProps {
   open: boolean;
@@ -11,8 +12,15 @@ interface GuestSelectorProps {
   onUpdate: (adults: number, children: number) => void;
   adultAgeThreshold?: number;
   childrenEnabled?: boolean;
-  /** VAY-2320: the group's rooms. It starts at the fewest the group needs and can't go below. */
-  rooms?: { count: number; fewest: number; onChange: (count: number) => void };
+  /** VAY-2320: the group's rooms. It starts at the fewest the group needs and can't go below.
+   * VAY-2393: with two or more, "Who sleeps where" sets each room's adults (`split`). */
+  rooms?: {
+    count: number;
+    fewest: number;
+    onChange: (count: number) => void;
+    split: RoomGuests[];
+    onSplit: (adultsPerRoom: number[]) => void;
+  };
 }
 
 function Stepper({
@@ -21,6 +29,7 @@ function Stepper({
   value,
   min,
   max,
+  labels,
   onChange,
 }: {
   label: string;
@@ -28,6 +37,8 @@ function Stepper({
   value: number;
   min: number;
   max: number;
+  /** The buttons' names when "Fewer {label}" doesn't read well. */
+  labels?: { fewer: string; more: string };
   onChange: (value: number) => void;
 }) {
   const t = useTranslations("guestPicker");
@@ -40,7 +51,7 @@ function Stepper({
       <div className="flex items-center gap-3 flex-shrink-0">
         <button
           type="button"
-          aria-label={t("fewer", { label })}
+          aria-label={labels?.fewer ?? t("fewer", { label })}
           onClick={() => onChange(Math.max(min, value - 1))}
           disabled={value <= min}
           className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
@@ -50,7 +61,7 @@ function Stepper({
         <span className="w-6 text-center font-semibold text-gray-900">{value}</span>
         <button
           type="button"
-          aria-label={t("more", { label })}
+          aria-label={labels?.more ?? t("more", { label })}
           onClick={() => onChange(Math.min(max, value + 1))}
           disabled={value >= max}
           className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
@@ -76,7 +87,7 @@ export default function GuestSelector({
   const ref = useRef<HTMLDivElement>(null);
   const childMaxAge = Math.max(0, adultAgeThreshold - 1);
   // Every room needs an adult, so the group never takes more rooms than adults.
-  const mostRooms = Math.min(9, adults);
+  const mostRooms = mostRoomsFor(adults, rooms?.fewest ?? 1);
   const fewestRooms = Math.min(rooms?.fewest ?? 1, mostRooms);
 
   useEffect(() => {
@@ -132,10 +143,39 @@ export default function GuestSelector({
               max={mostRooms}
               onChange={rooms.onChange}
             />
-            {rooms.count > 1 && (
-              <p className="rounded-xl bg-primary-50 px-3 py-2.5 text-xs text-gray-700">
-                {t("splitNote")}
-              </p>
+            {rooms.count > 1 && rooms.split.length === rooms.count && (
+              <section
+                aria-labelledby="who-sleeps-where"
+                data-testid="who-sleeps-where"
+                className="space-y-3 rounded-xl bg-gray-50 p-3"
+              >
+                <h4 id="who-sleeps-where" className="text-sm font-semibold text-gray-900">
+                  {t("whoSleepsWhere")}
+                </h4>
+                {rooms.split.map((room, index) => (
+                  <Stepper
+                    key={index}
+                    label={t("roomNumber", { number: index + 1 })}
+                    hint={t("roomGuests", { adults: room.adults, children: room.children })}
+                    value={room.adults}
+                    min={1}
+                    max={adults - (rooms.count - 1)}
+                    labels={{
+                      fewer: t("fewerAdultsIn", { number: index + 1 }),
+                      more: t("moreAdultsIn", { number: index + 1 }),
+                    }}
+                    onChange={(value) =>
+                      rooms.onSplit(
+                        moveAdult(
+                          rooms.split.map((r) => r.adults),
+                          index,
+                          value > room.adults ? 1 : -1,
+                        ),
+                      )
+                    }
+                  />
+                ))}
+              </section>
             )}
           </>
         )}
