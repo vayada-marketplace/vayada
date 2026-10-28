@@ -695,9 +695,6 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
                     >
                       Contact
                     </span>
-                    <span className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full border border-white/60">
-                      Refer a Guest
-                    </span>
                     <span className="px-2 py-0.5 text-[9px] font-semibold text-white rounded-full border border-white/60">
                       EN
                     </span>
