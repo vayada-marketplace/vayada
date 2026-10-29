@@ -15,7 +15,7 @@ GG Guernsey|GH Ghanaian|GI Gibraltarian|GL Greenlandic|GM Gambian|GN Guinean|GP 
 GQ Equatorial Guinean|GR Greek|GT Guatemalan|GU Guamanian|GW Bissau-Guinean|GY Guyanese|HK Hongkonger
 HN Honduran|HR Croatian|HT Haitian|HU Hungarian|ID Indonesian|IE Irish|IL Israeli|IM Manx|IN Indian
 IQ Iraqi|IR Iranian|IS Icelandic|IT Italian|JE Jersey|JM Jamaican|JO Jordanian|JP Japanese|KE Kenyan
-KG Kyrgyz|KH Cambodian|KI I-Kiribati|KM Comoran|KN Kittitian/Nevisian|KP North Korean|KR South Korean
+KG Kyrgyz|KH Cambodian|KI I-Kiribati|KM Comoran|KN Kittitian/Nevisian|KP North Korean|KR South Korean/Korean
 KW Kuwaiti|KY Caymanian|KZ Kazakh|LA Lao/Laotian|LB Lebanese|LC Saint Lucian|LI Liechtensteiner
 LK Sri Lankan|LR Liberian|LS Basotho|LT Lithuanian|LU Luxembourgish|LV Latvian|LY Libyan|MA Moroccan
 MC Monégasque|MD Moldovan|ME Montenegrin|MF Saint-Martinoise|MG Malagasy|MH Marshallese|MK Macedonian

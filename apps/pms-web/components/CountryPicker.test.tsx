@@ -16,8 +16,9 @@ const codes = (
 const phoneOptions: CountryPickerOption[] = [
   { code: "AT", name: "Austria", callingCode: "+43" },
   { code: "DE", name: "Germany", callingCode: "+49" },
-  { code: "GB", name: "United Kingdom", callingCode: "+44" },
+  { code: "GG", name: "Guernsey", callingCode: "+44" },
   { code: "ID", name: "Indonesia", callingCode: "+62" },
+  { code: "GB", name: "United Kingdom", callingCode: "+44" },
 ];
 
 describe("searchCountries", () => {
@@ -29,10 +30,32 @@ describe("searchCountries", () => {
     expect(codes("guinea")).toEqual(["GN", "GW", "GQ", "PG"]);
     expect(codes("aland")).toEqual(["AX", "NZ"]);
     expect(codes("cote")).toEqual(["CI"]);
+    expect(codes("Cote d'Ivoire")).toEqual(["CI"]);
+  });
+
+  it("puts an exact nationality word, alias or name before countries that only start with it", () => {
+    for (const [query, code] of [
+      ["American", "US"],
+      ["america", "US"],
+      ["USA", "US"],
+      ["British", "GB"],
+      ["UK", "GB"],
+      ["Great Britain", "GB"],
+      ["Holland", "NL"],
+      ["Korean", "KR"],
+      ["Dominican", "DO"],
+    ])
+      expect([query, codes(query)[0]]).toEqual([query, code]);
+    // Ties go to the suggested countries first.
+    expect(searchCountries(NATIONALITY_PICKER_OPTIONS, "Dominican", ["DM"])[0]!.option.code).toBe(
+      "DM",
+    );
   });
 
   it("finds calling codes typed with or without +, the exact code first", () => {
-    expect(codes("+4", phoneOptions)).toEqual(["AT", "DE", "GB"]);
+    expect(codes("+4", phoneOptions)).toEqual(["GB", "AT", "DE", "GG"]);
+    // The main country of a shared code wins a tie.
+    expect(codes("+44", phoneOptions)).toEqual(["GB", "GG"]);
     expect(codes("49", phoneOptions)).toEqual(["DE"]);
     expect(codes("+6", phoneOptions)).toEqual(["ID"]);
   });
@@ -106,11 +129,48 @@ describe("CountryPicker", () => {
     expect(trigger().props["aria-expanded"]).toBe(false);
   });
 
+  it("takes the highlighted country on Tab, and an exact one on click-away", () => {
+    const tab = render();
+    act(() => tab.trigger().props.onClick());
+    act(() => tab.search().props.onChange({ target: { value: "germ" } }));
+    tab.key("Tab");
+    expect(tab.onChange).toHaveBeenCalledWith("DE");
+    expect(tab.trigger().props["aria-expanded"]).toBe(false);
+
+    const away = render();
+    const blur = () =>
+      act(() =>
+        away.view.root
+          .findByProps({ className: "relative" })
+          .props.onBlur({ currentTarget: { contains: () => false }, relatedTarget: null }),
+      );
+    act(() => away.trigger().props.onClick());
+    act(() => away.search().props.onChange({ target: { value: "ger" } }));
+    blur();
+    expect(away.onChange).not.toHaveBeenCalled();
+    act(() => away.trigger().props.onClick());
+    act(() => away.search().props.onChange({ target: { value: "uk" } }));
+    blur();
+    expect(away.onChange).toHaveBeenCalledWith("GB");
+  });
+
+  it("closes only the list on Escape from the field itself (after Shift+Tab)", () => {
+    const { trigger } = render();
+    act(() => trigger().props.onClick());
+    const event = { key: "Escape", preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    act(() => trigger().props.onKeyDown(event));
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(trigger().props["aria-expanded"]).toBe(false);
+  });
+
   it("closes on Escape without closing the modal around it, and says when nothing matches", () => {
     const { view, onChange, trigger, search, key } = render();
     act(() => trigger().props.onClick());
     act(() => search().props.onChange({ target: { value: "qqq" } }));
     expect(view.root.findAllByProps({ role: "option" })).toHaveLength(0);
+    // Announced outside the listbox, which holds only options.
+    expect(view.root.findByProps({ role: "listbox" }).findAllByType("p")).toHaveLength(0);
+    expect(view.root.findByProps({ role: "status" }).children.join("")).toContain("qqq");
     expect(JSON.stringify(view.toJSON())).toContain("No country matches “qqq”");
     const escape = key("Escape");
     expect(escape.stopPropagation).toHaveBeenCalled();
@@ -118,8 +178,14 @@ describe("CountryPicker", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("shows the chosen country and clears it", () => {
+  it("shows the chosen country, selected once though listed twice, and clears it", () => {
     const { view, onChange, trigger } = render("DE");
+    act(() => trigger().props.onClick());
+    const selected = view.root
+      .findAllByProps({ role: "option" })
+      .filter((option) => option.props["aria-selected"]);
+    expect(selected).toHaveLength(1);
+    act(() => trigger().props.onClick());
     expect(trigger().props.value).toBe("DE");
     expect(view.root.findByProps({ id: trigger().props["aria-describedby"] }).children).toEqual([
       "Germany",
