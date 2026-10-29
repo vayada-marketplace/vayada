@@ -138,8 +138,9 @@ for (const viewport of VIEWPORTS) {
 
     if (viewport.width >= 768) {
       await page.goto("/calendar");
-      await expect(page.locator("main h1").first()).toBeVisible();
+      const position = await titlePosition(page);
       await expect(page).toHaveURL(onRoute("/calendar"));
+      expect(position, "/calendar").toEqual({ x: viewport.padding, y: viewport.padding });
       expect(await titleStyle(page), "/calendar").toEqual(dashboardTitle);
     }
 
@@ -156,6 +157,31 @@ for (const viewport of VIEWPORTS) {
     expect(subPageY).toBeGreaterThan(viewport.padding);
   });
 }
+
+// VAY-2413: from md up the subtitle sits right under the title; on phones it gets its own line
+// under the buttons, so it doesn't share the width with them (VAY-2338).
+test("the Rooms & Rates subtitle sits under the title, and under the buttons on phones", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await mockPages(page);
+  for (const viewport of VIEWPORTS) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/rooms");
+    const subtitle = page.locator("main").getByText(/ room types? · /);
+    await expect(subtitle).toBeVisible();
+    const title = (await page.locator("main h1").first().boundingBox())!;
+    const add = (await page.locator('main a[href="/rooms/new"]').first().boundingBox())!;
+    const below = (await subtitle.boundingBox())!;
+    expect(Math.round(below.x), `${viewport.width}px`).toBe(Math.round(title.x));
+    if (viewport.width < 768) {
+      expect(below.y, `${viewport.width}px`).toBeGreaterThanOrEqual(add.y + add.height);
+    } else {
+      expect(below.y - (title.y + title.height), `${viewport.width}px`).toBeLessThanOrEqual(8);
+      expect(below.y, `${viewport.width}px`).toBeLessThan(add.y + add.height);
+    }
+  }
+});
 
 test("detail page titles stay at the left edge on wide screens", async ({ page }) => {
   test.setTimeout(120_000);

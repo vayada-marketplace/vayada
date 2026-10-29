@@ -23,14 +23,19 @@ export function PageHeader({
   actions?: ReactNode;
   className?: string;
 }) {
+  // Title, subtitle, actions: the reading and Tab order. The grid places the actions top right.
   return (
     <div
-      className={`grid items-start gap-x-4 ${actions ? "grid-cols-[minmax(0,1fr)_auto]" : ""} ${className}`}
+      className={`grid items-start gap-x-4 ${actions ? "grid-cols-[minmax(min-content,1fr)_auto]" : ""} ${className}`}
     >
       <PageTitle>{title}</PageTitle>
-      {actions && <div className="flex items-center gap-2 md:row-span-2">{actions}</div>}
       {subtitle && (
         <div className="col-span-full mt-1 text-sm text-gray-500 md:col-span-1">{subtitle}</div>
+      )}
+      {actions && (
+        <div className="col-start-2 row-start-1 flex items-center gap-2 md:row-end-3">
+          {actions}
+        </div>
       )}
     </div>
   );
