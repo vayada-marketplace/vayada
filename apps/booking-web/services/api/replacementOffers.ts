@@ -38,6 +38,9 @@ export type RoomContent = {
   images?: { url: string; alt: string | null }[];
   size?: { value: number; unit: "sqm" };
   category?: string;
+  /** VAY-2410: for the details' facts line; bathrooms may be fractional (1.5). */
+  bedrooms?: number;
+  bathrooms?: number;
   amenities?: string[];
   /** The room's own place, sent only while the hotel shows the location map (VAY-2126): its pin and address,
    * or (VAY-2321) a pin rounded to its area with the area's name, never its street. */
@@ -88,6 +91,8 @@ function roomContent(room: Record<string, unknown>): RoomContent {
       size.value > 0 &&
       size.unit === "sqm" && { size: { value: size.value, unit: "sqm" as const } }),
     ...(text(room.category) && { category: room.category }),
+    ...(count(room.bedrooms, 1) && { bedrooms: room.bedrooms }),
+    ...(typeof room.bathrooms === "number" && room.bathrooms > 0 && { bathrooms: room.bathrooms }),
     ...(Array.isArray(amenities) && { amenities: amenities.filter(text) }),
     ...(object(l) &&
       typeof l.latitude === "number" &&

@@ -115,6 +115,8 @@ it("keeps the room cards' content and drops malformed parts without failing sele
             ],
             size: { value: 32, unit: "sqm" },
             category: "Double",
+            bedrooms: 2,
+            bathrooms: 1.5,
             amenities: ["Free WiFi", "", 3],
             offers: [
               {
@@ -130,6 +132,8 @@ it("keeps the room cards' content and drops malformed parts without failing sele
             description: 7,
             occupancy: { maxGuests: 0 },
             size: { value: 30, unit: "sqft" },
+            bedrooms: 0,
+            bathrooms: "1",
             offers: [
               {
                 publicOfferKey: `pricing-offer.v2:${"c".repeat(64)}`,
@@ -156,6 +160,8 @@ it("keeps the room cards' content and drops malformed parts without failing sele
       ],
       size: { value: 32, unit: "sqm" },
       category: "Double",
+      bedrooms: 2,
+      bathrooms: 1.5,
       amenities: ["Free WiFi"],
       offers: [
         {
