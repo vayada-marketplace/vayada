@@ -15,6 +15,7 @@ import { calendarService, CalendarInventoryDay } from "@/services/calendar";
 import { CheckinSettings, pmsSettingsService, settingsService } from "@/services/settings";
 import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
 import { ArrivalPopup } from "@/components/dashboard/ArrivalPopup";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { bookingArrivalTime } from "@/lib/checkin/labels";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { expectedGuestCount, registeredGuestCount } from "@/lib/guestRegistration";
@@ -377,14 +378,11 @@ export default function DashboardPage() {
         setup={setupChecklist}
         incompleteSetupPropertyId={incompleteSetupPropertyId}
       />
-      {/* Title */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("dashboard.title")}</h1>
-          <p className="text-sm text-gray-500 mt-1">{dateLabel}</p>
-        </div>
-        <PmsDashboardSetupChip setup={setupChecklist} />
-      </div>
+      <PageHeader
+        title={t("dashboard.title")}
+        subtitle={dateLabel}
+        actions={<PmsDashboardSetupChip setup={setupChecklist} />}
+      />
       <PmsDashboardSetupCard
         setup={setupChecklist}
         roomCount={tonightOccupancy.sellableUnits || null}

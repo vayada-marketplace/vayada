@@ -21,6 +21,7 @@ import {
 } from "@/services/rooms";
 import { ApiErrorResponse } from "@/services/api/client";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { PageHeader } from "@/components/layout/PageHeader";
 import {
   RoomPriceSummary,
   RoomPricesLink,
@@ -650,33 +651,30 @@ export default function RoomsPage() {
 
   return (
     <div className="p-4 md:p-6">
-      {/* Header */}
-      {/* The subtitle takes its own line, so on phones it doesn't share the width with the buttons. */}
-      <div className="flex flex-wrap items-start justify-between gap-x-3 mb-4 md:mb-5">
-        <h1 className="min-w-0 text-2xl md:text-[26px] font-bold tracking-tight text-gray-900">
-          {t("rooms.title")}
-        </h1>
-        <div className="flex items-center gap-2 shrink-0">
-          <Link
-            href="/rooms/new"
-            className="inline-flex h-10 items-center gap-1.5 px-3 md:px-4 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span className="hidden md:inline">{t("rooms.addRoomType")}</span>
-            <span className="md:hidden">{t("common.add")}</span>
-          </Link>
-          {/* Set up once and rarely touched: the Airbnb import, linked inventory and room order (VAY-2338). */}
-          <RoomsMenu
-            buttonRef={menuButton}
-            airbnbHref={importPropertyId ? airbnbImportHref(importPropertyId) : null}
-            canReorder={individualRooms.length > 1}
-            onLinkedInventory={() => setLinkedOpen(true)}
-          />
-        </div>
-        {!loading && !(loadFailed && rooms.length === 0) && (
-          <p className="mt-1 w-full text-[13px] md:text-sm text-gray-500">{summary}</p>
-        )}
-      </div>
+      <PageHeader
+        title={t("rooms.title")}
+        subtitle={!loading && !(loadFailed && rooms.length === 0) ? summary : undefined}
+        actions={
+          <>
+            <Link
+              href="/rooms/new"
+              className="inline-flex h-10 items-center gap-1.5 px-3 md:px-4 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span className="hidden md:inline">{t("rooms.addRoomType")}</span>
+              <span className="md:hidden">{t("common.add")}</span>
+            </Link>
+            {/* Set up once and rarely touched: the Airbnb import, linked inventory and room order (VAY-2338). */}
+            <RoomsMenu
+              buttonRef={menuButton}
+              airbnbHref={importPropertyId ? airbnbImportHref(importPropertyId) : null}
+              canReorder={individualRooms.length > 1}
+              onLinkedInventory={() => setLinkedOpen(true)}
+            />
+          </>
+        }
+        className="mb-4 md:mb-5"
+      />
 
       <RoomsPricesStrip {...propertyPrices} />
 
