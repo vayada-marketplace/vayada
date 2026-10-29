@@ -18,9 +18,7 @@ test("shows the hotel's terms on the payment step and the tick agrees to them", 
   await expect(section).toContainText("These are our house terms.");
   await expect(section).toContainText("We confirm by email.");
   await expect(
-    page.getByLabel(
-      "I agree to the cancellation policy, guest rules and terms & conditions above.",
-    ),
+    page.getByLabel("I agree to the cancellation policy, guest rules and terms & conditions."),
   ).toBeVisible();
 });
 
@@ -31,7 +29,7 @@ test("shows no terms section and agrees to the rest when the hotel has no terms"
   await toPayment(page);
   await expect(page.getByRole("button", { name: "Terms & conditions" })).toHaveCount(0);
   await expect(
-    page.getByLabel("I agree to the cancellation policy and guest rules above."),
+    page.getByLabel("I agree to the cancellation policy and guest rules."),
   ).toBeVisible();
 });
 

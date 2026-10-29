@@ -57,7 +57,7 @@ import {
   replacementExtrasScope,
   type ReplacementExtrasValue,
 } from "@/services/api/replacementAddonSelection";
-import BeforeYouBook from "@/components/booking/BeforeYouBook";
+import BeforeYouBook, { BookingConsent } from "@/components/booking/BeforeYouBook";
 import ReplacementBookingConfirmation, {
   type BookingAttempt,
 } from "@/components/booking/ReplacementBookingConfirmation";
@@ -148,6 +148,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // The price whose Confirm was pressed before the box was ticked (VAY-2306).
   const [consentMissedFor, setConsentMissedFor] = useState<string | null>(null);
   const consentErrorId = useId();
+  // VAY-2416: where Confirm shows, at the bottom of "Your stay".
+  const [confirmSlot, setConfirmSlot] = useState<HTMLDivElement | null>(null);
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -1202,6 +1204,27 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       )}
     </div>
   );
+  // Review: an expired, refused or changed price, said above the tick and Confirm. "Checking
+  // price…" shows in the total's place.
+  const reviewNotice =
+    error && quote && !attemptOpen ? (
+      <Notice
+        tone="amber"
+        title={error}
+        action={{ label: "Get an updated price", onClick: submit }}
+      >
+        Nothing was booked or charged. Your extras and details are kept.
+      </Notice>
+    ) : error && !attemptOpen ? (
+      priceNotice
+    ) : priceChange && quote ? (
+      <Notice
+        tone="amber"
+        title={`Your price changed from ${priceChange} to ${money(quote.totalMinor, quote.currency)}.`}
+      >
+        Please check it and tick the box again.
+      </Notice>
+    ) : null;
   const titles: Record<BookStep, string> = {
     rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
     extras: "Enhance Your Stay",
@@ -1616,113 +1639,107 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           </form>
         )}
         {settled && step === "payment" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2">
-              <PaymentStep
-                guestName={`${guest.firstName} ${guest.lastName}`}
-                guestEmail={guest.email}
-                guestPhone={guest.phone}
-                onChangeDetails={() => goBack("details")}
-                method={method}
-                options={methodOptions}
-                unavailable={noWayToPay ? priceNotice : null}
-                onMethod={setPayment}
+          <CheckoutColumns
+            card={
+              <StaySummary
+                {...summary}
+                quote={summaryQuote}
+                expired={!!error}
                 locked={attemptOpen}
-                showExplanation={!!quote && quote.paymentMethod === method}
-                notice={
-                  error && quote && !attemptOpen ? (
-                    <Notice
-                      tone="amber"
-                      title={error}
-                      action={{ label: "Get an updated price", onClick: submit }}
-                    >
-                      Nothing was booked or charged. Your extras and details are kept.
-                    </Notice>
-                  ) : error && !attemptOpen ? (
-                    priceNotice
-                  ) : priceChange && quote ? (
-                    <Notice
-                      tone="amber"
-                      title={`Your price changed from ${priceChange} to ${money(quote.totalMinor, quote.currency)}.`}
-                    >
-                      Please check it and tick the box again.
-                    </Notice>
-                  ) : loading ? (
-                    <p role="status">{tReview("checkingPrice")}</p>
-                  ) : null
-                }
-                beforeYouBook={
-                  quote && (
-                    <BeforeYouBook
-                      quote={quote}
-                      disclosure={quoteRules}
-                      rulesFailed={guestRulesQuote.failed}
-                      onRetryRules={guestRulesQuote.retry}
-                      roomNames={roomNames}
-                      today={hotelDate}
-                      hotelCountry={hotelCountry}
-                      termsText={pagePayment.termsText}
-                      formatMoney={(minor) => money(minor, quote.currency)}
-                      agreed={agreed}
-                      consentDisabled={!consentFor || !!error}
-                      consentErrorId={consentError ? consentErrorId : undefined}
-                      onAgree={(checked) => setAgreedTo(checked ? consentFor : null)}
-                      status={quoteRules && !consentFor ? tBefore("roomsMissing") : undefined}
-                    />
-                  )
-                }
-                confirm={
-                  quote && (
-                    <ReplacementBookingConfirmation
-                      key={quote.quoteId}
-                      slug={slug}
-                      quote={quote}
-                      disclosure={agreed ? quoteRules : null}
-                      guest={
-                        guestComplete(guest, rulesForQuote)
-                          ? acceptanceGuest(guest, rulesForQuote)
-                          : null
-                      }
-                      termsAccepted={agreed}
-                      attempt={attempt}
-                      onAttemptChange={setAttempt}
-                      onBooked={openConfirmation}
-                      soldOutNotice={soldOutNotice}
-                      label={pricedOption?.button}
-                      busyLabel={pricedOption?.busy}
-                      hints={{ details: tBefore("hintDetails"), agree: tBefore("hintAgree") }}
-                      onConsentMissing={
-                        // Only while the box can be ticked: an expired price, rules that didn't
-                        // load or a room without its name keep Confirm off, as before.
-                        !error && consentFor
-                          ? () => {
-                              // The box is marked before focus lands, so it is announced.
-                              flushSync(() => setConsentMissedFor(quote.quoteId));
-                              document
-                                .querySelector<HTMLInputElement>(
-                                  "input[data-consent]:not(:checked):not(:disabled)",
-                                )
-                                ?.focus();
-                            }
-                          : undefined
-                      }
-                    />
-                  )
+                action={
+                  // VAY-2416: the one tick right above Confirm.
+                  <div className="space-y-3">
+                    {reviewNotice}
+                    {quote && (
+                      <BookingConsent
+                        quote={quote}
+                        roomNames={roomNames}
+                        today={hotelDate}
+                        termsText={pagePayment.termsText}
+                        agreed={agreed}
+                        disabled={!consentFor || !!error}
+                        errorId={consentError ? consentErrorId : undefined}
+                        onAgree={(checked) => setAgreedTo(checked ? consentFor : null)}
+                        status={quoteRules && !consentFor ? tBefore("roomsMissing") : undefined}
+                      />
+                    )}
+                    <div ref={setConfirmSlot} />
+                  </div>
                 }
               />
-            </div>
-            <div className="lg:col-span-1 space-y-4">
-              {summaryQuote && (
-                <StaySummary
-                  {...summary}
-                  quote={summaryQuote}
-                  expired={!!error}
-                  locked={attemptOpen}
-                />
-              )}
-              {summaryQuote && <ApproximateAmountsNote currency={summaryQuote.currency} />}
-            </div>
-          </div>
+            }
+          >
+            <PaymentStep
+              guestName={`${guest.firstName} ${guest.lastName}`}
+              guestEmail={guest.email}
+              guestPhone={guest.phone}
+              onChangeDetails={() => goBack("details")}
+              method={method}
+              options={methodOptions}
+              unavailable={noWayToPay ? priceNotice : null}
+              onMethod={setPayment}
+              locked={attemptOpen}
+              showExplanation={!!quote && quote.paymentMethod === method}
+              // VAY-2416: what the price says sits in "Your stay", above the tick and Confirm.
+              notice={null}
+              beforeYouBook={
+                quote && (
+                  <BeforeYouBook
+                    quote={quote}
+                    disclosure={quoteRules}
+                    rulesFailed={guestRulesQuote.failed}
+                    onRetryRules={guestRulesQuote.retry}
+                    roomNames={roomNames}
+                    today={hotelDate}
+                    hotelCountry={hotelCountry}
+                    termsText={pagePayment.termsText}
+                    formatMoney={(minor) => money(minor, quote.currency)}
+                  />
+                )
+              }
+              confirm={
+                quote && (
+                  <ReplacementBookingConfirmation
+                    key={quote.quoteId}
+                    slug={slug}
+                    quote={quote}
+                    disclosure={agreed ? quoteRules : null}
+                    guest={
+                      guestComplete(guest, rulesForQuote)
+                        ? acceptanceGuest(guest, rulesForQuote)
+                        : null
+                    }
+                    termsAccepted={agreed}
+                    attempt={attempt}
+                    onAttemptChange={setAttempt}
+                    onBooked={openConfirmation}
+                    soldOutNotice={soldOutNotice}
+                    label={pricedOption?.button}
+                    busyLabel={pricedOption?.busy}
+                    actionSlot={confirmSlot}
+                    buttonClassName={stayButton()}
+                    hints={{ details: tBefore("hintDetails"), agree: tBefore("hintAgree") }}
+                    onConsentMissing={
+                      // Only while the box can be ticked: an expired price, rules that didn't
+                      // load or a room without its name keep Confirm off, as before.
+                      !error && consentFor
+                        ? () => {
+                            // The box is marked before focus lands, so it is announced.
+                            flushSync(() => setConsentMissedFor(quote.quoteId));
+                            document
+                              .querySelector<HTMLInputElement>(
+                                "input[data-consent]:not(:checked):not(:disabled)",
+                              )
+                              ?.focus();
+                          }
+                        : undefined
+                    }
+                  />
+                )
+              }
+            />
+            {summaryQuote && <ApproximateAmountsNote currency={summaryQuote.currency} />}
+          </CheckoutColumns>
         )}
       </div>
     </BookShell>

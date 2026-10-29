@@ -9,7 +9,7 @@ import type {
 } from "@vayada/domain-booking/replacement-pricing";
 import de from "@/messages/de.json";
 import en from "@/messages/en.json";
-import BeforeYouBook from "./BeforeYouBook";
+import BeforeYouBook, { BookingConsent } from "./BeforeYouBook";
 
 const quote = {
   quoteId: "11111111-1111-4111-8111-111111111111",
@@ -57,30 +57,36 @@ afterEach(() => {
   act(() => root.unmount());
   vi.unstubAllGlobals();
 });
-const render = (props: Record<string, unknown> = {}, locale = "en") =>
+// "Before you book" on the left and its tick in "Your stay" (VAY-2416), from the same props.
+const render = (props: Record<string, unknown> = {}, locale = "en") => {
+  const all = {
+    quote,
+    disclosure,
+    rulesFailed: false,
+    onRetryRules: retry,
+    roomNames: { a: "Villa Four" },
+    today: "2026-10-25",
+    hotelCountry: "Sri Lanka",
+    termsText: "Quiet hours from 22:00.",
+    formatMoney: (minor: string) => `US$${Number(minor) / 100}`,
+    agreed: false,
+    disabled: false,
+    onAgree: agree,
+    ...props,
+  } as Parameters<typeof BeforeYouBook>[0] & Parameters<typeof BookingConsent>[0];
   act(() =>
     root.render(
       createElement(NextIntlClientProvider, {
         locale,
         messages: locale === "de" ? de : en,
-        children: createElement(BeforeYouBook, {
-          quote,
-          disclosure,
-          rulesFailed: false,
-          onRetryRules: retry,
-          roomNames: { a: "Villa Four" },
-          today: "2026-10-25",
-          hotelCountry: "Sri Lanka",
-          termsText: "Quiet hours from 22:00.",
-          formatMoney: (minor: string) => `US$${Number(minor) / 100}`,
-          agreed: false,
-          consentDisabled: false,
-          onAgree: agree,
-          ...props,
-        }),
+        children: [
+          createElement(BeforeYouBook, { key: "before", ...all }),
+          createElement(BookingConsent, { key: "consent", ...all }),
+        ],
       }),
     ),
   );
+};
 const text = () => document.body.textContent ?? "";
 const button = (name: string) =>
   Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes(name))!;
@@ -122,18 +128,18 @@ it("agrees to everything with one tick and says why when it was missed", () => {
   render({ today: "2026-10-01" });
   const box = document.querySelector<HTMLInputElement>("input[data-consent]")!;
   expect(box.closest("label")!.textContent).toBe(
-    "I agree to the cancellation policy, guest rules and terms & conditions above.",
+    "I agree to the cancellation policy, guest rules and terms & conditions.",
   );
   act(() => box.click());
   expect(agree).toHaveBeenCalledWith(true);
-  render({ consentErrorId: "missing" });
+  render({ errorId: "missing" });
   expect(document.getElementById("missing")!.textContent).toBe(
-    "Tick the box to agree before you book.",
+    "Please tick the box to confirm your booking.",
   );
   expect(box.getAttribute("aria-invalid")).toBe("true");
   render({ termsText: null, today: "2026-10-01" });
   expect(document.querySelector("input[data-consent]")!.closest("label")!.textContent).toBe(
-    "I agree to the cancellation policy and guest rules above.",
+    "I agree to the cancellation policy and guest rules.",
   );
 });
 
@@ -141,7 +147,7 @@ it("says first in the consent when rooms can't be refunded (VAY-2392)", () => {
   const label = () => document.querySelector("input[data-consent]")!.closest("label")!.textContent;
   render();
   expect(label()).toBe(
-    "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged. I agree to the cancellation policy, guest rules and terms & conditions above.",
+    "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
   );
   // One room still free to cancel, one not.
   const mixed = {
@@ -155,17 +161,15 @@ it("says first in the consent when rooms can't be refunded (VAY-2392)", () => {
   } as unknown as PublicBookingQuote;
   // While a request waits for us, cancelling is still free: no such sentence.
   render({ quote: { ...quote, acceptanceMode: "request" } });
-  expect(label()).toBe(
-    "I agree to the cancellation policy, guest rules and terms & conditions above.",
-  );
+  expect(label()).toBe("I agree to the cancellation policy, guest rules and terms & conditions.");
   render({ quote: mixed, today: "2026-10-01", roomNames: { a: "Villa Four", b: "Garden" } });
   expect(label()).toBe(
-    "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged. I agree to the cancellation policy, guest rules and terms & conditions above.",
+    "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
   );
 });
 
 it("offers a retry when the guest rules couldn't be checked", () => {
-  render({ disclosure: null, rulesFailed: true, consentDisabled: true });
+  render({ disclosure: null, rulesFailed: true, disabled: true });
   expect(document.querySelector('[role="alert"]')!.textContent).toContain(
     "We couldn’t check the hotel’s guest rules for this price.",
   );

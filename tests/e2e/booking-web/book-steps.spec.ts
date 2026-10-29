@@ -381,7 +381,7 @@ for (const width of [1440, 390]) {
     const agree = page.getByLabel(/I agree to the cancellation policy/);
     const missing = page
       .getByRole("alert")
-      .filter({ hasText: "Tick the box to agree before you book." });
+      .filter({ hasText: "Please tick the box to confirm your booking." });
     // VAY-2306: Confirm before ticking books nothing; it marks the box and focuses it.
     await confirm.click();
     await expect(missing).toBeVisible();
