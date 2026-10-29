@@ -36,6 +36,7 @@ only writer that accepts them.
 | 2026-10-08 | VAY-1422 | Optional create field `expectedPricingRevision`; `409 pricing_changed` when prices were republished after the preview                                  |
 | 2026-10-08 | VAY-2065 | A `custom` stay's `nightlyAmount.currency` is optional; omitted, the server prices it in the currency it resolves for custom-only bookings (below)     |
 | 2026-10-26 | VAY-2365 | Create refuses `422 guests_over_capacity` when the booker plus `additionalGuests` exceed the busiest night's room places (below); preview unchanged    |
+| 2026-10-29 | VAY-2417 | Add-on quantities capped at what the party needs; transfers may be dated on the arrival/departure day; the add-on list adds limits (below)             |
 
 The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
 old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
@@ -56,6 +57,27 @@ exception the product owner approved on 2026-10-25 (decision D6), instead of
 - Caller migration: none beyond that modal. A caller that sends more people
   than the rooms hold gets `422 guests_over_capacity` and must remove guests or
   add a room.
+
+The VAY-2417 row narrows and widens what v1 accepts. It stays in v1 as an
+exception the product owner approved on 2026-10-29, instead of
+`pms-manual-booking.v2`:
+
+- The only caller is PMS Web's New Booking modal, which works the quantities out
+  from the party instead of asking for them.
+- Until that modal ships, its free quantity field answers "Couldn't calculate
+  pricing" above the cap. An exact replay returns before pricing, so no stored
+  command or booking changes.
+- An undated one-off unit keeps its meaning. A dated unit is new and stores its
+  day in the add-on snapshot's `serviceDates`, which the PMS shows. Dated units of
+  the other models now store their days there too.
+- The stored days are those of the booking as created. A later
+  `correct-stays` command leaves add-on rows unchanged, as it does for
+  booking-page add-ons, so moved dates keep the booked days.
+- The 2026-08 cutover readiness gate (`manualBookingReadiness`) still checks
+  the old unit shapes. It only reads bookings created before its watermark,
+  so it needs updating only if it is run again for a later cohort.
+- The add-on list adds `scheduleMode`, `maxGuests` (null when unset) and
+  `maxQuantity` (1 when unset) to each add-on.
 
 ## Current evidence and gaps
 
@@ -298,8 +320,17 @@ the target manual writer can be accepted.
   Booking UI never submits `missing` or implicit allocation.
 - Add-on IDs are unique and booking-level. The server resolves the active
   definition, pricing model, unit price and currency, then snapshots them.
-- `packageCount` is positive. `per_stay` uses one null/null unit; `per_guest`
-  uses one null-date unit with guest count bounded by summed stay occupancy.
+- `packageCount` is positive and no more than the party needs (VAY-2417): `1`
+  for `per_guest` and `per_guest_night`; for `per_stay` and `per_night`, the
+  add-on's `maxQuantity` (default 1). A `transport` add-on with a `maxGuests`
+  group size instead takes enough items for the party, rounded up (vehicles).
+  The party is the most guests staying on any one night, so a room move does
+  not count its guests twice.
+- `per_stay` uses one null/null unit; `per_guest` uses one null-date unit with
+  guest count bounded by summed stay occupancy. A `transport` add-on of either
+  model may instead use one or two units dated on the booking's first check-in
+  and/or last check-out (VAY-2417, a transfer's pickup and drop-off); a dated
+  `per_guest` unit counts at most the guests starting or ending a stay that day.
 - `per_night` uses one null-guest unit per distinct service date.
   `per_guest_night` uses one guest-count unit per distinct date. Each date must
   be covered by a stay and its count cannot exceed occupancy on that date; room
