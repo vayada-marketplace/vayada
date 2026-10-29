@@ -41,6 +41,7 @@ import {
   pricingRoom,
 } from "@/components/calendar/calendarPrices";
 import NightPopover from "@/components/calendar/NightPopover";
+import BookingPopover, { BlockPopover } from "@/components/calendar/BookingPopover";
 import type { PopoverAnchor } from "@/components/calendar/CalendarPopover";
 import { useShowPrices } from "@/components/calendar/useShowPrices";
 import { usePropertyPrices } from "@/components/pricing/RoomsPrices";
@@ -94,6 +95,11 @@ const normalizeBookingChannel = (channel?: string | null): string => {
   return LEGEND_KEYS.has(key) ? key : "other";
 };
 
+const anchorOf = (element: Element): PopoverAnchor => {
+  const { left, right, top, bottom } = element.getBoundingClientRect();
+  return { left, right, top, bottom };
+};
+
 const mergeRoomOrderIntent = (
   intended: CalendarRoom[],
   current: CalendarRoom[],
@@ -134,13 +140,28 @@ export default function CalendarPage() {
   // VAY-2411: free nights show their cheapest rate from the published prices, unless this user turned it off.
   const [showPrices, setShowPrices] = useShowPrices();
   const { prices, error: pricesError } = usePropertyPrices();
-  const openBooking = useCallback(
-    (booking: CalendarBooking) =>
-      booking.status === "awaiting_payment"
-        ? setAwaitingBooking(booking)
-        : setSelectedBooking(booking),
-    [],
-  );
+  // VAY-2411: a timeline bar (with its anchor) opens the booking's popover; the month and mobile views open its
+  // window as before.
+  const [bookingPopover, setBookingPopover] = useState<{
+    booking: CalendarBooking;
+    anchor: PopoverAnchor;
+  } | null>(null);
+  const [blockPopover, setBlockPopover] = useState<{
+    block: CalendarBlock;
+    anchor: PopoverAnchor;
+  } | null>(null);
+  const openBooking = useCallback((booking: CalendarBooking, anchor?: PopoverAnchor) => {
+    if (booking.status === "awaiting_payment") return setAwaitingBooking(booking);
+    if (!anchor) return setSelectedBooking(booking);
+    setPrefill(null);
+    setBlockPopover(null);
+    setBookingPopover({ booking, anchor });
+  }, []);
+  const openBlock = (block: CalendarBlock, anchor: PopoverAnchor) => {
+    setPrefill(null);
+    setBookingPopover(null);
+    setBlockPopover({ block, anchor });
+  };
   /** The bar's look and hover text: channel colour, or the striped "awaiting payment" hold. */
   const bookingBar = (b: CalendarBooking, extraTitle = "") => {
     const name = `${b.guestFirstName} ${b.guestLastName}`.trim();
@@ -327,7 +348,10 @@ export default function CalendarPage() {
     e.preventDefault();
     let limitIdx = idx;
     while (limitIdx < VIEW_DAYS - 1 && !nightTaken(stays, dayKeys[limitIdx + 1]!)) limitIdx++;
+    // preventDefault stops the mousedown that would close an open popover, so close them here.
     setPrefill(null);
+    setBookingPopover(null);
+    setBlockPopover(null);
     setDrag({
       roomId,
       rect: { left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom },
@@ -1290,7 +1314,7 @@ export default function CalendarPage() {
                                   key={`block-${bl.id}`}
                                   type="button"
                                   data-bar="block"
-                                  onClick={() => setSelectedBlock(bl)}
+                                  onClick={(e) => openBlock(bl, anchorOf(e.currentTarget))}
                                   className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[1] border border-dashed flex items-center gap-1 cursor-pointer ${
                                     bl.protected
                                       ? "bg-amber-100 border-amber-300 text-amber-700 hover:bg-amber-200"
@@ -1347,7 +1371,7 @@ export default function CalendarPage() {
                                   }`}
                                   style={{ ...style, ...bar.style }}
                                   title={`${bar.title}${multiRoomTitle}`}
-                                  onClick={() => openBooking(b)}
+                                  onClick={(e) => openBooking(b, anchorOf(e.currentTarget))}
                                 >
                                   <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
                                     {getInitials(b.guestFirstName, b.guestLastName)}
@@ -1417,7 +1441,7 @@ export default function CalendarPage() {
                             className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] ${bar.className} transition-all flex items-center gap-1.5 ${b.status === "awaiting_payment" ? "" : "opacity-75"}`}
                             style={{ ...style, top: `${calendarLaneTop(index)}px`, ...bar.style }}
                             title={bar.title}
-                            onClick={() => openBooking(b)}
+                            onClick={(e) => openBooking(b, anchorOf(e.currentTarget))}
                           >
                             <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
                               {getInitials(b.guestFirstName, b.guestLastName)}
@@ -1464,6 +1488,47 @@ export default function CalendarPage() {
             />
           );
         })()}
+
+      {bookingPopover && (
+        <BookingPopover
+          // A new booking starts fresh (its check-in time read).
+          key={`${bookingPopover.booking.id}-${bookingPopover.booking.roomPosition}`}
+          booking={bookingPopover.booking}
+          roomLabel={
+            bookingPopover.booking.roomNumber
+              ? `#${bookingPopover.booking.roomNumber}`
+              : `${t("calendar.unassigned")} · ${bookingPopover.booking.roomName}`
+          }
+          anchor={bookingPopover.anchor}
+          onChangeRoom={() => {
+            setSelectedBooking(bookingPopover.booking);
+            setBookingPopover(null);
+          }}
+          onClose={() => setBookingPopover(null)}
+        />
+      )}
+
+      {blockPopover && (
+        <BlockPopover
+          // A new block never inherits another block's open "Unblock this period?" confirmation.
+          key={blockPopover.block.id}
+          block={blockPopover.block}
+          anchor={blockPopover.anchor}
+          onEdit={() => {
+            setSelectedBlock(blockPopover.block);
+            setBlockPopover(null);
+          }}
+          onUnblock={async () => {
+            await calendarService.deleteRoomBlock(
+              blockPopover.block.id,
+              blockPopover.block.version,
+            );
+            setBlockPopover(null);
+            await fetchData();
+          }}
+          onClose={() => setBlockPopover(null)}
+        />
+      )}
 
       {/* Block Modal */}
       {showBlockModal && data && (

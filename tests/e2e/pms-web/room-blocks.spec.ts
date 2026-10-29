@@ -37,6 +37,11 @@ test.describe("target PMS room blocks", () => {
 
     target.rejectNextPatch();
     await page.getByText("Maintenance").first().click();
+    // VAY-2411: a block opens its popover; its Edit opens the block window.
+    await page
+      .getByRole("dialog", { name: /Blocked/ })
+      .getByRole("button", { name: "Edit" })
+      .click();
     await page.getByRole("button", { name: "Edit" }).click();
     await page.locator('input[type="date"]').nth(1).fill("2026-08-25");
     await page.getByPlaceholder(/Maintenance/).fill("Extended maintenance");
@@ -47,8 +52,9 @@ test.describe("target PMS room blocks", () => {
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Extended maintenance").first()).toBeVisible();
     await page.getByText("Extended maintenance").first().click();
-    await page.getByRole("button", { name: "Unblock" }).click();
-    await page.getByRole("button", { name: "Unblock" }).click();
+    // The popover's "Unblock dates", then its confirmation.
+    await page.getByRole("button", { name: "Unblock dates" }).click();
+    await page.getByRole("button", { name: "Unblock", exact: true }).click();
     await expect(page.getByText("Extended maintenance")).toHaveCount(0);
 
     expect(target.methods()).toEqual(["POST", "PATCH", "PATCH", "DELETE"]);
