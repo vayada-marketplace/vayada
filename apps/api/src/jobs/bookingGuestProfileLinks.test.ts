@@ -16,10 +16,12 @@ const direct: GuestProfileSource = {
   sourceSystem: "pms",
   bookingChannel: "direct",
   contactVisible: true,
+  applied: false,
+  contactApplied: false,
 };
 
 describe("profileValuesFromBooking", () => {
-  it("lets a direct booking overwrite with what it holds, but never clear a value", () => {
+  it("lets a direct booking overwrite the first time, but never clear a value", () => {
     expect(profileValuesFromBooking(profile, direct)).toEqual({
       email: "new@example.test",
       phone: "+4917600000000",
@@ -28,6 +30,20 @@ describe("profileValuesFromBooking", () => {
     expect(
       profileValuesFromBooking(profile, { ...direct, email: "  ", phone: null, countryCode: null }),
     ).toEqual(profile);
+  });
+
+  it("only fills gaps from a booking applied before, so an old booking can't undo newer details", () => {
+    const again = { ...direct, applied: true, contactApplied: true };
+    expect(profileValuesFromBooking(profile, again)).toEqual(profile);
+    expect(
+      profileValuesFromBooking({ email: null, phone: null, countryCode: null }, again),
+    ).toEqual({ email: "new@example.test", phone: "+4917600000000", countryCode: "AT" });
+    // Contact that waited for acceptance arrives as new.
+    expect(profileValuesFromBooking(profile, { ...again, contactApplied: false })).toEqual({
+      ...profile,
+      email: "new@example.test",
+      phone: "+4917600000000",
+    });
   });
 
   it("lets a channel booking only fill empty fields", () => {

@@ -1,4 +1,4 @@
-import pg from "pg";
+import pg, { type QueryResultRow } from "pg";
 import { normalizeNationalityCode } from "@vayada/locale-constants";
 
 import {
@@ -13,20 +13,37 @@ import {
  * accepts are all picked up on the next run.
  *
  * Matching: same account and same name, plus the same email or phone as the profile or one of its
- * stays. An email alone never joins two people (families share one), a booking without a last name
- * (channel placeholders) never joins anyone, and more than one candidate makes a new profile.
+ * stays. An email alone never joins two people (families share one), and a booking without a last
+ * name (channel placeholders) never joins anyone. Of several candidates, the one matching both email
+ * and phone wins; otherwise a new profile is made. A profile with a single stay follows that stay's
+ * name, so a placeholder that later gets the real name can still join the guest's profile.
  *
- * Values: direct bookings (booking engine, New Booking) overwrite with what they hold; channel
- * bookings only fill empty fields, so relay addresses never replace what the desk collected. An empty
- * value never clears one. Nationality comes from PMS bookings and additional guests only: the booking
- * engine asks its booker for the country of residence. Email and phone wait until the property may see
- * them (commission plan, request not accepted yet), the same rule as the reservation pages.
+ * Values: the first time a direct booking's values reach a profile (booking engine, New Booking), they
+ * overwrite it; later changes to that booking, and channel bookings, only fill empty fields, so an old
+ * booking or a relay address never undoes newer details or a staff edit. An empty value never clears
+ * one. Nationality comes from PMS bookings and additional guests only: the booking engine asks its
+ * booker for the country of residence. Email and phone wait until the property may see them
+ * (commission plan, request not accepted yet), the same rule as the reservation pages.
  */
-export const GUEST_PROFILE_LINK_BATCH_SIZE = 100;
+export const GUEST_PROFILE_LINK_BATCH_SIZE = 50;
 export const GUEST_PROFILE_LINK_INTERVAL_MS = 30_000;
-// One run at a time across next-api tasks, so two bookings of a new guest can't make two profiles.
-const SWEEP_LOCK_KEY = "booking.guest_profile_links";
+// One linker at a time across next-api tasks, so two bookings of a new guest can't make two profiles.
+const LINK_LOCK_SQL =
+  "SELECT pg_try_advisory_xact_lock(hashtext('booking.guest_profile_links')) AS locked";
+// Bookings that end without the property ever seeing the guest's contact.
+const CLOSED_STATUSES = ["declined", "canceled", "expired", "completed", "no_show"];
 
+/** The account a property's guests belong to: its one active owner, else the property itself. */
+export const GUEST_ACCOUNT_SQL = (propertyId: string) => `COALESCE((
+    SELECT CASE WHEN count(DISTINCT owner.organization_id) = 1
+      THEN min(owner.organization_id::text) END
+    FROM identity.organization_resource_links owner
+    WHERE owner.product = 'hotel_catalog'
+      AND owner.resource_type = 'property'
+      AND lower(owner.resource_id) = (${propertyId})::text
+      AND owner.relationship = 'owner'
+      AND owner.status = 'active'
+  ), (${propertyId})::text)::uuid`;
 const CONTACT_VISIBLE_SQL = `(${PROPERTY_ALWAYS_HAS_GUEST_CONTACT_SQL} OR ${BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL})`;
 const NAME_KEY_SQL = (first: string, last: string) =>
   `lower(regexp_replace(btrim(${first} || ' ' || ${last}), '\\s+', ' ', 'g'))`;
@@ -53,13 +70,27 @@ export type GuestProfileSource = {
   sourceSystem: string;
   bookingChannel: string;
   contactVisible: boolean;
+  /** This booking's values reached the profile before (it was linked). */
+  applied: boolean;
+  /** Its email and phone reached the profile before (linked, and not waiting for visibility). */
+  contactApplied: boolean;
 };
 
-type PendingRow = GuestProfileSource & {
+export type GuestProfileQueryable = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[] }>;
+};
+
+type PendingRow = Omit<GuestProfileSource, "applied" | "contactApplied"> & {
   bookingGuestId: string;
   guestProfileId: string | null;
+  contactDeferred: boolean;
   firstName: string;
   lastName: string;
+  nameKey: string;
+  bookingStatus: string;
   accountId: string;
 };
 
@@ -69,21 +100,30 @@ export function profileValuesFromBooking(
   source: GuestProfileSource,
 ): GuestProfileValues {
   const direct = source.bookingChannel === "direct";
-  const pick = (current: string | null, incoming: string | null) =>
-    incoming === null ? current : direct || current === null ? incoming : current;
+  const pick = (current: string | null, incoming: string | null, overwrite: boolean) =>
+    incoming === null ? current : overwrite || current === null ? incoming : current;
   const current = profile ?? { email: null, phone: null, countryCode: null };
+  const contact = direct && !source.contactApplied;
   return {
-    email: source.contactVisible ? pick(current.email, clean(source.email)) : current.email,
-    phone: source.contactVisible ? pick(current.phone, clean(source.phone)) : current.phone,
+    email: source.contactVisible
+      ? pick(current.email, clean(source.email), contact)
+      : current.email,
+    phone: source.contactVisible
+      ? pick(current.phone, clean(source.phone), contact)
+      : current.phone,
     countryCode:
       source.sourceSystem === "pms" || source.guestRole === "additional_guest"
-        ? pick(current.countryCode, normalizeNationalityCode(source.countryCode))
+        ? pick(
+            current.countryCode,
+            normalizeNationalityCode(source.countryCode),
+            direct && !source.applied,
+          )
         : current.countryCode,
   };
 }
 
 export type GuestProfileLinkStore = {
-  /** Links or re-applies up to `limit` booking guests; failed rows are retried on the next run. */
+  /** Links or re-applies up to `limit` booking guests. */
   linkBatch(limit: number): Promise<{ linked: number; failed: number }>;
   close(): Promise<void>;
 };
@@ -97,6 +137,8 @@ export function createPgGuestProfileLinkStore(config: {
     throw new Error("Guest profile link connectionString must not be empty");
   }
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
+  // Rows that failed wait for the next restart, so they can't block the rows behind them.
+  const parked = new Set<string>();
 
   return {
     async linkBatch(limit) {
@@ -106,17 +148,17 @@ export function createPgGuestProfileLinkStore(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const lock = await client.query<{ locked: boolean }>(
-          "SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked",
-          [SWEEP_LOCK_KEY],
-        );
+        await client.query("SET LOCAL lock_timeout = '5s'");
+        await client.query("SET LOCAL statement_timeout = '60s'");
+        const lock = await client.query<{ locked: boolean }>(LINK_LOCK_SQL);
         if (!lock.rows[0]?.locked) {
           await client.query("ROLLBACK");
           return { linked: 0, failed: 0 };
         }
-        const pending = await client.query<PendingRow>(PENDING_ROWS_SQL, [limit]);
+        const pending = await client.query<PendingRow>(PENDING_ROWS_SQL, [limit, [...parked]]);
         let linked = 0;
         let failed = 0;
+        // One savepoint per row: a batch stays under PostgreSQL's 64 cached subtransactions.
         for (const row of pending.rows) {
           await client.query("SAVEPOINT guest_profile_link");
           try {
@@ -125,6 +167,7 @@ export function createPgGuestProfileLinkStore(config: {
             linked += 1;
           } catch (error) {
             await client.query("ROLLBACK TO SAVEPOINT guest_profile_link");
+            parked.add(row.bookingGuestId);
             config.onRowError?.(row.bookingGuestId, error);
             failed += 1;
           }
@@ -145,41 +188,43 @@ export function createPgGuestProfileLinkStore(config: {
   };
 }
 
-// Booking guests not linked yet, changed since their values were last applied, or holding contact
-// details that became visible. Drafts wait: an expired draft is deleted with its guests. Older
-// bookings go first, so the latest booking's values are the ones a profile ends up with.
-const PENDING_ROWS_SQL = `
+const ROW_SQL = `
   SELECT guest.id::text AS "bookingGuestId",
          guest.guest_profile_id::text AS "guestProfileId",
+         guest.guest_profile_contact_deferred AS "contactDeferred",
          guest.guest_role AS "guestRole",
          guest.first_name AS "firstName",
          guest.last_name AS "lastName",
+         ${NAME_KEY_SQL("guest.first_name", "guest.last_name")} AS "nameKey",
          guest.email,
          guest.phone,
          guest.country_code AS "countryCode",
+         booking.lifecycle_status AS "bookingStatus",
          booking.source_system AS "sourceSystem",
          booking.booking_channel AS "bookingChannel",
          ${CONTACT_VISIBLE_SQL} AS "contactVisible",
-         COALESCE((
-           SELECT CASE WHEN count(*) = 1 THEN min(owner.organization_id::text) END
-           FROM identity.organization_resource_links owner
-           WHERE owner.product = 'hotel_catalog'
-             AND owner.resource_type = 'property'
-             AND lower(owner.resource_id) = booking.property_id::text
-             AND owner.relationship = 'owner'
-             AND owner.status = 'active'
-         ), booking.property_id::text) AS "accountId"
+         ${GUEST_ACCOUNT_SQL("booking.property_id")} AS "accountId"
   FROM booking.booking_guests guest
   JOIN booking.guest_bookings booking ON booking.id = guest.guest_booking_id
-  WHERE booking.lifecycle_status NOT IN ('draft', 'expired')
-    AND (
-      guest.guest_profile_id IS NULL
+  WHERE booking.lifecycle_status NOT IN ('draft', 'expired')`;
+
+// Booking guests not linked yet, changed since their values were last applied, or holding contact
+// details that became visible (or never will: their booking closed). The first condition is the
+// partial index idx_booking_guests_profile_pending, so a run doesn't read the whole table. Drafts
+// wait (an expired draft is deleted with its guests) and expired bookings never became stays. Older
+// bookings go first, so the latest booking's values are the ones a profile ends up with.
+const PENDING_ROWS_SQL = `${ROW_SQL}
+    AND (guest.guest_profile_id IS NULL
       OR guest.guest_profile_synced_at IS DISTINCT FROM guest.updated_at
-      OR (guest.guest_profile_contact_deferred AND ${CONTACT_VISIBLE_SQL})
-    )
+      OR guest.guest_profile_contact_deferred)
+    AND (guest.guest_profile_id IS NULL
+      OR guest.guest_profile_synced_at IS DISTINCT FROM guest.updated_at
+      OR ${CONTACT_VISIBLE_SQL}
+      OR booking.lifecycle_status IN (${CLOSED_STATUSES.map((status) => `'${status}'`).join(", ")}))
+    AND NOT (guest.id = ANY($2::uuid[]))
   ORDER BY booking.created_at, guest.created_at, guest.id
   LIMIT $1
-  FOR UPDATE OF guest SKIP LOCKED`;
+  FOR NO KEY UPDATE OF guest SKIP LOCKED`;
 
 const MATCH_SQL = `
   WITH incoming AS (
@@ -208,64 +253,101 @@ const MATCH_SQL = `
     FROM booking.guest_profiles profile, incoming
     WHERE profile.account_id = $1::uuid
       AND profile.name_key = incoming.name_key
+      AND profile.id IS DISTINCT FROM $6::uuid
   )
-  SELECT id::text AS id, by_email AS "byEmail"
+  SELECT id::text AS id, by_email AS "byEmail", by_phone AS "byPhone"
   FROM candidates
   WHERE by_email OR by_phone
   ORDER BY created_at, id
-  LIMIT 2`;
+  LIMIT 10`;
 
-async function linkRow(client: pg.PoolClient, row: PendingRow): Promise<void> {
+type Link = "matched_email" | "matched_phone" | "created";
+
+/** The profile this booking guest belongs to, if exactly one fits (see the matching rule above). */
+async function findMatch(
+  client: GuestProfileQueryable,
+  row: PendingRow,
+  exceptProfileId: string | null,
+): Promise<{ id: string; link: Link } | null> {
+  // A booking without a last name is a channel placeholder ("Guest"): never matched.
+  if (!row.lastName.trim()) return null;
+  const candidates = (
+    await client.query<{ id: string; byEmail: boolean; byPhone: boolean }>(MATCH_SQL, [
+      row.accountId,
+      row.firstName,
+      row.lastName,
+      row.email,
+      row.phone,
+      exceptProfileId,
+    ])
+  ).rows;
+  const both = candidates.filter((candidate) => candidate.byEmail && candidate.byPhone);
+  const match = candidates.length === 1 ? candidates[0] : both.length === 1 ? both[0] : undefined;
+  return match ? { id: match.id, link: match.byEmail ? "matched_email" : "matched_phone" } : null;
+}
+
+async function linkRow(client: GuestProfileQueryable, row: PendingRow): Promise<string> {
   let profileId = row.guestProfileId;
-  let link: "matched_email" | "matched_phone" | "created" | null = null;
-  if (!profileId) {
-    // A booking without a last name is a channel placeholder ("Guest"): never matched.
-    const matches = row.lastName.trim()
-      ? (
-          await client.query<{ id: string; byEmail: boolean }>(MATCH_SQL, [
-            row.accountId,
-            row.firstName,
-            row.lastName,
-            row.email,
-            row.phone,
-          ])
-        ).rows
-      : [];
-    if (matches.length === 1) {
-      profileId = matches[0]!.id;
-      link = matches[0]!.byEmail ? "matched_email" : "matched_phone";
-    } else {
-      const values = profileValuesFromBooking(null, row);
-      const created = await client.query<{ id: string }>(
-        `INSERT INTO booking.guest_profiles
-           (account_id, first_name, last_name, email, phone, country_code)
-         VALUES ($1::uuid, $2, $3, $4, $5, $6)
-         RETURNING id::text`,
-        [
-          row.accountId,
-          row.firstName.trim(),
-          row.lastName.trim(),
-          values.email,
-          values.phone,
-          values.countryCode,
-        ],
+  let link: Link | null = null;
+  if (profileId) {
+    const current = (
+      await client.query<{ nameKey: string; stays: number }>(
+        `SELECT profile.name_key AS "nameKey",
+                (SELECT count(*)::int FROM booking.booking_guests stay
+                 WHERE stay.guest_profile_id = profile.id) AS stays
+         FROM booking.guest_profiles profile WHERE profile.id = $1::uuid FOR UPDATE`,
+        [profileId],
+      )
+    ).rows[0];
+    // A profile with this stay only follows the stay's name, then may join the guest's profile.
+    if (current && current.stays === 1 && current.nameKey !== row.nameKey) {
+      await client.query(
+        `UPDATE booking.guest_profiles SET first_name = $2, last_name = $3, updated_at = now()
+         WHERE id = $1::uuid`,
+        [profileId, row.firstName.trim(), row.lastName.trim()],
       );
-      profileId = created.rows[0]!.id;
-      link = "created";
+      const match = await findMatch(client, row, profileId);
+      if (match) {
+        await client.query(
+          `UPDATE booking.guest_notes SET guest_profile_id = $2::uuid
+           WHERE guest_profile_id = $1::uuid`,
+          [profileId, match.id],
+        );
+        await client.query(
+          `UPDATE booking.booking_guests SET guest_profile_id = $2::uuid, guest_profile_link = $3
+           WHERE id = $1::uuid`,
+          [row.bookingGuestId, match.id, match.link],
+        );
+        await client.query("DELETE FROM booking.guest_profiles WHERE id = $1::uuid", [profileId]);
+        profileId = match.id;
+        link = match.link;
+      }
     }
+  } else {
+    const match = await findMatch(client, row, null);
+    profileId = match ? match.id : await createProfile(client, row);
+    link = match ? match.link : "created";
   }
   if (link !== "created") {
-    const current = await client.query<GuestProfileValues>(
-      `SELECT email, phone, country_code AS "countryCode"
-       FROM booking.guest_profiles WHERE id = $1::uuid FOR UPDATE`,
-      [profileId],
-    );
-    const before = current.rows[0]!;
-    const after = profileValuesFromBooking(before, row);
+    // A booking moved to another profile brings its values there for the first time.
+    const fresh = link !== null;
+    const current = (
+      await client.query<GuestProfileValues>(
+        `SELECT email, phone, country_code AS "countryCode"
+         FROM booking.guest_profiles WHERE id = $1::uuid FOR UPDATE`,
+        [profileId],
+      )
+    ).rows[0];
+    if (!current) throw new Error("Guest profile disappeared while linking");
+    const after = profileValuesFromBooking(current, {
+      ...row,
+      applied: !fresh,
+      contactApplied: !fresh && !row.contactDeferred,
+    });
     if (
-      after.email !== before.email ||
-      after.phone !== before.phone ||
-      after.countryCode !== before.countryCode
+      after.email !== current.email ||
+      after.phone !== current.phone ||
+      after.countryCode !== current.countryCode
     ) {
       await client.query(
         `UPDATE booking.guest_profiles
@@ -275,17 +357,45 @@ async function linkRow(client: pg.PoolClient, row: PendingRow): Promise<void> {
       );
     }
   }
-  const contactDeferred =
-    !row.contactVisible && (clean(row.email) !== null || clean(row.phone) !== null);
   // updated_at stays as it is: the copy wasn't changed, only linked.
   await client.query(
     `UPDATE booking.booking_guests
      SET guest_profile_id = $2::uuid,
-         guest_profile_link = COALESCE(guest_profile_link, $3),
+         guest_profile_link = COALESCE($3, guest_profile_link),
          guest_profile_synced_at = updated_at,
          guest_profile_contact_deferred = $4
      WHERE id = $1::uuid`,
-    [row.bookingGuestId, profileId, link, contactDeferred],
+    [row.bookingGuestId, profileId, link, contactDeferred(row)],
+  );
+  return profileId;
+}
+
+async function createProfile(client: GuestProfileQueryable, row: PendingRow): Promise<string> {
+  const values = profileValuesFromBooking(null, { ...row, applied: false, contactApplied: false });
+  const created = await client.query<{ id: string }>(
+    `INSERT INTO booking.guest_profiles
+       (account_id, first_name, last_name, email, phone, country_code)
+     VALUES ($1::uuid, $2, $3, $4, $5, $6)
+     RETURNING id::text`,
+    [
+      row.accountId,
+      row.firstName.trim(),
+      row.lastName.trim(),
+      values.email,
+      values.phone,
+      values.countryCode,
+    ],
+  );
+  return created.rows[0]!.id;
+}
+
+// Email or phone the property may not see yet: applied once it may. A booking that closed without
+// that never will be.
+function contactDeferred(row: PendingRow): boolean {
+  return (
+    !row.contactVisible &&
+    !CLOSED_STATUSES.includes(row.bookingStatus) &&
+    (clean(row.email) !== null || clean(row.phone) !== null)
   );
 }
 
@@ -309,7 +419,7 @@ export function startGuestProfileLinkWorker(options: {
       const batch = await options.store.linkBatch(batchSize);
       linked += batch.linked;
       failed += batch.failed;
-      // A batch with nothing linked stops the run, so rows that keep failing can't loop forever.
+      // A batch with nothing linked ends the run; its failed rows are parked for the next one.
       if (closing || batch.linked === 0 || batch.linked + batch.failed < batchSize) break;
     }
     if (linked > 0 || failed > 0)

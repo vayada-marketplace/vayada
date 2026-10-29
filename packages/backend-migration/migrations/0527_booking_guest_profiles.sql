@@ -53,6 +53,13 @@ CREATE INDEX idx_booking_guests_guest_profile
   ON booking.booking_guests (guest_profile_id)
   WHERE guest_profile_id IS NOT NULL;
 
+-- What the background job still has to do: link, re-apply a changed copy, or apply contact later.
+CREATE INDEX idx_booking_guests_profile_pending
+  ON booking.booking_guests (created_at)
+  WHERE guest_profile_id IS NULL
+     OR guest_profile_synced_at IS DISTINCT FROM updated_at
+     OR guest_profile_contact_deferred;
+
 COMMENT ON COLUMN booking.booking_guests.guest_profile_synced_at IS
   'VAY-2420: updated_at of this row when its values were last applied to the profile.';
 

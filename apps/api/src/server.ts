@@ -3550,11 +3550,14 @@ const guestProfileLinkWorker = startGuestProfileLinkWorker({
   store: createPgGuestProfileLinkStore({
     connectionString: targetDatabaseUrl,
     max: 1,
-    onRowError: (bookingGuestId, err) =>
+    // Database errors can quote the failing row's guest details, so only their names are logged.
+    onRowError: (bookingGuestId, err) => {
+      const { code, table, column, constraint } = (err ?? {}) as Record<string, unknown>;
       app.log.error(
-        { err, bookingGuestId },
+        { bookingGuestId, code, table, column, constraint },
         "Booking guest could not be linked to a guest profile",
-      ),
+      );
+    },
   }),
   enabled: config.backgroundWorkersEnabled,
   logger: app.log,

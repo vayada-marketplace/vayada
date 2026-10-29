@@ -39,7 +39,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
   const admin = new pg.Pool({ connectionString: TEST_DATABASE_URL ?? "postgresql://disabled" });
   const accountId = randomUUID();
   const [propertyA, propertyB, propertyAlone] = [randomUUID(), randomUUID(), randomUUID()];
-  const rowErrors: unknown[] = [];
+  // Row errors of any suite's rows; only this suite's are asserted.
+  const rowErrors: { id: string; error: unknown }[] = [];
   let fixture: HotelSetupOrdinaryLoginFixture;
   let store: GuestProfileLinkStore;
 
@@ -67,7 +68,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
     fixture = await createHotelSetupOrdinaryLoginFixture(admin, TEST_DATABASE_URL!);
     store = createPgGuestProfileLinkStore({
       connectionString: fixture.connectionString,
-      onRowError: (_id, error) => rowErrors.push(error),
+      onRowError: (id, error) => rowErrors.push({ id, error }),
     });
   });
 
@@ -292,6 +293,86 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
     );
   });
 
+  it("never lets a change to an older booking undo a newer one's details", async () => {
+    const january = await book(
+      propertyA,
+      { createdAt: "2026-01-05T00:00:00Z" },
+      { first: "Ida", last: "Lang", email: "ida@example.test", phone: "+4915111111111" },
+    );
+    await book(
+      propertyA,
+      { createdAt: "2026-03-05T00:00:00Z" },
+      { first: "Ida", last: "Lang", email: "ida@example.test", phone: "+4915122222222" },
+    );
+    await sweep();
+    expect(await link(january.guestIds[0]!)).toMatchObject({ phone: "+4915122222222" });
+
+    // An arrival-time edit on the January booking re-applies it, which only fills gaps.
+    await admin.query(
+      `UPDATE booking.booking_guests SET arrival_time = '18:00', updated_at = now()
+       WHERE id = $1::uuid`,
+      [january.guestIds[0]],
+    );
+    await sweep();
+    expect(await link(january.guestIds[0]!)).toMatchObject({
+      synced: true,
+      phone: "+4915122222222",
+    });
+  });
+
+  it("prefers the one profile matching both email and phone over making yet another", async () => {
+    const byEmail = await book(
+      propertyA,
+      {},
+      { first: "Ole", last: "Sand", email: "ole@example.test" },
+    );
+    const byPhone = await book(propertyA, {}, { first: "Ole", last: "Sand", phone: "+4790000001" });
+    const both = { first: "Ole", last: "Sand", email: "ole@example.test", phone: "+4790000001" };
+    const third = await book(propertyA, {}, both);
+    const fourth = await book(propertyA, {}, both);
+    await sweep();
+
+    const [p1, p2, p3, p4] = await Promise.all(
+      [byEmail, byPhone, third, fourth].map(({ guestIds }) => link(guestIds[0]!)),
+    );
+    expect(p2!.profileId).not.toBe(p1!.profileId);
+    // Two candidates, one each way: a new profile, which from then on matches both.
+    expect(p3).toMatchObject({ link: "created" });
+    expect(p4).toMatchObject({ profileId: p3!.profileId, link: "matched_email" });
+  });
+
+  it("lets a channel placeholder that gets the real name join the guest's profile", async () => {
+    const desk = await book(
+      propertyA,
+      {},
+      { first: "Lina", last: "Hart", email: "lina@example.test", phone: "+4366012345678" },
+    );
+    const ota = await book(
+      propertyA,
+      { channel: "booking_com" },
+      { first: "Guest", last: "", email: "z9@guest.booking.test", phone: "+43 660 12345678" },
+    );
+    await sweep();
+    const placeholder = await link(ota.guestIds[0]!);
+    expect(placeholder).toMatchObject({ link: "created", firstName: "Guest" });
+
+    await admin.query(
+      `UPDATE booking.booking_guests SET first_name = 'Lina', last_name = 'Hart', updated_at = now()
+       WHERE id = $1::uuid`,
+      [ota.guestIds[0]],
+    );
+    await sweep();
+    expect(await link(ota.guestIds[0]!)).toMatchObject({
+      profileId: (await link(desk.guestIds[0]!)).profileId,
+      link: "matched_phone",
+      email: "lina@example.test",
+    });
+    const gone = await admin.query("SELECT 1 FROM booking.guest_profiles WHERE id = $1::uuid", [
+      placeholder.profileId,
+    ]);
+    expect(gone.rows).toEqual([]);
+  });
+
   it("links a request at once but copies its email and phone only after it is accepted", async () => {
     const request = await book(
       propertyA,
@@ -336,7 +417,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
   });
 
   it("linked every row of this suite without a row error", async () => {
-    expect(rowErrors).toEqual([]);
+    const ours = await admin.query<{ id: string }>(
+      `SELECT guest.id::text AS id FROM booking.booking_guests guest
+       JOIN booking.guest_bookings booking ON booking.id = guest.guest_booking_id
+       WHERE booking.public_reference LIKE $1 AND guest.id = ANY($2::uuid[])`,
+      [`${PREFIX}%`, rowErrors.map(({ id }) => id)],
+    );
+    expect(ours.rows).toEqual([]);
     const unlinked = await admin.query<{ count: number }>(
       `SELECT count(*)::int AS count
        FROM booking.booking_guests guest
