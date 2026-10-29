@@ -343,6 +343,8 @@ describe("calendarService manual-booking rates", () => {
         name: "Flexible",
         rateType: "flexible",
         baseRate: 150,
+        mealPlan: null,
+        cancellation: null,
       },
     ]);
     expect(result.rooms[0]?.size).toBe(38);

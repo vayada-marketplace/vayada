@@ -25,6 +25,9 @@ export interface CalendarRoomType {
     name: string;
     rateType: "flexible" | "non_refundable" | "package" | "manual";
     baseRate: number;
+    /** The offer's meal plan and cancellation terms, which name it like the Prices tab does (VAY-2411). */
+    mealPlan?: string | null;
+    cancellation?: Record<string, unknown> | null;
   }>;
   seasons: {
     name?: string;
@@ -152,6 +155,8 @@ type PmsOperationsRoomType = {
     rateType: "flexible" | "non_refundable" | "package" | "manual";
     baseRate: PmsOperationsMoney;
     active: boolean;
+    mealPlan?: string | null;
+    cancellationPolicySnapshot?: Record<string, unknown> | null;
   }>;
 };
 
@@ -433,6 +438,8 @@ function toCalendarData(
           name: plan.name,
           rateType: plan.rateType,
           baseRate: moneyAmount(plan.baseRate),
+          mealPlan: plan.mealPlan ?? null,
+          cancellation: plan.cancellationPolicySnapshot ?? null,
         })),
         seasons: [],
       };

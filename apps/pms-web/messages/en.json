@@ -672,6 +672,8 @@
   "calendar.viewMonth": "Month",
   "calendar.roomView": "Room view",
   "calendar.reorderRooms": "Reorder rooms",
+  "calendar.display": "Display",
+  "calendar.showPrices": "Show prices",
   "calendar.reorderingRooms": "Reordering rooms",
   "calendar.saveOrder": "Save order",
   "calendar.cancel": "Cancel",

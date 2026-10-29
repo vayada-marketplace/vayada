@@ -33,6 +33,9 @@ import MiniDatePicker from "@/components/calendar/MiniDatePicker";
 import MobileCalendar, { calendarLaneTop } from "@/components/calendar/MobileCalendar";
 import MonthView from "@/components/calendar/MonthView";
 import ReorderStepper from "@/components/calendar/ReorderStepper";
+import { calendarNightRates, cellPrice, nightTaken } from "@/components/calendar/calendarPrices";
+import { useShowPrices } from "@/components/calendar/useShowPrices";
+import { usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import { useTranslation } from "@/lib/i18n";
 import {
   groupRoomsByType,
@@ -120,6 +123,9 @@ export default function CalendarPage() {
   // VAY-2348: a booking waiting for its bank transfer opens its deadline card, not the room tools.
   const [awaitingBooking, setAwaitingBooking] = useState<CalendarBooking | null>(null);
   const hotelTimeZone = useHotelTimeZone();
+  // VAY-2411: free nights show their cheapest rate from the published prices, unless this user turned it off.
+  const [showPrices, setShowPrices] = useShowPrices();
+  const { prices } = usePropertyPrices();
   const openBooking = useCallback(
     (booking: CalendarBooking) =>
       booking.status === "awaiting_payment"
@@ -197,6 +203,7 @@ export default function CalendarPage() {
     () => Array.from({ length: VIEW_DAYS }, (_, i) => addDays(startDate, i)),
     [startDate],
   );
+  const dayKeys = useMemo(() => dates.map((d) => format(d, "yyyy-MM-dd")), [dates]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(MOBILE_CALENDAR_QUERY);
@@ -704,6 +711,14 @@ export default function CalendarPage() {
 
   const allBookings = useMemo(() => data?.bookings || [], [data]);
 
+  const publication = prices?.publication ?? null;
+  const nightRates = useMemo(
+    () => (publication && data ? calendarNightRates(publication, data.roomTypes, dayKeys) : {}),
+    [publication, data, dayKeys],
+  );
+  const pricesShown = showPrices && publication !== null;
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+
   return (
     <div className="h-full flex flex-col">
       <p className="sr-only" aria-live="polite">
@@ -939,6 +954,24 @@ export default function CalendarPage() {
                           </button>
                         </>
                       )}
+                      <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-y border-gray-200">
+                        {t("calendar.display")}
+                      </div>
+                      <div className="px-3 py-2 text-sm text-gray-700 flex items-center justify-between gap-3">
+                        <span id="calendar-show-prices">{t("calendar.showPrices")}</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={showPrices}
+                          aria-labelledby="calendar-show-prices"
+                          onClick={() => setShowPrices(!showPrices)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 ${showPrices ? "bg-primary-600" : "bg-gray-300"}`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${showPrices ? "translate-x-4" : "translate-x-0.5"}`}
+                          />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1048,6 +1081,19 @@ export default function CalendarPage() {
                 {(reorderMode && localRooms ? localRooms : data.rooms).map(
                   (room, roomIdx, roomsArr) => {
                     const roomBookings = bookingsByRoom[room.id] || [];
+                    // Per-room blocks render on their own row; legacy count-based blocks still fill the first N
+                    // rooms of the type.
+                    const roomBlocks = [
+                      ...(blocksByRoom[room.id] || []),
+                      ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
+                        (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
+                      ),
+                    ];
+                    const stays = [
+                      ...roomBookings.map((b) => ({ start: b.checkIn, end: b.checkOut })),
+                      ...roomBlocks.map((bl) => ({ start: bl.startDate, end: bl.endDate })),
+                    ];
+                    const roomNightRates = pricesShown ? nightRates[room.roomTypeId] : undefined;
                     const rt = roomTypeMap[room.roomTypeId];
                     const isFirst = roomsArr[roomIdx - 1]?.roomTypeId !== room.roomTypeId;
                     const isLast = roomsArr[roomIdx + 1]?.roomTypeId !== room.roomTypeId;
@@ -1155,14 +1201,14 @@ export default function CalendarPage() {
                           </td>
                           <td
                             colSpan={VIEW_DAYS}
-                            className={`relative h-12 p-0 select-none touch-none ${
+                            className={`relative ${pricesShown ? "h-14" : "h-12"} p-0 select-none touch-none ${
                               reorderMode ? "pointer-events-none opacity-60" : "cursor-cell"
                             }`}
                             onPointerDown={(e) => handleCellPointerDown(e, room.id)}
                           >
-                            {/* Day grid lines */}
+                            {/* Day grid lines, with the cheapest rate of each free night from today on */}
                             <div className="absolute inset-0 flex">
-                              {dates.map((d) => {
+                              {dates.map((d, i) => {
                                 const isToday =
                                   format(d, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
                                 const dow = d.getDay();
@@ -1172,12 +1218,23 @@ export default function CalendarPage() {
                                   : isWeekend
                                     ? { backgroundColor: "#fafafa" }
                                     : undefined;
+                                const day = dayKeys[i]!;
+                                const lowest =
+                                  day >= todayKey && !nightTaken(stays, day)
+                                    ? roomNightRates?.[day]?.[0]
+                                    : undefined;
                                 return (
                                   <div
                                     key={d.toISOString()}
                                     style={cellStyle}
-                                    className="flex-1 border-r border-gray-100"
-                                  />
+                                    className="flex-1 border-r border-gray-100 flex items-end justify-center pb-1 min-w-0"
+                                  >
+                                    {lowest && publication && (
+                                      <span className="max-w-full truncate text-[10px] leading-none text-gray-500 tabular-nums">
+                                        {cellPrice(lowest.totalMinor, publication.currency, locale)}
+                                      </span>
+                                    )}
+                                  </div>
                                 );
                               })}
                             </div>
@@ -1208,14 +1265,8 @@ export default function CalendarPage() {
                                 />
                               );
                             })()}
-                            {/* Block bars — per-room blocks render on their own row.
-                          Legacy count-based blocks still fill the first N rooms of the type. */}
-                            {[
-                              ...(blocksByRoom[room.id] || []),
-                              ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
-                                (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
-                              ),
-                            ].map((bl) => {
+                            {/* Block bars */}
+                            {roomBlocks.map((bl) => {
                               const style = getBarStyle(bl.startDate, bl.endDate);
                               if (!style) return null;
                               return (
