@@ -15,11 +15,17 @@ import { createPortal } from "react-dom";
 type PropertyGalleryProps = {
   hotelName: string;
   images: string[];
+  /** Phone nav: the grid icon alone, like the Contact button there, with a 44px tap area. */
+  compact?: boolean;
 };
 
 const MAX_PROPERTY_GALLERY_PHOTOS = 10;
 
-export default function PropertyGallery({ hotelName, images }: PropertyGalleryProps) {
+export default function PropertyGallery({
+  hotelName,
+  images,
+  compact = false,
+}: PropertyGalleryProps) {
   const t = useTranslations("home.gallery");
   const galleryImages = Array.from(new Set(images.filter(Boolean))).slice(
     0,
@@ -88,11 +94,17 @@ export default function PropertyGallery({ hotelName, images }: PropertyGalleryPr
           setFailedImages(new Set());
           setOpen(true);
         }}
-        className="absolute bottom-14 right-4 z-20 inline-flex min-h-11 items-center gap-2 rounded-full border border-white/25 bg-gray-950/70 px-4 py-2.5 text-sm font-semibold text-white shadow-lg backdrop-blur-md transition hover:bg-gray-950/85 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-transparent md:right-8"
+        className={`flex items-center rounded-full bg-white text-[#1F2427] transition-colors hover:bg-[#F0F1F1] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 ${
+          compact
+            ? // The tap area reaches 8px past the circle; mr-0.5 keeps it clear of Contact.
+              "relative mr-0.5 h-7 w-7 justify-center before:absolute before:-inset-2 before:content-['']"
+            : "h-10 gap-2 px-[18px] text-[15px] font-semibold focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+        }`}
+        aria-label={t("open")}
         aria-haspopup="dialog"
       >
-        <Squares2X2Icon className="h-5 w-5" />
-        {t("viewPhotos", { count: galleryImages.length })}
+        <Squares2X2Icon className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} aria-hidden="true" />
+        {!compact && t("label")}
       </button>
 
       {open &&

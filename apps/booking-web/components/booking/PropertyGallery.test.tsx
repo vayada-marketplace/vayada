@@ -46,27 +46,43 @@ describe("PropertyGallery", () => {
   });
 
   it("deduplicates and caps the guest-facing gallery at ten photos", () => {
-    const images = Array.from({ length: 12 }, (_, index) =>
-      index === 11
-        ? "https://cdn.vayada.com/gallery-1.webp"
-        : `https://cdn.vayada.com/gallery-${index + 1}.webp`,
+    renderInteractiveGallery(
+      Array.from({ length: 12 }, (_, index) =>
+        index === 11
+          ? "https://cdn.vayada.com/gallery-1.webp"
+          : `https://cdn.vayada.com/gallery-${index + 1}.webp`,
+      ),
     );
+    act(() => button("Open photo gallery").click());
 
-    const markup = renderGalleryToMarkup("en", images);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("1 / 10");
+  });
 
-    expect(markup).toContain("View photos (10)");
+  it("labels the nav pill Gallery and names the button for screen readers", () => {
+    const markup = renderGalleryToMarkup("en", ["https://cdn.vayada.com/gallery.webp"]);
+
+    expect(markup).toContain('aria-label="Open photo gallery"');
     expect(markup).toContain('aria-haspopup="dialog"');
+    expect(markup).toMatch(/Gallery<\/button>$/);
+  });
+
+  it("shows only the icon in the compact phone nav", () => {
+    const markup = renderGalleryToMarkup("en", ["https://cdn.vayada.com/gallery.webp"], true);
+
+    expect(markup).toContain('aria-label="Open photo gallery"');
+    expect(markup).not.toContain("Gallery</button>");
   });
 
   it("renders guest controls in the requested locale", () => {
-    expect(renderGalleryToMarkup("de", ["https://cdn.vayada.com/gallery.webp"])).toContain(
-      "Fotos ansehen (1)",
-    );
+    const markup = renderGalleryToMarkup("de", ["https://cdn.vayada.com/gallery.webp"]);
+
+    expect(markup).toContain('aria-label="Galerie öffnen"');
+    expect(markup).toMatch(/Galerie<\/button>$/);
   });
 
   it("keeps keyboard focus inside the open modal", () => {
     renderInteractiveGallery();
-    const trigger = button("View photos (2)");
+    const trigger = button("Open photo gallery");
     act(() => trigger.click());
 
     const close = button("Close our photo gallery");
@@ -96,7 +112,7 @@ describe("PropertyGallery", () => {
 
   it("shows a placeholder card instead of alt text when a photo fails to load", () => {
     renderInteractiveGallery();
-    act(() => button("View photos (2)").click());
+    act(() => button("Open photo gallery").click());
 
     const photo = document.querySelector("img");
     expect(photo?.getAttribute("src")).toBe("https://cdn.vayada.com/gallery-1.webp");
@@ -115,36 +131,32 @@ describe("PropertyGallery", () => {
     );
 
     act(() => button("Close our photo gallery").click());
-    act(() => button("View photos (2)").click());
+    act(() => button("Open photo gallery").click());
     expect(document.querySelector("img")?.getAttribute("src")).toBe(
       "https://cdn.vayada.com/gallery-1.webp",
     );
   });
 
-  function renderInteractiveGallery() {
+  function renderInteractiveGallery(
+    images = ["https://cdn.vayada.com/gallery-1.webp", "https://cdn.vayada.com/gallery-2.webp"],
+  ) {
     const container = document.querySelector("#root");
     if (!(container instanceof HTMLElement)) throw new Error("Missing test root");
     root = createRoot(container);
     act(() => {
       root?.render(
         <NextIntlClientProvider locale="en" messages={enMessages}>
-          <PropertyGallery
-            hotelName="Hotel Alpenrose"
-            images={[
-              "https://cdn.vayada.com/gallery-1.webp",
-              "https://cdn.vayada.com/gallery-2.webp",
-            ]}
-          />
+          <PropertyGallery hotelName="Hotel Alpenrose" images={images} />
         </NextIntlClientProvider>,
       );
     });
   }
 });
 
-function renderGalleryToMarkup(locale: "de" | "en", images: string[]) {
+function renderGalleryToMarkup(locale: "de" | "en", images: string[], compact = false) {
   return renderToStaticMarkup(
     <NextIntlClientProvider locale={locale} messages={locale === "de" ? deMessages : enMessages}>
-      <PropertyGallery hotelName="Hotel Alpenrose" images={images} />
+      <PropertyGallery hotelName="Hotel Alpenrose" images={images} compact={compact} />
     </NextIntlClientProvider>,
   );
 }

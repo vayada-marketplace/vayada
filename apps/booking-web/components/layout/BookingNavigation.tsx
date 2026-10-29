@@ -5,6 +5,7 @@ import { useHotel } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useTranslations, useLocale } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
+import PropertyGallery from "@/components/booking/PropertyGallery";
 
 const LANGUAGES = [
   { code: "en", label: "English" },
@@ -221,8 +222,17 @@ function Dropdown({
 }
 
 // --- Main Navigation ---
-/** Sits over a hero photo by default; `solid` puts it on its own white bar (the booking page). */
-export default function BookingNavigation({ solid = false }: { solid?: boolean }) {
+/**
+ * Sits over a hero photo by default; `solid` puts it on its own white bar (the booking page).
+ * `showGallery` puts the hotel's photo gallery first in the actions (the hotel page, VAY-2414).
+ */
+export default function BookingNavigation({
+  solid = false,
+  showGallery = false,
+}: {
+  solid?: boolean;
+  showGallery?: boolean;
+}) {
   const { hotel } = useHotel();
   const { selectedCurrency, setSelectedCurrency, availableCurrencies } = useCurrency();
   const t = useTranslations("nav");
@@ -322,6 +332,8 @@ export default function BookingNavigation({ solid = false }: { solid?: boolean }
 
             {/* Right - Actions (always visible on mobile, full nav on desktop) */}
             <div className="hidden md:flex items-center gap-2">
+              {showGallery && <PropertyGallery hotelName={hotel.name} images={hotel.images} />}
+
               {/* Contact */}
               {header.showContactButton && (
                 <div className="relative">
@@ -408,6 +420,9 @@ export default function BookingNavigation({ solid = false }: { solid?: boolean }
 
             {/* Mobile inline actions */}
             <div className="md:hidden flex shrink-0 items-center gap-1.5 ml-auto">
+              {showGallery && (
+                <PropertyGallery hotelName={hotel.name} images={hotel.images} compact />
+              )}
               {header.showContactButton && (
                 <div className="relative">
                   <button
