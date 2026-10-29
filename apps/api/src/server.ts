@@ -3551,7 +3551,10 @@ const guestProfileLinkWorker = startGuestProfileLinkWorker({
     connectionString: targetDatabaseUrl,
     max: 1,
     onRowError: (bookingGuestId, err) =>
-      app.log.error({ err, bookingGuestId }, "Booking guest could not be linked to a guest profile"),
+      app.log.error(
+        { err, bookingGuestId },
+        "Booking guest could not be linked to a guest profile",
+      ),
   }),
   enabled: config.backgroundWorkersEnabled,
   logger: app.log,
