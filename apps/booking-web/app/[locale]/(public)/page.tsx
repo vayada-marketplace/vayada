@@ -10,7 +10,6 @@ import BookingFooter from "@/components/layout/BookingFooter";
 import DatePickerCalendar from "@/components/booking/DatePickerCalendar";
 import GuestSelector from "@/components/booking/GuestSelector";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
-import PropertyGallery from "@/components/booking/PropertyGallery";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
 import { trackEvent } from "@/services/api/tracking";
@@ -755,9 +754,7 @@ function HomePageContent() {
         <HotelHeroImage src={heroImage} alt={hotel.name} quality={90} sizes="100vw" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
 
-        <BookingNavigation />
-
-        <PropertyGallery hotelName={hotel.name} images={hotel.images} />
+        <BookingNavigation showGallery />
 
         {/* Hero Content */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">

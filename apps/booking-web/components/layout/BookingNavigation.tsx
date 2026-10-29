@@ -5,6 +5,7 @@ import { useHotel } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useTranslations, useLocale } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
+import PropertyGallery from "@/components/booking/PropertyGallery";
 
 const LANGUAGES = [
   { code: "en", label: "English" },
@@ -221,8 +222,17 @@ function Dropdown({
 }
 
 // --- Main Navigation ---
-/** Sits over a hero photo by default; `solid` puts it on its own white bar (the booking page). */
-export default function BookingNavigation({ solid = false }: { solid?: boolean }) {
+/**
+ * Sits over a hero photo by default; `solid` puts it on its own white bar (the booking page).
+ * `showGallery` puts the hotel's photo gallery first in the actions (the hotel page, VAY-2414).
+ */
+export default function BookingNavigation({
+  solid = false,
+  showGallery = false,
+}: {
+  solid?: boolean;
+  showGallery?: boolean;
+}) {
   const { hotel } = useHotel();
   const { selectedCurrency, setSelectedCurrency, availableCurrencies } = useCurrency();
   const t = useTranslations("nav");
@@ -288,11 +298,12 @@ export default function BookingNavigation({ solid = false }: { solid?: boolean }
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="relative flex items-center justify-between h-16">
             {/* The existing mobile text fallback stays hidden; an uploaded logo gets
-                a constrained slot that cannot shrink the action controls. */}
+                a constrained slot that cannot shrink the action controls. On tablets a
+                long name truncates rather than pushing the actions off-screen. */}
             <Link
               href="/"
               aria-label={hotel.name}
-              className={`${logoUrl || solid ? "flex" : "hidden"} min-w-0 flex-1 items-center overflow-hidden pr-2 md:flex md:flex-none`}
+              className={`${logoUrl || solid ? "flex" : "hidden"} min-w-0 flex-1 items-center overflow-hidden pr-2 md:flex md:flex-initial`}
             >
               {/* Uploaded logos are made for the dark hero; the solid white bar shows the name. */}
               {logoUrl && !solid ? (
@@ -312,7 +323,7 @@ export default function BookingNavigation({ solid = false }: { solid?: boolean }
                   className={
                     solid
                       ? "truncate font-heading text-xl font-semibold text-primary-700"
-                      : "text-lg font-semibold text-white"
+                      : "truncate text-lg font-semibold text-white"
                   }
                 >
                   {hotel.name}
@@ -322,6 +333,8 @@ export default function BookingNavigation({ solid = false }: { solid?: boolean }
 
             {/* Right - Actions (always visible on mobile, full nav on desktop) */}
             <div className="hidden md:flex items-center gap-2">
+              {showGallery && <PropertyGallery hotelName={hotel.name} images={hotel.images} />}
+
               {/* Contact */}
               {header.showContactButton && (
                 <div className="relative">
@@ -408,6 +421,9 @@ export default function BookingNavigation({ solid = false }: { solid?: boolean }
 
             {/* Mobile inline actions */}
             <div className="md:hidden flex shrink-0 items-center gap-1.5 ml-auto">
+              {showGallery && (
+                <PropertyGallery hotelName={hotel.name} images={hotel.images} compact />
+              )}
               {header.showContactButton && (
                 <div className="relative">
                   <button

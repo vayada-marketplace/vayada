@@ -118,7 +118,8 @@
     "selectingRate": "Préparation du paiement...",
     "soldOut": "Complet",
     "gallery": {
-      "viewPhotos": "Voir les photos ({count})",
+      "label": "Galerie",
+      "open": "Ouvrir la galerie photo",
       "dialogLabel": "Notre galerie de {hotelName}",
       "close": "Fermer notre galerie",
       "photoAlt": "Notre photo {index} de {hotelName}",
