@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import type { CalendarRoomType } from "@/services/calendar";
-import { calendarNightRates, cellPrice, nightTaken } from "./calendarPrices";
+import { calendarNightRates, calendarRateNames, cellPrice, nightTaken } from "./calendarPrices";
 
 const rules = {
   minArrivalNights: 1,
@@ -11,8 +11,9 @@ const rules = {
   stopSell: false,
 };
 const flat = (amountMinor: string) => ({ mode: "flat" as const, amountMinor });
-// Standard €90, "High" season €108 from 6 November, an own price of €70 on 3 November, closed on 4 November, and a
-// non-refundable rate 10% below; "hidden" is published but not one of the calendar's rates.
+// Standard €90, "High" season €108 from 6 November with a 2-night minimum, an own price of €70 on 3 November, no
+// arrivals on 31 October, closed on 4 November, and a non-refundable rate 10% below; "hidden" is published but not one
+// of the calendar's rates.
 const room = {
   version: "pricing.v2",
   propertyId: "property",
@@ -44,8 +45,11 @@ const room = {
       restrictions: {
         kind: "own",
         rules,
-        seasons: [],
-        dates: [{ date: "2026-11-04", rules: { ...rules, stopSell: true } }],
+        seasons: [{ from: "11-06", through: "11-08", rules: { ...rules, minArrivalNights: 2 } }],
+        dates: [
+          { date: "2026-10-31", rules: { ...rules, closedToArrival: true } },
+          { date: "2026-11-04", rules: { ...rules, stopSell: true } },
+        ],
       },
     },
     {
@@ -72,7 +76,28 @@ const room = {
     },
   ],
 } as unknown as PricingConfiguration;
-const plan = (id: string) => ({ id, name: id, rateType: "flexible" as const, baseRate: 0 });
+const plan = (id: string) => ({
+  id,
+  name: id,
+  rateType: "flexible" as const,
+  baseRate: 0,
+  mealPlan: "room_only",
+  cancellation:
+    id === "nonref"
+      ? { kind: "non_refundable" }
+      : {
+          kind: "flexible",
+          terms: { flexibleCancellationType: "free", freeCancellationDeadlineDays: 7 },
+        },
+});
+const rate = (offerId: string, totalMinor: string, rules: Record<string, unknown> = {}) => ({
+  offerId,
+  totalMinor,
+  season: null,
+  minNights: 1,
+  noArrival: false,
+  ...rules,
+});
 const roomType = (id: string, rates: string[]): CalendarRoomType => ({
   id,
   name: "Villa",
@@ -94,20 +119,13 @@ describe("calendarNightRates (VAY-2411)", () => {
       [roomType("ROOM-TYPE", ["flex", "nonref"])],
       dates,
     );
+    const closed = { noArrival: true };
+    const high = { season: "High", minNights: 2 };
     expect(prices["ROOM-TYPE"]).toEqual({
-      "2026-10-31": [
-        { offerId: "nonref", totalMinor: "8100" },
-        { offerId: "flex", totalMinor: "9000" },
-      ],
-      "2026-11-03": [
-        { offerId: "nonref", totalMinor: "6300" },
-        { offerId: "flex", totalMinor: "7000" },
-      ],
+      "2026-10-31": [rate("nonref", "8100", closed), rate("flex", "9000", closed)],
+      "2026-11-03": [rate("nonref", "6300"), rate("flex", "7000")],
       // 4 November is closed to sale, so no rate is open.
-      "2026-11-06": [
-        { offerId: "nonref", totalMinor: "9720" },
-        { offerId: "flex", totalMinor: "10800" },
-      ],
+      "2026-11-06": [rate("nonref", "9720", high), rate("flex", "10800", high)],
     });
   });
 
@@ -119,6 +137,14 @@ describe("calendarNightRates (VAY-2411)", () => {
         dates,
       ),
     ).toEqual({ "room-type": {} });
+  });
+});
+
+it("names the rates as the Prices tab does, from their meal plan and cancellation terms", () => {
+  const t = (key: string) => key;
+  expect(calendarRateNames(room, roomType("room-type", ["flex", "nonref"]), t)).toMatchObject({
+    flex: "pricing.steps.name.flexible.room_only",
+    nonref: "pricing.steps.name.non_refundable.room_only",
   });
 });
 

@@ -1,11 +1,37 @@
-import { pricingCurrencyScale } from "@vayada/domain-pms/replacement-pricing";
+import type { ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
+import {
+  pricingCurrencyScale,
+  type PricingConfiguration,
+} from "@vayada/domain-pms/replacement-pricing";
 import { calendarNights } from "@/components/pricing/priceCalendarModel";
-import { money, sampleAdults } from "@/components/pricing/stepPricing";
+import type { Translate } from "@/components/pricing/pricingAmounts";
+import { money, optionNames, sampleAdults } from "@/components/pricing/stepPricing";
 import type { PricingSnapshot } from "@/services/api/replacementPricingClient";
 import type { CalendarRoomType } from "@/services/calendar";
 
-/** One rate's price for a night, in minor units of the publication's currency. */
-export type NightRate = { offerId: string; totalMinor: string };
+/** One rate's price for a night, in minor units of the publication's currency, with the season that prices it and the
+ * night's stay rules for arrivals. */
+export type NightRate = {
+  offerId: string;
+  totalMinor: string;
+  season: string | null;
+  minNights: number;
+  noArrival: boolean;
+};
+
+/** Cheapest first; equal prices keep their order. */
+export function byPrice(a: { totalMinor: string }, b: { totalMinor: string }) {
+  const x = BigInt(a.totalMinor),
+    y = BigInt(b.totalMinor);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/** The published prices of one room type. */
+export const pricingRoom = (
+  publication: Pick<PricingSnapshot, "rooms">,
+  roomTypeId: string,
+): PricingConfiguration | undefined =>
+  publication.rooms.find((room) => room.roomTypeId.toLowerCase() === roomTypeId.toLowerCase());
 
 /** Each room type's open rates per night ("YYYY-MM-DD"), cheapest first (VAY-2411). The prices are the engine's, as on
  * the Prices tab (standard price, seasons, months, weekdays and own date prices, for its sample guests), and only the
@@ -19,9 +45,7 @@ export function calendarNightRates(
   const shown = new Set(dates);
   const byRoomType: Record<string, Record<string, NightRate[]>> = {};
   for (const roomType of roomTypes) {
-    const room = publication.rooms.find(
-      (value) => value.roomTypeId.toLowerCase() === roomType.id.toLowerCase(),
-    );
+    const room = pricingRoom(publication, roomType.id);
     if (!room) continue;
     const rateIds = new Set(roomType.ratePlans.map((plan) => plan.id));
     const nights: Record<string, NightRate[]> = {};
@@ -33,16 +57,42 @@ export function calendarNightRates(
             checkOut: "",
           }))
             if (shown.has(night.date) && night.kind === "priced" && night.totalMinor !== null)
-              (nights[night.date] ??= []).push({ offerId: offer.id, totalMinor: night.totalMinor });
+              (nights[night.date] ??= []).push({
+                offerId: offer.id,
+                totalMinor: night.totalMinor,
+                season: night.season?.name ?? null,
+                minNights: night.minNights,
+                noArrival: night.noArrival,
+              });
     } catch {
       // A room the engine can't read shows no prices; the rest of the calendar still works.
       continue;
     }
-    for (const rates of Object.values(nights))
-      rates.sort((a, b) => (BigInt(a.totalMinor) < BigInt(b.totalMinor) ? -1 : 1));
+    for (const rates of Object.values(nights)) rates.sort(byPrice);
     byRoomType[roomType.id] = nights;
   }
   return byRoomType;
+}
+
+/** The calendar's rates by name, as the Prices tab words them ("Free cancellation", "Non-refundable"): from each
+ * rate's meal plan and cancellation terms. A rate without readable terms is left out. */
+export function calendarRateNames(
+  room: PricingConfiguration,
+  roomType: CalendarRoomType,
+  t: Translate,
+): Record<string, string> {
+  const terms = Object.fromEntries(
+    roomType.ratePlans.flatMap((plan) => {
+      const cancellation = plan.cancellation as ReplacementOfferTerms["cancellation"] | null;
+      const known =
+        cancellation?.kind === "non_refundable" ||
+        (cancellation?.kind === "flexible" && !!cancellation.terms);
+      return known ? [[plan.id, { cancellation: cancellation! }]] : [];
+    }),
+  );
+  return Object.fromEntries(
+    Object.entries(optionNames(room, terms, t)).filter(([offerId]) => offerId in terms),
+  );
 }
 
 /** A day cell's price: "$81", or a compact figure ("25K", "1.3M") when the full price wouldn't fit the column. */

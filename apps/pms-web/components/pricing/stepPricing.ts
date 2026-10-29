@@ -61,7 +61,7 @@ export function headlineMinor(price: RoomPrice): string {
  * failed) the meal plan and position name it. Later options with the same name are numbered. */
 export function optionNames(
   room: Room,
-  terms: Readonly<Record<string, OptionTerms | undefined>>,
+  terms: Readonly<Record<string, Pick<OptionTerms, "cancellation"> | undefined>>,
   t: Translate,
 ) {
   const keys = pricingOfferNameKeys(

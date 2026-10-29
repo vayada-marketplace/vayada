@@ -172,6 +172,16 @@ async function mockPricedVilla(page: Page) {
   );
 }
 
+/** The bottom of night `index` (0 is 28 October) in the villa's row, below any booking bar. */
+async function night(page: Page, index: number) {
+  const box = await page
+    .locator("tr", { hasText: "#Paddy Villa" })
+    .locator("td[colspan]")
+    .boundingBox();
+  if (!box) throw new Error("The villa's row is not on screen");
+  return { x: box.x + ((index + 0.5) * box.width) / 21, y: box.y + box.height - 8 };
+}
+
 test.describe("PMS calendar prices", () => {
   test.beforeEach(async ({ page }) => {
     await page.clock.setFixedTime(new Date("2026-10-28T12:00:00.000Z"));
@@ -208,6 +218,73 @@ test.describe("PMS calendar prices", () => {
     await expect(showPrices).toHaveAttribute("aria-checked", "false");
     await showPrices.click();
     await expect(price("€81")).toHaveCount(14);
+    await assertHealthy();
+  });
+
+  test("opens a night's popover on a click and a stay's popover only on a drag to the right", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.goto("/calendar");
+    await expect(page.locator("tr", { hasText: "#Paddy Villa" }).getByText("€63")).toBeVisible();
+
+    // One night: its rates cheapest first, the season, the stay rules and the room's next booking.
+    let point = await night(page, 2);
+    await page.mouse.click(point.x, point.y);
+    let popover = page.getByRole("dialog", { name: "#Paddy Villa · Fri, Oct 30" });
+    await expect(popover).toBeVisible();
+    await expect(popover.getByText("Available")).toBeVisible();
+    await expect(popover.getByText("Season: Standard")).toBeVisible();
+    await expect(popover.getByRole("listitem").nth(0)).toHaveText(/Non-refundable\s*Lowest\s*€63/);
+    await expect(popover.getByRole("listitem").nth(1)).toHaveText(/Free cancellation\s*€70/);
+    await expect(popover.getByText("1 night", { exact: true })).toBeVisible();
+    await expect(popover.getByText("Free until Nov 3 · 4 nights open")).toBeVisible();
+    await expect(popover.getByText("Next arrival Nov 3: Ada Lovelace · Direct")).toBeVisible();
+    await expect(popover.getByText(/hard to sell/)).toHaveCount(0);
+    await expect(popover.getByRole("link", { name: /Edit prices & rules/ })).toHaveAttribute(
+      "href",
+      `/rooms/${VILLA}?tab=prices&date=2026-10-30`,
+    );
+    await page.screenshot({ path: testInfo.outputPath("calendar-night-popover.png") });
+
+    // A second click opens that night alone, not a stay; 1 November leaves one night before Ada.
+    point = await night(page, 4);
+    await page.mouse.click(point.x, point.y);
+    popover = page.getByRole("dialog", { name: "#Paddy Villa · Sun, Nov 1" });
+    await expect(popover).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await expect(popover.getByText(/Leaves 1 night open before the next booking/)).toBeVisible();
+
+    // A drag to the right stops before Ada's stay and totals each rate.
+    const from = await night(page, 2);
+    const to = await night(page, 11);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    await page.mouse.up();
+    popover = page.getByRole("dialog", { name: "#Paddy Villa · Oct 30 → Nov 3 · 4 nights" });
+    await expect(popover).toBeVisible();
+    const total = popover.locator("section", { hasText: "Total" }).getByRole("listitem");
+    await expect(total.nth(0)).toHaveText(/Non-refundable\s*Lowest\s*€306/);
+    await expect(total.nth(1)).toHaveText(/Free cancellation\s*€340/);
+    await expect(popover.getByRole("button", { name: "New Booking · 4 nights" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("calendar-stay-popover.png") });
+
+    // No dragging to the left: the night where the drag started opens alone.
+    const right = await night(page, 5);
+    const left = await night(page, 1);
+    await page.mouse.move(right.x, right.y);
+    await page.mouse.down();
+    await page.mouse.move(left.x, left.y, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.getByRole("dialog", { name: "#Paddy Villa · Mon, Nov 2" })).toBeVisible();
+
+    // Escape closes it, and a booked night opens nothing.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    point = await night(page, 7);
+    await page.mouse.click(point.x, point.y);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await assertHealthy();
   });
 });
