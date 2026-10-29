@@ -89,6 +89,8 @@ function createProjectionFailurePool() {
         async query<T extends QueryResultRow = QueryResultRow>(text: string) {
           queries.push(text);
           const query = text.trimStart();
+          // Guest profiles (VAY-2420): none in these fakes.
+          if (query.includes("guest_profiles")) return { rows: [] as T[], rowCount: 0 };
           if (query === "BEGIN" || query === "ROLLBACK") {
             return { rows: [] as T[], rowCount: 0 };
           }

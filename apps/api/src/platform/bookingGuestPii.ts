@@ -392,12 +392,12 @@ export function createTargetBookingGuestPiiPort(
           await client.query("ROLLBACK");
           return reservationNotFound(command.guestBookingId);
         }
-        const result = await client.query<{ guestId: string }>(
+        const result = await client.query<{ guestId: string; guestProfileId: string | null }>(
           `DELETE FROM booking.booking_guests
            WHERE id = $1::uuid
              AND guest_booking_id = $2::uuid
              AND guest_role = 'additional_guest'
-           RETURNING id::text AS "guestId"`,
+           RETURNING id::text AS "guestId", guest_profile_id::text AS "guestProfileId"`,
           [command.guestId, command.guestBookingId],
         );
         const guestId = result.rows[0]?.guestId;
@@ -405,6 +405,15 @@ export function createTargetBookingGuestPiiPort(
           await client.query("ROLLBACK");
           return additionalGuestNotFound(command.guestId);
         }
+        // VAY-2420: a guest profile with no stay left goes too, so the removed details don't linger.
+        await client.query(
+          `DELETE FROM booking.guest_profiles profile
+           WHERE profile.id = $1::uuid
+             AND NOT EXISTS (
+               SELECT 1 FROM booking.booking_guests stay WHERE stay.guest_profile_id = profile.id
+             )`,
+          [result.rows[0]?.guestProfileId ?? null],
+        );
         await insertGuestPiiAuditEvent(client, command, {
           action: "booking.guest_pii.additional_guest.deleted",
           guestId,
