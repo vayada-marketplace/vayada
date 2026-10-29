@@ -308,6 +308,8 @@ type MockBookingApisOptions = {
   primaryColor?: string;
   /** VAY-2247: a hotel that went live before adding any photos. */
   noPhotos?: boolean;
+  /** VAY-2414: a long hotel name, to check the nav on narrow screens. */
+  hotelName?: string;
   /** VAY-2307: the public map pin, shown only when the hotel shows its location. */
   mapPin?: { latitude: number; longitude: number };
 };
@@ -343,6 +345,7 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
           }
         : {}),
       ...(options.noPhotos ? { images: [] } : {}),
+      ...(options.hotelName ? { name: options.hotelName } : {}),
       ...(options.mapPin
         ? { location: { ...publicHotelProfile.hotel.location, ...options.mapPin } }
         : {}),

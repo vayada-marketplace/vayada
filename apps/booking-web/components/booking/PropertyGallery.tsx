@@ -94,11 +94,12 @@ export default function PropertyGallery({
           setFailedImages(new Set());
           setOpen(true);
         }}
-        className={`flex items-center rounded-full bg-white text-[#1F2427] transition-colors hover:bg-[#F0F1F1] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 ${
+        // A white ring would merge into the white pill; the offset outline leaves a visible gap.
+        className={`flex items-center rounded-full bg-white text-[#1F2427] transition-colors hover:bg-[#F0F1F1] focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
           compact
             ? // The tap area reaches 8px past the circle; mr-0.5 keeps it clear of Contact.
               "relative mr-0.5 h-7 w-7 justify-center before:absolute before:-inset-2 before:content-['']"
-            : "h-10 gap-2 px-[18px] text-[15px] font-semibold focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+            : "h-10 gap-2 px-[18px] text-[15px] font-semibold"
         }`}
         aria-label={t("open")}
         aria-haspopup="dialog"

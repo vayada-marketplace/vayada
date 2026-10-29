@@ -33,14 +33,14 @@ test.describe("booking-web gallery in the top nav", () => {
       if (width > 600) {
         await expect(gallery).toHaveText("Gallery");
         expect(galleryBox.height).toBe(40);
+        await gallery.hover();
+        await expect(gallery).toHaveCSS("background-color", "rgb(240, 241, 241)");
       } else {
         // Icon only, like Contact; the 28px circle answers taps up to 22px from its centre.
         await expect(gallery).toHaveText("");
         expect(await answersTapsWithin(gallery, 21)).toBe(true);
       }
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
+      expect(await navRightEdge(nav)).toBeLessThanOrEqual(width);
       await page.screenshot({ path: testInfo.outputPath(`gallery-nav-${width}.png`) });
 
       await gallery.click();
@@ -50,6 +50,10 @@ test.describe("booking-web gallery in the top nav", () => {
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
       await expect(gallery).toBeFocused();
+      // Back from the keyboard, the white pill shows a white outline with a gap around it.
+      await expect(gallery).toHaveCSS("outline-style", "solid");
+      await expect(gallery).toHaveCSS("outline-color", "rgb(255, 255, 255)");
+      await expect(gallery).toHaveCSS("outline-offset", "2px");
 
       await page.keyboard.press("Enter");
       await expect(dialog).toBeVisible();
@@ -61,14 +65,46 @@ test.describe("booking-web gallery in the top nav", () => {
     });
   }
 
-  test("shows no gallery button for a hotel without photos", async ({ page }) => {
-    await mockBookingApis(page, { noPhotos: true });
+  test("keeps every nav control on screen on a tablet with a long hotel name", async ({
+    page,
+  }, testInfo) => {
+    const name = "Hotel Alpenrose Boutique & Wellness Resort Zermatt";
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await mockBookingApis(page, { hotelName: name });
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Open photo gallery" })).toHaveCount(0);
+    const nav = page.locator("nav");
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    await expect(nav.getByRole("button", { name: "Open photo gallery" })).toBeVisible();
+    await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
+    // The name gives way (truncates) instead of pushing the currency button off-screen.
+    expect(await navRightEdge(nav)).toBeLessThanOrEqual(768);
+    expect((await nav.boundingBox())?.height).toBe(64);
+    await page.screenshot({ path: testInfo.outputPath("gallery-nav-768-long-name.png") });
   });
+
+  for (const width of [1440, 390]) {
+    test(`shows no gallery button for a hotel without photos at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+      await mockBookingApis(page, { noPhotos: true });
+      await page.goto("/");
+
+      await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Open photo gallery" })).toHaveCount(0);
+    });
+  }
 });
+
+/** The right edge of the nav's rightmost visible button (the page clips, so scrollWidth can't tell). */
+async function navRightEdge(nav: Locator) {
+  return nav.evaluate((element) =>
+    Math.max(
+      ...Array.from(element.querySelectorAll("button"))
+        .filter((button) => button.offsetParent !== null)
+        .map((button) => button.getBoundingClientRect().right),
+    ),
+  );
+}
 
 /** True when taps `reach` px left, right, above and below the button's centre all land on it. */
 async function answersTapsWithin(button: Locator, reach: number) {

@@ -298,11 +298,12 @@ export default function BookingNavigation({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="relative flex items-center justify-between h-16">
             {/* The existing mobile text fallback stays hidden; an uploaded logo gets
-                a constrained slot that cannot shrink the action controls. */}
+                a constrained slot that cannot shrink the action controls. On tablets a
+                long name truncates rather than pushing the actions off-screen. */}
             <Link
               href="/"
               aria-label={hotel.name}
-              className={`${logoUrl || solid ? "flex" : "hidden"} min-w-0 flex-1 items-center overflow-hidden pr-2 md:flex md:flex-none`}
+              className={`${logoUrl || solid ? "flex" : "hidden"} min-w-0 flex-1 items-center overflow-hidden pr-2 md:flex md:flex-initial`}
             >
               {/* Uploaded logos are made for the dark hero; the solid white bar shows the name. */}
               {logoUrl && !solid ? (
@@ -322,7 +323,7 @@ export default function BookingNavigation({
                   className={
                     solid
                       ? "truncate font-heading text-xl font-semibold text-primary-700"
-                      : "text-lg font-semibold text-white"
+                      : "truncate text-lg font-semibold text-white"
                   }
                 >
                   {hotel.name}

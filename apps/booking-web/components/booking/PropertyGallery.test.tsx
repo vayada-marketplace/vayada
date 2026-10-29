@@ -45,13 +45,21 @@ describe("PropertyGallery", () => {
     expect(renderGalleryToMarkup("en", [])).toBe("");
   });
 
-  it("deduplicates and caps the guest-facing gallery at ten photos", () => {
+  it("skips duplicate and empty photo links", () => {
+    renderInteractiveGallery([
+      "https://cdn.vayada.com/gallery-1.webp",
+      "",
+      "https://cdn.vayada.com/gallery-2.webp",
+      "https://cdn.vayada.com/gallery-1.webp",
+    ]);
+    act(() => button("Open photo gallery").click());
+
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("1 / 2");
+  });
+
+  it("caps the guest-facing gallery at ten photos", () => {
     renderInteractiveGallery(
-      Array.from({ length: 12 }, (_, index) =>
-        index === 11
-          ? "https://cdn.vayada.com/gallery-1.webp"
-          : `https://cdn.vayada.com/gallery-${index + 1}.webp`,
-      ),
+      Array.from({ length: 12 }, (_, index) => `https://cdn.vayada.com/gallery-${index + 1}.webp`),
     );
     act(() => button("Open photo gallery").click());
 
@@ -67,10 +75,16 @@ describe("PropertyGallery", () => {
   });
 
   it("shows only the icon in the compact phone nav", () => {
-    const markup = renderGalleryToMarkup("en", ["https://cdn.vayada.com/gallery.webp"], true);
+    const container = document.createElement("div");
+    container.innerHTML = renderGalleryToMarkup(
+      "en",
+      ["https://cdn.vayada.com/gallery.webp"],
+      true,
+    );
+    const trigger = container.querySelector("button");
 
-    expect(markup).toContain('aria-label="Open photo gallery"');
-    expect(markup).not.toContain("Gallery</button>");
+    expect(trigger?.getAttribute("aria-label")).toBe("Open photo gallery");
+    expect(trigger?.textContent).toBe("");
   });
 
   it("renders guest controls in the requested locale", () => {
