@@ -853,6 +853,7 @@ jobs:
           src/pmsNavigationModules.integration.test.ts
           src/pmsNavigationModules.test.ts
           src/pmsGuestRegistrations.integration.test.ts
+          src/jobs/bookingGuestProfileLinks.integration.test.ts
           src/pmsCheckinSettings.integration.test.ts
           src/pmsBookingModules.integration.test.ts
           src/pmsBookingModules.test.ts

@@ -358,6 +358,10 @@ import {
   startContactIntakeRetentionWorker,
 } from "./jobs/contactIntakeRetention.js";
 import {
+  createPgGuestProfileLinkStore,
+  startGuestProfileLinkWorker,
+} from "./jobs/bookingGuestProfileLinks.js";
+import {
   contactNotificationSender,
   runContactNotificationJobs,
 } from "./jobs/contactNotificationDelivery.js";
@@ -3539,6 +3543,22 @@ const contactIntakeRetentionWorker = startContactIntakeRetentionWorker({
 
 app.addHook("onClose", async () => {
   await contactIntakeRetentionWorker.close();
+});
+
+// VAY-2420: every booking guest gets one guest profile per person and account.
+const guestProfileLinkWorker = startGuestProfileLinkWorker({
+  store: createPgGuestProfileLinkStore({
+    connectionString: targetDatabaseUrl,
+    max: 1,
+    onRowError: (bookingGuestId, err) =>
+      app.log.error({ err, bookingGuestId }, "Booking guest could not be linked to a guest profile"),
+  }),
+  enabled: config.backgroundWorkersEnabled,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await guestProfileLinkWorker.close();
 });
 
 if (authSessionHandoffRepository) {
