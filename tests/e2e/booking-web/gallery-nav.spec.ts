@@ -70,7 +70,16 @@ test.describe("booking-web gallery in the top nav", () => {
   }, testInfo) => {
     const name = "Hotel Alpenrose Boutique & Wellness Resort Zermatt";
     await page.setViewportSize({ width: 768, height: 1024 });
-    await mockBookingApis(page, { hotelName: name });
+    // Every header control on, so the nav is as full as it gets.
+    await mockBookingApis(page, {
+      hotelName: name,
+      headerSettings: {
+        showContactButton: true,
+        showReferAGuestButton: false,
+        showLanguageSelector: true,
+        showCurrencySelector: true,
+      },
+    });
     await page.goto("/");
 
     const nav = page.locator("nav");
