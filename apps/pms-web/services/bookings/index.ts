@@ -613,6 +613,24 @@ export interface GuestRegistrationsResponse {
   guests: GuestRegistration[];
 }
 
+/** A reservation's guest with their guest record (VAY-2420), names as on this booking. */
+export interface ReservationGuestProfile {
+  bookingGuestId: string;
+  role: "booker" | "primary_guest" | "additional_guest";
+  firstName: string;
+  lastName: string;
+  /** Null only for a draft booking. */
+  guestProfileId: string | null;
+}
+
+/** A staff edit of a guest's record; null clears email or phone. */
+export type GuestProfileEdit = Partial<{
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+}>;
+
 export type BookingAdditionalGuestPayload = Partial<
   Omit<
     BookingAdditionalGuest,
@@ -1154,6 +1172,29 @@ export const bookingsService = {
       fields,
       pmsOperationsRequestOptions,
     ),
+
+  /** The reservation's guests, booker first (VAY-2420). */
+  listGuestProfiles: async (id: string) =>
+    (
+      await pmsOperationsClient.get<{ guests: ReservationGuestProfile[] }>(
+        await reservationEndpoint(id, "/guest-profiles"),
+        pmsOperationsRequestOptions,
+      )
+    ).guests,
+
+  /** Edits the guest's record from this booking: send only what staff changed. This booking and
+   * the guest's upcoming ones show the new values. */
+  editGuestProfile: async (
+    guest: { bookingGuestId: string; guestProfileId: string },
+    edit: GuestProfileEdit,
+  ) => {
+    const propertyId = await resolveSelectedPmsPropertyId("editing a guest");
+    await pmsOperationsClient.patch<unknown>(
+      propertyEndpoint(propertyId, `guests/${encodeURIComponent(guest.guestProfileId)}`),
+      { bookingGuestId: guest.bookingGuestId, ...edit },
+      pmsOperationsRequestOptions,
+    );
+  },
 
   listAvailableAddons: (_id: string) =>
     unsupportedPmsNextStackFeature<BookingAddon[]>("Booking add-ons"),

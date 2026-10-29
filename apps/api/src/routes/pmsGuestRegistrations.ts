@@ -4,7 +4,7 @@ import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { linkBookingGuestNow, lockGuestProfiles } from "../jobs/bookingGuestProfileLinks.js";
+import { linkReservationGuestsNow, lockGuestProfiles } from "../jobs/bookingGuestProfileLinks.js";
 import { editBookingGuestProfile, type GuestProfileFields } from "../platform/guestProfileEdits.js";
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
@@ -336,14 +336,7 @@ export function createPgPmsGuestRegistrationRepository(config: {
       try {
         await client.query("BEGIN");
         await lockGuestProfiles(client);
-        const unlinked = await client.query<{ id: string }>(
-          `SELECT guest.id::text AS id FROM booking.booking_guests guest
-           JOIN booking.guest_bookings booking ON booking.id = guest.guest_booking_id
-           WHERE booking.property_id = $1::uuid AND booking.id = $2::uuid
-             AND guest.guest_profile_id IS NULL`,
-          [propertyId, guestBookingId],
-        );
-        for (const { id } of unlinked.rows) await linkBookingGuestNow(client, id);
+        await linkReservationGuestsNow(client, propertyId, guestBookingId);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);

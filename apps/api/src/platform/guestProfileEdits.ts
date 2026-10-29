@@ -40,8 +40,8 @@ export const GUEST_PROFILE_SELECT = `profile.first_name AS "firstName",
  * A staff edit of a guest profile: the fields given are set, and null clears one (unlike the copies
  * from bookings, which never clear). Names and contact also go to the booking copies of the guest's
  * current and upcoming stays at `propertyIds`, and of the stay it was edited from, so that stay's
- * emails use them; past stays keep what was booked. Returns the fields that changed, or null when
- * the profile doesn't exist. Runs in the caller's transaction.
+ * emails use them; past stays keep what was booked. Returns the fields written to the profile or
+ * the copies, or null when the profile doesn't exist. Runs in the caller's transaction.
  */
 export async function editGuestProfile(
   client: GuestProfileQueryable,
@@ -72,7 +72,9 @@ export async function editGuestProfile(
       [input.guestProfileId, ...changed.map((field) => input.edit[field])],
     );
   }
-  const copied = COPIED_FIELDS.filter((field) => changed.includes(field));
+  // Also a value the profile already had: the booking can still show an older one (a channel's
+  // relay address) that staff just replaced.
+  const copied = COPIED_FIELDS.filter((field) => input.edit[field] !== undefined);
   if (copied.length) {
     // A staff-chosen nationality settles any imported value that needed review.
     const review =
@@ -100,7 +102,7 @@ export async function editGuestProfile(
       ],
     );
   }
-  return changed;
+  return [...new Set([...changed, ...copied])];
 }
 
 /**

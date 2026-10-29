@@ -399,7 +399,9 @@ names and IDs only.
 - `POST .../guests/:guestProfileId/separate` (`bookingGuestId`) gives one stay its own new profile;
   `POST .../merge` (`guestProfileId`) moves another profile's stays and notes into this one.
 - `GET .../reservations/:guestBookingId/guest-profiles`: each guest of a reservation with its
-  profile, stay count and notes.
+  names as on this booking, profile, stay count and notes. Guests the job hasn't reached yet are
+  linked first. Check-in and the reservation page edit the booker's name and contact through it
+  and the `PATCH` above, sending only the fields staff changed.
 
 VAY-784 implements the P2c check-out command in `apps/api`.
 `POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`

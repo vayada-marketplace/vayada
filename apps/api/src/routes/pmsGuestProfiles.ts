@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   CONTACT_VISIBLE_SQL,
   GUEST_ACCOUNT_SQL,
+  linkReservationGuestsNow,
   lockGuestProfiles,
   separateBookingGuest,
   type GuestProfileQueryable,
@@ -105,7 +106,10 @@ export type PmsGuestProfile = PmsGuestProfileSummary & {
 export type PmsReservationGuestProfile = {
   bookingGuestId: string;
   role: PmsGuestStay["role"];
-  /** Null until the guest is linked (shortly after the booking leaves draft). */
+  /** As on this booking: the reservation read only has the joined name. */
+  firstName: string;
+  lastName: string;
+  /** Null only for a draft booking: other guests are linked when this is read. */
   guestProfileId: string | null;
   reservations: number;
   notes: PmsGuestNote[];
@@ -854,33 +858,37 @@ export function createPgPmsGuestProfileRepository(config: {
     },
 
     async reservationProfiles(scope, guestBookingId) {
-      // One row with no guest when the reservation has none, none when it isn't this property's.
-      const guests = await pool.query<Omit<PmsReservationGuestProfile, "notes">>(
-        `SELECT stay.id::text AS "bookingGuestId", stay.guest_role AS role,
-                stay.guest_profile_id::text AS "guestProfileId",
-                (SELECT count(DISTINCT other.guest_booking_id)::int
-                 FROM booking.booking_guests other
-                 JOIN booking.guest_bookings other_booking ON other_booking.id = other.guest_booking_id
-                 WHERE other.guest_profile_id = stay.guest_profile_id
-                   AND other_booking.property_id = ANY($3::uuid[])) AS reservations
-         FROM booking.guest_bookings booking
-         LEFT JOIN booking.booking_guests stay ON stay.guest_booking_id = booking.id
-         WHERE booking.id = $1::uuid AND booking.property_id = $2::uuid
-         ORDER BY CASE stay.guest_role WHEN 'booker' THEN 0 WHEN 'primary_guest' THEN 1 ELSE 2 END,
-           stay.created_at, stay.id`,
-        [guestBookingId, scope.propertyId, scope.propertyIds],
-      );
-      if (!guests.rows.length) return null;
-      const profileIds = guests.rows.flatMap((row) =>
-        row.guestProfileId ? [row.guestProfileId] : [],
-      );
-      const notes = await listNotes(pool, profileIds, scope.propertyIds);
-      return guests.rows
-        .filter((row) => row.bookingGuestId)
-        .map((row) => ({
-          ...row,
-          notes: (row.guestProfileId && notes.get(row.guestProfileId)) || [],
-        }));
+      return transaction(async (client) => {
+        await linkReservationGuestsNow(client, scope.propertyId, guestBookingId);
+        // One row with no guest when the reservation has none, none when it isn't this property's.
+        const guests = await client.query<Omit<PmsReservationGuestProfile, "notes">>(
+          `SELECT stay.id::text AS "bookingGuestId", stay.guest_role AS role,
+                  stay.first_name AS "firstName", stay.last_name AS "lastName",
+                  stay.guest_profile_id::text AS "guestProfileId",
+                  (SELECT count(DISTINCT other.guest_booking_id)::int
+                   FROM booking.booking_guests other
+                   JOIN booking.guest_bookings other_booking ON other_booking.id = other.guest_booking_id
+                   WHERE other.guest_profile_id = stay.guest_profile_id
+                     AND other_booking.property_id = ANY($3::uuid[])) AS reservations
+           FROM booking.guest_bookings booking
+           LEFT JOIN booking.booking_guests stay ON stay.guest_booking_id = booking.id
+           WHERE booking.id = $1::uuid AND booking.property_id = $2::uuid
+           ORDER BY CASE stay.guest_role WHEN 'booker' THEN 0 WHEN 'primary_guest' THEN 1 ELSE 2 END,
+             stay.created_at, stay.id`,
+          [guestBookingId, scope.propertyId, scope.propertyIds],
+        );
+        if (!guests.rows.length) return null;
+        const profileIds = guests.rows.flatMap((row) =>
+          row.guestProfileId ? [row.guestProfileId] : [],
+        );
+        const notes = await listNotes(client, profileIds, scope.propertyIds);
+        return guests.rows
+          .filter((row) => row.bookingGuestId)
+          .map((row) => ({
+            ...row,
+            notes: (row.guestProfileId && notes.get(row.guestProfileId)) || [],
+          }));
+      });
     },
 
     async close() {
