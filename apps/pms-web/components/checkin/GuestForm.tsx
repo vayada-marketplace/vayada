@@ -1,15 +1,24 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
-import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import { useEffect, useId, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { ArrowLeftIcon, LockClosedIcon } from "@heroicons/react/24/outline";
+import { nationalityLabel } from "@vayada/locale-constants";
 import { NationalitySelect } from "@/components/NationalitySelect";
 import type { GuestDocumentType, GuestGender } from "@/services/bookings";
 import type { CheckinGuestField, CheckinSettings } from "@/services/settings";
 import { guestRegistrationStatus, type GuestRegistrationStatus } from "@/lib/checkin/registration";
 import type { CheckinRoom } from "@/lib/checkin/rooms";
+import {
+  BIRTH_DATE_PLACEHOLDER,
+  birthDateInput,
+  birthDateText,
+  parseBirthDate,
+} from "@/lib/checkin/birthDate";
+import { guestChanges } from "@/lib/checkin/guestAutosave";
 import { guestFieldLabel } from "@/lib/settings/checkinSettings";
 import { useTranslation } from "@/lib/i18n";
-import { checkinPrimaryButton, checkinSecondaryButton } from "./CheckinStepCard";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
+import { checkinPrimaryButton } from "./CheckinStepCard";
 
 export type GuestLockableField = "firstName" | "lastName" | "email" | "phone" | "nationality";
 
@@ -36,6 +45,10 @@ const REGISTRATION_FIELDS: CheckinGuestField[] = [
   "documentNumber",
   "gender",
 ];
+/** One label and one input style for every field (VAY-2418). */
+const LABEL_CLASS = "text-[13px] font-semibold text-gray-700";
+const INPUT_CLASS =
+  "mt-1 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100";
 
 export function filledRegistrationFields(values: GuestFormValues): string[] {
   return (
@@ -49,23 +62,32 @@ export const statusTone: Record<GuestRegistrationStatus, string> = {
   details_missing: "text-amber-700",
 };
 
+const today = () => new Date().toISOString().slice(0, 10);
+
 /** The guest's details as Settings → Check-in asks for them (VAY-2373). Laptop: inline under the
- * guest; phone: its own screen, Save returns to the list. */
+ * guest; phone: its own screen. Each field saves when it loses focus; a guest nobody has entered
+ * yet is listed on Done or when staff leave the step, not while they type (VAY-2418). */
 export function GuestForm({
   title,
   initial,
+  guestId,
+  requireNames,
   settings,
   rooms,
-  lockedFields,
+  lockedFields: lockedOnOpen,
   canReadIdentity,
   savedFilledFields,
-  saving,
-  error,
   onSave,
-  onCancel,
+  flush,
+  onUnsaved,
+  onDone,
 }: {
   title: string;
   initial: GuestFormValues;
+  /** Null for a guest nobody has entered yet. */
+  guestId: string | null;
+  /** Everyone but the booker needs both names to be listed. */
+  requireNames: boolean;
   settings: CheckinSettings;
   rooms: CheckinRoom[];
   /** Name and contact taken from the booking or an OTA import. */
@@ -73,23 +95,102 @@ export function GuestForm({
   canReadIdentity: boolean;
   /** The registration fields on record; the status uses them when the ID fields are hidden. */
   savedFilledFields: readonly string[];
-  saving: boolean;
-  error: string | null;
-  onSave: (values: GuestFormValues) => void;
-  onCancel: () => void;
+  /** Saves what changed since `saved`; `listed` gets a new guest's id as soon as it is listed. */
+  onSave: (
+    values: GuestFormValues,
+    saved: GuestFormValues,
+    guestId: string | null,
+    listed: (id: string) => void,
+  ) => Promise<void>;
+  /** Set to this form's save while it is open: resolves false when something stays unsaved. */
+  flush: MutableRefObject<(() => Promise<boolean>) | null>;
+  /** True while a save failed or a value can't be saved yet. */
+  onUnsaved: (unsaved: boolean) => void;
+  onDone: () => void;
 }) {
-  const { locale, t } = useTranslation();
+  const { t } = useTranslation();
   const formId = useId();
-  const [values, setValues] = useState(initial);
-  const set = (patch: Partial<GuestFormValues>) =>
-    setValues((current) => ({ ...current, ...patch }));
-  const { status, missing } = guestRegistrationStatus(
-    values,
-    canReadIdentity ? filledRegistrationFields(values) : savedFilledFields,
+  // The date of birth is held as typed ("23 / 06 / 1912"); everything else as saved.
+  const [values, setValues] = useState(() => ({
+    ...initial,
+    dateOfBirth: birthDateText(initial.dateOfBirth),
+  }));
+  const typed = useRef(values);
+  const saved = useRef(initial);
+  const savedGuestId = useRef(guestId);
+  // What came with the booking when the form opened: a value staff fill in now stays editable.
+  const [lockedFields] = useState(lockedOnOpen);
+  const queue = useRef(Promise.resolve(true));
+  /** "creating" while a new guest is being listed. */
+  const [saving, setSaving] = useState<null | "saving" | "creating">(null);
+  const [problem, setProblem] = useState<{
+    text: string;
+    retry?: boolean;
+    birthDate?: boolean;
+  } | null>(null);
+
+  const set = (patch: Partial<GuestFormValues>) => {
+    typed.current = { ...typed.current, ...patch };
+    setValues(typed.current);
+  };
+
+  /** Saves what changed since the last save, one save at a time. An unfinished date of birth
+   * isn't sent: the registration keeps the saved one. */
+  const save = () => {
+    queue.current = queue.current.then(async () => {
+      const birthDate = parseBirthDate(typed.current.dateOfBirth, today());
+      const next = { ...typed.current, dateOfBirth: birthDate ?? saved.current.dateOfBirth };
+      const { contact, registration } = guestChanges(saved.current, next);
+      if (contact.length || registration) {
+        if (requireNames && (!next.firstName.trim() || !next.lastName.trim())) {
+          setProblem({ text: t("checkIn.flow.form.namesRequired") });
+          return false;
+        }
+        setSaving(savedGuestId.current === null ? "creating" : "saving");
+        try {
+          await onSave(next, saved.current, savedGuestId.current, (id) => {
+            // The guest list has the names and contact now, even if the registration fails next.
+            savedGuestId.current = id;
+            const { firstName, lastName, email, phone, nationality } = next;
+            saved.current = { ...saved.current, firstName, lastName, email, phone, nationality };
+          });
+          saved.current = next;
+        } catch (err) {
+          setProblem({
+            text: localizedErrorText(err, t("checkIn.flow.form.saveError"), t),
+            retry: true,
+          });
+          return false;
+        } finally {
+          setSaving(null);
+        }
+      }
+      if (birthDate === null) {
+        setProblem({ text: t("checkIn.flow.form.birthDateInvalid"), birthDate: true });
+        return false;
+      }
+      setProblem(null);
+      return true;
+    });
+    return queue.current;
+  };
+
+  useEffect(() => {
+    flush.current = save;
+    return () => {
+      flush.current = null;
+    };
+  });
+  useEffect(() => onUnsaved(problem !== null), [problem, onUnsaved]);
+  useEffect(() => () => onUnsaved(false), [onUnsaved]);
+
+  const birthDate = parseBirthDate(values.dateOfBirth, today());
+  const current = { ...values, dateOfBirth: birthDate ?? "" };
+  const { status } = guestRegistrationStatus(
+    current,
+    canReadIdentity ? filledRegistrationFields(current) : savedFilledFields,
     settings,
   );
-  const fieldLabel = (field: CheckinGuestField | "firstName" | "lastName") =>
-    t(`settings.checkIn.field.${field}`);
   const shown = settings.guestFields.filter(
     (entry) => entry.show && (canReadIdentity || !REGISTRATION_FIELDS.includes(entry.field)),
   );
@@ -97,24 +198,45 @@ export function GuestForm({
     settings.guestFields.some((entry) => entry.field === field && entry.required);
   const statusLabel = t(`checkIn.flow.status.${status}`);
 
+  const caption = (label: string, isRequired: boolean) => (
+    <span className={LABEL_CLASS}>
+      {label}
+      {isRequired && <span className="text-red-600"> *</span>}
+    </span>
+  );
+  /** A value from the booking: shown as it is, on white, with a lock under it (VAY-2418). */
+  const lockedInput = (label: string, isRequired: boolean, value: string) => (
+    <label className="block">
+      {caption(label, isRequired)}
+      <input
+        value={value}
+        readOnly
+        className={`${INPUT_CLASS} cursor-default focus:border-gray-300 focus:ring-0`}
+      />
+      <span className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+        <LockClosedIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {t("checkIn.flow.form.fromBooking")}
+      </span>
+    </label>
+  );
+
   const field = (name: CheckinGuestField): ReactNode => {
     const label = guestFieldLabel(name, t);
-    const inputClass =
-      "mt-1 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100 disabled:bg-gray-100 disabled:text-gray-500";
-    const caption = (
-      <span className="text-sm font-semibold text-gray-700">
-        {label}
-        {required(name) && <span className="text-red-600"> *</span>}
-      </span>
-    );
     switch (name) {
       case "nationality":
-        return (
+        return lockedFields.has("nationality") ? (
+          lockedInput(
+            label,
+            required(name),
+            nationalityLabel(values.nationality) ?? values.nationality,
+          )
+        ) : (
           <NationalitySelect
-            label={required(name) ? `${label} *` : label}
+            label={caption(label, required(name))}
             value={values.nationality}
-            disabled={lockedFields.has("nationality")}
             onChange={(nationality) => set({ nationality })}
+            labelClassName="block"
+            inputClassName={INPUT_CLASS}
           />
         );
       case "documentType":
@@ -122,11 +244,11 @@ export function GuestForm({
         const options = name === "documentType" ? DOCUMENT_TYPES : GENDERS;
         return (
           <label className="block">
-            {caption}
+            {caption(label, required(name))}
             <select
               value={values[name]}
               onChange={(event) => set({ [name]: event.target.value } as Partial<GuestFormValues>)}
-              className={inputClass}
+              className={INPUT_CLASS}
             >
               <option value="">{t("checkIn.flow.form.choose")}</option>
               {options.map((option) => (
@@ -138,35 +260,44 @@ export function GuestForm({
           </label>
         );
       }
-      default: {
-        const locked = (name === "email" || name === "phone") && lockedFields.has(name);
-        const key = name as "email" | "phone" | "dateOfBirth" | "documentNumber";
+      case "dateOfBirth": {
+        const invalid = problem?.birthDate === true;
         return (
           <label className="block">
-            {caption}
+            {caption(label, required(name))}
             <input
-              type={
-                name === "email"
-                  ? "email"
-                  : name === "phone"
-                    ? "tel"
-                    : name === "dateOfBirth"
-                      ? "date"
-                      : "text"
-              }
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              value={values.dateOfBirth}
+              placeholder={BIRTH_DATE_PLACEHOLDER}
+              aria-invalid={invalid || undefined}
+              onChange={(event) => set({ dateOfBirth: birthDateInput(event.target.value) })}
+              className={`${INPUT_CLASS} ${invalid ? "border-red-500" : ""}`}
+            />
+          </label>
+        );
+      }
+      default: {
+        const key = name as "email" | "phone" | "documentNumber";
+        if ((key === "email" || key === "phone") && lockedFields.has(key))
+          return lockedInput(label, required(name), values[key]);
+        return (
+          <label className="block">
+            {caption(label, required(name))}
+            <input
+              type={key === "email" ? "email" : key === "phone" ? "tel" : "text"}
               value={values[key]}
-              disabled={locked}
-              max={name === "dateOfBirth" ? new Date().toISOString().slice(0, 10) : undefined}
-              maxLength={name === "documentNumber" ? 64 : undefined}
+              maxLength={key === "documentNumber" ? 64 : undefined}
               placeholder={
-                name === "documentNumber"
+                key === "documentNumber"
                   ? t("checkIn.flow.form.documentNumberPlaceholder")
                   : required(name)
                     ? undefined
                     : t("checkIn.flow.form.optional")
               }
               onChange={(event) => set({ [key]: event.target.value } as Partial<GuestFormValues>)}
-              className={inputClass}
+              className={INPUT_CLASS}
             />
           </label>
         );
@@ -174,20 +305,19 @@ export function GuestForm({
     }
   };
 
-  const nameInput = (name: "firstName" | "lastName") => (
-    <label className="block">
-      <span className="text-sm font-semibold text-gray-700">
-        {fieldLabel(name)}
-        <span className="text-red-600"> *</span>
-      </span>
-      <input
-        value={values[name]}
-        disabled={lockedFields.has(name)}
-        onChange={(event) => set({ [name]: event.target.value } as Partial<GuestFormValues>)}
-        className="mt-1 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-base text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100 disabled:bg-gray-100 disabled:text-gray-500"
-      />
-    </label>
-  );
+  const nameInput = (name: "firstName" | "lastName") =>
+    lockedFields.has(name) ? (
+      lockedInput(t(`settings.checkIn.field.${name}`), true, values[name])
+    ) : (
+      <label className="block">
+        {caption(t(`settings.checkIn.field.${name}`), true)}
+        <input
+          value={values[name]}
+          onChange={(event) => set({ [name]: event.target.value } as Partial<GuestFormValues>)}
+          className={INPUT_CLASS}
+        />
+      </label>
+    );
 
   return (
     <form
@@ -195,15 +325,19 @@ export function GuestForm({
       aria-label={title}
       onSubmit={(event) => {
         event.preventDefault();
-        onSave(values);
+        void save();
+      }}
+      onBlur={() => {
+        // A guest nobody has entered yet is listed on Done or when staff leave the step.
+        if (savedGuestId.current !== null) void save();
       }}
       className="fixed inset-0 z-40 flex flex-col overflow-y-auto bg-white md:static md:z-auto md:overflow-visible md:border-t md:border-gray-200 md:bg-gray-50"
     >
       <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 md:hidden">
         <button
           type="button"
-          onClick={onCancel}
-          aria-label={t("common.cancel")}
+          onClick={onDone}
+          aria-label={t("checkIn.flow.guests.done")}
           className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-900"
         >
           <ArrowLeftIcon className="h-5 w-5" aria-hidden="true" />
@@ -218,7 +352,8 @@ export function GuestForm({
         </span>
       </div>
 
-      <div className="flex flex-col gap-5 px-4 py-5 md:px-5">
+      {/* A new guest's fields wait while the guest is being listed. */}
+      <fieldset disabled={saving === "creating"} className="flex flex-col gap-5 px-4 py-5 md:px-5">
         <div className="grid gap-4 md:grid-cols-4">
           {nameInput("firstName")}
           {nameInput("lastName")}
@@ -232,9 +367,7 @@ export function GuestForm({
 
         {canReadIdentity && rooms.length > 1 && (
           <fieldset>
-            <legend className="text-sm font-semibold text-gray-700">
-              {t("checkIn.flow.form.sleepsIn")}
-            </legend>
+            <legend className={LABEL_CLASS}>{t("checkIn.flow.form.sleepsIn")}</legend>
             <div className="mt-2 flex flex-wrap gap-2">
               {rooms.map((room) => {
                 const on = values.assignmentId === room.assignmentId;
@@ -261,7 +394,7 @@ export function GuestForm({
 
         {canReadIdentity && settings.guestNotes && (
           <label className="block">
-            <span className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+            <span className={`flex items-center gap-2 ${LABEL_CLASS}`}>
               {t("checkIn.flow.form.notes")}
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
                 {t("checkIn.flow.form.staffOnly")}
@@ -278,29 +411,33 @@ export function GuestForm({
           </label>
         )}
 
-        {status !== "registered" && (
-          <p className="text-sm text-amber-700">
-            {t("checkIn.flow.form.stillMissing", {
-              fields: new Intl.ListFormat(locale, { type: "conjunction" }).format(
-                missing.map((name) => fieldLabel(name)),
-              ),
-              status: statusLabel,
-            })}
-          </p>
-        )}
-        {error && (
+        {problem ? (
           <p role="alert" className="text-sm font-medium text-red-700">
-            {error}
+            {problem.text}
+            {problem.retry && (
+              <button
+                type="button"
+                onClick={() => void save()}
+                className="ml-2 font-semibold underline hover:text-red-800"
+              >
+                {t("checkIn.flow.form.retry")}
+              </button>
+            )}
+          </p>
+        ) : (
+          <p className="text-sm text-gray-500">
+            {saving
+              ? t("common.saving")
+              : guestId === null
+                ? t("checkIn.flow.form.addedOnDone")
+                : t("checkIn.flow.form.autosave")}
           </p>
         )}
-      </div>
+      </fieldset>
 
-      <div className="sticky bottom-0 mt-auto grid grid-cols-2 gap-3 border-t border-gray-200 bg-white px-4 py-4 md:static md:flex md:border-0 md:bg-transparent md:px-5 md:pb-5 md:pt-0">
-        <button type="button" onClick={onCancel} className={`${checkinSecondaryButton} md:order-2`}>
-          {t("common.cancel")}
-        </button>
-        <button type="submit" disabled={saving} className={`${checkinPrimaryButton} md:order-1`}>
-          {saving ? t("common.saving") : t("checkIn.flow.form.save")}
+      <div className="sticky bottom-0 mt-auto border-t border-gray-200 bg-white px-4 py-4 md:hidden">
+        <button type="button" onClick={onDone} className={`${checkinPrimaryButton} w-full`}>
+          {t("checkIn.flow.guests.done")}
         </button>
       </div>
     </form>
