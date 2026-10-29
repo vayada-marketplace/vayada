@@ -306,6 +306,11 @@ async function insertAddons(
 ): Promise<void> {
   const snapshots = command.addOns.map((selection) => {
     const resolved = preview.addOns.find(({ addonId }) => addonId === selection.addonId)!;
+    // The days it happens, which the PMS shows from booking_addon_selection_items (a transfer's
+    // pickup and drop-off, VAY-2417).
+    const serviceDates = selection.serviceUnits
+      .flatMap(({ serviceDate }) => (serviceDate === null ? [] : [serviceDate]))
+      .sort();
     return {
       addonId: selection.addonId,
       packageCount: selection.packageCount,
@@ -317,6 +322,7 @@ async function insertAddons(
         unitPrice: resolved.unitPrice,
         packageCount: selection.packageCount,
         serviceUnits: selection.serviceUnits,
+        ...(serviceDates.length ? { serviceDates } : {}),
       },
     };
   });

@@ -170,7 +170,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         (SELECT count(*)::int FROM pms.booking_notes_private note
           WHERE note.guest_booking_id = booking.id) AS notes,
         (SELECT count(*)::int FROM booking.booking_addon_selections addon
-          WHERE addon.guest_booking_id = booking.id) AS addons
+          WHERE addon.guest_booking_id = booking.id) AS addons,
+        (SELECT jsonb_agg(item.service_dates) FROM booking.booking_addon_selection_items item
+          WHERE item.guest_booking_id = booking.id) AS "addonDates"
        FROM booking.guest_bookings booking
        JOIN booking.booking_guests guest ON guest.guest_booking_id = booking.id
        WHERE booking.id = $1::uuid`,
@@ -188,6 +190,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       stays: 2,
       notes: 1,
       addons: 1,
+      // The PMS reads an add-on's days from the snapshot (VAY-2417).
+      addonDates: [["2027-01-01"]],
       metadata: {
         contractVersion: "pms-manual-booking.v1",
         commandId: input.commandId,
