@@ -40,8 +40,8 @@ export const GUEST_PROFILE_SELECT = `profile.first_name AS "firstName",
  * A staff edit of a guest profile: the fields given are set, and null clears one (unlike the copies
  * from bookings, which never clear). Names and contact also go to the booking copies of the guest's
  * current and upcoming stays at `propertyIds`, and of the stay it was edited from, so that stay's
- * emails use them; past stays keep what was booked. Returns the fields written to the profile or
- * the copies, or null when the profile doesn't exist. Runs in the caller's transaction.
+ * emails use them; past stays keep what was booked. Returns the fields that changed, or null when
+ * the profile doesn't exist. Runs in the caller's transaction.
  */
 export async function editGuestProfile(
   client: GuestProfileQueryable,
@@ -72,37 +72,43 @@ export async function editGuestProfile(
       [input.guestProfileId, ...changed.map((field) => input.edit[field])],
     );
   }
-  // Also a value the profile already had: the booking can still show an older one (a channel's
-  // relay address) that staff just replaced.
-  const copied = COPIED_FIELDS.filter((field) => input.edit[field] !== undefined);
-  if (copied.length) {
+  const copy = async (fields: readonly GuestProfileFieldName[], stays: string) => {
+    if (!fields.length) return;
     // A staff-chosen nationality settles any imported value that needed review.
     const review =
-      copied.includes("countryCode") && input.edit.countryCode
+      fields.includes("countryCode") && input.edit.countryCode
         ? ", country_code_raw = NULL, country_code_review_required = FALSE"
         : "";
     await client.query(
       `UPDATE booking.booking_guests guest
-       SET ${copied.map((field, index) => `${PROFILE_COLUMNS[field]} = $${index + 4}`).join(", ")}${review},
+       SET ${fields.map((field, index) => `${PROFILE_COLUMNS[field]} = $${index + 4}`).join(", ")}${review},
            updated_at = now(), guest_profile_synced_at = now()
        FROM booking.guest_bookings booking
        WHERE booking.id = guest.guest_booking_id
          AND guest.guest_profile_id = $1::uuid
          AND booking.property_id = ANY($2::uuid[])
-         AND (
-           guest.id = $3::uuid
-           OR (booking.check_out >= CURRENT_DATE
-             AND booking.lifecycle_status IN ('pending_payment', 'confirmed'))
-         )`,
+         AND (${stays})`,
       [
         input.guestProfileId,
         input.propertyIds,
         input.bookingGuestId ?? null,
-        ...copied.map((field) => input.edit[field]),
+        ...fields.map((field) => input.edit[field]),
       ],
     );
-  }
-  return [...new Set([...changed, ...copied])];
+  };
+  await copy(
+    COPIED_FIELDS.filter((field) => changed.includes(field)),
+    `guest.id = $3::uuid OR (booking.check_out >= CURRENT_DATE
+       AND booking.lifecycle_status IN ('pending_payment', 'confirmed'))`,
+  );
+  // The stay it was edited from also takes a value the profile already had: it can still show an
+  // older one (a channel's relay address) that staff just replaced.
+  if (input.bookingGuestId)
+    await copy(
+      COPIED_FIELDS.filter((field) => input.edit[field] !== undefined && !changed.includes(field)),
+      "guest.id = $3::uuid",
+    );
+  return changed;
 }
 
 /**

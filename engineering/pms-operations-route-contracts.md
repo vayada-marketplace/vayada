@@ -394,7 +394,8 @@ names and IDs only.
 - `GET /api/pms/properties/:propertyId/guests?search=&limit=`: the account's guests, newest stay first.
 - `GET/PATCH .../guests/:guestProfileId`: the profile with its stays and notes; a staff edit (null
   clears a field, names can't be cleared) also updates the copies on current and upcoming stays and
-  on the stay given as `bookingGuestId`.
+  on the stay given as `bookingGuestId`. Email and phone answer 403 `guest_contact_hidden` where
+  that stay's contact (or, without `bookingGuestId`, every stay's here) is hidden until acceptance.
 - `POST .../guests/:guestProfileId/notes`, `DELETE .../notes/:noteId`: staff-only guest notes.
 - `POST .../guests/:guestProfileId/separate` (`bookingGuestId`) gives one stay its own new profile;
   `POST .../merge` (`guestProfileId`) moves another profile's stays and notes into this one.

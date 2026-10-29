@@ -482,6 +482,7 @@
   "bookings.detail.editBooker": "Buchenden bearbeiten",
   "bookings.detail.failedToLoadBooker": "Die Angaben zum Buchenden konnten nicht geöffnet werden. Bitte versuchen Sie es erneut.",
   "bookings.detail.bookerSavedToGuest": "Wird beim Gast gespeichert: Auch kommende Buchungen des Gastes zeigen es.",
+  "bookings.detail.bookerFromChannel": "Wird beim Gast gespeichert. Angaben von {channel} bleiben, wie sie sind; leere Felder können ergänzt werden.",
   "bookings.detail.correct": "Korrigieren",
   "bookings.detail.needsReview": "Prüfung erforderlich",
   "bookings.detail.importedValue": "Importierter Wert: {value}",

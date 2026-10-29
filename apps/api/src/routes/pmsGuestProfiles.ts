@@ -141,7 +141,7 @@ export type PmsGuestProfileRepository = {
     edit: Partial<GuestProfileFields>,
     bookingGuestId: string | null,
     audit: PmsGuestProfileAudit,
-  ): Promise<PmsGuestProfile | "not_found" | "stay_not_found">;
+  ): Promise<PmsGuestProfile | "not_found" | "stay_not_found" | "contact_hidden">;
   addNote(
     scope: PmsGuestProfileScope,
     guestProfileId: string,
@@ -318,6 +318,8 @@ export async function registerPmsGuestProfileRoutes(
       if (result === "not_found") return reply.status(404).send({ code: "guest_not_found" });
       if (result === "stay_not_found")
         return invalidRequest(reply, "bookingGuestId is not a stay of this guest.");
+      if (result === "contact_hidden")
+        return reply.status(403).send({ code: "guest_contact_hidden" });
       return reply.header("Cache-Control", "no-store").send(result);
     } catch (error) {
       return unavailable(request, reply, error);
@@ -741,6 +743,22 @@ export function createPgPmsGuestProfileRepository(config: {
         if (!(await lockVisible(client, scope, guestProfileId))) return "not_found";
         if (bookingGuestId && !(await visibleStay(client, scope, guestProfileId, bookingGuestId)))
           return "stay_not_found";
+        // Email and phone only where the property may see them ("Hidden until you accept"): on the
+        // stay edited from, else on one of the guest's stays here.
+        if (
+          (edit.email !== undefined || edit.phone !== undefined) &&
+          !(
+            await client.query(
+              `SELECT 1 FROM booking.booking_guests stay
+               JOIN booking.guest_bookings booking ON booking.id = stay.guest_booking_id
+               WHERE stay.guest_profile_id = $1::uuid AND booking.property_id = ANY($2::uuid[])
+                 AND ($3::uuid IS NULL OR stay.id = $3::uuid) AND ${CONTACT_VISIBLE_SQL}
+               LIMIT 1`,
+              [guestProfileId, scope.propertyIds, bookingGuestId],
+            )
+          ).rows.length
+        )
+          return "contact_hidden";
         const changed = await editGuestProfile(client, {
           guestProfileId,
           edit,
@@ -858,10 +876,9 @@ export function createPgPmsGuestProfileRepository(config: {
     },
 
     async reservationProfiles(scope, guestBookingId) {
-      return transaction(async (client) => {
-        await linkReservationGuestsNow(client, scope.propertyId, guestBookingId);
-        // One row with no guest when the reservation has none, none when it isn't this property's.
-        const guests = await client.query<Omit<PmsReservationGuestProfile, "notes">>(
+      // One row with no guest when the reservation has none, none when it isn't this property's.
+      const read = () =>
+        pool.query<Omit<PmsReservationGuestProfile, "notes">>(
           `SELECT stay.id::text AS "bookingGuestId", stay.guest_role AS role,
                   stay.first_name AS "firstName", stay.last_name AS "lastName",
                   stay.guest_profile_id::text AS "guestProfileId",
@@ -877,18 +894,36 @@ export function createPgPmsGuestProfileRepository(config: {
              stay.created_at, stay.id`,
           [guestBookingId, scope.propertyId, scope.propertyIds],
         );
-        if (!guests.rows.length) return null;
-        const profileIds = guests.rows.flatMap((row) =>
-          row.guestProfileId ? [row.guestProfileId] : [],
-        );
-        const notes = await listNotes(client, profileIds, scope.propertyIds);
-        return guests.rows
-          .filter((row) => row.bookingGuestId)
-          .map((row) => ({
-            ...row,
-            notes: (row.guestProfileId && notes.get(row.guestProfileId)) || [],
-          }));
-      });
+      let guests = await read();
+      if (guests.rows.some((row) => row.bookingGuestId && !row.guestProfileId)) {
+        // Guests the job hasn't reached yet (a booking made moments ago) are linked now, so they
+        // can be edited at once. When that can't happen (the lock is busy, a row fails) they are
+        // listed unlinked; the job links them, or reports the row.
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL lock_timeout = '5s'");
+          await lockGuestProfiles(client);
+          await linkReservationGuestsNow(client, scope.propertyId, guestBookingId);
+          await client.query("COMMIT");
+        } catch {
+          await client.query("ROLLBACK").catch(() => undefined);
+        } finally {
+          client.release();
+        }
+        guests = await read();
+      }
+      if (!guests.rows.length) return null;
+      const profileIds = guests.rows.flatMap((row) =>
+        row.guestProfileId ? [row.guestProfileId] : [],
+      );
+      const notes = await listNotes(pool, profileIds, scope.propertyIds);
+      return guests.rows
+        .filter((row) => row.bookingGuestId)
+        .map((row) => ({
+          ...row,
+          notes: (row.guestProfileId && notes.get(row.guestProfileId)) || [],
+        }));
     },
 
     async close() {

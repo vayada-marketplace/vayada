@@ -548,6 +548,33 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
       audit(),
     );
     expect(await copy(channel.guestIds[0]!)).toMatchObject({ email: "anna@example.test" });
+
+    // A request not accepted yet keeps its booker's contact out of reach: staff can't replace it.
+    const request = await book(
+      propertyB,
+      { checkIn: "2031-01-10", checkOut: "2031-01-12", accepted: false },
+      { first: "Jonas", last: "Ried", email: "jonas@example.test" },
+    );
+    const [requester] = (await profiles.reservationProfiles(atB, request.bookingId))!;
+    expect(
+      await profiles.edit(
+        atB,
+        requester!.guestProfileId!,
+        { email: "other@example.test" },
+        requester!.bookingGuestId,
+        audit(),
+      ),
+    ).toBe("contact_hidden");
+    expect(
+      await profiles.edit(
+        atB,
+        requester!.guestProfileId!,
+        { lastName: "Riedl" },
+        requester!.bookingGuestId,
+        audit(),
+      ),
+    ).toMatchObject({ lastName: "Riedl" });
+    expect(await copy(request.guestIds[0]!)).toMatchObject({ email: "jonas@example.test" });
   });
 });
 

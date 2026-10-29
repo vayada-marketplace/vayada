@@ -35,6 +35,7 @@ import {
   type BookingCancellationTerms,
 } from "@/services/bookings";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
+import { isChannelBooking } from "@/lib/bookings/channelLabel";
 import { individualRoomsService, Room } from "@/services/rooms";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Modal from "@/components/Modal";
@@ -1718,6 +1719,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
    * name. They are saved to the booker's guest record (VAY-2420). */
   const handleEditBooker = async () => {
     if (!booking) return;
+    setError("");
     setBookerSaving(true);
     try {
       // Listed booker first, like the guest the reservation read shows.
@@ -1743,9 +1745,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const bookerChanges = bookerEdit ? guestProfileEdit(bookerEdit.shown, bookerForm) : {};
+  // A channel's values stay as sent (its next update would write them again), and so does contact
+  // staff may not see; empty fields can still be filled.
+  const bookerLocked = (field: keyof BookerForm) =>
+    Boolean(bookerEdit) &&
+    ((isChannelBooking(booking?.channel) && bookerEdit!.shown[field].trim() !== "") ||
+      ((field === "email" || field === "phone") &&
+        bookerEdit!.shown.email === HIDDEN_GUEST_CONTACT));
 
   const handleSaveBooker = async () => {
     if (!bookerEdit) return;
+    setError("");
     setBookerSaving(true);
     try {
       if (Object.keys(bookerChanges).length) {
@@ -2792,30 +2802,32 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   label={t("bookings.modal.firstNameLabel")}
                   value={bookerForm.firstName}
                   onChange={(v) => setBookerForm({ ...bookerForm, firstName: v })}
+                  disabled={bookerLocked("firstName")}
                 />
                 <Field
                   label={t("bookings.modal.lastNameLabel")}
                   value={bookerForm.lastName}
                   onChange={(v) => setBookerForm({ ...bookerForm, lastName: v })}
+                  disabled={bookerLocked("lastName")}
                 />
                 <Field
-                  label={t("bookings.detail.email")}
+                  label={t("bookings.detail.emailOptional")}
                   type="email"
                   value={bookerForm.email}
                   onChange={(v) => setBookerForm({ ...bookerForm, email: v })}
-                  disabled={bookerEdit.shown.email === HIDDEN_GUEST_CONTACT}
+                  disabled={bookerLocked("email")}
                 />
                 <Field
                   label={t("bookings.detail.phoneOptional")}
                   type="tel"
                   value={bookerForm.phone}
                   onChange={(v) => setBookerForm({ ...bookerForm, phone: v })}
-                  disabled={bookerEdit.shown.phone === HIDDEN_GUEST_CONTACT}
+                  disabled={bookerLocked("phone")}
                 />
               </div>
               <p className="mt-3 text-xs text-gray-500">
-                {bookerEdit.shown.email === HIDDEN_GUEST_CONTACT
-                  ? t("bookings.detail.contactAvailableAfterAcceptance")
+                {isChannelBooking(booking.channel)
+                  ? t("bookings.detail.bookerFromChannel", { channel: channelLabel })
                   : t("bookings.detail.bookerSavedToGuest")}
               </p>
               <div className="mt-4 flex justify-end gap-2">

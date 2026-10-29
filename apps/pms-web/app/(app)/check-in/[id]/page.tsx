@@ -24,7 +24,7 @@ import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
 import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
-import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
+import { bookingChannelLabel, isChannelBooking } from "@/lib/bookings/channelLabel";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import {
   expectedRegistrations,
@@ -74,10 +74,6 @@ import { CheckinStepCard } from "@/components/checkin/CheckinStepCard";
 
 function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
-}
-
-function channelIsOta(channel: string | null | undefined) {
-  return Boolean(channel && channel.toLowerCase() !== "direct");
 }
 
 function customStepDone(step: CheckinChecklistStep, value: string | boolean | undefined) {
@@ -330,20 +326,24 @@ export default function CheckInPage() {
     };
   };
 
-  const ota = channelIsOta(booking?.channel);
+  const ota = isChannelBooking(booking?.channel);
   const lockedFields = (guest: RegistrationGuest) => {
-    // The booker is edited through their guest record (VAY-2420); their contact only where staff
-    // may see it.
-    if (guest.role === "booker")
-      return new Set<GuestLockableField>(
-        !bookerProfile
-          ? ["firstName", "lastName", "email", "phone"]
-          : booking?.guestEmail === HIDDEN_GUEST_CONTACT
-            ? ["email", "phone"]
-            : [],
-      );
-    const listed = additionalGuests.find((entry) => entry.id === guest.guestId);
     const locked = new Set<GuestLockableField>();
+    // The booker is edited through their guest record (VAY-2420): not without one, their contact
+    // not where staff may not see it, and a channel's values stay as sent (its next update would
+    // write them again); empty ones can still be filled.
+    if (guest.role === "booker") {
+      const shown = formInitial(guest);
+      for (const name of ["firstName", "lastName", "email", "phone"] as const)
+        if (
+          !bookerProfile ||
+          (ota && shown[name].trim()) ||
+          ((name === "email" || name === "phone") && shown.email === HIDDEN_GUEST_CONTACT)
+        )
+          locked.add(name);
+      return locked;
+    }
+    const listed = additionalGuests.find((entry) => entry.id === guest.guestId);
     // An OTA import's values stay as supplied; empty ones can still be filled.
     if (ota && listed) {
       for (const name of ["firstName", "lastName", "email", "phone"] as const)
