@@ -117,7 +117,7 @@ it("lets the guest press Confirm before ticking and points at the boxes instead 
   const confirm = () => document.querySelector<HTMLButtonElement>('button[type="submit"]')!;
   render(false, null, ada, missing);
   expect(confirm().disabled).toBe(false);
-  expect(document.body.textContent).not.toContain("Agree to the terms above");
+  expect(document.body.textContent).not.toContain("Agree to the terms");
   await submit();
   expect(missing).toHaveBeenCalledTimes(1);
   expect(acceptPricingQuote).not.toHaveBeenCalled();
@@ -473,4 +473,57 @@ it("hands a made booking to the page so it can open the confirmation (VAY-2195)"
     bookingReference: result.bookingReference,
     requested: false,
   });
+});
+
+it("shows its button in “Your stay” and opens the card form where it is, in view (VAY-2416)", async () => {
+  const card = { ...quote, paymentMethod: "card", dueNowMinor: "20000", dueLaterMinor: "0" };
+  vi.mocked(acceptPricingQuote).mockResolvedValueOnce({
+    kind: "payment_required" as const,
+    bookingId: result.bookingId,
+    bookingReference: result.bookingReference,
+    requestId: "accept-1",
+    payment: {
+      provider: "stripe" as const,
+      clientSecret: "pi_1_secret_2",
+      stripeAccountId: "acct_1",
+      paymentIntentId: "pi_1",
+      expiresAt: "2026-09-14T12:31:01.000Z",
+    },
+  });
+  // jsdom has no scrollIntoView.
+  const scrolled = vi.fn();
+  Element.prototype.scrollIntoView = scrolled;
+  const slot = document.createElement("div");
+  document.body.append(slot);
+  const view = (actionSlot: HTMLElement | null) =>
+    act(() =>
+      root.render(
+        createElement(ReplacementBookingConfirmation, {
+          slug: "hotel",
+          quote: card as PublicBookingQuote,
+          disclosure,
+          termsAccepted: true,
+          guest: ada,
+          actionSlot,
+          buttonClassName: "card-button",
+        }),
+      ),
+    );
+  // Nothing shows until the card's place exists.
+  view(null);
+  expect(document.querySelector("form")).toBeNull();
+  view(slot);
+  const button = slot.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(button.textContent).toBe("Continue to card payment");
+  expect(button.className).toBe("card-button");
+  expect(document.getElementById("root")!.querySelector("form")).toBeNull();
+  await act(async () => slot.querySelector("form")!.requestSubmit());
+  expect(acceptPricingQuote).toHaveBeenCalledTimes(1);
+  // The card form opens where the component is, not in the card, and is brought into view.
+  expect(slot.querySelector("form")).toBeNull();
+  expect(
+    document.getElementById("root")!.querySelector('[aria-label="Card payment"]'),
+  ).not.toBeNull();
+  expect(scrolled).toHaveBeenCalledTimes(1);
+  delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
 });

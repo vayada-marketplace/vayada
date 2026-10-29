@@ -79,8 +79,8 @@ function ruleSentences(r: Choices, t: ReturnType<typeof useTranslations>): strin
 }
 
 /** Step 3's "Before you book" (VAY-2347): quick facts, the times line, the cancellation policy
- * (open; one block per policy), the guest rules and the hotel's terms (closed), then the one tick
- * that agrees to all of them. */
+ * (open; one block per policy), the guest rules and the hotel's terms (closed). The one tick that
+ * agrees to all of them is BookingConsent, in "Your stay" above Confirm (VAY-2416). */
 export default function BeforeYouBook({
   quote,
   disclosure,
@@ -91,11 +91,6 @@ export default function BeforeYouBook({
   hotelCountry,
   termsText,
   formatMoney,
-  agreed,
-  consentDisabled,
-  consentErrorId,
-  onAgree,
-  status,
 }: {
   quote: PublicBookingQuote;
   /** This price's guest rules; null while they load or when they failed. */
@@ -108,29 +103,11 @@ export default function BeforeYouBook({
   hotelCountry: string | null;
   termsText: string | null;
   formatMoney: (minor: string) => string;
-  agreed: boolean;
-  consentDisabled: boolean;
-  /** Confirm was pressed before ticking (VAY-2306): the id of the message that says so. */
-  consentErrorId?: string;
-  onAgree: (checked: boolean) => void;
-  /** Why the tick can't be given yet (an expired price, rooms without their names). */
-  status?: ReactNode;
 }) {
   const t = useTranslations("beforeYouBook");
   const tHome = useTranslations("home");
   const rules = disclosure?.choices ?? null;
   const blocks = policyBlocks(quote, { today, roomNames });
-  // VAY-2392: when rooms can't be refunded from booking, the consent says so first (Timo's
-  // prototype). Not while a request waits for us or a transfer for its money: cancelling is free
-  // until then, as the policy's first row says.
-  const notRefundable = blocks.filter(
-    ({ policy }) => policy.tone === "amber" && !policy.request && !policy.bankTransfer,
-  ).length;
-  const consentNonRefundable = !notRefundable
-    ? null
-    : notRefundable === blocks.length
-      ? t("agreeNonRefundable")
-      : t("agreeSomeNonRefundable");
   const meals = Array.from(new Set(quote.rooms.map((room) => room.mealPlan)));
   const facts: [string, string][] = rules
     ? [
@@ -176,52 +153,91 @@ export default function BeforeYouBook({
       </p>
     );
   return (
-    <>
-      <section aria-label={t("title")} className={`${card} space-y-[18px]`}>
-        <h2 className="text-xl font-bold text-gray-900">{t("title")}</h2>
-        {rules ? (
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-            {facts.map(([label, value]) => (
-              <div key={label}>
-                <dt className="text-sm text-gray-600">{label}</dt>
-                <dd className="text-[15px] font-bold text-gray-900">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : (
-          rulesState(true)
-        )}
-        <p className="text-sm text-gray-600">
-          {hotelCountry ? t("timesLocalIn", { country: hotelCountry }) : t("timesLocal")}
-        </p>
-        {blocks.map((block) => (
-          <div key={block.key} className="border-t border-gray-100 pt-4">
-            <CancellationPolicy
-              block={block}
-              titled={blocks.length > 1}
-              formatMoney={formatMoney}
-            />
-          </div>
-        ))}
-        <Section title={t("guestRules")}>
-          {rules ? (
-            <ul className="list-disc space-y-1.5 pl-5 text-[15px] text-gray-800">
-              {ruleSentences(rules, t).map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-          ) : (
-            rulesState(false)
-          )}
-        </Section>
-        {termsText && (
-          <Section title={t("terms")} scroll>
-            <div className="whitespace-pre-wrap break-words text-[15px] text-gray-800">
-              {termsText}
+    <section aria-label={t("title")} className={`${card} space-y-[18px]`}>
+      <h2 className="text-xl font-bold text-gray-900">{t("title")}</h2>
+      {rules ? (
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+          {facts.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-sm text-gray-600">{label}</dt>
+              <dd className="text-[15px] font-bold text-gray-900">{value}</dd>
             </div>
-          </Section>
+          ))}
+        </dl>
+      ) : (
+        rulesState(true)
+      )}
+      <p className="text-sm text-gray-600">
+        {hotelCountry ? t("timesLocalIn", { country: hotelCountry }) : t("timesLocal")}
+      </p>
+      {blocks.map((block) => (
+        <div key={block.key} className="border-t border-gray-100 pt-4">
+          <CancellationPolicy block={block} titled={blocks.length > 1} formatMoney={formatMoney} />
+        </div>
+      ))}
+      <Section title={t("guestRules")}>
+        {rules ? (
+          <ul className="list-disc space-y-1.5 pl-5 text-[15px] text-gray-800">
+            {ruleSentences(rules, t).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          rulesState(false)
         )}
-      </section>
+      </Section>
+      {termsText && (
+        <Section title={t("terms")} scroll>
+          <div className="whitespace-pre-wrap break-words text-[15px] text-gray-800">
+            {termsText}
+          </div>
+        </Section>
+      )}
+    </section>
+  );
+}
+
+/** The one tick that agrees to "Before you book" for this price (VAY-2347), in "Your stay" right
+ * above Confirm (VAY-2416). Pressing Confirm before ticking marks it and says so (VAY-2306). */
+export function BookingConsent({
+  quote,
+  roomNames,
+  today,
+  termsText,
+  agreed,
+  disabled,
+  errorId,
+  onAgree,
+  status,
+}: {
+  quote: PublicBookingQuote;
+  roomNames: Readonly<Record<string, string>>;
+  /** The hotel's date today (YYYY-MM-DD). */
+  today: string;
+  termsText: string | null;
+  agreed: boolean;
+  disabled: boolean;
+  /** Confirm was pressed before ticking: the id of the message that says so. */
+  errorId?: string;
+  onAgree: (checked: boolean) => void;
+  /** Why the tick can't be given yet (an expired price, rooms without their names). */
+  status?: ReactNode;
+}) {
+  const t = useTranslations("beforeYouBook");
+  const blocks = policyBlocks(quote, { today, roomNames });
+  // VAY-2392: when rooms can't be refunded from booking, the consent says so first (Timo's
+  // prototype). Not while a request waits for us or a transfer for its money: cancelling is free
+  // until then, as the policy's first row says.
+  const notRefundable = blocks.filter(
+    ({ policy }) => policy.tone === "amber" && !policy.request && !policy.bankTransfer,
+  ).length;
+  const consentNonRefundable = !notRefundable
+    ? null
+    : notRefundable === blocks.length
+      ? t("agreeNonRefundable")
+      : t("agreeSomeNonRefundable");
+  return (
+    <div className="space-y-2">
       {status && (
         <div role="status" className="text-sm text-gray-600">
           {status}
@@ -232,15 +248,15 @@ export default function BeforeYouBook({
           .filter(Boolean)
           .join(" ")}
         checked={agreed}
-        disabled={consentDisabled}
-        errorId={consentErrorId}
+        disabled={disabled}
+        errorId={errorId}
         onChange={onAgree}
       />
-      {consentErrorId && !agreed && !consentDisabled && (
+      {errorId && !agreed && !disabled && (
         <p
-          id={consentErrorId}
+          id={errorId}
           role="alert"
-          className="flex items-start gap-2 text-sm font-medium text-red-700"
+          className="flex items-start gap-2 text-sm font-medium text-orange-700"
         >
           <svg
             className="mt-0.5 h-4 w-4 shrink-0"
@@ -259,6 +275,6 @@ export default function BeforeYouBook({
           {t("agreeMissing")}
         </p>
       )}
-    </>
+    </div>
   );
 }
