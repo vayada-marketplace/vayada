@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
-test("accepts, reopens and withdraws optional analytics without blocking rooms", async ({
+test("accepts, reopens from the footer and withdraws optional analytics without blocking rooms", async ({
   page,
 }) => {
   await mockBookingApis(page);
@@ -28,22 +28,35 @@ test("accepts, reopens and withdraws optional analytics without blocking rooms",
   await expect(notice).toHaveAttribute("rel", "noopener noreferrer");
   expect(events).toEqual([]);
   expect(await identifiers()).toEqual([]);
+  // VAY-2419: no floating button any more; the footer's link reopens the prompt.
+  const choices = page.getByRole("button", { name: "Privacy choices", exact: true });
+  await expect(choices).toHaveCount(1);
+  await expect(
+    page.locator("footer").getByRole("button", { name: "Privacy choices" }),
+  ).toBeVisible();
+  // Pressed while the prompt is already open, the link moves focus into it.
+  await choices.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("region", { name: "Optional analytics" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("heading", { name: "Optional analytics", exact: true })).toBeHidden();
-  await page.getByRole("button", { name: "Privacy choices", exact: true }).click();
+  await expect(choices).toBeFocused();
+  await choices.click();
   await page.getByRole("button", { name: "Reject analytics", exact: true }).click();
   await page.reload();
-  await expect(page.getByRole("button", { name: "Privacy choices", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Optional analytics", exact: true })).toBeHidden();
   expect(events).toEqual([]);
   expect(await identifiers()).toEqual([]);
-  await page.getByRole("button", { name: "Privacy choices", exact: true }).click();
+  await choices.click();
+  await expect(page.getByText("Analytics is off.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Allow analytics", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Privacy choices", exact: true })).toBeFocused();
+  await expect(choices).toBeFocused();
   await page.reload();
   await expect.poll(() => events.length).toBeGreaterThan(0);
   expect(events[0]).toMatchObject({ analyticsConsent: true, consentVersion: CONSENT });
   expect(await identifiers()).toEqual([`vayada_sid:${SEEDED_BOOKING_SLUG}`]);
-  await page.getByRole("button", { name: "Privacy choices", exact: true }).click();
+  await choices.click();
   await page.getByRole("button", { name: "Reject analytics", exact: true }).click();
   expect(await identifiers()).toEqual([]);
   const count = events.length;

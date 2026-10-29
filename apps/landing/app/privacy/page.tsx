@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 28, 2026
+              <strong>Effective Date:</strong> October 29, 2026
             </p>
           </div>
 
@@ -630,8 +630,8 @@ export default function PrivacyPage() {
                   to be restricted, or to receive it in a portable format. You can object to
                   processing based on legitimate interests (Article 6(1) lit. f GDPR). You can
                   withdraw your analytics consent at any time with the &quot;Privacy choices&quot;
-                  button on the booking site; this stops further events and does not affect
-                  processing before you withdrew it.
+                  link at the bottom of the booking site&apos;s pages; this stops further events and
+                  does not affect processing before you withdrew it.
                 </p>
                 <p>
                   Please send requests to the hotel. You can also write to us at{" "}

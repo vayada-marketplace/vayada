@@ -19,7 +19,7 @@ test("sets no cookie before or after the privacy choice", async ({ page, context
   expect(new URL(page.url()).searchParams.has("ref")).toBe(false);
   expect(await context.cookies()).toEqual([]);
 
-  await page.getByRole("button", { name: "Privacy choices", exact: true }).click();
+  // The prompt opens again on this full page load: no choice was made yet.
   await page.getByRole("button", { name: "Allow analytics", exact: true }).click();
   await page.reload();
   await expect(page.getByRole("button", { name: "Add room", exact: true })).toBeVisible();

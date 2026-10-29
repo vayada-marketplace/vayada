@@ -3,12 +3,14 @@
 import { useState } from "react";
 import FindBookingModal from "@/components/booking/FindBookingModal";
 import { useHotel } from "@/contexts/HotelContext";
+import { openAnalyticsChoices } from "@/services/api/analyticsConsent";
 import { useTranslations } from "next-intl";
 
 export default function BookingFooter() {
   const { hotel } = useHotel();
   const t = useTranslations("common");
   const tm = useTranslations("myBooking");
+  const ta = useTranslations("analyticsConsent");
   const [findBookingOpen, setFindBookingOpen] = useState(false);
 
   return (
@@ -120,13 +122,23 @@ export default function BookingFooter() {
             <p>
               &copy; {new Date().getFullYear()} {t("allRightsReserved", { name: hotel.name })}
             </p>
-            <button
-              type="button"
-              onClick={() => setFindBookingOpen(true)}
-              className="font-semibold text-white underline underline-offset-4 transition-opacity hover:opacity-80"
-            >
-              {tm("findBooking")}
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+              <button
+                type="button"
+                onClick={() => setFindBookingOpen(true)}
+                className="font-semibold text-white underline underline-offset-4 transition-opacity hover:opacity-80"
+              >
+                {tm("findBooking")}
+              </button>
+              {/* Reopens the analytics prompt (VAY-2419). */}
+              <button
+                type="button"
+                onClick={(event) => openAnalyticsChoices(event.currentTarget)}
+                className="underline underline-offset-4 transition-colors hover:text-white"
+              >
+                {ta("settings")}
+              </button>
+            </div>
             <p>
               {t("poweredBy")} <span className="text-white font-semibold underline">vayada</span>
             </p>
