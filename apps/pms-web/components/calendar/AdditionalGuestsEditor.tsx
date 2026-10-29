@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
-import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
+import CountryPicker, { NATIONALITY_PICKER_OPTIONS } from "@/components/CountryPicker";
 import PhoneNumberInput, { phoneToE164 } from "@/components/PhoneNumberInput";
 import { useTranslation } from "@/lib/i18n";
 
@@ -38,6 +38,8 @@ type Props = {
   guests: AdditionalGuestDraft[];
   onChange: (guests: AdditionalGuestDraft[]) => void;
   defaultPhoneCountry: string;
+  /** Listed first in the phone and nationality pickers: guest 1's, the property's (VAY-2417). */
+  suggestedCountries: readonly string[];
   /** The selected rooms' places on their busiest night; 0 until a room is chosen. Adding stops at it
    * and the booking can't be created above it (VAY-2365/2366). */
   guestCapacity: number;
@@ -53,6 +55,7 @@ export default function AdditionalGuestsEditor({
   guests,
   onChange,
   defaultPhoneCountry,
+  suggestedCountries,
   guestCapacity,
   partySize,
   focusGuest,
@@ -61,6 +64,7 @@ export default function AdditionalGuestsEditor({
 }: Props) {
   const { t } = useTranslation();
   const capacityHint = useId();
+  const nationalityId = useId();
   const nextKey = useRef(1);
   const firstNames = useRef(new Map<number, HTMLInputElement>());
   // A new guest's first name takes focus, also when the full rooms disable "+ Add guest".
@@ -159,18 +163,31 @@ export default function AdditionalGuestsEditor({
                 onChange={(next) =>
                   update(guest.key, { phoneCountry: next.country, phone: next.number })
                 }
+                suggestedCountries={suggestedCountries}
                 labelClassName="block text-xs font-medium text-gray-700"
                 inputClassName={inputClass}
               />
-              <NationalitySelect
-                label={t("calendar.targetManualBooking.guestNationality", { number })}
-                value={guest.countryCode}
-                onChange={(countryCode) => update(guest.key, { countryCode })}
-                placeholder={t("calendar.targetManualBooking.searchNationality")}
-                containerClassName="space-y-1"
-                labelClassName={labelClass}
-                inputClassName={inputClass}
-              />
+              <div>
+                <label
+                  htmlFor={`${nationalityId}-${guest.key}`}
+                  className="block text-xs font-medium text-gray-700"
+                >
+                  {t("calendar.targetManualBooking.guestNationality", { number })}
+                </label>
+                <CountryPicker
+                  id={`${nationalityId}-${guest.key}`}
+                  label={t("calendar.targetManualBooking.guestNationality", { number })}
+                  options={NATIONALITY_PICKER_OPTIONS}
+                  value={guest.countryCode}
+                  onChange={(countryCode) => update(guest.key, { countryCode })}
+                  placeholder={t("common.countryPicker.choose")}
+                  suggested={suggestedCountries}
+                  display="name"
+                  clearable
+                  className="mt-1"
+                  triggerClassName={inputClass}
+                />
+              </div>
               <button
                 type="button"
                 onClick={() => onChange(guests.filter((item) => item.key !== guest.key))}

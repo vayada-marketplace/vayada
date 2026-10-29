@@ -259,31 +259,46 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
     amountDecimal: "150.00",
   });
 
-  // Nationality is a searchable country list that stores the ISO alpha-2 code.
-  const nationality = dialog.getByLabel("Nationality");
-  await expect(nationality).toHaveAttribute("placeholder", "Search country");
-  await expect(dialog.locator('datalist option[value="Germany"]')).toHaveAttribute(
-    "label",
-    "🇩🇪 DE",
-  );
-  await nationality.fill("Germany");
-  await nationality.blur();
+  // Nationality and the phone code share one searchable country picker with SVG flags; the
+  // nationality is stored as its ISO alpha-2 code (VAY-2417).
+  const nationality = dialog.getByRole("button", { name: "Nationality", exact: true });
+  await expect(nationality).toHaveText("Choose a country");
+  await nationality.click();
+  const nationalitySearch = dialog.getByRole("combobox", {
+    name: "Search country, nationality or code",
+  });
+  await expect(nationalitySearch).toBeFocused();
+  // Esc closes the list, not the booking modal.
+  await nationalitySearch.press("Escape");
+  await expect(nationalitySearch).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await nationality.click();
+  await nationalitySearch.fill("German");
+  const firstMatch = dialog.getByRole("option").first();
+  await expect(firstMatch).toContainText("Germany");
+  await expect(firstMatch.locator(".fi.fi-de")).toBeVisible();
+  await nationalitySearch.press("Enter");
+  await expect(nationality).toContainText("Germany");
   await dialog.getByRole("textbox", { name: "First Name *" }).fill("Ada");
   await dialog.getByRole("textbox", { name: "Last Name *" }).fill("Lovelace");
   await dialog.getByRole("textbox", { name: "Email *" }).fill("ada@example.com");
 
   // Phone dial code defaults to the property's country (DE in the shared profile mock);
   // a pasted international number switches the code, and the request carries E.164.
-  const dialCode = dialog.getByLabel("Phone country code");
-  await expect(dialCode).toHaveValue("DE");
-  await expect(dialCode.locator("option:checked")).toHaveText("Germany 🇩🇪 +49");
+  const dialCode = dialog.getByRole("button", { name: "Phone country code", exact: true });
+  await expect(dialCode).toHaveAttribute("value", "DE");
+  await expect(dialCode).toContainText("+49");
   const phone = dialog.getByRole("textbox", { name: "Phone" });
   await phone.fill("+62 812 3456 7890");
   await phone.blur();
-  await expect(dialCode).toHaveValue("ID");
+  await expect(dialCode).toHaveAttribute("value", "ID");
   await expect(phone).toHaveValue("0812-3456-7890");
-  await dialCode.selectOption("DE");
+  await dialCode.click();
+  await dialog.getByRole("combobox", { name: "Search country or dial code" }).fill("+49");
+  await dialog.getByRole("combobox", { name: "Search country or dial code" }).press("Enter");
+  await expect(dialCode).toHaveAttribute("value", "DE");
   await phone.fill("089 1234567");
+  await expect(dialog.getByText("Saved as +49 89 1234567")).toBeVisible();
 
   // Additional guests are booking-level cards, up to the rooms' places (VAY-2365).
   await dialog.getByRole("button", { name: "+ Add guest" }).click();

@@ -18,6 +18,17 @@ function previewFor(input: PmsManualBookingPreviewInput): PmsManualBookingPrevie
 // prettier-ignore
 function render(canRecordPaidPayment = false) { return renderToStaticMarkup(createElement(TargetManualBookingModal, { roomTypes, rooms, canRecordPaidPayment, onSubmit: vi.fn(), onClose: vi.fn() })); }
 
+/** Opens a country picker, searches and presses Enter, which picks the first match (VAY-2417). */
+function pickCountry(view: ReactTestRenderer, label: string, query: string) {
+  const trigger = view.root.findByProps({ "aria-label": label, "aria-haspopup": "listbox" });
+  act(() => trigger.props.onClick());
+  const search = view.root.findByProps({ role: "combobox" });
+  act(() => search.props.onChange({ target: { value: query } }));
+  act(() =>
+    search.props.onKeyDown({ key: "Enter", preventDefault: vi.fn(), stopPropagation: vi.fn() }),
+  );
+}
+
 async function settlePreview() {
   await act(async () => {
     vi.advanceTimersByTime(250);
@@ -517,7 +528,8 @@ describe("target manual booking fields", () => {
     // prettier-ignore
     await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, onSubmit: vi.fn(), onClose: vi.fn() })); });
     const dialCode = () => view.root.findByProps({ "aria-label": "Phone country code" });
-    act(() => dialCode().props.onChange({ target: { value: "GB" } }));
+    pickCountry(view, "Phone country code", "United Kingdom");
+    expect(dialCode().props.value).toBe("GB");
     await act(async () => resolveCountry("ID"));
     expect(dialCode().props.value).toBe("GB");
     act(() => view.unmount());
@@ -746,7 +758,26 @@ describe("target manual booking fields", () => {
   });
 
   // prettier-ignore
-  it("submits the searchable nationality as an ISO code", async () => { vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview); const onSubmit = vi.fn().mockResolvedValue({}); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const nationality = view.root.findAllByType("input").find((input) => input.props.list)!; expect(nationality.props.placeholder).toBe("Search country"); expect(view.root.findByType("datalist").findAllByType("option").some((option) => option.props.value === "Germany" && option.props.label === "🇩🇪 DE")).toBe(true); expect(view.root.findAllByType("input").some((input) => input.props.name === "countryCode")).toBe(false); act(() => nationality.props.onChange({ target: { value: "Germany" } })); await act(async () => { await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() }); }); expect(onSubmit.mock.calls[0]![0].guest.countryCode).toBe("DE"); });
+  it("picks the nationality from the shared country picker and submits its ISO code", async () => {
+    vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview);
+    const onSubmit = vi.fn().mockResolvedValue({});
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); });
+    await settlePreview();
+    expect(view.root.findAllByType("datalist")).toEqual([]);
+    expect(view.root.findAllByType("select").some((select) => select.props["aria-label"] === "Phone country code")).toBe(false);
+    // The property's country is suggested first, for phone and nationality alike.
+    act(() => view.root.findByProps({ "aria-label": "Nationality", "aria-haspopup": "listbox" }).props.onClick());
+    expect(view.root.findAllByProps({ role: "option" })[0]!.findByProps({ "aria-hidden": "true" }).props.className).toContain("fi-id");
+    act(() => view.root.findByProps({ role: "combobox" }).props.onKeyDown({ key: "Escape", preventDefault: vi.fn(), stopPropagation: vi.fn() }));
+    pickCountry(view, "Nationality", "German");
+    expect(view.root.findByProps({ "aria-label": "Nationality", "aria-haspopup": "listbox" }).props.value).toBe("DE");
+    await act(async () => {
+      await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(onSubmit.mock.calls[0]![0].guest.countryCode).toBe("DE");
+  });
 
   // prettier-ignore
   it("cannot create from stale evidence after the current preview fails", async () => { let fail = false; const onSubmit = vi.fn(); vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) => { if (fail) throw new Error("Preview failed."); return previewFor(input); }); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const adults = view.root.findByProps({ "aria-label": "Room 1 adults" }); fail = true; act(() => adults.props.onChange({ target: { value: "3" } })); await act(async () => view.root.findByProps({ "aria-label": "Room 1 adults" }).props.onChange({ target: { value: "1" } })); await settlePreview(); expect(JSON.stringify(view.toJSON())).toContain("Couldn't calculate pricing."); expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true); await act(async () => view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() })); expect(onSubmit).not.toHaveBeenCalled(); });
