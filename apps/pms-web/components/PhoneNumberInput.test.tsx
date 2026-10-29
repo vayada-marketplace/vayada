@@ -87,7 +87,8 @@ describe("PhoneNumberInput", () => {
       render(number)
         .view.root.findAll((node) => node.type === "p")
         .map((node) => node.children.join(""));
-    expect(saved("0151 23456789")).toEqual(["Saved as +49 151 23456789"]);
+    // libphonenumber's own grouping of +4915123456789.
+    expect(saved("0151 23456789")).toEqual(["Saved as +49 1512 3456789"]);
     expect(saved("12")).toEqual([]);
     expect(saved("")).toEqual([]);
   });
