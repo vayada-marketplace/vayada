@@ -43,7 +43,7 @@ export default function Toast({
       aria-atomic="true"
       // Above the privacy settings pill and the floating Map button on a phone, and over any
       // open dialog.
-      className="pointer-events-none fixed inset-x-4 bottom-[calc(7.5rem+var(--fixed-bottom-bar,0px))] z-[110] flex justify-center md:bottom-8"
+      className="pointer-events-none fixed inset-x-4 bottom-[calc(7.5rem+var(--fixed-bottom-bar,0px))] z-[110] flex justify-center lg:bottom-8"
     >
       {toast && (
         <div

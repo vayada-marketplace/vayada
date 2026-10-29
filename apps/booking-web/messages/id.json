@@ -269,25 +269,12 @@
     "noDateNeeded": "Tidak perlu tanggal",
     "notOnYourDates": "Tidak tersedia pada hari-hari menginap Anda.",
     "dayOn": "{name} pada {day}",
-    "badgeDay": "Hari",
-    "badgeStay": "Inap",
     "chooseADayShort": "Pilih hari",
-    "onArrival": "Saat kedatangan",
-    "onDeparture": "Saat keberangkatan",
-    "anytimeShort": "Kapan saja",
     "stayTotalLabel": "Total masa inap Anda",
     "chooseDayForTotal": "Pilih hari untuk melihat total Anda",
-    "totalIncludes": "total, sudah termasuk pajak & biaya",
     "continueWithoutExtras": "Lanjut tanpa ekstra",
     "continueToDetails": "Lanjut ke data Anda",
-    "chooseDayFor": "Pilih hari untuk {name}, atau hapus.",
-    "yourExtrasCount": "Ekstra Anda ({count})",
-    "yourExtras": "Ekstra Anda",
-    "extrasTotal": "Total ekstra",
-    "toSchedule": "{count} perlu dijadwalkan",
-    "showExtras": "Tampilkan ekstra Anda",
-    "closeExtras": "Tutup ekstra Anda",
-    "removeExtra": "Hapus {name} dari ekstra Anda"
+    "chooseDayFor": "Pilih hari untuk {name}, atau hapus."
   },
   "book": {
     "guestInformation": "Informasi Tamu",
@@ -897,6 +884,7 @@
       "discount": "Diskon",
       "total": "Total",
       "includes": "Termasuk pajak & biaya",
+      "details": "Detail",
       "hold": "Harga ditahan untuk Anda selama {time} menit",
       "expired": "Harga tidak lagi ditahan",
       "instant": "Konfirmasi instan lewat email",
@@ -1022,8 +1010,6 @@
     "empty": "Kami belum menambahkan rekomendasi."
   },
   "extrasRooms": {
-    "title": "{count, plural, one {Kamar Anda} other {# kamar Anda}}",
-    "roomTitle": "Kamar {number} · {guests}",
     "change": "Ubah",
     "changeRoom": "Ubah Kamar {number}",
     "remove": "Hapus",

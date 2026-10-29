@@ -270,25 +270,12 @@
     "noDateNeeded": "Kein Datum nötig",
     "notOnYourDates": "An den Tagen Ihres Aufenthalts nicht verfügbar.",
     "dayOn": "{name} am {day}",
-    "badgeDay": "Tag",
-    "badgeStay": "Aufenthalt",
     "chooseADayShort": "Tag wählen",
-    "onArrival": "Bei Anreise",
-    "onDeparture": "Bei Abreise",
-    "anytimeShort": "Jederzeit",
     "stayTotalLabel": "Gesamtpreis Ihres Aufenthalts",
     "chooseDayForTotal": "Wählen Sie einen Tag, um den Gesamtpreis zu sehen",
-    "totalIncludes": "insgesamt, inkl. Steuern & Gebühren",
     "continueWithoutExtras": "Ohne Extras weiter",
     "continueToDetails": "Weiter zu Ihren Angaben",
-    "chooseDayFor": "Wählen Sie einen Tag für {name} oder entfernen Sie es.",
-    "yourExtrasCount": "Ihre Extras ({count})",
-    "yourExtras": "Ihre Extras",
-    "extrasTotal": "Extras gesamt",
-    "toSchedule": "{count} noch einzuplanen",
-    "showExtras": "Ihre Extras anzeigen",
-    "closeExtras": "Ihre Extras schließen",
-    "removeExtra": "{name} aus Ihren Extras entfernen"
+    "chooseDayFor": "Wählen Sie einen Tag für {name} oder entfernen Sie es."
   },
   "book": {
     "guestInformation": "Gastinformationen",
@@ -898,6 +885,7 @@
       "discount": "Rabatt",
       "total": "Gesamt",
       "includes": "Inkl. Steuern und Gebühren",
+      "details": "Details",
       "hold": "Preis für Sie reserviert: noch {time} Min.",
       "expired": "Preis nicht mehr reserviert",
       "instant": "Sofortige Bestätigung per E-Mail",
@@ -1023,8 +1011,6 @@
     "empty": "Wir haben noch keine Tipps hinzugefügt."
   },
   "extrasRooms": {
-    "title": "{count, plural, one {Ihr Zimmer} other {Ihre # Zimmer}}",
-    "roomTitle": "Zimmer {number} · {guests}",
     "change": "Ändern",
     "changeRoom": "Zimmer {number} ändern",
     "remove": "Entfernen",

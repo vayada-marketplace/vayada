@@ -53,7 +53,6 @@ function render(
           notice: null,
           beforeYouBook: null,
           confirm: null,
-          onBack: () => {},
         }),
       }),
     ),

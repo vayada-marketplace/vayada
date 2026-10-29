@@ -305,9 +305,10 @@ for (const width of [1440, 390]) {
     const total = page.getByRole("status", { name: "Your stay total" });
     await expect(total).toContainText("€268");
     await expect(extras).toContainText("€18 / person / night");
-    // VAY-2391: the sticky bar; without extras it goes on without them.
-    await expect(page.getByRole("button", { name: "Continue without extras" })).toBeVisible();
-    await expect(page.getByText(/Your extras \(/)).toHaveCount(0);
+    // VAY-2416: "Your stay" carries Continue; without extras it goes on without them.
+    const stay = page.getByRole("complementary", { name: "Your stay" });
+    await expect(stay.getByRole("button", { name: "Continue without extras" })).toBeVisible();
+    await expect(stay).not.toContainText("Garden breakfast");
     await extras.getByRole("button", { name: "Add Garden breakfast" }).click();
     // Every night of the stay, nothing to choose.
     await expect(extras).toContainText("Every day of your stay2 nights");
@@ -316,7 +317,7 @@ for (const width of [1440, 390]) {
     const next = page.getByRole("button", { name: "Continue to your details" });
     // Without its day the extra can't be priced: the total asks for it instead of loading.
     await expect(total).toHaveText("Choose a day to see your total");
-    await expect(page.getByText("1 to schedule")).toBeVisible();
+    await expect(stay).toContainText("Late check-outChoose a day");
     // Continue says what's missing and marks the card.
     await next.click();
     await expect(page.getByText("Choose a day for Late check-out, or remove it.")).toBeVisible();
@@ -328,13 +329,14 @@ for (const width of [1440, 390]) {
     );
     await extras.getByRole("button", { name: "Late check-out on Sat 7 Nov" }).click();
     await expect(total).toContainText("€370");
-    await expect(page.getByText("Your extras (2)")).toBeVisible();
-    await page.getByRole("button", { name: /^Show your extras/ }).click();
-    const list = page.getByRole("dialog", { name: "Your extras" });
-    await expect(list.getByRole("listitem")).toHaveText([/Garden breakfast/, /Late check-out/]);
-    await expect(list).toContainText("Extras total€102");
+    // Each extra with its price in the card; on a phone behind "Details".
+    await expect(stay).toContainText("Garden breakfast€72");
+    await expect(stay).toContainText("Late check-out€30");
+    await expect(next).toBeInViewport();
+    if (width === 390) await stay.getByRole("button", { name: "Details", exact: true }).click();
+    await expect(stay.getByText("Garden breakfast")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`extras-list-${width}.png`) });
-    await list.getByRole("button", { name: "Close your extras" }).click();
+    if (width === 390) await stay.getByRole("button", { name: "Details", exact: true }).click();
     await page.screenshot({ path: testInfo.outputPath(`extras-${width}.png`), fullPage: true });
     await next.click();
 
@@ -355,7 +357,7 @@ for (const width of [1440, 390]) {
     await page.screenshot({ path: testInfo.outputPath(`details-${width}.png`), fullPage: true });
     await page.goBack();
     await expect(page).toHaveURL(/[?&]step=extras/);
-    await expect(page.getByText("Your extras (2)")).toBeVisible();
+    await expect(stay).toContainText("Late check-out€30");
     await page.goForward();
     await page.getByRole("button", { name: "Continue to review" }).click();
 
@@ -542,13 +544,15 @@ test("prices the stay again without extras when an extra's notice ran out meanwh
   await extras.getByRole("button", { name: "Add Garden breakfast" }).click();
   // The extra is dropped, the extras load again and the stay is priced without them.
   await expect.poll(() => catalogues).toBeGreaterThan(loaded);
-  await expect(page.getByText("Your extras (1)")).toHaveCount(0);
+  await expect(page.getByRole("complementary", { name: "Your stay" })).not.toContainText(
+    "Garden breakfast",
+  );
   await expect(total).toContainText("€268");
   await expect(page.getByText("We couldn't price this selection")).toHaveCount(0);
 });
 
-// VAY-2391: six extras, each scheduled its own way. The sticky bar keeps Continue in view on a
-// 1080p screen, and the list in it orders the extras by their day.
+// VAY-2391: six extras, each scheduled its own way. "Your stay" keeps Continue in view on a 1080p
+// screen (VAY-2416) and lists each extra with its price.
 test("shows when each extra happens and keeps Continue in view with six extras", async ({
   page,
 }, testInfo) => {
@@ -626,13 +630,14 @@ test("shows when each extra happens and keeps Continue in view with six extras",
   ]);
   await expect(next).toHaveText("Continue to your details");
   await expect(next).toBeInViewport();
-  await page.getByRole("button", { name: /^Show your extras/ }).click();
-  await expect(page.getByRole("dialog", { name: "Your extras" }).getByRole("listitem")).toHaveText([
-    /^—.*Welcome bottle/,
-    /^6.*Airport transfer.*On arrival/,
-    /^6.*Sunset dinner/,
-    /^8.*Drop-off.*On departure/,
-  ]);
+  const stay = page.getByRole("complementary", { name: "Your stay" });
+  for (const line of [
+    "Airport transfer€30",
+    "Sunset dinner€90",
+    "Welcome bottle€35",
+    "Drop-off€25",
+  ])
+    await expect(stay).toContainText(line);
   await page.screenshot({ path: testInfo.outputPath("extras-six-1080p.png") });
 });
 
@@ -640,7 +645,11 @@ test("skips Extras for a hotel without extras", async ({ page }) => {
   await mockFlow(page, { extras: false });
   await page.goto(STAY);
   await expect(page).toHaveURL(/[?&]step=details/);
-  const steps = page.locator("main").getByText(/^(Rooms|Extras|Details|Review & pay)$/);
+  // Visible only: "Your stay" has a phones-only "Details" button.
+  const steps = page
+    .locator("main")
+    .getByText(/^(Rooms|Extras|Details|Review & pay)$/)
+    .filter({ visible: true });
   await expect(steps).toHaveText(["Rooms", "Details", "Review & pay"]);
   await page.getByRole("button", { name: "Back to rooms" }).click();
   await expect(page).toHaveURL(/\/\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2$/);
