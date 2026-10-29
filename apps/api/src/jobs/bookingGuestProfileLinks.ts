@@ -82,8 +82,6 @@ export function profileValuesFromBooking(
   };
 }
 
-export type GuestProfileLinkPool = Pick<pg.Pool, "connect" | "end">;
-
 export type GuestProfileLinkStore = {
   /** Links or re-applies up to `limit` booking guests; failed rows are retried on the next run. */
   linkBatch(limit: number): Promise<{ linked: number; failed: number }>;
@@ -93,14 +91,12 @@ export type GuestProfileLinkStore = {
 export function createPgGuestProfileLinkStore(config: {
   connectionString: string;
   max?: number;
-  pool?: GuestProfileLinkPool;
   onRowError?: (bookingGuestId: string, error: unknown) => void;
 }): GuestProfileLinkStore {
   if (!config.connectionString.trim()) {
     throw new Error("Guest profile link connectionString must not be empty");
   }
-  const pool =
-    config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
+  const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
 
   return {
     async linkBatch(limit) {
