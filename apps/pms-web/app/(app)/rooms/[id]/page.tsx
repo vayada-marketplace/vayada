@@ -28,7 +28,12 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const { id } = use(params);
   const { t } = useTranslation();
   const router = useRouter();
-  const pricesFirst = useSearchParams().get("tab") === "prices";
+  const searchParams = useSearchParams();
+  const pricesFirst = searchParams.get("tab") === "prices";
+  // The calendar's "Edit prices & rules" opens the Prices tab on one night (VAY-2411).
+  const priceDate = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get("date") ?? "")
+    ? searchParams.get("date")!
+    : undefined;
   // The Prices tab mounts once opened and stays mounted, so switching tabs or saving room details keeps
   // unsaved prices.
   const [tab, setTab] = useState<RoomTab>(pricesFirst ? "prices" : "details");
@@ -255,6 +260,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         <div hidden={tab !== "prices"}>
           <RoomPricesTab
             roomTypeId={id}
+            date={priceDate}
             refresh={pricesRefresh}
             // The strip shows the stale-prices banner only while its own read succeeds.
             staleShown={pricesNeedPublishing && stalePrices && !propertyPrices.error}

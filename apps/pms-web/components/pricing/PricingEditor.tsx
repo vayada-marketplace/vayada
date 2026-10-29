@@ -68,7 +68,7 @@ type NewRoom = { take: MutableRefObject<(() => NewRoomPrices | null) | null>; ac
  * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
  * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work; `staleShown`: the
  * page already warns that the prices need saving again, so the editor does not repeat it. */
-export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover, staleShown = false }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void; staleShown?: boolean }) {
+export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, date, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover, staleShown = false }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; date?: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void; staleShown?: boolean }) {
   const manualMethods = useLoadedPricingManualMethods(client);
   const cardReadiness = useLoadedPricingCardReadiness(client);
   const onPrices = newRoom?.onPrices;
@@ -81,8 +81,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [optionOpen, setOptionOpen] = useState<string | null>(null), [childrenOpen, setChildrenOpen] = useState(false);
   const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null), [deleteError, setDeleteError] = useState<unknown>(null);
   // The guest preview's sample stay (a picked calendar night, or the next weekend), the calendar's month and option.
-  const [stayStart, setStayStart] = useState<string | null>(null), [shownMonth, setShownMonth] = useState<string | null>(null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
-  const [calendarAdults, setCalendarAdults] = useState<number | null>(null), [selection, setSelection] = useState<NightSelection | null>(null);
+  // `date` (from the calendar, VAY-2411) opens the price calendar on that night, picked as onPick picks it.
+  const [stayStart, setStayStart] = useState<string | null>(date ?? null), [shownMonth, setShownMonth] = useState<string | null>(date?.slice(0, 7) ?? null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
+  const [calendarAdults, setCalendarAdults] = useState<number | null>(null), [selection, setSelection] = useState<NightSelection | null>(date ? { from: date, to: date } : null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   // A first price's ways to pay and currency from Payment settings (undefined: loading; methods null: unknown), and a
   // season window to open once "Add a season" has added the first prices (VAY-2188).
