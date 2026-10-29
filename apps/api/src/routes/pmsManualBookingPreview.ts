@@ -79,7 +79,7 @@ export async function registerPmsManualBookingPreviewRoutes(
         if (!context) fail(404, "property_not_found");
         // The schedule and limits let the modal work out each quantity (VAY-2417).
         // prettier-ignore
-        const addOns = context.addonItems.filter((addon) => addon.status === "active").map(({ addonItemId, name, description, price, currency, category, pricingModel, scheduleMode, maxGuests, maxQuantity }) => ({ addonItemId, name, description, price, currency, category, pricingModel, scheduleMode, maxGuests: maxGuests ?? null, maxQuantity: addonMaxQuantity(maxQuantity) }));
+        const addOns = context.addonItems.filter((addon) => addon.status === "active").map(({ addonItemId, name, description, price, currency, category, pricingModel, scheduleMode, maxGuests, maxQuantity }) => ({ addonItemId, name, description, price, currency, category, pricingModel, scheduleMode, maxGuests: maxGuests && maxGuests > 0 ? maxGuests : null, maxQuantity: addonMaxQuantity(maxQuantity) }));
         return reply.send({
           contractVersion: "pms-manual-booking.v1",
           addOns,

@@ -258,13 +258,13 @@ export function addonMaxQuantity(value: number | null | undefined): number {
   return Number.isInteger(value) && value! > 0 ? value! : 1;
 }
 
-/** Items of a per-stay or per-night add-on the party needs: enough groups of "up to N guests" for
- * everyone (vehicles for a transfer), otherwise the add-on's own most per booking (VAY-2417). */
+/** Items the party needs: a transfer with a group size ("up to N guests") takes enough vehicles for
+ * everyone; anything else, the add-on's own most per booking (VAY-2417). */
 function addonItemLimit(
-  addon: Pick<BookingAddonItem, "maxGuests" | "maxQuantity">,
+  addon: Pick<BookingAddonItem, "category" | "maxGuests" | "maxQuantity">,
   guests: number,
 ): number {
-  return addon.maxGuests && addon.maxGuests > 0
+  return addon.category === "transport" && addon.maxGuests && addon.maxGuests > 0
     ? Math.max(1, Math.ceil(guests / addon.maxGuests))
     : addonMaxQuantity(addon.maxQuantity);
 }
@@ -287,22 +287,36 @@ function unitFactor(
     .map((stay) => stay.checkOut)
     .sort()
     .at(-1);
-  // A one-off add-on happens once, or on the arrival day, the departure day or both, e.g. a
-  // transfer's pickup and drop-off (VAY-2417).
+  // Guests starting or ending their stay that day; a transfer carries only them.
+  const travelling = (date: string) =>
+    stays
+      .filter((stay) => stay.checkIn === date || stay.checkOut === date)
+      .reduce((sum, stay) => sum + stay.adults + stay.children, 0);
+  // The party is everyone staying at once, so a room move doesn't count its guests twice.
+  const party = Math.max(0, ...Array.from(expectedDates, occupancy));
+  // A one-off add-on happens once; a transfer may instead be dated on the arrival day, the
+  // departure day or both: its pickup and drop-off (VAY-2417).
   const oneOff =
     (units.length === 1 && units[0]!.serviceDate === null) ||
-    (units.length > 0 &&
+    (addon.category === "transport" &&
+      units.length > 0 &&
       units.length <= 2 &&
       units.every((unit) => unit.serviceDate === arrival || unit.serviceDate === departure));
   const perPerson = addon.pricingModel === "per_guest" || addon.pricingModel === "per_guest_night";
-  // No more than the party needs: one per guest, or items for the whole party (VAY-2417).
-  if (selection.packageCount > (perPerson ? 1 : addonItemLimit(addon, totalGuests)))
+  // No more than the party needs: one per guest, or the items above (VAY-2417).
+  if (selection.packageCount > (perPerson ? 1 : addonItemLimit(addon, party)))
     fail(422, "invalid_addon_selection", "packageCount");
   let valid = new Set(dates).size === dates.length;
   if (addon.pricingModel === "per_stay")
     valid &&= oneOff && units.every((unit) => unit.guestCount === null);
   if (addon.pricingModel === "per_guest")
-    valid &&= oneOff && units.every((unit) => !!unit.guestCount && unit.guestCount <= totalGuests);
+    valid &&=
+      oneOff &&
+      units.every(
+        (unit) =>
+          !!unit.guestCount &&
+          unit.guestCount <= (unit.serviceDate ? travelling(unit.serviceDate) : totalGuests),
+      );
   if (addon.pricingModel === "per_night")
     valid &&=
       dates.length === expectedDates.size &&

@@ -28,7 +28,8 @@ type State = {
   amountsMinor?: string[];
   propertyCurrency?: string | null;
   roomTypeCurrency?: string | null;
-  /** Every add-on's group size and most per booking (VAY-2417). */
+  /** Every add-on's category, group size and most per booking (VAY-2417). */
+  category?: string;
   maxGuests?: number | null;
   maxQuantity?: number;
 };
@@ -190,8 +191,7 @@ describe("target manual-booking preview", () => {
   });
 
   it("caps add-on quantities at what the party needs (VAY-2417)", async () => {
-    // Six guests. Groups of up to two need three items, whatever the add-on's own most; without a
-    // group size, the add-on's most per booking is the limit.
+    // At most five people stay at once (2 July), although the three rooms hold six in all.
     const scope = { propertyId, organizationId };
     const preview = (addOn: unknown, state: Partial<State> = {}) =>
       calculateManualBookingPreview(
@@ -208,10 +208,15 @@ describe("target manual-booking preview", () => {
       status: 422,
       body: { code: "invalid_addon_selection", field: "packageCount" },
     };
-    await expect(preview(perStay(3), { maxGuests: 2 })).resolves.toBeTruthy();
-    await expect(preview(perStay(4), { maxGuests: 2 })).rejects.toMatchObject(tooMany);
-    await expect(preview(perStay(3), { maxQuantity: 3 })).resolves.toBeTruthy();
-    await expect(preview(perStay(4), { maxQuantity: 3 })).rejects.toMatchObject(tooMany);
+    // A transfer for groups of up to two: three vehicles carry five, whatever its own most.
+    const transfer = { category: "transport", maxGuests: 2, maxQuantity: 1 };
+    await expect(preview(perStay(3), transfer)).resolves.toBeTruthy();
+    await expect(preview(perStay(4), transfer)).rejects.toMatchObject(tooMany);
+    // Anything else keeps the hotel's most per booking, group size or not.
+    await expect(preview(perStay(3), { maxQuantity: 3, maxGuests: 2 })).resolves.toBeTruthy();
+    await expect(preview(perStay(4), { maxQuantity: 3, maxGuests: 2 })).rejects.toMatchObject(
+      tooMany,
+    );
     // A per-person add-on counts the guests, never extra packages.
     const [, perGuest, , perGuestNight] = command().addOns;
     for (const addOn of [perGuest, perGuestNight])
@@ -220,11 +225,15 @@ describe("target manual-booking preview", () => {
       ).rejects.toMatchObject(tooMany);
   });
 
-  it("prices a one-off add-on on the arrival day, the departure day or both (VAY-2417)", async () => {
-    // The booking runs from 30 June (room 1) to 4 July (room 3): a transfer's pickup and drop-off.
+  it("prices a transfer's pickup on the arrival day and drop-off on the departure day (VAY-2417)", async () => {
+    // The booking runs from 30 June (room 1, one guest) to 4 July (room 3, three guests).
     const scope = { propertyId, organizationId };
-    const preview = (addOn: unknown) =>
-      calculateManualBookingPreview(scope, { ...command(), addOns: [addOn] }, ports({ reads: [] }));
+    const preview = (addOn: unknown, category = "transport") =>
+      calculateManualBookingPreview(
+        scope,
+        { ...command(), addOns: [addOn] },
+        ports({ reads: [], category }),
+      );
     const units = (...serviceDates: (string | null)[]) =>
       serviceDates.map((serviceDate) => ({ serviceDate, guestCount: null }));
     const transfer = (serviceUnits: unknown) => ({
@@ -238,17 +247,23 @@ describe("target manual-booking preview", () => {
     await expect(preview(transfer(units("2027-07-04")))).resolves.toMatchObject({
       addOns: [{ total: { amountDecimal: "20.00" } }],
     });
-    // Per guest: each day counts its guests.
-    await expect(
-      preview({
-        addonId: addonIds[1],
-        packageCount: 1,
-        serviceUnits: [
-          { serviceDate: "2027-06-30", guestCount: 6 },
-          { serviceDate: "2027-07-04", guestCount: 2 },
-        ],
-      }),
-    ).resolves.toMatchObject({ addOns: [{ total: { amountDecimal: "40.00" } }] });
+    // Per guest: each trip counts only the guests arriving or leaving that day.
+    const perGuest = (arriving: number, leaving: number) => ({
+      addonId: addonIds[1],
+      packageCount: 1,
+      serviceUnits: [
+        { serviceDate: "2027-06-30", guestCount: arriving },
+        { serviceDate: "2027-07-04", guestCount: leaving },
+      ],
+    });
+    await expect(preview(perGuest(1, 3))).resolves.toMatchObject({
+      addOns: [{ total: { amountDecimal: "20.00" } }],
+    });
+    const badUnits = {
+      status: 422,
+      body: { code: "invalid_addon_selection", field: "serviceUnits" },
+    };
+    await expect(preview(perGuest(2, 3))).rejects.toMatchObject(badUnits);
     for (const serviceUnits of [
       units("2027-07-01"),
       units("2027-06-30", "2027-06-30"),
@@ -256,10 +271,9 @@ describe("target manual-booking preview", () => {
       units("2027-06-30", "2027-07-04", "2027-07-04"),
       [],
     ])
-      await expect(preview(transfer(serviceUnits))).rejects.toMatchObject({
-        status: 422,
-        body: { code: "invalid_addon_selection", field: "serviceUnits" },
-      });
+      await expect(preview(transfer(serviceUnits))).rejects.toMatchObject(badUnits);
+    // Only a transfer has a pickup and a drop-off; other one-off add-ons stay undated.
+    await expect(preview(transfer(units("2027-06-30")), "dining")).rejects.toMatchObject(badUnits);
   });
 
   it("prices children by age band", async () => {
@@ -433,7 +447,7 @@ function ports(state: State): PmsManualBookingPreviewRoutesOptions {
       },
     },
     booking: {
-      async listAddonItemsByHotelId() { read("addons"); return { addonItems: addonIds.map((addonItemId, index) => ({ addonItemId, propertyId, name: `Add-on ${index + 1}`, description: "", category: "dining", price: ["10.00", "5.00", "4.00", "2.00"][index], currency: state.addonCurrency ?? "EUR", pricingModel: ["per_stay", "per_guest", "per_night", "per_guest_night"][index], scheduleMode: ["arrival", "guest_pick", "daily", "daily"][index], maxGuests: state.maxGuests ?? null, maxQuantity: state.maxQuantity ?? 2, status: "active" })), propertyPlan: {} } as any; },
+      async listAddonItemsByHotelId() { read("addons"); return { addonItems: addonIds.map((addonItemId, index) => ({ addonItemId, propertyId, name: `Add-on ${index + 1}`, description: "", category: state.category ?? "dining", price: ["10.00", "5.00", "4.00", "2.00"][index], currency: state.addonCurrency ?? "EUR", pricingModel: ["per_stay", "per_guest", "per_night", "per_guest_night"][index], scheduleMode: ["arrival", "guest_pick", "daily", "daily"][index], maxGuests: state.maxGuests ?? null, maxQuantity: state.maxQuantity ?? 2, status: "active" })), propertyPlan: {} } as any; },
     },
   };
 }
