@@ -44,6 +44,7 @@ import NightPopover from "@/components/calendar/NightPopover";
 import BookingPopover, { BlockPopover } from "@/components/calendar/BookingPopover";
 import type { PopoverAnchor } from "@/components/calendar/CalendarPopover";
 import { useShowPrices } from "@/components/calendar/useShowPrices";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -801,10 +802,9 @@ export default function CalendarPage() {
 
       {/* Desktop Calendar */}
       <div className="hidden md:flex flex-col flex-1 p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-2 mb-4">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">{t("calendar.title")}</h1>
+        <PageHeader
+          title={t("calendar.title")}
+          subtitle={
             <div className="relative inline-block">
               <button
                 type="button"
@@ -845,189 +845,197 @@ export default function CalendarPage() {
                 />
               )}
             </div>
-          </div>
-          {reorderMode ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-gray-700">
-                {t("calendar.reorderingRooms")}
-              </span>
-              <button
-                onClick={cancelReorder}
-                disabled={savingOrder}
-                className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {t("calendar.cancel")}
-              </button>
-              <button
-                onClick={saveReorder}
-                disabled={savingOrder || roomOrderNeedsRefresh || !hasUnsavedOrder}
-                className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {t("calendar.saveOrder")}
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={goToday}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                {t("calendar.today")}
-              </button>
-              <button
-                onClick={goPrev}
-                className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                &larr;
-              </button>
-              <button
-                onClick={goNext}
-                className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                &rarr;
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPrefill(null);
-                  setShowBlockModal(true);
-                }}
-                className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
-              >
-                {t("calendar.blockRoom")}
-              </button>
-              <button
-                type="button"
-                disabled={!MANUAL_BOOKINGS_AVAILABLE}
-                title={
-                  !MANUAL_BOOKINGS_AVAILABLE ? t("calendar.manualBookingUnavailable") : undefined
-                }
-                onClick={() => {
-                  setPrefill(null);
-                  setShowNewBookingModal(true);
-                }}
-                className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:cursor-not-allowed disabled:bg-gray-300"
-              >
-                {t("calendar.newBooking")}
-              </button>
-              {data && (
-                <div className="relative" ref={roomViewMenuRef}>
-                  <button
-                    onClick={() => setShowRoomViewMenu((v) => !v)}
-                    aria-label={t("calendar.roomViewMenu")}
-                    className="p-2 text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 6h16M4 12h16M4 18h16"
-                      />
-                    </svg>
-                  </button>
-                  {showRoomViewMenu && (
-                    <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden">
-                      <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-200">
-                        {t("calendar.view")}
-                      </div>
-                      <button
-                        onClick={() => switchView("timeline")}
-                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
-                          viewMode === "timeline"
-                            ? "bg-primary-50 text-primary-700 font-medium"
-                            : "text-gray-700 hover:bg-gray-50"
-                        }`}
+          }
+          actions={
+            reorderMode ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-gray-700">
+                  {t("calendar.reorderingRooms")}
+                </span>
+                <button
+                  onClick={cancelReorder}
+                  disabled={savingOrder}
+                  className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {t("calendar.cancel")}
+                </button>
+                <button
+                  onClick={saveReorder}
+                  disabled={savingOrder || roomOrderNeedsRefresh || !hasUnsavedOrder}
+                  className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {t("calendar.saveOrder")}
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={goToday}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  {t("calendar.today")}
+                </button>
+                <button
+                  onClick={goPrev}
+                  className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  &larr;
+                </button>
+                <button
+                  onClick={goNext}
+                  className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  &rarr;
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrefill(null);
+                    setShowBlockModal(true);
+                  }}
+                  className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  {t("calendar.blockRoom")}
+                </button>
+                <button
+                  type="button"
+                  disabled={!MANUAL_BOOKINGS_AVAILABLE}
+                  title={
+                    !MANUAL_BOOKINGS_AVAILABLE ? t("calendar.manualBookingUnavailable") : undefined
+                  }
+                  onClick={() => {
+                    setPrefill(null);
+                    setShowNewBookingModal(true);
+                  }}
+                  className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:cursor-not-allowed disabled:bg-gray-300"
+                >
+                  {t("calendar.newBooking")}
+                </button>
+                {data && (
+                  <div className="relative" ref={roomViewMenuRef}>
+                    <button
+                      onClick={() => setShowRoomViewMenu((v) => !v)}
+                      aria-label={t("calendar.roomViewMenu")}
+                      className="p-2 text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 6h16M4 12h10M4 18h16"
-                          />
-                        </svg>
-                        {t("calendar.viewTimeline")}
-                      </button>
-                      <button
-                        onClick={() => switchView("month")}
-                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
-                          viewMode === "month"
-                            ? "bg-primary-50 text-primary-700 font-medium"
-                            : "text-gray-700 hover:bg-gray-50"
-                        }`}
-                      >
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                          />
-                        </svg>
-                        {t("calendar.viewMonth")}
-                      </button>
-                      {data.rooms.length > 1 && (
-                        <>
-                          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-y border-gray-200">
-                            {t("calendar.roomView")}
-                          </div>
-                          <button
-                            onClick={enterReorderMode}
-                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
-                          >
-                            <svg
-                              className="w-4 h-4 text-gray-500"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M8 9l4-4 4 4m0 6l-4 4-4-4"
-                              />
-                            </svg>
-                            {t("calendar.reorderRooms")}
-                          </button>
-                        </>
-                      )}
-                      <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-y border-gray-200">
-                        {t("calendar.display")}
-                      </div>
-                      <div className="px-3 py-2 text-sm text-gray-700 flex items-center justify-between gap-3">
-                        <span id="calendar-show-prices">{t("calendar.showPrices")}</span>
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 6h16M4 12h16M4 18h16"
+                        />
+                      </svg>
+                    </button>
+                    {showRoomViewMenu && (
+                      <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden">
+                        <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-200">
+                          {t("calendar.view")}
+                        </div>
                         <button
-                          type="button"
-                          role="switch"
-                          aria-checked={showPrices}
-                          aria-labelledby="calendar-show-prices"
-                          onClick={() => setShowPrices(!showPrices)}
-                          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 ${showPrices ? "bg-primary-600" : "bg-gray-300"}`}
+                          onClick={() => switchView("timeline")}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
+                            viewMode === "timeline"
+                              ? "bg-primary-50 text-primary-700 font-medium"
+                              : "text-gray-700 hover:bg-gray-50"
+                          }`}
                         >
-                          <span
-                            className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${showPrices ? "translate-x-4" : "translate-x-0.5"}`}
-                          />
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 6h16M4 12h10M4 18h16"
+                            />
+                          </svg>
+                          {t("calendar.viewTimeline")}
                         </button>
+                        <button
+                          onClick={() => switchView("month")}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
+                            viewMode === "month"
+                              ? "bg-primary-50 text-primary-700 font-medium"
+                              : "text-gray-700 hover:bg-gray-50"
+                          }`}
+                        >
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                            />
+                          </svg>
+                          {t("calendar.viewMonth")}
+                        </button>
+                        {data.rooms.length > 1 && (
+                          <>
+                            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-y border-gray-200">
+                              {t("calendar.roomView")}
+                            </div>
+                            <button
+                              onClick={enterReorderMode}
+                              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                            >
+                              <svg
+                                className="w-4 h-4 text-gray-500"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 9l4-4 4 4m0 6l-4 4-4-4"
+                                />
+                              </svg>
+                              {t("calendar.reorderRooms")}
+                            </button>
+                          </>
+                        )}
+                        <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-y border-gray-200">
+                          {t("calendar.display")}
+                        </div>
+                        <div className="px-3 py-2 text-sm text-gray-700 flex items-center justify-between gap-3">
+                          <span id="calendar-show-prices">{t("calendar.showPrices")}</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={showPrices}
+                            aria-labelledby="calendar-show-prices"
+                            onClick={() => setShowPrices(!showPrices)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 ${showPrices ? "bg-primary-600" : "bg-gray-300"}`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${showPrices ? "translate-x-4" : "translate-x-0.5"}`}
+                            />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          }
+          className="mb-4"
+        />
 
         {reorderMode && (
           <div className="mb-4 px-4 py-2.5 bg-primary-50 border border-primary-200 rounded-lg text-xs text-primary-800">

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 // VAY-2320: a group too big for one room chooses its rooms one by one, mixing room types.
 /** A public offer key; its letter must be a hex digit, like the API's keys. */
@@ -130,4 +130,12 @@ export async function mockGroup(page: Page, stayRequests: URL[], paymentMethods 
       },
     });
   });
+}
+
+/** The room being chosen (VAY-2412): one tab per room, and its tab is selected. */
+export async function expectChoosing(page: Page, number: number, count: number) {
+  const tabs = page.getByTestId("room-tabs").getByRole("tab");
+  await expect(tabs).toHaveCount(count);
+  await expect(page.getByTestId(`room-tab-${number}`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("room-tabs").getByRole("tab", { selected: true })).toHaveCount(1);
 }

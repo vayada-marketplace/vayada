@@ -259,13 +259,24 @@ export default function RoomCard({
     if (inDetails) setDetailsOpen(false);
     action();
   };
+  // "6 Nov – 8 Nov · 2 nights" over the details' rates (VAY-2410); none for a malformed stay.
+  const checkOutTime = Date.parse(`${checkIn}T00:00:00Z`) + nights * 86_400_000;
+  const stayDates = Number.isNaN(checkOutTime)
+    ? null
+    : [
+        `${shortDate(checkIn, locale)} – ${shortDate(new Date(checkOutTime).toISOString().slice(0, 10), locale)}`,
+        tc("nights", { count: nights }),
+      ].join(" · ");
   const rates = (inDetails: boolean) => (
     <div className="border-t border-gray-100 pt-4">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-        {pick
-          ? t("selectRateForRoom", { number: pick.room, guests: guestsText })
-          : t("selectYourRate")}
-      </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          {pick
+            ? t("selectRateForRoom", { number: pick.room, guests: guestsText })
+            : t("selectYourRate")}
+        </p>
+        {inDetails && stayDates && <p className="text-xs text-gray-500">{stayDates}</p>}
+      </div>
       <div className="space-y-3">
         {shown.map((choice) => {
           const total = amount(choice);
@@ -386,7 +397,11 @@ export default function RoomCard({
               ? t("notAvailable")
               : current
                 ? t("pickRoom.continueWithPlace")
-                : t("selectThisRate")}
+                : inDetails && selected?.priced
+                  ? t("selectThisRateFor", {
+                      price: money(amount(selected)!, selected.priced.currency).label,
+                    })
+                  : t("selectThisRate")}
         </button>
       )}
       {pick && currentRate && !pick.allChosen && (

@@ -93,8 +93,8 @@ for (const width of [1440, 390]) {
     await notice.getByRole("button", { name: "Choose another room for room 2" }).click();
 
     await expect(page).toHaveURL(/\/(en)?\?checkIn=2026-11-10/);
-    await expect(page.getByTestId("room-pill-1")).toContainText("✓ Deluxe Double Room");
-    await expect(page.getByTestId("room-pill-2")).toContainText("choosing now");
+    await expect(page.getByTestId("room-tab-1")).toContainText("Deluxe Double Room");
+    await expect(page.getByTestId("room-tab-2")).toContainText("choosing");
     await expect(
       page.getByTestId("room-card-garden").getByRole("button", { name: "Select for Room 2" }),
     ).toBeVisible();
@@ -136,7 +136,7 @@ test("says when the rooms can't be priced and sends the group back to choose the
   await expect(notice).toBeVisible();
   await notice.getByRole("button", { name: "Choose another room" }).click();
   await expect(page).toHaveURL(/\/(en)?\?checkIn=2026-11-10.*rooms=2/);
-  await expect(page.getByTestId("room-pill-1")).toContainText("✓ Deluxe Double Room");
+  await expect(page.getByTestId("room-tab-1")).toContainText("Deluxe Double Room");
 });
 
 const groupBooking = {

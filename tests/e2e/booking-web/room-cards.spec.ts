@@ -408,3 +408,124 @@ test("shows a room's details with its choices, as the old page did", async ({ pa
   await expect(page).toHaveURL(new RegExp(`/(en/)?book\\?.*offer=${encodeURIComponent(key("c"))}`));
   await assertHealthy();
 });
+
+test("VAY-2410: shows a room's details wide, with a 5:4 photo and the rates pinned beside it", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await page.setViewportSize({ width: 1920, height: 960 });
+  await mockBookingApis(page);
+  await page.clock.setFixedTime(new Date("2026-10-14T08:00:00Z"));
+  await page.route("https://images.vayada.com/**", (route) =>
+    route.fulfill({ contentType: "image/png", body: PHOTO }),
+  );
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: {
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            roomTypeId: "villa",
+            name: "Garden House",
+            description:
+              "A restored merchant's house in the old town with a quiet courtyard pool, four bright " +
+              "bedrooms and an en-suite shower room for each of them. Step out into lanes full of " +
+              "cafés, small shops and museums, or walk two minutes from the back gate to the beach. " +
+              "The kitchen is fully equipped, the living room opens onto the courtyard, and the roof " +
+              "terrace looks over the town walls at sunset. Daily housekeeping is included.",
+            occupancy: { maxGuests: 8, maxAdults: 8, maxChildren: 4 },
+            images: ["courtyard", "bedroom", "pool"].map((name) => ({
+              url: `https://images.vayada.com/test/${name}.png`,
+              alt: name,
+            })),
+            size: { value: 79, unit: "sqm" },
+            category: "Villa",
+            bedrooms: 4,
+            bathrooms: 3,
+            amenities: Array.from({ length: 18 }, (_, index) => `Amenity ${index + 1}`),
+            offers: [
+              {
+                publicOfferKey: key("7"),
+                currency: "EUR",
+                mealPlan: "room_only",
+                cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+              },
+              {
+                publicOfferKey: key("8"),
+                currency: "EUR",
+                mealPlan: "room_only",
+                cancellation: { kind: "non_refundable" },
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  await mockStayPrices(
+    page,
+    { villa: { [key("7")]: "20000", [key("8")]: "18000" } },
+    { villa: { roomsLeft: 1 } },
+  );
+  await page.goto(STAY);
+  await page.getByTestId("room-card-villa").getByRole("button", { name: "View Details" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Garden House" });
+  const photo = dialog.getByRole("img", { name: "courtyard" });
+  const cta = dialog.getByRole("button", { name: "Select This Rate · €180" });
+  await expect(dialog.getByText("79 m² · Up to 8 guests · 4 bedrooms · 3 bathrooms")).toBeVisible();
+  await expect(dialog.getByText("6 Nov – 8 Nov · 2 nights")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Show all 18 amenities" })).toBeVisible();
+  await expect(dialog.getByText("Amenity 9", { exact: true })).toHaveCount(0);
+  // Up to 1360px wide; the 5:4 photo is 3/5 of it and sets the window's height.
+  const box = (await dialog.boundingBox())!;
+  const shot = (await photo.boundingBox())!;
+  expect(box.width).toBe(1360);
+  expect(Math.abs(shot.width - 816)).toBeLessThan(1);
+  expect(Math.abs(shot.width / shot.height - 1.25)).toBeLessThan(0.01);
+  expect(Math.abs(shot.height - box.height)).toBeLessThan(2);
+  // The rates and their button stay in view while the details beside them get longer.
+  await expect(cta).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByText("Last room available!")).toBeInViewport({ ratio: 1 });
+  await dialog.getByRole("button", { name: "Read more" }).click();
+  await expect(dialog.getByRole("button", { name: "Show less" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await expect(cta).toBeInViewport({ ratio: 1 });
+  // Keyboard focus below the fold scrolls clear of the pinned rates, not behind them.
+  const showAll = dialog.getByRole("button", { name: "Show all 18 amenities" });
+  await showAll.focus();
+  await expect
+    .poll(() =>
+      showAll.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return element.contains(hit);
+      }),
+    )
+    .toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("room-details-1920.png") });
+
+  // A short wide window leaves too little room above the rates: they scroll with the details.
+  await page.setViewportSize({ width: 1024, height: 700 });
+  await dialog.getByRole("heading", { name: "Garden House" }).scrollIntoViewIfNeeded();
+  await expect(cta).not.toBeInViewport();
+  await cta.scrollIntoViewIfNeeded();
+  await expect(cta).toBeInViewport({ ratio: 1 });
+
+  // Under 1024px, one column: the details and rates follow the photo in one scroll.
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect.poll(async () => (await dialog.boundingBox())?.width).toBe(672);
+  await expect(cta).not.toBeInViewport();
+  // Phones keep the full-screen window with its 288px photo.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(async () => dialog.boundingBox())
+    .toEqual({ x: 0, y: 0, width: 390, height: 844 });
+  expect((await photo.boundingBox())?.height).toBe(288);
+
+  await cta.click();
+  await expect(page).toHaveURL(new RegExp(`/(en/)?book\\?.*offer=${encodeURIComponent(key("8"))}`));
+  await assertHealthy();
+});

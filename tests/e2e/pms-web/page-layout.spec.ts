@@ -33,6 +33,10 @@ const SUB_PAGES = [
   "/settings/team",
   "/settings/billing",
 ];
+// VAY-2413: these pages and every Settings sub-page share one title style with the Dashboard.
+// Calendar shows its title from md up only.
+const SAME_TITLE = ["/dashboard", "/bookings", "/rooms", "/settings"];
+
 // Detail pages open with a back link or guest details before the title, so their title sits a
 // little further in, but never moves with the screen width.
 const DETAIL_PAGES = [
@@ -96,6 +100,22 @@ async function titlePosition(page: Page) {
   });
 }
 
+/** The page title's type, so no page drifts back to its own size or weight. */
+async function titleStyle(page: Page) {
+  return page
+    .locator("main h1")
+    .first()
+    .evaluate((h1) => {
+      const style = getComputedStyle(h1);
+      return {
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        lineHeight: style.lineHeight,
+        letterSpacing: style.letterSpacing,
+      };
+    });
+}
+
 for (const viewport of VIEWPORTS) {
   test(`every page title starts at the same place at ${viewport.width}px`, async ({ page }) => {
     // One test walks every page, so allow for a dev server compiling each route once.
@@ -103,12 +123,25 @@ for (const viewport of VIEWPORTS) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockPages(page);
 
+    let dashboardTitle: Awaited<ReturnType<typeof titleStyle>> | undefined;
     for (const route of TOP_LEVEL) {
       await page.goto(route);
       const position = await titlePosition(page);
       // Checked after the title shows, so a client-side redirect can't pass for the page.
       await expect(page).toHaveURL(onRoute(route));
       expect(position, route).toEqual({ x: viewport.padding, y: viewport.padding });
+      if (SAME_TITLE.includes(route)) {
+        dashboardTitle ??= await titleStyle(page);
+        expect(await titleStyle(page), route).toEqual(dashboardTitle);
+      }
+    }
+
+    if (viewport.width >= 768) {
+      await page.goto("/calendar");
+      const position = await titlePosition(page);
+      await expect(page).toHaveURL(onRoute("/calendar"));
+      expect(position, "/calendar").toEqual({ x: viewport.padding, y: viewport.padding });
+      expect(await titleStyle(page), "/calendar").toEqual(dashboardTitle);
     }
 
     let subPageY: number | undefined;
@@ -119,10 +152,36 @@ for (const viewport of VIEWPORTS) {
       expect(position.x, route).toBe(viewport.padding);
       subPageY ??= position.y;
       expect(position.y, route).toBe(subPageY);
+      expect(await titleStyle(page), route).toEqual(dashboardTitle);
     }
     expect(subPageY).toBeGreaterThan(viewport.padding);
   });
 }
+
+// VAY-2413: from md up the subtitle sits right under the title; on phones it gets its own line
+// under the buttons, so it doesn't share the width with them (VAY-2338).
+test("the Rooms & Rates subtitle sits under the title, and under the buttons on phones", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await mockPages(page);
+  for (const viewport of VIEWPORTS) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/rooms");
+    const subtitle = page.locator("main").getByText(/ room types? · /);
+    await expect(subtitle).toBeVisible();
+    const title = (await page.locator("main h1").first().boundingBox())!;
+    const add = (await page.locator('main a[href="/rooms/new"]').first().boundingBox())!;
+    const below = (await subtitle.boundingBox())!;
+    expect(Math.round(below.x), `${viewport.width}px`).toBe(Math.round(title.x));
+    if (viewport.width < 768) {
+      expect(below.y, `${viewport.width}px`).toBeGreaterThanOrEqual(add.y + add.height);
+    } else {
+      expect(below.y - (title.y + title.height), `${viewport.width}px`).toBeLessThanOrEqual(8);
+      expect(below.y, `${viewport.width}px`).toBeLessThan(add.y + add.height);
+    }
+  }
+});
 
 test("detail page titles stay at the left edge on wide screens", async ({ page }) => {
   test.setTimeout(120_000);

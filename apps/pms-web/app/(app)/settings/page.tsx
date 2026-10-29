@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SettingsCardGrid } from "@vayada/settings-ui";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useTranslation } from "@/lib/i18n";
 import { getPmsSettingsCards, legacySettingsAnchorTarget } from "@/lib/settings/navigation";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
@@ -26,9 +27,7 @@ export default function SettingsPage() {
   return (
     <div className="p-4 md:p-6">
       <div className="max-w-6xl">
-        <h1 className="mb-6 text-xl font-semibold text-gray-900 md:text-2xl">
-          {t("settings.title")}
-        </h1>
+        <PageHeader title={t("settings.title")} className="mb-4 md:mb-5" />
         <SettingsCardGrid
           featured={featured}
           cards={cards}
