@@ -107,7 +107,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
 
   const book = async (
     propertyId: string,
-    stay: { checkIn: string; checkOut: string; source?: "pms" | "booking" },
+    stay: { checkIn: string; checkOut: string; source?: "pms" | "booking"; accepted?: boolean },
     ...guests: { first: string; last: string; email?: string; phone?: string }[]
   ) => {
     const id = randomUUID();
@@ -129,12 +129,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
         source === "booking" ? "booking_engine" : "walk_in",
       ],
     );
-    await admin.query(
-      `INSERT INTO booking.booking_status_events
-         (guest_booking_id, event_type, from_status, to_status, actor_type)
-       VALUES ($1::uuid, 'guest_booking.accepted', NULL, 'confirmed', 'property_user')`,
-      [id],
-    );
+    if (stay.accepted ?? true)
+      await admin.query(
+        `INSERT INTO booking.booking_status_events
+           (guest_booking_id, event_type, from_status, to_status, actor_type)
+         VALUES ($1::uuid, 'guest_booking.accepted', NULL, 'confirmed', 'property_user')`,
+        [id],
+      );
     const ids: string[] = [];
     for (const guest of guests)
       ids.push(
@@ -326,7 +327,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
   it("keeps ID details on the guest, so a returning guest arrives with them filled in", async () => {
     const noah = { first: "Noah", last: "Weiss", email: "noah@example.test" };
     const first = await book(propertyA, { checkIn: "2030-07-01", checkOut: "2030-07-03" }, noah);
-    const again = await book(propertyA, { checkIn: "2030-09-01", checkOut: "2030-09-03" }, noah);
     await sweep();
     const saved = await registrations.save({
       propertyId: propertyA,
@@ -357,11 +357,34 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
       document_number: null,
       gender: "male",
     });
-    expect((await registrations.list(propertyA, again.bookingId))![0]).toMatchObject({
+    // A new booking of the same guest, not linked yet: opening its check-in links it and shows them.
+    const again = await book(propertyA, { checkIn: "2030-09-01", checkOut: "2030-09-03" }, noah);
+    const shown = (await registrations.list(propertyA, again.bookingId))![0]!;
+    expect(shown).toMatchObject({
       dateOfBirth: "1990-02-03",
       documentType: "passport",
       documentNumber: "X1234567",
       gender: null,
+    });
+    // Saving what the form showed plus a gender leaves the guest's ID details as they are.
+    await registrations.save({
+      propertyId: propertyA,
+      guestBookingId: again.bookingId,
+      guestId: again.guestIds[0]!,
+      fields: {
+        assignmentId: null,
+        dateOfBirth: shown.dateOfBirth,
+        documentType: shown.documentType,
+        documentNumber: shown.documentNumber,
+        gender: "male",
+        staffNotes: null,
+      },
+      audit: { ...audit(), organizationId: accountId },
+    });
+    const noahProfile = (await copy(first.guestIds[0]!)).profileId!;
+    expect((await profiles.get(both, noahProfile))!.fields).toMatchObject({
+      dateOfBirth: "1990-02-03",
+      documentNumber: "X1234567",
     });
 
     // ID details recorded before guest profiles move to the profile on the next run.
@@ -394,7 +417,28 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
     });
   });
 
+  it("hides email and phone where the guest's only stay is a request not accepted yet", async () => {
+    const zoe = { first: "Zoe", last: "Mark", email: "zoe@example.test" };
+    const request = await book(
+      propertyA,
+      { checkIn: "2030-12-01", checkOut: "2030-12-02", source: "booking", accepted: false },
+      zoe,
+    );
+    await book(propertyB, { checkIn: "2030-12-10", checkOut: "2030-12-11" }, zoe);
+    await sweep();
+    const profileId = (await copy(request.guestIds[0]!)).profileId!;
+    expect((await profiles.get(both, profileId))!.fields.email).toBe("zoe@example.test");
+    expect((await profiles.get(onlyA, profileId))!.fields.email).toBeNull();
+    expect(await profiles.search(onlyA, { search: "zoe@", limit: 10 })).toEqual([]);
+  });
+
   it("applies the reservation page's guest edits to the guest at once", async () => {
+    // Lena's phone comes from an earlier stay of hers, not from this booking.
+    await book(
+      propertyB,
+      { checkIn: "2025-02-01", checkOut: "2025-02-03" },
+      { first: "Lena", last: "Berg", email: "lena@example.test", phone: "+4915199999999" },
+    );
     const party = await book(
       propertyA,
       { checkIn: "2030-11-01", checkOut: "2030-11-03", source: "booking" },
@@ -435,6 +479,25 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
     });
     expect(cleared.ok).toBe(true);
     expect((await profiles.get(both, lena.profileId!))!.fields.email).toBeNull();
+
+    // The form sends every field: one it shows empty because this booking never had it (Lena's
+    // phone) stays on the guest.
+    const wholeForm = await port.updateAdditionalGuestForPmsOperations({
+      ...meta("form"),
+      guestId: party.guestIds[1]!,
+      guest: {
+        firstName: "Lena",
+        lastName: "Berg-Ott",
+        email: null,
+        phone: null,
+        countryCode: null,
+      },
+    });
+    expect(wholeForm.ok).toBe(true);
+    expect((await profiles.get(both, lena.profileId!))!.fields).toMatchObject({
+      lastName: "Berg-Ott",
+      phone: "+4915199999999",
+    });
   });
 });
 
