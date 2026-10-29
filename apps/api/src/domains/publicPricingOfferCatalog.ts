@@ -205,12 +205,16 @@ function roomFacts(row: RoomRow) {
 }
 
 /** What the booking page's room cards show besides name and photos (VAY-2190): size in square
- * metres, the room's category and its amenities as public labels. Each is empty when unusable. */
+ * metres, the room's category, its bedrooms and bathrooms (VAY-2410) and its amenities as public
+ * labels. Each is empty when unusable. */
 export function roomCardFacts(row: Pick<RoomRow, "category" | "attributes" | "amenities">) {
   const attributes = (
     row.attributes && typeof row.attributes === "object" ? row.attributes : {}
   ) as Record<string, unknown>;
   const raw = attributes["size"];
+  const { bedrooms, bathrooms } = attributes;
+  const rooms = (value: unknown): value is number =>
+    typeof value === "number" && value > 0 && value <= 100;
   const sqm =
     typeof raw === "number"
       ? raw
@@ -234,6 +238,10 @@ export function roomCardFacts(row: Pick<RoomRow, "category" | "attributes" | "am
         ? { value: sqm, unit: "sqm" as const }
         : null,
     category: category && category.length <= 80 ? category : null,
+    // As the room facts save them: whole bedrooms (0 is a studio, not shown), bathrooms as entered
+    // (1.5 for a shower room; none when shared).
+    bedrooms: rooms(bedrooms) && Number.isInteger(bedrooms) ? bedrooms : null,
+    bathrooms: rooms(bathrooms) ? bathrooms : null,
     amenities: toPublicPmsRoomAmenityLabelsV1(amenities).slice(0, 40),
   };
 }
