@@ -21,11 +21,11 @@ const MOVES: Record<string, (index: number, count: number) => number> = {
 };
 
 function moveFocus(event: KeyboardEvent<HTMLButtonElement>) {
-  const tabs = [
-    ...(event.currentTarget
+  const tabs = Array.from(
+    event.currentTarget
       .closest('[role="tablist"]')
-      ?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []),
-  ];
+      ?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [],
+  );
   const move = MOVES[event.key];
   if (!move) return;
   event.preventDefault();
