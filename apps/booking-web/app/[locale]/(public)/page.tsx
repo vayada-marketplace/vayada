@@ -19,7 +19,7 @@ import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
-import RoomsProgress, { type RoomsProgressRoom } from "@/components/booking/RoomsProgress";
+import RoomTabs, { RoomsHelp, type RoomsProgressRoom } from "@/components/booking/RoomsProgress";
 import Toast, { type ToastMessage } from "@/components/booking/Toast";
 import {
   encodePick,
@@ -482,7 +482,7 @@ function HomePageContent() {
     const open = done.findIndex((isDone, index) => index !== activeRoom && !isDone);
     if (open === -1) return continueWithRooms(next as RoomPick[]);
     toRoomList();
-    // Keyboard and screen-reader users continue at "ROOM 2 OF 2", not on a card that moved.
+    // Keyboard and screen-reader users continue at "Pick a place for…", not on a card that moved.
     requestAnimationFrame(() =>
       document.getElementById("rooms-progress-title")?.focus({ preventScroll: true }),
     );
@@ -593,34 +593,38 @@ function HomePageContent() {
     setGuestsOpen(true);
     document.getElementById("stay-search")?.scrollIntoView({ block: "start" });
   };
+  // VAY-2412: a borderless select, labelled "Sort rooms" behind its icon.
   const sortControl = (
-    <>
-      <svg
-        className="w-4 h-4 text-gray-400"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-        />
-      </svg>
+    <div className="flex items-center gap-1.5">
+      <label htmlFor="room-sort" className="text-gray-400">
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+          />
+        </svg>
+        <span className="sr-only">{t("sortRooms")}</span>
+      </label>
       <select
-        aria-label={t("sortRooms")}
+        id="room-sort"
         value={sortOption}
         onChange={(event) => setSortOption(event.target.value)}
-        className="text-sm text-gray-700 border border-gray-300 rounded-lg px-3 py-2 bg-white"
+        className="min-h-[44px] cursor-pointer bg-transparent text-sm font-medium text-gray-700"
       >
         <option value="recommended">{t("recommended")}</option>
         <option value="priceLow">{t("priceLowHigh")}</option>
         <option value="priceHigh">{t("priceHighLow")}</option>
         <option value="roomSize">{t("roomSize")}</option>
       </select>
-    </>
+    </div>
   );
   const roomCard = (
     room: PricingRoom,
@@ -692,14 +696,12 @@ function HomePageContent() {
         </div>
       )}
       {pickMode ? (
-        <RoomsProgress
-          rooms={progressRooms}
+        <RoomsHelp
+          count={roomCount}
           current={allChosen ? null : activeRoom}
           guests={slots[activeRoom]!}
           hasExtras={hasAddons}
-          onOpen={openRoom}
           onContinue={() => continueWithRooms(picks as RoomPick[])}
-          onRemove={removeRoom}
         />
       ) : noneFits ? (
         // VAY-2393: no place fits the whole party; the rooms it needs are one click away.
@@ -734,12 +736,8 @@ function HomePageContent() {
           </p>
         )
       )}
-      {pickMode ? (
-        <p className="mb-5 text-sm text-gray-500">{t("pricesPerRoom")}</p>
-      ) : (
-        effectiveChildren > 0 && (
-          <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
-        )
+      {!pickMode && effectiveChildren > 0 && (
+        <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
       )}
     </>
   );
@@ -1118,6 +1116,17 @@ function HomePageContent() {
                   search?.querySelector("button")?.focus({ preventScroll: true });
                 },
               }}
+              tabs={
+                pickMode && (
+                  <RoomTabs
+                    rooms={progressRooms}
+                    current={allChosen ? null : activeRoom}
+                    guests={slots}
+                    onOpen={openRoom}
+                    onRemove={removeRoom}
+                  />
+                )
+              }
               toolbar={sortControl}
               notices={notices}
               renderCard={roomCard}
