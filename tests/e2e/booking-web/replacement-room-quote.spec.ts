@@ -161,7 +161,9 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await expect(extras.getByRole("button", { name: "Fewer for Extra breakfast" })).toBeDisabled();
   await expect(toPayment).toBeEnabled();
   await expect(total).toContainText("€320");
-  await expect(page.getByText("Your extras (1)")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Your stay" })).toContainText(
+    "Extra breakfast",
+  );
   await toPayment.click();
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();

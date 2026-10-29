@@ -24,13 +24,11 @@ import {
   savePickDraft,
   saveRoomUndo,
 } from "@/lib/roomPicker";
-import ExtrasRooms, { type ExtrasRoomLine } from "@/components/booking/ExtrasRooms";
 import Toast, { type ToastMessage } from "@/components/booking/Toast";
 import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ExtrasStep from "@/components/booking/ExtrasStep";
-import ExtrasBar, { type ExtrasBarRow } from "@/components/booking/ExtrasBar";
 import {
   extraAmountMinor,
   extraDates,
@@ -40,7 +38,11 @@ import {
   quoteExtrasMinor,
 } from "@/lib/extrasChoices";
 import PaymentStep from "@/components/booking/PaymentStep";
-import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
+import StaySummary, {
+  stayButton,
+  type SummaryExtra,
+  type SummaryRoom,
+} from "@/components/booking/StaySummary";
 import GuestDetailsForm, {
   acceptanceGuest,
   emptyGuest,
@@ -55,7 +57,7 @@ import {
   replacementExtrasScope,
   type ReplacementExtrasValue,
 } from "@/services/api/replacementAddonSelection";
-import BeforeYouBook from "@/components/booking/BeforeYouBook";
+import BeforeYouBook, { BookingConsent } from "@/components/booking/BeforeYouBook";
 import ReplacementBookingConfirmation, {
   type BookingAttempt,
 } from "@/components/booking/ReplacementBookingConfirmation";
@@ -111,17 +113,6 @@ import {
 
 const field = "block w-full rounded-lg border border-gray-300 p-3 mt-1 text-gray-900 bg-white";
 const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
-/** "Fri, 6 Nov 2026" for a stay date (YYYY-MM-DD). */
-const formatStayDate = (date: string) =>
-  /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      })
-    : date;
 const newRoom = (): RoomChoice => ({
   selectionId: crypto.randomUUID(),
   publicOfferKey: "",
@@ -157,6 +148,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // The price whose Confirm was pressed before the box was ticked (VAY-2306).
   const [consentMissedFor, setConsentMissedFor] = useState<string | null>(null);
   const consentErrorId = useId();
+  // VAY-2416: where Confirm shows, at the bottom of "Your stay".
+  const [confirmSlot, setConfirmSlot] = useState<HTMLDivElement | null>(null);
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -728,18 +721,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       hotelNow,
     ).name;
   };
-  const nights = Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000);
-  const firstRoom = rooms?.find((room) =>
-    room.offers.some((offer) => offer.publicOfferKey === choices[0]?.publicOfferKey),
-  );
-  const stayLine = [
-    choices.length === 1 && firstRoom
-      ? `${firstRoom.name} · ${choiceName(firstRoom, choices[0]!.publicOfferKey)}`
-      : `${choices.length} rooms`,
-    Number.isFinite(nights) ? `${nights} ${nights === 1 ? "night" : "nights"}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
   const summaryRooms: SummaryRoom[] = choices.flatMap((choice) => {
     const room = rooms?.find((r) =>
       r.offers.some((o) => o.publicOfferKey === choice.publicOfferKey),
@@ -766,39 +747,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const roomNames = Object.fromEntries(
     summaryRooms.map((room) => [room.selectionId, `${room.name} · ${room.choice}`]),
   );
-  // VAY-2393: each booked room on the Extras step, priced from this quote.
-  const extrasRoomLines: ExtrasRoomLine[] = choices.flatMap((choice, index) => {
-    const room = roomOf(choice);
-    if (!room) return [];
-    const guests = [
-      tCommon("adults", { count: Number(choice.adults) || 0 }),
-      ...(choice.childAges.length ? [tCommon("children", { count: choice.childAges.length })] : []),
-    ].join(", ");
-    const amount = quote
-      ? quote.lines
-          .filter(
-            (line) =>
-              line.selectionId === choice.selectionId &&
-              (line.kind === "room" || line.kind === "meal"),
-          )
-          .reduce((sum, line) => sum + BigInt(line.amountMinor), BigInt(0))
-      : null;
-    return [
-      {
-        selectionId: choice.selectionId,
-        title:
-          choices.length > 1 ? tExtrasRooms("roomTitle", { number: index + 1, guests }) : guests,
-        name: room.name,
-        rate: [
-          choiceName(room, choice.publicOfferKey),
-          Number.isFinite(nights) ? tCommon("nights", { count: nights }) : null,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-        price: amount === null || !quote ? null : money(String(amount), quote.currency),
-      },
-    ];
-  });
   // VAY-2393: the next hand-off for this stay starts with the guest's choices for these rooms.
   const carryStay = (rooms: RoomChoice[]) =>
     saveStayCarryOver(slug, {
@@ -810,13 +758,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       guest,
       at: Date.now(),
     });
-  const focusExtrasRooms = () =>
+  const focusStay = () =>
     requestAnimationFrame(() =>
-      document.getElementById("extras-rooms-title")?.focus({ preventScroll: true }),
+      document.getElementById("stay-summary-title")?.focus({ preventScroll: true }),
     );
   // VAY-2393: Change goes back to the room cards with that room open; its new place comes back
-  // here. A room card's single hand-off goes back to the cards as before.
-  const changeRoomFromExtras = (index: number) => {
+  // to the steps. A room card's single hand-off goes back to the cards as before.
+  const changeRoom = (index: number) => {
     if (!fromPicks) return backToRooms();
     carryStay(choices);
     const home = new URLSearchParams(homeSearch);
@@ -905,7 +853,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setAllocationRevision((value) => value + 1);
     // The pressed Remove is gone: a pointer's focus goes to the rooms' heading, a keyboard's to
     // Undo.
-    if (!byKeyboard) focusExtrasRooms();
+    if (!byKeyboard) focusStay();
     setToast({
       id: Date.now(),
       message,
@@ -923,7 +871,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           setChoices(before.choices);
           setAllocationRevision(before.allocationRevision);
           setExtras(before.extras);
-          focusExtrasRooms();
+          focusStay();
         },
       },
     });
@@ -1062,18 +1010,15 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const missingDay = (addonCatalogue ?? []).find((addon) =>
     extras?.items.some((item) => item.id === addon.id && extraNeedsDay(addon, item)),
   )?.name;
-  // VAY-2391: the chosen extras for the bar, by when they happen: those without a day first, those
-  // still waiting for the guest's day last.
   const pageDay = (date: string) => formatExtraDay(date, locale);
+  // The chosen extras, for "Your stay" (VAY-2416).
   const chosenExtras =
     baseRequest &&
     extras?.scope ===
       replacementExtrasScope(addonCatalogue ?? [], baseRequest.selection, allocationRevision)
       ? (addonCatalogue ?? []).flatMap((addon) => {
           const item = extras.items.find((current) => current.id === addon.id);
-          return item
-            ? [{ addon, item, dates: extraDates(addon, item, baseRequest.selection) }]
-            : [];
+          return item ? [{ addon, item }] : [];
         })
       : [];
   const extrasQuoted = quote ? quoteExtrasMinor(quote) : null;
@@ -1084,57 +1029,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     ),
     extrasQuoted,
   );
-  const badgeMonth = (date: string) =>
-    new Date(`${date}T00:00:00Z`).toLocaleDateString(locale, { month: "short", timeZone: "UTC" });
-  const badgeDay = (date: string) => String(Number(date.slice(8)));
-  const sortKey = ({ addon, item, dates }: (typeof chosenExtras)[number]) =>
-    extraNeedsDay(addon, item) ? "~" : (dates[0] ?? "");
-  const extrasRows: ExtrasBarRow[] = chosenExtras
-    .map((chosen, index) => ({ chosen, index }))
-    // Dates as text sort by day; "~" comes after every date.
-    .sort((a, b) =>
-      sortKey(a.chosen) < sortKey(b.chosen) ? -1 : sortKey(a.chosen) > sortKey(b.chosen) ? 1 : 0,
-    )
-    .map(({ chosen: { addon, item, dates }, index }) => {
-      const needsDay = extraNeedsDay(addon, item);
-      const first = dates[0],
-        last = dates[dates.length - 1];
-      return {
-        id: addon.id,
-        name: addon.name,
-        needsDay,
-        badge: needsDay
-          ? { top: "?", bottom: tAddons("badgeDay") }
-          : !first || !last
-            ? { top: "—", bottom: tAddons("badgeStay") }
-            : {
-                top: first === last ? badgeDay(first) : `${badgeDay(first)}–${badgeDay(last)}`,
-                // A stay across two months names both.
-                bottom:
-                  badgeMonth(first) === badgeMonth(last)
-                    ? badgeMonth(first)
-                    : `${badgeMonth(first)}–${badgeMonth(last)}`,
-              },
-        sub: needsDay
-          ? tAddons("chooseADayShort")
-          : addon.scheduleMode === "arrival"
-            ? tAddons("onArrival")
-            : addon.scheduleMode === "departure"
-              ? tAddons("onDeparture")
-              : addon.scheduleMode === "daily"
-                ? tAddons("nights", { count: dates.length })
-                : addon.scheduleMode === "anytime"
-                  ? tAddons("anytimeShort")
-                  : pageDay(first!).weekday,
-        price: extrasLines ? money(String(extrasLines[index]), addon.currency) : null,
-        onRemove: () =>
-          setExtras((value) =>
-            value && value.items.length > 1
-              ? { ...value, items: value.items.filter((current) => current.id !== addon.id) }
-              : null,
-          ),
-      };
-    });
+  const summaryExtras: SummaryExtra[] = chosenExtras.map(({ addon, item }, index) => ({
+    id: addon.id,
+    name: addon.name,
+    price: extrasLines ? money(String(extrasLines[index]), addon.currency) : null,
+    needsDay: extraNeedsDay(addon, item),
+  }));
   // Each step continues with a price: a refused one says so above the step's buttons.
   const priceFailed = !!error && !quote;
   // The last price for these choices stays in the summary, struck through, once it has run out.
@@ -1246,75 +1146,85 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       </div>
     );
   };
-  // VAY-2391: the Extras step's bar, sticky at the bottom of the screen. With an extra still
-  // waiting for its day, Continue says what's missing instead of going on.
-  const extrasBar = (
-    <ExtrasBar
-      rows={extrasRows}
-      extrasTotal={
-        extrasQuoted !== null && quote ? money(String(extrasQuoted), quote.currency) : null
-      }
-      stay={{
-        line: stayLine,
-        total: (
-          <p
-            role="status"
-            aria-label={tAddons("stayTotalLabel")}
-            className={
-              quote || loading ? "text-lg font-bold text-gray-900" : "text-sm text-gray-600"
-            }
-          >
-            {quote
-              ? money(quote.totalMinor, quote.currency)
-              : loading
-                ? tReview("checkingPrice")
-                : missingDay
-                  ? tAddons("chooseDayForTotal")
-                  : ""}
-            {quote && (
-              <span className="text-xs font-normal text-gray-500"> {tAddons("totalIncludes")}</span>
-            )}
-          </p>
-        ),
-      }}
-      continueLabel={
-        addonError || !chosenExtras.length
+  // VAY-2416: "Your stay" on Extras, Details and Review, with the step's button at its bottom.
+  const summary = {
+    rooms: summaryRooms,
+    guests: guestsLine,
+    // The price's own times once known; the hotel's otherwise.
+    rules:
+      knownRules ??
+      (hotel?.checkInTime
+        ? { checkInTime: hotel.checkInTime, checkOutTime: hotel.checkOutTime }
+        : null),
+    formatMoney: money,
+    checkIn,
+    checkOut,
+    extras: summaryExtras,
+    box: pricedOption?.box,
+    pending: loading
+      ? tReview("checkingPrice")
+      : missingDay
+        ? tAddons("chooseDayForTotal")
+        : undefined,
+    onChangeRoom: changeRoom,
+  };
+  // VAY-2391: with an extra still waiting for its day, Continue says what's missing instead of
+  // going on. A refused price says so right above it, in view (VAY-2309).
+  const extrasAction = (
+    <div className="space-y-3">
+      {priceNotice}
+      <button
+        type="button"
+        className={stayButton(!!missingDay)}
+        disabled={!missingDay && (addons === null || !quote)}
+        onClick={() => {
+          if (missingDay) {
+            setExtrasTried(true);
+            // The card that still needs its day may be out of view.
+            document
+              .querySelector(`article[aria-label="${CSS.escape(missingDay)}"]`)
+              ?.scrollIntoView({ block: "center", behavior: "smooth" });
+            return;
+          }
+          trackEvent(slug, "addons_step_passed", {
+            extrasShown: true,
+            extrasChosen: !!addons?.length,
+          });
+          go(next);
+        }}
+      >
+        {addonError || !chosenExtras.length
           ? tAddons("continueWithoutExtras")
-          : tAddons("continueToDetails")
-      }
-      waiting={!!missingDay}
-      continueDisabled={!missingDay && (addons === null || !quote)}
-      onContinue={() => {
-        if (missingDay) {
-          setExtrasTried(true);
-          // The card that still needs its day may be out of view.
-          document
-            .querySelector(`article[aria-label="${CSS.escape(missingDay)}"]`)
-            ?.scrollIntoView({ block: "center", behavior: "smooth" });
-          return;
-        }
-        trackEvent(slug, "addons_step_passed", {
-          extrasShown: true,
-          extrasChosen: !!addons?.length,
-        });
-        go(next);
-      }}
-      hint={extrasTried && missingDay ? tAddons("chooseDayFor", { name: missingDay }) : null}
-      // A refused price says so right above Continue, in view (VAY-2309).
-      notice={priceNotice}
-      onBack={backToRooms}
-      labels={{
-        backToRooms: tDetails("backToRooms"),
-        yourExtras: (count) => tAddons("yourExtrasCount", { count }),
-        yourExtrasTitle: tAddons("yourExtras"),
-        extrasTotal: tAddons("extrasTotal"),
-        toSchedule: (count) => tAddons("toSchedule", { count }),
-        showExtras: tAddons("showExtras"),
-        close: tAddons("closeExtras"),
-        removeExtra: (name) => tAddons("removeExtra", { name }),
-      }}
-    />
+          : tAddons("continueToDetails")}
+      </button>
+      {extrasTried && missingDay && (
+        <p role="alert" className="text-sm text-amber-700">
+          {tAddons("chooseDayFor", { name: missingDay })}
+        </p>
+      )}
+    </div>
   );
+  // Review: an expired, refused or changed price, said above the tick and Confirm. "Checking
+  // price…" shows in the total's place.
+  const reviewNotice =
+    error && quote && !attemptOpen ? (
+      <Notice
+        tone="amber"
+        title={error}
+        action={{ label: "Get an updated price", onClick: submit }}
+      >
+        Nothing was booked or charged. Your extras and details are kept.
+      </Notice>
+    ) : error && !attemptOpen ? (
+      priceNotice
+    ) : priceChange && quote ? (
+      <Notice
+        tone="amber"
+        title={`Your price changed from ${priceChange} to ${money(quote.totalMinor, quote.currency)}.`}
+      >
+        Please check it and tick the box again.
+      </Notice>
+    ) : null;
   const titles: Record<BookStep, string> = {
     rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
     extras: "Enhance Your Stay",
@@ -1326,7 +1236,22 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     <BookShell
       steps={steps}
       current={step}
-      bar={settled && step === "extras" ? extrasBar : undefined}
+      back={
+        !settled || step === "rooms"
+          ? undefined
+          : step === "extras"
+            ? { label: tDetails("backToRooms"), onClick: backToRooms }
+            : step === "details"
+              ? {
+                  label: previous === "extras" ? tDetails("backToExtras") : tDetails("backToRooms"),
+                  onClick: () => (previous === "rooms" ? backToRooms() : goBack(previous)),
+                }
+              : {
+                  label: tReview("backToDetails"),
+                  onClick: () => goBack("details"),
+                  disabled: attemptOpen,
+                }
+      }
       title={titles[step]}
       subtitle={
         step === "extras"
@@ -1589,98 +1514,105 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           </form>
         )}
         {settled && step === "extras" && (
-          // VAY-2393: the booked rooms beside the extras on wide screens, above them on phones.
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-            {extrasRoomLines.length > 0 && (
-              <div className="lg:sticky lg:top-6 lg:order-2">
-                <ExtrasRooms
-                  rooms={extrasRoomLines}
-                  onChange={changeRoomFromExtras}
-                  onRemove={fromPicks && extrasRoomLines.length > 1 ? removeRoomFromExtras : null}
+          <CheckoutColumns
+            card={
+              <StaySummary
+                {...summary}
+                quote={quote ?? undefined}
+                onRemoveRoom={fromPicks && summaryRooms.length > 1 ? removeRoomFromExtras : null}
+                action={extrasAction}
+              />
+            }
+          >
+            {addonError ? (
+              <div
+                role="alert"
+                className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700"
+              >
+                <p className="font-semibold">We couldn’t load our extras right now.</p>
+                <p className="mt-1">Your rooms are kept. You can continue without extras.</p>
+                <button
+                  type="button"
+                  className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
+                  onClick={() => setAddonReload((value) => value + 1)}
+                >
+                  Try again
+                </button>
+              </div>
+            ) : (
+              baseRequest && (
+                <ExtrasStep
+                  catalogue={addonCatalogue ?? []}
+                  display={pagePayment.extras}
+                  showCategories={pagePayment.groupExtras}
+                  selection={baseRequest.selection}
+                  allocationRevision={allocationRevision}
+                  value={extras}
+                  onChange={(value) => {
+                    setExtras(value);
+                    setExtrasTried(false);
+                  }}
+                  attention={extrasTried}
+                  formatMoney={money}
+                  formatDay={pageDay}
+                  formatNotice={(hours) => tAddons("needsNotice", { hours })}
                   labels={{
-                    title: tExtrasRooms("title", { count: extrasRoomLines.length }),
-                    change: tExtrasRooms("change"),
-                    changeRoom: (number) => tExtrasRooms("changeRoom", { number }),
-                    remove: tExtrasRooms("remove"),
-                    removeRoom: (number) => t("roomsProgress.remove", { number }),
+                    seeDetails: tAddons("seeDetails"),
+                    add: tAddons("add"),
+                    added: tAddons("added"),
+                    remove: tAddons("remove"),
+                    previousPhoto: tAddons("previousPhoto"),
+                    nextPhoto: tAddons("nextPhoto"),
+                    showPhoto: (number) => tAddons("showPhoto", { number }),
+                    upToGuests: (count) => tAddons("upToGuests", { count }),
+                    close: tAddons("closeDetails"),
+                    inYourStay: (detail) => tAddons("inYourStay", { detail }),
+                    groupsUpTo: (count) => tAddons("groupsUpTo", { count }),
+                    tooSoon: (notice) => tAddons("tooSoonForStay", { notice }),
+                    scheduledAutomatically: tAddons("scheduledAutomatically"),
+                    arrivalDay: (day) => tAddons("arrivalDay", { day }),
+                    departureDay: (day) => tAddons("departureDay", { day }),
+                    everyDay: tAddons("everyDay"),
+                    nights: (count) => tAddons("nights", { count }),
+                    anytime: tAddons("anytime"),
+                    noDateNeeded: tAddons("noDateNeeded"),
+                    whichDay: tAddons("whichDay"),
+                    chooseADay: tAddons("chooseDayToContinue"),
+                    notOnYourDates: tAddons("notOnYourDates"),
+                    dayOn: (name, day) => tAddons("dayOn", { name, day }),
                   }}
                 />
-              </div>
+              )
             )}
-            <div className="min-w-0 lg:order-1">
-              {addonError ? (
-                <div
-                  role="alert"
-                  className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700"
-                >
-                  <p className="font-semibold">We couldn’t load our extras right now.</p>
-                  <p className="mt-1">Your rooms are kept. You can continue without extras.</p>
-                  <button
-                    type="button"
-                    className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
-                    onClick={() => setAddonReload((value) => value + 1)}
-                  >
-                    Try again
-                  </button>
-                </div>
-              ) : (
-                baseRequest && (
-                  <ExtrasStep
-                    catalogue={addonCatalogue ?? []}
-                    display={pagePayment.extras}
-                    showCategories={pagePayment.groupExtras}
-                    selection={baseRequest.selection}
-                    allocationRevision={allocationRevision}
-                    value={extras}
-                    onChange={(value) => {
-                      setExtras(value);
-                      setExtrasTried(false);
-                    }}
-                    attention={extrasTried}
-                    formatMoney={money}
-                    formatDay={pageDay}
-                    formatNotice={(hours) => tAddons("needsNotice", { hours })}
-                    labels={{
-                      seeDetails: tAddons("seeDetails"),
-                      add: tAddons("add"),
-                      added: tAddons("added"),
-                      remove: tAddons("remove"),
-                      previousPhoto: tAddons("previousPhoto"),
-                      nextPhoto: tAddons("nextPhoto"),
-                      showPhoto: (number) => tAddons("showPhoto", { number }),
-                      upToGuests: (count) => tAddons("upToGuests", { count }),
-                      close: tAddons("closeDetails"),
-                      inYourStay: (detail) => tAddons("inYourStay", { detail }),
-                      groupsUpTo: (count) => tAddons("groupsUpTo", { count }),
-                      tooSoon: (notice) => tAddons("tooSoonForStay", { notice }),
-                      scheduledAutomatically: tAddons("scheduledAutomatically"),
-                      arrivalDay: (day) => tAddons("arrivalDay", { day }),
-                      departureDay: (day) => tAddons("departureDay", { day }),
-                      everyDay: tAddons("everyDay"),
-                      nights: (count) => tAddons("nights", { count }),
-                      anytime: tAddons("anytime"),
-                      noDateNeeded: tAddons("noDateNeeded"),
-                      whichDay: tAddons("whichDay"),
-                      chooseADay: tAddons("chooseDayToContinue"),
-                      notOnYourDates: tAddons("notOnYourDates"),
-                      dayOn: (name, day) => tAddons("dayOn", { name, day }),
-                    }}
-                  />
-                )
-              )}
-            </div>
-          </div>
+          </CheckoutColumns>
         )}
         <Toast toast={toast} onClose={() => setToast(null)} />
         {settled && step === "details" && (
-          // VAY-2347: the form, then "Your stay" (below it on a phone), then the buttons. Continue
-          // is always pressable; missing fields are marked and the first one gets focus.
-          <form
-            noValidate
-            className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-x-8"
-            onSubmit={continueToReview}
-          >
-            <div className="lg:col-span-2 space-y-6">
+          // VAY-2347: the form, then "Your stay" with Continue (a bar on a phone). Continue is always
+          // pressable; missing fields are marked and the first one gets focus.
+          <form noValidate onSubmit={continueToReview}>
+            <CheckoutColumns
+              card={
+                <StaySummary
+                  {...summary}
+                  quote={quote ?? undefined}
+                  action={
+                    <div className="space-y-3">
+                      {priceNotice}
+                      {/* Pressable while fields are missing, so it can mark them; with everything
+                          filled in it waits for the price, which step 3 needs. */}
+                      <button
+                        type="submit"
+                        className={stayButton()}
+                        disabled={detailsComplete && !quote}
+                      >
+                        {tDetails("continue")}
+                      </button>
+                    </div>
+                  }
+                />
+              }
+            >
               {guestRulesQuote.failed && (
                 <div
                   role="alert"
@@ -1703,185 +1635,125 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 locked={attemptOpen}
                 showErrors={detailsTried}
               />
-              {!quote && loading && <p role="status">{tReview("checkingPrice")}</p>}
-              {priceNotice}
-            </div>
-            <div className="lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:self-start">
-              {quote && (
-                <StaySummary
-                  quote={quote}
-                  rooms={summaryRooms}
-                  guests={guestsLine}
-                  rules={knownRules}
-                  formatMoney={money}
-                  // Only once the hotel's own ways are known, not the defaults.
-                  methods={pagePaymentLoaded ? offeredMethods : undefined}
-                />
-              )}
-            </div>
-            <div className="lg:col-span-2 flex flex-col-reverse items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <button
-                type="button"
-                className="text-[15px] font-semibold text-gray-800 hover:text-gray-900 flex items-center justify-center gap-1.5"
-                onClick={() => (previous === "rooms" ? backToRooms() : goBack(previous))}
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-                {previous === "extras" ? tDetails("backToExtras") : tDetails("backToRooms")}
-              </button>
-              {/* Pressable while fields are missing, so it can mark them; with everything filled
-                  in it waits for the price, which step 3 needs. */}
-              <button
-                type="submit"
-                className={`${button} flex items-center justify-center gap-2 px-7 text-[17px]`}
-                disabled={detailsComplete && !quote}
-              >
-                {tDetails("continue")}
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              </button>
-            </div>
+            </CheckoutColumns>
           </form>
         )}
         {settled && step === "payment" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2">
-              <PaymentStep
-                guestName={`${guest.firstName} ${guest.lastName}`}
-                guestEmail={guest.email}
-                guestPhone={guest.phone}
-                onChangeDetails={() => goBack("details")}
-                method={method}
-                options={methodOptions}
-                unavailable={noWayToPay ? priceNotice : null}
-                onMethod={setPayment}
+          <CheckoutColumns
+            card={
+              <StaySummary
+                {...summary}
+                quote={summaryQuote}
+                expired={!!error}
                 locked={attemptOpen}
-                showExplanation={!!quote && quote.paymentMethod === method}
-                notice={
-                  error && quote && !attemptOpen ? (
-                    <Notice
-                      tone="amber"
-                      title={error}
-                      action={{ label: "Get an updated price", onClick: submit }}
-                    >
-                      Nothing was booked or charged. Your extras and details are kept.
-                    </Notice>
-                  ) : error && !attemptOpen ? (
-                    priceNotice
-                  ) : priceChange && quote ? (
-                    <Notice
-                      tone="amber"
-                      title={`Your price changed from ${priceChange} to ${money(quote.totalMinor, quote.currency)}.`}
-                    >
-                      Please check it and tick the box again.
-                    </Notice>
-                  ) : loading ? (
-                    <p role="status">{tReview("checkingPrice")}</p>
-                  ) : null
+                action={
+                  // VAY-2416: the one tick right above Confirm.
+                  <div className="space-y-3">
+                    {reviewNotice}
+                    {quote && (
+                      <BookingConsent
+                        quote={quote}
+                        roomNames={roomNames}
+                        today={hotelDate}
+                        termsText={pagePayment.termsText}
+                        agreed={agreed}
+                        disabled={!consentFor || !!error}
+                        errorId={consentError ? consentErrorId : undefined}
+                        onAgree={(checked) => setAgreedTo(checked ? consentFor : null)}
+                        status={quoteRules && !consentFor ? tBefore("roomsMissing") : undefined}
+                      />
+                    )}
+                    <div ref={setConfirmSlot} />
+                  </div>
                 }
-                beforeYouBook={
-                  quote && (
-                    <BeforeYouBook
-                      quote={quote}
-                      disclosure={quoteRules}
-                      rulesFailed={guestRulesQuote.failed}
-                      onRetryRules={guestRulesQuote.retry}
-                      roomNames={roomNames}
-                      today={hotelDate}
-                      hotelCountry={hotelCountry}
-                      termsText={pagePayment.termsText}
-                      formatMoney={(minor) => money(minor, quote.currency)}
-                      agreed={agreed}
-                      consentDisabled={!consentFor || !!error}
-                      consentErrorId={consentError ? consentErrorId : undefined}
-                      onAgree={(checked) => setAgreedTo(checked ? consentFor : null)}
-                      status={quoteRules && !consentFor ? tBefore("roomsMissing") : undefined}
-                    />
-                  )
-                }
-                confirm={
-                  quote && (
-                    <ReplacementBookingConfirmation
-                      key={quote.quoteId}
-                      slug={slug}
-                      quote={quote}
-                      disclosure={agreed ? quoteRules : null}
-                      guest={
-                        guestComplete(guest, rulesForQuote)
-                          ? acceptanceGuest(guest, rulesForQuote)
-                          : null
-                      }
-                      termsAccepted={agreed}
-                      attempt={attempt}
-                      onAttemptChange={setAttempt}
-                      onBooked={openConfirmation}
-                      soldOutNotice={soldOutNotice}
-                      label={pricedOption?.button}
-                      busyLabel={pricedOption?.busy}
-                      hints={{ details: tBefore("hintDetails"), agree: tBefore("hintAgree") }}
-                      onConsentMissing={
-                        // Only while the box can be ticked: an expired price, rules that didn't
-                        // load or a room without its name keep Confirm off, as before.
-                        !error && consentFor
-                          ? () => {
-                              // The box is marked before focus lands, so it is announced.
-                              flushSync(() => setConsentMissedFor(quote.quoteId));
-                              document
-                                .querySelector<HTMLInputElement>(
-                                  "input[data-consent]:not(:checked):not(:disabled)",
-                                )
-                                ?.focus();
-                            }
-                          : undefined
-                      }
-                    />
-                  )
-                }
-                onBack={() => goBack("details")}
               />
-            </div>
-            <div className="lg:col-span-1 space-y-4">
-              {summaryQuote && (
-                <StaySummary
-                  quote={summaryQuote}
-                  rooms={summaryRooms}
-                  guests={guestsLine}
-                  rules={knownRules}
-                  formatMoney={money}
-                  box={pricedOption?.box}
-                  expired={!!error}
-                />
-              )}
-              {summaryQuote && <ApproximateAmountsNote currency={summaryQuote.currency} />}
-            </div>
-          </div>
+            }
+          >
+            <PaymentStep
+              guestName={`${guest.firstName} ${guest.lastName}`}
+              guestEmail={guest.email}
+              guestPhone={guest.phone}
+              onChangeDetails={() => goBack("details")}
+              method={method}
+              options={methodOptions}
+              unavailable={noWayToPay ? priceNotice : null}
+              onMethod={setPayment}
+              locked={attemptOpen}
+              showExplanation={!!quote && quote.paymentMethod === method}
+              // VAY-2416: what the price says sits in "Your stay", above the tick and Confirm.
+              notice={null}
+              beforeYouBook={
+                quote && (
+                  <BeforeYouBook
+                    quote={quote}
+                    disclosure={quoteRules}
+                    rulesFailed={guestRulesQuote.failed}
+                    onRetryRules={guestRulesQuote.retry}
+                    roomNames={roomNames}
+                    today={hotelDate}
+                    hotelCountry={hotelCountry}
+                    termsText={pagePayment.termsText}
+                    formatMoney={(minor) => money(minor, quote.currency)}
+                  />
+                )
+              }
+              confirm={
+                quote && (
+                  <ReplacementBookingConfirmation
+                    key={quote.quoteId}
+                    slug={slug}
+                    quote={quote}
+                    disclosure={agreed ? quoteRules : null}
+                    guest={
+                      guestComplete(guest, rulesForQuote)
+                        ? acceptanceGuest(guest, rulesForQuote)
+                        : null
+                    }
+                    termsAccepted={agreed}
+                    attempt={attempt}
+                    onAttemptChange={setAttempt}
+                    onBooked={openConfirmation}
+                    soldOutNotice={soldOutNotice}
+                    label={pricedOption?.button}
+                    busyLabel={pricedOption?.busy}
+                    actionSlot={confirmSlot}
+                    buttonClassName={stayButton()}
+                    hints={{ details: tBefore("hintDetails"), agree: tBefore("hintAgree") }}
+                    onConsentMissing={
+                      // Only while the box can be ticked: an expired price, rules that didn't
+                      // load or a room without its name keep Confirm off, as before.
+                      !error && consentFor
+                        ? () => {
+                            // The box is marked before focus lands, so it is announced.
+                            flushSync(() => setConsentMissedFor(quote.quoteId));
+                            document
+                              .querySelector<HTMLInputElement>(
+                                "input[data-consent]:not(:checked):not(:disabled)",
+                              )
+                              ?.focus();
+                          }
+                        : undefined
+                    }
+                  />
+                )
+              }
+            />
+            {summaryQuote && <ApproximateAmountsNote currency={summaryQuote.currency} />}
+          </CheckoutColumns>
         )}
       </div>
     </BookShell>
+  );
+}
+
+/** VAY-2416: a checkout step on the left and its "Your stay" card, with the step's button, on the
+ * right. On phones the card is a bar fixed to the bottom of the screen. */
+function CheckoutColumns({ card, children }: { card: ReactNode; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="min-w-0 space-y-6">{children}</div>
+      <div>{card}</div>
+    </div>
   );
 }
 

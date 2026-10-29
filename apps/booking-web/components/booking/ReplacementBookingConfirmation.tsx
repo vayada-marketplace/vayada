@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
@@ -43,7 +44,9 @@ export default function ReplacementBookingConfirmation({
   soldOutNotice,
   label,
   busyLabel,
-  hints = { details: "Fill in your details to book.", agree: "Agree to the terms above to book." },
+  hints = { details: "Fill in your details to book.", agree: "Agree to the terms to book." },
+  actionSlot,
+  buttonClassName = button,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -74,6 +77,10 @@ export default function ReplacementBookingConfirmation({
   hints?: { details: string; agree: string };
   /** Its words while the booking is being made. */
   busyLabel?: string;
+  /** VAY-2416: where the button, with what it says before booking, is shown ("Your stay"); null
+   * until that place exists. The card payment and the outcome stay where this component is. */
+  actionSlot?: HTMLElement | null;
+  buttonClassName?: string;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -129,6 +136,15 @@ export default function ReplacementBookingConfirmation({
     // Once per reservation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manualPayment]);
+  // VAY-2416: Confirm was pressed in "Your stay"; the card form opens where this component is, so
+  // it is brought into view.
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (cardPayment && actionSlot !== undefined)
+      card.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    // Once, when the card form opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardPayment]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -266,16 +282,18 @@ export default function ReplacementBookingConfirmation({
 
   if (cardPayment)
     return (
-      <ReplacementCardPayment
-        slug={slug}
-        quoteId={quote.quoteId}
-        required={cardPayment}
-        request={request}
-        onPaid={setResult}
-      />
+      <div ref={card}>
+        <ReplacementCardPayment
+          slug={slug}
+          quoteId={quote.quoteId}
+          required={cardPayment}
+          request={request}
+          onPaid={setResult}
+        />
+      </div>
     );
 
-  return (
+  const form = (
     <form className="space-y-4" onSubmit={submit}>
       {!supported ? (
         <p role="status">Online confirmation is not available for this payment option.</p>
@@ -283,7 +301,11 @@ export default function ReplacementBookingConfirmation({
         <p role="status">{guest ? hints.agree : hints.details}</p>
       ) : null}
       {soldOut && soldOutNotice ? soldOutNotice(soldOut) : error && <p role="alert">{error}</p>}
-      <button className={button} type="submit" disabled={!(ready || consentMissing) || loading}>
+      <button
+        className={buttonClassName}
+        type="submit"
+        disabled={!(ready || consentMissing) || loading}
+      >
         {loading
           ? busyLabel
             ? busyLabel
@@ -302,4 +324,6 @@ export default function ReplacementBookingConfirmation({
       </button>
     </form>
   );
+  if (actionSlot === undefined) return form;
+  return actionSlot && createPortal(form, actionSlot);
 }

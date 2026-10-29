@@ -173,7 +173,8 @@ export default function ExtrasStep({
           ))}
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
+      {/* Two to a row beside "Your stay" (VAY-2416). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
         {extras
           .filter(
             (addon) => category === "all" || (display[addon.id]?.category ?? "other") === category,

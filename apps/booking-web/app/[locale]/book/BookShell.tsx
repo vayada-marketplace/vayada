@@ -9,22 +9,21 @@ import { useHotel } from "@/contexts/HotelContext";
 import type { BookStep } from "@/lib/bookFlow";
 
 /** The old booking pages' frame around each /book step (VAY-2195): the hotel's hero, the step's
- * title with the step indicator, and the footer. */
+ * title with the step indicator, and the footer. VAY-2416: "Back to …" sits above the title. */
 export default function BookShell({
   steps,
   current,
   title,
   subtitle,
   children,
-  bar,
+  back,
 }: {
   steps: readonly BookStep[];
   current: BookStep;
   title: string;
   subtitle?: string;
   children: ReactNode;
-  /** A bar sticky at the bottom of the screen until it settles above the footer (VAY-2391). */
-  bar?: ReactNode;
+  back?: { label: string; onClick: () => void; disabled?: boolean };
 }) {
   const t = useTranslations("steps");
   const { hotel } = useHotel();
@@ -35,7 +34,8 @@ export default function BookShell({
     payment: t("payment"),
   };
   return (
-    <div className="min-h-screen bg-gray-50">
+    // The step's "Your stay" bar is fixed to the bottom of a phone's screen: the footer clears it.
+    <div className="min-h-screen bg-gray-50 pb-[var(--fixed-bottom-bar,0px)]">
       <HeroSection
         heroImage={hotel.heroImage}
         heading={hotel.branding?.heroHeading || hotel.name}
@@ -44,6 +44,30 @@ export default function BookShell({
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
           <div>
+            {back && (
+              <button
+                type="button"
+                onClick={back.onClick}
+                disabled={back.disabled}
+                className="mb-2 flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 disabled:opacity-40"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                {back.label}
+              </button>
+            )}
             <h1 className="text-[22px] leading-[30px] font-heading text-gray-900">{title}</h1>
             {subtitle && <p className="text-gray-500 mt-1">{subtitle}</p>}
           </div>
@@ -54,7 +78,6 @@ export default function BookShell({
         </div>
         {children}
       </main>
-      {bar}
       <BookingFooter />
     </div>
   );

@@ -5,12 +5,6 @@ import { useTranslations } from "next-intl";
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import type { PaymentMethodOption } from "@/lib/paymentMethodOptions";
 
-const icon = (d: string, size = "w-5 h-5 text-gray-700") => (
-  <svg className={size} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
-  </svg>
-);
-
 const card = "bg-white rounded-2xl border border-gray-200 p-5 md:p-8";
 
 /** Step 3, "Review & pay" (VAY-2347): who is booking, how they pay (the hotel's ways, each with
@@ -28,7 +22,6 @@ export default function PaymentStep({
   notice,
   beforeYouBook,
   confirm,
-  onBack,
   locked = false,
 }: {
   guestName: string;
@@ -46,8 +39,8 @@ export default function PaymentStep({
   notice: ReactNode;
   /** What the guest agrees to for this price and the tick (VAY-2347); nothing without a price. */
   beforeYouBook: ReactNode;
+  /** The booking's button and what follows it (VAY-2416: the button itself shows in "Your stay"). */
   confirm: ReactNode;
-  onBack: () => void;
   /** A booking attempt is open: the way to pay and the details can't change until it settles. */
   locked?: boolean;
 }) {
@@ -153,18 +146,7 @@ export default function PaymentStep({
         )}
       </section>
       {beforeYouBook}
-      <div className="space-y-4">
-        <button
-          type="button"
-          onClick={onBack}
-          disabled={locked}
-          className="text-[15px] font-semibold text-gray-800 flex items-center gap-1.5 disabled:opacity-40"
-        >
-          {icon("M15 19l-7-7 7-7", "w-4 h-4")}
-          {t("backToDetails")}
-        </button>
-        {confirm}
-      </div>
+      {confirm}
     </div>
   );
 }

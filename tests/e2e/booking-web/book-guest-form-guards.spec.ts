@@ -42,7 +42,7 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
   // VAY-2306: Confirm before ticking marks the box; once the price runs out that mark goes.
   const missing = page
     .getByRole("alert")
-    .filter({ hasText: "Tick the box to agree before you book." });
+    .filter({ hasText: "Please tick the box to confirm your booking." });
   await page.getByRole("button", { name: "Confirm booking" }).click();
   await expect(missing).toBeVisible();
   await acknowledge(page);

@@ -5,7 +5,7 @@ import { watchPageHealth } from "../support/pageHealth";
 import { expectChoosing, key, mockGroup, STAY } from "../support/roomPickerMocks";
 
 // VAY-2393 part 4: the Extras step lists each booked room with Change and Remove, beside the
-// extras; the total and Continue stay in the Extras bar (VAY-2391). Chosen extras survive.
+// extras, in "Your stay" with the total and Continue (VAY-2416). Chosen extras survive.
 const hotelApi = `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}`;
 const stay = (adults: number) =>
   `/?checkIn=2026-11-10&checkOut=2026-11-12&adults=${adults}&rooms=2`;
@@ -70,19 +70,21 @@ for (const width of [1440, 390]) {
     await openPage(page, stay(4));
     await chooseGarden(page, 2);
 
-    const panel = page.getByTestId("extras-rooms");
-    await expect(panel).toContainText("Your 2 rooms");
-    const room1 = page.getByTestId("extras-room-1");
-    await expect(room1).toContainText("Room 1 · 2 Adults");
-    await expect(room1).toContainText("Garden Double Room");
-    await expect(room1).toContainText("2 nights");
+    const card = page.getByRole("complementary", { name: "Your stay" });
+    // On a phone the rooms are behind "Details".
+    if (width === 390) await card.getByRole("button", { name: "Details", exact: true }).click();
+    await expect(page.getByTestId("stay-room-2")).toBeVisible();
+    const room1 = page.getByTestId("stay-room-1");
+    await expect(room1).toContainText("Room 1 · Garden Double Room");
+    await expect(room1).toContainText("2 Adults");
     await expect(room1).toContainText("€100");
     await expect(room1.getByRole("button", { name: "Remove Room 1 from booking" })).toBeVisible();
     await addTransfer(page);
     await transferAdded(page);
     // Priced again with the transfer.
     await expect(room1).toContainText("€100");
-    await expect(page.getByTestId("extras-bar")).toContainText("€25");
+    await expect(card).toContainText("Airport transfer");
+    await expect(card).toContainText("€25");
     await page.screenshot({
       path: testInfo.outputPath(`extras-rooms-${width}.png`),
       fullPage: true,
@@ -99,7 +101,7 @@ for (const width of [1440, 390]) {
       .click();
     await expect(page).toHaveURL(/[?&]step=extras/);
     expect(new URL(page.url()).searchParams.getAll("pick")[0]).toBe(`2-0-${key("a")}`);
-    await expect(page.getByTestId("extras-room-1")).toContainText("Deluxe Double Room");
+    await expect(page.getByTestId("stay-room-1")).toContainText("Deluxe Double Room");
     await transferAdded(page);
     await assertHealthy();
   });
@@ -115,20 +117,24 @@ test("removes a room on Extras and stays while the other place still fits", asyn
   await chooseGarden(page, 2);
   await addTransfer(page);
   await page
-    .getByTestId("extras-room-2")
+    .getByTestId("stay-room-2")
     .getByRole("button", { name: "Remove Room 2 from booking" })
     .click();
   const toast = page.getByTestId("toast");
   await expect(toast).toContainText("Room 2 removed. All 2 adults are now in one room.");
   await expect(page).toHaveURL(/[?&]step=extras/);
-  await expect(page.getByTestId("extras-rooms")).toContainText("Your room");
-  await expect(page.getByTestId("extras-room-1")).toContainText("2 Adults");
+  // One room: its name and guests under "Your stay", with Change.
+  const card = page.getByRole("complementary", { name: "Your stay" });
+  await expect(page.getByTestId("stay-room-1")).toHaveCount(0);
+  await expect(card).toContainText("Garden Double Room");
+  await expect(card).toContainText("2 adults");
+  await expect(card.getByRole("button", { name: "Change Room 1" })).toBeVisible();
   expect(new URL(page.url()).searchParams.getAll("pick")).toEqual([`2-0-${key("f")}`]);
   await transferAdded(page);
 
   // Undo: both rooms are back, with the extra.
   await toast.getByRole("button", { name: "Undo" }).click();
-  await expect(page.getByTestId("extras-rooms")).toContainText("Your 2 rooms");
+  await expect(page.getByTestId("stay-room-2")).toBeVisible();
   expect(new URL(page.url()).searchParams.getAll("pick")).toHaveLength(2);
   await transferAdded(page);
   await assertHealthy();
@@ -144,7 +150,7 @@ test("removes a room on Extras and goes back to the cards when the place left is
   await chooseGarden(page, 2);
   await addTransfer(page);
   await page
-    .getByTestId("extras-room-2")
+    .getByTestId("stay-room-2")
     .getByRole("button", { name: "Remove Room 2 from booking" })
     .click();
   const toast = page.getByTestId("toast");
@@ -157,7 +163,7 @@ test("removes a room on Extras and goes back to the cards when the place left is
   // Undo goes back to Extras as it was.
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(page).toHaveURL(/[?&]step=extras/);
-  await expect(page.getByTestId("extras-rooms")).toContainText("Your 2 rooms");
+  await expect(page.getByTestId("stay-room-2")).toBeVisible();
   await transferAdded(page);
   await assertHealthy();
 });
@@ -176,8 +182,8 @@ test("keeps a child's age and the extras when a family changes a room", async ({
       .click();
   await page.getByLabel("Child 1: age at check-in").selectOption("7");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByTestId("extras-rooms")).toBeVisible();
-  await expect(page.getByTestId("extras-room-2")).toContainText("Room 2 · 1 Adult, 1 Child");
+  await expect(page.getByTestId("stay-room-2")).toContainText("Room 2 · Garden Double Room");
+  await expect(page.getByTestId("stay-room-2")).toContainText("1 Adult, 1 Child");
   await addTransfer(page);
 
   await page.getByRole("button", { name: "Change Room 1" }).click();
@@ -186,8 +192,8 @@ test("keeps a child's age and the extras when a family changes a room", async ({
     .getByRole("button", { name: "Select for Room 1" })
     .click();
   // Straight back to Extras: the child's age is kept, so nothing is asked again.
-  await expect(page.getByTestId("extras-room-1")).toContainText("Deluxe Double Room");
-  await expect(page.getByTestId("extras-room-2")).toContainText("Room 2 · 1 Adult, 1 Child");
+  await expect(page.getByTestId("stay-room-1")).toContainText("Deluxe Double Room");
+  await expect(page.getByTestId("stay-room-2")).toContainText("1 Adult, 1 Child");
   await expect(page.getByLabel("Child 1: age at check-in")).toHaveCount(0);
   await transferAdded(page);
   await assertHealthy();

@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 
-/** A tick on the payment step (VAY-2306), drawn like the ways to pay above it: the whole tile
- * ticks the box, and the hotel's colour shows it ticked. `children` (the "Read …" button) sits
- * above the tile's click area, so it opens the text without ticking. The ring sits on the tile;
- * a browser without :has() keeps the box's own focus outline. */
+/** A tick on the payment step (VAY-2306): the whole tile ticks the box, the hotel's colour shows
+ * it ticked, and orange marks it when Confirm was pressed without it (VAY-2416). `children` (the
+ * "Read …" button) sits above the tile's click area, so it opens the text without ticking. The ring
+ * sits on the tile; a browser without :has() keeps the box's own focus outline. */
 export default function ConsentTile({
   label,
   checked,
@@ -24,7 +24,7 @@ export default function ConsentTile({
   const tone = disabled
     ? "border-gray-200 bg-gray-50 text-gray-400"
     : invalid
-      ? "border-red-600 bg-red-50 text-gray-700"
+      ? "border-orange-500 bg-orange-50 text-gray-700"
       : checked
         ? "border-primary-600 bg-primary-50 font-medium text-gray-900"
         : "border-gray-200 bg-white text-gray-700 hover:border-gray-300";
@@ -39,7 +39,7 @@ export default function ConsentTile({
           <input
             type="checkbox"
             data-consent
-            className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border-[1.5px] border-gray-500 bg-white [@supports_selector(:has(*))]:focus:outline-none checked:border-primary-600 checked:bg-primary-600 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 aria-[invalid=true]:border-red-600 aria-[invalid=true]:bg-red-50"
+            className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border-[1.5px] border-gray-500 bg-white [@supports_selector(:has(*))]:focus:outline-none checked:border-primary-600 checked:bg-primary-600 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 aria-[invalid=true]:border-orange-500 aria-[invalid=true]:bg-orange-50"
             checked={checked}
             disabled={disabled}
             aria-invalid={invalid || undefined}
