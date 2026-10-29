@@ -112,13 +112,33 @@ const list = (items: unknown[]) => ({
   sourceFreshness: {},
 });
 
+// Ada's booking total and the hotel's check-in time from its arrival times (VAY-2411 booking popover).
+const adaPricing = {
+  amountStatus: "recorded",
+  totalAmount: { amountDecimal: "243.00", currency: "EUR" },
+  balanceAmount: { amountDecimal: "0.00", currency: "EUR" },
+};
+const block = {
+  blockId: "block_paint",
+  version: "room-block-v1",
+  roomTypeId: VILLA,
+  roomId: ROOM,
+  startsOn: "2026-11-12",
+  endsOn: "2026-11-13",
+  blockedCount: 1,
+  reason: "Painting",
+  status: "active",
+  kind: "manual",
+};
+
 async function mockPricedVilla(page: Page) {
   const routes = {
     roomTypes: `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`,
     rooms: `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/rooms*`,
     reservations: `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations*`,
   };
-  for (const route of Object.values(routes)) await page.unroute(route);
+  await page.unroute(routes.roomTypes);
+  await page.unroute(routes.rooms);
   await page.route(routes.roomTypes, (route) =>
     route.fulfill({
       json: list([
@@ -153,6 +173,7 @@ async function mockPricedVilla(page: Page) {
   const ada = {
     ...pmsWebReservation,
     stay: { ...pmsWebReservation.stay, checkIn: "2026-11-03", checkOut: "2026-11-06" },
+    pricing: adaPricing,
     assignments: [
       {
         ...pmsWebReservation.assignments[0],
@@ -166,6 +187,19 @@ async function mockPricedVilla(page: Page) {
     route.fulfill({
       json: { ...list([ada]), pagination: { total: 1, limit: 500, offset: 0 } },
     }),
+  );
+  // Ada's own read, for the booking window "Change room" opens.
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${pmsWebReservation.guestBookingId}`,
+    (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          item: ada,
+          sourceFreshness: {},
+        },
+      }),
   );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
     route.fulfill({ json: publication }),
@@ -285,6 +319,52 @@ test.describe("PMS calendar prices", () => {
     point = await night(page, 7);
     await page.mouse.click(point.x, point.y);
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    await assertHealthy();
+  });
+
+  test("opens a booking's and a block's popover from their bars", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-blocks*`, (route) =>
+      route.fulfill({ json: list([block]) }),
+    );
+    await page.route(
+      `**/api/booking/properties/${PMS_WEB_PROPERTY_ID}/booking-guest-policy`,
+      (route) =>
+        route.fulfill({ json: { current: { bundle: { choices: { checkInTime: "15:00" } } } } }),
+    );
+    await page.goto("/calendar");
+
+    await page.locator('[data-bar="booking"]', { hasText: "Ada Lovelace" }).click();
+    const booking = page.getByRole("dialog", { name: "Ada Lovelace · #Paddy Villa" });
+    await expect(booking).toContainText("Nov 3 → Nov 6 · 3 nights");
+    await expect(booking).toContainText("Confirmed");
+    await expect(booking.getByRole("definition")).toHaveText([
+      "Ada Lovelace",
+      "Direct",
+      "€243",
+      "Tue, Nov 3 · from 15:00",
+    ]);
+    await expect(booking.getByRole("link", { name: "Open reservation" })).toHaveAttribute(
+      "href",
+      "/bookings/guest_booking_ada",
+    );
+    await page.screenshot({ path: testInfo.outputPath("calendar-booking-popover.png") });
+    // Change room opens the calendar's booking window with its room tools.
+    await booking.getByRole("button", { name: "Change room" }).click();
+    await expect(booking).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Move to another room|Assign room/ }),
+    ).toBeVisible();
+
+    await page.goto("/calendar");
+    await page.locator('[data-bar="block"]', { hasText: "Painting" }).click();
+    const blocked = page.getByRole("dialog", { name: "Blocked · #Paddy Villa" });
+    await expect(blocked).toContainText("Nov 12 → Nov 14 · 2 nights");
+    await expect(blocked).toContainText("Painting");
+    await expect(blocked.getByRole("button", { name: "Unblock dates" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("calendar-block-popover.png") });
+    await blocked.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByText("Blocked Room")).toBeVisible();
     await assertHealthy();
   });
 });

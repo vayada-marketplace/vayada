@@ -285,6 +285,10 @@ describe("calendarService manual-booking rates", () => {
               source: "manual",
               stay: { checkIn: "2026-08-20", checkOut: "2026-08-22" },
               primaryGuest: { displayName: "Manual Guest" },
+              pricing: {
+                amountStatus: "recorded",
+                totalAmount: { amountDecimal: "240.00", currency: "EUR" },
+              },
               assignments: [
                 {
                   assignmentId: "manual-assignment",
@@ -303,6 +307,10 @@ describe("calendarService manual-booking rates", () => {
               source: "channel",
               stay: { checkIn: "2026-08-22", checkOut: "2026-08-24" },
               primaryGuest: { displayName: "OTA Guest" },
+              pricing: {
+                amountStatus: "unverified",
+                totalAmount: { amountDecimal: "0.00", currency: "EUR" },
+              },
               assignments: [
                 {
                   assignmentId: "ota-assignment",
@@ -352,6 +360,11 @@ describe("calendarService manual-booking rates", () => {
     expect(result.bookings.map(({ id, channel }) => ({ id, channel }))).toEqual([
       { id: "manual-booking", channel: "manual" },
       { id: "ota-booking", channel: "booking.com" },
+    ]);
+    // VAY-2411: the booking popover shows a recorded total, never an unverified one.
+    expect(result.bookings.map(({ bookingValue }) => bookingValue)).toEqual([
+      { amountDecimal: "240.00", currency: "EUR" },
+      null,
     ]);
   });
 
