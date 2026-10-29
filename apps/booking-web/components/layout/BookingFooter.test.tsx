@@ -45,4 +45,8 @@ describe("BookingFooter", () => {
       expect(html).not.toContain("text-white/80 text-sm leading-relaxed");
     }
   });
+
+  it("offers the guest's privacy choices (VAY-2419)", () => {
+    expect(renderFooter("")).toContain(">Privacy choices</button>");
+  });
 });

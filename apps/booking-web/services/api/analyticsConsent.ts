@@ -40,6 +40,20 @@ export function onAnalyticsAllowed(slug: string, listener: () => void): () => vo
   return () => window.removeEventListener(ALLOWED, handle);
 }
 
+const OPEN = "vayada:analytics-choices";
+
+/** Opens the analytics prompt again, from the footer's "Privacy choices" link (VAY-2419). The
+ * link passes itself to get focus back: Safari doesn't focus a button it clicks. */
+export function openAnalyticsChoices(opener: HTMLElement) {
+  window.dispatchEvent(new CustomEvent(OPEN, { detail: opener }));
+}
+
+export function onAnalyticsChoicesOpened(listener: (opener: HTMLElement) => void): () => void {
+  const handle = (event: Event) => listener((event as CustomEvent<HTMLElement>).detail);
+  window.addEventListener(OPEN, handle);
+  return () => window.removeEventListener(OPEN, handle);
+}
+
 export function saveAnalyticsChoice(slug: string, analytics: boolean): boolean {
   if (!analytics) clearAnalyticsSession(slug);
   const before = analyticsChoice(slug);
