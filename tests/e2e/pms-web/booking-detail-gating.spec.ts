@@ -497,7 +497,7 @@ test("saves check-in guests to the guest list and their ID to the registration (
 
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
   const main = page.locator("main").first();
-  await main.getByRole("button", { name: "Continue" }).click();
+  await main.getByRole("button", { name: "Confirm arrival" }).click();
 
   // Grace came with the OTA import: her name and nationality stay as supplied.
   await main.getByRole("button", { name: /^Complete Grace Hopper/ }).click();
@@ -533,7 +533,8 @@ test("saves check-in guests to the guest list and their ID to the registration (
   await steps.getByRole("button", { name: /^Add-ons & payment/ }).click();
   await expect(page.getByRole("radio")).toHaveCount(0);
   await steps.getByRole("button", { name: /^Keys & check-in/ }).click();
-  await page.getByRole("button", { name: "Check in 2 guests" }).click();
+  await page.getByRole("checkbox", { name: /Room 101 · key handed over/ }).check();
+  await page.getByRole("button", { name: "Complete check-in" }).click();
   await expect.poll(() => checkIns).toBe(1);
   await assertHealthy();
 });

@@ -131,7 +131,7 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
     main.getByText("Late arrival around 11 pm, please leave the key at the bar."),
   ).toBeVisible();
   // Settings → Check-in asks staff to confirm they read it before going on.
-  const proceed = main.getByRole("button", { name: "Continue" });
+  const proceed = main.getByRole("button", { name: "Confirm arrival" });
   await expect(proceed).toBeDisabled();
   await main.getByRole("checkbox", { name: "I have read the request" }).check();
   await proceed.click();
@@ -151,7 +151,7 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
   await expect(main.getByText("Due now").locator("..")).toContainText("€240");
   await main.getByRole("radio", { name: /Collect now/ }).click();
   await main.getByRole("button", { name: "Cash", exact: true }).click();
-  await main.getByRole("button", { name: "Continue" }).click();
+  await main.getByRole("button", { name: "Continue to keys" }).click();
   await expect.poll(() => paid).toBe(true);
   await expect(main.getByText("Step 4 of 4")).toBeVisible();
   await expect(main.getByText(/€240(\.00)? · Cash, recorded/)).toBeVisible();
@@ -185,7 +185,7 @@ test("shows and records the rest of a card deposit at check-in", async ({ page }
   await expect(main.getByText("Due now").locator("..")).toContainText("€168");
   await main.getByRole("radio", { name: /Collect now/ }).click();
   await main.getByRole("button", { name: "Card · own terminal", exact: true }).click();
-  await main.getByRole("button", { name: "Continue" }).click();
+  await main.getByRole("button", { name: "Continue to keys" }).click();
   await expect.poll(() => paid).toBe(true);
   await expect(main.getByText(/€168(\.00)? · Card · own terminal, recorded/)).toBeVisible();
   await assertHealthy();
