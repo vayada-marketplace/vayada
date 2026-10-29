@@ -136,16 +136,22 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
   await main.getByRole("checkbox", { name: "I have read the request" }).check();
   await proceed.click();
 
-  // The booker's contact comes from the booking; the nationality can be corrected here.
-  await main.getByRole("button", { name: /^Complete Ada Lovelace/ }).click();
+  // The booker's contact comes from the booking, shown locked; the nationality can be corrected
+  // here and saves itself (VAY-2418).
+  await main.getByRole("button", { name: /^Add details Ada Lovelace/ }).click();
   const bookerNationality = main.getByRole("combobox", { name: /Nationality/ });
   await expect(bookerNationality).toHaveValue("Austria");
   await expect(bookerNationality).toBeEnabled();
-  await expect(main.getByRole("textbox", { name: /First name/ })).toBeDisabled();
+  await expect(main.getByRole("textbox", { name: /First name/ })).not.toBeEditable();
+  await expect(main.getByRole("textbox", { name: /First name/ })).toHaveAccessibleName(
+    /From the booking/,
+  );
   await bookerNationality.fill("Netherlands");
-  await main.getByRole("button", { name: "Save guest" }).click();
+  await main.getByRole("button", { name: /^Done Ada Lovelace/ }).click();
   await expect.poll(() => countryCode).toBe("NL");
-  await expect.poll(() => registrations.length).toBe(1);
+  await expect(main.getByRole("button", { name: /^Add details Ada Lovelace/ })).toBeVisible();
+  // Nothing in the staff-only registration changed, so nothing is sent there.
+  expect(registrations).toHaveLength(0);
 
   await openCheckinStep(page, "Add-ons & payment");
   await expect(main.getByText("Due now").locator("..")).toContainText("€240");

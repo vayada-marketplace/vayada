@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { useParams, useSearchParams } from "next/navigation";
@@ -8,6 +8,7 @@ import {
   Booking,
   BookingAddon,
   BookingAdditionalGuest,
+  BookingAdditionalGuestPayload,
   CheckinStepResult,
   GuestRegistration,
   bookingsService,
@@ -29,6 +30,7 @@ import {
   type RegistrationGuest,
 } from "@/lib/checkin/registration";
 import { checkinRooms, guestsByRoom, roomMoveOptions, type CheckinRoom } from "@/lib/checkin/rooms";
+import { guestChanges } from "@/lib/checkin/guestAutosave";
 import {
   bookingArrivalTime,
   countLabel,
@@ -123,6 +125,9 @@ export default function CheckInPage() {
   const [checklistSteps, setChecklistSteps] = useState<CheckinChecklistStep[]>([]);
   const [checklistValues, setChecklistValues] = useState<Record<string, string | boolean>>({});
   const [checkOutTime, setCheckOutTime] = useState<string | null>(null);
+  // The open guest form's save, and whether it holds details it couldn't save (VAY-2418).
+  const guestFlush = useRef<(() => Promise<boolean>) | null>(null);
+  const [guestUnsaved, setGuestUnsaved] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -170,6 +175,18 @@ export default function CheckInPage() {
     guests,
     booking ? expectedRegistrations(booking, settings) : 1,
   );
+  // Leaving Rooms & guests waits for the open guest form's save, then is judged on what it saved:
+  // a guest just made incomplete keeps staff there when every guest must be complete (VAY-2418).
+  const [leaveTo, setLeaveTo] = useState<number | null>(null);
+  const incompleteGuests = registration.incomplete.length;
+  useEffect(() => {
+    if (leaveTo === null) return;
+    setLeaveTo(null);
+    if (leaveTo < 2 || settings.allowIncompleteGuests || incompleteGuests === 0) {
+      setStep(leaveTo);
+      window.scrollTo({ top: 0 });
+    }
+  }, [leaveTo, settings.allowIncompleteGuests, incompleteGuests]);
   // Add-ons offered at the desk: those Settings → Check-in picks, in the booking's currency.
   const offers = useMemo(
     () =>
@@ -195,20 +212,33 @@ export default function CheckInPage() {
       };
     });
 
-  /** The booker's name and contact come from the booking (only the nationality can be corrected);
-   * other guests are saved to the guest list; then their registration, when staff may see IDs. */
-  const saveGuest = async (guest: RegistrationGuest, values: GuestFormValues) => {
+  /** Saves what changed since the last save (VAY-2418 autosave). The booker's name and contact
+   * come from the booking (only the nationality can be corrected); other guests go to the guest
+   * list, a new one listed first (`listed` gets its id at once, so a retry never lists them
+   * twice); then their registration, when staff may see IDs. */
+  const saveGuest = async (
+    guest: RegistrationGuest,
+    values: GuestFormValues,
+    previous: GuestFormValues,
+    knownId: string | null,
+    listed: (id: string) => void,
+  ) => {
     if (!booking) return;
-    let guestId = guest.guestId;
+    const { contact, registration: registrationChanged } = guestChanges(previous, values);
+    let guestId = knownId;
     if (guest.role === "booker") {
-      if (values.nationality && values.nationality !== booking.guestCountry) {
+      if (
+        contact.includes("nationality") &&
+        values.nationality &&
+        values.nationality !== booking.guestCountry
+      ) {
         const correction = await bookingsService.correctPrimaryGuestNationality(
           booking.id,
           values.nationality,
         );
         setBooking((current) => (current ? { ...current, ...correction } : current));
       }
-    } else {
+    } else if (!guestId || contact.length) {
       const payload = {
         firstName: values.firstName.trim(),
         lastName: values.lastName.trim(),
@@ -216,17 +246,21 @@ export default function CheckInPage() {
         phone: values.phone.trim(),
         nationality: values.nationality,
       };
+      const changed: BookingAdditionalGuestPayload = {};
+      for (const field of contact) changed[field] = payload[field];
       const saved = guestId
-        ? await bookingsService.updateAdditionalGuest(booking.id, guestId, payload)
+        ? await bookingsService.updateAdditionalGuest(booking.id, guestId, changed)
         : await bookingsService.createAdditionalGuest(booking.id, payload);
       guestId = saved.id;
+      // In the same render as the list: the open card follows the new id instead of rebuilding.
+      listed(saved.id);
       setAdditionalGuests((current) =>
         current.some((entry) => entry.id === saved.id)
           ? current.map((entry) => (entry.id === saved.id ? saved : entry))
           : [...current, saved],
       );
     }
-    if (!canReadIdentity || !guestId) return;
+    if (!canReadIdentity || !guestId || !registrationChanged) return;
     const saved = await bookingsService.saveGuestRegistration(booking.id, guestId, {
       assignmentId: values.assignmentId,
       dateOfBirth: values.dateOfBirth || null,
@@ -468,14 +502,22 @@ export default function CheckInPage() {
   const reachable = (index: number) =>
     index <= step ||
     ((index < 1 || arrivalReady) && (index < 2 || guestsReady) && (index < 3 || step === 2));
-  const goTo = (index: number) => {
-    if (!reachable(index)) return;
+  const jump = (index: number) => {
     if (index === 3 && step === 2) {
       void settlePayment();
       return;
     }
     setStep(index);
     window.scrollTo({ top: 0 });
+  };
+  // An open guest form saves first; details it can't save keep staff on the step.
+  const goTo = (index: number) => {
+    if (!reachable(index)) return;
+    if (step === 1 && guestFlush.current) {
+      void guestFlush.current().then((saved) => saved && setLeaveTo(index));
+      return;
+    }
+    jump(index);
   };
 
   /** Continue on step 3: the desk charges match the add-ons added now, then the payment is recorded
@@ -607,7 +649,6 @@ export default function CheckInPage() {
   // Each step's button and the line under it, at the foot of the Booking card (VAY-2418).
   const fine = (text: string) => ({ text, ok: true });
   const pending = (text: string) => ({ text, ok: false });
-  const incompleteCount = registration.incomplete.length;
   const actions: CheckinCardAction[] = [
     {
       label: t("checkIn.flow.arrival.cta"),
@@ -619,15 +660,16 @@ export default function CheckInPage() {
     },
     {
       label: t("checkIn.flow.rooms.cta"),
-      disabled: !guestsReady,
+      disabled: !guestsReady || guestUnsaved,
       onClick: () => goTo(2),
-      status:
-        incompleteCount === 0
+      status: guestUnsaved
+        ? pending(t("checkIn.flow.rooms.notSaved"))
+        : incompleteGuests === 0
           ? fine(t("checkIn.flow.rooms.allRegistered"))
           : pending(
               t(
-                `checkIn.flow.rooms.${settings.allowIncompleteGuests ? "incompleteLater" : "incompleteBlocked"}${incompleteCount === 1 ? "One" : "Many"}`,
-                { count: incompleteCount },
+                `checkIn.flow.rooms.${settings.allowIncompleteGuests ? "incompleteLater" : "incompleteBlocked"}${incompleteGuests === 1 ? "One" : "Many"}`,
+                { count: incompleteGuests },
               ),
             ),
     },
@@ -865,6 +907,8 @@ export default function CheckInPage() {
                 formInitial={formInitial}
                 lockedFields={lockedFields}
                 onSaveGuest={saveGuest}
+                guestFlush={guestFlush}
+                onGuestUnsaved={setGuestUnsaved}
                 loadRoomOptions={loadRoomOptions}
                 onMoveRoom={moveRoom}
               />
@@ -943,7 +987,7 @@ export default function CheckInPage() {
               {
                 label: t("checkIn.flow.summary.guests"),
                 value: registered,
-                warn: incompleteCount > 0,
+                warn: incompleteGuests > 0,
               },
               {
                 label: t("checkIn.flow.summary.addons"),

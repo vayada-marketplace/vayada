@@ -66,6 +66,14 @@ describe("guest registration status (VAY-2373)", () => {
       { key: "slot-4", role: "slot", status: "details_missing" },
     ]);
     expect(guests[1]!.missing).toEqual(["documentType", "documentNumber"]);
+    // A guest nobody entered yet misses every required field (VAY-2418).
+    expect(guests[2]!.missing).toEqual([
+      "firstName",
+      "lastName",
+      ...DEFAULT_CHECKIN_SETTINGS.guestFields
+        .filter((entry) => entry.required)
+        .map((entry) => entry.field),
+    ]);
     expect(registrationSummary(guests, 4)).toMatchObject({ registered: 1, total: 4 });
   });
 

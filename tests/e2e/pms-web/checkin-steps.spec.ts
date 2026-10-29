@@ -48,9 +48,14 @@ for (const [width, height] of [
     await expect(main(page).getByText("Departs earlier")).toHaveCount(1);
     await expect(main(page).getByRole("heading", { name: /^Room 104 · Aug 15/ })).toBeVisible();
     await expect(main(page).getByRole("heading", { name: /^Room 101 · Aug 15/ })).toBeVisible();
-    await expect(main(page).getByRole("button", { name: /^View Ada Lovelace/ })).toBeVisible();
-    await expect(main(page).getByRole("button", { name: /^Complete Grace Hopper/ })).toBeVisible();
-    await expect(main(page).getByRole("button", { name: /^Complete Guest 3/ })).toBeVisible();
+    await expect(main(page).getByRole("button", { name: /^Edit Ada Lovelace/ })).toBeVisible();
+    await expect(
+      main(page).getByRole("button", { name: /^Add details Grace Hopper/ }),
+    ).toBeVisible();
+    await expect(main(page).getByRole("button", { name: /^Add details Guest 3/ })).toBeVisible();
+    // VAY-2418: each card says how many required fields are still empty.
+    await expect(main(page).getByText("ID missing · 2 required fields left")).toBeVisible();
+    await expect(main(page).getByText("Details missing · 6 required fields")).toHaveCount(2);
     await expect(main(page).getByText("3 guests incomplete · you can finish later")).toBeVisible();
     expect(await overflow()).toBeLessThanOrEqual(0);
     await testInfo.attach(`checkin-step2-${width}`, {
@@ -138,7 +143,7 @@ test("keeps every step's button in the sticky Booking card on a 13-inch laptop",
   await assertHealthy();
 });
 
-test("records a new guest's details and ID, sleeping in the room they're listed under", async ({
+test("lists a new guest on Done, with their ID, in the room they're listed under", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
@@ -147,26 +152,50 @@ test("records a new guest's details and ID, sleeping in the room they're listed 
   await main(page).getByRole("button", { name: "Confirm arrival" }).click();
 
   await main(page)
-    .getByRole("button", { name: /^Complete Guest 3/ })
+    .getByRole("button", { name: /^Add details Guest 3/ })
     .click();
   const form = main(page).getByRole("form", { name: "Guest 3" });
-  await form.getByRole("button", { name: "Save guest" }).click();
-  await expect(form.getByRole("alert")).toHaveText("Enter the guest’s first and last name.");
+  // VAY-2418: no Save, Cancel or Close; a guest nobody entered yet is added on Done.
+  await expect(form.getByText("This guest is added when you click Done")).toBeVisible();
+  await expect(main(page).getByRole("button", { name: /^(Save guest|Cancel|Close)/ })).toHaveCount(
+    0,
+  );
+  await expect(form.getByText(/^Still empty/)).toHaveCount(0);
+
+  // Clicking elsewhere lists nobody yet; Done without both names says so and holds the step.
+  await form.getByRole("textbox", { name: /Document number/ }).fill("C01X00T47");
+  await main(page).getByRole("heading", { name: "Guests", exact: true }).click();
+  await page.waitForTimeout(300);
+  await expect(form.locator('p[role="alert"]')).toHaveCount(0);
+  await main(page)
+    .getByRole("button", { name: /^Done Guest 3/ })
+    .click();
+  await expect(form.locator('p[role="alert"]')).toHaveText(
+    "Enter the guest’s first and last name.",
+  );
+  const proceed = bookingCard(page).getByRole("button", { name: "Continue to add-ons" });
+  await expect(proceed).toBeDisabled();
+  await expect(bookingCard(page).getByText("A guest’s details aren’t saved yet")).toBeVisible();
+
   await form.getByRole("textbox", { name: /First name/ }).fill("Alan");
   await form.getByRole("textbox", { name: /Last name/ }).fill("Turing");
   await form.getByRole("combobox", { name: /Nationality/ }).fill("United Kingdom");
-  await form.getByLabel(/Date of birth/).fill("1912-06-23");
-  // Still "ID missing" until the document is there.
-  await expect(form.getByText(/Still empty: Document type and Document number/)).toBeVisible();
+  const birth = form.getByRole("textbox", { name: /Date of birth/ });
+  await expect(birth).toHaveAttribute("placeholder", "DD / MM / YYYY");
+  await birth.pressSequentially("23061912");
+  await expect(birth).toHaveValue("23 / 06 / 1912");
   await form.getByRole("combobox", { name: /Document type/ }).selectOption("passport");
-  await form.getByRole("textbox", { name: /Document number/ }).fill("C01X00T47");
   await expect(form.getByRole("button", { name: "Room 101" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
   await form.getByRole("textbox", { name: /Guest notes/ }).fill("Vegetarian");
-  await form.getByRole("button", { name: "Save guest" }).click();
-  await expect(main(page).getByRole("button", { name: /^View Alan Turing/ })).toBeVisible();
+  // Moving between a new guest's fields lists nobody yet.
+  expect(writes.guests).toHaveLength(0);
+  await main(page)
+    .getByRole("button", { name: /^Done Guest 3/ })
+    .click();
+  await expect(main(page).getByRole("button", { name: /^Edit Alan Turing/ })).toBeVisible();
 
   expect(writes.guests).toEqual([
     expect.objectContaining({ firstName: "Alan", lastName: "Turing", countryCode: "GB" }),
@@ -186,7 +215,192 @@ test("records a new guest's details and ID, sleeping in the room they're listed 
       },
     },
   ]);
+  await expect(proceed).toBeEnabled();
   await expect(main(page).getByText("2 guests incomplete · you can finish later")).toBeVisible();
+  await assertHealthy();
+});
+
+test("saves a listed guest's field when staff leave it, sending only the change", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockCheckinFlow(page, { confirmSpecialRequest: false });
+  await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  await main(page).getByRole("button", { name: "Confirm arrival" }).click();
+  // Straight from Ada's open form to Grace's (same room): Grace gets a form of her own.
+  await main(page)
+    .getByRole("button", { name: /^Edit Ada Lovelace/ })
+    .click();
+  await main(page)
+    .getByRole("button", { name: /^Add details Grace Hopper/ })
+    .click();
+  const form = main(page).getByRole("form", { name: "Grace Hopper" });
+  await expect(main(page).getByRole("form", { name: "Ada Lovelace" })).toHaveCount(0);
+  await expect(form.getByText("Changes save automatically")).toBeVisible();
+
+  // Grace came with the OTA import: her name shows as it came, on white, marked as locked.
+  const firstName = form.getByRole("textbox", { name: /First name/ });
+  await expect(firstName).toHaveValue("Grace");
+  await expect(firstName).not.toBeEditable();
+  await expect(firstName).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(form.getByText("From the booking").first()).toBeVisible();
+
+  // Every field has the same label and input; no browser date picker.
+  for (const name of [/Phone/, /Nationality/, /Document type/, /Document number/, /Date of birth/])
+    await expect(form.getByLabel(name)).toHaveCSS("height", "44px");
+  await expect(form.getByRole("textbox", { name: /Date of birth/ })).toHaveAttribute(
+    "type",
+    "text",
+  );
+
+  await form.getByRole("textbox", { name: "Phone" }).fill("+1 555 0100");
+  await form.getByRole("combobox", { name: /Document type/ }).focus();
+  await expect.poll(() => writes.guests).toEqual([{ phone: "+1 555 0100" }]);
+  expect(writes.registrations).toHaveLength(0);
+
+  await form.getByRole("combobox", { name: /Document type/ }).selectOption("passport");
+  await form.getByRole("textbox", { name: /Document number/ }).fill("C01X00T47");
+  await form.getByRole("textbox", { name: /Date of birth/ }).pressSequentially("09121906");
+  await form.getByRole("textbox", { name: /Guest notes/ }).focus();
+  await expect
+    .poll(() => writes.registrations.at(-1)?.body)
+    .toEqual({
+      assignmentId: "assignment_1",
+      dateOfBirth: "1906-12-09",
+      documentType: "passport",
+      documentNumber: "C01X00T47",
+      gender: null,
+      staffNotes: null,
+    });
+  // Leaving a field without changing it sends nothing.
+  const sent = writes.registrations.length;
+  await form.getByRole("textbox", { name: "Phone" }).focus();
+  await form.getByRole("textbox", { name: /Guest notes/ }).focus();
+  await page.waitForTimeout(300);
+  expect(writes.registrations).toHaveLength(sent);
+  expect(writes.guests).toHaveLength(1);
+
+  // Moving her to Room 101 saves at once, but the open form stays where it is, with the note
+  // being typed, until Done.
+  await form.getByRole("button", { name: "Room 101" }).click();
+  const notes = form.getByRole("textbox", { name: /Guest notes/ });
+  await notes.click();
+  await expect.poll(() => writes.registrations.at(-1)?.body.assignmentId).toBe("assignment_2");
+  await notes.pressSequentially("Late arrival");
+  await expect(notes).toBeFocused();
+  await expect(notes).toHaveValue("Late arrival");
+  const group = (room: string) =>
+    main(page)
+      .locator("div")
+      .filter({ has: page.getByRole("heading", { name: new RegExp(`^Room ${room} · Aug 15`) }) })
+      .last();
+  await expect(group("104").getByRole("form", { name: "Grace Hopper" })).toBeVisible();
+  await main(page)
+    .getByRole("button", { name: /^Done Grace Hopper/ })
+    .click();
+  await expect.poll(() => writes.registrations.at(-1)?.body.staffNotes).toBe("Late arrival");
+  await expect(group("101").getByRole("button", { name: /^Edit Grace Hopper/ })).toBeVisible();
+  await expect(main(page).getByText("2 of 4 registered").first()).toBeVisible();
+  await assertHealthy();
+});
+
+// No page-health watch: this test fails a save on purpose, which the browser logs.
+test("holds the step on a date it can't read or a failed save, and lists a new guest only once", async ({
+  page,
+}) => {
+  const writes = await mockCheckinFlow(page, { confirmSpecialRequest: false });
+  await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  await main(page).getByRole("button", { name: "Confirm arrival" }).click();
+  await main(page)
+    .getByRole("button", { name: /^Add details Grace Hopper/ })
+    .click();
+  const grace = main(page).getByRole("form", { name: "Grace Hopper" });
+  const proceed = bookingCard(page).getByRole("button", { name: "Continue to add-ons" });
+  const notSaved = bookingCard(page).getByText("A guest’s details aren’t saved yet");
+
+  const birth = grace.getByRole("textbox", { name: /Date of birth/ });
+  await birth.pressSequentially("31021990");
+  await grace.getByRole("textbox", { name: /Document number/ }).focus();
+  await expect(grace.locator('p[role="alert"]')).toHaveText(
+    "Enter a real date of birth as DD / MM / YYYY.",
+  );
+  await expect(birth).toHaveAttribute("aria-invalid", "true");
+  await expect(proceed).toBeDisabled();
+  await expect(notSaved).toBeVisible();
+  // The step bar can't leave the guest behind either.
+  await page
+    .getByRole("navigation", { name: "Check-in steps" })
+    .getByRole("button", { name: /^Arrival/ })
+    .click();
+  await expect(main(page).getByText("Step 2 of 4")).toBeVisible();
+  expect(writes.registrations).toHaveLength(0);
+  // Clearing the date fixes it: nothing to send.
+  await birth.fill("");
+  await grace.getByRole("textbox", { name: /Document number/ }).focus();
+  await expect(notSaved).toHaveCount(0);
+  await main(page)
+    .getByRole("button", { name: /^Done Grace Hopper/ })
+    .click();
+
+  // A new guest whose registration fails: listed once, the form keeps what was typed and the
+  // step waits for "Try again".
+  let fail = true;
+  await page.route(
+    `**/api/pms/properties/*/reservations/${PMS_WEB_RESERVATION_ID}/guest-registrations/*`,
+    (route) => (fail ? route.fulfill({ status: 503, json: {} }) : route.fallback()),
+  );
+  await main(page)
+    .getByRole("button", { name: /^Add details Guest 3/ })
+    .click();
+  const guest = main(page).getByRole("form", { name: "Guest 3" });
+  await guest.getByRole("textbox", { name: /First name/ }).fill("Alan");
+  await guest.getByRole("textbox", { name: /Last name/ }).fill("Turing");
+  await guest.getByRole("textbox", { name: /Document number/ }).fill("C01X00T47");
+  await main(page)
+    .getByRole("button", { name: /^Done Guest 3/ })
+    .click();
+  const alan = main(page).getByRole("form", { name: "Alan Turing" });
+  await expect(alan.locator('p[role="alert"]')).toContainText("Try again");
+  await expect(alan.getByRole("textbox", { name: /Document number/ })).toHaveValue("C01X00T47");
+  await expect(proceed).toBeDisabled();
+  expect(writes.guests).toHaveLength(1);
+  fail = false;
+  await alan.getByRole("button", { name: "Try again" }).click();
+  await expect(alan.locator('p[role="alert"]')).toHaveCount(0);
+  await expect(notSaved).toHaveCount(0);
+  expect(writes.guests).toHaveLength(1);
+  expect(writes.registrations.at(-1)?.body).toMatchObject({ documentNumber: "C01X00T47" });
+  await expect(proceed).toBeEnabled();
+  await proceed.click();
+  await expect(main(page).getByText("Step 3 of 4")).toBeVisible();
+});
+
+test("keeps staff on Rooms & guests when the save on the way out leaves a guest incomplete", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockCheckinFlow(page, {
+    confirmSpecialRequest: false,
+    registrationScope: "booker",
+    allowIncompleteGuests: false,
+  });
+  await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  await main(page).getByRole("button", { name: "Confirm arrival" }).click();
+  const proceed = bookingCard(page).getByRole("button", { name: "Continue to add-ons" });
+  await expect(proceed).toBeEnabled();
+  await main(page)
+    .getByRole("button", { name: /^Edit Ada Lovelace/ })
+    .click();
+  const form = main(page).getByRole("form", { name: "Ada Lovelace" });
+  await form.getByRole("combobox", { name: /Document type/ }).selectOption("passport");
+  // The fake API keeps only what was sent, so this save leaves her document number and date
+  // of birth empty: the step is judged on that, not on what the page showed before the click.
+  await proceed.click();
+  await expect(
+    bookingCard(page).getByText("1 guest still needs details before check-in"),
+  ).toBeVisible();
+  await expect(main(page).getByText("Step 2 of 4")).toBeVisible();
+  await expect(proceed).toBeDisabled();
   await assertHealthy();
 });
 
@@ -408,10 +622,10 @@ test("keeps a guest's recorded status when staff can't see ID details", async ({
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
   await main(page).getByRole("button", { name: "Confirm arrival" }).click();
   await main(page)
-    .getByRole("button", { name: /^View Grace Hopper/ })
+    .getByRole("button", { name: /^Edit Grace Hopper/ })
     .click();
   const form = main(page).getByRole("form", { name: "Grace Hopper" });
   await expect(form.getByText(/ID details are only shown to staff/)).toBeVisible();
-  await expect(form.getByText(/^Still empty:/)).toHaveCount(0);
+  await expect(main(page).getByText("Registered").first()).toBeVisible();
   await assertHealthy();
 });

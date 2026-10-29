@@ -144,18 +144,16 @@ export async function mockCheckinFlow(
     if (route.request().method() === "GET") return route.fulfill({ json: { items: [grace] } });
     const body = (route.request().postDataJSON() as { guest: Record<string, unknown> }).guest;
     writes.guests.push(body);
+    // A new guest is listed as guest_new; an update (only the changed fields) merges into Grace.
+    const guest = {
+      ...(route.request().method() === "PATCH"
+        ? grace
+        : { ...grace, guestId: "guest_new", email: null, phone: null, countryCode: null }),
+      ...body,
+    };
     return route.fulfill({
       json: {
-        additionalGuest: {
-          ...grace,
-          guestId: "guest_new",
-          displayName: `${body.firstName} ${body.lastName}`,
-          firstName: body.firstName,
-          lastName: body.lastName,
-          email: body.email ?? null,
-          phone: body.phone ?? null,
-          countryCode: body.countryCode ?? null,
-        },
+        additionalGuest: { ...guest, displayName: `${guest.firstName} ${guest.lastName}` },
       },
     });
   });
@@ -179,7 +177,7 @@ export async function mockCheckinFlow(
     return route.fulfill({
       json: {
         guestId,
-        role: "additional_guest",
+        role: guestId === "guest_ada" ? "booker" : "additional_guest",
         ...body,
         filledFields: Object.keys(body).filter((key) => body[key] !== null),
         updatedAt: "2026-08-15T12:05:00Z",
