@@ -24,6 +24,8 @@ import {
   propertyCanAccessGuestContact,
 } from "../domains/bookingGuestContactAccess.js";
 import { readPropertyPlan } from "../domains/propertyPlanReadModel.js";
+import { lockGuestProfiles } from "../jobs/bookingGuestProfileLinks.js";
+import { editBookingGuestProfile, type GuestProfileFields } from "./guestProfileEdits.js";
 
 export type BookingGuestPiiClient = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -112,6 +114,8 @@ export function createTargetBookingGuestPiiPort(
       const acceptedAt = now().toISOString();
       try {
         await client.query("BEGIN");
+        // VAY-2420: guest profile writers lock in one order (see lockGuestProfiles).
+        await lockGuestProfiles(client);
         if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
           await client.query("ROLLBACK");
           return reservationNotFound(command.guestBookingId);
@@ -145,6 +149,11 @@ export function createTargetBookingGuestPiiPort(
             await client.query("ROLLBACK");
             return primaryGuestNotFound(command.guestBookingId);
           }
+          await editBookingGuestProfile(client, {
+            bookingGuestId: guestId,
+            propertyId: command.propertyId,
+            edit: { countryCode },
+          });
           await insertGuestPiiAuditEvent(client, command, {
             action: "booking.guest_pii.primary_guest.nationality_corrected",
             auditKey: `booking.guest_pii.${reservation.id}.v1`,
@@ -188,6 +197,8 @@ export function createTargetBookingGuestPiiPort(
       const commandMeta = guestPiiCommandMeta(command, acceptedAt);
       try {
         await client.query("BEGIN");
+        // VAY-2420: guest profile writers lock in one order (see lockGuestProfiles).
+        await lockGuestProfiles(client);
         if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
           await client.query("ROLLBACK");
           return reservationNotFound(command.guestBookingId);
@@ -243,6 +254,12 @@ export function createTargetBookingGuestPiiPort(
           ],
         );
         const additionalGuest = toBookingGuestPii(result.rows[0]!);
+        // What staff typed goes to the guest profile; what they left empty keeps the profile's value.
+        await editBookingGuestProfile(client, {
+          bookingGuestId: additionalGuest.guestId,
+          propertyId: command.propertyId,
+          edit: profileEdit(null, additionalGuest),
+        });
         await insertGuestPiiAuditEvent(client, command, {
           action: "booking.guest_pii.additional_guest.created",
           guestId: additionalGuest.guestId,
@@ -288,6 +305,8 @@ export function createTargetBookingGuestPiiPort(
       const commandMeta = guestPiiCommandMeta(command, acceptedAt);
       try {
         await client.query("BEGIN");
+        // VAY-2420: guest profile writers lock in one order (see lockGuestProfiles).
+        await lockGuestProfiles(client);
         if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
           await client.query("ROLLBACK");
           return reservationNotFound(command.guestBookingId);
@@ -302,10 +321,8 @@ export function createTargetBookingGuestPiiPort(
           command.propertyId,
           command.guestBookingId,
         );
-        const merged = {
-          ...existing,
-          ...definedGuestFields(command.guest, canWriteContact),
-        };
+        const edited = definedGuestFields(command.guest, canWriteContact);
+        const merged = { ...existing, ...edited };
         const result = await client.query<BookingGuestPiiRow>(
           `UPDATE booking.booking_guests
            SET first_name = $1,
@@ -351,6 +368,13 @@ export function createTargetBookingGuestPiiPort(
           ],
         );
         const additionalGuest = toBookingGuestPii(result.rows[0]!);
+        // The fields staff changed go to the guest profile; one they emptied is cleared there too.
+        // The form sends every field, so unchanged ones are left alone.
+        await editBookingGuestProfile(client, {
+          bookingGuestId: additionalGuest.guestId,
+          propertyId: command.propertyId,
+          edit: profileEdit(existing, merged),
+        });
         await insertGuestPiiAuditEvent(client, command, {
           action: "booking.guest_pii.additional_guest.updated",
           guestId: additionalGuest.guestId,
@@ -388,6 +412,8 @@ export function createTargetBookingGuestPiiPort(
       const commandMeta = guestPiiCommandMeta(command, acceptedAt);
       try {
         await client.query("BEGIN");
+        // VAY-2420: guest profile writers lock in one order (see lockGuestProfiles).
+        await lockGuestProfiles(client);
         if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
           await client.query("ROLLBACK");
           return reservationNotFound(command.guestBookingId);
@@ -762,6 +788,25 @@ function validateAdditionalGuestInput(
     }
   }
   return null;
+}
+
+/**
+ * The guest profile fields of a staff edit: those that differ from the booking's copy before it
+ * (a new guest: those it holds). Names are never cleared.
+ */
+function profileEdit(
+  before: Partial<BookingAdditionalGuestInput> | null,
+  after: Partial<BookingAdditionalGuestInput>,
+): Partial<GuestProfileFields> {
+  const edit: Record<string, string | null> = {};
+  for (const key of ["firstName", "lastName", "email", "phone", "countryCode"] as const) {
+    const value = after[key] ?? null;
+    const name = key === "firstName" || key === "lastName";
+    if (before ? value === (before[key] ?? null) : value === null) continue;
+    if (value === null && name) continue;
+    edit[key] = value;
+  }
+  return edit as Partial<GuestProfileFields>;
 }
 
 function definedGuestFields(

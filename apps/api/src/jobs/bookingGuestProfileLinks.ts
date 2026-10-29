@@ -27,9 +27,15 @@ import {
  */
 export const GUEST_PROFILE_LINK_BATCH_SIZE = 50;
 export const GUEST_PROFILE_LINK_INTERVAL_MS = 30_000;
-// One linker at a time across next-api tasks, so two bookings of a new guest can't make two profiles.
+// One writer of guest profiles at a time (linker runs across next-api tasks, staff edits), so two
+// bookings of a new guest can't make two profiles and writers never wait on each other's rows.
 const LINK_LOCK_SQL =
   "SELECT pg_try_advisory_xact_lock(hashtext('booking.guest_profile_links')) AS locked";
+
+/** Every staff write to guest profiles takes this first, before any row lock. */
+export async function lockGuestProfiles(client: GuestProfileQueryable): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext('booking.guest_profile_links'))");
+}
 // Bookings that end without the property ever seeing the guest's contact.
 const CLOSED_STATUSES = ["declined", "canceled", "expired", "completed", "no_show"];
 
@@ -44,7 +50,7 @@ export const GUEST_ACCOUNT_SQL = (propertyId: string) => `COALESCE((
       AND owner.relationship = 'owner'
       AND owner.status = 'active'
   ), (${propertyId})::text)::uuid`;
-const CONTACT_VISIBLE_SQL = `(${PROPERTY_ALWAYS_HAS_GUEST_CONTACT_SQL} OR ${BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL})`;
+export const CONTACT_VISIBLE_SQL = `(${PROPERTY_ALWAYS_HAS_GUEST_CONTACT_SQL} OR ${BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL})`;
 const NAME_KEY_SQL = (first: string, last: string) =>
   `lower(regexp_replace(btrim(${first} || ' ' || ${last}), '\\s+', ' ', 'g'))`;
 const EMAIL_KEY_SQL = (value: string) =>
@@ -172,6 +178,7 @@ export function createPgGuestProfileLinkStore(config: {
             failed += 1;
           }
         }
+        await moveRecordedIdDetails(client);
         await client.query("COMMIT");
         return { linked, failed };
       } catch (error) {
@@ -186,6 +193,101 @@ export function createPgGuestProfileLinkStore(config: {
       await pool.end();
     },
   };
+}
+
+/**
+ * Links one booking guest now and returns its profile, for staff edits that need it at once (null
+ * for a draft). Runs in the caller's transaction, after lockGuestProfiles.
+ */
+export async function linkBookingGuestNow(
+  client: GuestProfileQueryable,
+  bookingGuestId: string,
+): Promise<string | null> {
+  await lockGuestProfiles(client);
+  const row = (
+    await client.query<PendingRow>(
+      `${ROW_SQL} AND guest.id = $1::uuid FOR NO KEY UPDATE OF guest`,
+      [bookingGuestId],
+    )
+  ).rows[0];
+  if (!row) return null;
+  return row.guestProfileId ?? (await linkRow(client, row));
+}
+
+/**
+ * Gives a wrongly matched booking guest its own new profile, made from that booking's copy, and
+ * returns it (null when the guest isn't linked or its booking is a draft). Runs in the caller's
+ * transaction, after lockGuestProfiles.
+ */
+export async function separateBookingGuest(
+  client: GuestProfileQueryable,
+  bookingGuestId: string,
+): Promise<string | null> {
+  await lockGuestProfiles(client);
+  const row = (
+    await client.query<PendingRow>(
+      `${ROW_SQL} AND guest.id = $1::uuid FOR NO KEY UPDATE OF guest`,
+      [bookingGuestId],
+    )
+  ).rows[0];
+  if (!row?.guestProfileId) return null;
+  const profileId = await createProfile(client, row);
+  await client.query(
+    `UPDATE booking.booking_guests
+     SET guest_profile_id = $2::uuid, guest_profile_link = 'separated',
+         guest_profile_synced_at = updated_at,
+         guest_profile_contact_deferred = $3
+     WHERE id = $1::uuid`,
+    [bookingGuestId, profileId, contactDeferred(row)],
+  );
+  return profileId;
+}
+
+/**
+ * ID details check-in recorded per stay before they lived on the profile (VAY-2373) move to the
+ * profile of a linked guest, newest first. They only fill: a document type and number stay a pair.
+ */
+async function moveRecordedIdDetails(client: GuestProfileQueryable): Promise<void> {
+  const recorded = await client.query<{
+    bookingGuestId: string;
+    guestProfileId: string;
+    dateOfBirth: string | null;
+    documentType: string | null;
+    documentNumber: string | null;
+  }>(
+    `SELECT registration.booking_guest_id::text AS "bookingGuestId",
+            guest.guest_profile_id::text AS "guestProfileId",
+            to_char(registration.date_of_birth, 'YYYY-MM-DD') AS "dateOfBirth",
+            registration.document_type AS "documentType",
+            registration.document_number AS "documentNumber"
+     FROM pms.guest_registrations registration
+     JOIN booking.booking_guests guest ON guest.id = registration.booking_guest_id
+     WHERE guest.guest_profile_id IS NOT NULL
+       AND (registration.date_of_birth IS NOT NULL OR registration.document_type IS NOT NULL
+         OR registration.document_number IS NOT NULL)
+     ORDER BY registration.updated_at DESC
+     LIMIT 50
+     FOR UPDATE OF registration SKIP LOCKED`,
+  );
+  for (const row of recorded.rows) {
+    await client.query(
+      `UPDATE booking.guest_profiles
+       SET date_of_birth = COALESCE(date_of_birth, $2::date),
+           document_type = CASE WHEN document_type IS NULL AND document_number IS NULL
+             THEN $3 ELSE document_type END,
+           document_number = CASE WHEN document_type IS NULL AND document_number IS NULL
+             THEN $4 ELSE document_number END,
+           updated_at = now()
+       WHERE id = $1::uuid`,
+      [row.guestProfileId, row.dateOfBirth, row.documentType, row.documentNumber],
+    );
+    await client.query(
+      `UPDATE pms.guest_registrations
+       SET date_of_birth = NULL, document_type = NULL, document_number = NULL, updated_at = now()
+       WHERE booking_guest_id = $1::uuid`,
+      [row.bookingGuestId],
+    );
+  }
 }
 
 const ROW_SQL = `

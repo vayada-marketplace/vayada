@@ -375,13 +375,31 @@ VAY-2373/2374 add the step-by-step check-in's data, outside `pmsOperations.ts`:
   (`routes/pmsGuestRegistrations.ts`, `pms.guest_registrations`, migration 0516): date of birth, ID
   document, gender, room and a staff note per booking guest. Front desk, operators and owners read and
   write it; the ID fields are hidden from staff without `pms.guest_contact.read`, who also can't save.
-  Audit events carry the changed field names only.
+  Audit events carry the changed field names only. Since VAY-2420 date of birth and the ID document
+  are read from and saved to the guest profile.
 - `GET/PUT /api/pms/properties/:propertyId/check-in-settings` (`routes/pmsCheckinSettings.ts`,
   `pms.checkin_settings`, migration 0517): Settings → Check-in. Anyone who checks guests in reads it;
   owners and operators with `pms.settings.manage` change it. No row means the defaults.
 - `POST .../reservations/:guestBookingId/mark-paid` takes an optional `settlementMethod` (`cash`,
   `manual_card`, `bank_transfer`, `other`): how staff took the money at the desk, recorded on the
   Finance payment instead of the booking's own method. Nothing is charged online.
+
+VAY-2420 adds guest profiles (`routes/pmsGuestProfiles.ts`, `booking.guest_profiles` and
+`booking.guest_notes`, migration 0527). A background job links every booking guest to one profile
+per account (`jobs/bookingGuestProfileLinks.ts`). Reads need `pms.reservation.read`, writes
+`pms.operations.manage`; contact and ID fields need `pms.guest_contact.read`. A reader sees a
+profile, its stays and its notes only at the properties they may open. Audit events carry field
+names and IDs only.
+
+- `GET /api/pms/properties/:propertyId/guests?search=&limit=`: the account's guests, newest stay first.
+- `GET/PATCH .../guests/:guestProfileId`: the profile with its stays and notes; a staff edit (null
+  clears a field, names can't be cleared) also updates the copies on current and upcoming stays and
+  on the stay given as `bookingGuestId`.
+- `POST .../guests/:guestProfileId/notes`, `DELETE .../notes/:noteId`: staff-only guest notes.
+- `POST .../guests/:guestProfileId/separate` (`bookingGuestId`) gives one stay its own new profile;
+  `POST .../merge` (`guestProfileId`) moves another profile's stays and notes into this one.
+- `GET .../reservations/:guestBookingId/guest-profiles`: each guest of a reservation with its
+  profile, stay count and notes.
 
 VAY-784 implements the P2c check-out command in `apps/api`.
 `POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`
