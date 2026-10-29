@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Modal from "@/components/Modal";
 import { formatCurrency } from "@/lib/formatCurrency";
 import {
@@ -13,7 +13,7 @@ import {
 import { CalendarRoom, CalendarRoomType, calendarService } from "@/services/calendar";
 import type { BookingAddon } from "@/services/bookings";
 import { useTranslation } from "@/lib/i18n";
-import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
+import CountryPicker, { NATIONALITY_PICKER_OPTIONS } from "@/components/CountryPicker";
 import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
 import AdditionalGuestsEditor, {
   additionalGuestNumber,
@@ -163,6 +163,8 @@ export default function TargetManualBookingModal({
   // prettier-ignore
   const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonPackages, setAddonPackages] = useState<Record<string, number>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
   const [phoneCountry, setPhoneCountry] = useState("");
+  const [propertyCountry, setPropertyCountry] = useState("");
+  const nationalityId = useId();
   const [additionalGuests, setAdditionalGuests] = useState<AdditionalGuestDraft[]>([]);
   const [guestFocus, setGuestFocus] = useState<{ key: number } | null>(null);
   const [capacityBlocked, setCapacityBlocked] = useState(false);
@@ -183,7 +185,12 @@ export default function TargetManualBookingModal({
   useEffect(() => {
     let active = true;
     calendarService.getPropertyCountry().then(
-      (code) => active && setPhoneCountry((current) => current || phoneCountryOrEmpty(code)),
+      (code) => {
+        if (!active) return;
+        setPhoneCountry((current) => current || phoneCountryOrEmpty(code));
+        // Listed first in the country pickers (VAY-2417).
+        setPropertyCountry(code?.trim().toUpperCase() ?? "");
+      },
       () => undefined,
     );
     return () => {
@@ -968,24 +975,38 @@ export default function TargetManualBookingModal({
                       setPhoneCountry(next.country);
                       setPhone(next.number);
                     }}
+                    suggestedCountries={[propertyCountry]}
                     className="sm:col-span-2"
                     labelClassName="block text-xs font-medium text-gray-700"
                     inputClassName={inputClass}
                   />
-                  <NationalitySelect
-                    label={t("bookings.detail.nationality")}
-                    value={countryCode}
-                    onChange={setCountryCode}
-                    placeholder={t("calendar.targetManualBooking.searchNationality")}
-                    containerClassName="space-y-1"
-                    labelClassName={labelClass}
-                    inputClassName={inputClass}
-                  />{" "}
+                  <div>
+                    <label
+                      htmlFor={nationalityId}
+                      className="block text-xs font-medium text-gray-700"
+                    >
+                      {t("bookings.detail.nationality")}
+                    </label>
+                    <CountryPicker
+                      id={nationalityId}
+                      label={t("bookings.detail.nationality")}
+                      options={NATIONALITY_PICKER_OPTIONS}
+                      value={countryCode}
+                      onChange={setCountryCode}
+                      placeholder={t("common.countryPicker.choose")}
+                      suggested={[propertyCountry, phoneCountry]}
+                      display="name"
+                      clearable
+                      className="mt-1"
+                      triggerClassName={inputClass}
+                    />
+                  </div>{" "}
                 </div>
                 <AdditionalGuestsEditor
                   guests={additionalGuests}
                   onChange={setAdditionalGuests}
                   defaultPhoneCountry={phoneCountry}
+                  suggestedCountries={[countryCode, propertyCountry, phoneCountry]}
                   guestCapacity={guestCapacity}
                   partySize={partySize}
                   focusGuest={guestFocus}

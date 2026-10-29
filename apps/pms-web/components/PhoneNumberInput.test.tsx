@@ -61,31 +61,36 @@ describe("PhoneNumberInput", () => {
     };
   }
 
-  it("lists countries by name and shows flag and calling code when closed", () => {
-    const { view } = render("");
-    const select = view.root.findByProps({ "aria-label": "Phone country code" });
-    expect(select.props.value).toBe("DE");
-    expect(
-      select
-        .findAllByType("option")
-        .some((option) => option.children.join("") === "Germany 🇩🇪 +49"),
-    ).toBe(true);
-    expect(view.root.findByProps({ className: "truncate" }).children.join("")).toBe("🇩🇪 +49");
+  it("shows flag and calling code when closed and picks a country by dial code", () => {
+    const { view, onChange } = render("089 1234567");
+    const trigger = view.root.findByProps({
+      "aria-label": "Phone country code",
+      "aria-haspopup": "listbox",
+    });
+    expect(trigger.props.value).toBe("DE");
+    const flags = trigger.findAll((node) => String(node.props.className).includes("fi fi-de"));
+    expect(flags).toHaveLength(1);
+    // The value is read out after the field's name.
+    const shown = view.root.findByProps({ id: trigger.props["aria-describedby"] });
+    expect(shown.children.join("")).toBe("+49");
+    act(() => trigger.props.onClick());
+    const search = view.root.findByProps({ role: "combobox" });
+    act(() => search.props.onChange({ target: { value: "+62" } }));
+    act(() =>
+      search.props.onKeyDown({ key: "Enter", preventDefault: vi.fn(), stopPropagation: vi.fn() }),
+    );
+    expect(onChange).toHaveBeenCalledWith({ country: "ID", number: "089 1234567" });
   });
 
-  it("keeps the select's own text hidden when Chrome autofill forces its colour", () => {
-    // VAY-2363: autofill sets `color` with !important; the text fill still hides the name, and
-    // the open list paints its options again.
-    const { view } = render("");
-    const select = view.root.findByProps({ "aria-label": "Phone country code" });
-    expect(select.props.className).toContain("[-webkit-text-fill-color:transparent]");
-    expect(
-      select
-        .findAllByType("option")
-        .every((option) =>
-          String(option.props.className).includes("[-webkit-text-fill-color:currentcolor]"),
-        ),
-    ).toBe(true);
+  it("shows the number it saves, in E.164 with spaces, only when it is valid", () => {
+    const saved = (number: string) =>
+      render(number)
+        .view.root.findAll((node) => node.type === "p")
+        .map((node) => node.children.join(""));
+    // libphonenumber's own grouping of +4915123456789.
+    expect(saved("0151 23456789")).toEqual(["Saved as +49 1512 3456789"]);
+    expect(saved("12")).toEqual([]);
+    expect(saved("")).toEqual([]);
   });
 
   it("adopts the country of a pasted valid international number", () => {

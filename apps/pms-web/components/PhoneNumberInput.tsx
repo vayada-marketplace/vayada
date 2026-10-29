@@ -8,14 +8,17 @@ import {
   type CountryCode,
 } from "libphonenumber-js/min";
 import { COUNTRY_OPTIONS } from "@vayada/locale-constants";
+import CountryPicker from "@/components/CountryPicker";
+import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 // Same country list and calling-code source as the shared onboarding phone field.
 const SUPPORTED = new Set<string>(getCountries());
 const PHONE_COUNTRIES = COUNTRY_OPTIONS.filter(({ code }) => SUPPORTED.has(code)).map(
-  (country) => ({
-    ...country,
-    callingCode: `+${getCountryCallingCode(country.code as CountryCode)}`,
+  ({ code, name }) => ({
+    code,
+    name,
+    callingCode: `+${getCountryCallingCode(code as CountryCode)}`,
   }),
 );
 const PHONE_COUNTRY_CODES = new Set(PHONE_COUNTRIES.map(({ code }) => code));
@@ -50,6 +53,8 @@ type Props = {
   country: string;
   number: string;
   onChange: (value: { country: string; number: string }) => void;
+  /** Countries listed first in the picker, e.g. the property's. */
+  suggestedCountries?: readonly string[];
   className?: string;
   labelClassName?: string;
   inputClassName: string;
@@ -62,74 +67,40 @@ export default function PhoneNumberInput({
   country,
   number,
   onChange,
+  suggestedCountries,
   className,
   labelClassName,
   inputClassName,
 }: Props) {
+  const { t } = useTranslation();
   const inputId = useId();
-  const selected = PHONE_COUNTRIES.find(({ code }) => code === country);
+  const savedId = useId();
+  // The E.164 number the booking stores, spaced for reading (VAY-2417).
+  const saved = number.trim() ? validPhone(country, number)?.formatInternational() : undefined;
   return (
     <div className={className}>
       <label htmlFor={inputId} className={labelClassName}>
         {label}
       </label>
       <div className="mt-1 flex gap-2">
-        {/* Options start with the country name so native type-ahead works; the closed
-            select shows only flag + calling code through the overlay. Chrome autofill forces
-            the select's text colour, so the text fill hides it instead (VAY-2363). */}
-        <div className="relative w-28 shrink-0">
-          <select
-            aria-label={countryLabel}
-            value={country}
-            onChange={(event) => onChange({ country: event.target.value, number })}
-            className={cn(
-              inputClassName,
-              "text-transparent [-webkit-text-fill-color:transparent] disabled:text-transparent",
-            )}
-          >
-            <option value="" className="text-gray-900 [-webkit-text-fill-color:currentcolor]">
-              {countryPlaceholder}
-            </option>
-            {PHONE_COUNTRIES.map((option) => (
-              <option
-                key={option.code}
-                value={option.code}
-                className="text-gray-900 [-webkit-text-fill-color:currentcolor]"
-              >
-                {option.name} {option.flag} {option.callingCode}
-              </option>
-            ))}
-          </select>
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 flex items-center justify-between gap-1 px-3 text-sm text-gray-900"
-          >
-            <span className="truncate">
-              {selected ? `${selected.flag} ${selected.callingCode}` : countryPlaceholder}
-            </span>
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 20 20"
-              fill="none"
-              className="shrink-0 text-gray-500"
-            >
-              <path
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.5"
-                d="m6 8 4 4 4-4"
-              />
-            </svg>
-          </span>
-        </div>
+        <CountryPicker
+          label={countryLabel}
+          options={PHONE_COUNTRIES}
+          value={country}
+          onChange={(next) => onChange({ country: next, number })}
+          placeholder={countryPlaceholder}
+          suggested={suggestedCountries}
+          display="dial"
+          className="w-28 shrink-0"
+          triggerClassName={cn(inputClassName, "w-full")}
+        />
         <input
           id={inputId}
           name="phone"
           type="tel"
           autoComplete="off"
           value={number}
+          aria-describedby={saved ? savedId : undefined}
           onChange={(event) => onChange({ country, number: event.target.value })}
           onBlur={() => {
             // A pasted valid international number selects its own country code.
@@ -137,9 +108,14 @@ export default function PhoneNumberInput({
             const pasted = phoneCountryOrEmpty(parsed?.country);
             if (parsed && pasted) onChange({ country: pasted, number: parsed.formatNational() });
           }}
-          className={cn(inputClassName, "min-w-0 flex-1")}
+          className={cn(inputClassName, "min-h-11 min-w-0 flex-1")}
         />
       </div>
+      {saved && (
+        <p id={savedId} className="mt-1 text-xs text-gray-500">
+          {t("common.phoneSavedAs", { number: saved })}
+        </p>
+      )}
     </div>
   );
 }
