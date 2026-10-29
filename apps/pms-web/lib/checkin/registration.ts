@@ -107,6 +107,12 @@ export function registrationGuests(input: {
     };
   });
   const expected = expectedRegistrations(booking, settings);
+  // Nobody entered yet: every required field is missing (VAY-2418 counts them on the card).
+  const empty = guestRegistrationStatus(
+    { firstName: "", lastName: "", email: "", phone: "", nationality: "" },
+    [],
+    settings,
+  );
   const slots: RegistrationGuest[] = [];
   for (let index = 1 + others.length; index < expected; index += 1)
     slots.push({
@@ -116,8 +122,7 @@ export function registrationGuests(input: {
       firstName: "",
       lastName: "",
       registration: null,
-      status: "details_missing",
-      missing: ["firstName", "lastName"],
+      ...empty,
     });
   return [booker, ...others, ...slots];
 }

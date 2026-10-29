@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { useParams, useSearchParams } from "next/navigation";
@@ -8,12 +8,14 @@ import {
   Booking,
   BookingAddon,
   BookingAdditionalGuest,
+  BookingAdditionalGuestPayload,
   CheckinStepResult,
   GuestRegistration,
   bookingsService,
 } from "@/services/bookings";
 import { calendarService } from "@/services/calendar";
 import { CheckinChecklistStep, CheckinSettings, settingsService } from "@/services/settings";
+import { arrivalTimesService } from "@/services/settings/arrivalTimes";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { bookingAmountDue } from "@/components/bookings/BookingStaySummary";
 import { useTranslation } from "@/lib/i18n";
@@ -28,6 +30,7 @@ import {
   type RegistrationGuest,
 } from "@/lib/checkin/registration";
 import { checkinRooms, guestsByRoom, roomMoveOptions, type CheckinRoom } from "@/lib/checkin/rooms";
+import { guestChanges } from "@/lib/checkin/guestAutosave";
 import {
   bookingArrivalTime,
   countLabel,
@@ -49,7 +52,10 @@ import {
   CheckinStepBar,
   type CheckinStepItem,
 } from "@/components/checkin/CheckinStepBar";
-import { CheckinBookingSummary } from "@/components/checkin/CheckinBookingSummary";
+import {
+  CheckinBookingCard,
+  type CheckinCardAction,
+} from "@/components/checkin/CheckinBookingCard";
 import { ArrivalStep } from "@/components/checkin/ArrivalStep";
 import { RoomsGuestsStep } from "@/components/checkin/RoomsGuestsStep";
 import {
@@ -61,7 +67,7 @@ import { KeysCheckinStep, type CheckinReviewRow } from "@/components/checkin/Key
 import { CheckinDone } from "@/components/checkin/CheckinDone";
 import type { GuestFormValues, GuestLockableField } from "@/components/checkin/GuestForm";
 import { nationalityLabel } from "@vayada/locale-constants";
-import { CheckinStepCard, checkinPrimaryButton } from "@/components/checkin/CheckinStepCard";
+import { CheckinStepCard } from "@/components/checkin/CheckinStepCard";
 
 function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
@@ -118,9 +124,18 @@ export default function CheckInPage() {
   const [done, setDone] = useState<CheckinFlag[] | null>(null);
   const [checklistSteps, setChecklistSteps] = useState<CheckinChecklistStep[]>([]);
   const [checklistValues, setChecklistValues] = useState<Record<string, string | boolean>>({});
+  const [checkOutTime, setCheckOutTime] = useState<string | null>(null);
+  // The open guest form's save, and whether it holds details it couldn't save (VAY-2418).
+  const guestFlush = useRef<(() => Promise<boolean>) | null>(null);
+  const [guestUnsaved, setGuestUnsaved] = useState(false);
 
   useEffect(() => {
     if (!id) return;
+    // The property's check-out time, for staff who may read the booking settings.
+    arrivalTimesService
+      .load()
+      .then((setup) => setCheckOutTime(setup.current?.bundle.choices.checkOutTime ?? null))
+      .catch(() => setCheckOutTime(null));
     Promise.all([
       bookingsService.get(id),
       bookingsService.listAdditionalGuests(id),
@@ -160,6 +175,18 @@ export default function CheckInPage() {
     guests,
     booking ? expectedRegistrations(booking, settings) : 1,
   );
+  // Leaving Rooms & guests waits for the open guest form's save, then is judged on what it saved:
+  // a guest just made incomplete keeps staff there when every guest must be complete (VAY-2418).
+  const [leaveTo, setLeaveTo] = useState<number | null>(null);
+  const incompleteGuests = registration.incomplete.length;
+  useEffect(() => {
+    if (leaveTo === null) return;
+    setLeaveTo(null);
+    if (leaveTo < 2 || settings.allowIncompleteGuests || incompleteGuests === 0) {
+      setStep(leaveTo);
+      window.scrollTo({ top: 0 });
+    }
+  }, [leaveTo, settings.allowIncompleteGuests, incompleteGuests]);
   // Add-ons offered at the desk: those Settings → Check-in picks, in the booking's currency.
   const offers = useMemo(
     () =>
@@ -185,20 +212,33 @@ export default function CheckInPage() {
       };
     });
 
-  /** The booker's name and contact come from the booking (only the nationality can be corrected);
-   * other guests are saved to the guest list; then their registration, when staff may see IDs. */
-  const saveGuest = async (guest: RegistrationGuest, values: GuestFormValues) => {
+  /** Saves what changed since the last save (VAY-2418 autosave). The booker's name and contact
+   * come from the booking (only the nationality can be corrected); other guests go to the guest
+   * list, a new one listed first (`listed` gets its id at once, so a retry never lists them
+   * twice); then their registration, when staff may see IDs. */
+  const saveGuest = async (
+    guest: RegistrationGuest,
+    values: GuestFormValues,
+    previous: GuestFormValues,
+    knownId: string | null,
+    listed: (id: string) => void,
+  ) => {
     if (!booking) return;
-    let guestId = guest.guestId;
+    const { contact, registration: registrationChanged } = guestChanges(previous, values);
+    let guestId = knownId;
     if (guest.role === "booker") {
-      if (values.nationality && values.nationality !== booking.guestCountry) {
+      if (
+        contact.includes("nationality") &&
+        values.nationality &&
+        values.nationality !== booking.guestCountry
+      ) {
         const correction = await bookingsService.correctPrimaryGuestNationality(
           booking.id,
           values.nationality,
         );
         setBooking((current) => (current ? { ...current, ...correction } : current));
       }
-    } else {
+    } else if (!guestId || contact.length) {
       const payload = {
         firstName: values.firstName.trim(),
         lastName: values.lastName.trim(),
@@ -206,17 +246,21 @@ export default function CheckInPage() {
         phone: values.phone.trim(),
         nationality: values.nationality,
       };
+      const changed: BookingAdditionalGuestPayload = {};
+      for (const field of contact) changed[field] = payload[field];
       const saved = guestId
-        ? await bookingsService.updateAdditionalGuest(booking.id, guestId, payload)
+        ? await bookingsService.updateAdditionalGuest(booking.id, guestId, changed)
         : await bookingsService.createAdditionalGuest(booking.id, payload);
       guestId = saved.id;
+      // In the same render as the list: the open card follows the new id instead of rebuilding.
+      listed(saved.id);
       setAdditionalGuests((current) =>
         current.some((entry) => entry.id === saved.id)
           ? current.map((entry) => (entry.id === saved.id ? saved : entry))
           : [...current, saved],
       );
     }
-    if (!canReadIdentity || !guestId) return;
+    if (!canReadIdentity || !guestId || !registrationChanged) return;
     const saved = await bookingsService.saveGuestRegistration(booking.id, guestId, {
       assignmentId: values.assignmentId,
       dateOfBirth: values.dateOfBirth || null,
@@ -410,9 +454,11 @@ export default function CheckInPage() {
           : t("dashboard.popup.amountDue", { amount: money(dueNow) })
         : t("dashboard.popup.nothingToPay");
 
-  // Keys (D5: physical keys or no key step) and the open items that stay on the reservation.
+  // Keys (D5: physical keys or no key step): every key is handed over before the check-in
+  // (VAY-2418); the other open items stay on the reservation.
   const keyRooms = settings.keyHandover === "physical" ? rooms.filter((room) => room.unit) : [];
   const keysHanded = keyRooms.filter((room) => keysGiven[room.key]).length;
+  const keysLeft = keyRooms.length - keysHanded;
   const checksDone = checklistSteps.filter((item) =>
     customStepDone(item, checklistValues[item.id]),
   ).length;
@@ -425,12 +471,6 @@ export default function CheckInPage() {
           },
         ]
       : []),
-    ...keyRooms
-      .filter((room) => !keysGiven[room.key])
-      .map((room) => ({
-        stepId: `key:${room.key}`,
-        label: t("checkIn.flow.keys.keyOpen", { room: unitName(room) }),
-      })),
     ...checklistSteps
       .filter((item) => item.required && !customStepDone(item, checklistValues[item.id]))
       .map((item) => ({ stepId: item.id, label: localizeBuiltInCheckinStep(item, t).label })),
@@ -462,14 +502,22 @@ export default function CheckInPage() {
   const reachable = (index: number) =>
     index <= step ||
     ((index < 1 || arrivalReady) && (index < 2 || guestsReady) && (index < 3 || step === 2));
-  const goTo = (index: number) => {
-    if (!reachable(index)) return;
+  const jump = (index: number) => {
     if (index === 3 && step === 2) {
       void settlePayment();
       return;
     }
     setStep(index);
     window.scrollTo({ top: 0 });
+  };
+  // An open guest form saves first; details it can't save keep staff on the step.
+  const goTo = (index: number) => {
+    if (!reachable(index)) return;
+    if (step === 1 && guestFlush.current) {
+      void guestFlush.current().then((saved) => saved && setLeaveTo(index));
+      return;
+    }
+    jump(index);
   };
 
   /** Continue on step 3: the desk charges match the add-ons added now, then the payment is recorded
@@ -512,7 +560,7 @@ export default function CheckInPage() {
   }
 
   const completeCheckIn = async () => {
-    if (busy) return;
+    if (busy || keysLeft > 0) return;
     setBusy("complete");
     setError("");
     try {
@@ -598,16 +646,68 @@ export default function CheckInPage() {
     );
   }
 
-  const continueButton = (disabled = false) => (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => goTo(step + 1)}
-      className={checkinPrimaryButton}
-    >
-      {t("checkIn.flow.continue")}
-    </button>
-  );
+  // Each step's button and the line under it, at the foot of the Booking card (VAY-2418).
+  const fine = (text: string) => ({ text, ok: true });
+  const pending = (text: string) => ({ text, ok: false });
+  const actions: CheckinCardAction[] = [
+    {
+      label: t("checkIn.flow.arrival.cta"),
+      disabled: !arrivalReady,
+      onClick: () => goTo(1),
+      status: arrivalReady
+        ? fine(t("checkIn.flow.arrival.ready"))
+        : pending(t("checkIn.flow.arrival.readFirst")),
+    },
+    {
+      label: t("checkIn.flow.rooms.cta"),
+      disabled: !guestsReady || guestUnsaved,
+      onClick: () => goTo(2),
+      status: guestUnsaved
+        ? pending(t("checkIn.flow.rooms.notSaved"))
+        : incompleteGuests === 0
+          ? fine(t("checkIn.flow.rooms.allRegistered"))
+          : pending(
+              t(
+                `checkIn.flow.rooms.${settings.allowIncompleteGuests ? "incompleteLater" : "incompleteBlocked"}${incompleteGuests === 1 ? "One" : "Many"}`,
+                { count: incompleteGuests },
+              ),
+            ),
+    },
+    {
+      label: busy === "payment" ? t("common.saving") : t("checkIn.flow.payment.cta"),
+      disabled: !paymentReady || busy !== null,
+      onClick: () => void settlePayment(),
+      status: paymentReady
+        ? { text: paymentSummary, ok: recorded !== null || dueNow <= 0 || choice !== null }
+        : pending(t("checkIn.flow.payment.chooseFirst")),
+    },
+    {
+      label: busy === "complete" ? t("checkIn.flow.keys.checkingIn") : t("checkIn.flow.keys.cta"),
+      disabled: keysLeft > 0 || busy !== null,
+      onClick: () => void completeCheckIn(),
+      status:
+        keysLeft > 0
+          ? pending(
+              t(`checkIn.flow.keys.keysLeft${keysLeft === 1 ? "One" : "Many"}`, {
+                count: keysLeft,
+              }),
+            )
+          : openFlags.length
+            ? pending(
+                t(`checkIn.flow.keys.openItems${openFlags.length === 1 ? "One" : "Many"}`, {
+                  count: openFlags.length,
+                }),
+              )
+            : fine(t("checkIn.flow.keys.allReady")),
+    },
+  ];
+  const cardDate = (date: string) =>
+    formatPropertyDate(date, { weekday: "short", month: "short", day: "numeric" }, locale);
+  // "11:00" from the booking settings, in the reader's clock.
+  const clockTime = (time: string) =>
+    new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(
+      new Date(`1970-01-01T${time.slice(0, 5)}:00Z`),
+    );
   const unitList = list(rooms.map(unitName));
   const reviewRows: CheckinReviewRow[] = [
     ...(request
@@ -740,15 +840,13 @@ export default function CheckInPage() {
           </p>
         )}
 
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
           {step === 0 && (
             <CheckinStepCard
               step={1}
               total={4}
               title={steps[0]!.title}
               subtitle={t("checkIn.flow.arrival.subtitle")}
-              hint={arrivalReady ? undefined : t("checkIn.flow.arrival.readFirst")}
-              primary={continueButton(!arrivalReady)}
             >
               <ArrivalStep
                 facts={[
@@ -798,16 +896,6 @@ export default function CheckInPage() {
                   ? "checkIn.flow.rooms.subtitle"
                   : "checkIn.flow.rooms.subtitleStrict",
               )}
-              onBack={() => goTo(0)}
-              hint={
-                registration.incomplete.length === 0
-                  ? undefined
-                  : t(
-                      `checkIn.flow.rooms.${settings.allowIncompleteGuests ? "incompleteLater" : "incompleteBlocked"}${registration.incomplete.length === 1 ? "One" : "Many"}`,
-                      { count: registration.incomplete.length },
-                    )
-              }
-              primary={continueButton(!guestsReady)}
             >
               <RoomsGuestsStep
                 rooms={rooms}
@@ -819,6 +907,8 @@ export default function CheckInPage() {
                 formInitial={formInitial}
                 lockedFields={lockedFields}
                 onSaveGuest={saveGuest}
+                guestFlush={guestFlush}
+                onGuestUnsaved={setGuestUnsaved}
                 loadRoomOptions={loadRoomOptions}
                 onMoveRoom={moveRoom}
               />
@@ -831,24 +921,6 @@ export default function CheckInPage() {
               total={4}
               title={steps[2]!.title}
               subtitle={t("checkIn.flow.payment.subtitle")}
-              onBack={() => goTo(1)}
-              hint={
-                paymentReady
-                  ? dueNow > 0
-                    ? paymentSummary
-                    : undefined
-                  : t("checkIn.flow.payment.chooseFirst")
-              }
-              primary={
-                <button
-                  type="button"
-                  disabled={!paymentReady || busy !== null}
-                  onClick={() => void settlePayment()}
-                  className={checkinPrimaryButton}
-                >
-                  {busy === "payment" ? t("common.saving") : t("checkIn.flow.continue")}
-                </button>
-              }
             >
               <AddonsPaymentStep
                 booking={booking}
@@ -875,28 +947,6 @@ export default function CheckInPage() {
               total={4}
               title={steps[3]!.title}
               subtitle={t("checkIn.flow.keys.subtitle")}
-              onBack={() => goTo(2)}
-              hint={
-                openFlags.length
-                  ? t(`checkIn.flow.keys.openItems${openFlags.length === 1 ? "One" : "Many"}`, {
-                      count: openFlags.length,
-                    })
-                  : t("checkIn.flow.keys.allReady")
-              }
-              primary={
-                <button
-                  type="button"
-                  onClick={() => void completeCheckIn()}
-                  disabled={busy !== null}
-                  className={checkinPrimaryButton}
-                >
-                  {busy === "complete"
-                    ? t("checkIn.flow.keys.checkingIn")
-                    : t(`checkIn.flow.keys.checkIn${guestCount === 1 ? "One" : "Many"}`, {
-                        count: guestCount,
-                      })}
-                </button>
-              }
             >
               <KeysCheckinStep
                 keys={
@@ -916,16 +966,29 @@ export default function CheckInPage() {
             </CheckinStepCard>
           )}
 
-          <CheckinBookingSummary
+          <CheckinBookingCard
             reference={booking.bookingReference}
-            rows={[
+            source={bookingChannelLabel(booking.channel, t)}
+            viewHref={`/bookings/${booking.id}`}
+            dates={[
               {
-                label: t("checkIn.flow.summary.stay"),
-                value: stayRangeLabel(locale, booking.checkIn, booking.checkOut),
+                label: t("bookings.detail.checkIn"),
+                date: cardDate(booking.checkIn),
+                time: bookingArrivalTime(booking),
               },
+              {
+                label: t("bookings.detail.checkOut"),
+                date: cardDate(booking.checkOut),
+                time: checkOutTime ? clockTime(checkOutTime) : null,
+              },
+            ]}
+            rows={[
               { label: t("checkIn.flow.summary.rooms"), value: unitList },
-              { label: t("checkIn.flow.summary.guests"), value: registered },
-              { label: t("checkIn.flow.summary.balance"), value: paymentSummary },
+              {
+                label: t("checkIn.flow.summary.guests"),
+                value: registered,
+                warn: incompleteGuests > 0,
+              },
               {
                 label: t("checkIn.flow.summary.addons"),
                 value:
@@ -950,15 +1013,21 @@ export default function CheckInPage() {
                         handed: keysHanded,
                         total: keyRooms.length,
                       }),
+                      warn: keysLeft > 0,
                     },
                   ]
                 : []),
             ]}
-            booker={{
-              name: guestName(booking),
-              email: booking.guestEmail,
-              phone: booking.guestPhone,
-            }}
+            balance={{ label: t("checkIn.flow.summary.balance"), value: paymentSummary }}
+            action={actions[step]!}
+            back={
+              step > 0
+                ? {
+                    label: t("checkIn.flow.backTo", { step: steps[step - 1]!.title }),
+                    onClick: () => goTo(step - 1),
+                  }
+                : null
+            }
           />
         </div>
       </div>

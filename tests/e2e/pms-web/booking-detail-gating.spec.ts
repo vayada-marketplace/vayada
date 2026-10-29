@@ -497,43 +497,41 @@ test("saves check-in guests to the guest list and their ID to the registration (
 
   await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
   const main = page.locator("main").first();
-  await main.getByRole("button", { name: "Continue" }).click();
+  await main.getByRole("button", { name: "Confirm arrival" }).click();
 
-  // Grace came with the OTA import: her name and nationality stay as supplied.
-  await main.getByRole("button", { name: /^Complete Grace Hopper/ }).click();
+  // Grace came with the OTA import: her name and nationality stay as supplied, shown locked.
+  await main.getByRole("button", { name: /^Add details Grace Hopper/ }).click();
   const form = main.getByRole("form", { name: "Grace Hopper" });
-  await expect(form.getByRole("textbox", { name: /First name/ })).toBeDisabled();
-  await expect(form.getByRole("combobox", { name: /Nationality/ })).toHaveValue("United States");
-  await expect(form.getByRole("combobox", { name: /Nationality/ })).toBeDisabled();
+  await expect(form.getByRole("textbox", { name: /First name/ })).not.toBeEditable();
+  await expect(form.getByRole("textbox", { name: /Nationality/ })).toHaveValue("United States");
+  await expect(form.getByRole("textbox", { name: /Nationality/ })).not.toBeEditable();
   await form.getByRole("textbox", { name: "Phone" }).fill("+1 555 0100");
-  await form.getByLabel(/Date of birth/).fill("1986-12-09");
+  await form.getByLabel(/Date of birth/).fill("09/12/1986");
   await form.getByRole("combobox", { name: /Document type/ }).selectOption("passport");
   await form.getByRole("textbox", { name: /Document number/ }).fill("C01X00T47");
-  await form.getByRole("button", { name: "Save guest" }).click();
-  await expect(main.getByRole("button", { name: /^View Grace Hopper/ })).toBeVisible();
+  await main.getByRole("button", { name: /^Done Grace Hopper/ }).click();
+  await expect(main.getByRole("button", { name: /^Edit Grace Hopper/ })).toBeVisible();
 
-  // Names and contact go to the guest list; the ID only to the staff-only registration.
+  // Names and contact go to the guest list; the ID only to the staff-only registration, which
+  // saves itself field by field (VAY-2418).
   expect(guestWrites).toHaveLength(1);
-  expect(guestWrites[0]).toMatchObject({ phone: "+1 555 0100" });
-  for (const field of ["gender", "dateOfBirth", "passportNumber", "documentNumber"])
-    expect(guestWrites[0]).not.toHaveProperty(field);
-  expect(registrationWrites).toEqual([
-    {
-      assignmentId: "assignment_ada",
-      dateOfBirth: "1986-12-09",
-      documentType: "passport",
-      documentNumber: "C01X00T47",
-      gender: null,
-      staffNotes: null,
-    },
-  ]);
+  expect(guestWrites[0]).toEqual({ phone: "+1 555 0100" });
+  expect(registrationWrites.at(-1)).toEqual({
+    assignmentId: "assignment_ada",
+    dateOfBirth: "1986-12-09",
+    documentType: "passport",
+    documentNumber: "C01X00T47",
+    gender: null,
+    staffNotes: null,
+  });
 
   // An OTA stay has no hotel-collected payment to record here.
   const steps = page.getByRole("navigation", { name: "Check-in steps" });
   await steps.getByRole("button", { name: /^Add-ons & payment/ }).click();
   await expect(page.getByRole("radio")).toHaveCount(0);
   await steps.getByRole("button", { name: /^Keys & check-in/ }).click();
-  await page.getByRole("button", { name: "Check in 2 guests" }).click();
+  await page.getByRole("checkbox", { name: /Room 101 · key handed over/ }).check();
+  await page.getByRole("button", { name: "Complete check-in" }).click();
   await expect.poll(() => checkIns).toBe(1);
   await assertHealthy();
 });

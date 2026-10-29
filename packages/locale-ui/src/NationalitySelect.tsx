@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 import {
   NATIONALITY_OPTIONS,
@@ -10,7 +10,7 @@ import {
 } from "@vayada/locale-constants";
 
 export type NationalitySelectProps = {
-  label?: string;
+  label?: ReactNode;
   value: string;
   onChange: (code: string) => void;
   disabled?: boolean;

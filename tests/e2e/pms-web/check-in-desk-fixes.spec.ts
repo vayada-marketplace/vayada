@@ -131,27 +131,33 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
     main.getByText("Late arrival around 11 pm, please leave the key at the bar."),
   ).toBeVisible();
   // Settings → Check-in asks staff to confirm they read it before going on.
-  const proceed = main.getByRole("button", { name: "Continue" });
+  const proceed = main.getByRole("button", { name: "Confirm arrival" });
   await expect(proceed).toBeDisabled();
   await main.getByRole("checkbox", { name: "I have read the request" }).check();
   await proceed.click();
 
-  // The booker's contact comes from the booking; the nationality can be corrected here.
-  await main.getByRole("button", { name: /^Complete Ada Lovelace/ }).click();
+  // The booker's contact comes from the booking, shown locked; the nationality can be corrected
+  // here and saves itself (VAY-2418).
+  await main.getByRole("button", { name: /^Add details Ada Lovelace/ }).click();
   const bookerNationality = main.getByRole("combobox", { name: /Nationality/ });
   await expect(bookerNationality).toHaveValue("Austria");
   await expect(bookerNationality).toBeEnabled();
-  await expect(main.getByRole("textbox", { name: /First name/ })).toBeDisabled();
+  await expect(main.getByRole("textbox", { name: /First name/ })).not.toBeEditable();
+  await expect(main.getByRole("textbox", { name: /First name/ })).toHaveAccessibleName(
+    /From the booking/,
+  );
   await bookerNationality.fill("Netherlands");
-  await main.getByRole("button", { name: "Save guest" }).click();
+  await main.getByRole("button", { name: /^Done Ada Lovelace/ }).click();
   await expect.poll(() => countryCode).toBe("NL");
-  await expect.poll(() => registrations.length).toBe(1);
+  await expect(main.getByRole("button", { name: /^Add details Ada Lovelace/ })).toBeVisible();
+  // Nothing in the staff-only registration changed, so nothing is sent there.
+  expect(registrations).toHaveLength(0);
 
   await openCheckinStep(page, "Add-ons & payment");
   await expect(main.getByText("Due now").locator("..")).toContainText("€240");
   await main.getByRole("radio", { name: /Collect now/ }).click();
   await main.getByRole("button", { name: "Cash", exact: true }).click();
-  await main.getByRole("button", { name: "Continue" }).click();
+  await main.getByRole("button", { name: "Continue to keys" }).click();
   await expect.poll(() => paid).toBe(true);
   await expect(main.getByText("Step 4 of 4")).toBeVisible();
   await expect(main.getByText(/€240(\.00)? · Cash, recorded/)).toBeVisible();
@@ -185,7 +191,7 @@ test("shows and records the rest of a card deposit at check-in", async ({ page }
   await expect(main.getByText("Due now").locator("..")).toContainText("€168");
   await main.getByRole("radio", { name: /Collect now/ }).click();
   await main.getByRole("button", { name: "Card · own terminal", exact: true }).click();
-  await main.getByRole("button", { name: "Continue" }).click();
+  await main.getByRole("button", { name: "Continue to keys" }).click();
   await expect.poll(() => paid).toBe(true);
   await expect(main.getByText(/€168(\.00)? · Card · own terminal, recorded/)).toBeVisible();
   await assertHealthy();
