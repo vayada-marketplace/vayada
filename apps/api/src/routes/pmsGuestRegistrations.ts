@@ -4,10 +4,14 @@ import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import { linkBookingGuestNow, lockGuestProfiles } from "../jobs/bookingGuestProfileLinks.js";
+import { editBookingGuestProfile, type GuestProfileFields } from "../platform/guestProfileEdits.js";
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
 /** What staff record per guest at check-in for police registration (VAY-2373, migration 0516). Names,
- * email, phone and nationality stay on the booking guest; this adds the ID document and the rest. */
+ * email, phone and nationality stay on the booking guest; this adds the ID document and the rest.
+ * Since VAY-2420 date of birth and the ID document live on the guest profile, so a returning guest
+ * arrives with them filled in; gender, room and the staff note stay with this stay. */
 export const PMS_GUEST_DOCUMENT_TYPES = [
   "passport",
   "national_id",
@@ -302,10 +306,20 @@ type RegistrationRow = {
   updatedAt: Date | null;
 };
 
+// ID details live on the guest profile (VAY-2420); a stay holds them only until the guest is linked
+// and the linker moves them there. A document's type and number come from the same place.
+const PROFILE_DOCUMENT =
+  "(profile.document_type IS NOT NULL OR profile.document_number IS NOT NULL)";
 const REGISTRATION_COLUMNS = `registration.assignment_id::text AS "assignmentId",
-  to_char(registration.date_of_birth, 'YYYY-MM-DD') AS "dateOfBirth",
-  registration.document_type AS "documentType", registration.document_number AS "documentNumber",
+  to_char(COALESCE(profile.date_of_birth, registration.date_of_birth), 'YYYY-MM-DD') AS "dateOfBirth",
+  CASE WHEN ${PROFILE_DOCUMENT} THEN profile.document_type ELSE registration.document_type END
+    AS "documentType",
+  CASE WHEN ${PROFILE_DOCUMENT} THEN profile.document_number ELSE registration.document_number END
+    AS "documentNumber",
   registration.gender, registration.staff_notes AS "staffNotes", registration.updated_at AS "updatedAt"`;
+const REGISTRATION_FROM = `booking.booking_guests guest
+  LEFT JOIN booking.guest_profiles profile ON profile.id = guest.guest_profile_id
+  LEFT JOIN pms.guest_registrations registration ON registration.booking_guest_id = guest.id`;
 
 export function createPgPmsGuestRegistrationRepository(config: {
   connectionString: string;
@@ -317,10 +331,31 @@ export function createPgPmsGuestRegistrationRepository(config: {
 
   return {
     async list(propertyId, guestBookingId) {
+      // Guests are linked before the form shows, so what staff see is what a save compares with.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await lockGuestProfiles(client);
+        const unlinked = await client.query<{ id: string }>(
+          `SELECT guest.id::text AS id FROM booking.booking_guests guest
+           JOIN booking.guest_bookings booking ON booking.id = guest.guest_booking_id
+           WHERE booking.property_id = $1::uuid AND booking.id = $2::uuid
+             AND guest.guest_profile_id IS NULL`,
+          [propertyId, guestBookingId],
+        );
+        for (const { id } of unlinked.rows) await linkBookingGuestNow(client, id);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
       const result = await pool.query<RegistrationRow>(
         `SELECT guest.id::text AS "guestId", guest.guest_role AS role, ${REGISTRATION_COLUMNS}
          FROM booking.guest_bookings booking
          LEFT JOIN booking.booking_guests guest ON guest.guest_booking_id = booking.id
+         LEFT JOIN booking.guest_profiles profile ON profile.id = guest.guest_profile_id
          LEFT JOIN pms.guest_registrations registration
            ON registration.booking_guest_id = guest.id AND registration.property_id = booking.property_id
          WHERE booking.property_id = $1::uuid AND booking.id = $2::uuid
@@ -336,6 +371,7 @@ export function createPgPmsGuestRegistrationRepository(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await lockGuestProfiles(client);
         const guest = await client.query<{ role: PmsGuestRegistration["role"] }>(
           `SELECT guest.guest_role AS role
            FROM booking.booking_guests guest
@@ -358,12 +394,39 @@ export function createPgPmsGuestRegistrationRepository(config: {
             return { ok: false, code: "assignment_not_found" };
           }
         }
-        const previous = await client.query<RegistrationRow>(
-          `SELECT ${REGISTRATION_COLUMNS} FROM pms.guest_registrations registration
-           WHERE registration.booking_guest_id = $1::uuid FOR UPDATE`,
+        await client.query(
+          "SELECT 1 FROM pms.guest_registrations WHERE booking_guest_id = $1::uuid FOR UPDATE",
           [guestId],
         );
-        const saved = await client.query<RegistrationRow>(
+        const read = async () =>
+          (
+            await client.query<RegistrationRow>(
+              `SELECT ${REGISTRATION_COLUMNS} FROM ${REGISTRATION_FROM} WHERE guest.id = $1::uuid`,
+              [guestId],
+            )
+          ).rows[0]!;
+        const before = await read();
+        // The ID details go to the guest profile; this stay keeps only what is about the stay. The
+        // form sends every field, so only those that differ from what it showed are changed there;
+        // a document's type and number go together.
+        const edit: Partial<GuestProfileFields> = {};
+        if (fields.dateOfBirth !== before.dateOfBirth) edit.dateOfBirth = fields.dateOfBirth;
+        if (
+          fields.documentType !== before.documentType ||
+          fields.documentNumber !== before.documentNumber
+        ) {
+          edit.documentType = fields.documentType;
+          edit.documentNumber = fields.documentNumber;
+        }
+        const onProfile = await editBookingGuestProfile(client, {
+          bookingGuestId: guestId,
+          propertyId,
+          edit,
+        });
+        const kept = onProfile
+          ? { dateOfBirth: null, documentType: null, documentNumber: null }
+          : fields;
+        await client.query(
           `INSERT INTO pms.guest_registrations AS registration (
              booking_guest_id, property_id, guest_booking_id, assignment_id, date_of_birth,
              document_type, document_number, gender, staff_notes, updated_by_user_id
@@ -377,23 +440,22 @@ export function createPgPmsGuestRegistrationRepository(config: {
              gender = EXCLUDED.gender,
              staff_notes = EXCLUDED.staff_notes,
              updated_by_user_id = EXCLUDED.updated_by_user_id,
-             updated_at = now()
-           RETURNING ${REGISTRATION_COLUMNS}`,
+             updated_at = now()`,
           [
             guestId,
             propertyId,
             guestBookingId,
             fields.assignmentId,
-            fields.dateOfBirth,
-            fields.documentType,
-            fields.documentNumber,
+            kept.dateOfBirth,
+            kept.documentType,
+            kept.documentNumber,
             fields.gender,
             fields.staffNotes,
             audit.actorUserId,
           ],
         );
-        const before = previous.rows[0];
-        const changed = FIELDS.filter((key) => (before?.[key] ?? null) !== saved.rows[0]![key]);
+        const saved = await read();
+        const changed = FIELDS.filter((key) => before[key] !== saved[key]);
         // Field names only: the values are guest identity data and stay out of the audit log.
         await client.query(
           `INSERT INTO platform.product_audit_events (
@@ -419,7 +481,7 @@ export function createPgPmsGuestRegistrationRepository(config: {
         await client.query("COMMIT");
         return {
           ok: true,
-          registration: toRegistration({ ...saved.rows[0]!, guestId, role: guest.rows[0].role }),
+          registration: toRegistration({ ...saved, guestId, role: guest.rows[0].role }),
         };
       } catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);

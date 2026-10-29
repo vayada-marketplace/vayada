@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import { createTargetBookingGuestPiiPort, type BookingGuestPiiPool } from "./bookingGuestPii.js";
 
+// Guest profile locks and links (VAY-2420): no profile in these fakes.
+const GUEST_PROFILE_QUERY =
+  /pg_advisory_xact_lock|guest_profiles|guest_profile_contact_deferred|guest_profile_synced_at = updated_at/;
+
 function createPool(input: { plan?: "fixed"; guestContactAccepted: boolean }) {
   const queries: string[] = [];
   const pool: BookingGuestPiiPool = {
@@ -90,7 +94,7 @@ function createProjectionFailurePool() {
           queries.push(text);
           const query = text.trimStart();
           // Guest profiles (VAY-2420): none in these fakes.
-          if (query.includes("guest_profiles")) return { rows: [] as T[], rowCount: 0 };
+          if (GUEST_PROFILE_QUERY.test(query)) return { rows: [] as T[], rowCount: 0 };
           if (query === "BEGIN" || query === "ROLLBACK") {
             return { rows: [] as T[], rowCount: 0 };
           }
@@ -144,6 +148,7 @@ function createUpdatePool() {
           text: string,
           values: readonly unknown[] = [],
         ) {
+          if (GUEST_PROFILE_QUERY.test(text)) return { rows: [] as T[], rowCount: 0 };
           if (["BEGIN", "COMMIT", "ROLLBACK"].includes(text)) {
             return { rows: [] as T[], rowCount: 0 };
           }
@@ -222,6 +227,7 @@ function createNationalityCorrectionPool(idempotency: "new" | "replay" | "confli
           text: string,
           values: readonly unknown[] = [],
         ) {
+          if (GUEST_PROFILE_QUERY.test(text)) return { rows: [] as T[], rowCount: 0 };
           if (["BEGIN", "COMMIT", "ROLLBACK"].includes(text)) {
             return { rows: [] as T[], rowCount: 0 };
           }
