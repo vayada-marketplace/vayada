@@ -137,4 +137,5 @@ export async function expectChoosing(page: Page, number: number, count: number) 
   const tabs = page.getByTestId("room-tabs").getByRole("tab");
   await expect(tabs).toHaveCount(count);
   await expect(page.getByTestId(`room-tab-${number}`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("room-tabs").getByRole("tab", { selected: true })).toHaveCount(1);
 }

@@ -170,6 +170,7 @@
     "paidDifferently": "Wird anders bezahlt als Ihre gewählten Zimmer. Eine Buchung wird auf eine Art bezahlt.",
     "roomsProgress": {
       "pickHelp": "Wählen Sie eine Unterkunft für {adults, plural, one {# Erwachsenen} other {# Erwachsene}}{children, plural, =0 {} one { und # Kind} other { und # Kinder}}. Preise gelten pro Zimmer; Kinder kommen im nächsten Schritt dazu.",
+      "pricesPerRoom": "Preise gelten pro Zimmer; Kinder kommen im nächsten Schritt dazu.",
       "guests": "{adults, plural, one {# Erwachsener} other {# Erwachsene}}{children, plural, =0 {} one { · # Kind} other { · # Kinder}}",
       "yourRooms": "Ihre Zimmer",
       "room": "Zimmer {number}",

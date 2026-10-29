@@ -170,6 +170,7 @@
     "paidDifferently": "Dibayar dengan cara berbeda dari kamar yang Anda pilih. Satu pemesanan dibayar dengan satu cara.",
     "roomsProgress": {
       "pickHelp": "Pilih tempat menginap untuk {adults} dewasa{children, plural, =0 {} other { dan # anak}}. Harga per kamar; anak-anak ditambahkan di langkah berikutnya.",
+      "pricesPerRoom": "Harga per kamar; anak-anak ditambahkan di langkah berikutnya.",
       "guests": "{adults} dewasa{children, plural, =0 {} other { · # anak}}",
       "yourRooms": "Kamar Anda",
       "room": "Kamar {number}",

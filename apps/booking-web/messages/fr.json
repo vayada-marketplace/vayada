@@ -170,6 +170,7 @@
     "paidDifferently": "Se paie autrement que les chambres choisies. Une réservation se paie d'une seule façon.",
     "roomsProgress": {
       "pickHelp": "Choisissez un logement pour {adults, plural, one {# adulte} other {# adultes}}{children, plural, =0 {} one { et # enfant} other { et # enfants}}. Les prix sont par chambre ; les enfants sont ajoutés à l'étape suivante.",
+      "pricesPerRoom": "Les prix sont par chambre ; les enfants sont ajoutés à l'étape suivante.",
       "guests": "{adults, plural, one {# adulte} other {# adultes}}{children, plural, =0 {} one { · # enfant} other { · # enfants}}",
       "yourRooms": "Vos chambres",
       "room": "Chambre {number}",

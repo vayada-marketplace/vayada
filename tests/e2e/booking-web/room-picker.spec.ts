@@ -47,6 +47,7 @@ for (const width of [1440, 390]) {
     await expectChoosing(page, 2, 2);
     await expect(help).toContainText("Pick a place for 1 adult and 1 child");
     await expect(page.getByTestId("room-tab-1")).toContainText("Deluxe Double Room");
+    await expect(page.getByTestId("room-tab-1")).toContainText("✓");
     await expect(page.getByTestId("room-tab-2")).toContainText("choosing");
     // The last Deluxe is room 1's: it can't be booked twice, and moves below the rooms that fit.
     await expect(deluxe.getByRole("button", { name: "Already your Room 1" })).toBeDisabled();
@@ -512,6 +513,10 @@ test("puts the room tabs and the sort on one row and moves between the tabs from
   await tab1.focus();
   await page.keyboard.press("ArrowRight");
   await expect(tab2).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(tab1).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(tab2).toBeFocused();
   await page.keyboard.press("Home");
   await expect(tab1).toBeFocused();
   await page.keyboard.press("End");
@@ -538,9 +543,15 @@ test("scrolls the room tabs on a phone, with the sort below them and targets of 
   // Three rooms don't fit across a phone: the tabs scroll sideways, not the page.
   const tabs = page.getByTestId("room-tabs");
   expect(await tabs.evaluate((list) => list.scrollWidth > list.clientWidth)).toBe(true);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  const right = await page
+    .locator("#rooms")
+    .evaluate(
+      (rooms) =>
+        rooms.getBoundingClientRect().right - parseFloat(getComputedStyle(rooms).paddingRight),
+    );
   const sort = page.getByRole("combobox", { name: "Sort rooms" });
   const [row, select] = await Promise.all([tabs.boundingBox(), sort.boundingBox()]);
+  expect(row!.x + row!.width).toBeLessThanOrEqual(right + 1);
   expect(select!.y).toBeGreaterThanOrEqual(row!.y + row!.height - 1);
   for (const target of [
     page.getByTestId("room-tab-1"),
@@ -556,9 +567,12 @@ test("scrolls the room tabs on a phone, with the sort below them and targets of 
     fullPage: true,
     animations: "disabled",
   });
-  // The last tab is in reach by scrolling the tabs.
-  await page.getByTestId("room-tab-3").click();
+  // Two rooms chosen: the tabs scroll so Room 3's, the one being chosen, is in sight.
+  const garden = page.getByTestId("room-card-garden");
+  await garden.getByRole("button", { name: "Select for Room 1" }).click();
+  await garden.getByRole("button", { name: "Select for Room 2" }).click();
   await expectChoosing(page, 3, 3);
+  await expect(page.getByTestId("room-tab-3")).toBeInViewport({ ratio: 1 });
   await assertHealthy();
 });
 

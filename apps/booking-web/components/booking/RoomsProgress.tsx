@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
 import type { RoomGuests } from "@/lib/roomPicker";
 
@@ -51,13 +51,24 @@ export default function RoomTabs({
   onRemove: (index: number, byKeyboard: boolean) => void;
 }) {
   const t = useTranslations("home.roomsProgress");
+  const list = useRef<HTMLDivElement>(null);
+  // The room being chosen stays in sight: on a phone, or with many rooms, its tab can be scrolled
+  // away. Only the tabs scroll, not the page.
+  useEffect(() => {
+    const tab = list.current?.querySelector('[aria-selected="true"]')?.parentElement;
+    if (!list.current || !tab) return;
+    const [shown, edges] = [list.current.getBoundingClientRect(), tab.getBoundingClientRect()];
+    list.current.scrollLeft +=
+      edges.left < shown.left ? edges.left - shown.left : Math.max(0, edges.right - shown.right);
+  }, [current]);
   return (
     <div
+      ref={list}
       role="tablist"
       aria-label={t("yourRooms")}
       data-testid="room-tabs"
       // On the row's bottom border, with the active tab's underline over it.
-      className="relative -mb-px flex overflow-x-auto"
+      className="relative -mb-px flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {rooms.map((room, index) => {
         const number = index + 1;
@@ -169,7 +180,7 @@ export function RoomsHelp({
         {current === null ? (
           <>
             <strong className="text-gray-900">{t("allChosen", { count })}</strong>
-            {` · ${t(hasExtras ? "readyForExtras" : "readyForDetails")}`}
+            {` · ${t(hasExtras ? "readyForExtras" : "readyForDetails")}. ${t("pricesPerRoom")}`}
           </>
         ) : (
           t("pickHelp", guests)

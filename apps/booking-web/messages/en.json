@@ -170,6 +170,7 @@
     "paidDifferently": "Paid differently from the rooms you chose. One booking is paid one way.",
     "roomsProgress": {
       "pickHelp": "Pick a place for {adults, plural, one {# adult} other {# adults}}{children, plural, =0 {} one { and # child} other { and # children}}. Prices are per room; children are added on the next step.",
+      "pricesPerRoom": "Prices are per room; children are added on the next step.",
       "guests": "{adults, plural, one {# adult} other {# adults}}{children, plural, =0 {} one { · # child} other { · # children}}",
       "yourRooms": "Your rooms",
       "room": "Room {number}",
