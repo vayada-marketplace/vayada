@@ -55,6 +55,7 @@ export default function AccommodationViews({
   rooms,
   map,
   stay,
+  tabs,
   toolbar,
   notices,
   renderCard,
@@ -67,6 +68,8 @@ export default function AccommodationViews({
   map: { pins: LocationMapPin[]; places: GuestMapPlace[]; apiKey: string } | null;
   /** The stay searched, for the phone map's summary, and Edit to change it. */
   stay: { label: string; onEdit: () => void };
+  /** A group's room tabs, left of the sort on the same row (VAY-2412). */
+  tabs: ReactNode;
   /** The sort, next to the views. */
   toolbar: ReactNode;
   /** Said above the cards, such as prices that failed. */
@@ -100,10 +103,22 @@ export default function AccommodationViews({
     return () => observer.disconnect();
   }, [phoneCards]);
 
+  // With room tabs, the row gets a bottom border for their underline; on a phone the tabs scroll
+  // and the sort wraps below them.
+  const toolbarRow = (controls: ReactNode) =>
+    tabs ? (
+      <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between md:gap-6 md:border-b md:border-gray-200">
+        <div className="min-w-0 border-b border-gray-200 md:border-b-0">{tabs}</div>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">{controls}</div>
+      </div>
+    ) : (
+      <div className="mb-5 flex flex-wrap items-center justify-end gap-3">{controls}</div>
+    );
+
   if (!map || !wide) {
     return (
       <>
-        <div className="mb-5 flex items-center justify-end gap-2">{toolbar}</div>
+        {toolbarRow(toolbar)}
         {notices}
         <div ref={map ? setPhoneCards : undefined} className="space-y-6">
           {rooms.map((room) => renderCard(room, { compact: false, active: false }))}
@@ -189,35 +204,37 @@ export default function AccommodationViews({
 
   return (
     <>
-      <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
-        <div
-          role="group"
-          aria-label={t("viewsLabel")}
-          className="inline-flex rounded-xl bg-gray-100 p-1"
-        >
-          {VIEWS.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={view === value}
-              onClick={() => {
-                // A place's card stays with the map it was opened on.
-                if (value !== view) nearby.close();
-                setView(value);
-                chooseView(value);
-              }}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                view === value
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-900"
-              }`}
-            >
-              {t(label)}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">{toolbar}</div>
-      </div>
+      {toolbarRow(
+        <>
+          <div
+            role="group"
+            aria-label={t("viewsLabel")}
+            className="inline-flex rounded-xl bg-gray-100 p-1"
+          >
+            {VIEWS.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={view === value}
+                onClick={() => {
+                  // A place's card stays with the map it was opened on.
+                  if (value !== view) nearby.close();
+                  setView(value);
+                  chooseView(value);
+                }}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  view === value
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-900"
+                }`}
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
+          {toolbar}
+        </>,
+      )}
       {notices}
       <div
         className={

@@ -169,11 +169,11 @@
     "cantCombine": "Non combinable",
     "paidDifferently": "Se paie autrement que les chambres choisies. Une réservation se paie d'une seule façon.",
     "roomsProgress": {
-      "roomOf": "Chambre {number} sur {count}",
-      "pickFor": "Choisissez un logement pour {adults, plural, one {# adulte} other {# adultes}}{children, plural, =0 {} one { et # enfant} other { et # enfants}}",
+      "pickHelp": "Choisissez un logement pour {adults, plural, one {# adulte} other {# adultes}}{children, plural, =0 {} one { et # enfant} other { et # enfants}}. Les prix sont par chambre ; les enfants sont ajoutés à l'étape suivante.",
+      "guests": "{adults, plural, one {# adulte} other {# adultes}}{children, plural, =0 {} one { · # enfant} other { · # enfants}}",
       "yourRooms": "Vos chambres",
       "room": "Chambre {number}",
-      "choosingNow": "en cours de choix",
+      "choosing": "en cours de choix",
       "next": "ensuite",
       "tooSmall": "Pas assez de place dans {name}",
       "chosen": "Chambre {number} : {name}. Choisissez maintenant la chambre {next}.",
@@ -205,7 +205,6 @@
       "yourChoice": "Votre choix",
       "continueWithPlace": "Continuer avec ce logement"
     },
-    "pricesPerRoom": "Les prix sont par chambre, pour les adultes qui y dorment. Nous ajoutons les enfants dès que vous indiquez leur âge à l'étape suivante.",
     "oneRoom": {
       "together": "Logements pour les {count} personnes ensemble.",
       "preferSeparate": "Vous préférez des chambres séparées ?",

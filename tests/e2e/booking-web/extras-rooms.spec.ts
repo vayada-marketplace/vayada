@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { mockAnyPrice } from "../support/bookFlow";
 import { watchPageHealth } from "../support/pageHealth";
-import { key, mockGroup, STAY } from "../support/roomPickerMocks";
+import { expectChoosing, key, mockGroup, STAY } from "../support/roomPickerMocks";
 
 // VAY-2393 part 4: the Extras step lists each booked room with Change and Remove, beside the
 // extras; the total and Continue stay in the Extras bar (VAY-2391). Chosen extras survive.
@@ -91,8 +91,8 @@ for (const width of [1440, 390]) {
 
     // Change Room 1: the room cards open on Room 1, and the new place comes straight back.
     await room1.getByRole("button", { name: "Change Room 1" }).click();
-    await expect(page.getByTestId("rooms-progress")).toContainText("Room 1 of 2");
-    await expect(page.getByTestId("room-pill-1")).toContainText("changing…");
+    await expectChoosing(page, 1, 2);
+    await expect(page.getByTestId("room-tab-1")).toContainText("changing…");
     await page
       .getByTestId("room-card-deluxe")
       .getByRole("button", { name: "Select for Room 1" })

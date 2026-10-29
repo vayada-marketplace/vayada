@@ -169,11 +169,11 @@
     "cantCombine": "Can't combine",
     "paidDifferently": "Paid differently from the rooms you chose. One booking is paid one way.",
     "roomsProgress": {
-      "roomOf": "Room {number} of {count}",
-      "pickFor": "Pick a place for {adults, plural, one {# adult} other {# adults}}{children, plural, =0 {} one { and # child} other { and # children}}",
+      "pickHelp": "Pick a place for {adults, plural, one {# adult} other {# adults}}{children, plural, =0 {} one { and # child} other { and # children}}. Prices are per room; children are added on the next step.",
+      "guests": "{adults, plural, one {# adult} other {# adults}}{children, plural, =0 {} one { · # child} other { · # children}}",
       "yourRooms": "Your rooms",
       "room": "Room {number}",
-      "choosingNow": "choosing now",
+      "choosing": "choosing",
       "next": "next",
       "tooSmall": "{name} is too small",
       "chosen": "Room {number}: {name}. Now pick Room {next}.",
@@ -205,7 +205,6 @@
       "yourChoice": "Your choice",
       "continueWithPlace": "Continue with this place"
     },
-    "pricesPerRoom": "Prices are per room, for the adults in it. We add children once you tell us their ages on the next step.",
     "oneRoom": {
       "together": "Showing places for all {count} guests together.",
       "preferSeparate": "Prefer separate rooms?",
