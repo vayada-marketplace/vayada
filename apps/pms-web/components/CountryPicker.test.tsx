@@ -89,7 +89,7 @@ describe("CountryPicker", () => {
     expect(options).toHaveLength(NATIONALITY_PICKER_OPTIONS.length + 2);
     expect(options.every((option) => option.props.className.includes("min-h-11"))).toBe(true);
     // No emoji flags: Windows Chrome shows them as letters (VAY-2417).
-    expect(JSON.stringify(view.toJSON())).not.toMatch(/\p{Regional_Indicator}/u);
+    expect(JSON.stringify(view.toJSON())).not.toMatch(/\uD83C[\uDDE6-\uDDFF]/);
   });
 
   it("moves with the arrow keys and picks with Enter, the first match by default", () => {
