@@ -11,6 +11,8 @@ import {
   BookingAdditionalGuestPayload,
   CheckinStepResult,
   GuestRegistration,
+  HIDDEN_GUEST_CONTACT,
+  ReservationGuestProfile,
   bookingsService,
 } from "@/services/bookings";
 import { calendarService } from "@/services/calendar";
@@ -22,7 +24,8 @@ import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
 import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
-import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
+import { bookingChannelLabel, isChannelBooking } from "@/lib/bookings/channelLabel";
+import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import {
   expectedRegistrations,
   registrationGuests,
@@ -73,10 +76,6 @@ function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
 }
 
-function channelIsOta(channel: string | null | undefined) {
-  return Boolean(channel && channel.toLowerCase() !== "direct");
-}
-
 function customStepDone(step: CheckinChecklistStep, value: string | boolean | undefined) {
   if (step.type === "checkbox") return value === true;
   if (step.type === "amount") return Number(value || 0) > 0;
@@ -106,6 +105,8 @@ export default function CheckInPage() {
   const [booking, setBooking] = useState<Booking | null>(null);
   const [additionalGuests, setAdditionalGuests] = useState<BookingAdditionalGuest[]>([]);
   const [registrations, setRegistrations] = useState<GuestRegistration[]>([]);
+  // The booker's guest record, through which their name and contact are edited (VAY-2420).
+  const [bookerProfile, setBookerProfile] = useState<ReservationGuestProfile | null>(null);
   const [registrationsUnavailable, setRegistrationsUnavailable] = useState(false);
   const [canReadIdentity, setCanReadIdentity] = useState(false);
   const [settings, setSettings] = useState<CheckinSettings>(DEFAULT_CHECKIN_SETTINGS);
@@ -147,17 +148,27 @@ export default function CheckInPage() {
         .catch(() => DEFAULT_CHECKIN_SETTINGS),
       settingsService.getCheckinChecklist().catch(() => ({ steps: [] })),
       calendarService.listAvailableAddons("").catch(() => [] as BookingAddon[]),
+      bookingsService.listGuestProfiles(id).catch(() => null),
     ])
-      .then(([bookingRes, guestRes, registrationRes, settingsRes, checklistRes, addons]) => {
-        setBooking(bookingRes);
-        setAdditionalGuests(guestRes.guests);
-        setRegistrations(registrationRes?.guests ?? []);
-        setRegistrationsUnavailable(!registrationRes);
-        setCanReadIdentity(registrationRes?.canReadIdentity ?? false);
-        setSettings(settingsRes);
-        setChecklistSteps(checklistRes.steps || []);
-        setCatalog(addons);
-      })
+      .then(
+        ([bookingRes, guestRes, registrationRes, settingsRes, checklistRes, addons, profiles]) => {
+          // Listed booker first, like the guest the reservation read shows.
+          const listedBooker = profiles?.[0];
+          setBookerProfile(
+            listedBooker?.guestProfileId && listedBooker.role !== "additional_guest"
+              ? listedBooker
+              : null,
+          );
+          setBooking(bookingRes);
+          setAdditionalGuests(guestRes.guests);
+          setRegistrations(registrationRes?.guests ?? []);
+          setRegistrationsUnavailable(!registrationRes);
+          setCanReadIdentity(registrationRes?.canReadIdentity ?? false);
+          setSettings(settingsRes);
+          setChecklistSteps(checklistRes.steps || []);
+          setCatalog(addons);
+        },
+      )
       .catch((err) =>
         setError(localizedErrorText(err, err.message || t("checkIn.flow.loadError"), t)),
       )
@@ -212,10 +223,10 @@ export default function CheckInPage() {
       };
     });
 
-  /** Saves what changed since the last save (VAY-2418 autosave). The booker's name and contact
-   * come from the booking (only the nationality can be corrected); other guests go to the guest
-   * list, a new one listed first (`listed` gets its id at once, so a retry never lists them
-   * twice); then their registration, when staff may see IDs. */
+  /** Saves what changed since the last save (VAY-2418 autosave). The booker's name and contact go
+   * to their guest record (VAY-2420), the nationality to the booking's correction; other guests go
+   * to the guest list, a new one listed first (`listed` gets its id at once, so a retry never
+   * lists them twice); then their registration, when staff may see IDs. */
   const saveGuest = async (
     guest: RegistrationGuest,
     values: GuestFormValues,
@@ -227,6 +238,22 @@ export default function CheckInPage() {
     const { contact, registration: registrationChanged } = guestChanges(previous, values);
     let guestId = knownId;
     if (guest.role === "booker") {
+      const edit = guestProfileEdit(previous, values);
+      if (bookerProfile?.guestProfileId && Object.keys(edit).length) {
+        await bookingsService.editGuestProfile(
+          {
+            bookingGuestId: bookerProfile.bookingGuestId,
+            guestProfileId: bookerProfile.guestProfileId,
+          },
+          edit,
+        );
+        // The form holds both names as booked, so the booking's split of them stays right.
+        const names = { firstName: values.firstName.trim(), lastName: values.lastName.trim() };
+        setBookerProfile((current) => (current ? { ...current, ...names } : current));
+        setBooking((current) =>
+          current ? withBookerEdit(current, { ...edit, ...names }) : current,
+        );
+      }
       if (
         contact.includes("nationality") &&
         values.nationality &&
@@ -278,13 +305,15 @@ export default function CheckInPage() {
   const formInitial = (guest: RegistrationGuest): GuestFormValues => {
     const listed = additionalGuests.find((entry) => entry.id === guest.guestId);
     const booker = guest.role === "booker" && booking;
+    // The booker's names as booked: the reservation read only has them joined.
+    const names = (booker && bookerProfile) || guest;
     const saved = guest.registration;
     const room = rooms.find((entry) =>
       (placement.get(entry.key) ?? []).some((placed) => placed.key === guest.key),
     );
     return {
-      firstName: guest.firstName,
-      lastName: guest.lastName,
+      firstName: names.firstName,
+      lastName: names.lastName,
       email: booker ? booking.guestEmail : (listed?.email ?? ""),
       phone: booker ? booking.guestPhone : (listed?.phone ?? ""),
       nationality: booker ? booking.guestCountry : (listed?.nationality ?? ""),
@@ -297,12 +326,24 @@ export default function CheckInPage() {
     };
   };
 
-  const ota = channelIsOta(booking?.channel);
+  const ota = isChannelBooking(booking?.channel);
   const lockedFields = (guest: RegistrationGuest) => {
-    if (guest.role === "booker")
-      return new Set<GuestLockableField>(["firstName", "lastName", "email", "phone"]);
-    const listed = additionalGuests.find((entry) => entry.id === guest.guestId);
     const locked = new Set<GuestLockableField>();
+    // The booker is edited through their guest record (VAY-2420): not without one, their contact
+    // not where staff may not see it, and a channel's values stay as sent (its next update would
+    // write them again); empty ones can still be filled.
+    if (guest.role === "booker") {
+      const shown = formInitial(guest);
+      for (const name of ["firstName", "lastName", "email", "phone"] as const)
+        if (
+          !bookerProfile ||
+          (ota && shown[name].trim()) ||
+          ((name === "email" || name === "phone") && shown.email === HIDDEN_GUEST_CONTACT)
+        )
+          locked.add(name);
+      return locked;
+    }
+    const listed = additionalGuests.find((entry) => entry.id === guest.guestId);
     // An OTA import's values stay as supplied; empty ones can still be filled.
     if (ota && listed) {
       for (const name of ["firstName", "lastName", "email", "phone"] as const)

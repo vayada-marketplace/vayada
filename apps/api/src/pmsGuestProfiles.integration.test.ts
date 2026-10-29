@@ -107,7 +107,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
 
   const book = async (
     propertyId: string,
-    stay: { checkIn: string; checkOut: string; source?: "pms" | "booking"; accepted?: boolean },
+    stay: {
+      checkIn: string;
+      checkOut: string;
+      source?: "pms" | "booking";
+      accepted?: boolean;
+      channel?: "direct" | "booking_com";
+    },
     ...guests: { first: string; last: string; email?: string; phone?: string }[]
   ) => {
     const id = randomUUID();
@@ -118,7 +124,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
           check_in, check_out, adults, currency, total_amount, balance_amount, booking_metadata,
           booking_channel, direct_booking_source)
        VALUES ($1::uuid, $2::uuid, $3, $4, $3, 'confirmed', $5::date, $6::date, 2, 'EUR', 600, 600,
-         '{}'::jsonb, 'direct', $7)`,
+         '{}'::jsonb, $8, $7)`,
       [
         id,
         propertyId,
@@ -126,7 +132,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
         source,
         stay.checkIn,
         stay.checkOut,
-        source === "booking" ? "booking_engine" : "walk_in",
+        stay.channel === "booking_com" ? null : source === "booking" ? "booking_engine" : "walk_in",
+        stay.channel ?? "direct",
       ],
     );
     if (stay.accepted ?? true)
@@ -279,6 +286,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
       {
         bookingGuestId: second.guestIds[0],
         role: "booker",
+        firstName: "Mia",
+        lastName: "Kurz",
         guestProfileId: profileId,
         reservations: 2,
         notes: [note],
@@ -498,6 +507,74 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
       lastName: "Berg-Ott",
       phone: "+4915199999999",
     });
+  });
+
+  it("gives check-in and the reservation page the booker as booked, linked, to edit", async () => {
+    // Anna stayed before with her real email; her Booking.com stay has a relay address and the
+    // job hasn't reached it yet.
+    const anna = { first: "Anna Maria", last: "Lind", phone: "+4915188888888" };
+    await book(
+      propertyA,
+      { checkIn: "2025-03-01", checkOut: "2025-03-02" },
+      { ...anna, email: "anna@example.test" },
+    );
+    await sweep();
+    const channel = await book(
+      propertyB,
+      { checkIn: "2030-12-01", checkOut: "2030-12-03", channel: "booking_com" },
+      { ...anna, email: "x1y2@guest.booking.com" },
+    );
+    const atB = { ...both, propertyId: propertyB };
+
+    // Read with both names as booked (the reservation read only has them joined), and linked.
+    const [booker] = (await profiles.reservationProfiles(atB, channel.bookingId))!;
+    expect(booker).toMatchObject({
+      bookingGuestId: channel.guestIds[0],
+      role: "booker",
+      firstName: "Anna Maria",
+      lastName: "Lind",
+      reservations: 2,
+    });
+    expect((await copy(channel.guestIds[0]!)).profileId).toBe(booker!.guestProfileId);
+    const profileId = booker!.guestProfileId!;
+    expect((await profiles.get(atB, profileId))!.fields.email).toBe("anna@example.test");
+
+    // Staff replace the relay address with the email the guest already has: the booking shows it.
+    await profiles.edit(
+      atB,
+      profileId,
+      { email: "anna@example.test" },
+      booker!.bookingGuestId,
+      audit(),
+    );
+    expect(await copy(channel.guestIds[0]!)).toMatchObject({ email: "anna@example.test" });
+
+    // A request not accepted yet keeps its booker's contact out of reach: staff can't replace it.
+    const request = await book(
+      propertyB,
+      { checkIn: "2031-01-10", checkOut: "2031-01-12", accepted: false },
+      { first: "Jonas", last: "Ried", email: "jonas@example.test" },
+    );
+    const [requester] = (await profiles.reservationProfiles(atB, request.bookingId))!;
+    expect(
+      await profiles.edit(
+        atB,
+        requester!.guestProfileId!,
+        { email: "other@example.test" },
+        requester!.bookingGuestId,
+        audit(),
+      ),
+    ).toBe("contact_hidden");
+    expect(
+      await profiles.edit(
+        atB,
+        requester!.guestProfileId!,
+        { lastName: "Riedl" },
+        requester!.bookingGuestId,
+        audit(),
+      ),
+    ).toMatchObject({ lastName: "Riedl" });
+    expect(await copy(request.guestIds[0]!)).toMatchObject({ email: "jonas@example.test" });
   });
 });
 

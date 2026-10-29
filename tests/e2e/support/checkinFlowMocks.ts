@@ -170,6 +170,25 @@ export async function mockCheckinFlow(
       },
     }),
   );
+  // Ada's guest record, through which her name and contact are edited (VAY-2420).
+  await page.route(`${base}/guest-profiles`, (route) =>
+    route.fulfill({
+      json: {
+        guestBookingId: PMS_WEB_RESERVATION_ID,
+        guests: [
+          {
+            bookingGuestId: "guest_ada",
+            role: "booker",
+            firstName: "Ada",
+            lastName: "Lovelace",
+            guestProfileId: "f6855a00-0000-4000-8000-000000000002",
+            reservations: 1,
+            notes: [],
+          },
+        ],
+      },
+    }),
+  );
   await page.route(`${base}/guest-registrations/*`, (route) => {
     const guestId = new URL(route.request().url()).pathname.split("/").at(-1)!;
     const body = route.request().postDataJSON() as Record<string, unknown>;

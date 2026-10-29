@@ -72,34 +72,42 @@ export async function editGuestProfile(
       [input.guestProfileId, ...changed.map((field) => input.edit[field])],
     );
   }
-  const copied = COPIED_FIELDS.filter((field) => changed.includes(field));
-  if (copied.length) {
+  const copy = async (fields: readonly GuestProfileFieldName[], stays: string) => {
+    if (!fields.length) return;
     // A staff-chosen nationality settles any imported value that needed review.
     const review =
-      copied.includes("countryCode") && input.edit.countryCode
+      fields.includes("countryCode") && input.edit.countryCode
         ? ", country_code_raw = NULL, country_code_review_required = FALSE"
         : "";
     await client.query(
       `UPDATE booking.booking_guests guest
-       SET ${copied.map((field, index) => `${PROFILE_COLUMNS[field]} = $${index + 4}`).join(", ")}${review},
+       SET ${fields.map((field, index) => `${PROFILE_COLUMNS[field]} = $${index + 4}`).join(", ")}${review},
            updated_at = now(), guest_profile_synced_at = now()
        FROM booking.guest_bookings booking
        WHERE booking.id = guest.guest_booking_id
          AND guest.guest_profile_id = $1::uuid
          AND booking.property_id = ANY($2::uuid[])
-         AND (
-           guest.id = $3::uuid
-           OR (booking.check_out >= CURRENT_DATE
-             AND booking.lifecycle_status IN ('pending_payment', 'confirmed'))
-         )`,
+         AND (${stays})`,
       [
         input.guestProfileId,
         input.propertyIds,
         input.bookingGuestId ?? null,
-        ...copied.map((field) => input.edit[field]),
+        ...fields.map((field) => input.edit[field]),
       ],
     );
-  }
+  };
+  await copy(
+    COPIED_FIELDS.filter((field) => changed.includes(field)),
+    `guest.id = $3::uuid OR (booking.check_out >= CURRENT_DATE
+       AND booking.lifecycle_status IN ('pending_payment', 'confirmed'))`,
+  );
+  // The stay it was edited from also takes a value the profile already had: it can still show an
+  // older one (a channel's relay address) that staff just replaced.
+  if (input.bookingGuestId)
+    await copy(
+      COPIED_FIELDS.filter((field) => input.edit[field] !== undefined && !changed.includes(field)),
+      "guest.id = $3::uuid",
+    );
   return changed;
 }
 

@@ -31,8 +31,11 @@ import {
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
   AssignmentSelector,
+  HIDDEN_GUEST_CONTACT,
   type BookingCancellationTerms,
 } from "@/services/bookings";
+import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
+import { isChannelBooking } from "@/lib/bookings/channelLabel";
 import { individualRoomsService, Room } from "@/services/rooms";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Modal from "@/components/Modal";
@@ -140,6 +143,8 @@ function formatDateTime(iso: string, locale?: string): string {
 function errMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
+
+type BookerForm = { firstName: string; lastName: string; email: string; phone: string };
 
 function totalGuestsLabel(adults: number, children: number, t: Translate): string {
   const parts: string[] = [];
@@ -1340,23 +1345,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     position: number;
     label: string;
   } | null>(null);
-  const [bookerEditing, setBookerEditing] = useState(false);
+  // The booker's guest record and what the form showed, while their name and contact are edited
+  // (VAY-2420).
+  const [bookerEdit, setBookerEdit] = useState<{
+    guest: { bookingGuestId: string; guestProfileId: string };
+    shown: BookerForm;
+  } | null>(null);
   const [bookerSaving, setBookerSaving] = useState(false);
   const [nationalityEditing, setNationalityEditing] = useState(false);
   const [nationalityDraft, setNationalityDraft] = useState("");
   const [nationalitySaving, setNationalitySaving] = useState(false);
   const [nationalityError, setNationalityError] = useState("");
   const nationalitySavePending = useRef(false);
-  const [bookerForm, setBookerForm] = useState({
-    guestFirstName: "",
-    guestLastName: "",
-    guestGender: "",
-    guestCountry: "",
-    guestDateOfBirth: "",
-    guestEmail: "",
-    guestPhone: "",
-    guestPassportNumber: "",
-    specialRequests: "",
+  const [bookerForm, setBookerForm] = useState<BookerForm>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
   });
 
   useEffect(() => {
@@ -1710,38 +1715,61 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     });
   };
 
-  const handleEditBooker = () => {
+  /** Opens the booker's name and contact, as booked: the reservation read only has the joined
+   * name. They are saved to the booker's guest record (VAY-2420). */
+  const handleEditBooker = async () => {
     if (!booking) return;
-    setBookerForm({
-      guestFirstName: booking.guestFirstName,
-      guestLastName: booking.guestLastName,
-      guestGender: booking.guestGender,
-      guestCountry: booking.guestCountry,
-      guestDateOfBirth: booking.guestDateOfBirth ?? "",
-      guestEmail: booking.guestEmail,
-      guestPhone: booking.guestPhone,
-      guestPassportNumber: booking.guestPassportNumber,
-      specialRequests: booking.specialRequests,
-    });
-    setBookerEditing(true);
-  };
-
-  const handleSaveBooker = async () => {
+    setError("");
     setBookerSaving(true);
     try {
-      const updated = await bookingsService.update(id, {
-        guestFirstName: bookerForm.guestFirstName,
-        guestLastName: bookerForm.guestLastName,
-        guestGender: bookerForm.guestGender,
-        guestCountry: bookerForm.guestCountry,
-        guestDateOfBirth: bookerForm.guestDateOfBirth || null,
-        guestEmail: bookerForm.guestEmail,
-        guestPhone: bookerForm.guestPhone,
-        guestPassportNumber: bookerForm.guestPassportNumber,
-        specialRequests: bookerForm.specialRequests,
+      // Listed booker first, like the guest the reservation read shows.
+      const [listed] = await bookingsService.listGuestProfiles(id);
+      if (!listed?.guestProfileId || listed.role === "additional_guest")
+        throw new Error(t("bookings.detail.failedToLoadBooker"));
+      const shown = {
+        firstName: listed.firstName,
+        lastName: listed.lastName,
+        email: booking.guestEmail,
+        phone: booking.guestPhone,
+      };
+      setBookerForm(shown);
+      setBookerEdit({
+        guest: { bookingGuestId: listed.bookingGuestId, guestProfileId: listed.guestProfileId },
+        shown,
       });
-      setBooking(updated);
-      setBookerEditing(false);
+    } catch (err) {
+      setError(errMessage(err, t("bookings.detail.failedToLoadBooker")));
+    } finally {
+      setBookerSaving(false);
+    }
+  };
+
+  const bookerChanges = bookerEdit ? guestProfileEdit(bookerEdit.shown, bookerForm) : {};
+  // A channel's values stay as sent (its next update would write them again), and so does contact
+  // staff may not see; empty fields can still be filled.
+  const bookerLocked = (field: keyof BookerForm) =>
+    Boolean(bookerEdit) &&
+    ((isChannelBooking(booking?.channel) && bookerEdit!.shown[field].trim() !== "") ||
+      ((field === "email" || field === "phone") &&
+        bookerEdit!.shown.email === HIDDEN_GUEST_CONTACT));
+
+  const handleSaveBooker = async () => {
+    if (!bookerEdit) return;
+    setError("");
+    setBookerSaving(true);
+    try {
+      if (Object.keys(bookerChanges).length) {
+        await bookingsService.editGuestProfile(bookerEdit.guest, bookerChanges);
+        // Both names as booked, so the booking's split of them stays right.
+        const names = {
+          firstName: bookerForm.firstName.trim(),
+          lastName: bookerForm.lastName.trim(),
+        };
+        setBooking((current) =>
+          current ? withBookerEdit(current, { ...bookerChanges, ...names }) : current,
+        );
+      }
+      setBookerEdit(null);
     } catch (err) {
       setError(errMessage(err, t("bookings.detail.failedToSaveBooker")));
     } finally {
@@ -2754,100 +2782,69 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             <h2 className="text-sm font-semibold text-gray-900">
               {t("bookings.detail.guestInformationBooker")}
             </h2>
-            {!bookerEditing && (
+            {!bookerEdit && (
               <button
+                type="button"
                 onClick={handleEditBooker}
-                disabled={!LEGACY_BOOKING_WRITES_AVAILABLE}
-                title={t("bookings.detail.bookerEditingUnavailable")}
-                className="inline-flex cursor-not-allowed items-center gap-1 rounded bg-gray-50 px-2 py-1 text-[11px] font-medium text-gray-400"
-                aria-label={t("bookings.detail.editBookerUnavailableLabel")}
+                disabled={bookerSaving}
+                aria-label={t("bookings.detail.editBooker")}
+                className="inline-flex items-center gap-1 rounded bg-gray-50 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
               >
                 <PencilSquareIcon className="w-4 h-4" />
-                {t("bookings.detail.soon")}
+                {t("common.edit")}
               </button>
             )}
           </div>
-          {bookerEditing ? (
+          {bookerEdit ? (
             <div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Field
                   label={t("bookings.modal.firstNameLabel")}
-                  value={bookerForm.guestFirstName}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestFirstName: v })}
+                  value={bookerForm.firstName}
+                  onChange={(v) => setBookerForm({ ...bookerForm, firstName: v })}
+                  disabled={bookerLocked("firstName")}
                 />
                 <Field
                   label={t("bookings.modal.lastNameLabel")}
-                  value={bookerForm.guestLastName}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestLastName: v })}
-                />
-                <SelectField
-                  label={t("bookings.detail.gender")}
-                  value={bookerForm.guestGender}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestGender: v })}
-                  options={[
-                    { value: "", label: "—" },
-                    { value: "female", label: t("bookings.detail.genderFemale") },
-                    { value: "male", label: t("bookings.detail.genderMale") },
-                    { value: "other", label: t("bookings.detail.genderOther") },
-                    {
-                      value: "prefer_not_to_say",
-                      label: t("bookings.detail.genderPreferNotToSay"),
-                    },
-                  ]}
-                />
-                <NationalitySelect
-                  value={bookerForm.guestCountry}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestCountry: v })}
+                  value={bookerForm.lastName}
+                  onChange={(v) => setBookerForm({ ...bookerForm, lastName: v })}
+                  disabled={bookerLocked("lastName")}
                 />
                 <Field
-                  label={t("bookings.detail.dateOfBirth")}
-                  type="date"
-                  value={bookerForm.guestDateOfBirth}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestDateOfBirth: v })}
-                />
-                <Field
-                  label={t("bookings.detail.email")}
+                  label={t("bookings.detail.emailOptional")}
                   type="email"
-                  value={bookerForm.guestEmail}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestEmail: v })}
+                  value={bookerForm.email}
+                  onChange={(v) => setBookerForm({ ...bookerForm, email: v })}
+                  disabled={bookerLocked("email")}
                 />
                 <Field
                   label={t("bookings.detail.phoneOptional")}
                   type="tel"
-                  value={bookerForm.guestPhone}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestPhone: v })}
+                  value={bookerForm.phone}
+                  onChange={(v) => setBookerForm({ ...bookerForm, phone: v })}
+                  disabled={bookerLocked("phone")}
                 />
-                <Field
-                  label={t("bookings.detail.passportOptional")}
-                  value={bookerForm.guestPassportNumber}
-                  onChange={(v) => setBookerForm({ ...bookerForm, guestPassportNumber: v })}
-                />
-                <div className="md:col-span-2">
-                  <label className="block">
-                    <span className="block text-xs font-medium text-gray-600 mb-1">
-                      {t("bookings.detail.specialRequests")}
-                    </span>
-                    <textarea
-                      value={bookerForm.specialRequests}
-                      onChange={(e) =>
-                        setBookerForm({ ...bookerForm, specialRequests: e.target.value })
-                      }
-                      rows={3}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent resize-none"
-                    />
-                  </label>
-                </div>
               </div>
+              <p className="mt-3 text-xs text-gray-500">
+                {isChannelBooking(booking.channel)
+                  ? t("bookings.detail.bookerFromChannel", { channel: channelLabel })
+                  : t("bookings.detail.bookerSavedToGuest")}
+              </p>
               <div className="mt-4 flex justify-end gap-2">
                 <button
-                  onClick={() => setBookerEditing(false)}
+                  type="button"
+                  onClick={() => setBookerEdit(null)}
                   className="px-3 py-1.5 text-xs font-medium text-gray-700 rounded-lg hover:bg-gray-100"
                 >
                   {t("bookings.modal.cancelButton")}
                 </button>
                 <button
+                  type="button"
                   onClick={handleSaveBooker}
-                  disabled={bookerSaving}
+                  // Names can't be emptied; one the booking came without may stay empty.
+                  disabled={
+                    bookerSaving || bookerChanges.firstName === "" || bookerChanges.lastName === ""
+                  }
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   {bookerSaving ? t("common.saving") : t("common.save")}

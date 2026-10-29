@@ -215,6 +215,25 @@ export async function linkBookingGuestNow(
 }
 
 /**
+ * Links a reservation's guests the job hasn't reached yet, so a form shows what a save compares
+ * with and a booking made moments ago can be edited at once. Runs in the caller's transaction.
+ */
+export async function linkReservationGuestsNow(
+  client: GuestProfileQueryable,
+  propertyId: string,
+  guestBookingId: string,
+): Promise<void> {
+  const unlinked = await client.query<{ id: string }>(
+    `SELECT guest.id::text AS id FROM booking.booking_guests guest
+     JOIN booking.guest_bookings booking ON booking.id = guest.guest_booking_id
+     WHERE booking.property_id = $1::uuid AND booking.id = $2::uuid
+       AND guest.guest_profile_id IS NULL`,
+    [propertyId, guestBookingId],
+  );
+  for (const { id } of unlinked.rows) await linkBookingGuestNow(client, id);
+}
+
+/**
  * Gives a wrongly matched booking guest its own new profile, made from that booking's copy, and
  * returns it (null when the guest isn't linked or its booking is a draft). Runs in the caller's
  * transaction, after lockGuestProfiles.

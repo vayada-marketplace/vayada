@@ -315,9 +315,8 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
   // Only manual stays keep the (disabled) legacy modify button; direct stays use host actions.
   await expect(page.getByRole("button", { name: /modify booking/i })).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: /edit booker.*not available yet/i }),
-  ).toBeDisabled();
+  // The booker is edited through their guest record (VAY-2420, the next test).
+  await expect(page.getByRole("button", { name: "Edit booker" })).toBeEnabled();
   await expect(page.getByText("Needs review")).toBeVisible();
   await expect(page.getByText(/Imported value: Holland/)).toBeVisible();
   await page.getByRole("button", { name: "Correct nationality" }).click();
@@ -393,6 +392,80 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await expect.poll(() => approvals).toBe(1);
   await expect(page.getByText(/last change request was approved/i)).toBeVisible();
 
+  await assertHealthy();
+});
+
+test("edits the booker's name and contact through their guest record (VAY-2420)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const reservationPath = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
+  // Booked as "Ada Augusta" + "Lovelace": the reservation read only has the joined name.
+  await page.route(reservationPath, (route) =>
+    route.fulfill({
+      json: {
+        item: {
+          ...pmsWebReservation,
+          primaryGuest: { ...pmsWebReservation.primaryGuest, displayName: "Ada Augusta Lovelace" },
+        },
+      },
+    }),
+  );
+  for (const path of ["notes", "additional-guests"])
+    await page.route(`${reservationPath}/${path}`, (route) =>
+      route.fulfill({ json: { items: [] } }),
+    );
+  await page.route(`${reservationPath}/change-request`, (route) => route.fulfill({ json: null }));
+  const guestProfileId = "f6855a00-0000-4000-8000-000000000001";
+  await page.route(`${reservationPath}/guest-profiles`, (route) =>
+    route.fulfill({
+      json: {
+        guestBookingId: PMS_WEB_RESERVATION_ID,
+        guests: [
+          {
+            bookingGuestId: "guest_ada",
+            role: "booker",
+            firstName: "Ada Augusta",
+            lastName: "Lovelace",
+            guestProfileId,
+            reservations: 2,
+            notes: [],
+          },
+        ],
+      },
+    }),
+  );
+  const edits: unknown[] = [];
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guests/${guestProfileId}`,
+    (route) => {
+      edits.push(route.request().postDataJSON());
+      return route.fulfill({ json: {} });
+    },
+  );
+
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+  await page.getByRole("button", { name: "Edit booker" }).click();
+  const firstName = page.getByRole("textbox", { name: "First Name" });
+  await expect(firstName).toHaveValue("Ada Augusta");
+  await expect(page.getByText(/upcoming bookings show it too/)).toBeVisible();
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  // A name can't be emptied.
+  await firstName.fill(" ");
+  await expect(save).toBeDisabled();
+  await firstName.fill("Ada Augusta");
+  await page.getByRole("textbox", { name: "Last Name" }).fill("King");
+  await page.getByRole("textbox", { name: "Phone (optional)" }).fill("");
+  await save.click();
+
+  // Only what changed is sent; an emptied phone clears it.
+  await expect
+    .poll(() => edits)
+    .toEqual([{ bookingGuestId: "guest_ada", lastName: "King", phone: null }]);
+  await expect(page.getByText("Ada Augusta King", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit booker" })).toBeVisible();
   await assertHealthy();
 });
 

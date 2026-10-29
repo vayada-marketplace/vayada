@@ -333,6 +333,19 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
         : route.fallback(),
     );
 
+  // The check-in edits the booker through their guest record (VAY-2420): none unless a spec says
+  // so, which keeps the booker's name and contact read-only.
+  await page.context().route("**/api/pms/properties/*/reservations/*/guest-profiles", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({
+          json: {
+            guestBookingId: new URL(route.request().url()).pathname.split("/").at(-2),
+            guests: [],
+          },
+        })
+      : route.fallback(),
+  );
+
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({
       json: {

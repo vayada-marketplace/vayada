@@ -90,7 +90,8 @@ export function GuestForm({
   requireNames: boolean;
   settings: CheckinSettings;
   rooms: CheckinRoom[];
-  /** Name and contact taken from the booking or an OTA import. */
+  /** Values staff can't change here: an OTA import's, or the booker's when their guest record
+   * can't be reached. */
   lockedFields: ReadonlySet<GuestLockableField>;
   canReadIdentity: boolean;
   /** The registration fields on record; the status uses them when the ID fields are hidden. */
@@ -142,7 +143,12 @@ export function GuestForm({
       const next = { ...typed.current, dateOfBirth: birthDate ?? saved.current.dateOfBirth };
       const { contact, registration } = guestChanges(saved.current, next);
       if (contact.length || registration) {
-        if (requireNames && (!next.firstName.trim() || !next.lastName.trim())) {
+        // The booker can't have a name emptied, but a channel booker without a last name still
+        // saves the rest.
+        const blankName = (["firstName", "lastName"] as const).some(
+          (name) => !next[name].trim() && (requireNames || contact.includes(name)),
+        );
+        if (blankName) {
           setProblem({ text: t("checkIn.flow.form.namesRequired") });
           return false;
         }

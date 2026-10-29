@@ -89,6 +89,33 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
     });
   });
 
+  await page.route(`${base}/guest-profiles`, (route) =>
+    route.fulfill({
+      json: {
+        guestBookingId: PMS_WEB_RESERVATION_ID,
+        guests: [
+          {
+            bookingGuestId: "guest_ada",
+            role: "booker",
+            firstName: "Ada",
+            lastName: "Lovelace",
+            guestProfileId: "f6855a00-0000-4000-8000-000000000001",
+            reservations: 2,
+            notes: [],
+          },
+        ],
+      },
+    }),
+  );
+  const profileEdits: unknown[] = [];
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guests/f6855a00-0000-4000-8000-000000000001`,
+    (route) => {
+      profileEdits.push(route.request().postDataJSON());
+      return route.fulfill({ json: {} });
+    },
+  );
+
   const registrations: Record<string, unknown>[] = [];
   await page.route(`${base}/guest-registrations/*`, (route) => {
     registrations.push(route.request().postDataJSON());
@@ -136,19 +163,24 @@ test("records a pay-at-hotel payment at check-in and shows the special request",
   await main.getByRole("checkbox", { name: "I have read the request" }).check();
   await proceed.click();
 
-  // The booker's contact comes from the booking, shown locked; the nationality can be corrected
-  // here and saves itself (VAY-2418).
+  // The booker's name and contact are edited through their guest record (VAY-2420): only what
+  // changed is sent, with this booking's guest. The nationality is corrected on the booking. Both
+  // save themselves (VAY-2418).
   await main.getByRole("button", { name: /^Add details Ada Lovelace/ }).click();
   const bookerNationality = main.getByRole("combobox", { name: /Nationality/ });
   await expect(bookerNationality).toHaveValue("Austria");
   await expect(bookerNationality).toBeEnabled();
-  await expect(main.getByRole("textbox", { name: /First name/ })).not.toBeEditable();
-  await expect(main.getByRole("textbox", { name: /First name/ })).toHaveAccessibleName(
-    /From the booking/,
-  );
+  await expect(main.getByRole("textbox", { name: /First name/ })).toHaveValue("Ada");
+  await expect(main.getByRole("textbox", { name: /First name/ })).toBeEditable();
+  await expect(main.getByText("From the booking")).toHaveCount(0);
+  await main.getByRole("textbox", { name: /Email/ }).fill("ada@lovelace.example");
   await bookerNationality.fill("Netherlands");
+  await expect
+    .poll(() => profileEdits)
+    .toEqual([{ bookingGuestId: "guest_ada", email: "ada@lovelace.example" }]);
   await main.getByRole("button", { name: /^Done Ada Lovelace/ }).click();
   await expect.poll(() => countryCode).toBe("NL");
+  expect(profileEdits).toHaveLength(1);
   await expect(main.getByRole("button", { name: /^Add details Ada Lovelace/ })).toBeVisible();
   // Nothing in the staff-only registration changed, so nothing is sent there.
   expect(registrations).toHaveLength(0);

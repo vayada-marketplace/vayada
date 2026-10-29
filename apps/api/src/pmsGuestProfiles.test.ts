@@ -65,6 +65,7 @@ function createRepository() {
     get: record("get", profile),
     edit: async (scope, id, edit, stay, audit) => {
       calls.push({ method: "edit", scope, args: [id, edit, stay, audit] });
+      if (edit.email === "hidden@example.test") return "contact_hidden";
       return stay === guestBookingId ? "stay_not_found" : profile;
     },
     addNote: record("addNote", {
@@ -275,6 +276,16 @@ describe("PMS guest profile routes (VAY-2420)", () => {
       payload: { firstName: "Tim", bookingGuestId: guestBookingId },
     });
     expect(wrongStay.statusCode).toBe(400);
+
+    // Contact the property may not see yet ("Hidden until you accept") can't be replaced.
+    const hidden = await app.inject({
+      method: "PATCH",
+      url: `${base}/${guestProfileId}`,
+      headers,
+      payload: { email: "hidden@example.test", bookingGuestId },
+    });
+    expect(hidden.statusCode).toBe(403);
+    expect(hidden.json()).toEqual({ code: "guest_contact_hidden" });
   });
 
   it("adds notes, and answers for missing notes, last stays and self-merges", async () => {

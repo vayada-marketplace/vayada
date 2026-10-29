@@ -15,3 +15,9 @@ export function bookingChannelLabel(channel: string | null | undefined, t: Trans
   const normalized = normalizeChannelKey(channel);
   return keys[normalized] ? t(keys[normalized]) : getChannelLabel(channel ?? "");
 }
+
+/** A booking a channel sent (Booking.com, Airbnb, …), not one made directly or at the desk: a
+ * channel update writes its guest's values again. */
+export function isChannelBooking(channel: string | null | undefined): boolean {
+  return Boolean(channel) && !["direct", "manual"].includes(normalizeChannelKey(channel));
+}
