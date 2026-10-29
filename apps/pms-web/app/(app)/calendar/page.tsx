@@ -33,7 +33,19 @@ import MiniDatePicker from "@/components/calendar/MiniDatePicker";
 import MobileCalendar, { calendarLaneTop } from "@/components/calendar/MobileCalendar";
 import MonthView from "@/components/calendar/MonthView";
 import ReorderStepper from "@/components/calendar/ReorderStepper";
+import {
+  calendarNightRates,
+  calendarRateNames,
+  cellPrice,
+  nightTaken,
+  pricingRoom,
+} from "@/components/calendar/calendarPrices";
+import NightPopover from "@/components/calendar/NightPopover";
+import BookingPopover, { BlockPopover } from "@/components/calendar/BookingPopover";
+import type { PopoverAnchor } from "@/components/calendar/CalendarPopover";
+import { useShowPrices } from "@/components/calendar/useShowPrices";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import { useTranslation } from "@/lib/i18n";
 import {
   groupRoomsByType,
@@ -84,6 +96,11 @@ const normalizeBookingChannel = (channel?: string | null): string => {
   return LEGEND_KEYS.has(key) ? key : "other";
 };
 
+const anchorOf = (element: Element): PopoverAnchor => {
+  const { left, right, top, bottom } = element.getBoundingClientRect();
+  return { left, right, top, bottom };
+};
+
 const mergeRoomOrderIntent = (
   intended: CalendarRoom[],
   current: CalendarRoom[],
@@ -121,13 +138,31 @@ export default function CalendarPage() {
   // VAY-2348: a booking waiting for its bank transfer opens its deadline card, not the room tools.
   const [awaitingBooking, setAwaitingBooking] = useState<CalendarBooking | null>(null);
   const hotelTimeZone = useHotelTimeZone();
-  const openBooking = useCallback(
-    (booking: CalendarBooking) =>
-      booking.status === "awaiting_payment"
-        ? setAwaitingBooking(booking)
-        : setSelectedBooking(booking),
-    [],
-  );
+  // VAY-2411: free nights show their cheapest rate from the published prices, unless this user turned it off.
+  const [showPrices, setShowPrices] = useShowPrices();
+  const { prices, error: pricesError } = usePropertyPrices();
+  // VAY-2411: a timeline bar (with its anchor) opens the booking's popover; the month and mobile views open its
+  // window as before.
+  const [bookingPopover, setBookingPopover] = useState<{
+    booking: CalendarBooking;
+    anchor: PopoverAnchor;
+  } | null>(null);
+  const [blockPopover, setBlockPopover] = useState<{
+    block: CalendarBlock;
+    anchor: PopoverAnchor;
+  } | null>(null);
+  const openBooking = useCallback((booking: CalendarBooking, anchor?: PopoverAnchor) => {
+    if (booking.status === "awaiting_payment") return setAwaitingBooking(booking);
+    if (!anchor) return setSelectedBooking(booking);
+    setPrefill(null);
+    setBlockPopover(null);
+    setBookingPopover({ booking, anchor });
+  }, []);
+  const openBlock = (block: CalendarBlock, anchor: PopoverAnchor) => {
+    setPrefill(null);
+    setBookingPopover(null);
+    setBlockPopover({ block, anchor });
+  };
   /** The bar's look and hover text: channel colour, or the striped "awaiting payment" hold. */
   const bookingBar = (b: CalendarBooking, extraTitle = "") => {
     const name = `${b.guestFirstName} ${b.guestLastName}`.trim();
@@ -176,20 +211,20 @@ export default function CalendarPage() {
   const roomViewMenuRef = useRef<HTMLDivElement | null>(null);
   const latestFetchRef = useRef(0);
 
-  // Drag-to-select state for creating bookings/blocks by dragging across day cells
+  // Drag-to-select state for creating bookings/blocks by dragging across day cells. A drag only runs right, up to
+  // `limitIdx`, the last free night before the room's next booking or block (VAY-2411).
   const [drag, setDrag] = useState<{
     roomId: string;
-    rectLeft: number;
-    rectWidth: number;
+    rect: { left: number; width: number; top: number; bottom: number };
     startIdx: number;
     endIdx: number;
+    limitIdx: number;
   } | null>(null);
   const [prefill, setPrefill] = useState<{
     roomId: string;
     startDate: string;
     endDate: string;
-    x: number;
-    y: number;
+    anchor: PopoverAnchor;
   } | null>(null);
   const dragActive = drag !== null;
 
@@ -198,6 +233,7 @@ export default function CalendarPage() {
     () => Array.from({ length: VIEW_DAYS }, (_, i) => addDays(startDate, i)),
     [startDate],
   );
+  const dayKeys = useMemo(() => dates.map((d) => format(d, "yyyy-MM-dd")), [dates]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(MOBILE_CALENDAR_QUERY);
@@ -296,17 +332,34 @@ export default function CalendarPage() {
     );
   }, [connectedChannelKeys, data]);
 
-  const handleCellPointerDown = (e: React.PointerEvent<HTMLTableCellElement>, roomId: string) => {
+  const handleCellPointerDown = (
+    e: React.PointerEvent<HTMLTableCellElement>,
+    roomId: string,
+    stays: ReadonlyArray<{ start: string; end: string }>,
+  ) => {
     if ((e.target as HTMLElement).closest("[data-bar]")) return;
     if (e.button !== 0) return;
-    e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
     const idx = Math.max(
       0,
       Math.min(VIEW_DAYS - 1, Math.floor(((e.clientX - rect.left) / rect.width) * VIEW_DAYS)),
     );
+    // A booked or blocked night (beside its bar) opens nothing.
+    if (nightTaken(stays, dayKeys[idx]!)) return;
+    e.preventDefault();
+    let limitIdx = idx;
+    while (limitIdx < VIEW_DAYS - 1 && !nightTaken(stays, dayKeys[limitIdx + 1]!)) limitIdx++;
+    // preventDefault stops the mousedown that would close an open popover, so close them here.
     setPrefill(null);
-    setDrag({ roomId, rectLeft: rect.left, rectWidth: rect.width, startIdx: idx, endIdx: idx });
+    setBookingPopover(null);
+    setBlockPopover(null);
+    setDrag({
+      roomId,
+      rect: { left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom },
+      startIdx: idx,
+      endIdx: idx,
+      limitIdx,
+    });
   };
 
   useEffect(() => {
@@ -315,28 +368,26 @@ export default function CalendarPage() {
       setDrag((d) => {
         if (!d) return d;
         const idx = Math.max(
-          0,
-          Math.min(
-            VIEW_DAYS - 1,
-            Math.floor(((ev.clientX - d.rectLeft) / d.rectWidth) * VIEW_DAYS),
-          ),
+          d.startIdx,
+          Math.min(d.limitIdx, Math.floor(((ev.clientX - d.rect.left) / d.rect.width) * VIEW_DAYS)),
         );
         return idx === d.endIdx ? d : { ...d, endIdx: idx };
       });
     };
-    const handleUp = (ev: PointerEvent) => {
+    const handleUp = () => {
       setDrag((d) => {
         if (!d) return null;
-        const startIdx = Math.min(d.startIdx, d.endIdx);
-        const endIdx = Math.max(d.startIdx, d.endIdx);
-        const sDate = format(addDays(startDate, startIdx), "yyyy-MM-dd");
-        const eDate = format(addDays(startDate, endIdx + 1), "yyyy-MM-dd");
+        const column = d.rect.width / VIEW_DAYS;
         setPrefill({
           roomId: d.roomId,
-          startDate: sDate,
-          endDate: eDate,
-          x: ev.clientX,
-          y: ev.clientY,
+          startDate: format(addDays(startDate, d.startIdx), "yyyy-MM-dd"),
+          endDate: format(addDays(startDate, d.endIdx + 1), "yyyy-MM-dd"),
+          anchor: {
+            left: d.rect.left + d.startIdx * column,
+            right: d.rect.left + (d.endIdx + 1) * column,
+            top: d.rect.top,
+            bottom: d.rect.bottom,
+          },
         });
         return null;
       });
@@ -348,17 +399,6 @@ export default function CalendarPage() {
       window.removeEventListener("pointerup", handleUp);
     };
   }, [dragActive, startDate]);
-
-  useEffect(() => {
-    if (!prefill) return;
-    const handleClick = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-prefill-popover]")) {
-        setPrefill(null);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [prefill]);
 
   const goToday = () =>
     setStartDate(viewMode === "month" ? startOfMonth(new Date()) : startOfDay(new Date()));
@@ -705,6 +745,30 @@ export default function CalendarPage() {
 
   const allBookings = useMemo(() => data?.bookings || [], [data]);
 
+  // Per-room blocks render on their own row; legacy count-based blocks still fill the first N rooms of the type.
+  const blocksForRoom = (room: CalendarRoom) => [
+    ...(blocksByRoom[room.id] || []),
+    ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
+      (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
+    ),
+  ];
+
+  const publication = prices?.publication ?? null;
+  const nightRates = useMemo(
+    () => (publication && data ? calendarNightRates(publication, data.roomTypes, dayKeys) : {}),
+    [publication, data, dayKeys],
+  );
+  const rateNames = useMemo(() => {
+    const names: Record<string, Record<string, string>> = {};
+    for (const roomType of data?.roomTypes ?? []) {
+      const room = publication && pricingRoom(publication, roomType.id);
+      if (room) names[roomType.id] = calendarRateNames(room, roomType, t);
+    }
+    return names;
+  }, [publication, data, t]);
+  const pricesShown = showPrices && publication !== null;
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+
   return (
     <div className="h-full flex flex-col">
       <p className="sr-only" aria-live="polite">
@@ -945,6 +1009,24 @@ export default function CalendarPage() {
                             </button>
                           </>
                         )}
+                        <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-y border-gray-200">
+                          {t("calendar.display")}
+                        </div>
+                        <div className="px-3 py-2 text-sm text-gray-700 flex items-center justify-between gap-3">
+                          <span id="calendar-show-prices">{t("calendar.showPrices")}</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={showPrices}
+                            aria-labelledby="calendar-show-prices"
+                            onClick={() => setShowPrices(!showPrices)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 ${showPrices ? "bg-primary-600" : "bg-gray-300"}`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${showPrices ? "translate-x-4" : "translate-x-0.5"}`}
+                            />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1056,6 +1138,23 @@ export default function CalendarPage() {
                 {(reorderMode && localRooms ? localRooms : data.rooms).map(
                   (room, roomIdx, roomsArr) => {
                     const roomBookings = bookingsByRoom[room.id] || [];
+                    const roomBlocks = blocksForRoom(room);
+                    const stays = [
+                      ...roomBookings.map((b) => ({ start: b.checkIn, end: b.checkOut })),
+                      ...roomBlocks.map((bl) => ({ start: bl.startDate, end: bl.endDate })),
+                    ];
+                    const roomNightRates = pricesShown ? nightRates[room.roomTypeId] : undefined;
+                    // The nights being dragged, or those of the open night popover: one field with no day lines
+                    // inside (VAY-2411).
+                    const selection = (() => {
+                      if (drag?.roomId === room.id) return { s: drag.startIdx, e: drag.endIdx };
+                      if (prefill?.roomId !== room.id) return null;
+                      const ps = differenceInDays(parseISO(prefill.startDate), startDate);
+                      const pe = differenceInDays(parseISO(prefill.endDate), startDate) - 1;
+                      return pe >= 0 && ps < VIEW_DAYS
+                        ? { s: Math.max(0, ps), e: Math.min(VIEW_DAYS - 1, pe) }
+                        : null;
+                    })();
                     const rt = roomTypeMap[room.roomTypeId];
                     const isFirst = roomsArr[roomIdx - 1]?.roomTypeId !== room.roomTypeId;
                     const isLast = roomsArr[roomIdx + 1]?.roomTypeId !== room.roomTypeId;
@@ -1163,14 +1262,14 @@ export default function CalendarPage() {
                           </td>
                           <td
                             colSpan={VIEW_DAYS}
-                            className={`relative h-12 p-0 select-none touch-none ${
+                            className={`relative ${pricesShown ? "h-14" : "h-12"} p-0 select-none touch-none ${
                               reorderMode ? "pointer-events-none opacity-60" : "cursor-cell"
                             }`}
-                            onPointerDown={(e) => handleCellPointerDown(e, room.id)}
+                            onPointerDown={(e) => handleCellPointerDown(e, room.id, stays)}
                           >
-                            {/* Day grid lines */}
+                            {/* Day grid lines, with the cheapest rate of each free night from today on */}
                             <div className="absolute inset-0 flex">
-                              {dates.map((d) => {
+                              {dates.map((d, i) => {
                                 const isToday =
                                   format(d, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
                                 const dow = d.getDay();
@@ -1180,50 +1279,42 @@ export default function CalendarPage() {
                                   : isWeekend
                                     ? { backgroundColor: "#fafafa" }
                                     : undefined;
+                                const day = dayKeys[i]!;
+                                const lowest =
+                                  day >= todayKey && !nightTaken(stays, day)
+                                    ? roomNightRates?.[day]?.[0]
+                                    : undefined;
                                 return (
                                   <div
                                     key={d.toISOString()}
                                     style={cellStyle}
-                                    className="flex-1 border-r border-gray-100"
-                                  />
+                                    className={`flex-1 border-r flex items-end justify-center pb-1 min-w-0 ${
+                                      selection && i >= selection.s && i < selection.e
+                                        ? "border-transparent"
+                                        : "border-gray-100"
+                                    }`}
+                                  >
+                                    {lowest && publication && (
+                                      <span className="max-w-full truncate text-[10px] leading-none text-gray-500 tabular-nums">
+                                        {cellPrice(lowest.totalMinor, publication.currency, locale)}
+                                      </span>
+                                    )}
+                                  </div>
                                 );
                               })}
                             </div>
                             {/* Drag-selection overlay — persists while popover is open */}
-                            {(() => {
-                              let s: number | null = null;
-                              let e: number | null = null;
-                              if (drag && drag.roomId === room.id) {
-                                s = Math.min(drag.startIdx, drag.endIdx);
-                                e = Math.max(drag.startIdx, drag.endIdx);
-                              } else if (prefill && prefill.roomId === room.id) {
-                                const ps = differenceInDays(parseISO(prefill.startDate), startDate);
-                                const pe =
-                                  differenceInDays(parseISO(prefill.endDate), startDate) - 1;
-                                if (pe >= 0 && ps < VIEW_DAYS) {
-                                  s = Math.max(0, ps);
-                                  e = Math.min(VIEW_DAYS - 1, pe);
-                                }
-                              }
-                              if (s === null || e === null) return null;
-                              return (
-                                <div
-                                  className="absolute top-1 bottom-1 bg-primary-500/20 border-2 border-primary-500 rounded-md pointer-events-none z-[2]"
-                                  style={{
-                                    left: `${(s / VIEW_DAYS) * 100}%`,
-                                    width: `${((e - s + 1) / VIEW_DAYS) * 100}%`,
-                                  }}
-                                />
-                              );
-                            })()}
-                            {/* Block bars — per-room blocks render on their own row.
-                          Legacy count-based blocks still fill the first N rooms of the type. */}
-                            {[
-                              ...(blocksByRoom[room.id] || []),
-                              ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
-                                (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
-                              ),
-                            ].map((bl) => {
+                            {selection && (
+                              <div
+                                className="absolute top-1 bottom-1 bg-primary-500/20 border-2 border-primary-500 rounded-md pointer-events-none z-[2]"
+                                style={{
+                                  left: `${(selection.s / VIEW_DAYS) * 100}%`,
+                                  width: `${((selection.e - selection.s + 1) / VIEW_DAYS) * 100}%`,
+                                }}
+                              />
+                            )}
+                            {/* Block bars */}
+                            {roomBlocks.map((bl) => {
                               const style = getBarStyle(bl.startDate, bl.endDate);
                               if (!style) return null;
                               return (
@@ -1231,7 +1322,7 @@ export default function CalendarPage() {
                                   key={`block-${bl.id}`}
                                   type="button"
                                   data-bar="block"
-                                  onClick={() => setSelectedBlock(bl)}
+                                  onClick={(e) => openBlock(bl, anchorOf(e.currentTarget))}
                                   className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[1] border border-dashed flex items-center gap-1 cursor-pointer ${
                                     bl.protected
                                       ? "bg-amber-100 border-amber-300 text-amber-700 hover:bg-amber-200"
@@ -1288,7 +1379,7 @@ export default function CalendarPage() {
                                   }`}
                                   style={{ ...style, ...bar.style }}
                                   title={`${bar.title}${multiRoomTitle}`}
-                                  onClick={() => openBooking(b)}
+                                  onClick={(e) => openBooking(b, anchorOf(e.currentTarget))}
                                 >
                                   <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
                                     {getInitials(b.guestFirstName, b.guestLastName)}
@@ -1358,7 +1449,7 @@ export default function CalendarPage() {
                             className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] ${bar.className} transition-all flex items-center gap-1.5 ${b.status === "awaiting_payment" ? "" : "opacity-75"}`}
                             style={{ ...style, top: `${calendarLaneTop(index)}px`, ...bar.style }}
                             title={bar.title}
-                            onClick={() => openBooking(b)}
+                            onClick={(e) => openBooking(b, anchorOf(e.currentTarget))}
                           >
                             <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
                               {getInitials(b.guestFirstName, b.guestLastName)}
@@ -1376,92 +1467,76 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {/* Drag-selection action popover */}
+      {/* Night popover: the clicked night or the dragged stay (VAY-2411) */}
       {prefill &&
         !showBlockModal &&
         !showNewBookingModal &&
         data &&
         (() => {
           const room = data.rooms.find((r) => r.id === prefill.roomId);
-          const nights = differenceInDays(parseISO(prefill.endDate), parseISO(prefill.startDate));
-          const newBookingLabel = t("calendar.newBooking").replace(/^\+\s*/, "");
-          const blockRoomLabel = t("calendar.blockRoom");
-          const POPOVER_WIDTH = 240;
-          const POPOVER_HEIGHT = 150;
-          const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
-          const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-          const left = Math.min(Math.max(8, prefill.x + 8), vw - POPOVER_WIDTH - 8);
-          const top = Math.min(prefill.y + 8, vh - POPOVER_HEIGHT - 8);
+          if (!room) return null;
           return (
-            <div
-              data-prefill-popover
-              className="fixed z-50 bg-white border border-gray-200 shadow-xl rounded-xl overflow-hidden"
-              style={{ left, top, width: POPOVER_WIDTH }}
-            >
-              <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-                <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
-                  {room ? `#${room.roomNumber}` : t("calendar.roomColumn")}
-                </div>
-                <div className="text-xs text-gray-900 font-medium mt-0.5">
-                  {parseISO(prefill.startDate).toLocaleDateString(locale, {
-                    month: "short",
-                    day: "numeric",
-                  })}
-                  <span className="text-gray-400 mx-1">→</span>
-                  {parseISO(prefill.endDate).toLocaleDateString(locale, {
-                    month: "short",
-                    day: "numeric",
-                  })}
-                  <span className="text-gray-400">
-                    {" "}
-                    · {nights} {t(nights === 1 ? "common.night" : "common.nights")}
-                  </span>
-                </div>
-              </div>
-              <div className="p-1">
-                {MANUAL_BOOKINGS_AVAILABLE && (
-                  <button
-                    onClick={() => setShowNewBookingModal(true)}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-sm text-left text-gray-700 hover:bg-primary-50 hover:text-primary-700 rounded-md transition-colors"
-                  >
-                    <span className="w-7 h-7 flex items-center justify-center rounded-md bg-primary-50 text-primary-600">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 4v16m8-8H4"
-                        />
-                      </svg>
-                    </span>
-                    <span className="font-medium">{newBookingLabel}</span>
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowBlockModal(true)}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 text-sm text-left text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-md transition-colors"
-                >
-                  <span className="w-7 h-7 flex items-center justify-center rounded-md bg-red-50 text-red-500">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
-                      />
-                    </svg>
-                  </span>
-                  <span className="font-medium">{blockRoomLabel}</span>
-                </button>
-              </div>
-            </div>
+            <NightPopover
+              room={room}
+              startDate={prefill.startDate}
+              endDate={prefill.endDate}
+              anchor={prefill.anchor}
+              currency={publication?.currency ?? null}
+              pricesFailed={pricesError !== null}
+              nightRates={nightRates[room.roomTypeId]}
+              names={rateNames[room.roomTypeId] ?? {}}
+              bookings={bookingsByRoom[room.id] || []}
+              blocks={blocksForRoom(room)}
+              lastDay={dayKeys[VIEW_DAYS - 1]!}
+              onNewBooking={
+                MANUAL_BOOKINGS_AVAILABLE ? () => setShowNewBookingModal(true) : undefined
+              }
+              onBlockRoom={() => setShowBlockModal(true)}
+              onClose={() => setPrefill(null)}
+            />
           );
         })()}
+
+      {bookingPopover && (
+        <BookingPopover
+          // A new booking starts fresh (its check-in time read).
+          key={`${bookingPopover.booking.id}-${bookingPopover.booking.roomPosition}`}
+          booking={bookingPopover.booking}
+          roomLabel={
+            bookingPopover.booking.roomNumber
+              ? `#${bookingPopover.booking.roomNumber}`
+              : `${t("calendar.unassigned")} · ${bookingPopover.booking.roomName}`
+          }
+          anchor={bookingPopover.anchor}
+          onChangeRoom={() => {
+            setSelectedBooking(bookingPopover.booking);
+            setBookingPopover(null);
+          }}
+          onClose={() => setBookingPopover(null)}
+        />
+      )}
+
+      {blockPopover && (
+        <BlockPopover
+          // A new block never inherits another block's open "Unblock this period?" confirmation.
+          key={blockPopover.block.id}
+          block={blockPopover.block}
+          anchor={blockPopover.anchor}
+          onEdit={() => {
+            setSelectedBlock(blockPopover.block);
+            setBlockPopover(null);
+          }}
+          onUnblock={async () => {
+            await calendarService.deleteRoomBlock(
+              blockPopover.block.id,
+              blockPopover.block.version,
+            );
+            setBlockPopover(null);
+            await fetchData();
+          }}
+          onClose={() => setBlockPopover(null)}
+        />
+      )}
 
       {/* Block Modal */}
       {showBlockModal && data && (

@@ -14,12 +14,15 @@ import { usePricingRooms } from "./usePricingRooms";
  * `staleShown`: the page shows the "Prices need to be saved again" banner, so the tab does not repeat it. */
 export function RoomPricesTab({
   roomTypeId,
+  date,
   refresh = 0,
   staleShown = false,
   onAttention,
   onPublished,
 }: {
   roomTypeId: string;
+  /** A night ("YYYY-MM-DD") to show and select first. */
+  date?: string;
   refresh?: number;
   staleShown?: boolean;
   onAttention?: () => void;
@@ -53,6 +56,7 @@ export function RoomPricesTab({
       setup={{ propertyId: rooms.propertyId, rooms: rooms.setupRooms }}
       // Room-type IDs are lower-case UUIDs; a URL may carry another case.
       roomTypeId={roomTypeId.toLowerCase()}
+      date={date}
       refresh={refresh}
       staleShown={staleShown}
       onAttention={onAttention}

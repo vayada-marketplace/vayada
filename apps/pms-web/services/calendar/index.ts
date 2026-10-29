@@ -25,6 +25,9 @@ export interface CalendarRoomType {
     name: string;
     rateType: "flexible" | "non_refundable" | "package" | "manual";
     baseRate: number;
+    /** The offer's meal plan and cancellation terms, which name it like the Prices tab does (VAY-2411). */
+    mealPlan?: string | null;
+    cancellation?: Record<string, unknown> | null;
   }>;
   seasons: {
     name?: string;
@@ -77,6 +80,8 @@ export interface CalendarBooking {
   numberOfRooms: number;
   roomPosition: number;
   assignmentId: string | null;
+  /** The reservation's total as recorded (VAY-2411); null when the amount is unverified or missing. */
+  bookingValue?: PmsOperationsMoney | null;
 }
 
 export interface CalendarBlock {
@@ -131,7 +136,7 @@ export interface UpdateRoomBlockPayload {
   reason?: string;
 }
 
-type PmsOperationsMoney = {
+export type PmsOperationsMoney = {
   amountDecimal: string;
   currency: string;
 };
@@ -152,6 +157,8 @@ type PmsOperationsRoomType = {
     rateType: "flexible" | "non_refundable" | "package" | "manual";
     baseRate: PmsOperationsMoney;
     active: boolean;
+    mealPlan?: string | null;
+    cancellationPolicySnapshot?: Record<string, unknown> | null;
   }>;
 };
 
@@ -205,6 +212,7 @@ type PmsOperationalReservation = {
   payment?: { method: string | null };
   /** The booked room types, for rooms not assigned yet. */
   roomLines?: Array<{ roomTypeId: string; roomName: string; roomCount: number }>;
+  pricing?: { totalAmount: PmsOperationsMoney; amountStatus?: "recorded" | "unverified" };
   assignments: Array<{
     assignmentId?: string | null;
     roomTypeId: string;
@@ -433,6 +441,8 @@ function toCalendarData(
           name: plan.name,
           rateType: plan.rateType,
           baseRate: moneyAmount(plan.baseRate),
+          mealPlan: plan.mealPlan ?? null,
+          cancellation: plan.cancellationPolicySnapshot ?? null,
         })),
         seasons: [],
       };
@@ -536,6 +546,10 @@ function calendarBookingsForReservation(
         numberOfRooms,
         roomPosition: assignment ? Math.max(assignment.position - 1, 0) : index,
         assignmentId: assignment?.assignmentId ?? null,
+        bookingValue:
+          reservation.pricing && reservation.pricing.amountStatus !== "unverified"
+            ? reservation.pricing.totalAmount
+            : null,
       };
     })
     .filter(
