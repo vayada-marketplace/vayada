@@ -402,12 +402,15 @@ test("edits the booker's name and contact through their guest record (VAY-2420)"
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
   const reservationPath = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
-  // Booked as "Ada Augusta" + "Lovelace": the reservation read only has the joined name.
+  // Booked on Booking.com as "Ada Augusta" + "Lovelace": the reservation read only has the joined
+  // name.
   await page.route(reservationPath, (route) =>
     route.fulfill({
       json: {
         item: {
           ...pmsWebReservation,
+          source: "channel",
+          assignments: [{ ...pmsWebReservation.assignments[0]!, channel: "booking.com" }],
           primaryGuest: { ...pmsWebReservation.primaryGuest, displayName: "Ada Augusta Lovelace" },
         },
       },
@@ -450,7 +453,11 @@ test("edits the booker's name and contact through their guest record (VAY-2420)"
   await page.getByRole("button", { name: "Edit booker" }).click();
   const firstName = page.getByRole("textbox", { name: "First Name" });
   await expect(firstName).toHaveValue("Ada Augusta");
-  await expect(page.getByText(/upcoming bookings show it too/)).toBeVisible();
+  // What Booking.com sent can be changed too: its next update only writes what the guest changed.
+  await expect(firstName).toBeEditable();
+  await expect(
+    page.getByText(/If the guest changes it on Booking\.com, this booking takes their change/),
+  ).toBeVisible();
   const save = page.getByRole("button", { name: "Save", exact: true });
   // A name can't be emptied.
   await firstName.fill(" ");
