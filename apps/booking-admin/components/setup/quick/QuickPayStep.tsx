@@ -160,12 +160,13 @@ export function QuickPayStep({
     if (!document.activeElement || document.activeElement === document.body) focused.focus();
   }, [submitting]);
 
-  // Back from Stripe, a page the browser kept in its back/forward cache comes back as it left, still
-  // disabled: give the step back to the owner (VAY-2402).
+  // Back from Stripe, a page the browser kept in its back/forward cache comes back as it left: still
+  // disabled (VAY-2402), and not knowing the checkout is now open. Load it again, so the owner sees what a
+  // reload shows: the step, with "Your Fixed Fee checkout is open in Stripe" (VAY-2405).
   useEffect(() => {
     if (typeof window === "undefined") return;
     const restored = (event: PageTransitionEvent) => {
-      if (event.persisted) setSubmitting(false);
+      if (event.persisted) window.location.reload();
     };
     window.addEventListener("pageshow", restored);
     return () => window.removeEventListener("pageshow", restored);

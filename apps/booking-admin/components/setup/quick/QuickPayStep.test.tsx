@@ -124,9 +124,10 @@ describe("QuickPayStep (VAY-2247 step 4)", () => {
     renderer.unmount();
   });
 
-  it("stays disabled after a run that opens Stripe, until the browser brings the page back (VAY-2402)", async () => {
+  it("stays disabled after a run that opens Stripe, and loads the page again when the browser brings it back (VAY-2402, VAY-2405)", async () => {
     // The Fixed Fee run worked and the browser is on its way to Stripe: the step is still on screen.
-    const page = new EventTarget();
+    const reload = vi.fn();
+    const page = Object.assign(new EventTarget(), { location: { reload } });
     vi.stubGlobal("window", page);
     const onSubmit = vi.fn(async () => undefined);
     const renderer = create(<QuickPayStep {...props({ onSubmit })} />);
@@ -159,11 +160,14 @@ describe("QuickPayStep (VAY-2247 step 4)", () => {
 
     await pageshow(false);
     expect(fieldset().props.disabled).toBe(true);
-    // Back from Stripe, the page comes out of the back/forward cache as it left.
+    expect(reload).not.toHaveBeenCalled();
+    // Back from Stripe, the page comes out of the back/forward cache as it left, with the checkout open in
+    // Stripe. It loads again, as a reload would show it ("Your Fixed Fee checkout is open in Stripe"), and
+    // stays disabled until then: Continue can't send the run again meanwhile.
     await pageshow(true);
-    expect(fieldset().props.disabled).toBe(false);
-    expect(footer()).toEqual(new Set([false]));
-    expect(text(renderer)).not.toContain("Setting up your hotel…");
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(fieldset().props.disabled).toBe(true);
+    expect(footer()).toEqual(new Set([true]));
     renderer.unmount();
   });
 
