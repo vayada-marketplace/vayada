@@ -12,6 +12,7 @@ import {
   startGuestProfileLinkWorker,
   type GuestProfileLinkStore,
 } from "./bookingGuestProfileLinks.js";
+import { createPgGuestIdentityRetentionStore } from "./guestIdentityRetention.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PREFIX = "vay-2420-";
@@ -276,6 +277,73 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
       expect(b.link).toBe("created");
       expect(d).toMatchObject({ profileId: c.profileId, link: "matched_phone" });
     } finally {
+      await admin.query("DELETE FROM booking.guest_data_settings WHERE account_id = $1::uuid", [
+        accountId,
+      ]);
+    }
+  });
+
+  it("removes ID documents the chosen days after the last check-out (Guest data retention)", async () => {
+    await admin.query(
+      `INSERT INTO booking.guest_data_settings (account_id, settings)
+       VALUES ($1::uuid, '{"identityRetentionDays":30}'::jsonb)`,
+      [accountId],
+    );
+    const retention = createPgGuestIdentityRetentionStore({
+      connectionString: fixture.connectionString,
+    });
+    try {
+      const left = await book(
+        propertyA,
+        {},
+        { first: "Olga", last: "Petrova", email: "o@example.test" },
+      );
+      await admin.query(
+        "UPDATE booking.guest_bookings SET check_in = '2027-08-01', check_out = '2027-08-05' WHERE id = $1::uuid",
+        [left.bookingId],
+      );
+      // Still within 30 days of her check-out (Aug 19) on Sep 10.
+      const recent = await book(
+        propertyB,
+        {},
+        { first: "Ravi", last: "Nair", email: "r@example.test" },
+      );
+      await sweep();
+      const [olga, ravi] = await Promise.all(
+        [left, recent].map(async ({ guestIds }) => (await link(guestIds[0]!)).profileId!),
+      );
+      await admin.query(
+        `UPDATE booking.guest_profiles SET document_type = 'passport', document_number = 'X1234567',
+           date_of_birth = '1980-02-03' WHERE id = ANY($1::uuid[])`,
+        [[olga, ravi]],
+      );
+
+      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toMatchObject({ profiles: 1 });
+      const documents = await admin.query<{
+        id: string;
+        documentNumber: string | null;
+        birth: string;
+      }>(
+        `SELECT id::text, document_number AS "documentNumber", to_char(date_of_birth, 'YYYY-MM-DD') AS birth
+         FROM booking.guest_profiles WHERE id = ANY($1::uuid[])`,
+        [[olga, ravi]],
+      );
+      expect(Object.fromEntries(documents.rows.map((row) => [row.id, row]))).toEqual({
+        [olga]: { id: olga, documentNumber: null, birth: "1980-02-03" },
+        [ravi]: { id: ravi, documentNumber: "X1234567", birth: "1980-02-03" },
+      });
+      const audit = await admin.query<{ payload: unknown }>(
+        `SELECT redacted_payload AS payload FROM platform.product_audit_events
+         WHERE action = 'pms.guest_profile.identity_removed' AND target_resource_id = $1`,
+        [olga],
+      );
+      expect(audit.rows).toEqual([
+        { payload: { fields: ["documentType", "documentNumber"], retentionDays: 30 } },
+      ]);
+      // Nothing left to remove: the next run changes nothing.
+      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toMatchObject({ profiles: 0 });
+    } finally {
+      await retention.close();
       await admin.query("DELETE FROM booking.guest_data_settings WHERE account_id = $1::uuid", [
         accountId,
       ]);

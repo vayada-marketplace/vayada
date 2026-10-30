@@ -363,6 +363,10 @@ import {
   startGuestProfileLinkWorker,
 } from "./jobs/bookingGuestProfileLinks.js";
 import {
+  createPgGuestIdentityRetentionStore,
+  startGuestIdentityRetentionWorker,
+} from "./jobs/guestIdentityRetention.js";
+import {
   contactNotificationSender,
   runContactNotificationJobs,
 } from "./jobs/contactNotificationDelivery.js";
@@ -3571,6 +3575,17 @@ const guestProfileLinkWorker = startGuestProfileLinkWorker({
 
 app.addHook("onClose", async () => {
   await guestProfileLinkWorker.close();
+});
+
+// VAY-2420: ID documents leave guest profiles as Settings › Guest data's retention says (default: kept).
+const guestIdentityRetentionWorker = startGuestIdentityRetentionWorker({
+  store: createPgGuestIdentityRetentionStore({ connectionString: targetDatabaseUrl, max: 1 }),
+  enabled: config.backgroundWorkersEnabled,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await guestIdentityRetentionWorker.close();
 });
 
 if (authSessionHandoffRepository) {
