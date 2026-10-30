@@ -1,6 +1,10 @@
 import pg from "pg";
 import { randomUUID } from "node:crypto";
-import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
+import {
+  UnauthorizedError,
+  type RequestContext,
+  type ResourceRelationship,
+} from "@vayada/backend-auth";
 import {
   AuthorizationError,
   resolveEffectivePropertyAccess,
@@ -23,6 +27,12 @@ import {
   type GuestProfileFieldName,
   type GuestProfileFields,
 } from "../platform/guestProfileEdits.js";
+import {
+  guestDataSettingsFrom,
+  parseGuestDataSettings,
+  readGuestDataSettings,
+  type GuestDataSettings,
+} from "../platform/guestDataSettings.js";
 import { PMS_GUEST_DOCUMENT_TYPES } from "./pmsGuestRegistrations.js";
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
@@ -173,6 +183,13 @@ export type PmsGuestProfileRepository = {
     scope: PmsGuestProfileScope,
     guestBookingId: string,
   ): Promise<PmsReservationGuestProfile[] | null>;
+  /** Settings › Guest data of the URL property's account (migration 0528). */
+  dataSettings(scope: PmsGuestProfileScope): Promise<GuestDataSettings>;
+  saveDataSettings(
+    scope: PmsGuestProfileScope,
+    settings: GuestDataSettings,
+    audit: PmsGuestProfileAudit,
+  ): Promise<GuestDataSettings>;
   close?(): Promise<void>;
 };
 
@@ -194,6 +211,7 @@ const NOTE_PATH = `${NOTES_PATH}/:noteId`;
 const SEPARATE_PATH = `${PROFILE_PATH}/separate`;
 const MERGE_PATH = `${PROFILE_PATH}/merge`;
 const RESERVATION_PATH = "/properties/:propertyId/reservations/:guestBookingId/guest-profiles";
+const SETTINGS_PATH = "/properties/:propertyId/guest-data-settings";
 
 export async function registerPmsGuestProfileRoutes(
   app: FastifyInstance,
@@ -210,6 +228,7 @@ export async function registerPmsGuestProfileRoutes(
     SEPARATE_PATH,
     MERGE_PATH,
     RESERVATION_PATH,
+    SETTINGS_PATH,
   ]) {
     app.options(path, async (request, reply) => {
       if (!writeCorsHeaders(request, reply, options.allowedOrigins ?? []))
@@ -222,7 +241,8 @@ export async function registerPmsGuestProfileRoutes(
   const access = async (
     request: FastifyRequest<{ Params: PropertyParams }>,
     reply: FastifyReply,
-    permission: "pms.reservation.read" | "pms.operations.manage",
+    permission: "pms.reservation.read" | "pms.operations.manage" | "pms.settings.manage",
+    relationships: readonly ResourceRelationship[] = RELATIONSHIPS,
   ) => {
     if (!writeCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
       reply.status(403).send({ code: "origin_not_allowed" });
@@ -236,7 +256,7 @@ export async function registerPmsGuestProfileRoutes(
     try {
       const context = await enforcePmsPropertyRoutePolicy(
         request,
-        { propertyId, permission, allowedRelationships: RELATIONSHIPS },
+        { propertyId, permission, allowedRelationships: relationships },
         propertyAccessRepository,
       );
       const effective = await resolveEffectivePropertyAccess(
@@ -420,6 +440,43 @@ export async function registerPmsGuestProfileRoutes(
       const guests = await repository.reservationProfiles(allowed.scope, guestBookingId);
       if (!guests) return reply.status(404).send({ code: "reservation_not_found" });
       return reply.header("Cache-Control", "private, no-store").send({ guestBookingId, guests });
+    } catch (error) {
+      return unavailable(request, reply, error);
+    }
+  });
+
+  // D9: everyone who reads reservations sees which fields are off (forms and the profile hide them);
+  // only the owner organization's settings managers change them.
+  const canManageSettings = async (request: FastifyRequest, propertyId: string) =>
+    enforcePmsPropertyRoutePolicy(
+      request,
+      { propertyId, permission: "pms.settings.manage", allowedRelationships: ["owner"] },
+      propertyAccessRepository,
+    ).then(
+      () => true,
+      () => false,
+    );
+
+  app.get<{ Params: PropertyParams }>(SETTINGS_PATH, async (request, reply) => {
+    const allowed = await access(request, reply, "pms.reservation.read");
+    if (!allowed) return reply;
+    try {
+      const settings = await repository.dataSettings(allowed.scope);
+      const canManage = await canManageSettings(request, allowed.scope.propertyId);
+      return reply.header("Cache-Control", "private, no-store").send({ settings, canManage });
+    } catch (error) {
+      return unavailable(request, reply, error);
+    }
+  });
+
+  app.put<{ Params: PropertyParams; Body: unknown }>(SETTINGS_PATH, async (request, reply) => {
+    const allowed = await access(request, reply, "pms.settings.manage", ["owner"]);
+    if (!allowed) return reply;
+    const settings = parseGuestDataSettings(request.body);
+    if (typeof settings === "string") return invalidRequest(reply, settings);
+    try {
+      const saved = await repository.saveDataSettings(allowed.scope, settings, allowed.audit);
+      return reply.header("Cache-Control", "no-store").send({ settings: saved, canManage: true });
     } catch (error) {
       return unavailable(request, reply, error);
     }
@@ -949,6 +1006,46 @@ export function createPgPmsGuestProfileRepository(config: {
           reservations: row.reservations,
           notes: (row.guestProfileId && notes.get(row.guestProfileId)) || [],
         }));
+    },
+
+    async dataSettings(scope) {
+      return readGuestDataSettings(
+        pool,
+        (
+          await pool.query<{ accountId: string }>(
+            `SELECT ${GUEST_ACCOUNT_SQL("$1::uuid")}::text AS "accountId"`,
+            [scope.propertyId],
+          )
+        ).rows[0]!.accountId,
+      );
+    },
+
+    async saveDataSettings(scope, settings, audit) {
+      return transaction(async (client) => {
+        const { accountId, before } = (
+          await client.query<{ accountId: string; before: unknown }>(
+            `SELECT account.id::text AS "accountId", saved.settings AS before
+             FROM (SELECT ${GUEST_ACCOUNT_SQL("$1::uuid")} AS id) account
+             LEFT JOIN booking.guest_data_settings saved ON saved.account_id = account.id`,
+            [scope.propertyId],
+          )
+        ).rows[0]!;
+        await client.query(
+          `INSERT INTO booking.guest_data_settings (account_id, settings, updated_by_user_id)
+           VALUES ($1::uuid, $2::jsonb, $3::uuid)
+           ON CONFLICT (account_id) DO UPDATE SET settings = EXCLUDED.settings,
+             updated_by_user_id = EXCLUDED.updated_by_user_id, updated_at = now()`,
+          [accountId, JSON.stringify(settings), audit.actorUserId],
+        );
+        const previous = guestDataSettingsFrom(before);
+        await insertAudit(client, scope, audit, "pms.guest_data_settings.updated", accountId, {
+          changed: (["fields", "matching", "identityRetentionDays"] as const).filter(
+            (key) => JSON.stringify(previous[key]) !== JSON.stringify(settings[key]),
+          ),
+          settings,
+        });
+        return settings;
+      });
     },
 
     async close() {

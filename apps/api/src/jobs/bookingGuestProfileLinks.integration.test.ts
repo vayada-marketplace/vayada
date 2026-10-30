@@ -182,10 +182,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
       `SELECT has_table_privilege($1, 'booking.guest_profiles', 'INSERT') AS "insert",
               has_table_privilege($1, 'booking.guest_profiles', 'UPDATE') AS "update",
               has_column_privilege($1, 'booking.booking_guests', 'guest_profile_id', 'UPDATE')
-                AS "link"`,
+                AS "link",
+              has_table_privilege($1, 'booking.guest_data_settings', 'SELECT, INSERT, UPDATE')
+                AS "settings"`,
       [fixture.login],
     );
-    expect(privileges.rows[0]).toEqual({ insert: true, update: true, link: true });
+    expect(privileges.rows[0]).toEqual({ insert: true, update: true, link: true, settings: true });
   });
 
   it("joins stays of one person across the account's properties, by email or by phone", async () => {
@@ -244,6 +246,40 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
     expect(p1).toMatchObject({ link: "created" });
     expect(p2).toMatchObject({ link: "created" });
     expect(p1!.profileId).not.toBe(p2!.profileId);
+  });
+
+  it("lets Settings › Guest data switch matching by email off for the account", async () => {
+    await admin.query(
+      `INSERT INTO booking.guest_data_settings (account_id, settings)
+       VALUES ($1::uuid, '{"matching":{"email":false,"phone":true}}'::jsonb)`,
+      [accountId],
+    );
+    try {
+      const guest = { first: "Ines", last: "Moreau", email: "ines@example.test" };
+      const first = await book(propertyA, { createdAt: "2026-04-01T00:00:00Z" }, guest);
+      const sameEmail = await book(propertyB, { createdAt: "2026-04-02T00:00:00Z" }, guest);
+      const samePhone = await book(
+        propertyA,
+        { createdAt: "2026-04-03T00:00:00Z" },
+        { ...guest, email: "ines.m@example.test", phone: "+33 6 12 34 56 78" },
+      );
+      const laterPhone = await book(
+        propertyB,
+        { createdAt: "2026-04-04T00:00:00Z" },
+        { ...guest, email: null, phone: "+33612345678" },
+      );
+      await sweep();
+      const [a, b, c, d] = await Promise.all(
+        [first, sameEmail, samePhone, laterPhone].map(({ guestIds }) => link(guestIds[0]!)),
+      );
+      expect(b.profileId).not.toBe(a.profileId);
+      expect(b.link).toBe("created");
+      expect(d).toMatchObject({ profileId: c.profileId, link: "matched_phone" });
+    } finally {
+      await admin.query("DELETE FROM booking.guest_data_settings WHERE account_id = $1::uuid", [
+        accountId,
+      ]);
+    }
   });
 
   it("keeps a property without one owner in its own account", async () => {
