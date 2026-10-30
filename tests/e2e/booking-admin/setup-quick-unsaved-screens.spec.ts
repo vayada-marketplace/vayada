@@ -349,30 +349,52 @@ test("How guests pay can't be changed while the first run runs, and a failed run
 // loads. It stays disabled meanwhile: a plan picked then wasn't sent, and Continue sent a second run.
 // Playwright can't look at a page while it navigates away (its checks wait for the navigation to finish),
 // so the page notes its controls on every change, and the test reads the notes after coming back.
-// Playwright's Chromium runs without the back/forward cache, so that Back is a reload; a page restored
-// from the cache is the unit test's case.
+// Playwright's Chromium runs without the back/forward cache, so that Back is a reload. A page restored
+// from the cache reloads too (VAY-2405, the unit test's case), so the step then reads as this one does.
 test("How guests pay stays disabled while Stripe's checkout opens", async ({ page, baseURL }) => {
   await primeQuickSetupBrowserState(page);
   await mockQuickSetupExistingHotel(page);
   const checkout = "https://checkout.stripe.com/c/pay/cs_test";
   const runs: Record<string, unknown>[] = [];
+  const steps = ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"];
+  // After the run, the hotel waits for its Fixed Fee checkout.
+  const awaitingCheckout = {
+    contractVersion: "hotel-first-run.v1",
+    propertyId: QUICK_SETUP_PROPERTY_ID,
+    steps: steps.map((id) => ({ id, state: id === "plan" ? "awaiting_checkout" : "done" })),
+    nextStep: "plan",
+  };
   await page.route(
     new RegExp(`/api/hotel-setup/properties/${QUICK_SETUP_PROPERTY_ID}/first-run$`),
     async (route) => {
-      if (route.request().method() !== "POST") return route.fallback();
+      const method = route.request().method();
+      if (method === "GET" && runs.length > 0)
+        return route.fulfill({ headers: corsHeaders(route), json: awaitingCheckout });
+      if (method !== "POST") return route.fallback();
       runs.push(route.request().postDataJSON() as Record<string, unknown>);
-      const steps = ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"];
+      return route.fulfill({
+        headers: corsHeaders(route),
+        json: { state: awaitingCheckout, ran: steps, checkout: { url: checkout } },
+      });
+    },
+  );
+  await page.route(
+    new RegExp(`/api/finance/properties/${QUICK_SETUP_PROPERTY_ID}/plan-status`),
+    async (route) => {
+      if (route.request().method() !== "GET" || runs.length === 0) return route.fallback();
       return route.fulfill({
         headers: corsHeaders(route),
         json: {
-          state: {
-            contractVersion: "hotel-first-run.v1",
-            propertyId: QUICK_SETUP_PROPERTY_ID,
-            steps: steps.map((id) => ({ id, state: id === "plan" ? "awaiting_checkout" : "done" })),
-            nextStep: "plan",
+          planStatus: {
+            plan: null,
+            status: "checkout_pending",
+            currency: "EUR",
+            activeRoomCount: 2,
+            amountMinor: 3500,
+            fixedPlanAvailable: true,
+            checkoutPending: true,
+            updatedAt: "2026-10-30T00:00:00.000Z",
           },
-          ran: steps,
-          checkout: { url: checkout },
         },
       });
     },
@@ -426,4 +448,9 @@ test("How guests pay stays disabled while Stripe's checkout opens", async ({ pag
   expect(notes.slice(pressed)).toEqual(
     notes.slice(pressed).map(() => ({ busy: true, enabled: [] })),
   );
+  // Loaded again, the step knows the checkout is open in Stripe, and can be used.
+  await expect(heading(page, "How guests pay")).toBeVisible();
+  await expect(page.getByText("Your Fixed Fee checkout is open in Stripe.")).toBeVisible();
+  await expect(page.getByRole("radio", { name: /^Fixed Fee\b/ })).toBeChecked();
+  await expect(proceed(page)).toBeEnabled();
 });
