@@ -57,6 +57,35 @@ test("finds a guest in search and opens their profile with every stay (VAY-2420)
   await assertHealthy();
 });
 
+test("keeps contact hidden until the request is accepted (VAY-2420)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockGuests(page, {
+    email: null,
+    phone: null,
+    contactHidden: true,
+    fields: {
+      firstName: "Timo",
+      lastName: "Schreyer",
+      email: null,
+      phone: null,
+      countryCode: "DE",
+      dateOfBirth: null,
+      documentType: null,
+      documentNumber: null,
+    },
+  });
+  await page.goto(`/guests/${TIMO}`);
+  const data = page.getByRole("region", { name: "Guest data" });
+  await expect(data.getByText("Hidden until you accept")).toHaveCount(2);
+  await page.getByRole("button", { name: "Edit guest" }).click();
+  await expect(data.getByRole("textbox", { name: "Email" })).toBeDisabled();
+  await expect(data.getByRole("textbox", { name: "Phone" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "More actions" })).toBeDisabled();
+  await assertHealthy();
+});
+
 test("lists guests, merges a duplicate and separates a stay (VAY-2420)", async ({
   page,
 }, testInfo) => {

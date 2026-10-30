@@ -46,6 +46,7 @@ const profile: PmsGuestProfile = {
     documentNumber: null,
   },
   canReadContact: true,
+  contactHidden: false,
   nextArrival: "2027-08-15",
   guestSince: "2026-10-01T00:00:00.000Z",
   stays: [],

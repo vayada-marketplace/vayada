@@ -210,7 +210,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
     expect(fromA).toMatchObject({ reservations: 2, nextArrival: null });
     expect(fromA!.stays.map((stay) => stay.checkIn)).toEqual(["2025-09-01", "2025-05-01"]);
     const all = await profiles.get(both, profileId);
-    expect(all).toMatchObject({ reservations: 3, nextArrival: "2030-08-15" });
+    expect(all).toMatchObject({
+      reservations: 3,
+      nextArrival: "2030-08-15",
+      lastCheckIn: "2030-08-15",
+      contactHidden: false,
+    });
     expect(all!.stays[0]).toMatchObject({
       propertyId: propertyB,
       role: "booker",
@@ -433,12 +438,24 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
       { checkIn: "2030-12-01", checkOut: "2030-12-02", source: "booking", accepted: false },
       zoe,
     );
-    await book(propertyB, { checkIn: "2030-12-10", checkOut: "2030-12-11" }, zoe);
+    const later = await book(propertyB, { checkIn: "2030-12-10", checkOut: "2030-12-11" }, zoe);
     await sweep();
     const profileId = (await copy(request.guestIds[0]!)).profileId!;
     expect((await profiles.get(both, profileId))!.fields.email).toBe("zoe@example.test");
-    expect((await profiles.get(onlyA, profileId))!.fields.email).toBeNull();
+    expect(await profiles.get(onlyA, profileId)).toMatchObject({
+      fields: { email: null },
+      contactHidden: true,
+    });
     expect(await profiles.search(onlyA, { search: "zoe@", limit: 10 })).toEqual([]);
+    // A cancelled booking isn't an arrival: search shows the stay before it.
+    await admin.query(
+      "UPDATE booking.guest_bookings SET lifecycle_status = 'canceled' WHERE id = $1::uuid",
+      [later.bookingId],
+    );
+    expect((await profiles.search(both, { search: "zoe", limit: 10 }))[0]).toMatchObject({
+      lastCheckIn: "2030-12-01",
+      reservations: 2,
+    });
   });
 
   it("applies the reservation page's guest edits to the guest at once", async () => {

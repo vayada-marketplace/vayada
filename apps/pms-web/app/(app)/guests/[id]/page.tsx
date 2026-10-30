@@ -1,6 +1,13 @@
 "use client";
 
-import { use, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  use,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
@@ -12,8 +19,10 @@ import {
   PhoneIcon,
 } from "@heroicons/react/24/outline";
 import { nationalityLabel } from "@vayada/locale-constants";
+import Modal from "@/components/Modal";
 import { NationalitySelect } from "@/components/NationalitySelect";
 import { useTranslation } from "@/lib/i18n";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { countLabel } from "@/lib/checkin/labels";
 import { BIRTH_DATE_PLACEHOLDER, birthDateInput } from "@/lib/checkin/birthDate";
 import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
@@ -33,6 +42,7 @@ import {
   getStoredPmsPropertyId,
   storeSelectedPmsPropertyId,
 } from "@/services/api/pmsPropertyClient";
+import { HIDDEN_GUEST_CONTACT } from "@/services/bookings";
 import {
   guestsService,
   type GuestDocumentType,
@@ -75,8 +85,12 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
   const { locale, t } = useTranslation();
   const [guest, setGuest] = useState<GuestProfile | null>(null);
   const [loadError, setLoadError] = useState<"not_found" | "failed" | null>(null);
-  const [editing, setEditing] = useState<GuestForm | null>(null);
+  // The form, and what it showed when Edit was opened: only fields staff changed from that are sent.
+  const [editing, setEditing] = useState<{ shown: GuestForm; form: GuestForm } | null>(null);
+  const [triedSave, setTriedSave] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Edits, merges, separations and notes need the operations permission (front desk can only read).
+  const canManage = useHasPmsPermission("pms.operations.manage");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ text: string; href?: string } | null>(null);
   const [dialog, setDialog] = useState<"merge" | "separate" | null>(null);
@@ -111,12 +125,21 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
     );
 
   const name = `${guest.firstName} ${guest.lastName}`.trim();
-  const shown = guestForm(guest.fields);
   const today = localToday();
-  const changes = editing ? guestFormChanges(shown, editing, today) : {};
-  const namesMissing = editing !== null && (!editing.firstName.trim() || !editing.lastName.trim());
+  const changes = editing ? guestFormChanges(editing.shown, editing.form, today) : {};
+  const namesMissing =
+    editing !== null && (!editing.form.firstName.trim() || !editing.form.lastName.trim());
+  // A date of birth is judged once all 8 digits are typed, or on Save.
+  const birthDateInvalid =
+    changes === "invalid_birth_date" &&
+    (triedSave || editing!.form.dateOfBirth.replace(/\D/g, "").length >= 8);
+  // Hidden until the request is accepted: email and phone can't be read or changed yet.
+  const contactLocked = (field: keyof GuestFields) =>
+    (!guest.canReadContact && CONTACT_FIELDS.includes(field)) ||
+    (guest.contactHidden && (field === "email" || field === "phone"));
 
   const save = async () => {
+    setTriedSave(true);
     if (!editing || changes === "invalid_birth_date") return;
     if (Object.keys(changes).length === 0) return setEditing(null);
     setSaving(true);
@@ -140,9 +163,11 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
     if (!value)
       return (
         <span className="text-[#667085]">
-          {!guest.canReadContact && CONTACT_FIELDS.includes(field)
-            ? t("guests.hidden")
-            : t("guests.notProvided")}
+          {guest.contactHidden && (field === "email" || field === "phone")
+            ? HIDDEN_GUEST_CONTACT
+            : !guest.canReadContact && CONTACT_FIELDS.includes(field)
+              ? t("guests.hidden")
+              : t("guests.notProvided")}
         </span>
       );
     if (field === "countryCode") return nationalityLabel(value) ?? value;
@@ -152,10 +177,10 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
   };
 
   const fieldInput = (field: keyof GuestFields) => {
-    const form = editing!;
+    const { form } = editing!;
     const label = t(`settings.checkIn.field.${field === "countryCode" ? "nationality" : field}`);
-    const locked = !guest.canReadContact && CONTACT_FIELDS.includes(field);
-    const set = (value: string) => setEditing({ ...form, [field]: value });
+    const locked = contactLocked(field);
+    const set = (value: string) => setEditing({ ...editing!, form: { ...form, [field]: value } });
     if (field === "countryCode")
       return (
         <NationalitySelect
@@ -256,29 +281,39 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
                 </div>
               )}
             </div>
-            <div className="flex gap-2.5">
-              <button
-                type="button"
-                className={SECONDARY_BUTTON}
-                disabled={editing !== null}
-                onClick={() => {
-                  setError("");
-                  setEditing(shown);
-                }}
-              >
-                <PencilIcon className="w-4 h-4" aria-hidden="true" />
-                {t("guests.editGuest")}
-              </button>
-              <MoreActions
-                label={t("guests.moreActions")}
-                items={[
-                  { label: t("guests.mergeAction"), onSelect: () => setDialog("merge") },
-                  ...(guest.stays.length > 1
-                    ? [{ label: t("guests.separateAction"), onSelect: () => setDialog("separate") }]
-                    : []),
-                ]}
-              />
-            </div>
+            {canManage && (
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  className={SECONDARY_BUTTON}
+                  disabled={editing !== null}
+                  onClick={() => {
+                    const shown = guestForm(guest.fields);
+                    setError("");
+                    setTriedSave(false);
+                    setEditing({ shown, form: shown });
+                  }}
+                >
+                  <PencilIcon className="w-4 h-4" aria-hidden="true" />
+                  {t("guests.editGuest")}
+                </button>
+                <MoreActions
+                  disabled={editing !== null}
+                  label={t("guests.moreActions")}
+                  items={[
+                    { label: t("guests.mergeAction"), onSelect: () => setDialog("merge") },
+                    ...(guest.stays.length > 1
+                      ? [
+                          {
+                            label: t("guests.separateAction"),
+                            onSelect: () => setDialog("separate"),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
             {[
@@ -309,11 +344,11 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
                   <div key={field}>{fieldInput(field)}</div>
                 ))}
               </div>
-              {(namesMissing || changes === "invalid_birth_date" || error) && (
+              {(namesMissing || birthDateInvalid || error) && (
                 <p role="alert" className="mt-3 text-sm text-red-600">
                   {namesMissing
                     ? t("guests.namesRequired")
-                    : changes === "invalid_birth_date"
+                    : birthDateInvalid
                       ? t("guests.invalidBirthDate")
                       : error}
                 </p>
@@ -329,7 +364,7 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
                 <button
                   type="button"
                   onClick={save}
-                  disabled={saving || namesMissing || changes === "invalid_birth_date"}
+                  disabled={saving || namesMissing || birthDateInvalid}
                   className={PRIMARY_BUTTON}
                 >
                   {t("common.save")}
@@ -447,8 +482,8 @@ function StayRow({ stay }: { stay: GuestStay }) {
     <a
       href={href}
       onClick={(event) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
         if (stay.propertyId === getStoredPmsPropertyId()) return;
+        // Another property: the PMS switches to it first, so it opens here, not in a new tab.
         event.preventDefault();
         storeSelectedPmsPropertyId(stay.propertyId);
         window.location.assign(href);
@@ -497,44 +532,57 @@ function StayRow({ stay }: { stay: GuestStay }) {
 function MoreActions({
   label,
   items,
+  disabled = false,
 }: {
   label: string;
   items: { label: string; onSelect: () => void }[];
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (
-        event instanceof KeyboardEvent
-          ? event.key === "Escape"
-          : !ref.current?.contains(event.target as Node)
-      )
-        setOpen(false);
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const close = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
+    return () => document.removeEventListener("mousedown", close);
   }, [open]);
+  const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const entries = Array.from(
+      ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const at = entries.indexOf(document.activeElement as HTMLElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      entries[
+        (at + (event.key === "ArrowDown" ? 1 : -1) + entries.length) % entries.length
+      ]?.focus();
+    } else if (event.key === "Escape") {
+      setOpen(false);
+      button.current?.focus();
+    } else if (event.key === "Tab") setOpen(false);
+  };
   return (
     <div ref={ref} className="relative">
       <button
+        ref={button}
         type="button"
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
+        disabled={disabled}
         onClick={() => setOpen(!open)}
-        className="w-11 h-11 rounded-[10px] border border-[#D0D5DD] bg-white text-[#344054] flex items-center justify-center hover:bg-gray-50"
+        className="w-11 h-11 rounded-[10px] border border-[#D0D5DD] bg-white text-[#344054] flex items-center justify-center hover:bg-gray-50 disabled:opacity-50"
       >
         <EllipsisHorizontalIcon className="w-[18px] h-[18px]" aria-hidden="true" />
       </button>
       {open && (
         <div
           role="menu"
+          onKeyDown={onMenuKey}
           className="absolute right-0 top-12 z-20 min-w-[220px] rounded-xl border border-[#E4E7EC] bg-white py-1 shadow-lg"
         >
           {items.map((item) => (
@@ -560,30 +608,19 @@ function MoreActions({
 function Dialog({
   title,
   onClose,
+  actions,
   children,
 }: {
   title: string;
   onClose: () => void;
+  actions: ReactNode;
   children: ReactNode;
 }) {
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => event.key === "Escape" && onClose();
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [onClose]);
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="relative w-full max-w-[520px] rounded-2xl bg-white p-6"
-      >
-        <h2 className="text-[17px] font-semibold text-[#101828]">{title}</h2>
-        {children}
-      </div>
-    </div>
+    <Modal onClose={onClose} maxWidth="lg" ariaLabel={title} footer={actions}>
+      <h2 className="text-[17px] font-semibold text-[#101828]">{title}</h2>
+      {children}
+    </Modal>
   );
 }
 
@@ -599,7 +636,8 @@ function MergeDialog({
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState(guest.lastName);
-  const [candidates, setCandidates] = useState<GuestSummary[]>([]);
+  // null while searching; "failed" when the search couldn't run.
+  const [candidates, setCandidates] = useState<GuestSummary[] | "failed" | null>(null);
   const [chosen, setChosen] = useState<GuestSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -607,6 +645,9 @@ function MergeDialog({
 
   useEffect(() => {
     let alive = true;
+    // A guest no longer listed can't stay chosen.
+    setChosen(null);
+    setCandidates(null);
     const timer = setTimeout(() => {
       guestsService
         .search(query, 10)
@@ -615,7 +656,7 @@ function MergeDialog({
             alive &&
             setCandidates(list.filter((other) => other.guestProfileId !== guest.guestProfileId)),
         )
-        .catch(() => alive && setCandidates([]));
+        .catch(() => alive && setCandidates("failed"));
     }, 250);
     return () => {
       alive = false;
@@ -623,8 +664,34 @@ function MergeDialog({
     };
   }, [query, guest.guestProfileId]);
 
+  const merge = async () => {
+    if (!chosen) return;
+    setBusy(true);
+    setError("");
+    try {
+      onMerged(
+        await guestsService.merge(guest.guestProfileId, chosen.guestProfileId),
+        `${chosen.firstName} ${chosen.lastName}`.trim(),
+      );
+    } catch {
+      setError(t("guests.mergeFailed"));
+      setBusy(false);
+    }
+  };
+
   return (
-    <Dialog title={t("guests.mergeTitle")} onClose={onClose}>
+    <Dialog
+      title={t("guests.mergeTitle")}
+      onClose={onClose}
+      actions={
+        <DialogActions
+          onCancel={onClose}
+          confirm={t("guests.mergeConfirm")}
+          onConfirm={merge}
+          disabled={!chosen || busy}
+        />
+      }
+    >
       <p className="mt-1 text-sm text-[#475467]">{t("guests.mergeHelp", { name })}</p>
       <label className="mt-4 block">
         <span className="text-[13px] text-[#5B6474]">{t("guests.searchLabel")}</span>
@@ -636,10 +703,14 @@ function MergeDialog({
           className={INPUT}
         />
       </label>
-      <ul className="mt-3 max-h-64 overflow-y-auto rounded-xl border border-[#EAECF0]">
-        {candidates.length === 0 ? (
+      <ul className="mt-3 rounded-xl border border-[#EAECF0]">
+        {candidates === null || candidates === "failed" || candidates.length === 0 ? (
           <li className="px-4 py-6 text-center text-sm text-[#5B6474]">
-            {t("guests.noMatches", { query: query.trim() })}
+            {candidates === null
+              ? t("common.loading")
+              : candidates === "failed"
+                ? t("guests.failedToLoad")
+                : t("guests.noMatches", { query: query.trim() })}
           </li>
         ) : (
           candidates.map((other) => (
@@ -680,36 +751,6 @@ function MergeDialog({
           {error}
         </p>
       )}
-      <div className="mt-5 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-10 px-4 rounded-[10px] text-sm font-semibold text-[#344054] hover:bg-gray-100"
-        >
-          {t("common.cancel")}
-        </button>
-        <button
-          type="button"
-          disabled={!chosen || busy}
-          className={PRIMARY_BUTTON}
-          onClick={async () => {
-            if (!chosen) return;
-            setBusy(true);
-            setError("");
-            try {
-              onMerged(
-                await guestsService.merge(guest.guestProfileId, chosen.guestProfileId),
-                `${chosen.firstName} ${chosen.lastName}`.trim(),
-              );
-            } catch {
-              setError(t("guests.mergeFailed"));
-              setBusy(false);
-            }
-          }}
-        >
-          {t("guests.mergeConfirm")}
-        </button>
-      </div>
     </Dialog>
   );
 }
@@ -728,10 +769,34 @@ function SeparateDialog({
   const [chosen, setChosen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const separate = async () => {
+    if (!chosen) return;
+    setBusy(true);
+    setError("");
+    try {
+      onSeparated((await guestsService.separate(guest.guestProfileId, chosen)).guestProfileId);
+    } catch {
+      setError(t("guests.separateFailed"));
+      setBusy(false);
+    }
+  };
+
   return (
-    <Dialog title={t("guests.separateTitle")} onClose={onClose}>
+    <Dialog
+      title={t("guests.separateTitle")}
+      onClose={onClose}
+      actions={
+        <DialogActions
+          onCancel={onClose}
+          confirm={t("guests.separateConfirm")}
+          onConfirm={separate}
+          disabled={!chosen || busy}
+        />
+      }
+    >
       <p className="mt-1 text-sm text-[#475467]">{t("guests.separateHelp")}</p>
-      <ul className="mt-4 max-h-64 overflow-y-auto rounded-xl border border-[#EAECF0]">
+      <ul className="mt-4 rounded-xl border border-[#EAECF0]">
         {guest.stays.map((stay) => (
           <li key={stay.bookingGuestId} className="border-b border-[#EAECF0] last:border-0">
             <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50">
@@ -761,35 +826,34 @@ function SeparateDialog({
           {error}
         </p>
       )}
-      <div className="mt-5 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-10 px-4 rounded-[10px] text-sm font-semibold text-[#344054] hover:bg-gray-100"
-        >
-          {t("common.cancel")}
-        </button>
-        <button
-          type="button"
-          disabled={!chosen || busy}
-          className={PRIMARY_BUTTON}
-          onClick={async () => {
-            if (!chosen) return;
-            setBusy(true);
-            setError("");
-            try {
-              onSeparated(
-                (await guestsService.separate(guest.guestProfileId, chosen)).guestProfileId,
-              );
-            } catch {
-              setError(t("guests.separateFailed"));
-              setBusy(false);
-            }
-          }}
-        >
-          {t("guests.separateConfirm")}
-        </button>
-      </div>
     </Dialog>
+  );
+}
+
+function DialogActions({
+  onCancel,
+  confirm,
+  onConfirm,
+  disabled,
+}: {
+  onCancel: () => void;
+  confirm: string;
+  onConfirm: () => void;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex justify-end gap-2">
+      <button
+        type="button"
+        onClick={onCancel}
+        className="h-10 px-4 rounded-[10px] text-sm font-semibold text-[#344054] hover:bg-gray-100"
+      >
+        {t("common.cancel")}
+      </button>
+      <button type="button" disabled={disabled} className={PRIMARY_BUTTON} onClick={onConfirm}>
+        {confirm}
+      </button>
+    </div>
   );
 }

@@ -4188,5 +4188,6 @@
   "guests.separateConfirm": "Abtrennen",
   "guests.separateFailed": "Der Aufenthalt konnte nicht abgetrennt werden.",
   "guests.separatedNotice": "Der Aufenthalt hat jetzt einen eigenen Gasteintrag.",
-  "guests.openNewGuest": "Öffnen"
+  "guests.openNewGuest": "Öffnen",
+  "search.pageGuestsHint": "Gästeeinträge und ihre Aufenthalte"
 }

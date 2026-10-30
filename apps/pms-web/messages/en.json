@@ -4174,5 +4174,6 @@
   "guests.separateConfirm": "Separate",
   "guests.separateFailed": "Couldn't separate the stay.",
   "guests.separatedNotice": "The stay now has its own guest record.",
-  "guests.openNewGuest": "Open it"
+  "guests.openNewGuest": "Open it",
+  "search.pageGuestsHint": "Guest records and their stays"
 }

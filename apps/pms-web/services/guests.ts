@@ -11,7 +11,7 @@ export interface GuestSummary {
   phone: string | null;
   /** Reservations at the properties this user may open. */
   reservations: number;
-  /** The latest arrival, past or upcoming. */
+  /** The latest arrival, past or upcoming, of a booking that wasn't cancelled. */
   lastCheckIn: string | null;
 }
 
@@ -59,6 +59,8 @@ export interface GuestProfile extends GuestSummary {
   fields: GuestFields;
   /** False without guest contact access: email, phone and ID details stay hidden. */
   canReadContact: boolean;
+  /** Email and phone wait until a request is accepted ("Hidden until you accept"). */
+  contactHidden: boolean;
   nextArrival: string | null;
   guestSince: string;
   /** Newest first, at the properties this user may open. */

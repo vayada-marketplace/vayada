@@ -63,6 +63,7 @@ export type PmsGuestProfileSummary = {
   phone: string | null;
   /** Reservations at the properties this reader may open. */
   reservations: number;
+  /** The latest arrival of a booking that wasn't cancelled, declined or expired. */
   lastCheckIn: string | null;
 };
 
@@ -97,6 +98,8 @@ export type PmsGuestNote = {
 export type PmsGuestProfile = PmsGuestProfileSummary & {
   fields: GuestProfileFields;
   canReadContact: boolean;
+  /** Email and phone wait until the property may see them ("Hidden until you accept"). */
+  contactHidden: boolean;
   nextArrival: string | null;
   guestSince: string;
   stays: PmsGuestStay[];
@@ -578,6 +581,9 @@ const STAY_SQL = `
   WHERE stay.guest_profile_id = $1::uuid AND booking.property_id = ANY($2::uuid[])
   ORDER BY booking.check_in DESC, booking.id`;
 
+// Bookings that are or were a stay: search's "Arriving …" / "Last stay …" leaves the others out.
+const LIVE_STATUSES = ["pending_payment", "confirmed", "completed", "no_show"];
+
 const NOTE_COLUMNS = `note.id::text AS "noteId", note.body, note.property_id::text AS "propertyId",
   note.created_by_user_id::text AS "createdByUserId", note.created_at AS "createdAt"`;
 
@@ -645,9 +651,10 @@ export function createPgPmsGuestProfileRepository(config: {
       email: fields.email,
       phone: fields.phone,
       reservations: new Set(stays.map((stay) => stay.guestBookingId)).size,
-      lastCheckIn: stays[0]?.checkIn ?? null,
+      lastCheckIn: stays.find((stay) => LIVE_STATUSES.includes(stay.status))?.checkIn ?? null,
       fields,
       canReadContact: scope.canReadContact,
+      contactHidden: shown && !profile.contactVisible,
       nextArrival: upcoming[0] ?? null,
       guestSince: profile.guestSince.toISOString(),
       stays,
@@ -712,7 +719,9 @@ export function createPgPmsGuestProfileRepository(config: {
                 CASE WHEN $4 AND bool_or(${CONTACT_VISIBLE_SQL}) THEN profile.email END AS email,
                 CASE WHEN $4 AND bool_or(${CONTACT_VISIBLE_SQL}) THEN profile.phone END AS phone,
                 count(DISTINCT booking.id)::int AS reservations,
-                to_char(max(booking.check_in), 'YYYY-MM-DD') AS "lastCheckIn"
+                to_char(max(booking.check_in) FILTER (
+                  WHERE booking.lifecycle_status = ANY($7::text[])
+                ), 'YYYY-MM-DD') AS "lastCheckIn"
          FROM booking.guest_profiles profile
          JOIN booking.booking_guests stay ON stay.guest_profile_id = profile.id
          JOIN booking.guest_bookings booking ON booking.id = stay.guest_booking_id
@@ -729,7 +738,15 @@ export function createPgPmsGuestProfileRepository(config: {
          GROUP BY profile.id
          ORDER BY max(booking.check_in) DESC, profile.id
          LIMIT $6`,
-        [scope.propertyId, scope.propertyIds, term, scope.canReadContact, digits, limit],
+        [
+          scope.propertyId,
+          scope.propertyIds,
+          term,
+          scope.canReadContact,
+          digits,
+          limit,
+          LIVE_STATUSES,
+        ],
       );
       return result.rows;
     },

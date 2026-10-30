@@ -62,6 +62,7 @@ const profile = (overrides: Record<string, unknown> = {}) => ({
     documentNumber: null,
   },
   canReadContact: true,
+  contactHidden: false,
   nextArrival: "2026-08-15",
   guestSince: "2025-03-02T10:00:00.000Z",
   stays: [
@@ -85,9 +86,9 @@ const profile = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-export async function mockGuests(page: Page) {
+export async function mockGuests(page: Page, overrides: Record<string, unknown> = {}) {
   const writes = { edits: [] as unknown[], merges: [] as unknown[], separations: [] as unknown[] };
-  let current = profile();
+  let current = profile(overrides);
   await page.clock.install({ time: new Date("2026-08-15T12:00:00Z") });
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);

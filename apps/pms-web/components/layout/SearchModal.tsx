@@ -13,7 +13,7 @@ import {
   guestInitials,
   localToday,
 } from "@/lib/guests/guestDisplay";
-import { SearchResultList, type SearchResult } from "@vayada/settings-ui";
+import { SearchResultList, searchResultOptionId, type SearchResult } from "@vayada/settings-ui";
 
 interface PageEntry {
   id: string;
@@ -50,6 +50,12 @@ const PAGES: PageEntry[] = [
     labelKey: "layout.sidebar.reservations",
     sublabelKey: "search.pageReservationsHint",
     href: "/bookings",
+  },
+  {
+    id: "guests",
+    labelKey: "layout.sidebar.guests",
+    sublabelKey: "search.pageGuestsHint",
+    href: "/guests",
   },
   {
     id: "rooms",
@@ -245,6 +251,8 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
       // VAY-2420: the account's guest records, above their reservations. Each search fails on
       // its own, so the other groups still show.
       const today = localToday();
+      const statusLabel = (status: string) =>
+        BOOKING_STATUS_LABEL_KEYS[status] ? t(BOOKING_STATUS_LABEL_KEYS[status]) : "";
       const [guestResults, bookingResults] = await Promise.all([
         guestsService
           .search(query.trim(), 5)
@@ -283,7 +291,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
                 description: [
                   b.bookingReference,
                   formatStayDates(b.checkIn, b.checkOut, locale),
-                  BOOKING_STATUS_LABEL_KEYS[b.status] ? t(BOOKING_STATUS_LABEL_KEYS[b.status]) : "",
+                  statusLabel(b.awaitingPaymentConfirmation ? "awaiting_payment" : b.status),
                 ]
                   .filter(Boolean)
                   .join(" · "),
@@ -310,10 +318,10 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
         }));
 
       setResults([
-        ...guestResults,
-        ...bookingResults,
         ...pageResults,
         ...settingResults,
+        ...guestResults,
+        ...bookingResults,
         ...roomResults,
       ]);
       setActiveIndex(0);
@@ -329,6 +337,13 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
     },
     [onClose, router],
   );
+
+  // The chosen row stays in view while the arrow keys move through a long list.
+  useEffect(() => {
+    document
+      .getElementById(searchResultOptionId("pms-search-results", activeIndex))
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
 
   // Keyboard navigation
   useEffect(() => {
