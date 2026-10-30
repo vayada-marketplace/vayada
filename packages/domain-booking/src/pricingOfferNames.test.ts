@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  cancellationPolicy,
+  freeCancellationUntil,
   lastRefundDays,
   pricingOfferNameKeys,
   publicOfferCancellation,
@@ -70,6 +72,29 @@ describe("public offer cancellation", () => {
     expect(lastRefundDays(partial([{ minDaysBeforeCheckIn: 14, refundPercent: 0 }]))).toBeNull();
     expect(lastRefundDays(flexible(3))).toBeNull();
     expect(lastRefundDays({ kind: "non_refundable" })).toBeNull();
+  });
+
+  it("ends refunds the day Review & pay starts saying no refund any more (VAY-2406)", () => {
+    const terms = flexible(30, {
+      flexibleCancellationType: "partial_refund",
+      // A 0% step between refunds, and one after the last.
+      partialRefundTiers: [
+        { minDaysBeforeCheckIn: 30, refundPercent: 100 },
+        { minDaysBeforeCheckIn: 14, refundPercent: 0 },
+        { minDaysBeforeCheckIn: 3, refundPercent: 25 },
+        { minDaysBeforeCheckIn: 1, refundPercent: 0 },
+      ],
+    });
+    const checkIn = "2026-11-20";
+    const last = freeCancellationUntil(checkIn, lastRefundDays(terms)!);
+    expect(last).toBe("2026-11-17");
+    for (const today of ["2026-11-10", "2026-11-16", last, "2026-11-18", "2026-11-19"]) {
+      const { badge } = cancellationPolicy(terms as never, { checkIn, today }, "10000", {
+        request: false,
+        card: false,
+      });
+      expect(badge.kind === "noRefund", today).toBe(today > last);
+    }
   });
 });
 
