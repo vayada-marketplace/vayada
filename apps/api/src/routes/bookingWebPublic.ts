@@ -1199,6 +1199,8 @@ export type TargetBookingRow = QueryResultRow & {
   bookedTerms?: unknown;
   bookedPricedRooms?: unknown;
   bookedRoomNames?: unknown;
+  /** VAY-2408: the booked extras' lines (addonId, name, quantity, serviceDates). */
+  bookedAddons?: unknown;
   cancelledAt?: Date | string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
@@ -4198,6 +4200,7 @@ export async function loadTargetBooking(
        cancellation.occurred_at AS "cancelledAt",
        card_payment.card_brand AS "cardBrand",
        card_payment.card_last4 AS "cardLast4",
+       booked_addons.items AS "bookedAddons",
        booked_quote.terms AS "bookedTerms",
        booked_quote.rooms AS "bookedPricedRooms",
        booked_names.names AS "bookedRoomNames",
@@ -4289,6 +4292,29 @@ export async function loadTargetBooking(
            ) selection
          )
      ) booked_names ON TRUE
+     -- VAY-2408: the booked extras' lines as the PMS reads them (one per night or day, VAY-2391), in
+     -- checkout's order (the catalogue's, by id; one booking writes its lines at once). A per-guest
+     -- extra counts its guests, as checkout showed it.
+     LEFT JOIN LATERAL (
+       SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                'addonId', item.addon_key,
+                'name', item.addon_name,
+                'quantity', CASE
+                  WHEN jsonb_typeof(active_selection.addon_snapshot->'selection'->'people') = 'array'
+                    AND jsonb_array_length(active_selection.addon_snapshot->'selection'->'people') > 0
+                    THEN jsonb_array_length(active_selection.addon_snapshot->'selection'->'people')
+                  ELSE item.quantity END,
+                'serviceDates', item.service_dates
+              ) ORDER BY item.created_at, active_selection.addon_definition_id, item.selection_id,
+                item.item_ordinality), '[]'::jsonb) AS items
+       FROM booking.booking_addon_selection_items item
+       JOIN booking.active_booking_addon_selections active_selection
+         ON active_selection.id = item.selection_id
+        AND active_selection.property_id = item.property_id
+        AND active_selection.guest_booking_id = item.guest_booking_id
+       WHERE item.guest_booking_id = b.id
+         AND item.property_id = b.property_id
+     ) booked_addons ON TRUE
      WHERE b.property_id = $1::uuid
        AND b.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'
        AND (b.id::text = $2 OR b.public_reference = $2)
@@ -4410,6 +4436,45 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
     hostResponseDeadline:
       stringValue(metadata["hostResponseDeadlineAt"]) ?? stringValue(metadata["pendingExpiresAt"]),
     createdAt: toIsoDateTime(booking.createdAt),
+    ...bookedAddons(booking),
+  };
+}
+
+/** VAY-2408: the booked extras as checkout lists them, grouped per extra as the PMS does (VAY-2391): a
+ * per-night extra is one line per night, listed once with its days. Its nights carry the same quantity;
+ * lines that differ (older bookings) add up. Only loadTargetBooking reads the lines; other loaders
+ * leave the fields out. */
+function bookedAddons(booking: TargetBookingRow) {
+  if (!("bookedAddons" in booking)) return {};
+  const groups = new Map<string, { name: string; quantities: number[]; dates: Set<string> }>();
+  for (const value of Array.isArray(booking.bookedAddons) ? booking.bookedAddons : []) {
+    const line = objectValue(value);
+    const addonId = stringValue(line["addonId"]);
+    const name = stringValue(line["name"]);
+    const quantity = Number(line["quantity"]);
+    if (!addonId || !name || !Number.isInteger(quantity) || quantity < 1) continue;
+    const dates = stringArray(line["serviceDates"]);
+    const group = groups.get(addonId);
+    if (group) {
+      group.quantities.push(quantity);
+      dates.forEach((date) => group.dates.add(date));
+    } else groups.set(addonId, { name, quantities: [quantity], dates: new Set(dates) });
+  }
+  const list = Array.from(groups);
+  return {
+    addonIds: list.map(([addonId]) => addonId),
+    addonNames: list.map(([, { name }]) => name),
+    addonQuantities: Object.fromEntries(
+      list.map(([addonId, { quantities }]) => [
+        addonId,
+        quantities.every((quantity) => quantity === quantities[0])
+          ? quantities[0]
+          : quantities.reduce((sum, quantity) => sum + quantity, 0),
+      ]),
+    ),
+    addonDates: Object.fromEntries(
+      list.map(([addonId, { dates }]) => [addonId, Array.from(dates).sort()]),
+    ),
   };
 }
 

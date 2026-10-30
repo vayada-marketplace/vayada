@@ -126,6 +126,84 @@ describe.skipIf(!TEST_DATABASE_URL)(
       expect(await auditRows()).toEqual(before);
     });
 
+    it("returns the booked extras per extra with their days, and none for a booking without (VAY-2408)", async () => {
+      const breakfastId = uuid(6);
+      await admin.query(
+        `INSERT INTO booking.addon_definitions
+         (id, property_id, name, pricing_model, price_amount, currency)
+       VALUES ($1::uuid, $2::uuid, 'Garden breakfast', 'per_night', 12, 'EUR')`,
+        [breakfastId, propertyId],
+      );
+      for (const [id, reference] of [
+        [uuid(7), "VAY-2408-EXTRAS"],
+        [uuid(8), "VAY-2408-NONE"],
+      ] as const) {
+        await admin.query(
+          `INSERT INTO booking.guest_bookings
+           (id, property_id, public_reference, lifecycle_status, check_in, check_out,
+            currency, total_amount, balance_amount, booking_metadata)
+         VALUES ($1::uuid, $2::uuid, $3, 'confirmed', '2027-02-01', '2027-02-03',
+                 'EUR', 300, 300, '{"paymentMethod":"pay_at_property"}')`,
+          [id, propertyId, reference],
+        );
+        await admin.query(
+          `INSERT INTO booking.booking_guests (guest_booking_id, guest_role, first_name, last_name, email)
+         VALUES ($1::uuid, 'booker', 'Ada', 'Lovelace', 'guest@example.test')`,
+          [id],
+        );
+      }
+      // As checkout stores them: a per-night extra is one line per night, a per-guest one keeps its guests.
+      await admin.query(
+        `INSERT INTO booking.booking_addon_selections
+         (property_id, guest_booking_id, addon_definition_id, addon_snapshot, quantity,
+          service_date, total_amount, currency)
+       VALUES
+         ($1::uuid, $2::uuid, $3::uuid, '{"name":"Garden breakfast","selection":{"quantity":2,"people":null}}',
+          2, '2027-02-02', 24, 'EUR'),
+         ($1::uuid, $2::uuid, $3::uuid, '{"name":"Garden breakfast","selection":{"quantity":2,"people":null}}',
+          2, '2027-02-01', 24, 'EUR'),
+         ($1::uuid, $2::uuid, $4::uuid, '{"name":"Partner spa","selection":{"quantity":1,"people":[{"selectionId":"room","kind":"adult","index":0},{"selectionId":"room","kind":"adult","index":1}]}}',
+          1, '2027-02-01', 20.5, 'EUR')`,
+        [propertyId, uuid(7), breakfastId, addonId],
+      );
+      const app = buildApp({
+        logger: false,
+        bookingWebPublicNow: () => occurredAt,
+        publicHotelProfileRepository: { findProfileBySlug: async () => null },
+        bookingWebCheckoutAdapter: createAdapter(checkoutPool),
+      });
+      try {
+        const lookup = async (bookingReference: string) => {
+          const response = await app.inject({
+            method: "POST",
+            url: "/api/booking-web/hotels/vay-1188-hotel/bookings/lookup",
+            remoteAddress: "198.51.100.23",
+            payload: { bookingReference, guestEmail: "guest@example.test" },
+          });
+          expect(response.statusCode).toBe(200);
+          return response.json();
+        };
+        const booked = await lookup("VAY-2408-EXTRAS");
+        // In checkout's order (the catalogue's, by add-on id), though all lines were written at once.
+        // The partner spa's id is its source add-on id, as the PMS shows it.
+        expect(booked.addonIds).toEqual(["spa_partner", breakfastId]);
+        expect(booked.addonNames).toEqual(["Partner spa", "Garden breakfast"]);
+        expect(booked.addonQuantities).toEqual({ [breakfastId]: 2, spa_partner: 2 });
+        expect(booked.addonDates).toEqual({
+          [breakfastId]: ["2027-02-01", "2027-02-02"],
+          spa_partner: ["2027-02-01"],
+        });
+        expect(await lookup("VAY-2408-NONE")).toMatchObject({
+          addonIds: [],
+          addonNames: [],
+          addonQuantities: {},
+          addonDates: {},
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
     function createAdapter(pool: pg.Pool) {
       return createTargetBookingWebCheckoutAdapter({
         externalChanges: externalBookingChanges,
