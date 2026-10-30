@@ -6,7 +6,7 @@ import { ChevronRightIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outli
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useTranslation } from "@/lib/i18n";
 import { guestActivity, guestInitials, localToday } from "@/lib/guests/guestDisplay";
-import { guestsService, type GuestSummary } from "@/services/guests";
+import { guestDataSettingsService, guestsService, type GuestSummary } from "@/services/guests";
 
 // The API returns at most 100; search finds the others.
 const LIMIT = 100;
@@ -17,6 +17,14 @@ export default function GuestsPage() {
   const [query, setQuery] = useState("");
   const [guests, setGuests] = useState<GuestSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // Settings › Guest data can switch the phone off for the account (VAY-2420).
+  const [phoneOff, setPhoneOff] = useState(false);
+  useEffect(() => {
+    guestDataSettingsService
+      .get()
+      .then((loaded) => setPhoneOff(loaded.settings.fields.phone === "off"))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -99,7 +107,7 @@ export default function GuestsPage() {
                       <span className="block text-[13px] text-[#475467] truncate">
                         {[
                           guest.email,
-                          guest.phone,
+                          phoneOff ? null : guest.phone,
                           guestActivity(guest.lastCheckIn, today, locale, t),
                         ]
                           .filter(Boolean)

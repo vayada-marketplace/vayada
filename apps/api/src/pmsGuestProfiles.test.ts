@@ -94,6 +94,7 @@ function buildAuthenticatedApp(
   repository: PmsGuestProfileRepository,
   permissions = FULL,
   relationship: "front_desk" | "owner" = "front_desk",
+  roleKey = "hotel_owner",
 ) {
   const identityRepository: IdentityRepository = {
     async findUserByProviderUserId() {
@@ -110,9 +111,9 @@ function buildAuthenticatedApp(
       return {
         membershipId: "33333333-3333-3333-3333-333333333333",
         status: "active",
-        roleKey: "hotel_owner",
+        roleKey,
         workosMembershipId: "workos-membership-1",
-        workosRoleSlugs: ["hotel_owner"],
+        workosRoleSlugs: [roleKey],
       };
     },
     async findLinkedResources() {
@@ -347,7 +348,7 @@ describe("PMS guest profile routes (VAY-2420)", () => {
     ]);
   });
 
-  it("shows Settings › Guest data to readers and lets only the owner change it (D9)", async () => {
+  it("shows Settings › Guest data to readers and lets only the account owner change it (D9)", async () => {
     const settingsUrl = `/api/pms/properties/${propertyId}/guest-data-settings`;
     const { repository, calls } = createRepository();
     app = buildAuthenticatedApp(repository, [...FULL, "pms.settings.manage"]);
@@ -361,6 +362,25 @@ describe("PMS guest profile routes (VAY-2420)", () => {
       payload: DEFAULT_GUEST_DATA_SETTINGS,
     });
     expect(desk.statusCode).toBe(403);
+    await app.close();
+
+    // A manager in the owner organization may manage settings, but not these (D9).
+    app = buildAuthenticatedApp(
+      repository,
+      [...FULL, "pms.settings.manage"],
+      "owner",
+      "hotel_manager",
+    );
+    expect((await app.inject({ method: "GET", url: settingsUrl, headers })).json()).toMatchObject({
+      canManage: false,
+    });
+    const manager = await app.inject({
+      method: "PUT",
+      url: settingsUrl,
+      headers,
+      payload: DEFAULT_GUEST_DATA_SETTINGS,
+    });
+    expect([manager.statusCode, manager.json()]).toEqual([403, { code: "account_owner_required" }]);
     await app.close();
 
     app = buildAuthenticatedApp(repository, [...FULL, "pms.settings.manage"], "owner");

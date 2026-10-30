@@ -85,20 +85,18 @@ export function guestDataSettingsFrom(stored: unknown): GuestDataSettings {
   };
 }
 
-/** A whole settings object from the settings page, or why it can't be saved. */
+/**
+ * A whole settings object from the settings page, or why it can't be saved. Keys this version
+ * doesn't know are ignored, so a newer page keeps working while the API is rolled out.
+ */
 export function parseGuestDataSettings(raw: unknown): GuestDataSettings | string {
-  if (!isRecord(raw) || Object.keys(raw).sort().join() !== "fields,identityRetentionDays,matching")
+  if (!isRecord(raw) || !("identityRetentionDays" in raw))
     return "Send fields, matching and identityRetentionDays.";
   const { fields, matching } = raw;
-  if (
-    !isRecord(fields) ||
-    Object.keys(fields).sort().join() !== [...GUEST_DATA_FIELDS].sort().join() ||
-    GUEST_DATA_FIELDS.some((field) => !validStatus(field, fields[field]))
-  )
+  if (!isRecord(fields) || GUEST_DATA_FIELDS.some((field) => !validStatus(field, fields[field])))
     return "fields must give each guest field off, optional or required; email can't be off.";
   if (
     !isRecord(matching) ||
-    Object.keys(matching).sort().join() !== "email,phone" ||
     typeof matching.email !== "boolean" ||
     typeof matching.phone !== "boolean"
   )

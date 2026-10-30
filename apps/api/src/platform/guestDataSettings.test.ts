@@ -44,6 +44,10 @@ describe("guest data settings (VAY-2420)", () => {
     );
     expect(parseGuestDataSettings({ ...valid, identityRetentionDays: 14 })).toMatch(/7, 30, 90/);
     expect(parseGuestDataSettings({ ...valid, matching: { email: true } })).toMatch(/matching/);
-    expect(parseGuestDataSettings({ ...valid, extra: true })).toMatch(/Send fields/);
+    // A newer page may send keys this version doesn't know.
+    expect(parseGuestDataSettings({ ...valid, extra: true })).toEqual(valid);
+    const withoutRetention: Record<string, unknown> = { ...valid };
+    delete withoutRetention.identityRetentionDays;
+    expect(parseGuestDataSettings(withoutRetention)).toMatch(/Send fields/);
   });
 });

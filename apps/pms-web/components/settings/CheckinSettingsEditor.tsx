@@ -18,7 +18,6 @@ import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   CHECKIN_SETTLEMENT_OPTIONS,
-  DEFAULT_GUEST_DATA_FIELDS,
   checkinStepSummaries,
   guestFieldCounts,
   guestFieldLabel,
@@ -527,11 +526,11 @@ function RoomsAndGuestsSection({
             ))}
             {settings.guestFields.map((entry) => {
               const label = guestFieldLabel(entry.field, t);
-              // Gender is check-in's own; every other field's status lives in Guest data.
+              // Gender is check-in's own; every other field's status lives in Guest data (null
+              // while it can't be read).
+              const fromGuestData = entry.field !== "gender";
               const status =
-                entry.field === "gender"
-                  ? null
-                  : (guestDataFields ?? DEFAULT_GUEST_DATA_FIELDS)[entry.field];
+                entry.field !== "gender" && guestDataFields ? guestDataFields[entry.field] : null;
               return (
                 <tr key={entry.field} className="border-t border-gray-200">
                   <th scope="row" className="px-4 py-3 font-normal md:px-6">
@@ -551,12 +550,26 @@ function RoomsAndGuestsSection({
                     />
                   </td>
                   <td className="px-2 py-3 pr-4 md:pr-6">
-                    {status ? (
+                    {fromGuestData ? (
                       <Link
                         href="/settings/guest-data"
-                        className="text-xs font-semibold text-primary-700 hover:underline"
+                        aria-label={
+                          status
+                            ? t("settings.checkIn.guestDataStatus", {
+                                field: label,
+                                status: t(`settings.guestData.status.${status}`),
+                              })
+                            : undefined
+                        }
+                        className={`text-xs font-semibold hover:underline ${
+                          status && entry.show && status !== "off"
+                            ? "text-primary-700"
+                            : "text-gray-500"
+                        }`}
                       >
-                        {t(`settings.guestData.status.${status}`)}
+                        {status
+                          ? t(`settings.guestData.status.${status}`)
+                          : t("settings.checkIn.guestDataUnavailable")}
                       </Link>
                     ) : (
                       <Switch

@@ -289,7 +289,7 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
                       {guest.email}
                     </span>
                   )}
-                  {guest.phone && (
+                  {guest.phone && fieldStatus?.phone !== "off" && (
                     <span className="flex items-center gap-1.5">
                       <PhoneIcon className="w-[15px] h-[15px] shrink-0" aria-hidden="true" />
                       {guest.phone}

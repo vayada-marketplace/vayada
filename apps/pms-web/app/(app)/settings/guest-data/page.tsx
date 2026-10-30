@@ -32,8 +32,9 @@ export default function GuestDataSettingsPage() {
   const [settings, setSettings] = useState<GuestDataSettings | null>(null);
   const [canManage, setCanManage] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "failed" | "loadFailed">("idle");
-  // Saves run one after another, each with the latest settings, so the last change wins.
+  // Saves run one after another, so the last change wins; only the latest one sets the status.
   const queue = useRef(Promise.resolve());
+  const latest = useRef(0);
 
   useEffect(() => {
     guestDataSettingsService
@@ -48,10 +49,11 @@ export default function GuestDataSettingsPage() {
   const change = (next: GuestDataSettings) => {
     setSettings(next);
     setState("saving");
+    const save = ++latest.current;
     queue.current = queue.current.then(() =>
       guestDataSettingsService.save(next).then(
-        () => setState("idle"),
-        () => setState("failed"),
+        () => save === latest.current && setState("idle"),
+        () => save === latest.current && setState("failed"),
       ),
     );
   };
@@ -62,6 +64,7 @@ export default function GuestDataSettingsPage() {
     <SettingsSubPage
       title={t("settings.navigation.guestData")}
       description={t("settings.guestData.description")}
+      wide
       actions={
         settings && canManage ? (
           <span
@@ -76,6 +79,15 @@ export default function GuestDataSettingsPage() {
               : state === "failed"
                 ? t("settings.guestData.saveFailed")
                 : t("settings.guestData.autosave")}
+            {state === "failed" && (
+              <button
+                type="button"
+                onClick={() => change(settings)}
+                className="ml-1 font-semibold text-[#2D3FD3] hover:underline"
+              >
+                {t("settings.guestData.retry")}
+              </button>
+            )}
           </span>
         ) : undefined
       }

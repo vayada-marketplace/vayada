@@ -4194,7 +4194,7 @@
   "settings.guestData.description": "One field set for every guest. Check-in, the reservation page and the guest profile read and write these fields, so whatever a guest or your team enters ends up on the same guest profile.",
   "settings.guestData.autosave": "Changes save automatically",
   "settings.guestData.saving": "Saving…",
-  "settings.guestData.saveFailed": "Couldn't save. Try again.",
+  "settings.guestData.saveFailed": "Couldn’t save.",
   "settings.guestData.loadFailed": "Couldn't load the guest data settings.",
   "settings.guestData.ownerOnly": "Only the owner can change these settings.",
   "settings.guestData.fieldsTitle": "Guest fields",
@@ -4222,5 +4222,8 @@
   "settings.guestData.retentionLabel": "Delete identity documents",
   "settings.guestData.retentionDays": "{days} days after check-out",
   "settings.guestData.retentionKeep": "Keep until deleted manually",
-  "guests.manageFields": "Manage fields"
+  "guests.manageFields": "Manage fields",
+  "settings.guestData.retry": "Try again",
+  "settings.checkIn.guestDataStatus": "{field}: {status} in Guest data",
+  "settings.checkIn.guestDataUnavailable": "Set in Guest data"
 }

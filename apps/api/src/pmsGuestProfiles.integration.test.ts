@@ -12,6 +12,7 @@ import {
   type GuestProfileLinkStore,
 } from "./jobs/bookingGuestProfileLinks.js";
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
+import { DEFAULT_GUEST_DATA_SETTINGS } from "./platform/guestDataSettings.js";
 import {
   createPgPmsGuestProfileRepository,
   type PmsGuestProfileRepository,
@@ -592,6 +593,38 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS guest profiles (runtime login)", () => 
       ),
     ).toMatchObject({ lastName: "Riedl" });
     expect(await copy(request.guestIds[0]!)).toMatchObject({ email: "jonas@example.test" });
+  });
+
+  it("keeps Settings › Guest data per account, with an audit of what changed", async () => {
+    expect(await profiles.dataSettings(both)).toEqual(DEFAULT_GUEST_DATA_SETTINGS);
+    const changed = {
+      ...DEFAULT_GUEST_DATA_SETTINGS,
+      fields: { ...DEFAULT_GUEST_DATA_SETTINGS.fields, phone: "off" as const },
+      identityRetentionDays: 30 as const,
+    };
+    try {
+      expect(await profiles.saveDataSettings(both, changed, audit())).toEqual(changed);
+      // The same account from its other property.
+      expect(
+        await profiles.dataSettings({ ...both, propertyId: propertyB, propertyIds: [propertyB] }),
+      ).toEqual(changed);
+      const events = await admin.query<{ type: string; payload: { changed: string[] } }>(
+        `SELECT target_resource_type AS type, redacted_payload AS payload
+         FROM platform.product_audit_events
+         WHERE action = 'pms.guest_data_settings.updated' AND target_resource_id = $1`,
+        [accountId],
+      );
+      expect(events.rows).toEqual([
+        {
+          type: "guest_data_settings",
+          payload: expect.objectContaining({ changed: ["fields", "identityRetentionDays"] }),
+        },
+      ]);
+    } finally {
+      await admin.query("DELETE FROM booking.guest_data_settings WHERE account_id = $1::uuid", [
+        accountId,
+      ]);
+    }
   });
 });
 

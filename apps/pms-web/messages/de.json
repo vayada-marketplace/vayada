@@ -4208,7 +4208,7 @@
   "settings.guestData.description": "Ein Satz Felder für jeden Gast. Check-in, Reservierungsseite und Gastprofil lesen und schreiben diese Felder, sodass alles, was ein Gast oder Ihr Team eingibt, im selben Gastprofil landet.",
   "settings.guestData.autosave": "Änderungen werden automatisch gespeichert",
   "settings.guestData.saving": "Wird gespeichert…",
-  "settings.guestData.saveFailed": "Speichern fehlgeschlagen. Bitte erneut versuchen.",
+  "settings.guestData.saveFailed": "Nicht gespeichert.",
   "settings.guestData.loadFailed": "Die Einstellungen zu Gästedaten konnten nicht geladen werden.",
   "settings.guestData.ownerOnly": "Nur der Eigentümer kann diese Einstellungen ändern.",
   "settings.guestData.fieldsTitle": "Gastfelder",
@@ -4236,5 +4236,8 @@
   "settings.guestData.retentionLabel": "Ausweisdaten löschen",
   "settings.guestData.retentionDays": "{days} Tage nach dem Check-out",
   "settings.guestData.retentionKeep": "Behalten, bis sie von Hand gelöscht werden",
-  "guests.manageFields": "Felder verwalten"
+  "guests.manageFields": "Felder verwalten",
+  "settings.guestData.retry": "Erneut versuchen",
+  "settings.checkIn.guestDataStatus": "{field}: {status} in Gästedaten",
+  "settings.checkIn.guestDataUnavailable": "In Gästedaten festgelegt"
 }
