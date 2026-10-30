@@ -3,6 +3,7 @@ import { pmsOperationsClient, pmsOperationsRequestOptions } from "../api/pmsOper
 import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
 import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import type { CheckinStepType } from "@/services/settings";
+import type { GuestNote } from "@/services/guests";
 
 export type NoShowReport = {
   eligible: boolean;
@@ -621,6 +622,10 @@ export interface ReservationGuestProfile {
   lastName: string;
   /** Null only for a draft booking. */
   guestProfileId: string | null;
+  /** The guest record's reservations at the properties this user may open. */
+  reservations: number;
+  /** The guest record's staff-only notes, newest first. */
+  notes: GuestNote[];
 }
 
 /** A staff edit of a guest's record; null clears email or phone. */

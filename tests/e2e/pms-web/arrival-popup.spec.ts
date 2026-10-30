@@ -5,6 +5,7 @@ import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
   pmsWebReservation,
+  pmsWebGuestDataSettings,
 } from "../support/pmsWebMocks";
 import { watchPageHealth } from "../support/pageHealth";
 import { checkinSettingsResponse, defaultCheckinSettings } from "../support/checkinSettingsMocks";
@@ -180,11 +181,12 @@ for (const [width, height] of [
   });
 }
 
-test("counts registrations by Settings → Check-in and shows a settled stay", async ({
+test("counts registrations by Settings → Check-in and Guest data and shows a settled stay", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
-  // Only the booker registers, and the document is optional: Ada's names and country are enough.
+  // Only the booker registers (Check-in), and the ID fields are optional (Guest data, VAY-2420):
+  // Ada's names and country are enough.
   await mockArrival(
     page,
     {
@@ -203,6 +205,23 @@ test("counts registrations by Settings → Check-in and shows a settled stay", a
         required: false,
       })),
     },
+  );
+  await page.route("**/api/pms/properties/*/guest-data-settings", (route) =>
+    route.fulfill({
+      json: {
+        settings: {
+          ...pmsWebGuestDataSettings,
+          fields: {
+            ...pmsWebGuestDataSettings.fields,
+            nationality: "optional",
+            dateOfBirth: "optional",
+            documentType: "optional",
+            documentNumber: "optional",
+          },
+        },
+        canManage: true,
+      },
+    }),
   );
   const popup = await openPopup(page);
 

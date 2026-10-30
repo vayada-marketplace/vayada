@@ -2,6 +2,7 @@
 
 import { Fragment, useRef, useState, type MutableRefObject } from "react";
 import type { CheckinSettings } from "@/services/settings";
+import { forAdditionalGuests } from "@/lib/settings/checkinSettings";
 import type { RegistrationGuest } from "@/lib/checkin/registration";
 import type { CheckinRoom, RoomOption } from "@/lib/checkin/rooms";
 import { countLabel, guestDisplayName, stayRangeLabel } from "@/lib/checkin/labels";
@@ -75,14 +76,18 @@ export function RoomsGuestsStep({
       : t("dashboard.popup.noRoom");
   const number = (guest: RegistrationGuest) => guests.indexOf(guest) + 1;
   const name = (guest: RegistrationGuest) => guestDisplayName(guest, number(guest), t);
-  const requiredCount =
-    2 + settings.guestFields.filter((entry) => entry.show && entry.required).length;
+  // Email and phone are required of the lead guest only (VAY-2420, Settings › Guest data).
+  const othersSettings = forAdditionalGuests(settings);
+  const settingsFor = (guest: RegistrationGuest) =>
+    guest.role === "booker" ? settings : othersSettings;
+  const requiredCount = (guest: RegistrationGuest) =>
+    2 + settingsFor(guest).guestFields.filter((entry) => entry.show && entry.required).length;
   /** "Details missing · 4 required fields", "… 2 required fields left", "Registered". */
   const statusText = (guest: RegistrationGuest) => {
     const status = t(`checkIn.flow.status.${guest.status}`);
     if (guest.status === "registered") return status;
     const count = guest.missing.length;
-    const left = count < requiredCount ? "Left" : "";
+    const left = count < requiredCount(guest) ? "Left" : "";
     return `${status} · ${t(`checkIn.flow.guests.required${left}${count === 1 ? "One" : "Many"}`, { count })}`;
   };
   const shown = new Map(placement);
@@ -318,7 +323,7 @@ export function RoomsGuestsStep({
                         initial={formInitial(guest)}
                         guestId={guest.guestId}
                         requireNames={guest.role !== "booker"}
-                        settings={settings}
+                        settings={settingsFor(guest)}
                         rooms={rooms}
                         lockedFields={lockedFields(guest)}
                         canReadIdentity={canReadIdentity}

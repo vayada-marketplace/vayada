@@ -12,7 +12,8 @@ export type SearchResultKind =
   | "addon"
   | "promo"
   | "module"
-  | "location";
+  | "location"
+  | "guest";
 
 export interface SearchResult {
   id: string;
@@ -21,6 +22,12 @@ export interface SearchResult {
   category: string;
   kind: SearchResultKind;
   href: string;
+  /** A pill after the label, e.g. "2 reservations". */
+  badge?: string;
+  /** A guest's initials, shown in a round avatar instead of the kind's icon. */
+  initials?: string;
+  /** What Enter does on the active row, e.g. "Open profile". */
+  hint?: string;
 }
 
 const TILES: Record<SearchResultKind, string> = {
@@ -34,6 +41,7 @@ const TILES: Record<SearchResultKind, string> = {
   room: "bg-emerald-50 text-emerald-500",
   addon: "bg-emerald-50 text-emerald-500",
   design: "bg-pink-50 text-pink-500",
+  guest: "bg-[#EEF0FD] text-[#2D3FD3]",
 };
 
 const ICONS: Record<SearchResultKind, ReactNode> = {
@@ -103,6 +111,12 @@ const ICONS: Record<SearchResultKind, ReactNode> = {
       <circle cx="12" cy="10" r="3" />
     </>
   ),
+  guest: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+    </>
+  ),
 };
 
 export const searchResultOptionId = (listId: string, index: number) => `${listId}-${index}`;
@@ -117,6 +131,8 @@ interface SearchResultListProps {
   activeIndex: number;
   onActiveChange: (index: number) => void;
   onSelect?: (result: SearchResult, event: MouseEvent<HTMLAnchorElement>) => void;
+  /** Larger rows with two-line results, as in the PMS search (VAY-2420). */
+  large?: boolean;
 }
 
 /** The PMS search result rows, shared by the PMS and Booking Admin searches (VAY-2202). */
@@ -128,13 +144,21 @@ export function SearchResultList({
   activeIndex,
   onActiveChange,
   onSelect,
+  large = false,
 }: SearchResultListProps) {
   return (
     <div id={id} role="listbox" aria-label={label}>
       {results.map((result, index) => (
         <div key={result.id}>
           {(index === 0 || results[index - 1].category !== result.category) && (
-            <div className="px-4 pt-3 pb-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+            <div
+              className={cn(
+                "font-semibold uppercase",
+                large
+                  ? "px-5 pt-3.5 pb-2 text-xs tracking-[0.06em] text-[#5B6474]"
+                  : "px-4 pt-3 pb-1.5 text-[11px] text-gray-400 tracking-wide",
+              )}
+            >
               {categoryLabel(result.category)}
             </div>
           )}
@@ -152,40 +176,94 @@ export function SearchResultList({
               onSelect(result, event);
             }}
             className={cn(
-              "w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors",
-              index === activeIndex ? "bg-primary-50" : "hover:bg-gray-50",
+              "w-full flex items-center text-left transition-colors",
+              large ? "px-5 py-2.5 gap-3.5" : "px-4 py-2.5 gap-3",
+              index === activeIndex
+                ? large
+                  ? "bg-[#EEF0FD]"
+                  : "bg-primary-50"
+                : "hover:bg-gray-50",
             )}
           >
-            <span
-              className={cn(
-                "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
-                TILES[result.kind],
-              )}
-            >
-              <svg
-                className="w-3.5 h-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {result.initials ? (
+              <span
                 aria-hidden="true"
+                className={cn(
+                  "rounded-full flex items-center justify-center shrink-0 font-semibold text-[#2D3FD3]",
+                  large ? "w-10 h-10 text-sm" : "w-7 h-7 text-[11px]",
+                  index === activeIndex ? "bg-white" : "bg-[#EEF0FD]",
+                )}
               >
-                {ICONS[result.kind]}
-              </svg>
-            </span>
+                {result.initials}
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  "flex items-center justify-center shrink-0",
+                  large ? "w-10 h-10 rounded-[10px]" : "w-7 h-7 rounded-lg",
+                  TILES[result.kind],
+                )}
+              >
+                <svg
+                  className={large ? "w-[18px] h-[18px]" : "w-3.5 h-3.5"}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {ICONS[result.kind]}
+                </svg>
+              </span>
+            )}
             <span className="min-w-0 flex-1">
-              <span className="block text-[13px] font-medium text-gray-900 truncate">
-                {result.label}
+              <span className="flex items-center gap-2 min-w-0">
+                <span
+                  className={cn(
+                    "block min-w-0 truncate",
+                    large
+                      ? cn(
+                          "font-semibold text-gray-900",
+                          result.kind === "guest" ? "text-[15px]" : "text-sm",
+                        )
+                      : "text-[13px] font-medium text-gray-900",
+                  )}
+                >
+                  {result.label}
+                </span>
+                {result.badge && (
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-full px-2 py-px text-xs font-semibold text-[#344054]",
+                      index === activeIndex ? "bg-white" : "bg-gray-100",
+                    )}
+                  >
+                    {result.badge}
+                  </span>
+                )}
               </span>
               {result.description && (
-                <span className="block text-[11px] text-gray-400 truncate">
+                <span
+                  className={cn(
+                    "block truncate",
+                    large ? "text-[13px] text-[#5B6474]" : "text-[11px] text-gray-400",
+                  )}
+                >
                   {result.description}
                 </span>
               )}
             </span>
-            {index === activeIndex && (
+            {index === activeIndex && result.hint && (
+              <span
+                aria-hidden="true"
+                className="text-xs border border-[#C7CDF7] bg-white rounded-md px-2 py-0.5 text-[#2D3FD3] leading-none shrink-0 whitespace-nowrap"
+              >
+                {result.hint} ↵
+              </span>
+            )}
+            {index === activeIndex && !result.hint && (
               <kbd
                 aria-hidden="true"
                 className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-gray-50 text-gray-400 leading-none shrink-0"

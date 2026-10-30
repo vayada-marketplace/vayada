@@ -3,9 +3,17 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { bookingsService } from "@/services/bookings";
+import { guestsService } from "@/services/guests";
 import { roomsService, RoomType } from "@/services/rooms";
 import { useTranslation } from "@/lib/i18n";
-import { SearchResultList, type SearchResult } from "@vayada/settings-ui";
+import { BOOKING_STATUS_LABEL_KEYS } from "@/lib/constants/statusStyles";
+import {
+  formatStayDates,
+  guestActivity,
+  guestInitials,
+  localToday,
+} from "@/lib/guests/guestDisplay";
+import { SearchResultList, searchResultOptionId, type SearchResult } from "@vayada/settings-ui";
 
 interface PageEntry {
   id: string;
@@ -42,6 +50,12 @@ const PAGES: PageEntry[] = [
     labelKey: "layout.sidebar.reservations",
     sublabelKey: "search.pageReservationsHint",
     href: "/bookings",
+  },
+  {
+    id: "guests",
+    labelKey: "layout.sidebar.guests",
+    sublabelKey: "search.pageGuestsHint",
+    href: "/guests",
   },
   {
     id: "rooms",
@@ -164,7 +178,7 @@ const SETTINGS: SettingEntry[] = [
 ];
 
 export default function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -234,21 +248,61 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
         href: s.href,
       }));
 
-      // Server-side booking search
-      let bookingResults: SearchResult[] = [];
-      try {
-        const res = await bookingsService.list({ search: query.trim(), limit: 5 });
-        bookingResults = res.bookings.map((b) => ({
-          id: b.id,
-          label: `${b.guestFirstName} ${b.guestLastName}`,
-          description: `${b.bookingReference} · ${b.roomName} · ${b.checkIn}`,
-          category: "reservation",
-          kind: "reservation",
-          href: `/bookings/${b.id}`,
-        }));
-      } catch {
-        // Silently handle — rooms will still show
-      }
+      // VAY-2420: the account's guest records, above their reservations. Each search fails on
+      // its own, so the other groups still show.
+      const today = localToday();
+      const statusLabel = (status: string) =>
+        BOOKING_STATUS_LABEL_KEYS[status] ? t(BOOKING_STATUS_LABEL_KEYS[status]) : "";
+      const [guestResults, bookingResults] = await Promise.all([
+        guestsService
+          .search(query.trim(), 5)
+          .then((guests) =>
+            guests.map(
+              (guest): SearchResult => ({
+                id: `guest-${guest.guestProfileId}`,
+                label: `${guest.firstName} ${guest.lastName}`.trim(),
+                description: [
+                  guest.email,
+                  guest.phone,
+                  guestActivity(guest.lastCheckIn, today, locale, t),
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+                badge: t(
+                  guest.reservations === 1 ? "guests.reservationsOne" : "guests.reservationsMany",
+                  { count: guest.reservations },
+                ),
+                initials: guestInitials(guest.firstName, guest.lastName),
+                hint: t("search.openProfile"),
+                category: "guest",
+                kind: "guest",
+                href: `/guests/${guest.guestProfileId}`,
+              }),
+            ),
+          )
+          .catch(() => [] as SearchResult[]),
+        bookingsService
+          .list({ search: query.trim(), limit: 5 })
+          .then((res) =>
+            res.bookings.map(
+              (b): SearchResult => ({
+                id: b.id,
+                label: `${b.guestFirstName} ${b.guestLastName}`,
+                description: [
+                  b.bookingReference,
+                  formatStayDates(b.checkIn, b.checkOut, locale),
+                  statusLabel(b.awaitingPaymentConfirmation ? "awaiting_payment" : b.status),
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+                category: "reservation",
+                kind: "reservation",
+                href: `/bookings/${b.id}`,
+              }),
+            ),
+          )
+          .catch(() => [] as SearchResult[]),
+      ]);
 
       // Client-side room filtering (small dataset)
       const roomResults: SearchResult[] = rooms
@@ -263,12 +317,18 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
           href: `/rooms`,
         }));
 
-      setResults([...pageResults, ...settingResults, ...bookingResults, ...roomResults]);
+      setResults([
+        ...pageResults,
+        ...settingResults,
+        ...guestResults,
+        ...bookingResults,
+        ...roomResults,
+      ]);
       setActiveIndex(0);
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [query, rooms, t]);
+  }, [query, rooms, locale, t]);
 
   const navigate = useCallback(
     (result: SearchResult) => {
@@ -277,6 +337,13 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
     },
     [onClose, router],
   );
+
+  // The chosen row stays in view while the arrow keys move through a long list.
+  useEffect(() => {
+    document
+      .getElementById(searchResultOptionId("pms-search-results", activeIndex))
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -302,6 +369,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   if (!open) return null;
 
   const CATEGORY_LABELS: Record<string, string> = {
+    guest: t("search.categoryGuests"),
     page: t("search.categoryPages"),
     setting: t("search.categorySettings"),
     reservation: t("search.categoryReservations"),
@@ -318,13 +386,15 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
 
       {/* Modal */}
       <div
-        className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden"
+        role="dialog"
+        aria-label={t("search.placeholder")}
+        className="relative w-full max-w-[680px] mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 h-12 border-b border-gray-100">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-[#EAECF0]">
           <svg
-            className="w-4 h-4 text-gray-400 shrink-0"
+            className="w-5 h-5 text-[#5B6474] shrink-0"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -341,15 +411,15 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("search.placeholder")}
-            className="flex-1 text-sm text-gray-900 placeholder:text-gray-400 outline-none bg-transparent"
+            className="flex-1 min-w-0 text-lg text-[#101828] placeholder:text-gray-400 outline-none bg-transparent"
           />
-          <kbd className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-gray-50 text-gray-400 leading-none">
+          <kbd className="text-xs border border-[#D0D5DD] rounded-md px-2 py-0.5 text-[#475467] leading-none">
             ESC
           </kbd>
         </div>
 
         {/* Results */}
-        <div className="max-h-80 overflow-y-auto">
+        <div className="max-h-[min(60vh,420px)] overflow-y-auto py-2.5">
           {query.trim() && results.length === 0 && (
             <div className="px-4 py-8 text-center text-sm text-gray-400">
               {t("search.noResults", { query })}
@@ -361,6 +431,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
             label={t("search.placeholder")}
             results={results}
             categoryLabel={(category) => CATEGORY_LABELS[category] || category}
+            large
             activeIndex={activeIndex}
             onActiveChange={setActiveIndex}
             onSelect={(result, event) => {
@@ -374,6 +445,11 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
               {t("search.startTyping")}
             </div>
           )}
+        </div>
+        <div className="flex flex-wrap gap-x-[18px] gap-y-1 px-5 py-3 border-t border-[#EAECF0] text-xs text-[#5B6474]">
+          <span>{t("search.hintNavigate")}</span>
+          <span>{t("search.hintOpen")}</span>
+          <span>{t("search.guestsMatched")}</span>
         </div>
       </div>
     </div>

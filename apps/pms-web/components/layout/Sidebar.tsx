@@ -10,6 +10,7 @@ import {
   ChevronDownIcon,
   CheckIcon,
   StarIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -60,6 +61,13 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
     labelKey: "layout.sidebar.reservations",
     href: "/bookings",
     icon: ReservationsIcon,
+    requiredAny: ["pms.reservation.read"],
+  },
+  // VAY-2420: the account's guest records.
+  {
+    labelKey: "layout.sidebar.guests",
+    href: "/guests",
+    icon: UsersIcon,
     requiredAny: ["pms.reservation.read"],
   },
   {

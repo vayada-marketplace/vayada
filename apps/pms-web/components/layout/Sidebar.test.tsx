@@ -38,11 +38,16 @@ it("shows Inbox and Reviews only while their Feature Hub switch is on", () => {
   const hrefs = (modules: ReadonlySet<string> | null) =>
     visiblePmsNavigation(permissions, false, modules).map((item) => item.href);
 
-  expect(hrefs(new Set())).toEqual(["/bookings"]);
-  expect(hrefs(new Set(["inbox"]))).toEqual(["/bookings", "/inbox"]);
-  expect(hrefs(new Set(["inbox", "reviews"]))).toEqual(["/bookings", "/inbox", "/reviews"]);
+  expect(hrefs(new Set())).toEqual(["/bookings", "/guests"]);
+  expect(hrefs(new Set(["inbox"]))).toEqual(["/bookings", "/guests", "/inbox"]);
+  expect(hrefs(new Set(["inbox", "reviews"]))).toEqual([
+    "/bookings",
+    "/guests",
+    "/inbox",
+    "/reviews",
+  ]);
   // A failed switch read must not hide a module the property may already use.
-  expect(hrefs(null)).toEqual(["/bookings", "/inbox", "/reviews"]);
+  expect(hrefs(null)).toEqual(["/bookings", "/guests", "/inbox", "/reviews"]);
 });
 
 it("keeps permissions authoritative over an active switch", () => {
@@ -50,5 +55,5 @@ it("keeps permissions authoritative over an active switch", () => {
     visiblePmsNavigation(["pms.reservation.read"], false, new Set(["inbox", "reviews"])).map(
       (item) => item.href,
     ),
-  ).toEqual(["/bookings"]);
+  ).toEqual(["/bookings", "/guests"]);
 });

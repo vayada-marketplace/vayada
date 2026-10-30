@@ -828,6 +828,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "guest_bookings",
         "guest_choice_heads",
         "guest_choice_revisions",
+        "guest_data_settings",
         "guest_notes",
         "guest_policy_projection_receipts",
         "guest_policy_revisions",

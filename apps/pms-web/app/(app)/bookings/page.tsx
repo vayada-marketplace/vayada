@@ -6,7 +6,7 @@ import { bookingsService, Booking, BookingListResponse } from "@/services/bookin
 import { MagnifyingGlassIcon, EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/formatCurrency";
-import { normalizeChannelKey } from "@/lib/constants/statusStyles";
+import { BOOKING_STATUS_LABEL_KEYS, normalizeChannelKey } from "@/lib/constants/statusStyles";
 import { getBalanceStatus } from "@/lib/bookingBalanceStatus";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
@@ -27,18 +27,6 @@ const STATUS_STYLES: Record<string, string> = {
   no_show: "border-orange-200 text-orange-700 bg-orange-50",
   // VAY-2348: a booking-page bank transfer waiting for the guest's money (rooms held).
   awaiting_payment: AWAITING_PAYMENT_BADGE_CLASS,
-};
-
-const STATUS_LABEL_KEYS: Record<string, string> = {
-  pending: "bookings.statusPending",
-  confirmed: "bookings.statusConfirmed",
-  checked_in: "bookings.statusCheckedIn",
-  in_house: "bookings.statusInHouse",
-  cancelled: "bookings.statusCancelled",
-  declined: "bookings.statusDeclined",
-  expired: "bookings.statusExpired",
-  no_show: "bookings.statusNoShow",
-  awaiting_payment: "bookings.statusAwaitingPayment",
 };
 
 /** The status a reservation shows: "Awaiting payment" while the hotel waits for the transfer. */
@@ -301,8 +289,8 @@ export default function ReservationsPage() {
                     <span
                       className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STATUS_STYLES[displayStatus(b)] || STATUS_STYLES["pending"]}`}
                     >
-                      {STATUS_LABEL_KEYS[displayStatus(b)]
-                        ? t(STATUS_LABEL_KEYS[displayStatus(b)])
+                      {BOOKING_STATUS_LABEL_KEYS[displayStatus(b)]
+                        ? t(BOOKING_STATUS_LABEL_KEYS[displayStatus(b)])
                         : b.status}
                     </span>
                   </div>
@@ -512,8 +500,8 @@ export default function ReservationsPage() {
                         <span
                           className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold border ${STATUS_STYLES[displayStatus(b)] || STATUS_STYLES["pending"]}`}
                         >
-                          {STATUS_LABEL_KEYS[displayStatus(b)]
-                            ? t(STATUS_LABEL_KEYS[displayStatus(b)])
+                          {BOOKING_STATUS_LABEL_KEYS[displayStatus(b)]
+                            ? t(BOOKING_STATUS_LABEL_KEYS[displayStatus(b)])
                             : b.status}
                         </span>
                         {payBy(b) && (

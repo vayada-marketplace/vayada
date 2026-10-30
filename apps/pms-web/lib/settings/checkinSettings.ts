@@ -3,6 +3,7 @@ import type {
   CheckinSettings,
   CheckinSettlementOption,
 } from "@/services/settings";
+import type { GuestDataSettings } from "@/services/guests";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -40,6 +41,48 @@ export const DEFAULT_CHECKIN_SETTINGS: CheckinSettings = {
   paymentChoiceRequired: true,
   keyHandover: "physical",
 };
+
+/** Settings › Guest data as an account has it until the owner changes it (the API's defaults). */
+export const DEFAULT_GUEST_DATA_FIELDS: GuestDataSettings["fields"] = {
+  email: "optional",
+  phone: "optional",
+  nationality: "required",
+  dateOfBirth: "required",
+  documentType: "required",
+  documentNumber: "required",
+};
+
+/**
+ * Settings › Guest data over the check-in's own fields (VAY-2420): a field set to Off isn't asked,
+ * and Required or Optional takes the place of the check-in's Required switch. The check-in's Show
+ * switch still decides whether the form asks at all; gender is the check-in's own.
+ */
+export function withGuestDataFields(
+  settings: CheckinSettings,
+  fields: GuestDataSettings["fields"] = DEFAULT_GUEST_DATA_FIELDS,
+): CheckinSettings {
+  return {
+    ...settings,
+    guestFields: settings.guestFields.map((entry) => {
+      if (entry.field === "gender") return entry;
+      const status = fields[entry.field];
+      const show = entry.show && status !== "off";
+      return { ...entry, show, required: show && status === "required" };
+    }),
+  };
+}
+
+/** Email and phone apply to the lead guest: the other guests may give them, but never must. */
+export function forAdditionalGuests<Settings extends Pick<CheckinSettings, "guestFields">>(
+  settings: Settings,
+): Settings {
+  return {
+    ...settings,
+    guestFields: settings.guestFields.map((entry) =>
+      entry.field === "email" || entry.field === "phone" ? { ...entry, required: false } : entry,
+    ),
+  };
+}
 
 export const CHECKIN_SETTLEMENT_OPTIONS: CheckinSettlementOption[] = [
   "card",

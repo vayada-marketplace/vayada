@@ -15,6 +15,19 @@ export const BOOKING_STATUS_STYLES: Record<string, string> = {
   no_show: "bg-orange-100 text-orange-700",
 };
 
+/** The label of each reservation status, as the Reservations list and search show it. */
+export const BOOKING_STATUS_LABEL_KEYS: Record<string, string> = {
+  pending: "bookings.statusPending",
+  confirmed: "bookings.statusConfirmed",
+  checked_in: "bookings.statusCheckedIn",
+  in_house: "bookings.statusInHouse",
+  cancelled: "bookings.statusCancelled",
+  declined: "bookings.statusDeclined",
+  expired: "bookings.statusExpired",
+  no_show: "bookings.statusNoShow",
+  awaiting_payment: "bookings.statusAwaitingPayment",
+};
+
 export const PAYMENT_STATUS_STYLES: Record<string, string> = {
   unpaid: "bg-gray-100 text-gray-600",
   authorized: "bg-blue-100 text-blue-700",
