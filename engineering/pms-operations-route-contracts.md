@@ -402,7 +402,10 @@ names and IDs only.
 - `GET .../reservations/:guestBookingId/guest-profiles`: each guest of a reservation with its
   names as on this booking, profile, stay count and notes. Guests the job hasn't reached yet are
   linked first. Check-in and the reservation page edit the booker's name and contact through it
-  and the `PATCH` above, sending only the fields staff changed.
+  and the `PATCH` above, sending only the fields staff changed. Channel bookings too: a Channex
+  revision (`jobs/channexBookings.ts`) writes a booker detail only when the channel changed it since
+  its last import (kept as `importedGuest` in the booking's mapping metadata), so a staff edit stays
+  until the guest changes that detail at the channel.
 
 VAY-784 implements the P2c check-out command in `apps/api`.
 `POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`

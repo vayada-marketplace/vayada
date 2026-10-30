@@ -211,16 +211,21 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`channex-booking:${job.propertyId}:${job.channelBookingId}`]);
     const tombstone=(await client.query<{insertedAt:string}>(`SELECT to_char(inserted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "insertedAt" FROM pms.channel_booking_revision_tombstones WHERE connection_id=$1::uuid AND property_id=$2::uuid AND binding_generation=$3::uuid AND external_booking_id=$4 AND resolved_at IS NULL AND retention_expires_at>now() FOR UPDATE`,[connection[0]!.id,job.propertyId,connection[0]!.bindingGeneration,job.channelBookingId])).rows[0];
     const mappings = (
-      await client.query<{guestBookingId:string;revisionId:string|null;insertedAt:string|null;providerSource:string|null}>(
+      await client.query<{guestBookingId:string;revisionId:string|null;insertedAt:string|null;providerSource:string|null;importedGuest:Record<string,string|null>|null}>(
         `SELECT guest_booking_id::text AS "guestBookingId",external_revision_id AS "revisionId",
-           mapping_metadata->>'providerInsertedAt' AS "insertedAt",mapping_metadata->>'providerSource' AS "providerSource" FROM pms.channel_booking_mappings
+           mapping_metadata->>'providerInsertedAt' AS "insertedAt",mapping_metadata->>'providerSource' AS "providerSource",
+           mapping_metadata->'importedGuest' AS "importedGuest" FROM pms.channel_booking_mappings
          WHERE connection_id=$1::uuid AND external_booking_id=$2 ORDER BY channel_room_index FOR UPDATE`,
         [connection[0]!.id, job.channelBookingId],
       )
     ).rows;
     const bookingIds = new Set(mappings.map((row) => row.guestBookingId));
     if (bookingIds.size > 1) throw new Failure("ambiguous_booking_mapping", false);
-    const replayed=mappings.some(row=>row.revisionId===revision.id),metadata=JSON.stringify({providerSource:mappings.length?mappings[0]!.providerSource:revision.providerSource,latestProviderSource:revision.providerSource,providerPropertyId:job.providerPropertyId,providerInsertedAt:revision.insertedAt,providerRevision:revision.semanticRevision});
+    // VAY-2420: staff edit the booker, so a revision writes only the customer details the channel changed
+    // since its last import (`importedGuest`); a booking imported before that record takes them all once.
+    const importedGuest=mappings[0]?.importedGuest??null,sentGuest:Record<string,string|null>={...(revision.firstName===null?{}:{firstName:revision.firstName}),...(revision.lastName===null?{}:{lastName:revision.lastName}),...(revision.hasEmail?{email:revision.email}:{}),...(revision.hasPhone?{phone:revision.phone}:{})};
+    const guestChanged=(key:string)=>key in sentGuest&&(!importedGuest||!(key in importedGuest)||importedGuest[key]!==sentGuest[key]);
+    const replayed=mappings.some(row=>row.revisionId===revision.id),metadata=JSON.stringify({providerSource:mappings.length?mappings[0]!.providerSource:revision.providerSource,latestProviderSource:revision.providerSource,providerPropertyId:job.providerPropertyId,providerInsertedAt:revision.insertedAt,providerRevision:revision.semanticRevision,importedGuest:{...importedGuest,...sentGuest}});
     if(scope?.alertRecovery){
       if(await assertStagingAlertApproval(client,scope,scope.alertRecovery,job.id)!==revision.roomCount)throw new Failure("staging_alert_mapping_changed",false);
       if(!replayed || mappings.some(m=>m.revisionId!==revision.id || m.guestBookingId!==scope.alertRecovery!.canonicalBookingId))throw new Failure("staging_alert_mapping_changed",false);
@@ -274,7 +279,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
          WHERE id=$1::uuid AND property_id=$2::uuid`:`UPDATE booking.guest_bookings SET lifecycle_status='canceled',booking_metadata=CASE WHEN $3 THEN booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb ELSE booking_metadata END,updated_at=now() WHERE id=$1::uuid AND property_id=$2::uuid`,
         revision.roomCount?[guestBookingId,job.propertyId,revision.status,revision.checkIn,revision.checkOut,revision.adults,revision.children,revision.roomCount,revision.currency,revision.amount,Boolean(financialHistory)||isAirbnb]:[guestBookingId,job.propertyId,Boolean(financialHistory)||isAirbnb],
       );
-      if(revision.hasCustomer)await client.query("UPDATE booking.booking_guests SET first_name=COALESCE($2,first_name),last_name=COALESCE($3,last_name),email=CASE WHEN $6 THEN $4 ELSE email END,phone=CASE WHEN $7 THEN $5 ELSE phone END,updated_at=now() WHERE guest_booking_id=$1::uuid AND guest_role='booker'",[guestBookingId,revision.firstName,revision.lastName,revision.email,revision.phone,revision.hasEmail,revision.hasPhone]);
+      if(Object.keys(sentGuest).some(guestChanged))await client.query("UPDATE booking.booking_guests SET first_name=CASE WHEN $6 THEN $2 ELSE first_name END,last_name=CASE WHEN $7 THEN $3 ELSE last_name END,email=CASE WHEN $8 THEN $4 ELSE email END,phone=CASE WHEN $9 THEN $5 ELSE phone END,updated_at=now() WHERE guest_booking_id=$1::uuid AND guest_role='booker'",[guestBookingId,revision.firstName,revision.lastName,revision.email,revision.phone,guestChanged("firstName"),guestChanged("lastName"),guestChanged("email"),guestChanged("phone")]);
     }
     if(isAirbnb)await client.query(`UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || jsonb_build_object('airbnbMoneyStatus','unverified','airbnbProviderAmount',jsonb_build_object('amount',$3::text,'currency',$4::text,'revisionId',$5::text,'revisionAt',$6::text,'amountBasis',NULL)) WHERE id=$1::uuid AND property_id=$2::uuid`,[guestBookingId,job.propertyId,revision.amount,revision.currency,revision.id,revision.insertedAt]);
     // VAY-2108 W1d: this revision imports the booking, so its earlier not-imported alerts close. Closed-night

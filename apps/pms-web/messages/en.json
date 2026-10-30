@@ -484,7 +484,7 @@
   "bookings.detail.editBooker": "Edit booker",
   "bookings.detail.failedToLoadBooker": "Couldn’t open the booker’s details. Please try again.",
   "bookings.detail.bookerSavedToGuest": "Saved to the guest: their upcoming bookings show it too.",
-  "bookings.detail.bookerFromChannel": "Saved to the guest. Details {channel} sent stay as they are; empty ones can be filled.",
+  "bookings.detail.bookerFromChannel": "Saved to the guest: their upcoming bookings show it too. If the guest changes it on {channel}, this booking takes their change.",
   "bookings.detail.correct": "Correct",
   "bookings.detail.needsReview": "Needs review",
   "bookings.detail.importedValue": "Imported value: {value}",

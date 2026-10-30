@@ -231,13 +231,13 @@ test("saves a listed guest's field when staff leave it, sending only the change"
   await main(page)
     .getByRole("button", { name: /^Edit Ada Lovelace/ })
     .click();
-  // Ada booked through Booking.com: what it sent stays as sent, since its next update would write
-  // it again (VAY-2420).
+  // Ada booked through Booking.com: staff can still edit what it sent, since its next update only
+  // writes what she changed there (VAY-2420).
   await expect(
     main(page)
       .getByRole("form", { name: "Ada Lovelace" })
       .getByRole("textbox", { name: /First name/ }),
-  ).not.toBeEditable();
+  ).toBeEditable();
   await main(page)
     .getByRole("button", { name: /^Add details Grace Hopper/ })
     .click();

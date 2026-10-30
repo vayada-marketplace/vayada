@@ -329,15 +329,14 @@ export default function CheckInPage() {
   const ota = isChannelBooking(booking?.channel);
   const lockedFields = (guest: RegistrationGuest) => {
     const locked = new Set<GuestLockableField>();
-    // The booker is edited through their guest record (VAY-2420): not without one, their contact
-    // not where staff may not see it, and a channel's values stay as sent (its next update would
-    // write them again); empty ones can still be filled.
+    // The booker is edited through their guest record (VAY-2420), also on channel bookings (a
+    // channel update only writes what the guest changed there): not without one, and their contact
+    // not where staff may not see it.
     if (guest.role === "booker") {
       const shown = formInitial(guest);
       for (const name of ["firstName", "lastName", "email", "phone"] as const)
         if (
           !bookerProfile ||
-          (ota && shown[name].trim()) ||
           ((name === "email" || name === "phone") && shown.email === HIDDEN_GUEST_CONTACT)
         )
           locked.add(name);

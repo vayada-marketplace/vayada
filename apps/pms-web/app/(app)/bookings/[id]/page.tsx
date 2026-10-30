@@ -1745,13 +1745,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const bookerChanges = bookerEdit ? guestProfileEdit(bookerEdit.shown, bookerForm) : {};
-  // A channel's values stay as sent (its next update would write them again), and so does contact
-  // staff may not see; empty fields can still be filled.
-  const bookerLocked = (field: keyof BookerForm) =>
-    Boolean(bookerEdit) &&
-    ((isChannelBooking(booking?.channel) && bookerEdit!.shown[field].trim() !== "") ||
-      ((field === "email" || field === "phone") &&
-        bookerEdit!.shown.email === HIDDEN_GUEST_CONTACT));
+  // Contact staff may not see stays as it is.
+  const bookerContactHidden = bookerEdit?.shown.email === HIDDEN_GUEST_CONTACT;
 
   const handleSaveBooker = async () => {
     if (!bookerEdit) return;
@@ -2802,27 +2797,25 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   label={t("bookings.modal.firstNameLabel")}
                   value={bookerForm.firstName}
                   onChange={(v) => setBookerForm({ ...bookerForm, firstName: v })}
-                  disabled={bookerLocked("firstName")}
                 />
                 <Field
                   label={t("bookings.modal.lastNameLabel")}
                   value={bookerForm.lastName}
                   onChange={(v) => setBookerForm({ ...bookerForm, lastName: v })}
-                  disabled={bookerLocked("lastName")}
                 />
                 <Field
                   label={t("bookings.detail.emailOptional")}
                   type="email"
                   value={bookerForm.email}
                   onChange={(v) => setBookerForm({ ...bookerForm, email: v })}
-                  disabled={bookerLocked("email")}
+                  disabled={bookerContactHidden}
                 />
                 <Field
                   label={t("bookings.detail.phoneOptional")}
                   type="tel"
                   value={bookerForm.phone}
                   onChange={(v) => setBookerForm({ ...bookerForm, phone: v })}
-                  disabled={bookerLocked("phone")}
+                  disabled={bookerContactHidden}
                 />
               </div>
               <p className="mt-3 text-xs text-gray-500">

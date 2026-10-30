@@ -97,6 +97,30 @@ describe.skipIf(!URL)("Channex booking worker (PostgreSQL)",()=>{
     expect(await commissions("booking-legacy")).toBe(0);
   });
 
+  // VAY-2420: staff edit the booker through the guest record; a revision writes only what the channel changed.
+  it("keeps a staff edit of the booker until the channel itself changes that detail",async()=>{
+    const send=async(id:string,customer:Partial<ReturnType<typeof revision>["attributes"]["customer"]>={})=>{const value=revision(id,"booking-staff","BookingCom");if(id!=="staff-1")value.attributes.status="modified";Object.assign(value.attributes.customer,customer);await job("booking-staff",id,false,value);expect((await run()).succeeded).toBe(1);};
+    const edit=(firstName:string,email:string)=>db.query("UPDATE booking.booking_guests SET first_name=$2,email=$3 WHERE guest_role='booker' AND guest_booking_id=(SELECT id FROM booking.guest_bookings WHERE source_booking_id=$1)",[`channex:${P}:booking-staff`,firstName,email]);
+    const booker=async()=>(await db.query("SELECT first_name,last_name,email,phone FROM booking.booking_guests guest JOIN booking.guest_bookings booking ON booking.id=guest.guest_booking_id WHERE booking.source_booking_id=$1 AND guest.guest_role='booker'",[`channex:${P}:booking-staff`])).rows[0];
+    await send("staff-1");
+    await edit("Adele","adele@example.test");
+    // The same customer again (a date change, say) leaves the staff edit.
+    await send("staff-2");
+    expect(await booker()).toEqual({first_name:"Adele",last_name:"Guest",email:"adele@example.test",phone:"+100"});
+    // The guest changes their phone, then their email, on Booking.com: only that detail follows.
+    await send("staff-3",{phone:"+200"});
+    expect(await booker()).toEqual({first_name:"Adele",last_name:"Guest",email:"adele@example.test",phone:"+200"});
+    await send("staff-4",{phone:"+200",mail:"new@example.test"});
+    expect(await booker()).toEqual({first_name:"Adele",last_name:"Guest",email:"new@example.test",phone:"+200"});
+    // A booking imported before this has no record of its last import: it takes every sent detail once.
+    await db.query("UPDATE pms.channel_booking_mappings SET mapping_metadata=mapping_metadata-'importedGuest' WHERE property_id=$1 AND external_booking_id='booking-staff'",[P]);
+    await send("staff-5",{phone:"+200",mail:"new@example.test"});
+    expect(await booker()).toEqual({first_name:"Ada",last_name:"Guest",email:"new@example.test",phone:"+200"});
+    await edit("Adele","adele@example.test");
+    await send("staff-6",{phone:"+200",mail:"new@example.test"});
+    expect(await booker()).toEqual({first_name:"Adele",last_name:"Guest",email:"adele@example.test",phone:"+200"});
+  });
+
   // VAY-2368: OTA rooms take the first free unit of their type by the Assign button's rule.
   const UNIT={first:"11890000-0000-4000-8000-000000000011",second:"11890000-0000-4000-8000-000000000012",unverified:"11890000-0000-4000-8000-000000000013"};
 
