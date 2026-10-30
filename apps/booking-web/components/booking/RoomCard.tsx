@@ -190,9 +190,9 @@ export default function RoomCard({
         (unpricedRoom || price?.status === "priced" || price?.status === "unpriced"),
     };
   });
-  // A choice whose free cancellation has passed is hidden while another choice of the same meal
-  // isn't ruled out (old VAY-370 rule, also while prices load); otherwise it stays, named
-  // non-refundable with the reason.
+  // A choice whose free cancellation (or last refund step, VAY-2406) has passed is hidden while
+  // another choice of the same meal isn't ruled out (old VAY-370 rule, also while prices load);
+  // otherwise it stays, named non-refundable with the reason.
   const shown = all
     .filter(
       (choice) =>

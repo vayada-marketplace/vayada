@@ -4,11 +4,12 @@ import type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
 type MealPlan = PricingConfiguration["offers"][number]["meal"]["kind"];
 
 /** What a guest may learn about an option's cancellation before asking for a price: no refund, free until a number
- * of days before arrival, or a partial refund. Penalties and refund tiers stay with the quote. */
+ * of days before arrival, or a partial refund. Penalties and refund tiers stay with the quote; the booking page's
+ * offers add a partial refund's last refund day (`days`, VAY-2406), so a stay past it reads as no refund. */
 export type PublicOfferCancellation =
   | Readonly<{ kind: "non_refundable" }>
   | Readonly<{ kind: "free_until_days_before_arrival"; days: number }>
-  | Readonly<{ kind: "partial_refund" }>;
+  | Readonly<{ kind: "partial_refund"; days?: number }>;
 
 export function publicOfferCancellation(
   cancellation: ReplacementOfferTerms["cancellation"],
@@ -26,10 +27,24 @@ export function publicOfferCancellation(
     : { kind: "partial_refund" };
 }
 
+/** A partial refund's last refund day, in days before arrival (VAY-2406): the step with the least notice that still
+ * gives money back. After that day the guest gets nothing back, as Review & pay says ("No refund any more").
+ * Null for any other cancellation, or when no step refunds. */
+export function lastRefundDays(cancellation: ReplacementOfferTerms["cancellation"]): number | null {
+  if (cancellation.kind !== "flexible") return null;
+  const terms = cancellation.terms;
+  if (terms.flexibleCancellationType !== "partial_refund") return null;
+  const days = (terms.partialRefundTiers ?? [])
+    .filter((tier) => tier.refundPercent > 0)
+    .map((tier) => tier.minDaysBeforeCheckIn);
+  return days.length ? Math.min(...days) : null;
+}
+
 /** An option's plain name as a meal and a cancellation, for an app to word: "room_only" + "free" is "Free
  * cancellation", "breakfast" + "non_refundable" is "Breakfast included, non-refundable", and so on. A null
  * cancellation (unknown) names the meal alone. `days` is a free cancellation's deadline: a page that knows the stay
- * says "until <date>" with it, and a stay that starts inside the deadline has no free cancellation. */
+ * says "until <date>" with it, and a stay that starts inside the deadline has no free cancellation. For a partial
+ * refund it is the last refund day when the offer gives it (VAY-2406): after it, no refund. */
 export type PricingOfferNameKey = Readonly<{
   meal: MealPlan;
   cancellation: "free" | "non_refundable" | "partial_refund" | null;
@@ -58,8 +73,9 @@ export function pricingOfferNameKeys(
       meal: offer.mealPlan,
       cancellation,
       days:
-        offer.cancellation?.kind === "free_until_days_before_arrival"
-          ? offer.cancellation.days
+        offer.cancellation?.kind === "free_until_days_before_arrival" ||
+        offer.cancellation?.kind === "partial_refund"
+          ? (offer.cancellation.days ?? null)
           : null,
       number: count === 1 ? null : count,
     };

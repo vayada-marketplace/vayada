@@ -121,9 +121,11 @@ function roomContent(room: Record<string, unknown>): RoomContent {
 }
 function offerCancellation(v: unknown): OfferCancellation | undefined {
   if (!object(v)) return undefined;
-  if (v.kind === "non_refundable" || v.kind === "partial_refund") return { kind: v.kind };
-  if (v.kind === "free_until_days_before_arrival" && count(v.days, 0) && v.days <= 365)
-    return { kind: v.kind, days: v.days };
+  const days = count(v.days, 0) && v.days <= 365 ? v.days : null;
+  if (v.kind === "non_refundable") return { kind: v.kind };
+  // A partial refund's last refund day (VAY-2406); absent from older APIs.
+  if (v.kind === "partial_refund") return days === null ? { kind: v.kind } : { kind: v.kind, days };
+  if (v.kind === "free_until_days_before_arrival" && days !== null) return { kind: v.kind, days };
   return undefined;
 }
 /** Read only the fields needed for selection; never manufacture a nightly price. */

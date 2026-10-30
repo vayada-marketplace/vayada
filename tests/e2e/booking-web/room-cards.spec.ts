@@ -16,6 +16,10 @@ async function mockRooms(
   page: Page,
   breakfastText?: string,
   gardenCancellation: Record<string, unknown> = { kind: "non_refundable" },
+  deluxeCancellation: Record<string, unknown> = {
+    kind: "free_until_days_before_arrival",
+    days: 3,
+  },
 ) {
   // Free cancellation reads as a date that must not have passed yet.
   await page.clock.setFixedTime(new Date("2026-10-14T08:00:00Z"));
@@ -44,7 +48,7 @@ async function mockRooms(
                 publicOfferKey: key("a"),
                 currency: "EUR",
                 mealPlan: "room_only",
-                cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+                cancellation: deluxeCancellation,
               },
               {
                 publicOfferKey: key("b"),
@@ -257,6 +261,54 @@ for (const width of [1440, 390]) {
     await expect(garden).not.toContainText("OFF");
     await page.screenshot({
       path: testInfo.outputPath(`room-cards-window-passed-${width}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+    await assertHealthy();
+  });
+
+  test(`names a partial refund non-refundable once its last refund day has passed at ${width}px (VAY-2406)`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    await page.addInitScript(
+      ({ slug, version }) =>
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: false }),
+        ),
+      { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+    );
+    await mockBookingApis(page);
+    // Deluxe's room-only rate and the Garden Suite's one rate refund in part until 7 days before
+    // arrival; Deluxe's breakfast rate is still free cancellation until 3 days before.
+    const partial = { kind: "partial_refund", days: 7 };
+    await mockRooms(page, undefined, partial, partial);
+    // 1 Nov: for a stay from 6 Nov, refunds ended with 30 Oct; free cancellation runs to 3 Nov.
+    await page.clock.setFixedTime(new Date("2026-11-01T08:00:00Z"));
+    await page.goto(STAY);
+
+    // The partial refund now has the same terms as non-refundable at a higher price: only the
+    // cheaper one shows, with its saving.
+    const deluxe = page.getByTestId("room-card-deluxe").locator("[data-offer-key]");
+    await expect(deluxe).toHaveCount(2);
+    await expect(deluxe.nth(0)).toContainText("Non-refundable");
+    await expect(deluxe.nth(0)).toContainText("-10% OFF");
+    await expect(deluxe.nth(1)).toContainText("Breakfast included");
+    await expect(deluxe.nth(1)).toContainText("Free cancellation until 3 Nov");
+    await expect(page.getByTestId("room-card-deluxe")).not.toContainText("Partial refund");
+    // A room whose one choice is that partial refund reads non-refundable, with the reason.
+    const garden = page.getByTestId("room-card-garden").locator("[data-offer-key]");
+    await expect(garden).toHaveCount(1);
+    await expect(garden).toContainText("Non-refundable");
+    await expect(garden).toContainText(
+      "Refunds end 7 days before arrival. For these dates, no refund if you cancel or don't arrive",
+    );
+    await expect(garden).not.toContainText("Partial refund");
+    await expect(garden).not.toContainText("OFF");
+    await page.screenshot({
+      path: testInfo.outputPath(`room-cards-refunds-passed-${width}.png`),
       fullPage: true,
       animations: "disabled",
     });

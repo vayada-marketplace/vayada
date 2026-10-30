@@ -141,6 +141,7 @@
       "noRefund": "Tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "partialRefundTerms": "Jika Anda membatalkan, kami mengembalikan sebagian harga. Lihat ketentuan kami di langkah berikutnya",
       "windowPassed": "Pembatalan gratis berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
+      "refundsPassed": "Pengembalian dana berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "freeEnded": "Pembatalan gratis sudah berakhir",
       "meal": {
         "room_only": "Hanya kamar",

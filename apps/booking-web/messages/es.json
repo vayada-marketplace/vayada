@@ -141,6 +141,7 @@
       "noRefund": "Sin reembolso si cancela o no se presenta",
       "partialRefundTerms": "Si cancela, le devolvemos parte del precio. Verá nuestras condiciones en el siguiente paso",
       "windowPassed": "La cancelación gratuita termina {days, plural, one {# día} other {# días}} antes de la llegada. Para estas fechas, no hay reembolso si cancela o no se presenta",
+      "refundsPassed": "Los reembolsos terminan {days, plural, one {# día} other {# días}} antes de la llegada. Para estas fechas, no hay reembolso si cancela o no se presenta",
       "freeEnded": "La cancelación gratuita ha terminado",
       "meal": {
         "room_only": "Solo alojamiento",

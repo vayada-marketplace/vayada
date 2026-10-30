@@ -141,6 +141,7 @@
       "noRefund": "No refund if you cancel or don't arrive",
       "partialRefundTerms": "Part of the price is refunded if you cancel. See our terms on the next step",
       "windowPassed": "Free cancellation ends {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
+      "refundsPassed": "Refunds end {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
       "freeEnded": "Free cancellation has ended",
       "meal": {
         "room_only": "Room only",

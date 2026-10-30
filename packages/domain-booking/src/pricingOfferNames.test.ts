@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { pricingOfferNameKeys, publicOfferCancellation } from "./replacementPricingBrowser.js";
+import {
+  cancellationPolicy,
+  freeCancellationUntil,
+  lastRefundDays,
+  pricingOfferNameKeys,
+  publicOfferCancellation,
+} from "./replacementPricingBrowser.js";
 
 const flexible = (days: number, extra: Record<string, unknown> = {}) =>
   ({
@@ -47,6 +53,49 @@ describe("public offer cancellation", () => {
       ),
     ).toEqual({ kind: "non_refundable" });
   });
+
+  it("finds a partial refund's last refund day, as Review & pay ends refunds (VAY-2406)", () => {
+    const partial = (tiers: { minDaysBeforeCheckIn: number; refundPercent: number }[]) =>
+      flexible(30, { flexibleCancellationType: "partial_refund", partialRefundTiers: tiers });
+    // In any order; a 0% step adds nothing, before or after the refunds.
+    expect(
+      lastRefundDays(
+        partial([
+          { minDaysBeforeCheckIn: 3, refundPercent: 0 },
+          { minDaysBeforeCheckIn: 30, refundPercent: 100 },
+          { minDaysBeforeCheckIn: 7, refundPercent: 25 },
+          { minDaysBeforeCheckIn: 14, refundPercent: 50 },
+        ]),
+      ),
+    ).toBe(7);
+    expect(lastRefundDays(partial([{ minDaysBeforeCheckIn: 0, refundPercent: 50 }]))).toBe(0);
+    expect(lastRefundDays(partial([{ minDaysBeforeCheckIn: 14, refundPercent: 0 }]))).toBeNull();
+    expect(lastRefundDays(flexible(3))).toBeNull();
+    expect(lastRefundDays({ kind: "non_refundable" })).toBeNull();
+  });
+
+  it("ends refunds the day Review & pay starts saying no refund any more (VAY-2406)", () => {
+    const terms = flexible(30, {
+      flexibleCancellationType: "partial_refund",
+      // A 0% step between refunds, and one after the last.
+      partialRefundTiers: [
+        { minDaysBeforeCheckIn: 30, refundPercent: 100 },
+        { minDaysBeforeCheckIn: 14, refundPercent: 0 },
+        { minDaysBeforeCheckIn: 3, refundPercent: 25 },
+        { minDaysBeforeCheckIn: 1, refundPercent: 0 },
+      ],
+    });
+    const checkIn = "2026-11-20";
+    const last = freeCancellationUntil(checkIn, lastRefundDays(terms)!);
+    expect(last).toBe("2026-11-17");
+    for (const today of ["2026-11-10", "2026-11-16", last, "2026-11-18", "2026-11-19"]) {
+      const { badge } = cancellationPolicy(terms as never, { checkIn, today }, "10000", {
+        request: false,
+        card: false,
+      });
+      expect(badge.kind === "noRefund", today).toBe(today > last);
+    }
+  });
 });
 
 describe("offer name keys", () => {
@@ -66,6 +115,7 @@ describe("offer name keys", () => {
         { mealPlan: "breakfast", cancellation: null },
         { mealPlan: "breakfast", cancellation: undefined },
         { mealPlan: "room_only", cancellation: free },
+        { mealPlan: "half_board", cancellation: { kind: "partial_refund", days: 7 } },
       ]),
     ).toEqual([
       { meal: "room_only", cancellation: "free", days: 3, number: null },
@@ -77,6 +127,8 @@ describe("offer name keys", () => {
       { meal: "breakfast", cancellation: null, days: null, number: null },
       { meal: "breakfast", cancellation: null, days: null, number: 2 },
       { meal: "room_only", cancellation: "free", days: 3, number: 3 },
+      // A partial refund's last refund day, when known (VAY-2406).
+      { meal: "half_board", cancellation: "partial_refund", days: 7, number: 2 },
     ]);
   });
 });

@@ -141,6 +141,7 @@
       "noRefund": "Aucun remboursement en cas d'annulation ou de non-présentation",
       "partialRefundTerms": "En cas d'annulation, nous remboursons une partie du prix. Nos conditions sont à l'étape suivante",
       "windowPassed": "L'annulation gratuite prend fin {days, plural, one {# jour} other {# jours}} avant l'arrivée. Pour ces dates, aucun remboursement en cas d'annulation ou de non-présentation",
+      "refundsPassed": "Les remboursements prennent fin {days, plural, one {# jour} other {# jours}} avant l'arrivée. Pour ces dates, aucun remboursement en cas d'annulation ou de non-présentation",
       "freeEnded": "L'annulation gratuite est terminée",
       "meal": {
         "room_only": "Chambre seule",
