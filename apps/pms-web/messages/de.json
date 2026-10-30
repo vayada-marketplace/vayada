@@ -1368,7 +1368,7 @@
   "settings.checkIn.scope.all": "Alle Gäste",
   "settings.checkIn.scope.allHint": "Inklusive Kinder",
   "settings.checkIn.guestFields": "Gästefelder",
-  "settings.checkIn.guestFieldsHint": "In dieser Reihenfolge in jedem Gästeformular. Pflichtfelder entscheiden, wann ein Gast als „Registriert“ gilt.",
+  "settings.checkIn.guestFieldsHint": "In dieser Reihenfolge in jedem Gästeformular. Aus, Optional oder Pflicht legen Sie unter Einstellungen › Gästedaten fest (Geschlecht hier); Pflichtfelder entscheiden, wann ein Gast als „Registriert“ gilt.",
   "settings.checkIn.requiredCount": "{count} Pflicht",
   "settings.checkIn.optionalCount": "{count} optional",
   "settings.checkIn.hiddenCount": "{count} ausgeblendet",

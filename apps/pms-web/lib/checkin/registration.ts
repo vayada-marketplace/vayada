@@ -1,5 +1,6 @@
 import type { Booking, BookingAdditionalGuest, GuestRegistration } from "@/services/bookings";
 import type { CheckinGuestField, CheckinSettings } from "@/services/settings";
+import { forAdditionalGuests } from "@/lib/settings/checkinSettings";
 
 /** Registered: every required field is filled. ID missing: the names are there, the document isn't.
  * Details missing: anything else required is empty (VAY-2373, from Settings → Check-in). */
@@ -71,6 +72,8 @@ export function registrationGuests(input: {
   settings: Pick<CheckinSettings, "guestFields" | "registrationScope">;
 }): RegistrationGuest[] {
   const { booking, additionalGuests, registrations, settings } = input;
+  // Email and phone are required of the lead guest only (VAY-2420, Settings › Guest data).
+  const othersSettings = forAdditionalGuests(settings);
   const byGuest = new Map(registrations.map((entry) => [entry.guestId, entry]));
   const bookerRegistration =
     registrations.find((entry) => entry.role === "booker" || entry.role === "primary_guest") ??
@@ -103,7 +106,7 @@ export function registrationGuests(input: {
       firstName: guest.firstName,
       lastName: guest.lastName,
       registration,
-      ...guestRegistrationStatus(guest, registration?.filledFields ?? [], settings),
+      ...guestRegistrationStatus(guest, registration?.filledFields ?? [], othersSettings),
     };
   });
   const expected = expectedRegistrations(booking, settings);
@@ -111,7 +114,7 @@ export function registrationGuests(input: {
   const empty = guestRegistrationStatus(
     { firstName: "", lastName: "", email: "", phone: "", nationality: "" },
     [],
-    settings,
+    othersSettings,
   );
   const slots: RegistrationGuest[] = [];
   for (let index = 1 + others.length; index < expected; index += 1)

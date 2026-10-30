@@ -31,12 +31,7 @@ export function getPmsSettingsCards(
     card("property", "settings.navigation.property", HotelIcon, "/settings/property"),
     card("calendar", "settings.navigation.calendar", CalendarDaysIcon, "/settings/calendar"),
     card("checkIn", "settings.navigation.checkIn", KeyIcon, "/settings/check-in"),
-    card(
-      "guestData",
-      "settings.navigation.guestData",
-      IdentificationIcon,
-      "/settings/guest-data",
-    ),
+    card("guestData", "settings.navigation.guestData", IdentificationIcon, "/settings/guest-data"),
     card(
       "guestFlows",
       "settings.navigation.guestFlows",

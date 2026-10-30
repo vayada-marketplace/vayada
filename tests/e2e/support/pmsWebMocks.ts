@@ -360,11 +360,13 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       : route.fallback(),
   );
   // Settings › Guest data (VAY-2420): the defaults, which the owner may change.
-  await page.context().route("**/api/pms/properties/*/guest-data-settings", (route) =>
-    route.request().method() === "GET"
-      ? route.fulfill({ json: { settings: pmsWebGuestDataSettings, canManage: true } })
-      : route.fallback(),
-  );
+  await page
+    .context()
+    .route("**/api/pms/properties/*/guest-data-settings", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: { settings: pmsWebGuestDataSettings, canManage: true } })
+        : route.fallback(),
+    );
 
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({

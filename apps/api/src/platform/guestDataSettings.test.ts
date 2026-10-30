@@ -39,9 +39,9 @@ describe("guest data settings (VAY-2420)", () => {
     expect(parseGuestDataSettings({ ...valid, identityRetentionDays: null })).toMatchObject({
       identityRetentionDays: null,
     });
-    expect(
-      parseGuestDataSettings({ ...valid, fields: { ...valid.fields, email: "off" } }),
-    ).toMatch(/email can't be off/);
+    expect(parseGuestDataSettings({ ...valid, fields: { ...valid.fields, email: "off" } })).toMatch(
+      /email can't be off/,
+    );
     expect(parseGuestDataSettings({ ...valid, identityRetentionDays: 14 })).toMatch(/7, 30, 90/);
     expect(parseGuestDataSettings({ ...valid, matching: { email: true } })).toMatch(/matching/);
     expect(parseGuestDataSettings({ ...valid, extra: true })).toMatch(/Send fields/);

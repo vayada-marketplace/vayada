@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { CheckIcon, LockClosedIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import {
   type CheckinChecklistStep,
@@ -17,12 +18,15 @@ import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   CHECKIN_SETTLEMENT_OPTIONS,
+  DEFAULT_GUEST_DATA_FIELDS,
   checkinStepSummaries,
   guestFieldCounts,
   guestFieldLabel,
   setGuestField,
   settlementOptionLabel,
+  withGuestDataFields,
 } from "@/lib/settings/checkinSettings";
+import { guestDataSettingsService, type GuestDataSettings } from "@/services/guests";
 import { openBookingAdmin } from "@/lib/utils/bookingAdminLink";
 import { SettingsFeedback } from "./SettingsFeedback";
 import { SettingsSubPage } from "./SettingsSubPage";
@@ -72,8 +76,16 @@ export function CheckinSettingsEditor() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
+  // Settings › Guest data decides which fields are off, optional or required (VAY-2420).
+  const [guestDataFields, setGuestDataFields] = useState<GuestDataSettings["fields"] | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
+    guestDataSettingsService
+      .get()
+      .then((response) => setGuestDataFields(response.settings.fields))
+      .catch(() => undefined);
     Promise.all([
       settingsService.getCheckinSettings(),
       // Settings readers without operations access still get the settings.
@@ -171,10 +183,19 @@ export function CheckinSettingsEditor() {
             </p>
           )}
           <FlowOverview
-            summaries={checkinStepSummaries(settings, soldAddons.length, checks.length, t)}
+            summaries={checkinStepSummaries(
+              withGuestDataFields(settings, guestDataFields),
+              soldAddons.length,
+              checks.length,
+              t,
+            )}
           />
           <ArrivalSection settings={settings} onChange={update} />
-          <RoomsAndGuestsSection settings={settings} onChange={update} />
+          <RoomsAndGuestsSection
+            settings={settings}
+            guestDataFields={guestDataFields}
+            onChange={update}
+          />
           <AddonsAndPaymentSection
             settings={settings}
             catalog={catalog}
@@ -398,13 +419,17 @@ function ArrivalSection({
 
 function RoomsAndGuestsSection({
   settings,
+  guestDataFields,
   onChange,
 }: {
   settings: CheckinSettings;
+  guestDataFields: GuestDataSettings["fields"] | undefined;
   onChange: (next: CheckinSettings) => void;
 }) {
   const { t } = useTranslation();
-  const counts = guestFieldCounts(settings);
+  // What check-in asks: Guest data's statuses over this page's Show switches.
+  const asked = withGuestDataFields(settings, guestDataFields);
+  const counts = guestFieldCounts(asked);
   return (
     <Section step={2}>
       <SwitchRow
@@ -502,6 +527,11 @@ function RoomsAndGuestsSection({
             ))}
             {settings.guestFields.map((entry) => {
               const label = guestFieldLabel(entry.field, t);
+              // Gender is check-in's own; every other field's status lives in Guest data.
+              const status =
+                entry.field === "gender"
+                  ? null
+                  : (guestDataFields ?? DEFAULT_GUEST_DATA_FIELDS)[entry.field];
               return (
                 <tr key={entry.field} className="border-t border-gray-200">
                   <th scope="row" className="px-4 py-3 font-normal md:px-6">
@@ -514,19 +544,29 @@ function RoomsAndGuestsSection({
                   </th>
                   <td className="px-2 py-3">
                     <Switch
-                      checked={entry.show}
+                      checked={entry.show && status !== "off"}
                       label={t("settings.checkIn.showField", { field: label })}
+                      disabled={status === "off"}
                       onChange={(show) => onChange(setGuestField(settings, entry.field, { show }))}
                     />
                   </td>
                   <td className="px-2 py-3 pr-4 md:pr-6">
-                    <Switch
-                      checked={entry.required}
-                      label={t("settings.checkIn.requireField", { field: label })}
-                      onChange={(required) =>
-                        onChange(setGuestField(settings, entry.field, { required }))
-                      }
-                    />
+                    {status ? (
+                      <Link
+                        href="/settings/guest-data"
+                        className="text-xs font-semibold text-primary-700 hover:underline"
+                      >
+                        {t(`settings.guestData.status.${status}`)}
+                      </Link>
+                    ) : (
+                      <Switch
+                        checked={entry.required}
+                        label={t("settings.checkIn.requireField", { field: label })}
+                        onChange={(required) =>
+                          onChange(setGuestField(settings, entry.field, { required }))
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               );

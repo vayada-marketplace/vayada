@@ -14,7 +14,10 @@ import {
 const CARD = "bg-white border border-[#E4E7EC] rounded-2xl";
 const STATUSES: GuestFieldStatus[] = ["off", "optional", "required"];
 const GROUPS: { titleKey: string; fields: (GuestDataField | "firstName" | "lastName")[] }[] = [
-  { titleKey: "settings.guestData.groupContact", fields: ["firstName", "lastName", "email", "phone"] },
+  {
+    titleKey: "settings.guestData.groupContact",
+    fields: ["firstName", "lastName", "email", "phone"],
+  },
   {
     titleKey: "settings.guestData.groupIdentity",
     fields: ["nationality", "dateOfBirth", "documentType", "documentNumber"],
@@ -53,8 +56,7 @@ export default function GuestDataSettingsPage() {
     );
   };
 
-  const fieldLabel = (field: string) =>
-    t(`settings.checkIn.field.${field}`);
+  const fieldLabel = (field: string) => t(`settings.checkIn.field.${field}`);
 
   return (
     <SettingsSubPage

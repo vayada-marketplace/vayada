@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { CheckinSettings } from "@/services/settings";
-import { checkinStepSummaries, guestFieldCounts, setGuestField } from "./checkinSettings";
+import {
+  DEFAULT_GUEST_DATA_FIELDS,
+  checkinStepSummaries,
+  forAdditionalGuests,
+  guestFieldCounts,
+  setGuestField,
+  withGuestDataFields,
+} from "./checkinSettings";
 
 const defaults: CheckinSettings = {
   showSpecialRequest: true,
@@ -65,5 +72,39 @@ describe("Settings → Check-in helpers (VAY-2374)", () => {
       "settings.checkIn.summary.addonsOff",
       "settings.checkIn.summary.noKeys(0)",
     ]);
+  });
+
+  it("asks the fields Settings › Guest data keeps, as it marks them (VAY-2420)", () => {
+    const field = (settings: CheckinSettings, name: string) =>
+      settings.guestFields.find((entry) => entry.field === name)!;
+    // The defaults ask what check-in asked before.
+    expect(withGuestDataFields(defaults).guestFields).toEqual(defaults.guestFields);
+    const applied = withGuestDataFields(
+      {
+        ...defaults,
+        guestFields: defaults.guestFields.map((entry) =>
+          entry.field === "dateOfBirth" ? { ...entry, show: false } : entry,
+        ),
+      },
+      {
+        ...DEFAULT_GUEST_DATA_FIELDS,
+        email: "required",
+        phone: "off",
+        documentNumber: "optional",
+      },
+    );
+    expect(field(applied, "email")).toEqual({ field: "email", show: true, required: true });
+    expect(field(applied, "phone")).toEqual({ field: "phone", show: false, required: false });
+    expect(field(applied, "documentNumber").required).toBe(false);
+    // Check-in's Show still decides whether it asks; gender stays the check-in's own.
+    expect(field(applied, "dateOfBirth")).toEqual({
+      field: "dateOfBirth",
+      show: false,
+      required: false,
+    });
+    expect(field(applied, "gender")).toEqual(field(defaults, "gender"));
+    // Email and phone are required of the lead guest only.
+    expect(field(forAdditionalGuests(applied), "email").required).toBe(false);
+    expect(field(forAdditionalGuests(applied), "documentType").required).toBe(true);
   });
 });

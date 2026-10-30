@@ -1361,7 +1361,7 @@
   "settings.checkIn.scope.all": "All guests",
   "settings.checkIn.scope.allHint": "Including children",
   "settings.checkIn.guestFields": "Guest fields",
-  "settings.checkIn.guestFieldsHint": "Shown in this order on every guest form. Required fields decide when a guest counts as “Registered”.",
+  "settings.checkIn.guestFieldsHint": "Shown in this order on every guest form. Off, Optional or Required is set in Settings › Guest data (gender here); required fields decide when a guest counts as “Registered”.",
   "settings.checkIn.requiredCount": "{count} required",
   "settings.checkIn.optionalCount": "{count} optional",
   "settings.checkIn.hiddenCount": "{count} hidden",
