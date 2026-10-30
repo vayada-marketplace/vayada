@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { PMS_WEB_PROPERTY_ID, PMS_WEB_RESERVATION_ID } from "../support/pmsWebMocks";
+import {
+  PMS_WEB_PROPERTY_ID,
+  PMS_WEB_RESERVATION_ID,
+  pmsWebReservation,
+} from "../support/pmsWebMocks";
 import { TIMO, TIMO_TWIN, mockGuests } from "../support/guestProfileMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -163,6 +167,7 @@ test("keeps staff notes on the guest and shows them on their reservation (VAY-24
   for (const path of ["notes", "additional-guests"])
     await page.route(`${reservation}/${path}`, (route) => route.fulfill({ json: { items: [] } }));
   await page.route(`${reservation}/change-request`, (route) => route.fulfill({ json: null }));
+  await page.route(reservation, (route) => route.fulfill({ json: { item: pmsWebReservation } }));
   await page.route(`${reservation}/guest-profiles`, (route) =>
     route.fulfill({
       json: {
