@@ -132,6 +132,55 @@ describe("room choices", () => {
     ]);
   });
 
+  it("names a partial refund non-refundable once its last refund day has passed (VAY-2406)", () => {
+    const partial = (days?: number) => ({
+      kind: "partial_refund" as const,
+      ...(days !== undefined && { days }),
+    });
+    const keys = choiceKeys([offer("half_board", partial(7))])[0]!;
+    // Refunds until 7 days before arrival; that last day itself still refunds.
+    expect(choiceText(keys, { ...stay, checkIn: "2026-10-21" }, t, now)).toMatchObject({
+      name: "Half board, partial refund",
+      refundable: true,
+      cancellationPassed: false,
+    });
+    const passed =
+      "Refunds end 7 days before arrival. For these dates, no refund if you cancel or don't arrive";
+    expect(choiceText(keys, { ...stay, checkIn: "2026-10-20" }, t, now)).toEqual({
+      name: "Half board, non-refundable",
+      terms: `Breakfast and dinner every day · ${passed}`,
+      meal: "Half board",
+      cancellationTerms: passed,
+      refundable: false,
+      cancellationPassed: true,
+    });
+    // Numbered after the room's own non-refundable choice, as a passed free cancellation is.
+    const inside = { ...stay, checkIn: "2026-10-20" };
+    expect(
+      choiceKeys(
+        [offer("room_only", partial(7)), offer("room_only", { kind: "non_refundable" })],
+        inside,
+        now,
+      ).map((k) => choiceText(k, inside, t, now).name),
+    ).toEqual(["Non-refundable 2", "Non-refundable"]);
+    // An older API without the day: still a partial refund.
+    const older = choiceKeys([offer("half_board", partial())])[0]!;
+    expect(choiceText(older, inside, t, now)).toMatchObject({
+      name: "Half board, partial refund",
+      cancellationPassed: false,
+    });
+    const roomOnly = choiceKeys([offer("room_only", partial(7))])[0]!;
+    for (const [locale, messages] of Object.entries({ de, en, es, fr, id })) {
+      const tl = translator(locale, messages);
+      const text = choiceText(roomOnly, inside, tl, now);
+      expect(text.name, locale).toBe(tl("choice.nonRefundable"));
+      expect(text.terms, locale).toMatch(/7/);
+      expect(text.terms, locale).not.toMatch(/[{}#]/);
+      // Refunds end, not free cancellation: the rate never had free cancellation.
+      expect(text.terms, locale).not.toBe(tl("choice.windowPassed", { days: 7 }));
+    }
+  });
+
   it("judges the deadline on the hotel's calendar, not UTC's (VAY-2392)", () => {
     // Free until the 15th; 20:00 UTC on the 15th is already the 16th in Colombo.
     const keys = choiceKeys([offer("room_only", free(3))])[0]!;

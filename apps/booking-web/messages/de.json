@@ -141,6 +141,7 @@
       "noRefund": "Keine Erstattung bei Stornierung oder Nichterscheinen",
       "partialRefundTerms": "Bei Stornierung erstatten wir einen Teil des Preises. Unsere Bedingungen sehen Sie im nächsten Schritt",
       "windowPassed": "Die kostenlose Stornierung endet {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
+      "refundsPassed": "Erstattungen enden {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
       "freeEnded": "Die kostenlose Stornierung ist abgelaufen",
       "meal": {
         "room_only": "Nur Zimmer",

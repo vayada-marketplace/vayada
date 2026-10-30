@@ -1,4 +1,5 @@
 import {
+  lastRefundDays,
   publicOfferCancellation,
   type PricingPaymentMethod,
   type PublicOfferCancellation,
@@ -72,7 +73,8 @@ export function publicOfferMealDescriptions(owner: Owner): ReadonlyMap<string, s
 }
 
 /** Each offer's cancellation as guests may see it before a quote, by public offer key, so the booking page can name
- * options "Free cancellation" or "Non-refundable" (VAY-2188). An offer without its exact terms has no entry. */
+ * options "Free cancellation" or "Non-refundable" (VAY-2188). A partial refund adds its last refund day, so a stay
+ * past it reads as no refund (VAY-2406). An offer without its exact terms has no entry. */
 export function publicOfferCancellations(
   owner: Owner,
 ): ReadonlyMap<string, PublicOfferCancellation> {
@@ -89,8 +91,15 @@ export function publicOfferCancellations(
       const binding = bindings.find(
         (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
       );
-      if (terms && binding)
-        cancellations.set(binding.publicOfferKey, publicOfferCancellation(terms.cancellation));
+      if (!terms || !binding) continue;
+      const cancellation = publicOfferCancellation(terms.cancellation);
+      const days = lastRefundDays(terms.cancellation);
+      cancellations.set(
+        binding.publicOfferKey,
+        cancellation.kind === "partial_refund" && days !== null
+          ? { ...cancellation, days }
+          : cancellation,
+      );
     }
   return cancellations;
 }

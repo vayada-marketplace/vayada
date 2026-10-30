@@ -347,3 +347,40 @@ it("reads each rate's ways to pay and the ways all chosen rates take (VAY-2309)"
   // An older API without the field: unknown.
   expect(chosenRatesPaymentMethods(rooms, choices())).toBeNull();
 });
+
+it("keeps a partial refund's last refund day, when the API sends one (VAY-2406)", async () => {
+  const offer = (letter: string, cancellation: unknown) => ({
+    publicOfferKey: `pricing-offer.v2:${letter.repeat(64)}`,
+    currency: "EUR",
+    mealPlan: "room_only",
+    cancellation,
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          version: "public-pricing-offers.v1",
+          rooms: [
+            {
+              roomTypeId: "suite",
+              name: "Suite",
+              offers: [
+                offer("a", { kind: "partial_refund", days: 7 }),
+                // An older API, and a malformed day: the rate still reads as a partial refund.
+                offer("b", { kind: "partial_refund" }),
+                offer("c", { kind: "partial_refund", days: -1 }),
+              ],
+            },
+          ],
+        }),
+      ),
+    ),
+  );
+  const [suite] = await getReplacementOffers("hotel");
+  expect(suite!.offers.map((o) => o.cancellation)).toEqual([
+    { kind: "partial_refund", days: 7 },
+    { kind: "partial_refund" },
+    { kind: "partial_refund" },
+  ]);
+});
