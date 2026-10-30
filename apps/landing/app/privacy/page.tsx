@@ -137,6 +137,8 @@ export default function PrivacyPage() {
                           messages that you enter or that arrive through your booking site or
                           connected channels, and the registration details your staff record at
                           check-in (date of birth, identity document, gender, room and staff notes).
+                          Each guest&apos;s details and bookings are brought together in one guest
+                          profile per Hotel account, with staff-only guest notes.
                         </td>
                         <td className={TD}>
                           Processed on the Hotel&apos;s behalf and instructions as its processor
@@ -544,7 +546,19 @@ export default function PrivacyPage() {
                     identity document, your gender, which room you sleep in and internal notes, for
                     example to meet local guest registration rules (Article 6(1) lit. c GDPR) and to
                     look after your stay (Article 6(1) lit. b GDPR). Only the hotel&apos;s staff see
-                    this data, and the hotel keeps it as long as it keeps your booking.
+                    this data. The hotel can have the type and number of your identity document
+                    deleted 7, 30 or 90 days after you check out; otherwise it keeps them, like the
+                    rest, as long as it keeps your guest profile.
+                  </li>
+                  <li>
+                    <strong>Your guest profile (at the hotel): </strong>the hotel keeps one guest
+                    profile for you across its properties. A new booking joins it when your name and
+                    your email address or phone number match an earlier one. The profile holds your
+                    name, contact details, nationality, date of birth and identity document, your
+                    past and upcoming stays, and notes the hotel&apos;s staff keep for your next
+                    visit, such as preferences. The hotel uses it to recognise you and look after
+                    your stays (Article 6(1) lit. b and f GDPR). Only the hotel&apos;s staff see it,
+                    and the hotel can correct it or separate bookings that aren&apos;t yours.
                   </li>
                   <li>
                     <strong>What you agreed to: </strong>when you book, we keep a record with your
