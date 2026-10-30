@@ -54,8 +54,12 @@ export default function GuestDataSettingsPage() {
     const save = ++latest.current;
     queue.current = queue.current.then(() =>
       guestDataSettingsService.save(next).then(
-        () => save === latest.current && setState("idle"),
-        () => save === latest.current && setState("failed"),
+        () => {
+          if (save === latest.current) setState("idle");
+        },
+        () => {
+          if (save === latest.current) setState("failed");
+        },
       ),
     );
   };
