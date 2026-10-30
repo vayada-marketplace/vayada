@@ -546,19 +546,22 @@ export default function PrivacyPage() {
                     identity document, your gender, which room you sleep in and internal notes, for
                     example to meet local guest registration rules (Article 6(1) lit. c GDPR) and to
                     look after your stay (Article 6(1) lit. b GDPR). Only the hotel&apos;s staff see
-                    this data. The hotel can have the type and number of your identity document
-                    deleted 7, 30 or 90 days after you check out; otherwise it keeps them, like the
-                    rest, as long as it keeps your guest profile.
+                    this data. Your date of birth and identity document are kept on your guest
+                    profile (below); the hotel can have the document&apos;s type and number deleted
+                    7, 30 or 90 days after your last stay with it ends. Your gender, room and the
+                    staff&apos;s notes for the stay are kept with your booking.
                   </li>
                   <li>
                     <strong>Your guest profile (at the hotel): </strong>the hotel keeps one guest
-                    profile for you across its properties. A new booking joins it when your name and
-                    your email address or phone number match an earlier one. The profile holds your
-                    name, contact details, nationality, date of birth and identity document, your
-                    past and upcoming stays, and notes the hotel&apos;s staff keep for your next
-                    visit, such as preferences. The hotel uses it to recognise you and look after
-                    your stays (Article 6(1) lit. b and f GDPR). Only the hotel&apos;s staff see it,
-                    and the hotel can correct it or separate bookings that aren&apos;t yours.
+                    profile for you across its properties. A new booking can join it when your name
+                    and your email address or phone number match an earlier one; the hotel&apos;s
+                    staff can also join profiles, separate bookings that aren&apos;t yours and
+                    correct details. The profile holds your name, contact details, nationality, date
+                    of birth and identity document, your past and upcoming stays, and notes the
+                    hotel&apos;s staff keep for your next visit, such as preferences. The hotel uses
+                    it to recognise you and look after your stays (Article 6(1) lit. b and f GDPR).
+                    Only the hotel&apos;s staff see it, and the hotel keeps it as long as it keeps
+                    bookings of yours.
                   </li>
                   <li>
                     <strong>What you agreed to: </strong>when you book, we keep a record with your
