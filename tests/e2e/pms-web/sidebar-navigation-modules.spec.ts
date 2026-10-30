@@ -102,7 +102,9 @@ test("adds and removes Inbox and Reviews in the sidebar as the Feature Hub switc
   await page.getByRole("switch", { name: "Activate Reviews" }).click();
   await expect(navigation.getByRole("link", { name: /Reviews/ })).toBeVisible();
   const order = await sidebarLinks(page);
-  expect(order.indexOf("/inbox")).toBe(order.indexOf("/bookings") + 1);
+  // Reservations, then Guests (VAY-2420), then the switched modules.
+  expect(order.indexOf("/guests")).toBe(order.indexOf("/bookings") + 1);
+  expect(order.indexOf("/inbox")).toBe(order.indexOf("/guests") + 1);
   expect(order.indexOf("/reviews")).toBe(order.indexOf("/inbox") + 1);
   await expect.poll(unreadReads).toBeGreaterThan(0);
   await expect(navigation.getByRole("link", { name: /Inbox/ })).toContainText("2");
