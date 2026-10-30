@@ -604,6 +604,13 @@ async function cleanup(pool: pg.Pool): Promise<void> {
          AND NOT EXISTS (SELECT 1 FROM booking.booking_guests guest WHERE guest.guest_profile_id = profile.id)`,
       [profiles.rows.map(({ id }) => id)],
     );
+    // The retention job's audit rows name these properties. Replica mode skips the audit log's
+    // append-only trigger (and FK cascades, so this comes after the bookings are gone).
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      "DELETE FROM platform.product_audit_events WHERE property_id = ANY($1::uuid[])",
+      [properties],
+    );
     await client.query(
       "DELETE FROM identity.organization_resource_links WHERE resource_id = ANY($1::text[])",
       [properties],
