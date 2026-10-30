@@ -4218,12 +4218,14 @@
   "settings.guestData.match.phone": "Same phone number",
   "settings.guestData.match.phoneHint": "Compared after formatting, e.g. +49 157 35490950",
   "settings.guestData.retentionTitle": "Identity data retention",
-  "settings.guestData.retentionDescription": "Document type and number are removed from the guest profile after check-out. Contact data, nationality, notes and stay history stay.",
+  "settings.guestData.retentionDescription": "Document type and number are removed from the guest profile the chosen number of days after the guest's last stay ends. Contact data, date of birth, nationality, notes and stay history stay.",
   "settings.guestData.retentionLabel": "Delete identity documents",
   "settings.guestData.retentionDays": "{days} days after check-out",
   "settings.guestData.retentionKeep": "Keep until deleted manually",
   "guests.manageFields": "Manage fields",
   "settings.guestData.retry": "Try again",
   "settings.checkIn.guestDataStatus": "{field}: {status} in Guest data",
-  "settings.checkIn.guestDataUnavailable": "Set in Guest data"
+  "settings.checkIn.guestDataUnavailable": "Set in Guest data",
+  "settings.guestData.retentionConfirm": "Document type and number of every guest whose last stay ended more than {days} days ago are deleted within the hour. This can't be undone.",
+  "settings.guestData.retentionConfirmYes": "Delete after {days} days"
 }

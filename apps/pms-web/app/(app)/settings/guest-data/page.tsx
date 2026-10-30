@@ -31,6 +31,8 @@ export default function GuestDataSettingsPage() {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<GuestDataSettings | null>(null);
   const [canManage, setCanManage] = useState(false);
+  // A shorter retention waiting for the owner to confirm it.
+  const [pendingRetention, setPendingRetention] = useState<7 | 30 | 90 | null>(null);
   const [state, setState] = useState<"idle" | "saving" | "failed" | "loadFailed">("idle");
   // Saves run one after another, so the last change wins; only the latest one sets the status.
   const queue = useRef(Promise.resolve());
@@ -254,17 +256,22 @@ export default function GuestDataSettingsPage() {
               <label className="flex flex-col gap-1.5 text-sm font-medium text-[#101828]">
                 {t("settings.guestData.retentionLabel")}
                 <select
-                  value={settings.identityRetentionDays ?? "keep"}
+                  value={pendingRetention ?? settings.identityRetentionDays ?? "keep"}
                   disabled={!canManage}
-                  onChange={(event) =>
-                    change({
-                      ...settings,
-                      identityRetentionDays:
-                        event.target.value === "keep"
-                          ? null
-                          : (Number(event.target.value) as 7 | 30 | 90),
-                    })
-                  }
+                  onChange={(event) => {
+                    const days =
+                      event.target.value === "keep"
+                        ? null
+                        : (Number(event.target.value) as 7 | 30 | 90);
+                    const current = settings.identityRetentionDays;
+                    // Deleting sooner removes past guests' documents within the hour: ask first.
+                    if (days !== null && (current === null || days < current))
+                      setPendingRetention(days);
+                    else {
+                      setPendingRetention(null);
+                      change({ ...settings, identityRetentionDays: days });
+                    }
+                  }}
                   className="h-11 max-w-[280px] rounded-[10px] border border-[#D0D5DD] bg-white px-3 text-sm font-normal text-[#101828] disabled:bg-gray-50"
                 >
                   {[7, 30, 90].map((days) => (
@@ -275,6 +282,33 @@ export default function GuestDataSettingsPage() {
                   <option value="keep">{t("settings.guestData.retentionKeep")}</option>
                 </select>
               </label>
+              {pendingRetention !== null && (
+                <div
+                  role="alert"
+                  className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+                >
+                  <p>{t("settings.guestData.retentionConfirm", { days: pendingRetention })}</p>
+                  <div className="mt-2 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        change({ ...settings, identityRetentionDays: pendingRetention });
+                        setPendingRetention(null);
+                      }}
+                      className="font-semibold text-amber-900 underline"
+                    >
+                      {t("settings.guestData.retentionConfirmYes", { days: pendingRetention })}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingRetention(null)}
+                      className="font-semibold text-[#344054] hover:underline"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           </div>
         </div>

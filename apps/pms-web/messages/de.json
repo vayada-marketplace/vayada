@@ -4232,12 +4232,14 @@
   "settings.guestData.match.phone": "Gleiche Telefonnummer",
   "settings.guestData.match.phoneHint": "Nach dem Formatieren verglichen, z. B. +49 157 35490950",
   "settings.guestData.retentionTitle": "Aufbewahrung von Ausweisdaten",
-  "settings.guestData.retentionDescription": "Dokumentart und -nummer werden nach dem Check-out aus dem Gastprofil entfernt. Kontaktdaten, Nationalität, Notizen und Aufenthalte bleiben.",
+  "settings.guestData.retentionDescription": "Dokumentart und -nummer werden die gewählte Anzahl Tage nach dem Ende des letzten Aufenthalts aus dem Gastprofil entfernt. Kontaktdaten, Geburtsdatum, Nationalität, Notizen und Aufenthalte bleiben.",
   "settings.guestData.retentionLabel": "Ausweisdaten löschen",
   "settings.guestData.retentionDays": "{days} Tage nach dem Check-out",
   "settings.guestData.retentionKeep": "Behalten, bis sie von Hand gelöscht werden",
   "guests.manageFields": "Felder verwalten",
   "settings.guestData.retry": "Erneut versuchen",
   "settings.checkIn.guestDataStatus": "{field}: {status} in Gästedaten",
-  "settings.checkIn.guestDataUnavailable": "In Gästedaten festgelegt"
+  "settings.checkIn.guestDataUnavailable": "In Gästedaten festgelegt",
+  "settings.guestData.retentionConfirm": "Dokumentart und -nummer aller Gäste, deren letzter Aufenthalt vor mehr als {days} Tagen endete, werden innerhalb einer Stunde gelöscht. Das lässt sich nicht rückgängig machen.",
+  "settings.guestData.retentionConfirmYes": "Nach {days} Tagen löschen"
 }

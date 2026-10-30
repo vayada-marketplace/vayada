@@ -47,7 +47,11 @@ test("saves each guest data change at once, and keeps email on (VAY-2420)", asyn
     .getByRole("radio", { name: "Off" })
     .click();
   await page.getByRole("switch", { name: "Same email address" }).click();
+  // Deleting documents sooner asks first: past guests' documents go within the hour.
   await page.getByRole("combobox", { name: "Delete identity documents" }).selectOption("30");
+  await expect(page.getByRole("alert")).toContainText("deleted within the hour");
+  await expect.poll(() => saved.length).toBe(2);
+  await page.getByRole("button", { name: "Delete after 30 days" }).click();
   await expect.poll(() => saved.length).toBe(3);
   expect(saved.at(-1)).toEqual({
     fields: { ...pmsWebGuestDataSettings.fields, phone: "off" },
