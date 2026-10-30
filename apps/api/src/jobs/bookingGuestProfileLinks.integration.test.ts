@@ -318,7 +318,36 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
         [[olga, ravi]],
       );
 
-      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toMatchObject({ profiles: 1 });
+      // A check-in registration of a guest not linked yet keeps its own documents until then.
+      const unlinked = await book(
+        propertyA,
+        {},
+        { first: "Lea", last: "Roth", email: "l@example.test" },
+      );
+      await admin.query(
+        "UPDATE booking.guest_bookings SET check_in = '2027-08-01', check_out = '2027-08-05' WHERE id = $1::uuid",
+        [unlinked.bookingId],
+      );
+      await admin.query(
+        `INSERT INTO pms.guest_registrations
+           (booking_guest_id, property_id, guest_booking_id, document_type, document_number, gender)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'national_id', 'R998877', 'female')`,
+        [unlinked.guestIds[0], propertyA, unlinked.bookingId],
+      );
+
+      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toEqual({
+        profiles: 1,
+        registrations: 1,
+      });
+      expect(
+        (
+          await admin.query(
+            `SELECT document_type, document_number, gender FROM pms.guest_registrations
+             WHERE booking_guest_id = $1::uuid`,
+            [unlinked.guestIds[0]],
+          )
+        ).rows[0],
+      ).toEqual({ document_type: null, document_number: null, gender: "female" });
       const documents = await admin.query<{
         id: string;
         documentNumber: string | null;
@@ -332,16 +361,27 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
         [olga]: { id: olga, documentNumber: null, birth: "1980-02-03" },
         [ravi]: { id: ravi, documentNumber: "X1234567", birth: "1980-02-03" },
       });
-      const audit = await admin.query<{ payload: unknown }>(
-        `SELECT redacted_payload AS payload FROM platform.product_audit_events
-         WHERE action = 'pms.guest_profile.identity_removed' AND target_resource_id = $1`,
-        [olga],
+      const audit = await admin.query<{ action: string; property: string; payload: unknown }>(
+        `SELECT action, property_id::text AS property, redacted_payload AS payload
+         FROM platform.product_audit_events
+         WHERE target_resource_id = ANY($1::text[]) AND actor_type = 'system'
+         ORDER BY action`,
+        [[olga, unlinked.guestIds[0]]],
       );
+      const removed = { fields: ["documentType", "documentNumber"], retentionDays: 30 };
       expect(audit.rows).toEqual([
-        { payload: { fields: ["documentType", "documentNumber"], retentionDays: 30 } },
+        { action: "pms.guest_profile.identity_removed", property: propertyA, payload: removed },
+        {
+          action: "pms.guest_registration.identity_removed",
+          property: propertyA,
+          payload: removed,
+        },
       ]);
       // Nothing left to remove: the next run changes nothing.
-      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toMatchObject({ profiles: 0 });
+      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toEqual({
+        profiles: 0,
+        registrations: 0,
+      });
     } finally {
       await retention.close();
       await admin.query("DELETE FROM booking.guest_data_settings WHERE account_id = $1::uuid", [
