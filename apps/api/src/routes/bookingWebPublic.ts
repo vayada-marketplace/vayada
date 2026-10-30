@@ -4292,8 +4292,9 @@ export async function loadTargetBooking(
            ) selection
          )
      ) booked_names ON TRUE
-     -- VAY-2408: the booked extras' lines as the PMS reads them (one per night or day, VAY-2391). A
-     -- per-guest extra counts its guests, as checkout showed it.
+     -- VAY-2408: the booked extras' lines as the PMS reads them (one per night or day, VAY-2391), in
+     -- checkout's order (the catalogue's, by id; one booking writes its lines at once). A per-guest
+     -- extra counts its guests, as checkout showed it.
      LEFT JOIN LATERAL (
        SELECT COALESCE(jsonb_agg(jsonb_build_object(
                 'addonId', item.addon_key,
@@ -4304,7 +4305,8 @@ export async function loadTargetBooking(
                     THEN jsonb_array_length(active_selection.addon_snapshot->'selection'->'people')
                   ELSE item.quantity END,
                 'serviceDates', item.service_dates
-              ) ORDER BY item.created_at, item.selection_id, item.item_ordinality), '[]'::jsonb) AS items
+              ) ORDER BY item.created_at, active_selection.addon_definition_id, item.selection_id,
+                item.item_ordinality), '[]'::jsonb) AS items
        FROM booking.booking_addon_selection_items item
        JOIN booking.active_booking_addon_selections active_selection
          ON active_selection.id = item.selection_id

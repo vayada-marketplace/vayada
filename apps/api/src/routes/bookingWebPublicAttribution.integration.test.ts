@@ -184,12 +184,10 @@ describe.skipIf(!TEST_DATABASE_URL)(
           return response.json();
         };
         const booked = await lookup("VAY-2408-EXTRAS");
+        // In checkout's order (the catalogue's, by add-on id), though all lines were written at once.
         // The partner spa's id is its source add-on id, as the PMS shows it.
-        expect(
-          Object.fromEntries(
-            (booked.addonIds as string[]).map((id, index) => [id, booked.addonNames[index]]),
-          ),
-        ).toEqual({ [breakfastId]: "Garden breakfast", spa_partner: "Partner spa" });
+        expect(booked.addonIds).toEqual(["spa_partner", breakfastId]);
+        expect(booked.addonNames).toEqual(["Partner spa", "Garden breakfast"]);
         expect(booked.addonQuantities).toEqual({ [breakfastId]: 2, spa_partner: 2 });
         expect(booked.addonDates).toEqual({
           [breakfastId]: ["2027-02-01", "2027-02-02"],
