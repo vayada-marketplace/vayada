@@ -133,3 +133,52 @@ it("names what it can't read as unknown and leaves other bookings unchanged", ()
   delete unread["bookedRoomNames"];
   expect(serializeTargetBooking(unread as TargetBookingRow)).not.toHaveProperty("bookedRooms");
 });
+
+// VAY-2408: the lookup lists each booked extra once, with its quantity and days, as the PMS does.
+it("groups the booked extras' lines per extra", () => {
+  const extras = serializeTargetBooking(
+    row({
+      bookedAddons: [
+        {
+          addonId: "breakfast",
+          name: "Garden breakfast",
+          quantity: 2,
+          serviceDates: ["2026-11-11"],
+        },
+        { addonId: "late", name: "Late check-out", quantity: 1, serviceDates: ["2026-11-12"] },
+        {
+          addonId: "breakfast",
+          name: "Garden breakfast",
+          quantity: 2,
+          serviceDates: ["2026-11-10"],
+        },
+        // Older bookings' lines that differ add up.
+        { addonId: "transfer", name: "Transfer", quantity: 1, serviceDates: ["2026-11-10"] },
+        { addonId: "transfer", name: "Transfer", quantity: 2, serviceDates: ["2026-11-10"] },
+        { addonId: "bottle", name: "Welcome bottle", quantity: 1, serviceDates: [] },
+        { addonId: "broken", name: "", quantity: 1, serviceDates: [] },
+      ],
+    }),
+  );
+  expect(extras).toMatchObject({
+    addonIds: ["breakfast", "late", "transfer", "bottle"],
+    addonNames: ["Garden breakfast", "Late check-out", "Transfer", "Welcome bottle"],
+    addonQuantities: { breakfast: 2, late: 1, transfer: 3, bottle: 1 },
+    addonDates: {
+      breakfast: ["2026-11-10", "2026-11-11"],
+      late: ["2026-11-12"],
+      transfer: ["2026-11-10"],
+      bottle: [],
+    },
+  });
+});
+
+it("sends empty extras for a booking without, and none from loaders that don't read them", () => {
+  expect(serializeTargetBooking(row({ bookedAddons: [] }))).toMatchObject({
+    addonIds: [],
+    addonNames: [],
+    addonQuantities: {},
+    addonDates: {},
+  });
+  expect(serializeTargetBooking(row())).not.toHaveProperty("addonIds");
+});

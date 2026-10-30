@@ -181,6 +181,36 @@ for (const status of ["pending", "confirmed"] as const) {
   });
 }
 
+// VAY-2408: opened from the email in a fresh browser (nothing saved from checkout), the page lists
+// the extras the lookup sends, with their days, as right after checkout.
+test("lists the booked extras and their days from the lookup", async ({ page }) => {
+  await mockBookingApis(page);
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/bookings/lookup`, (route) =>
+    route.fulfill({
+      json: {
+        ...booking,
+        checkIn: "2026-11-05",
+        checkOut: "2026-11-08",
+        balanceAmount: 0,
+        addonIds: ["breakfast", "late-checkout"],
+        addonNames: ["Garden breakfast", "Late check-out"],
+        addonQuantities: { breakfast: 2, "late-checkout": 1 },
+        addonDates: {
+          breakfast: ["2026-11-05", "2026-11-06", "2026-11-07"],
+          "late-checkout": ["2026-11-08"],
+        },
+      },
+    }),
+  );
+
+  await page.goto(`/booking/VAY-1268?email=${encodeURIComponent(booking.guestEmail)}`);
+
+  await expect(page.getByTestId("confirmation-addons").getByRole("listitem")).toHaveText([
+    /^Garden breakfast.*× 2.*5 Nov – 7 Nov$/,
+    /^Late check-out.*Sun 8 Nov$/,
+  ]);
+});
+
 test("keeps booking lookup failures generic", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 360 });
   await mockBookingApis(page);
