@@ -11,6 +11,21 @@ const lateCheckOut = "44444444-4444-4444-8444-444444444444";
 const reference = "VAY-66666666666646668666666666666666";
 const STAY = `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&offer=${offerKey}`;
 
+// Resolves once the window has stopped scrolling: a smooth scrollIntoView takes several frames.
+async function scrollSettled(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          new Promise<boolean>((resolve) => {
+            const from = window.scrollY;
+            setTimeout(() => resolve(window.scrollY === from), 200);
+          }),
+      ),
+    )
+    .toBe(true);
+}
+
 async function mockFlow(
   page: Page,
   {
@@ -327,6 +342,9 @@ for (const width of [1440, 390]) {
     await expect(extras.getByRole("button", { name: "Late check-out on Sun 8 Nov" })).toHaveCount(
       0,
     );
+    // Continue scrolls that card to the middle smoothly. A click during the scroll stops it short,
+    // which left Continue below the fold in the merge queue.
+    await scrollSettled(page);
     await extras.getByRole("button", { name: "Late check-out on Sat 7 Nov" }).click();
     await expect(total).toContainText("€370");
     // Each extra with its price in the card; on a phone behind "Details".
