@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+import {
+  PMS_WEB_PROPERTY_ID,
+  PMS_WEB_RESERVATION_ID,
+  pmsWebReservation,
+} from "../support/pmsWebMocks";
 import { TIMO, TIMO_TWIN, mockGuests } from "../support/guestProfileMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -127,6 +132,78 @@ test("lists guests, merges a duplicate and separates a stay (VAY-2420)", async (
   await expect(page.getByRole("link", { name: "Open it" })).toHaveAttribute(
     "href",
     `/guests/${TIMO_TWIN}`,
+  );
+  await assertHealthy();
+});
+
+test("keeps staff notes on the guest and shows them on their reservation (VAY-2420)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockGuests(page);
+  await page.goto(`/guests/${TIMO}`);
+
+  const notes = page.getByRole("region", { name: "Guest notes" });
+  await expect(notes).toContainText("Staff only · kept across all stays");
+  await expect(notes).toContainText(
+    "No notes yet. Notes added here show on every future reservation of Timo.",
+  );
+  await expect(notes.getByRole("button", { name: "Add guest note" })).toBeDisabled();
+  await notes.getByRole("textbox", { name: "New note" }).fill("  Allergic to feathers  ");
+  await notes.getByRole("button", { name: "Add guest note" }).click();
+  await expect.poll(() => writes.notes).toEqual([{ body: "Allergic to feathers" }]);
+  await expect(notes.getByRole("listitem")).toHaveCount(1);
+  await expect(notes.getByRole("listitem")).toContainText("Aug 15, 2026 · Alpenrose Munich");
+  await expect(notes.getByRole("textbox", { name: "New note" })).toHaveValue("");
+
+  // Deleting asks once more, with the focus on the question; Escape goes back.
+  await notes.getByRole("button", { name: "Delete guest note" }).click();
+  await expect(notes.getByRole("button", { name: "Delete", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(notes.getByRole("button", { name: "Delete guest note" })).toBeFocused();
+  await notes.getByRole("button", { name: "Delete guest note" }).click();
+  await notes.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect.poll(() => writes.deletedNotes).toEqual(["note_1"]);
+  await expect(notes.getByRole("listitem")).toHaveCount(0);
+
+  // The booker's reservation shows the same notes, with a link to the profile.
+  const reservation = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
+  for (const path of ["notes", "additional-guests"])
+    await page.route(`${reservation}/${path}`, (route) => route.fulfill({ json: { items: [] } }));
+  await page.route(`${reservation}/change-request`, (route) => route.fulfill({ json: null }));
+  await page.route(reservation, (route) => route.fulfill({ json: { item: pmsWebReservation } }));
+  await page.route(`${reservation}/guest-profiles`, (route) =>
+    route.fulfill({
+      json: {
+        guestBookingId: PMS_WEB_RESERVATION_ID,
+        guests: [
+          {
+            bookingGuestId: "guest_ada",
+            role: "booker",
+            firstName: "Ada",
+            lastName: "Lovelace",
+            guestProfileId: TIMO,
+            reservations: 2,
+            notes: [
+              {
+                noteId: "note_kept",
+                body: "Prefers a quiet room",
+                propertyId: PMS_WEB_PROPERTY_ID,
+                createdByUserId: null,
+                createdAt: "2026-03-01T09:00:00.000Z",
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+  const kept = page.getByRole("region", { name: "Guest notes" });
+  await expect(kept).toContainText("Prefers a quiet room");
+  await expect(kept.getByRole("link", { name: "Open guest profile" })).toHaveAttribute(
+    "href",
+    `/guests/${TIMO}`,
   );
   await assertHealthy();
 });

@@ -406,6 +406,16 @@ names and IDs only.
   revision (`jobs/channexBookings.ts`) writes a booker detail only when the channel changed it since
   its last import (kept as hashes in `importedGuest` in the booking's mapping metadata), and an empty
   one never clears a value, so a staff edit stays until the guest changes that detail at the channel.
+- `GET/PUT /api/pms/properties/:propertyId/guest-data-settings` (Settings › Guest data, migration 0528):
+  one object per account with each guest field's status (`off`, `optional`, `required`; email can't
+  be off), the matching switches (`matching.email`, `matching.phone`; the name must always match) and
+  `identityRetentionDays` (7, 30, 90 or null = keep). No row means the defaults, which are what
+  check-in asked before. GET needs `pms.reservation.read` or `pms.settings.read` and says whether the
+  reader may change them (`canManage`); PUT needs the account owner (`hotel_owner` in the property's
+  owner organization, with `pms.settings.manage`) and is audited. Check-in, the dashboard's arrival
+  popup, the reservation page and the guest profile hide fields set to Off; Required/Optional replace
+  Settings › Check-in's Required switches (gender keeps its own), and email and phone are required
+  of the lead guest only.
 
 VAY-784 implements the P2c check-out command in `apps/api`.
 `POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`

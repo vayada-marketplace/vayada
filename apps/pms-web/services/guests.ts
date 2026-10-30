@@ -105,11 +105,62 @@ export const guestsService = {
       pmsOperationsRequestOptions,
     ),
 
+  /** A staff-only note on the guest record, shown on every reservation of the guest. */
+  addNote: async (guestProfileId: string, body: string) =>
+    pmsOperationsClient.post<GuestNote>(
+      await guestPath(`guests/${encodeURIComponent(guestProfileId)}/notes`, "adding a guest note"),
+      { body },
+      pmsOperationsRequestOptions,
+    ),
+
+  deleteNote: async (guestProfileId: string, noteId: string) =>
+    pmsOperationsClient.delete<unknown>(
+      await guestPath(
+        `guests/${encodeURIComponent(guestProfileId)}/notes/${encodeURIComponent(noteId)}`,
+        "deleting a guest note",
+      ),
+      pmsOperationsRequestOptions,
+    ),
+
   /** Gives one stay its own new guest record. */
   separate: async (guestProfileId: string, bookingGuestId: string) =>
     pmsOperationsClient.post<{ guestProfileId: string }>(
       await guestPath(`guests/${encodeURIComponent(guestProfileId)}/separate`, "separating a stay"),
       { bookingGuestId },
+      pmsOperationsRequestOptions,
+    ),
+};
+
+/** VAY-2420: Settings › Guest data, one per account (the API's GuestDataSettings). */
+export type GuestDataField =
+  | "email"
+  | "phone"
+  | "nationality"
+  | "dateOfBirth"
+  | "documentType"
+  | "documentNumber";
+export type GuestFieldStatus = "off" | "optional" | "required";
+export interface GuestDataSettings {
+  /** First and last name are always required, so they aren't listed; email can't be off. */
+  fields: Record<GuestDataField, GuestFieldStatus>;
+  /** A new booking joins a guest with the same name and the same email or phone. */
+  matching: { email: boolean; phone: boolean };
+  /** Days after check-out until document type and number are removed; null keeps them. */
+  identityRetentionDays: 7 | 30 | 90 | null;
+}
+
+export const guestDataSettingsService = {
+  get: async () =>
+    pmsOperationsClient.get<{ settings: GuestDataSettings; canManage: boolean }>(
+      await guestPath("guest-data-settings", "loading guest data settings"),
+      pmsOperationsRequestOptions,
+    ),
+
+  /** Only the owner may change them (D9). */
+  save: async (settings: GuestDataSettings) =>
+    pmsOperationsClient.put<{ settings: GuestDataSettings; canManage: boolean }>(
+      await guestPath("guest-data-settings", "saving guest data settings"),
+      settings,
       pmsOperationsRequestOptions,
     ),
 };

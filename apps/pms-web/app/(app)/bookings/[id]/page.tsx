@@ -33,7 +33,10 @@ import {
   AssignmentSelector,
   HIDDEN_GUEST_CONTACT,
   type BookingCancellationTerms,
+  type ReservationGuestProfile,
 } from "@/services/bookings";
+import { GuestNotes } from "@/components/guests/GuestNotes";
+import { guestDataSettingsService, type GuestDataSettings } from "@/services/guests";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import { isChannelBooking } from "@/lib/bookings/channelLabel";
 import { individualRoomsService, Room } from "@/services/rooms";
@@ -467,6 +470,8 @@ interface RoomOption {
 
 interface GuestRowProps {
   guest: BookingAdditionalGuest;
+  /** Settings › Guest data: fields set to Off aren't asked (VAY-2420). */
+  fieldStatus: GuestDataSettings["fields"] | null;
   position: number;
   total: number;
   roomOptions: RoomOption[];
@@ -476,6 +481,7 @@ interface GuestRowProps {
 
 function AdditionalGuestRow({
   guest,
+  fieldStatus,
   position,
   total,
   roomOptions,
@@ -567,10 +573,12 @@ function AdditionalGuestRow({
               value={form.lastName}
               onChange={(v) => setForm({ ...form, lastName: v })}
             />
-            <NationalitySelect
-              value={form.nationality}
-              onChange={(v) => setForm({ ...form, nationality: v })}
-            />
+            {fieldStatus?.nationality !== "off" && (
+              <NationalitySelect
+                value={form.nationality}
+                onChange={(v) => setForm({ ...form, nationality: v })}
+              />
+            )}
             <Field
               label={t("bookings.detail.emailOptional")}
               type="email"
@@ -578,13 +586,15 @@ function AdditionalGuestRow({
               onChange={(v) => setForm({ ...form, email: v })}
               disabled={guest.guestContactHidden}
             />
-            <Field
-              label={t("bookings.detail.phoneOptional")}
-              type="tel"
-              value={form.phone}
-              onChange={(v) => setForm({ ...form, phone: v })}
-              disabled={guest.guestContactHidden}
-            />
+            {fieldStatus?.phone !== "off" && (
+              <Field
+                label={t("bookings.detail.phoneOptional")}
+                type="tel"
+                value={form.phone}
+                onChange={(v) => setForm({ ...form, phone: v })}
+                disabled={guest.guestContactHidden}
+              />
+            )}
           </div>
           {guest.guestContactHidden && (
             <p className="mt-3 text-xs text-amber-700">
@@ -1352,6 +1362,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     shown: BookerForm;
   } | null>(null);
   const [bookerSaving, setBookerSaving] = useState(false);
+  // The booker's guest record with its staff-only notes, kept across all their stays (VAY-2420).
+  const [bookerRecord, setBookerRecord] = useState<ReservationGuestProfile | null>(null);
+  // Settings › Guest data: phone and nationality can be switched off for the account (VAY-2420).
+  const [guestFieldStatus, setGuestFieldStatus] = useState<GuestDataSettings["fields"] | null>(
+    null,
+  );
   const [nationalityEditing, setNationalityEditing] = useState(false);
   const [nationalityDraft, setNationalityDraft] = useState("");
   const [nationalitySaving, setNationalitySaving] = useState(false);
@@ -1399,6 +1415,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .then((r) => setGuests(r.guests))
         .catch(console.error),
       individualRoomsService.list().then(setAllRooms).catch(console.error),
+      bookingsService
+        .listGuestProfiles(id)
+        .then((listed) =>
+          setBookerRecord(
+            listed.find((guest) => guest.role !== "additional_guest" && guest.guestProfileId) ??
+              null,
+          ),
+        )
+        .catch(console.error),
+      guestDataSettingsService
+        .get()
+        .then((loaded) => setGuestFieldStatus(loaded.settings.fields))
+        .catch(console.error),
     ]);
   }, [id]);
 
@@ -2810,13 +2839,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   onChange={(v) => setBookerForm({ ...bookerForm, email: v })}
                   disabled={bookerContactHidden}
                 />
-                <Field
-                  label={t("bookings.detail.phoneOptional")}
-                  type="tel"
-                  value={bookerForm.phone}
-                  onChange={(v) => setBookerForm({ ...bookerForm, phone: v })}
-                  disabled={bookerContactHidden}
-                />
+                {guestFieldStatus?.phone !== "off" && (
+                  <Field
+                    label={t("bookings.detail.phoneOptional")}
+                    type="tel"
+                    value={bookerForm.phone}
+                    onChange={(v) => setBookerForm({ ...bookerForm, phone: v })}
+                    disabled={bookerContactHidden}
+                  />
+                )}
               </div>
               <p className="mt-3 text-xs text-gray-500">
                 {isChannelBooking(booking.channel)
@@ -2857,11 +2888,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   <p className="text-xs text-gray-500">{t("bookings.detail.email")}</p>
                   <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-500">{t("bookings.detail.phone")}</p>
-                  <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
-                </div>
-                <div className="space-y-2">
+                {guestFieldStatus?.phone !== "off" && (
+                  <div>
+                    <p className="text-xs text-gray-500">{t("bookings.detail.phone")}</p>
+                    <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
+                  </div>
+                )}
+                <div
+                  className={`space-y-2 ${guestFieldStatus?.nationality === "off" ? "hidden" : ""}`}
+                >
                   {nationalityEditing ? (
                     <>
                       <NationalitySelect
@@ -2954,7 +2989,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     </p>
                   </div>
                 )}
-                {booking.guestDateOfBirth && (
+                {booking.guestDateOfBirth && guestFieldStatus?.dateOfBirth !== "off" && (
                   <div>
                     <p className="text-xs text-gray-500">{t("bookings.detail.dateOfBirth")}</p>
                     <p className="font-medium text-gray-900">
@@ -2962,7 +2997,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     </p>
                   </div>
                 )}
-                {booking.guestPassportNumber && (
+                {booking.guestPassportNumber && guestFieldStatus?.documentNumber !== "off" && (
                   <div>
                     <p className="text-xs text-gray-500">{t("bookings.detail.passport")}</p>
                     <p className="font-medium text-gray-900">{booking.guestPassportNumber}</p>
@@ -2992,6 +3027,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </>
           )}
         </div>
+
+        {bookerRecord?.guestProfileId && (
+          <GuestNotes
+            key={bookerRecord.guestProfileId}
+            guestProfileId={bookerRecord.guestProfileId}
+            firstName={bookerRecord.firstName}
+            notes={bookerRecord.notes}
+            onNotesChange={(update) =>
+              setBookerRecord((current) => current && { ...current, notes: update(current.notes) })
+            }
+            profileHref={`/guests/${bookerRecord.guestProfileId}`}
+            compact
+          />
+        )}
 
         {/* 4. Additional guests */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
@@ -3039,6 +3088,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <AdditionalGuestRow
                   key={g.id}
                   guest={g}
+                  fieldStatus={guestFieldStatus}
                   position={idx + 1}
                   total={additionalCapacity}
                   roomOptions={roomOptions}

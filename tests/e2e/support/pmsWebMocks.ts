@@ -141,6 +141,20 @@ const room = {
   metadata: { roomTypeName: "Alpine Suite" },
 };
 
+/** Settings › Guest data as an account has it before anyone changes it (VAY-2420). */
+export const pmsWebGuestDataSettings = {
+  fields: {
+    email: "optional",
+    phone: "optional",
+    nationality: "required",
+    dateOfBirth: "required",
+    documentType: "required",
+    documentNumber: "required",
+  },
+  matching: { email: true, phone: true },
+  identityRetentionDays: null,
+};
+
 export const pmsWebReservation = {
   guestBookingId: PMS_WEB_RESERVATION_ID,
   bookingReference: "VAY-ADA",
@@ -345,6 +359,14 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
         })
       : route.fallback(),
   );
+  // Settings › Guest data (VAY-2420): the defaults, which the owner may change.
+  await page
+    .context()
+    .route("**/api/pms/properties/*/guest-data-settings", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: { settings: pmsWebGuestDataSettings, canManage: true } })
+        : route.fallback(),
+    );
 
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({

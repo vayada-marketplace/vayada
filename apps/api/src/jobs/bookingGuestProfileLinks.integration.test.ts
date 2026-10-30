@@ -12,6 +12,7 @@ import {
   startGuestProfileLinkWorker,
   type GuestProfileLinkStore,
 } from "./bookingGuestProfileLinks.js";
+import { createPgGuestIdentityRetentionStore } from "./guestIdentityRetention.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PREFIX = "vay-2420-";
@@ -182,10 +183,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
       `SELECT has_table_privilege($1, 'booking.guest_profiles', 'INSERT') AS "insert",
               has_table_privilege($1, 'booking.guest_profiles', 'UPDATE') AS "update",
               has_column_privilege($1, 'booking.booking_guests', 'guest_profile_id', 'UPDATE')
-                AS "link"`,
+                AS "link",
+              has_table_privilege($1, 'booking.guest_data_settings', 'SELECT, INSERT, UPDATE')
+                AS "settings"`,
       [fixture.login],
     );
-    expect(privileges.rows[0]).toEqual({ insert: true, update: true, link: true });
+    expect(privileges.rows[0]).toEqual({ insert: true, update: true, link: true, settings: true });
   });
 
   it("joins stays of one person across the account's properties, by email or by phone", async () => {
@@ -244,6 +247,147 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
     expect(p1).toMatchObject({ link: "created" });
     expect(p2).toMatchObject({ link: "created" });
     expect(p1!.profileId).not.toBe(p2!.profileId);
+  });
+
+  it("lets Settings › Guest data switch matching by email off for the account", async () => {
+    await admin.query(
+      `INSERT INTO booking.guest_data_settings (account_id, settings)
+       VALUES ($1::uuid, '{"matching":{"email":false,"phone":true}}'::jsonb)`,
+      [accountId],
+    );
+    try {
+      const guest = { first: "Ines", last: "Moreau", email: "ines@example.test" };
+      const first = await book(propertyA, { createdAt: "2026-04-01T00:00:00Z" }, guest);
+      const sameEmail = await book(propertyB, { createdAt: "2026-04-02T00:00:00Z" }, guest);
+      const samePhone = await book(
+        propertyA,
+        { createdAt: "2026-04-03T00:00:00Z" },
+        { ...guest, email: "ines.m@example.test", phone: "+33 6 12 34 56 78" },
+      );
+      const laterPhone = await book(
+        propertyB,
+        { createdAt: "2026-04-04T00:00:00Z" },
+        { ...guest, email: null, phone: "+33612345678" },
+      );
+      await sweep();
+      const [a, b, c, d] = await Promise.all(
+        [first, sameEmail, samePhone, laterPhone].map(({ guestIds }) => link(guestIds[0]!)),
+      );
+      expect(b.profileId).not.toBe(a.profileId);
+      expect(b.link).toBe("created");
+      expect(d).toMatchObject({ profileId: c.profileId, link: "matched_phone" });
+    } finally {
+      await admin.query("DELETE FROM booking.guest_data_settings WHERE account_id = $1::uuid", [
+        accountId,
+      ]);
+    }
+  });
+
+  it("removes ID documents the chosen days after the last check-out (Guest data retention)", async () => {
+    await admin.query(
+      `INSERT INTO booking.guest_data_settings (account_id, settings)
+       VALUES ($1::uuid, '{"identityRetentionDays":30}'::jsonb)`,
+      [accountId],
+    );
+    const retention = createPgGuestIdentityRetentionStore({
+      connectionString: fixture.connectionString,
+    });
+    try {
+      const left = await book(
+        propertyA,
+        {},
+        { first: "Olga", last: "Petrova", email: "o@example.test" },
+      );
+      await admin.query(
+        "UPDATE booking.guest_bookings SET check_in = '2027-08-01', check_out = '2027-08-05' WHERE id = $1::uuid",
+        [left.bookingId],
+      );
+      // Still within 30 days of her check-out (Aug 19) on Sep 10.
+      const recent = await book(
+        propertyB,
+        {},
+        { first: "Ravi", last: "Nair", email: "r@example.test" },
+      );
+      await sweep();
+      const [olga, ravi] = await Promise.all(
+        [left, recent].map(async ({ guestIds }) => (await link(guestIds[0]!)).profileId!),
+      );
+      await admin.query(
+        `UPDATE booking.guest_profiles SET document_type = 'passport', document_number = 'X1234567',
+           date_of_birth = '1980-02-03' WHERE id = ANY($1::uuid[])`,
+        [[olga, ravi]],
+      );
+
+      // A check-in registration of a guest not linked yet keeps its own documents until then.
+      const unlinked = await book(
+        propertyA,
+        {},
+        { first: "Lea", last: "Roth", email: "l@example.test" },
+      );
+      await admin.query(
+        "UPDATE booking.guest_bookings SET check_in = '2027-08-01', check_out = '2027-08-05' WHERE id = $1::uuid",
+        [unlinked.bookingId],
+      );
+      await admin.query(
+        `INSERT INTO pms.guest_registrations
+           (booking_guest_id, property_id, guest_booking_id, document_type, document_number, gender)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'national_id', 'R998877', 'female')`,
+        [unlinked.guestIds[0], propertyA, unlinked.bookingId],
+      );
+
+      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toEqual({
+        profiles: 1,
+        registrations: 1,
+      });
+      expect(
+        (
+          await admin.query(
+            `SELECT document_type, document_number, gender FROM pms.guest_registrations
+             WHERE booking_guest_id = $1::uuid`,
+            [unlinked.guestIds[0]],
+          )
+        ).rows[0],
+      ).toEqual({ document_type: null, document_number: null, gender: "female" });
+      const documents = await admin.query<{
+        id: string;
+        documentNumber: string | null;
+        birth: string;
+      }>(
+        `SELECT id::text, document_number AS "documentNumber", to_char(date_of_birth, 'YYYY-MM-DD') AS birth
+         FROM booking.guest_profiles WHERE id = ANY($1::uuid[])`,
+        [[olga, ravi]],
+      );
+      expect(Object.fromEntries(documents.rows.map((row) => [row.id, row]))).toEqual({
+        [olga]: { id: olga, documentNumber: null, birth: "1980-02-03" },
+        [ravi]: { id: ravi, documentNumber: "X1234567", birth: "1980-02-03" },
+      });
+      const audit = await admin.query<{ action: string; property: string; payload: unknown }>(
+        `SELECT action, property_id::text AS property, redacted_payload AS payload
+         FROM platform.product_audit_events
+         WHERE target_resource_id = ANY($1::text[]) AND actor_type = 'system'
+         ORDER BY action`,
+        [[olga, unlinked.guestIds[0]]],
+      );
+      const removed = { fields: ["documentType", "documentNumber"], retentionDays: 30 };
+      expect(audit.rows).toEqual([
+        { action: "pms.guest_profile.identity_removed", property: propertyA, payload: removed },
+        {
+          action: "pms.guest_registration.identity_removed",
+          property: propertyA,
+          payload: removed,
+        },
+      ]);
+      // Nothing left to remove: the next run changes nothing.
+      expect(await retention.removeExpiredBatch("2027-09-10", 50)).toEqual({
+        profiles: 0,
+        registrations: 0,
+      });
+    } finally {
+      await retention.close();
+      await admin.query("DELETE FROM booking.guest_data_settings WHERE account_id = $1::uuid", [
+        accountId,
+      ]);
+    }
   });
 
   it("keeps a property without one owner in its own account", async () => {
@@ -459,6 +603,13 @@ async function cleanup(pool: pg.Pool): Promise<void> {
       `DELETE FROM booking.guest_profiles profile WHERE profile.id = ANY($1::uuid[])
          AND NOT EXISTS (SELECT 1 FROM booking.booking_guests guest WHERE guest.guest_profile_id = profile.id)`,
       [profiles.rows.map(({ id }) => id)],
+    );
+    // The retention job's audit rows name these properties. Replica mode skips the audit log's
+    // append-only trigger (and FK cascades, so this comes after the bookings are gone).
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      "DELETE FROM platform.product_audit_events WHERE property_id = ANY($1::uuid[])",
+      [properties],
     );
     await client.query(
       "DELETE FROM identity.organization_resource_links WHERE resource_id = ANY($1::text[])",

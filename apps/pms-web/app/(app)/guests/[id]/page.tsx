@@ -21,6 +21,7 @@ import {
 import { nationalityLabel } from "@vayada/locale-constants";
 import Modal from "@/components/Modal";
 import { NationalitySelect } from "@/components/NationalitySelect";
+import { GuestNotes } from "@/components/guests/GuestNotes";
 import { useTranslation } from "@/lib/i18n";
 import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { countLabel } from "@/lib/checkin/labels";
@@ -44,7 +45,9 @@ import {
 } from "@/services/api/pmsPropertyClient";
 import { HIDDEN_GUEST_CONTACT } from "@/services/bookings";
 import {
+  guestDataSettingsService,
   guestsService,
+  type GuestDataSettings,
   type GuestDocumentType,
   type GuestFields,
   type GuestProfile,
@@ -91,6 +94,14 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
   const [saving, setSaving] = useState(false);
   // Edits, merges, separations and notes need the operations permission (front desk can only read).
   const canManage = useHasPmsPermission("pms.operations.manage");
+  // Settings › Guest data: fields set to Off don't show here (VAY-2420 P5).
+  const [fieldStatus, setFieldStatus] = useState<GuestDataSettings["fields"] | null>(null);
+  useEffect(() => {
+    guestDataSettingsService
+      .get()
+      .then((loaded) => setFieldStatus(loaded.settings.fields))
+      .catch(() => undefined);
+  }, []);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ text: string; href?: string } | null>(null);
   const [dialog, setDialog] = useState<"merge" | "separate" | null>(null);
@@ -126,6 +137,12 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
 
   const name = `${guest.firstName} ${guest.lastName}`.trim();
   const today = localToday();
+  const shownFields = FIELDS.filter(
+    (field) =>
+      field === "firstName" ||
+      field === "lastName" ||
+      fieldStatus?.[field === "countryCode" ? "nationality" : field] !== "off",
+  );
   const changes = editing ? guestFormChanges(editing.shown, editing.form, today) : {};
   const namesMissing =
     editing !== null && (!editing.form.firstName.trim() || !editing.form.lastName.trim());
@@ -272,7 +289,7 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
                       {guest.email}
                     </span>
                   )}
-                  {guest.phone && (
+                  {guest.phone && fieldStatus?.phone !== "off" && (
                     <span className="flex items-center gap-1.5">
                       <PhoneIcon className="w-[15px] h-[15px] shrink-0" aria-hidden="true" />
                       {guest.phone}
@@ -334,13 +351,21 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
 
         {/* Guest data */}
         <section className={`${CARD} px-6 py-5`} aria-labelledby="guest-data">
-          <h2 id="guest-data" className="text-[17px] font-semibold text-[#101828]">
-            {t("guests.guestData")}
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="guest-data" className="text-[17px] font-semibold text-[#101828]">
+              {t("guests.guestData")}
+            </h2>
+            <Link
+              href="/settings/guest-data"
+              className="text-[13px] font-semibold text-[#2D3FD3] hover:text-[#1F2DA3]"
+            >
+              {t("guests.manageFields")}
+            </Link>
+          </div>
           {editing ? (
             <div className="mt-3.5">
               <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-x-6 gap-y-4">
-                {FIELDS.map((field) => (
+                {shownFields.map((field) => (
                   <div key={field}>{fieldInput(field)}</div>
                 ))}
               </div>
@@ -373,7 +398,7 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
             </div>
           ) : (
             <dl className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-x-6">
-              {FIELDS.map((field) => (
+              {shownFields.map((field) => (
                 <div key={field} className="py-3 border-t border-[#EAECF0]">
                   <dt className="text-[13px] text-[#5B6474]">
                     {t(`settings.checkIn.field.${field === "countryCode" ? "nationality" : field}`)}
@@ -410,6 +435,18 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
             </ul>
           )}
         </section>
+
+        <GuestNotes
+          guestProfileId={guest.guestProfileId}
+          firstName={guest.firstName}
+          notes={guest.notes}
+          onNotesChange={(update) =>
+            setGuest((current) => current && { ...current, notes: update(current.notes) })
+          }
+          propertyName={(propertyId) =>
+            guest.stays.find((stay) => stay.propertyId === propertyId)?.propertyName ?? null
+          }
+        />
       </div>
 
       {dialog === "merge" && (
