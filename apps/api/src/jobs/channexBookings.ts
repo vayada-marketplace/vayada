@@ -211,7 +211,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`channex-booking:${job.propertyId}:${job.channelBookingId}`]);
     const tombstone=(await client.query<{insertedAt:string}>(`SELECT to_char(inserted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "insertedAt" FROM pms.channel_booking_revision_tombstones WHERE connection_id=$1::uuid AND property_id=$2::uuid AND binding_generation=$3::uuid AND external_booking_id=$4 AND resolved_at IS NULL AND retention_expires_at>now() FOR UPDATE`,[connection[0]!.id,job.propertyId,connection[0]!.bindingGeneration,job.channelBookingId])).rows[0];
     const mappings = (
-      await client.query<{guestBookingId:string;revisionId:string|null;insertedAt:string|null;providerSource:string|null;importedGuest:Record<string,string|null>|null}>(
+      await client.query<{guestBookingId:string;revisionId:string|null;insertedAt:string|null;providerSource:string|null;importedGuest:Record<string,string>|null}>(
         `SELECT guest_booking_id::text AS "guestBookingId",external_revision_id AS "revisionId",
            mapping_metadata->>'providerInsertedAt' AS "insertedAt",mapping_metadata->>'providerSource' AS "providerSource",
            mapping_metadata->'importedGuest' AS "importedGuest" FROM pms.channel_booking_mappings
@@ -222,9 +222,11 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     const bookingIds = new Set(mappings.map((row) => row.guestBookingId));
     if (bookingIds.size > 1) throw new Failure("ambiguous_booking_mapping", false);
     // VAY-2420: staff edit the booker, so a revision writes only the customer details the channel changed
-    // since its last import (`importedGuest`); a booking imported before that record takes them all once.
-    const importedGuest=mappings[0]?.importedGuest??null,sentGuest:Record<string,string|null>={...(revision.firstName===null?{}:{firstName:revision.firstName}),...(revision.lastName===null?{}:{lastName:revision.lastName}),...(revision.hasEmail?{email:revision.email}:{}),...(revision.hasPhone?{phone:revision.phone}:{})};
-    const guestChanged=(key:string)=>key in sentGuest&&(!importedGuest||!(key in importedGuest)||importedGuest[key]!==sentGuest[key]);
+    // since its last import (`importedGuest`, hashed per booking so no guest data is copied); an empty one
+    // never clears a value. A booking imported before that record takes every sent detail once.
+    const importedGuest=mappings[0]?.importedGuest??null,sentGuest:Record<string,string>={};
+    for(const [key,value] of Object.entries({firstName:revision.firstName,lastName:revision.lastName,email:revision.email,phone:revision.phone}))if(value!==null)sentGuest[key]=createHash("sha256").update(`${job.channelBookingId}:${value}`).digest("hex");
+    const guestChanged=(key:string)=>key in sentGuest&&importedGuest?.[key]!==sentGuest[key];
     const replayed=mappings.some(row=>row.revisionId===revision.id),metadata=JSON.stringify({providerSource:mappings.length?mappings[0]!.providerSource:revision.providerSource,latestProviderSource:revision.providerSource,providerPropertyId:job.providerPropertyId,providerInsertedAt:revision.insertedAt,providerRevision:revision.semanticRevision,importedGuest:{...importedGuest,...sentGuest}});
     if(scope?.alertRecovery){
       if(await assertStagingAlertApproval(client,scope,scope.alertRecovery,job.id)!==revision.roomCount)throw new Failure("staging_alert_mapping_changed",false);
