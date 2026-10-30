@@ -87,7 +87,13 @@ const profile = (overrides: Record<string, unknown> = {}) => ({
 });
 
 export async function mockGuests(page: Page, overrides: Record<string, unknown> = {}) {
-  const writes = { edits: [] as unknown[], merges: [] as unknown[], separations: [] as unknown[] };
+  const writes = {
+    edits: [] as unknown[],
+    merges: [] as unknown[],
+    separations: [] as unknown[],
+    notes: [] as unknown[],
+    deletedNotes: [] as string[],
+  };
   let current = profile(overrides);
   await page.clock.install({ time: new Date("2026-08-15T12:00:00Z") });
   await mockPmsWebAuthenticatedSession(page);
@@ -109,6 +115,24 @@ export async function mockGuests(page: Page, overrides: Record<string, unknown> 
       });
     }
     return route.fulfill({ json: current });
+  });
+  await page.route(`${GUESTS}/${TIMO}/notes`, (route) => {
+    const body = route.request().postDataJSON() as { body: string };
+    writes.notes.push(body);
+    return route.fulfill({
+      status: 201,
+      json: {
+        noteId: `note_${writes.notes.length}`,
+        body: body.body,
+        propertyId: PMS_WEB_PROPERTY_ID,
+        createdByUserId: null,
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+    });
+  });
+  await page.route(`${GUESTS}/${TIMO}/notes/*`, (route) => {
+    writes.deletedNotes.push(new URL(route.request().url()).pathname.split("/").at(-1)!);
+    return route.fulfill({ status: 204, body: "" });
   });
   await page.route(`${GUESTS}/${TIMO}/merge`, (route) => {
     writes.merges.push(route.request().postDataJSON());

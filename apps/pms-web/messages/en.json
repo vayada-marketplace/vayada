@@ -4175,5 +4175,17 @@
   "guests.separateFailed": "Couldn't separate the stay.",
   "guests.separatedNotice": "The stay now has its own guest record.",
   "guests.openNewGuest": "Open it",
-  "search.pageGuestsHint": "Guest records and their stays"
+  "search.pageGuestsHint": "Guest records and their stays",
+  "guests.notesTitle": "Guest notes",
+  "guests.notesHelper": "Staff only · kept across all stays",
+  "guests.newNote": "New note",
+  "guests.notePlaceholder": "Something worth remembering for the next stay — preferences, occasions, feedback…",
+  "guests.addNote": "Add note",
+  "guests.notesEmpty": "No notes yet. Notes added here show on every future reservation of {name}.",
+  "guests.noteAddFailed": "Couldn't add the note.",
+  "guests.noteDeleteFailed": "Couldn't delete the note.",
+  "guests.noteDelete": "Delete",
+  "guests.noteDeleteLabel": "Delete note",
+  "guests.noteDeleteConfirm": "Delete this note?",
+  "guests.openProfile": "Open guest profile"
 }

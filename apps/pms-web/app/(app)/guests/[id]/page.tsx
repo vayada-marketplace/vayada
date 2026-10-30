@@ -21,6 +21,7 @@ import {
 import { nationalityLabel } from "@vayada/locale-constants";
 import Modal from "@/components/Modal";
 import { NationalitySelect } from "@/components/NationalitySelect";
+import { GuestNotes } from "@/components/guests/GuestNotes";
 import { useTranslation } from "@/lib/i18n";
 import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { countLabel } from "@/lib/checkin/labels";
@@ -410,6 +411,16 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
             </ul>
           )}
         </section>
+
+        <GuestNotes
+          guestProfileId={guest.guestProfileId}
+          firstName={guest.firstName}
+          notes={guest.notes}
+          onNotesChange={(notes) => setGuest({ ...guest, notes })}
+          propertyName={(propertyId) =>
+            guest.stays.find((stay) => stay.propertyId === propertyId)?.propertyName ?? null
+          }
+        />
       </div>
 
       {dialog === "merge" && (

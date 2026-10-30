@@ -4189,5 +4189,17 @@
   "guests.separateFailed": "Der Aufenthalt konnte nicht abgetrennt werden.",
   "guests.separatedNotice": "Der Aufenthalt hat jetzt einen eigenen Gasteintrag.",
   "guests.openNewGuest": "Öffnen",
-  "search.pageGuestsHint": "Gästeeinträge und ihre Aufenthalte"
+  "search.pageGuestsHint": "Gästeeinträge und ihre Aufenthalte",
+  "guests.notesTitle": "Gastnotizen",
+  "guests.notesHelper": "Nur für das Team · über alle Aufenthalte",
+  "guests.newNote": "Neue Notiz",
+  "guests.notePlaceholder": "Etwas, das man sich für den nächsten Aufenthalt merken sollte – Vorlieben, Anlässe, Feedback…",
+  "guests.addNote": "Notiz hinzufügen",
+  "guests.notesEmpty": "Noch keine Notizen. Notizen von hier erscheinen auf jeder künftigen Reservierung von {name}.",
+  "guests.noteAddFailed": "Die Notiz konnte nicht hinzugefügt werden.",
+  "guests.noteDeleteFailed": "Die Notiz konnte nicht gelöscht werden.",
+  "guests.noteDelete": "Löschen",
+  "guests.noteDeleteLabel": "Notiz löschen",
+  "guests.noteDeleteConfirm": "Diese Notiz löschen?",
+  "guests.openProfile": "Gastprofil öffnen"
 }

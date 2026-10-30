@@ -33,7 +33,9 @@ import {
   AssignmentSelector,
   HIDDEN_GUEST_CONTACT,
   type BookingCancellationTerms,
+  type ReservationGuestProfile,
 } from "@/services/bookings";
+import { GuestNotes } from "@/components/guests/GuestNotes";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import { isChannelBooking } from "@/lib/bookings/channelLabel";
 import { individualRoomsService, Room } from "@/services/rooms";
@@ -1352,6 +1354,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     shown: BookerForm;
   } | null>(null);
   const [bookerSaving, setBookerSaving] = useState(false);
+  // The booker's guest record with its staff-only notes, kept across all their stays (VAY-2420).
+  const [bookerRecord, setBookerRecord] = useState<ReservationGuestProfile | null>(null);
   const [nationalityEditing, setNationalityEditing] = useState(false);
   const [nationalityDraft, setNationalityDraft] = useState("");
   const [nationalitySaving, setNationalitySaving] = useState(false);
@@ -1399,6 +1403,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .then((r) => setGuests(r.guests))
         .catch(console.error),
       individualRoomsService.list().then(setAllRooms).catch(console.error),
+      bookingsService
+        .listGuestProfiles(id)
+        .then((listed) =>
+          setBookerRecord(
+            listed.find((guest) => guest.role !== "additional_guest" && guest.guestProfileId) ??
+              null,
+          ),
+        )
+        .catch(console.error),
     ]);
   }, [id]);
 
@@ -2992,6 +3005,16 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </>
           )}
         </div>
+
+        {bookerRecord?.guestProfileId && (
+          <GuestNotes
+            guestProfileId={bookerRecord.guestProfileId}
+            firstName={bookerRecord.firstName}
+            notes={bookerRecord.notes}
+            onNotesChange={(notes) => setBookerRecord({ ...bookerRecord, notes })}
+            profileHref={`/guests/${bookerRecord.guestProfileId}`}
+          />
+        )}
 
         {/* 4. Additional guests */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">

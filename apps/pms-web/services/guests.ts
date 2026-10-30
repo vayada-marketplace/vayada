@@ -105,6 +105,23 @@ export const guestsService = {
       pmsOperationsRequestOptions,
     ),
 
+  /** A staff-only note on the guest record, shown on every reservation of the guest. */
+  addNote: async (guestProfileId: string, body: string) =>
+    pmsOperationsClient.post<GuestNote>(
+      await guestPath(`guests/${encodeURIComponent(guestProfileId)}/notes`, "adding a guest note"),
+      { body },
+      pmsOperationsRequestOptions,
+    ),
+
+  deleteNote: async (guestProfileId: string, noteId: string) =>
+    pmsOperationsClient.delete<unknown>(
+      await guestPath(
+        `guests/${encodeURIComponent(guestProfileId)}/notes/${encodeURIComponent(noteId)}`,
+        "deleting a guest note",
+      ),
+      pmsOperationsRequestOptions,
+    ),
+
   /** Gives one stay its own new guest record. */
   separate: async (guestProfileId: string, bookingGuestId: string) =>
     pmsOperationsClient.post<{ guestProfileId: string }>(
