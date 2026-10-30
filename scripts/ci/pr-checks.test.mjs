@@ -1325,7 +1325,6 @@ test("every API PostgreSQL step that creates its test database runs its suites t
 // The release precheck's isolated database blocks (VAY-2245). A workflow_dispatch of this workflow
 // replaces that precheck, so each block keeps its own new database, both URLs and its exact files.
 const PRECHECK_ISOLATED_BLOCKS = {
-  vayada_booking_edit_test: ["src/routes/pendingBookingEdits.integration.test.ts"],
   vayada_role_test: ["src/pmsDashboardRoleAccess.integration.test.ts"],
   vayada_pay_settings_test: [
     "src/financePaymentSettingsOrdinary.integration.test.ts",

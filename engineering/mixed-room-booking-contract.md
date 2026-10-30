@@ -2,8 +2,8 @@
 
 [VAY-910](https://linear.app/vayadacom/issue/VAY-910) extends the target TypeScript
 Booking Engine. VAY-1043 is Done. This contract builds on
-`booking-pms-domain-boundaries.md`, `pms-reservation-integration-contract.md`,
-`linked-inventory-contract.md`, and `pending-booking-edit-contract.md`.
+`booking-pms-domain-boundaries.md`, `pms-reservation-integration-contract.md` and
+`linked-inventory-contract.md`.
 
 ## Existing constraint
 
@@ -96,20 +96,16 @@ terms per line and aggregates the resulting amounts; shared add-on rules remain
 booking-scoped. Confirmed change requests retain all unchanged lines and quote
 the complete replacement selection.
 
-## Pending edits and checkout UI
+## Checkout UI
 
-VAY-959's eligibility, credentials, original deadline, revision locks, payment
-replacement, and immutable financial evidence rules remain mandatory. Prefill all
-room lines. Credit only verified reserved receipts belonging to this booking,
-against their matching room types and overlapping dates. Replace the complete
-selection atomically; failed saves leave the original selection and receipts
-intact. Switching between single and mixed selections preserves the reference.
+The guest pending-request editor (VAY-959) was removed in VAY-2400: it ran on the
+retired checkout quote and always failed. Guest edits of pending bookings on
+pricing v2 are VAY-2117.
 
 Show "Accommodation for N guests", each room quantity/name, allocation and rate
 terms, and the combined full-stay price. Carry the selection through add-ons,
-guest details, payment, confirmation, draft restoration, and the pending editor.
-The pending editor can adjust guest allocations within every held room even when
-public search has no unreserved stock. Preserve exact room/rate identities; allocation
+guest details, payment, confirmation, and draft restoration. Preserve exact
+room/rate identities; allocation
 totals must match the party before quote, and the server still validates current
 occupancy and verified receipt credit. Changing dates or guests requires revalidation; an expired selection cannot be
 silently replaced with its first room. Preserve existing styling, accessibility,
@@ -144,8 +140,8 @@ payments, or externally sent messages are authorized by this contract.
 - Two simultaneous buyers of the last combination: one winner and no partial
   reservations; failed create/edit and idempotent replay preserve inventory.
 - Cancellation/decline/expiry release all lines; receipt handoff never consumes
-  inventory twice; pending edits survive acceptance/payment races correctly.
-- Browser selection through confirmation and pending-edit prefill/save, with all
+  inventory twice.
+- Browser selection through confirmation, with all
   names, quantities, policies, and totals present. Mocked tests are labeled.
 - Deployed smoke only after verifying the running merged API/frontend revision.
   Coordinate shared fixtures with VAY-959; use bounded synthetic data and preserve

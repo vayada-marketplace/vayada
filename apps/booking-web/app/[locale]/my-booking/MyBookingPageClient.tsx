@@ -2,7 +2,6 @@
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
 import { formatStayDate } from "@/lib/utils";
-import { Link } from "@/i18n/navigation";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import BookedRoomsList from "@/components/booking/BookedRoomsList";
@@ -52,7 +51,6 @@ export default function MyBookingPageClient() {
   const t = useTranslations("myBooking");
   const locale = useLocale();
   const tc = useTranslations("common");
-  const tr = useTranslations("roomSelection");
   const tconf = useTranslations("confirmation");
   const th = useTranslations("home");
   const { hotel } = useHotel();
@@ -444,18 +442,6 @@ export default function MyBookingPageClient() {
                 />
               </div>
             )}
-            {isPending &&
-              booking.canEditRequest &&
-              booking.confirmationToken &&
-              (!booking.hostResponseDeadline ||
-                Date.parse(booking.hostResponseDeadline) > Date.now()) && (
-                <Link
-                  href={`/booking/${encodeURIComponent(booking.bookingReference)}/edit-request?token=${encodeURIComponent(booking.confirmationToken)}`}
-                  className="mt-6 inline-block rounded-full border border-gray-300 px-6 py-3 font-semibold"
-                >
-                  {tr("editRequest")}
-                </Link>
-              )}
             {/* Cancel / Withdraw Button, or why it can't be done online */}
             {canCancel &&
               (cancelRefusal ? (

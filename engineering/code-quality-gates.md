@@ -137,7 +137,7 @@ A pull request whose base is another branch than `main` (a PR in a stack) runs o
 
 The API and package unit-suite job runs `npm run test:unit-suites` (the full `vayada-api` suite and the backend package suites, no database); `.github/workflows/main-unit-suites.yml` repeats it on every push to `main` and nightly.
 
-The TypeScript API PostgreSQL job is a `postgres × shard` matrix (`platform`, `pms`, `pms-migrations`, `pricing`, `hotel-setup`); every shard gets a fresh cluster so cluster-wide role proofs stay ordered. `pricing` runs the pricing suites in their own database next to the `pms` batch instead of after it (VAY-2238), and `pms-migrations` runs the migration suites and the pending booking edits database that used to follow the batch (VAY-2287). Adding an integration step means picking a shard with `if: matrix.shard == '<shard>'`.
+The TypeScript API PostgreSQL job is a `postgres × shard` matrix (`platform`, `pms`, `pms-migrations`, `pricing`, `hotel-setup`); every shard gets a fresh cluster so cluster-wide role proofs stay ordered. `pricing` runs the pricing suites in their own database next to the `pms` batch instead of after it (VAY-2238), and `pms-migrations` runs the migration suites that used to follow the batch (VAY-2287). Adding an integration step means picking a shard with `if: matrix.shard == '<shard>'`.
 
 The mocked pms-web, booking-web and booking-admin browser projects each run as two Playwright shards (`--shard=1/2`, `2/2`), each with its own dev server (VAY-2287).
 

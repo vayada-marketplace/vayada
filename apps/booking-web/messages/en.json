@@ -546,9 +546,6 @@
     "contactWhatsApp": "WhatsApp",
     "manageOrCancel": "Manage or cancel",
     "manageHint": "See what you'd get back first",
-    "editRequest": "Edit request",
-    "editRequestHint": "Change dates or guests",
-    "opening": "Opening…",
     "withdrawHint": "We release the hold on your card",
     "bookAgain": "Book another stay",
     "bookAgainHint": "See rooms and prices at {hotel}",
@@ -666,13 +663,7 @@
     "afterDeadline": "No refund after the deadline or for a no-show.",
     "termsUnavailable": "Cancellation terms are unavailable.",
     "unavailable": "This accommodation selection is no longer available. Please search again.",
-    "choose": "Choose this accommodation",
-    "selectedAccommodation": "Selected accommodation",
-    "partyChanged": "Your guest count has changed. Update the guests in each room or choose other accommodation before reviewing the price.",
-    "editRequest": "Edit request",
-    "allocateGuests": "Guests in each room",
-    "allocationAdults": "Adults",
-    "allocationChildren": "Children"
+    "choose": "Choose this accommodation"
   },
   "guestErrors": {
     "somethingWentWrong": "Something went wrong. Please try again.",

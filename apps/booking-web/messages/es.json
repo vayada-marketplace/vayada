@@ -545,9 +545,6 @@
     "contactWhatsApp": "WhatsApp",
     "manageOrCancel": "Gestionar o cancelar",
     "manageHint": "Mira antes lo que recuperarías",
-    "editRequest": "Editar solicitud",
-    "editRequestHint": "Cambia las fechas o los huéspedes",
-    "opening": "Abriendo…",
     "withdrawHint": "Liberamos la retención en tu tarjeta",
     "bookAgain": "Reservar otra estancia",
     "bookAgainHint": "Ver habitaciones y precios en {hotel}",
@@ -665,13 +662,7 @@
     "afterDeadline": "Sin reembolso después del plazo o en caso de no presentarse.",
     "termsUnavailable": "Las condiciones de cancelación no están disponibles.",
     "unavailable": "Esta selección ya no está disponible. Busca de nuevo.",
-    "choose": "Elegir este alojamiento",
-    "selectedAccommodation": "Alojamiento seleccionado",
-    "partyChanged": "El número de huéspedes ha cambiado. Actualiza los huéspedes de cada habitación o elige otro alojamiento antes de revisar el precio.",
-    "editRequest": "Editar solicitud",
-    "allocateGuests": "Huéspedes en cada habitación",
-    "allocationAdults": "Adultos",
-    "allocationChildren": "Niños"
+    "choose": "Elegir este alojamiento"
   },
   "guestErrors": {
     "somethingWentWrong": "Algo salió mal. Vuelve a intentarlo.",

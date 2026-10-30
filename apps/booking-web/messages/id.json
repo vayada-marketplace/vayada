@@ -545,9 +545,6 @@
     "contactWhatsApp": "WhatsApp",
     "manageOrCancel": "Kelola atau batalkan",
     "manageHint": "Lihat dulu berapa yang Anda terima kembali",
-    "editRequest": "Ubah permintaan",
-    "editRequestHint": "Ubah tanggal atau tamu",
-    "opening": "Membuka…",
     "withdrawHint": "Kami melepaskan penahanan dana di kartu Anda",
     "bookAgain": "Pesan masa inap lain",
     "bookAgainHint": "Lihat kamar dan harga di {hotel}",
@@ -665,13 +662,7 @@
     "afterDeadline": "Tidak ada pengembalian dana setelah batas waktu atau jika tidak datang.",
     "termsUnavailable": "Ketentuan pembatalan tidak tersedia.",
     "unavailable": "Pilihan akomodasi ini tidak lagi tersedia. Silakan cari kembali.",
-    "choose": "Pilih akomodasi ini",
-    "selectedAccommodation": "Akomodasi yang dipilih",
-    "partyChanged": "Jumlah tamu Anda telah berubah. Perbarui tamu di setiap kamar atau pilih akomodasi lain sebelum meninjau harga.",
-    "editRequest": "Edit permintaan",
-    "allocateGuests": "Tamu di setiap kamar",
-    "allocationAdults": "Dewasa",
-    "allocationChildren": "Anak-anak"
+    "choose": "Pilih akomodasi ini"
   },
   "guestErrors": {
     "somethingWentWrong": "Terjadi kesalahan. Silakan coba lagi.",

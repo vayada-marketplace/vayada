@@ -278,7 +278,6 @@ export function toConfirmationBooking(
     roomSelection: source.roomSelection,
     roomLines: source.roomLines,
     ...(bookedRooms(source.bookedRooms) && { bookedRooms: bookedRooms(source.bookedRooms)! }),
-    canEditRequest: source.canEditRequest ?? context.canEditRequest,
     id:
       nonEmptyString(source.guestBookingId) ??
       nonEmptyString(source.id) ??

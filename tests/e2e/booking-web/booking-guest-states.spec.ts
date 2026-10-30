@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
@@ -53,6 +53,7 @@ for (const width of [1440, 390]) {
         json: {
           ...booking,
           status: "pending",
+          // An API from before VAY-2400 may still send this; the page no longer offers editing.
           canEditRequest: true,
           confirmationToken: token,
           hostResponseDeadline: new Date(Date.now() + 18 * 3_600_000).toISOString(),
@@ -71,7 +72,6 @@ for (const width of [1440, 390]) {
     await page.goto(`/booking/VAY-1268?email=${encodeURIComponent(email)}`);
     const heading = page.getByRole("heading", { name: "Request sent, Ada." });
     await expect(heading).toBeVisible();
-    const edit = page.getByRole("button", { name: /^Edit request/ });
     const withdraw = page.getByRole("button", { name: /^Withdraw request/ });
     await withdraw.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`booking-actions-${width}.png`) });
@@ -91,7 +91,7 @@ for (const width of [1440, 390]) {
     await expect(heading).toBeVisible();
     expect(withdrawals).toBe(0);
 
-    await expectStacked(edit, withdraw);
+    await expect(page.getByRole("button", { name: /^Edit request/ })).toHaveCount(0);
 
     await withdraw.click();
     await dialog.getByRole("button", { name: "Yes, Withdraw" }).click();
@@ -262,12 +262,4 @@ for (const [label, change] of [
 async function mockConfirmation(page: Page, json: Record<string, unknown>) {
   await mockBookingApis(page);
   await page.route(`${hotelApi}/bookings/confirmation`, (route) => route.fulfill({ json }));
-}
-
-/** VAY-2307: the request's actions are full-width rows of the next-steps list, one under the other. */
-async function expectStacked(first: Locator, second: Locator) {
-  const [a, b] = [(await first.boundingBox())!, (await second.boundingBox())!];
-  expect(Math.abs(a.x - b.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(a.width - b.width)).toBeLessThanOrEqual(1);
-  expect(b.y).toBeGreaterThanOrEqual(a.y + a.height - 1);
 }
