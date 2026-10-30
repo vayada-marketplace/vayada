@@ -10,6 +10,7 @@ it("lists the cards in Timo's order with Feature Hub on top", () => {
     ["property", "/settings/property"],
     ["calendar", "/settings/calendar"],
     ["checkIn", "/settings/check-in"],
+    ["guestData", "/settings/guest-data"],
     ["guestFlows", "/settings/guest-flows"],
     ["otaCommissions", "/settings/ota-commissions"],
     ["team", "/settings/team"],

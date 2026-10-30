@@ -73,7 +73,9 @@ export function withGuestDataFields(
 }
 
 /** Email and phone apply to the lead guest: the other guests may give them, but never must. */
-export function forAdditionalGuests(settings: CheckinSettings): CheckinSettings {
+export function forAdditionalGuests<Settings extends Pick<CheckinSettings, "guestFields">>(
+  settings: Settings,
+): Settings {
   return {
     ...settings,
     guestFields: settings.guestFields.map((entry) =>
