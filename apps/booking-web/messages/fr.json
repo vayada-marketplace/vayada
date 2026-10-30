@@ -546,9 +546,6 @@
     "contactWhatsApp": "WhatsApp",
     "manageOrCancel": "Gérer ou annuler",
     "manageHint": "Voyez d'abord ce qui vous serait remboursé",
-    "editRequest": "Modifier la demande",
-    "editRequestHint": "Changez les dates ou les voyageurs",
-    "opening": "Ouverture…",
     "withdrawHint": "Nous libérons l'empreinte sur votre carte",
     "bookAgain": "Réserver un autre séjour",
     "bookAgainHint": "Voir les chambres et les prix de {hotel}",
@@ -666,13 +663,7 @@
     "afterDeadline": "Aucun remboursement après la date limite ou en cas de non-présentation.",
     "termsUnavailable": "Les conditions d’annulation ne sont pas disponibles.",
     "unavailable": "Cette sélection n’est plus disponible. Veuillez relancer la recherche.",
-    "choose": "Choisir cet hébergement",
-    "selectedAccommodation": "Hébergement sélectionné",
-    "partyChanged": "Le nombre de voyageurs a changé. Mettez à jour les voyageurs de chaque chambre ou choisissez un autre hébergement avant de vérifier le prix.",
-    "editRequest": "Modifier la demande",
-    "allocateGuests": "Voyageurs dans chaque chambre",
-    "allocationAdults": "Adultes",
-    "allocationChildren": "Enfants"
+    "choose": "Choisir cet hébergement"
   },
   "guestErrors": {
     "somethingWentWrong": "Une erreur s’est produite. Veuillez réessayer.",

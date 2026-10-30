@@ -79,7 +79,6 @@ import {
 import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
-import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
 import { createBookingLookupRateLimit } from "../platform/bookingLookupRateLimit.js";
 import { createBookingWebEventRateLimit } from "../platform/bookingWebEventRateLimit.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
@@ -90,7 +89,6 @@ import {
   mixedSelectionOffer,
   mixedSelectionPromotion,
 } from "./bookingWebMixedSnapshot.js";
-import { pendingBookingEdit } from "./pendingBookingEdits.js";
 
 import type {
   StripeBookingPaymentIntent,
@@ -268,13 +266,6 @@ export type BookingWebCheckoutAdapter = {
     slug: string,
     request: BookingWebCheckoutRequest,
     context?: BookingWebCheckoutCommandContext,
-  ): Promise<unknown>;
-  editRequest?(
-    slug: string,
-    bookingId: string,
-    action: string,
-    request: BookingWebCheckoutRequest,
-    context: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
   confirmAuthorization(
     slug: string,
@@ -657,30 +648,6 @@ export async function registerBookingWebPublicRoutes(
       return response;
     },
   );
-
-  app.post<{
-    Params: { slug: string; bookingId: string; action: string };
-    Body: BookingWebCheckoutRequest;
-  }>("/hotels/:slug/bookings/:bookingId/edit/:action", async (request, reply) => {
-    const { slug, bookingId, action } = request.params;
-    if (!checkoutAdapter.editRequest || !["details", "quote", "prepare", "save"].includes(action))
-      throw createHttpError(404, "Booking action not found.");
-    reply.header("Cache-Control", "no-store");
-    reply.header("X-Robots-Tag", "noindex");
-    return checkoutAdapter.editRequest(
-      slug,
-      bookingId,
-      action,
-      request.body ?? {},
-      checkoutCommandContext(
-        request,
-        `booking-edit-${action}`,
-        `${slug}:${bookingId}`,
-        request.body,
-        now,
-      ),
-    );
-  });
 
   app.post<{ Params: BookingWebBookingHandleParams }>(
     "/hotels/:slug/bookings/:handle/confirm-authorization",
@@ -1176,7 +1143,6 @@ export type TargetBookingRow = QueryResultRow & {
   sourceSystem: string;
   updatedAt?: Date | string;
   hotelName?: string;
-  canEditRequest?: boolean;
   guestFirstName?: string;
   guestLastName?: string;
   guestEmail?: string;
@@ -1518,13 +1484,6 @@ export function createTargetBookingWebCheckoutAdapter(
     return serializeTargetChangeRequest(updated, true);
   }
 
-  const editCleanupTimer = setInterval(() => {
-    void releaseAbandonedBookingEdits(pool, config).catch(() =>
-      console.warn("Pending booking edit cleanup failed; it will retry."),
-    );
-  }, 60_000);
-  editCleanupTimer?.unref();
-
   const withCommand = async <T>(
     slug: string,
     context: BookingWebCheckoutCommandContext | undefined,
@@ -1804,9 +1763,6 @@ export function createTargetBookingWebCheckoutAdapter(
           },
         };
       });
-    },
-    async editRequest(slug, bookingId, action, request, context) {
-      return pendingBookingEdit(pool, config, slug, bookingId, action, request, context);
     },
     async getQuoteGuestDisclosure(slug, quoteId) {
       let disclosure;
@@ -2597,7 +2553,6 @@ export function createTargetBookingWebCheckoutAdapter(
       });
     },
     async close() {
-      if (editCleanupTimer) clearInterval(editCleanupTimer);
       if (ownsPool) {
         await pool.end();
         await stayPricesPool.end();
@@ -4204,15 +4159,7 @@ export async function loadTargetBooking(
        booked_quote.terms AS "bookedTerms",
        booked_quote.rooms AS "bookedPricedRooms",
        booked_names.names AS "bookedRoomNames",
-       b.created_at AS "createdAt",
-       (b.lifecycle_status='pending_payment' AND b.payment_status IN ('unpaid','authorized')
-        AND b.booking_metadata->>'acceptedPaymentDeadlineAt' IS NULL
-        AND NOT EXISTS(SELECT 1 FROM booking.booking_status_events e WHERE e.guest_booking_id=b.id
-          AND e.event_type IN ('guest_booking.accepted','booking.accepted','booking_accepted'))
-        AND NOT EXISTS(SELECT 1 FROM finance.folios f WHERE f.guest_booking_id=b.id)
-        AND EXISTS(SELECT 1 FROM pms.pending_booking_edit_support support
-          WHERE support.guest_booking_id=b.id AND support.property_id=b.property_id))
-        AS "canEditRequest"
+       b.created_at AS "createdAt"
      FROM booking.guest_bookings b
      JOIN hotel_catalog.properties property
        ON property.id = b.property_id
@@ -4396,7 +4343,6 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
     ...projectBookingRoomSelection(selectedOffer),
     ...pricingBookedRooms(booking, metadata),
     mealDescription: bookedMealDescription(selectedOffer),
-    canEditRequest: booking.canEditRequest ?? false,
     id: booking.guestBookingId,
     guestBookingId: booking.guestBookingId,
     bookingReference: booking.publicReference,
@@ -4618,7 +4564,6 @@ function publicBookingLifecycleStatus(status: string, operationalStatus?: string
 
 function serializeTargetBookingStatus(booking: TargetBookingRow): Record<string, unknown> {
   return {
-    canEditRequest: booking.canEditRequest ?? false,
     bookingReference: booking.publicReference,
     status: publicBookingLifecycleStatus(booking.lifecycleStatus, booking.operationalStatus),
     paymentStatus: booking.paymentStatus,

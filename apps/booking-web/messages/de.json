@@ -547,9 +547,6 @@
     "contactWhatsApp": "WhatsApp",
     "manageOrCancel": "Verwalten oder stornieren",
     "manageHint": "Sehen Sie vorher, was Sie zurückerhalten",
-    "editRequest": "Anfrage bearbeiten",
-    "editRequestHint": "Daten oder Gäste ändern",
-    "opening": "Wird geöffnet…",
     "withdrawHint": "Wir geben die Reservierung auf Ihrer Karte frei",
     "bookAgain": "Weiteren Aufenthalt buchen",
     "bookAgainHint": "Zimmer und Preise bei {hotel} ansehen",
@@ -667,13 +664,7 @@
     "afterDeadline": "Keine Erstattung nach Ablauf der Frist oder bei Nichtanreise.",
     "termsUnavailable": "Die Stornierungsbedingungen sind nicht verfügbar.",
     "unavailable": "Diese Unterkunftsauswahl ist nicht mehr verfügbar. Bitte suche erneut.",
-    "choose": "Diese Unterkunft wählen",
-    "selectedAccommodation": "Ausgewählte Unterkunft",
-    "partyChanged": "Ihre Gästezahl hat sich geändert. Aktualisieren Sie die Gäste pro Zimmer oder wählen Sie eine andere Unterkunft, bevor Sie den Preis prüfen.",
-    "editRequest": "Anfrage bearbeiten",
-    "allocateGuests": "Gäste pro Zimmer",
-    "allocationAdults": "Erwachsene",
-    "allocationChildren": "Kinder"
+    "choose": "Diese Unterkunft wählen"
   },
   "guestErrors": {
     "somethingWentWrong": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",

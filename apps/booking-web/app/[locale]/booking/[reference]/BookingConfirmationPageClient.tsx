@@ -32,7 +32,7 @@ import { formatExtraDays } from "@/lib/extrasChoices";
 import { useState, useEffect, useId, useRef, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
-import { Link, useRouter } from "@/i18n/navigation";
+import { Link } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
@@ -128,8 +128,6 @@ const ICONS = {
   card: "M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z",
   cash: "M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z",
   mail: "M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75",
-  pencil:
-    "m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10",
   ticket:
     "M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 0 1 0 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 0 1 0-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375Z",
   home: "m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25",
@@ -226,8 +224,6 @@ export default function BookingConfirmationPageClient({
   emailParam?: string;
   tokenParam?: string;
 }) {
-  const router = useRouter();
-  const [editing, setEditing] = useState(false);
   const t = useTranslations("confirmation");
   const locale = useLocale();
   const tc = useTranslations("common");
@@ -430,12 +426,11 @@ export default function BookingConfirmationPageClient({
     const poll = async () => {
       try {
         const result = await bookingService.getStatus(slug, reference, booking.guestEmail);
-        if (result.status !== status || result.canEditRequest !== booking.canEditRequest) {
+        if (result.status !== status) {
           setStatus(result.status);
           const updated = {
             ...booking,
             status: result.status as Booking["status"],
-            canEditRequest: result.canEditRequest,
           };
           setBooking(updated);
           saveLastBooking(updated);
@@ -485,24 +480,6 @@ export default function BookingConfirmationPageClient({
       );
     } finally {
       setWithdrawing(false);
-    }
-  };
-
-  const handleEdit = async () => {
-    if (!booking) return;
-    setEditing(true);
-    setWithdrawError("");
-    try {
-      const token =
-        tokenParam ||
-        (await bookingService.lookup(slug, reference, booking.guestEmail)).confirmationToken;
-      router.push(
-        `/booking/${encodeURIComponent(reference)}/edit-request?token=${encodeURIComponent(token)}`,
-      );
-    } catch (error) {
-      setWithdrawError(error instanceof Error ? error.message : "Unable to edit request.");
-    } finally {
-      setEditing(false);
     }
   };
 
@@ -724,10 +701,6 @@ export default function BookingConfirmationPageClient({
     phone && { label: t("contactCall"), href: `tel:${phone.replace(/\s+/g, "")}` },
     whatsappDigits && { label: t("contactWhatsApp"), href: `https://wa.me/${whatsappDigits}` },
   ].filter((link): link is { label: string; href: string } => !!link);
-  const canEdit =
-    isPending &&
-    !!booking?.canEditRequest &&
-    (!booking.hostResponseDeadline || Date.parse(booking.hostResponseDeadline) > Date.now());
   const details = stay && booking && stay.id === booking.id ? stay.details : null;
   // The stay details have answered (or can't be asked for): until then no terms show anywhere.
   const stayKnown = !!booking && (!STAY_ID.test(booking.id) || stay?.id === booking.id);
@@ -828,15 +801,6 @@ export default function BookingConfirmationPageClient({
   if (isPending) {
     steps = (
       <>
-        {canEdit && (
-          <StepRow
-            icon="pencil"
-            title={editing ? t("opening") : t("editRequest")}
-            hint={t("editRequestHint")}
-            onClick={handleEdit}
-            disabled={editing || withdrawing}
-          />
-        )}
         <StepRow
           icon="cross"
           danger
@@ -846,7 +810,7 @@ export default function BookingConfirmationPageClient({
             setWithdrawError("");
             setConfirmingWithdraw(true);
           }}
-          disabled={withdrawing || editing}
+          disabled={withdrawing}
         />
         {contact}
       </>

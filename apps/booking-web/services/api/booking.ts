@@ -4,85 +4,12 @@ import {
   type BookingStay,
   type StayExtrasRequest,
 } from "@/lib/bookingStay";
-import { Booking, RoomSelection, RoomSelectionSnapshot } from "@/lib/types";
+import { Booking } from "@/lib/types";
 import { bookingWebPublic } from "./client";
-
-export interface BookingRequestResponse {
-  // For card payments (VAY-388) `booking` is a placeholder preview —
-  // status === 'draft' and id is empty until Stripe authorizes the card.
-  // For other payment methods it's a real persisted booking.
-  booking: Booking;
-  clientSecret: string | null;
-  stripeAccountId?: string;
-  xenditInvoiceUrl: string | null;
-  paymentMethod: string;
-  // Soft-hold draft id, present when paymentMethod === 'card'. Pass it
-  // to confirmAuthorization() after Stripe.confirmPayment resolves.
-  draftId?: string;
-  bookingReference?: string;
-  authorizationComplete?: boolean;
-  authorizationExpired?: boolean;
-  confirmationToken?: string;
-  confirmationTokenExpiresAt?: string;
-}
 
 export interface BookingLookupResponse extends Booking {
   confirmationToken: string;
   confirmationTokenExpiresAt: string;
-}
-
-export type BookingCreateRequest = {
-  roomSelection?: RoomSelection;
-  currency?: string;
-  roomTypeId: string;
-  guestFirstName: string;
-  guestLastName: string;
-  guestEmail: string;
-  guestPhone: string;
-  guestCountry?: string;
-  specialRequests?: string;
-  estimatedArrivalTime?: string;
-  numberOfGuests?: number;
-  checkIn: string;
-  checkOut: string;
-  adults: number;
-  children: number;
-  numberOfRooms?: number;
-  paymentMethod?: string;
-  rateType?: string;
-  addonIds?: string[];
-  addonQuantities?: Record<string, number>;
-  addonPackageQuantities?: Record<string, number>;
-  addonDates?: Record<string, string[]>;
-  promoCode?: string;
-  quoteId?: string;
-  expectedTotalAmount?: number;
-  balanceAmount?: number;
-};
-
-export interface BookingQuote extends RoomSelectionSnapshot {
-  promotion?: { name: string; discountAmount: number; discountPercent: number } | null;
-  promotionDiscount?: number;
-  quoteId?: string;
-  expiresAt?: string;
-  roomTypeId: string;
-  roomName: string;
-  rateType: string;
-  paymentMethod: string;
-  nightlyRate: number;
-  numberOfRooms: number;
-  roomTotal: number;
-  addonTotal: number;
-  promoCode?: string | null;
-  promoDiscount: number;
-  lastMinuteDiscountPercent: number;
-  lastMinuteDiscountAmount: number;
-  totalAmount: number;
-  currency: string;
-  depositRequired: boolean;
-  depositPercentage?: number | null;
-  depositAmount: number;
-  balanceAmount: number;
 }
 
 export interface BankDetails {
@@ -120,7 +47,6 @@ export interface PaymentSettings {
 }
 
 export interface BookingStatus {
-  canEditRequest?: boolean;
   status: string;
   paymentStatus: string | null;
   hostResponseDeadline: string | null;

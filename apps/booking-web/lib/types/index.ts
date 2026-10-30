@@ -181,7 +181,6 @@ export interface Booking extends RoomSelectionSnapshot {
   /** VAY-2320: every booked room, each with its own type, guests, meal and terms. */
   bookedRooms?: BookedRoom[];
   mealDescription?: string | null;
-  canEditRequest?: boolean;
   id: string;
   bookingReference: string;
   hotelName: string;

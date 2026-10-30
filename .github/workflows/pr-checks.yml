@@ -509,8 +509,8 @@ jobs:
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
   #   pms         - the PMS/booking/finance integration batch
-  #   pms-migrations - the migration suites and the pending booking edits database, split from pms
-  #                 so the batch is not the slowest PostgreSQL job (VAY-2287)
+  #   pms-migrations - the migration suites, split from pms so the batch is not the slowest
+  #                 PostgreSQL job (VAY-2287)
   #   pricing     - pricing on the ordinary login in its own database (split from pms, VAY-2238)
   #   hotel-setup - hotel setup on the ordinary API login, shared setup profile, logo media and
   #                 nearby places
@@ -1267,24 +1267,6 @@ jobs:
           src/publicBookabilityGalleryMedia.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
-
-      - name: Run pending booking edits in an isolated database
-        if: matrix.shard == 'pms-migrations'
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
-          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
-        run: |
-          node --input-type=module -e '
-            import pg from "pg";
-            const url = new URL(process.env.TEST_DATABASE_URL);
-            url.pathname = "/postgres";
-            const client = new pg.Client({ connectionString: url.href });
-            await client.connect();
-            await client.query("CREATE DATABASE vayada_booking_edit_test");
-            await client.end();
-          '
-          npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
 
       - name: Verify removed pricing boundaries
         if: matrix.shard == 'pms-migrations'
