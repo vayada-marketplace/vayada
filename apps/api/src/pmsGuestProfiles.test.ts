@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
+import { DEFAULT_GUEST_DATA_SETTINGS } from "./platform/guestDataSettings.js";
 import type {
   PmsGuestProfile,
   PmsGuestProfileRepository,
@@ -80,11 +81,21 @@ function createRepository() {
     separate: record("separate", "only_stay" as const),
     merge: record("merge", "not_found" as const),
     reservationProfiles: record("reservationProfiles", null),
+    dataSettings: record("dataSettings", DEFAULT_GUEST_DATA_SETTINGS),
+    saveDataSettings: async (scope, settings) => {
+      calls.push({ method: "saveDataSettings", scope, args: [settings] });
+      return settings;
+    },
   };
   return { repository, calls };
 }
 
-function buildAuthenticatedApp(repository: PmsGuestProfileRepository, permissions = FULL) {
+function buildAuthenticatedApp(
+  repository: PmsGuestProfileRepository,
+  permissions = FULL,
+  relationship: "front_desk" | "owner" = "front_desk",
+  roleKey = "hotel_owner",
+) {
   const identityRepository: IdentityRepository = {
     async findUserByProviderUserId() {
       return {
@@ -100,9 +111,9 @@ function buildAuthenticatedApp(repository: PmsGuestProfileRepository, permission
       return {
         membershipId: "33333333-3333-3333-3333-333333333333",
         status: "active",
-        roleKey: "hotel_owner",
+        roleKey,
         workosMembershipId: "workos-membership-1",
-        workosRoleSlugs: ["hotel_owner"],
+        workosRoleSlugs: [roleKey],
       };
     },
     async findLinkedResources() {
@@ -111,14 +122,14 @@ function buildAuthenticatedApp(repository: PmsGuestProfileRepository, permission
           product: "pms" as const,
           resourceType: "pms_property" as const,
           resourceId,
-          relationship: "front_desk" as const,
+          relationship,
           status: "active" as const,
         },
         {
           product: "hotel_catalog" as const,
           resourceType: "property" as const,
           resourceId,
-          relationship: "front_desk" as const,
+          relationship,
           status: "active" as const,
         },
       ]);
@@ -334,6 +345,68 @@ describe("PMS guest profile routes (VAY-2420)", () => {
     expect([reservation.statusCode, reservation.json()]).toEqual([
       404,
       { code: "reservation_not_found" },
+    ]);
+  });
+
+  it("shows Settings › Guest data to readers and lets only the account owner change it (D9)", async () => {
+    const settingsUrl = `/api/pms/properties/${propertyId}/guest-data-settings`;
+    const { repository, calls } = createRepository();
+    app = buildAuthenticatedApp(repository, [...FULL, "pms.settings.manage"]);
+    const read = await app.inject({ method: "GET", url: settingsUrl, headers });
+    expect(read.statusCode).toBe(200);
+    expect(read.json()).toEqual({ settings: DEFAULT_GUEST_DATA_SETTINGS, canManage: false });
+    const desk = await app.inject({
+      method: "PUT",
+      url: settingsUrl,
+      headers,
+      payload: DEFAULT_GUEST_DATA_SETTINGS,
+    });
+    expect(desk.statusCode).toBe(403);
+    await app.close();
+
+    // A manager in the owner organization may manage settings, but not these (D9).
+    app = buildAuthenticatedApp(
+      repository,
+      [...FULL, "pms.settings.manage"],
+      "owner",
+      "hotel_manager",
+    );
+    expect((await app.inject({ method: "GET", url: settingsUrl, headers })).json()).toMatchObject({
+      canManage: false,
+    });
+    const manager = await app.inject({
+      method: "PUT",
+      url: settingsUrl,
+      headers,
+      payload: DEFAULT_GUEST_DATA_SETTINGS,
+    });
+    expect([manager.statusCode, manager.json()]).toEqual([403, { code: "account_owner_required" }]);
+    await app.close();
+
+    app = buildAuthenticatedApp(repository, [...FULL, "pms.settings.manage"], "owner");
+    expect((await app.inject({ method: "GET", url: settingsUrl, headers })).json()).toMatchObject({
+      canManage: true,
+    });
+    const invalid = await app.inject({
+      method: "PUT",
+      url: settingsUrl,
+      headers,
+      payload: {
+        ...DEFAULT_GUEST_DATA_SETTINGS,
+        fields: { ...DEFAULT_GUEST_DATA_SETTINGS.fields, email: "off" },
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const changed = {
+      ...DEFAULT_GUEST_DATA_SETTINGS,
+      fields: { ...DEFAULT_GUEST_DATA_SETTINGS.fields, phone: "off" },
+      identityRetentionDays: 30,
+    };
+    const saved = await app.inject({ method: "PUT", url: settingsUrl, headers, payload: changed });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toEqual({ settings: changed, canManage: true });
+    expect(calls.filter((call) => call.method === "saveDataSettings")).toEqual([
+      expect.objectContaining({ args: [changed] }),
     ]);
   });
 });

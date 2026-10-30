@@ -1,5 +1,6 @@
 import pg, { type QueryResultRow } from "pg";
 import { normalizeNationalityCode } from "@vayada/locale-constants";
+import { readGuestDataSettings } from "../platform/guestDataSettings.js";
 
 import {
   BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL,
@@ -15,7 +16,8 @@ import {
  * Matching: same account and same name, plus the same email or phone as the profile or one of its
  * stays. An email alone never joins two people (families share one), and a booking without a last
  * name (channel placeholders) never joins anyone. Of several candidates, the one matching both email
- * and phone wins; otherwise a new profile is made. A profile with a single stay follows that stay's
+ * and phone wins; otherwise a new profile is made. Settings › Guest data (0528) can switch the email
+ * or the phone part off per account. A profile with a single stay follows that stay's
  * name, so a placeholder that later gets the real name can still join the guest's profile.
  *
  * Values: the first time a direct booking's values reach a profile (booking engine, New Booking), they
@@ -355,7 +357,7 @@ const MATCH_SQL = `
   ), candidates AS (
     SELECT profile.id,
            profile.created_at,
-           incoming.email_key IS NOT NULL AND (
+           $7::boolean AND incoming.email_key IS NOT NULL AND (
              ${EMAIL_KEY_SQL("profile.email")} = incoming.email_key
              OR EXISTS (
                SELECT 1 FROM booking.booking_guests stay
@@ -363,7 +365,7 @@ const MATCH_SQL = `
                  AND ${EMAIL_KEY_SQL("stay.email")} = incoming.email_key
              )
            ) AS by_email,
-           incoming.phone_key IS NOT NULL AND (
+           $8::boolean AND incoming.phone_key IS NOT NULL AND (
              ${PHONE_KEY_SQL("profile.phone")} = incoming.phone_key
              OR EXISTS (
                SELECT 1 FROM booking.booking_guests stay
@@ -392,6 +394,9 @@ async function findMatch(
 ): Promise<{ id: string; link: Link } | null> {
   // A booking without a last name is a channel placeholder ("Guest"): never matched.
   if (!row.lastName.trim()) return null;
+  // Settings › Guest data may switch matching by email or by phone off for the account.
+  const { matching } = await readGuestDataSettings(client, row.accountId);
+  if (!matching.email && !matching.phone) return null;
   const candidates = (
     await client.query<{ id: string; byEmail: boolean; byPhone: boolean }>(MATCH_SQL, [
       row.accountId,
@@ -400,6 +405,8 @@ async function findMatch(
       row.email,
       row.phone,
       exceptProfileId,
+      matching.email,
+      matching.phone,
     ])
   ).rows;
   const both = candidates.filter((candidate) => candidate.byEmail && candidate.byPhone);

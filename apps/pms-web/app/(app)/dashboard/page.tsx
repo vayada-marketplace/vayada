@@ -13,7 +13,8 @@ import {
 } from "@/services/bookings";
 import { calendarService, CalendarInventoryDay } from "@/services/calendar";
 import { CheckinSettings, pmsSettingsService, settingsService } from "@/services/settings";
-import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
+import { DEFAULT_CHECKIN_SETTINGS, withGuestDataFields } from "@/lib/settings/checkinSettings";
+import { guestDataSettingsService } from "@/services/guests";
 import { ArrivalPopup } from "@/components/dashboard/ArrivalPopup";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { bookingArrivalTime } from "@/lib/checkin/labels";
@@ -260,12 +261,19 @@ export default function DashboardPage() {
             .then((response) => response.guests)
             .catch(() => null)
         : null,
-      // Settings → Check-in decides who must register and with what; the defaults if unreadable.
+      // Settings → Check-in decides who must register, and Settings › Guest data with what
+      // (VAY-2420), as at check-in; the defaults if unreadable.
       arrival
-        ? settingsService
-            .getCheckinSettings()
-            .then((response) => response.settings)
-            .catch(() => DEFAULT_CHECKIN_SETTINGS)
+        ? Promise.all([
+            settingsService
+              .getCheckinSettings()
+              .then((response) => response.settings)
+              .catch(() => DEFAULT_CHECKIN_SETTINGS),
+            guestDataSettingsService
+              .get()
+              .then((response) => response.settings.fields)
+              .catch(() => undefined),
+          ]).then(([checkin, fields]) => withGuestDataFields(checkin, fields))
         : DEFAULT_CHECKIN_SETTINGS,
     ])
       .then(([guestRes, noteRes, registrations, settings]) =>

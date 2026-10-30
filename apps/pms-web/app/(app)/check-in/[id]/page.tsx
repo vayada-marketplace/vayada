@@ -23,7 +23,8 @@ import { bookingAmountDue } from "@/components/bookings/BookingStaySummary";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
-import { DEFAULT_CHECKIN_SETTINGS } from "@/lib/settings/checkinSettings";
+import { DEFAULT_CHECKIN_SETTINGS, withGuestDataFields } from "@/lib/settings/checkinSettings";
+import { guestDataSettingsService } from "@/services/guests";
 import { bookingChannelLabel, isChannelBooking } from "@/lib/bookings/channelLabel";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import {
@@ -149,9 +150,23 @@ export default function CheckInPage() {
       settingsService.getCheckinChecklist().catch(() => ({ steps: [] })),
       calendarService.listAvailableAddons("").catch(() => [] as BookingAddon[]),
       bookingsService.listGuestProfiles(id).catch(() => null),
+      // Settings › Guest data: which fields are off, optional or required (VAY-2420).
+      guestDataSettingsService
+        .get()
+        .then((response) => response.settings.fields)
+        .catch(() => undefined),
     ])
       .then(
-        ([bookingRes, guestRes, registrationRes, settingsRes, checklistRes, addons, profiles]) => {
+        ([
+          bookingRes,
+          guestRes,
+          registrationRes,
+          settingsRes,
+          checklistRes,
+          addons,
+          profiles,
+          guestFields,
+        ]) => {
           // Listed booker first, like the guest the reservation read shows.
           const listedBooker = profiles?.[0];
           setBookerProfile(
@@ -164,7 +179,7 @@ export default function CheckInPage() {
           setRegistrations(registrationRes?.guests ?? []);
           setRegistrationsUnavailable(!registrationRes);
           setCanReadIdentity(registrationRes?.canReadIdentity ?? false);
-          setSettings(settingsRes);
+          setSettings(withGuestDataFields(settingsRes, guestFields));
           setChecklistSteps(checklistRes.steps || []);
           setCatalog(addons);
         },
