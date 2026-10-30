@@ -895,8 +895,9 @@ export function createPgPmsGuestProfileRepository(config: {
     async reservationProfiles(scope, guestBookingId) {
       // One row with no guest when the reservation has none, none when it isn't this property's.
       const read = () =>
-        pool.query<Omit<PmsReservationGuestProfile, "notes">>(
+        pool.query<Omit<PmsReservationGuestProfile, "notes"> & { linkable: boolean }>(
           `SELECT stay.id::text AS "bookingGuestId", stay.guest_role AS role,
+                  booking.lifecycle_status NOT IN ('draft', 'expired') AS linkable,
                   stay.first_name AS "firstName", stay.last_name AS "lastName",
                   stay.guest_profile_id::text AS "guestProfileId",
                   (SELECT count(DISTINCT other.guest_booking_id)::int
@@ -912,7 +913,9 @@ export function createPgPmsGuestProfileRepository(config: {
           [guestBookingId, scope.propertyId, scope.propertyIds],
         );
       let guests = await read();
-      if (guests.rows.some((row) => row.bookingGuestId && !row.guestProfileId)) {
+      // Drafts and expired bookings are never linked (the job skips them), so reading them never
+      // waits for the guest-profile lock.
+      if (guests.rows.some((row) => row.bookingGuestId && !row.guestProfileId && row.linkable)) {
         // Guests the job hasn't reached yet (a booking made moments ago) are linked now, so they
         // can be edited at once. When that can't happen (the lock is busy, a row fails) they are
         // listed unlinked; the job links them, or reports the row.
@@ -938,7 +941,12 @@ export function createPgPmsGuestProfileRepository(config: {
       return guests.rows
         .filter((row) => row.bookingGuestId)
         .map((row) => ({
-          ...row,
+          bookingGuestId: row.bookingGuestId,
+          role: row.role,
+          firstName: row.firstName,
+          lastName: row.lastName,
+          guestProfileId: row.guestProfileId,
+          reservations: row.reservations,
           notes: (row.guestProfileId && notes.get(row.guestProfileId)) || [],
         }));
     },

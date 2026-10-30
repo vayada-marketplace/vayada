@@ -4194,12 +4194,13 @@
   "guests.notesHelper": "Nur für das Team · über alle Aufenthalte",
   "guests.newNote": "Neue Notiz",
   "guests.notePlaceholder": "Etwas, das man sich für den nächsten Aufenthalt merken sollte – Vorlieben, Anlässe, Feedback…",
-  "guests.addNote": "Notiz hinzufügen",
+  "guests.addNote": "Gastnotiz hinzufügen",
   "guests.notesEmpty": "Noch keine Notizen. Notizen von hier erscheinen auf jeder künftigen Reservierung von {name}.",
   "guests.noteAddFailed": "Die Notiz konnte nicht hinzugefügt werden.",
   "guests.noteDeleteFailed": "Die Notiz konnte nicht gelöscht werden.",
   "guests.noteDelete": "Löschen",
-  "guests.noteDeleteLabel": "Notiz löschen",
+  "guests.noteDeleteLabel": "Gastnotiz löschen",
   "guests.noteDeleteConfirm": "Diese Notiz löschen?",
-  "guests.openProfile": "Gastprofil öffnen"
+  "guests.openProfile": "Gastprofil öffnen",
+  "guests.notesEmptyReadOnly": "Noch keine Notizen zu {name}."
 }

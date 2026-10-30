@@ -3008,11 +3008,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
         {bookerRecord?.guestProfileId && (
           <GuestNotes
+            key={bookerRecord.guestProfileId}
             guestProfileId={bookerRecord.guestProfileId}
             firstName={bookerRecord.firstName}
             notes={bookerRecord.notes}
-            onNotesChange={(notes) => setBookerRecord({ ...bookerRecord, notes })}
+            onNotesChange={(update) =>
+              setBookerRecord((current) => current && { ...current, notes: update(current.notes) })
+            }
             profileHref={`/guests/${bookerRecord.guestProfileId}`}
+            compact
           />
         )}
 

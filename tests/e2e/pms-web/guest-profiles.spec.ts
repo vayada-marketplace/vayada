@@ -148,16 +148,20 @@ test("keeps staff notes on the guest and shows them on their reservation (VAY-24
   await expect(notes).toContainText(
     "No notes yet. Notes added here show on every future reservation of Timo.",
   );
-  await expect(notes.getByRole("button", { name: "Add note" })).toBeDisabled();
+  await expect(notes.getByRole("button", { name: "Add guest note" })).toBeDisabled();
   await notes.getByRole("textbox", { name: "New note" }).fill("  Allergic to feathers  ");
-  await notes.getByRole("button", { name: "Add note" }).click();
+  await notes.getByRole("button", { name: "Add guest note" }).click();
   await expect.poll(() => writes.notes).toEqual([{ body: "Allergic to feathers" }]);
   await expect(notes.getByRole("listitem")).toHaveCount(1);
   await expect(notes.getByRole("listitem")).toContainText("Aug 15, 2026 · Alpenrose Munich");
   await expect(notes.getByRole("textbox", { name: "New note" })).toHaveValue("");
 
-  // Deleting asks once more.
-  await notes.getByRole("button", { name: "Delete note" }).click();
+  // Deleting asks once more, with the focus on the question; Escape goes back.
+  await notes.getByRole("button", { name: "Delete guest note" }).click();
+  await expect(notes.getByRole("button", { name: "Delete", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(notes.getByRole("button", { name: "Delete guest note" })).toBeFocused();
+  await notes.getByRole("button", { name: "Delete guest note" }).click();
   await notes.getByRole("button", { name: "Delete", exact: true }).click();
   await expect.poll(() => writes.deletedNotes).toEqual(["note_1"]);
   await expect(notes.getByRole("listitem")).toHaveCount(0);

@@ -4180,12 +4180,13 @@
   "guests.notesHelper": "Staff only · kept across all stays",
   "guests.newNote": "New note",
   "guests.notePlaceholder": "Something worth remembering for the next stay — preferences, occasions, feedback…",
-  "guests.addNote": "Add note",
+  "guests.addNote": "Add guest note",
   "guests.notesEmpty": "No notes yet. Notes added here show on every future reservation of {name}.",
   "guests.noteAddFailed": "Couldn't add the note.",
   "guests.noteDeleteFailed": "Couldn't delete the note.",
   "guests.noteDelete": "Delete",
-  "guests.noteDeleteLabel": "Delete note",
+  "guests.noteDeleteLabel": "Delete guest note",
   "guests.noteDeleteConfirm": "Delete this note?",
-  "guests.openProfile": "Open guest profile"
+  "guests.openProfile": "Open guest profile",
+  "guests.notesEmptyReadOnly": "No notes about {name} yet."
 }

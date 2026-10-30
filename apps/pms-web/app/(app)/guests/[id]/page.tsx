@@ -416,7 +416,9 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
           guestProfileId={guest.guestProfileId}
           firstName={guest.firstName}
           notes={guest.notes}
-          onNotesChange={(notes) => setGuest({ ...guest, notes })}
+          onNotesChange={(update) =>
+            setGuest((current) => current && { ...current, notes: update(current.notes) })
+          }
           propertyName={(propertyId) =>
             guest.stays.find((stay) => stay.propertyId === propertyId)?.propertyName ?? null
           }
