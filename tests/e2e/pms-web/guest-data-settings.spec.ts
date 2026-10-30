@@ -49,7 +49,8 @@ test("saves each guest data change at once, and keeps email on (VAY-2420)", asyn
   await page.getByRole("switch", { name: "Same email address" }).click();
   // Deleting documents sooner asks first: past guests' documents go within the hour.
   await page.getByRole("combobox", { name: "Delete identity documents" }).selectOption("30");
-  await expect(page.getByRole("alert")).toContainText("deleted within the hour");
+  const retention = page.getByRole("region", { name: "Identity data retention" });
+  await expect(retention.getByRole("alert")).toContainText("deleted within the hour");
   await expect.poll(() => saved.length).toBe(2);
   await page.getByRole("button", { name: "Delete after 30 days" }).click();
   await expect.poll(() => saved.length).toBe(3);
