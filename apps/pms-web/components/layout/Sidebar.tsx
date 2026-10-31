@@ -17,6 +17,7 @@ import { useTranslation } from "@/lib/i18n";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 import { pmsNavigationModuleClient } from "@/services/api/pmsNavigationModuleClient";
+import { guestsSectionOn } from "@/lib/guests/useGuestsSectionOn";
 import {
   getStoredPmsPropertyId,
   resolveSelectedPmsPropertyId,
@@ -109,8 +110,9 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
   },
 ];
 
-// Feature Hub switches decide whether these show (VAY-2078); they never gate the pages.
+// Feature Hub switches decide whether these show (VAY-2078, VAY-2423).
 const NAVIGATION_MODULE_BY_HREF: Record<string, string> = {
+  "/guests": "guests",
   "/inbox": "inbox",
   "/reviews": "reviews",
 };
@@ -168,9 +170,10 @@ export default function Sidebar({
   );
   const [inboxUnread, setInboxUnread] = useState(0);
   const [financialsAvailable, setFinancialsAvailable] = useState(false);
-  // Hidden until read (or cached); a failed read shows both rather than hiding the Inbox.
+  // Inbox and Reviews are hidden until read (or cached), Guests shows (on by default, VAY-2423); a
+  // failed read shows every item rather than hiding the Inbox.
   const [navigationModules, setNavigationModules] = useState<ReadonlySet<string> | null>(
-    () => new Set(),
+    () => new Set(["guests"]),
   );
   const { t } = useTranslation();
   const switcherRef = useRef<HTMLDivElement>(null);
@@ -262,11 +265,14 @@ export default function Sidebar({
         .list()
         .then((response) => {
           if (current !== sequence) return;
-          setNavigationModules(new Set(response.activeModules));
+          // An API that doesn't switch Guests yet leaves it on (VAY-2423).
+          const active = new Set(response.activeModules);
+          if (guestsSectionOn(response)) active.add("guests");
+          setNavigationModules(active);
           try {
             localStorage.setItem(
               NAVIGATION_MODULE_CACHE_PREFIX + response.hotelId,
-              JSON.stringify(response.activeModules),
+              JSON.stringify(Array.from(active)),
             );
           } catch {
             // Storage may be unavailable; the sidebar still follows the server read.

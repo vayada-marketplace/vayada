@@ -51,9 +51,14 @@ export default function GuestsPage() {
 
   return (
     <div className="p-4 md:p-6">
-      <div className="max-w-[960px] mx-auto">
-        <PageHeader title={t("guests.title")} subtitle={t("guests.subtitle")} />
-        <label className="mt-4 flex items-center gap-2 h-10 px-3 rounded-[10px] border border-[#D0D5DD] bg-white">
+      {/* Left-aligned like every PMS page, so the title doesn't jump between pages (VAY-2423). */}
+      <div className="max-w-[960px]">
+        <PageHeader
+          title={t("guests.title")}
+          subtitle={t("guests.subtitle")}
+          className="mb-4 md:mb-5"
+        />
+        <label className="flex items-center gap-2 h-10 px-3 rounded-[10px] border border-[#D0D5DD] bg-white">
           <MagnifyingGlassIcon className="w-4 h-4 text-[#5B6474] shrink-0" aria-hidden="true" />
           <span className="sr-only">{t("guests.searchLabel")}</span>
           <input

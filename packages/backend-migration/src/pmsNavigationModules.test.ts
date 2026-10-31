@@ -10,6 +10,10 @@ const migration = await readFile(
   join(import.meta.dirname, "../migrations/0476_pms_property_navigation_modules.sql"),
   "utf8",
 );
+const guestsMigration = await readFile(
+  join(import.meta.dirname, "../migrations/0530_pms_navigation_module_guests.sql"),
+  "utf8",
+);
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 const threadsOnly = "20780000-0000-4000-8000-000000000001";
@@ -23,6 +27,11 @@ describe("PMS navigation modules migration", () => {
     expect(migration).toContain("CHECK (module_id IN ('inbox', 'reviews'))");
     expect(migration).toContain("REFERENCES hotel_catalog.properties(id) ON DELETE CASCADE");
     expect(migration).toContain("ON CONFLICT (property_id, module_id) DO NOTHING");
+  });
+
+  it("adds Guests without a backfill, since a missing row means on (VAY-2423)", () => {
+    expect(guestsMigration).toContain("CHECK (module_id IN ('inbox', 'reviews', 'guests'))");
+    expect(guestsMigration).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/);
   });
 });
 
@@ -125,5 +134,21 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS navigation modules migration (PostgreSQ
       [threadsOnly],
     );
     expect(remaining.rows).toEqual([{ count: 0 }]);
+  });
+
+  it("accepts a Guests switch after 0530 and still rejects unknown modules", async () => {
+    await client.query(guestsMigration);
+    await client.query(
+      `INSERT INTO pms.property_navigation_modules (property_id, module_id, is_active, deactivated_at)
+       VALUES ($1, 'guests', FALSE, now())`,
+      [unused],
+    );
+    await expect(
+      client.query(
+        `INSERT INTO pms.property_navigation_modules (property_id, module_id, is_active)
+         VALUES ($1, 'financials', FALSE)`,
+        [unused],
+      ),
+    ).rejects.toMatchObject({ constraint: "property_navigation_modules_module_id_check" });
   });
 });

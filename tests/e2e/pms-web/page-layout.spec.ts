@@ -15,6 +15,7 @@ import { checkinSettingsResponse } from "../support/checkinSettingsMocks";
 const TOP_LEVEL = [
   "/dashboard",
   "/bookings",
+  "/guests",
   "/rooms",
   "/channel-manager",
   "/financials",
@@ -35,7 +36,10 @@ const SUB_PAGES = [
 ];
 // VAY-2413: these pages and every Settings sub-page share one title style with the Dashboard.
 // Calendar shows its title from md up only.
-const SAME_TITLE = ["/dashboard", "/bookings", "/rooms", "/settings"];
+const SAME_TITLE = ["/dashboard", "/bookings", "/guests", "/rooms", "/settings"];
+// VAY-2423: the first section starts the same distance under the header on these pages, so
+// switching between them doesn't move it. Calendar shows its header from md up only.
+const SAME_GAP = ["/dashboard", "/bookings", "/guests", "/rooms"];
 
 // Detail pages open with a back link or guest details before the title, so their title sits a
 // little further in, but never moves with the screen width.
@@ -100,6 +104,19 @@ async function titlePosition(page: Page) {
   });
 }
 
+/** The space between the page header and the first section under it, in whole pixels. */
+async function gapUnderHeader(page: Page) {
+  const title = page.locator("main h1").first();
+  await expect(title).toBeVisible();
+  return title.evaluate((h1) => {
+    const header = h1.parentElement!;
+    let next = header.nextElementSibling;
+    while (next && next.getBoundingClientRect().height === 0) next = next.nextElementSibling;
+    const below = next?.getBoundingClientRect().top ?? NaN;
+    return Math.round(below - header.getBoundingClientRect().bottom);
+  });
+}
+
 /** The page title's type, so no page drifts back to its own size or weight. */
 async function titleStyle(page: Page) {
   return page
@@ -155,6 +172,24 @@ for (const viewport of VIEWPORTS) {
       expect(await titleStyle(page), route).toEqual(dashboardTitle);
     }
     expect(subPageY).toBeGreaterThan(viewport.padding);
+  });
+}
+
+for (const viewport of VIEWPORTS) {
+  test(`the first section starts the same distance under the header at ${viewport.width}px`, async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mockPages(page);
+    const wide = viewport.width >= 768;
+    const expected = wide ? 20 : 16;
+    for (const route of wide ? [...SAME_GAP, "/calendar"] : SAME_GAP) {
+      await page.goto(route);
+      const gap = await gapUnderHeader(page);
+      await expect(page).toHaveURL(onRoute(route));
+      expect(gap, route).toBe(expected);
+    }
   });
 }
 

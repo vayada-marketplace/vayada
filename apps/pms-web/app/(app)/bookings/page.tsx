@@ -169,7 +169,7 @@ export default function ReservationsPage() {
             <span className="text-xs font-medium text-gray-700">{t("bookings.liveSync")}</span>
           </div>
         }
-        className="mb-6 md:mb-8"
+        className="mb-4 md:mb-5"
       />
 
       {/* Search & Filters */}
