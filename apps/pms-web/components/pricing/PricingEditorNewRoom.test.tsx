@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { ApiErrorResponse } from "@/services/api/client";
+import { bookingsService } from "@/services/bookings";
 import type {
   createReplacementPricingClient,
   PricingSnapshot,
@@ -126,6 +127,9 @@ beforeEach(() => {
     deposits: { ready: false },
   });
   take.current = null;
+  // Payment settings can't be read here (VAY-2425: settled at once, so the first-price form's currency isn't held by a
+  // real request that fails whenever the network gives up).
+  vi.spyOn(bookingsService, "getPaymentSettings").mockRejectedValue(new Error("offline"));
 });
 afterEach(() => {
   if (view) act(() => view.unmount());

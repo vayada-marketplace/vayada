@@ -4229,7 +4229,8 @@ it("prices a room in IDR after the Owner changed from USD, with another room's U
     expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "IDR" });
     expect(formSymbols()).toHaveLength(0);
     const first = firstIn("IDR", "500000");
-    const idrRooms = [{ ...usdRoom, currency: "IDR", revision: 2, offers: [{ ...usdRoom.offers[0], price: { ...usdRoom.offers[0].price, calendar: { ...usdRoom.offers[0].price.calendar, base: { mode: "flat" as const, amountMinor: "5000" } } }] }, { ...first.configuration, revision: 2 }];
+    const idrRoom = { ...usdRoom, currency: "IDR", revision: 2, offers: [{ ...usdRoom.offers[0], price: { kind: "independent" as const, calendar: { base: { mode: "flat" as const, amountMinor: "5000" }, months: [], seasons: [], weekdays: [], dates: [] } } }] };
+    const idrRooms = [idrRoom, { ...first.configuration, revision: 2 }];
     client.read.mockResolvedValue({ ...snapshot, currency: "IDR", rooms: idrRooms, revision: 2, sources, stale: false });
     await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
     // One save: the other room's numbers in IDR, rounded to whole rupiah, and the first price, in one publication.
