@@ -394,20 +394,21 @@ export function createPgFinanceSubscriptionWebhookStore(
     },
 
     async enqueuePaymentFailureNotification({ payload, entitlement, snapshot }) {
+      // A property-scoped job carries no organization_id (chk_platform_jobs_scope, VAY-2431);
+      // the consumer reads the organization from the payload.
       const result = await pool.query<{ id: string }>(
         `INSERT INTO platform.jobs
-           (job_key, queue_name, job_type, tenant_scope, organization_id, property_id,
+           (job_key, queue_name, job_type, tenant_scope, property_id,
             resource_product, resource_type, resource_id, correlation_id,
             idempotency_key_hash, payload, job_metadata)
          VALUES ($1, 'finance.notifications',
-           'finance.subscription-payment-failed.notify-internal', 'property', $2::uuid, $3::uuid,
-           'finance', 'billing_subscription', $4, $5, $6, $7::jsonb,
+           'finance.subscription-payment-failed.notify-internal', 'property', $2::uuid,
+           'finance', 'billing_subscription', $3, $4, $5, $6::jsonb,
            '{"audience":"vayada-internal","reason":"recurring-payment-failed"}'::jsonb)
          ON CONFLICT (queue_name, job_key) DO NOTHING
          RETURNING id::text`,
         [
           `finance.subscription-payment-failed:${payload.rawEventId}:v1`,
-          entitlement.organizationId,
           entitlement.propertyId,
           snapshot.subscriptionId,
           `webhook:stripe:${payload.rawEventId}`,
