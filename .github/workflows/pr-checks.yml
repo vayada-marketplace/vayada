@@ -1359,6 +1359,104 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts
 
+      # VAY-2427: migration suites that drop the schemas they test and rebuild them from single
+      # migration files. Their database is new, never migrated, and holds nothing else.
+      - name: Verify migration schema contracts in an unmigrated database
+        if: matrix.shard == 'pms-migrations'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2427_schema_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2427_schema_test"); await client.end();'
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism \
+            src/bookingDesignRevisions.test.ts \
+            src/bookingFinanceAttribution.test.ts \
+            src/bookingGuestNationalityBackfill.test.ts \
+            src/bookingGuestNationalityReview.test.ts \
+            src/bookingGuestPolicyEvidence.test.ts \
+            src/bookingNightlyRevenueEvidence.test.ts \
+            src/bookingSectionPermissions.test.ts \
+            src/financeExpenseCategories.test.ts \
+            src/financeExpenseReceiptMedia.test.ts \
+            src/financeExpenses.test.ts \
+            src/financeFolioEvidence.test.ts \
+            src/financeFolios.test.ts \
+            src/financePaymentReadiness.test.ts \
+            src/financePaypalPaymentMethod.test.ts \
+            src/hotelCatalogLocationPolicyRevisions.test.ts \
+            src/manualBookingSchema.test.ts \
+            src/organizationRoles.test.ts \
+            src/pmsCalendarAutoOpenSettings.test.ts \
+            src/pmsInventoryReadinessReservations.test.ts \
+            src/pmsMandatoryChargeConfirmations.test.ts \
+            src/pmsOperatingCalendar.test.ts \
+            src/pmsPricingSource.test.ts \
+            src/pmsPrivateNoteEdits.test.ts \
+            src/pmsRecurringPricingSources.test.ts \
+            src/pmsRoomAmenityReview.test.ts \
+            src/pmsRoomAssignmentOptimizationSettings.test.ts \
+            src/pmsRoomFacts.test.ts \
+            src/propertyManifestPermission.test.ts \
+            src/propertySocialContactChannels.test.ts \
+            src/propertyTermsAndConditions.test.ts \
+            src/staffInvitationDelivery.test.ts \
+            src/staffInvitations.test.ts \
+            src/staffPermissionCatalog.test.ts \
+            src/teamRolePresets.test.ts
+
+      # VAY-2427: migration readers, writers and guards on a migrated database of their own. The
+      # Channex claims and payment currency upgrade suites create and drop their own databases.
+      - name: Verify migration readers, writers and guards on a migrated database
+        if: matrix.shard == 'pms-migrations'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2427_migration_test
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2427_migration_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism \
+            src/accountAdminPreflight.integration.test.ts \
+            src/addonRevenueEvidence.integration.test.ts \
+            src/arrivalTimeRanges.integration.test.ts \
+            src/bookingNightlyRevenueBackfillWriter.integration.test.ts \
+            src/bookingPricingQuoteAcceptances.integration.test.ts \
+            src/channexBindingClaimsMigration.integration.test.ts \
+            src/channexInventoryAriJobScope.integration.test.ts \
+            src/channexOfferTargets.integration.test.ts \
+            src/channexRoomAvailabilityAttempts.integration.test.ts \
+            src/financeOnlineCardExecutionEvidence.test.ts \
+            src/financePaymentCurrencyCascadeMigration.integration.test.ts \
+            src/financialsActivationReadiness.integration.test.ts \
+            src/productionFinanceSnapshotReader.integration.test.ts \
+            src/productionFinanceTargetIo.integration.test.ts \
+            src/productionPmsSnapshotReader.integration.test.ts \
+            src/replacementPricingStorage.integration.test.ts
+
+      # VAY-2427: suites that need a database to themselves. The bank transfer schema suites create
+      # their schemas inside a rolled-back transaction (so the database stays empty), the admin
+      # guards accept only vay1439_admin_guard_test, runner.test.ts drops the platform schema,
+      # parity.test.ts rebuilds every target schema, and the parity evidence reader counts PII and
+      # legacy media across the whole migrated database.
+      - name: Verify the migration runner, rebuild and evidence parity, admin guards and bank transfer schema in their own databases
+        if: matrix.shard == 'pms-migrations'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          DATABASES: postgresql://vayada_test:vayada_test@127.0.0.1:5432
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const client = new pg.Client({ connectionString: process.env.ADMIN_URL }); await client.connect();
+            for (const database of ["vay2427_bank_schema_test", "vay1439_admin_guard_test", "vay2427_runner_test", "vay2427_parity_test", "vay2427_parity_reader_test"])
+              await client.query(`CREATE DATABASE ${database}`);
+            await client.end();
+          '
+          TARGET_DATABASE_URL="$DATABASES/vay2427_parity_reader_test" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          TEST_DATABASE_URL="$DATABASES/vay2427_bank_schema_test" npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/bankTransferDestinations.integration.test.ts src/bankTransferPolicyCleanup.integration.test.ts
+          TEST_DATABASE_URL="$DATABASES/vay1439_admin_guard_test" npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/accountAdminGuards.test.ts
+          TEST_DATABASE_URL="$DATABASES/vay2427_runner_test" npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/runner.test.ts
+          TEST_DATABASE_URL="$DATABASES/vay2427_parity_test" npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/parity.test.ts
+          TEST_DATABASE_URL="$DATABASES/vay2427_parity_reader_test" npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/productionParityReader.integration.test.ts
+
       # The release precheck's isolated blocks (VAY-2245). A workflow_dispatch of this workflow is
       # the release precheck, so each block runs as it did there: its own new database, migrated,
       # with TEST_DATABASE_URL and TARGET_DATABASE_URL on it and nothing else run in it. Some of
