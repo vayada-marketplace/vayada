@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "menunggu pembayaran",
   "notifications.awaitingAnswer": "menunggu jawaban Anda",
   "notifications.datesChanged": "tanggal diubah menjadi {dates}",
-  "notifications.requestUpdated": "permintaan diubah oleh tamu",
   "notifications.nowTotal": "sekarang {amount}",
   "notifications.cancelledByGuest": "dibatalkan oleh tamu",
   "notifications.cancelledByHotel": "dibatalkan oleh tim Anda",

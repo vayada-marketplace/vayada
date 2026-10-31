@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  createTargetCheckoutQuote,
-  loadTargetCheckoutOffer,
-  loadTargetCheckoutQuoteSnapshot,
-} from "./routes/bookingWebPublic.js";
+import { createTargetCheckoutQuote, loadTargetCheckoutOffer } from "./routes/bookingWebPublic.js";
 import { quoteTargetRoomSelection } from "./routes/bookingWebMixedQuote.js";
 
 const unavailable = { code: "PRICING_UNAVAILABLE", statusCode: 503 };
@@ -16,9 +12,6 @@ describe("pricing reset", () => {
     const pool = { query, end: vi.fn() };
     await expect(
       createTargetCheckoutQuote(pool, undefined as never, undefined as never, new Date()),
-    ).rejects.toMatchObject(retired);
-    await expect(
-      loadTargetCheckoutQuoteSnapshot(pool, "property", undefined as never, new Date()),
     ).rejects.toMatchObject(retired);
     await expect(loadTargetCheckoutOffer(pool, undefined as never)).rejects.toMatchObject(
       unavailable,

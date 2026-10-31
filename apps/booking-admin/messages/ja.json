@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "支払い待ち",
   "notifications.awaitingAnswer": "あなたの回答待ち",
   "notifications.datesChanged": "日程が {dates} に変更されました",
-  "notifications.requestUpdated": "ゲストがリクエストを変更しました",
   "notifications.nowTotal": "現在 {amount}",
   "notifications.cancelledByGuest": "ゲストによるキャンセル",
   "notifications.cancelledByHotel": "チームによるキャンセル",

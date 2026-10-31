@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "wartet auf Zahlung",
   "notifications.awaitingAnswer": "wartet auf Ihre Antwort",
   "notifications.datesChanged": "Daten geändert auf {dates}",
-  "notifications.requestUpdated": "Anfrage vom Gast geändert",
   "notifications.nowTotal": "jetzt {amount}",
   "notifications.cancelledByGuest": "vom Gast storniert",
   "notifications.cancelledByHotel": "von Ihrem Team storniert",

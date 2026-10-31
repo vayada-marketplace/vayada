@@ -191,10 +191,7 @@ export function notificationRow(
       };
     }
     if (item.kind === "booking_modified") {
-      const change =
-        booking.change?.kind === "request"
-          ? t("notifications.requestUpdated")
-          : t("notifications.datesChanged", { dates });
+      const change = t("notifications.datesChanged", { dates });
       const newTotal = money(
         booking.change?.newTotal ?? booking.totalAmount,
         booking.currency,

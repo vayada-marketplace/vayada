@@ -153,7 +153,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Admin notifications (runtime login)
     // Left out: a PMS-made booking, an event older than 30 days, payments, another property's booking.
     const pmsMade = await seedBooking({ sourceSystem: "pms" });
     await seedEvent(pmsMade, "guest_booking.created", { toStatus: "confirmed", ago: "1 day" });
-    await seedEvent(created, "guest_booking.request_updated", { ago: "40 days" });
+    await seedEvent(created, "guest_booking.change_accepted", { ago: "40 days" });
     await seedEvent(created, "guest_booking.payment_received", { ago: "2 hours" });
     const elsewhere = await seedBooking({ property: otherPropertyId });
     await seedEvent(elsewhere, "guest_booking.created", { toStatus: "confirmed", ago: "1 day" });

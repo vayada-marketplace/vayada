@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "wacht op betaling",
   "notifications.awaitingAnswer": "wacht op je antwoord",
   "notifications.datesChanged": "data gewijzigd naar {dates}",
-  "notifications.requestUpdated": "aanvraag gewijzigd door de gast",
   "notifications.nowTotal": "nu {amount}",
   "notifications.cancelledByGuest": "geannuleerd door de gast",
   "notifications.cancelledByHotel": "geannuleerd door je team",

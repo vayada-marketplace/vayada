@@ -477,19 +477,6 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
       );
     },
 
-    async selectionAvailabilityCredits(input) {
-      const result = await input.transaction.query<{
-        roomTypeId: string;
-        checkIn: string;
-        checkOut: string;
-        roomCount: number;
-      }>(
-        `SELECT room_type_id::text AS "roomTypeId",check_in::text AS "checkIn",check_out::text AS "checkOut",room_count AS "roomCount"
-         FROM pms.pending_booking_edit_receipts WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid`,
-        [input.propertyId, input.guestBookingId],
-      );
-      return new Map(result.rows.map(({ roomTypeId, ...credit }) => [roomTypeId, credit]));
-    },
     async availabilityCredit(input) {
       const result = await input.transaction.query<{
         checkIn: string;
@@ -531,32 +518,6 @@ function replacementReceiptIds(reservation?: InventoryReservationReceipt): strin
     parsePmsInventoryReservationBundle(reservation)?.receipts.map((receipt) => receipt.receiptId) ??
     []
   );
-}
-
-/** Readiness-only credit after release; never adds inventory to the live offer. */
-export async function releasedPmsReservationOfferKeys(
-  transaction: Transaction,
-  propertyId: string,
-  reservation: InventoryReservationReceipt | undefined,
-  releasedAt: Date,
-): Promise<ReadonlySet<string>> {
-  const ids = replacementReceiptIds(reservation);
-  if (!ids.length) return new Set();
-  const result = await transaction.query<{ publicOfferKey: string }>(
-    `SELECT receipt.public_offer_key AS "publicOfferKey"
-     FROM pms.inventory_reservation_receipts receipt
-     JOIN pms.inventory_reservation_statuses status USING(receipt_id)
-     WHERE receipt.receipt_id=ANY($1::uuid[]) AND receipt.property_id=$2::uuid
-       AND receipt.receipt_owner='pms' AND receipt.contract_version=$3
-       AND receipt.room_count>0 AND status.lifecycle_state='released' AND status.released_at=$4::timestamptz`,
-    [
-      ids,
-      propertyId,
-      PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
-      releasedAt.toISOString(),
-    ],
-  );
-  return new Set(result.rows.map((row) => row.publicOfferKey));
 }
 
 type ReceiptScopeRow = {

@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "ожидает оплаты",
   "notifications.awaitingAnswer": "ожидает вашего ответа",
   "notifications.datesChanged": "даты изменены на {dates}",
-  "notifications.requestUpdated": "гость изменил запрос",
   "notifications.nowTotal": "теперь {amount}",
   "notifications.cancelledByGuest": "отменено гостем",
   "notifications.cancelledByHotel": "отменено вашей командой",

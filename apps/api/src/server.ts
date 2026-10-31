@@ -524,7 +524,6 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   mediaServing: config.platformMediaServing,
   externalChanges: externalBookingChanges,
-  mixedRoomSelectionsEnabled: true,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
   replacementPricingDepositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled,
