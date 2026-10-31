@@ -15,8 +15,10 @@ test("finds a guest in search and opens their profile with every stay (VAY-2420)
   const writes = await mockGuests(page);
   await page.goto("/bookings");
 
-  // The top bar's search opens with Ctrl/Cmd+K once it is on the page.
-  await expect(page.getByRole("button", { name: /Search reservations/ }).first()).toBeAttached();
+  // The top bar's search opens with Ctrl/Cmd+K. The header listens for it from its first effects,
+  // and shows the property name only after a later fetch, so wait for the name: a press before the
+  // listener was lost in CI (VAY-2427).
+  await expect(page.getByRole("button", { name: "Alpenrose Munich" })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("textbox").fill("timo");

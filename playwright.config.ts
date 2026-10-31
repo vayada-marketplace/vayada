@@ -8,6 +8,13 @@ const startServers =
   (process.env.CI === "true" || process.env.E2E_START_SERVERS === "1");
 const firstPartyAuthOnly = process.env.E2E_FIRST_PARTY_AUTH_ONLY === "1";
 
+// The fake Maps key of the dev servers started below. The map specs read it from their own process,
+// so when Playwright starts the servers it gives the specs the same key (VAY-2427).
+const e2eGoogleMapsApiKey = "e2e-google-places";
+if (startServers && !firstPartyAuthOnly) {
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = e2eGoogleMapsApiKey;
+}
+
 const landingBaseURL =
   process.env.E2E_LANDING_BASE_URL ||
   process.env.E2E_BASE_URL ||
@@ -83,22 +90,19 @@ export default defineConfig({
             timeout: 120_000,
           },
           {
-            command:
-              "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places PORT=3002 npm run dev:booking-web",
+            command: `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${e2eGoogleMapsApiKey} PORT=3002 npm run dev:booking-web`,
             url: "http://127.0.0.1:3002",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },
           {
-            command:
-              "NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 PORT=3003 npm run dev:booking-admin",
+            command: `NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${e2eGoogleMapsApiKey} NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 PORT=3003 npm run dev:booking-admin`,
             url: "http://127.0.0.1:3003",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },
           {
-            command:
-              "NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places PORT=3004 npm run dev:pms-web",
+            command: `NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${e2eGoogleMapsApiKey} PORT=3004 npm run dev:pms-web`,
             url: "http://127.0.0.1:3004",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
