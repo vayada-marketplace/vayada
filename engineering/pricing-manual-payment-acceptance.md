@@ -12,9 +12,12 @@ email". There is no PayPal API, webhook or provider account. Bank details live e
 
 Everything sits behind `REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED` (default `false`).
 PayPal also needs `REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED` (default `false`): with only the
-first switch on, manual payments are bank transfer only (Flamur, 2026-10-31). The offer catalog,
-quotes, acceptance, checkout settings and the Finance manual-payment reader (launch readiness, the
-publication snapshot, setup and the PMS rate pickers) all use the same list.
+first switch on, manual payments are bank transfer only (Flamur, 2026-10-31). Bank transfer also
+needs the bank-details binding (Finance on target with the bank-transfer KMS settings). The offer
+catalog, quotes, acceptance and checkout settings take the methods that list allows, and so do the
+Finance manual-payment reader (launch readiness, the publication snapshot, setup and the PMS rate
+pickers) and the published-page checks (`replacementPricingManualPaymentMethods`): a page published
+with PayPal only is hidden while PayPal is off.
 While it is off, a bank-transfer or PayPal quote request answers 400, and accepting one answers
 404 `MANUAL_PAYMENT_UNAVAILABLE`; a replay of a booking made while it was on still answers its
 pending payment. Booking launch readiness keeps counting only card and pay at property, so a

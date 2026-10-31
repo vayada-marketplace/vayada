@@ -1293,6 +1293,20 @@ describe("Booking Web public bootstrap parity", () => {
         bankTransfers: undefined,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property"] });
+    // Quotes take PayPal only with its own switch too. Past the method check, the empty selection
+    // is the next thing refused, so that message shows the method got through.
+    const quote = (paymentMethod: string, paypal = false) =>
+      createTargetBookingWebCheckoutAdapter({
+        ...manualConfig,
+        replacementPricingPaypalAcceptanceEnabled: paypal,
+      }).quoteBooking(
+        "hotel-alpenrose",
+        { version: "public-booking-quote-request.v1", selection: {}, paymentMethod } as never,
+        { idempotencyKey: "vay2139-quote" } as never,
+      );
+    await expect(quote("paypal")).rejects.toThrow("Invalid quote request.");
+    await expect(quote("bank_transfer")).rejects.toThrow("Invalid quote selection.");
+    await expect(quote("paypal", true)).rejects.toThrow("Invalid quote selection.");
     // VAY-2301: card is offered only when Finance's card readiness is complete AND card
     // acceptance is on with a payment provider; neither alone offers it.
     const cardConfig = {
@@ -1388,10 +1402,12 @@ describe("Booking Web public bootstrap parity", () => {
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         pool: pool as never,
         replacementPricingManualPaymentAcceptanceEnabled: true,
+        replacementPricingPaypalAcceptanceEnabled: true,
         bankTransfers: {} as never,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({
-      bookingPagePaymentMethods: ["pay_at_property", "bank_transfer"],
+      // PayPal keeps its own payment window: no booking window applies to it.
+      bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
       paymentMethodArrivalWindows: {
         pay_at_property: { through: "2026-10-13" },
         bank_transfer: { from: "2026-10-19" },

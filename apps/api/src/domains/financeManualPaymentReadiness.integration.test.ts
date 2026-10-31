@@ -7,7 +7,10 @@ const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("Finance bank-transfer and PayPal launch readiness (VAY-2139)", () => {
   const pool = new pg.Pool({ connectionString: url, max: 2 });
   afterAll(() => pool.end());
-  const reader = createFinanceManualPaymentReadinessReader({ pool });
+  const reader = createFinanceManualPaymentReadinessReader({
+    pool,
+    methods: ["bank_transfer", "paypal"],
+  });
   async function hotel(
     methods: string[],
     options: { bound?: boolean; email?: string; bank?: boolean } = {},

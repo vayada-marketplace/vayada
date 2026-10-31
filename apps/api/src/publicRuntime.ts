@@ -1,4 +1,4 @@
-import type { ApiConfig } from "./config.js";
+import { replacementPricingManualPaymentMethods, type ApiConfig } from "./config.js";
 import {
   createTargetPublicHotelProfileRepository,
   type PublicHotelProfileReadPool,
@@ -16,6 +16,7 @@ export function createPublicRuntimeRepositories(config: ApiConfig, pools: Public
           connectionString: requireTargetDatabaseUrl(config),
           pool: pools.publicHotelProfilePool,
           manualPayments: config.replacementPricingManualPaymentAcceptanceEnabled,
+          manualMethods: replacementPricingManualPaymentMethods(config),
         })
       : createTargetPublicHotelProfileRepository({
           connectionString: requireTargetDatabaseUrl(config),

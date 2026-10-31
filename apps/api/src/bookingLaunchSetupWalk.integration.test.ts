@@ -149,6 +149,7 @@ function parsed<T>(value: T | null, step: string): T {
  * accepted.
  */
 const METHODS = ["pay_at_property", "bank_transfer", "paypal"] as const;
+const BOTH = ["bank_transfer", "paypal"] as const;
 const WALK = { timeout: 300_000 };
 describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", WALK, () => {
   it.each(METHODS)("walks setup to ready and publishes the booking page (%s)", async (method) => {
@@ -277,7 +278,10 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         financeScope: financeRead,
         // Bank transfer and PayPal count only while their acceptance is on (VAY-2139).
         ...(manualMethod
-          ? { manualPayments: createFinanceManualPaymentReadinessReader({ pool }) }
+          ? {
+              manualPayments: createFinanceManualPaymentReadinessReader({ pool, methods: BOTH }),
+              manualMethods: BOTH,
+            }
           : {}),
         warn: (fields) => unavailable.push(fields),
       });
@@ -1161,16 +1165,28 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       expect(content.profile.hotel.supportedQuoteParameters.supportedLocales).toEqual(
         content.profile.hotel.supportedLocales,
       );
-      // The public page counts bank transfer and PayPal only while their acceptance is on.
-      const publicProfile = (manualPayments: boolean) =>
+      // The public page counts bank transfer and PayPal only while their acceptance is on, and only
+      // the ones the booking page takes now.
+      const publicProfile = (
+        manualPayments: boolean,
+        manualMethods: readonly ("bank_transfer" | "paypal")[] = BOTH,
+      ) =>
         createActiveBookingPublicationProfileRepository({
           connectionString: cs,
           pool,
           manualPayments,
+          manualMethods,
         }).findProfileBySlug(content.profile.hotel.slug);
       expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
       if (manualMethod) expect(await publicProfile(false)).toBeNull();
       else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
+      // VAY-2139: with PayPal's own switch off, a PayPal-only page is hidden; bank transfer stays.
+      if (manualMethod === "paypal")
+        expect(await publicProfile(true, ["bank_transfer"])).toBeNull();
+      else
+        expect(await publicProfile(true, ["bank_transfer"])).toMatchObject({
+          hotel: { propertyId },
+        });
       // VAY-2318: Design Studio saves a hero heading into the booking settings and a colour outside
       // the setup swatches into the booking design, then refreshes the live page, and guests get
       // both. Before, the page kept the hotel name and the setup colour.
@@ -1548,7 +1564,11 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
         try {
           expect(await authority()).toBeNull();
-          configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: true });
+          configureActiveBookingPublicationGate({
+            servesPublications: true,
+            manualPayments: true,
+            manualMethods: BOTH,
+          });
           expect(await authority()).toMatchObject({ propertyId });
         } finally {
           configureActiveBookingPublicationGate({

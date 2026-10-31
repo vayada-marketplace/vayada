@@ -417,6 +417,28 @@ function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string
 const KMS_KEY_ARN =
   /^arn:(aws(?:-[a-z]+)?):kms:([a-z0-9-]+):(\d{12}):key\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
 
+/** The bank-transfer and PayPal methods the booking page takes (VAY-2139): none while manual
+ * payment acceptance is off, PayPal only with its own switch, and bank transfer only with the
+ * bank-details binding (Finance on target with the bank-transfer KMS settings, as server.ts builds
+ * it). Launch readiness, the publication gate and the published pages all use this list. */
+export function replacementPricingManualPaymentMethods(
+  config: Pick<
+    ApiConfig,
+    | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingPaypalAcceptanceEnabled"
+    | "financeSource"
+    | "financeBankTransferKms"
+  >,
+): ("bank_transfer" | "paypal")[] {
+  if (!config.replacementPricingManualPaymentAcceptanceEnabled) return [];
+  return [
+    ...(config.financeSource === "target" && config.financeBankTransferKms
+      ? (["bank_transfer"] as const)
+      : []),
+    ...(config.replacementPricingPaypalAcceptanceEnabled ? (["paypal"] as const) : []),
+  ];
+}
+
 function loadBankTransferKms(env: NodeJS.ProcessEnv): ApiConfig["financeBankTransferKms"] {
   const currentKeyArn = readOptionalEnv(env, "FINANCE_BANK_TRANSFER_KMS_CURRENT_KEY_ARN");
   const allowed = readOptionalEnv(env, "FINANCE_BANK_TRANSFER_KMS_ALLOWED_KEY_ARNS");

@@ -2,6 +2,7 @@ import {
   parseBookingPublicContent,
   type BookingPublicContent,
 } from "@vayada/domain-distribution/booking-publication";
+import type { ManualPricingPaymentMethod } from "@vayada/domain-booking";
 import type { QueryResultRow } from "pg";
 
 import { manualPublishedPagePayable } from "./financeManualPaymentReadiness.js";
@@ -20,17 +21,24 @@ export type ActiveBookingPublicationRow = QueryResultRow & {
 
 export const ACTIVE_BOOKING_PUBLICATION_CONTRACT = "booking-public-content.v1";
 
+/** Whether bank-transfer and PayPal pages count (their acceptance is on), and which of the two the
+ * booking page takes now (replacementPricingManualPaymentMethods). Without `manualMethods` no
+ * bank-transfer or PayPal page counts. */
+export type ManualPaymentPagesContext = {
+  manualPayments: boolean;
+  manualMethods?: readonly ManualPricingPaymentMethod[];
+};
+
 /**
  * One rule for whether an active Booking publication is publicly visible, shared by the public
  * page reader, checkout and the pricing authority so they can't disagree (VAY-2134). The stored
  * content must parse as the exact published contract for its property, be bookable and fresh,
  * still be payable by its published methods (VAY-2139), and keep any custom domain verified.
- * `manualPayments` is whether bank-transfer and PayPal pages count.
  */
 export async function visibleActiveBookingPublication(
   queryable: Queryable,
   row: ActiveBookingPublicationRow | undefined,
-  context: { manualPayments: boolean },
+  context: ManualPaymentPagesContext,
 ): Promise<BookingPublicContent | null> {
   if (!row) return null;
   const parsed = parseBookingPublicContent(row.publicContent, context);
@@ -46,7 +54,12 @@ export async function visibleActiveBookingPublication(
   // A bank-transfer or PayPal page stays up only while the hotel can still be paid that way.
   if (
     context.manualPayments &&
-    !(await manualPublishedPagePayable(queryable, row.propertyId, parsed.payments.readyMethods))
+    !(await manualPublishedPagePayable(
+      queryable,
+      row.propertyId,
+      parsed.payments.readyMethods,
+      context.manualMethods ?? [],
+    ))
   )
     return null;
   const customDomainUrl = profile.hotel.customDomainUrl;
@@ -65,12 +78,12 @@ export async function visibleActiveBookingPublication(
   return verified.rows.length ? parsed : null;
 }
 
-export type ActiveBookingPublicationGateConfig = Readonly<{
-  /** PUBLIC_HOTEL_PROFILE_SOURCE=active_publication: the public site serves setup publications. */
-  servesPublications: boolean;
-  /** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139). */
-  manualPayments: boolean;
-}>;
+export type ActiveBookingPublicationGateConfig = Readonly<
+  {
+    /** PUBLIC_HOTEL_PROFILE_SOURCE=active_publication: the public site serves setup publications. */
+    servesPublications: boolean;
+  } & ManualPaymentPagesContext
+>;
 
 let gateConfig: ActiveBookingPublicationGateConfig = {
   servesPublications: false,
@@ -124,7 +137,7 @@ export async function lockActiveBookingPublication(
   queryable: Queryable,
   slug: string,
   propertyId: string,
-  context: { manualPayments: boolean },
+  context: ManualPaymentPagesContext,
 ): Promise<"absent" | "hidden" | "visible"> {
   const result = await queryable.query<ActiveBookingPublicationRow & { propertyActive: boolean }>(
     `SELECT active.property_id::text AS "propertyId", revision.public_content AS "publicContent",

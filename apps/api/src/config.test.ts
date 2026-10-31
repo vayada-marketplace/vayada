@@ -4,6 +4,7 @@ import {
   channexClaimedAriScope,
   channexClaimedScope,
   loadConfig,
+  replacementPricingManualPaymentMethods,
   stripeSubscriptionRuntimeEnabled,
 } from "./config.js";
 
@@ -910,6 +911,29 @@ describe("api config", () => {
       loadConfig({ REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED: "true" })
         .replacementPricingPaypalAcceptanceEnabled,
     ).toBe(true);
+  });
+
+  it("lists the manual payment methods the booking page takes (VAY-2139)", () => {
+    const kms = { currentKeyArn: "key", allowedKeyArns: ["key"], region: "eu-west-1" };
+    const methods = (
+      manual: boolean,
+      paypal: boolean,
+      financeBankTransferKms: typeof kms | undefined = kms,
+      financeSource: "target" | "legacy" = "target",
+    ) =>
+      replacementPricingManualPaymentMethods({
+        replacementPricingManualPaymentAcceptanceEnabled: manual,
+        replacementPricingPaypalAcceptanceEnabled: paypal,
+        financeSource,
+        financeBankTransferKms,
+      });
+    expect(methods(false, true)).toEqual([]);
+    expect(methods(true, false)).toEqual(["bank_transfer"]);
+    expect(methods(true, true)).toEqual(["bank_transfer", "paypal"]);
+    // Without the bank-details binding there is no bank transfer to take.
+    expect(methods(true, false, undefined)).toEqual([]);
+    expect(methods(true, true, undefined)).toEqual(["paypal"]);
+    expect(methods(true, false, kms, "legacy")).toEqual([]);
   });
 
   it("keeps the hotel first run (VAY-2247) unmounted unless explicitly enabled", () => {

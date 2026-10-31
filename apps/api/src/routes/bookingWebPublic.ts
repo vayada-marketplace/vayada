@@ -4,6 +4,7 @@ import {
   hotelAddressSql,
   publicationServesAddress,
   visibleActiveBookingPublication,
+  type ManualPaymentPagesContext,
 } from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
@@ -2754,7 +2755,7 @@ export async function resolveTargetCheckoutProperty(
 async function publishedCheckoutProperty(
   pool: BookingWebQueryExecutor,
   slug: string,
-  context: { manualPayments: boolean },
+  context: ManualPaymentPagesContext,
 ): Promise<TargetCheckoutPropertyRow | "absent" | "hidden"> {
   const result = await pool.query<
     TargetCheckoutPropertyRow & { publicContent: unknown; propertyActive: boolean }

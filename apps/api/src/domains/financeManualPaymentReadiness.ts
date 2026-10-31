@@ -1,8 +1,5 @@
 import type pg from "pg";
-import {
-  MANUAL_PRICING_PAYMENT_METHODS,
-  type ManualPricingPaymentMethod,
-} from "@vayada/domain-booking";
+import type { ManualPricingPaymentMethod } from "@vayada/domain-booking";
 
 /** Bank transfer and PayPal for booking launch (VAY-2139), read only while their acceptance is on.
  * Ready on a committed Finance row (payment methods saved through either writer) that takes them,
@@ -22,15 +19,14 @@ export type FinanceManualPaymentMethodsReadPort = {
 
 type QueryPool = { query(text: string, values?: unknown[]): Promise<{ rows: any[] }> };
 
-/** `methods` limits the result to the manual methods the booking page takes (REPLACEMENT_PRICING_*):
- * the server passes only bank transfer while PayPal is off. Defaults to both. */
+/** `methods` are the manual methods the booking page takes (replacementPricingManualPaymentMethods):
+ * bank transfer only while PayPal's own switch is off. No default, so no caller gets PayPal back
+ * by leaving it out. */
 export function createFinanceManualPaymentReadinessReader(config: {
   pool: Pick<pg.Pool, "query"> | QueryPool;
-  methods?: readonly ManualPricingPaymentMethod[];
+  methods: readonly ManualPricingPaymentMethod[];
 }): FinanceManualPaymentReadinessReadPort & FinanceManualPaymentMethodsReadPort {
-  const { pool } = config;
-  const offered: readonly ManualPricingPaymentMethod[] =
-    config.methods ?? MANUAL_PRICING_PAYMENT_METHODS;
+  const { pool, methods: offered } = config;
   const read = async (propertyId: string) => {
     const row = (
       await pool.query(
@@ -77,19 +73,23 @@ export function createFinanceManualPaymentReadinessReader(config: {
 /**
  * VAY-2139: a published page that lists only bank transfer or PayPal is served only while the hotel
  * still takes at least one of them with its details in place (an enabled bank destination, a valid
- * PayPal email). It comes back by itself once they are restored. Other pages always pass, including
- * one that also lists card or pay at property (Finance doesn't publish those mixed today).
+ * PayPal email), among the manual `methods` the booking page takes now. So a PayPal-only page is
+ * hidden while PayPal's switch is off. It comes back by itself once they are restored. Other pages
+ * always pass, including one that also lists card or pay at property (Finance doesn't publish those
+ * mixed today).
  */
 export async function manualPublishedPagePayable(
   pool: Pick<pg.Pool, "query"> | QueryPool,
   propertyId: string,
   readyMethods: readonly string[],
+  methods: readonly ManualPricingPaymentMethod[],
 ): Promise<boolean> {
   if (readyMethods.some((method) => method === "card" || method === "pay_at_property")) return true;
   const manual = readyMethods.filter((method) => method === "bank_transfer" || method === "paypal");
   if (!manual.length) return true;
-  const accepted = await createFinanceManualPaymentReadinessReader({ pool }).acceptedMethods({
-    propertyId,
-  });
+  const accepted = await createFinanceManualPaymentReadinessReader({
+    pool,
+    methods,
+  }).acceptedMethods({ propertyId });
   return manual.some((method) => accepted.includes(method as (typeof accepted)[number]));
 }

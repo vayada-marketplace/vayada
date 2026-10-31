@@ -2914,6 +2914,16 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       if (pending.kind !== "payment_pending" || !("acceptedAt" in pending))
         throw new Error(`unexpected ${pending.kind}`);
       expect(pending.payment.method).toBe("paypal");
+      // A PayPal booking made while PayPal was on still replays after it is switched off.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+          bankTransfers: bankOperations(),
+        }),
+      ).resolves.toMatchObject({
+        kind: "payment_pending",
+        bookingId: pending.bookingId,
+        replayed: true,
+      });
       const window = Date.parse(pending.payment.deadlineAt) - Date.parse(pending.acceptedAt);
       expect(window).toBeGreaterThan(6 * 3600_000 - 60_000);
       expect(window).toBeLessThanOrEqual(6 * 3600_000);

@@ -1,3 +1,4 @@
+import type { ManualPricingPaymentMethod } from "@vayada/domain-booking";
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
 import pg, { type QueryResultRow } from "pg";
 import { LIVE_PROMO_CODES_SQL } from "../domains/bookingGuestModules.js";
@@ -7,6 +8,7 @@ import {
   normalizedDomain,
   visibleActiveBookingPublication,
   type ActiveBookingPublicationRow,
+  type ManualPaymentPagesContext,
 } from "../domains/activeBookingPublicationGate.js";
 import {
   createTargetPublicHotelProfileRepository,
@@ -35,8 +37,10 @@ export function createActiveBookingPublicationProfileRepository(config: {
   connectionString: string;
   max?: number;
   pool?: PublicHotelProfileReadPool;
-  /** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139). */
+  /** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139), for the
+   * manual methods the booking page takes now (replacementPricingManualPaymentMethods). */
   manualPayments?: boolean;
+  manualMethods?: readonly ManualPricingPaymentMethod[];
 }): PublicHotelProfileRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Active Booking publication profile connectionString must not be empty");
@@ -44,7 +48,10 @@ export function createActiveBookingPublicationProfileRepository(config: {
   const ownsPool = !config.pool;
   const pool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
-  const content = { manualPayments: config.manualPayments === true };
+  const content: ManualPaymentPagesContext = {
+    manualPayments: config.manualPayments === true,
+    manualMethods: config.manualMethods ?? [],
+  };
   // A hotel that never published in setup keeps the page it had before the public site switched to
   // setup publications, as checkout and pricing already do. Once it publishes, only its
   // publication counts, even while that is hidden. Only the legacy publisher writes those
@@ -118,7 +125,7 @@ export function createActiveBookingPublicationProfileRepository(config: {
 async function currentActiveProfile(
   pool: PublicHotelProfileReadPool,
   row: ActiveBookingPublicationRow | undefined,
-  content: { manualPayments: boolean },
+  content: ManualPaymentPagesContext,
 ): Promise<PublicBookabilityProfileProjection | null> {
   const parsed = await visibleActiveBookingPublication(pool, row, content);
   if (!parsed || !row) return null;
