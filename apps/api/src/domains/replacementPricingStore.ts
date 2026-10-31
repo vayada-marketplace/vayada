@@ -104,12 +104,12 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         }
         if (!await guard.validate(client, scope, next, effective, "publish")) return fail("denied");
         const currencyChange = previous && previous.currency !== next.currency;
-        // VAY-2390 P5 (D2), VAY-2425: an Owner's currency change leaves the published prices in the old currency, not
-        // selling. A publication in the property's locked pricing currency publishes them again, whatever its numbers,
-        // rooms or price step: no conversion. Finance must still take that currency (validate above). Every other
-        // currency change still needs FX and the guard.
-        const repriced = currencyChange ? (await client.query<{ currency: string }>("SELECT currency::text AS currency FROM pms.property_pricing_settings WHERE property_id=$1 FOR SHARE",
-          [scope.propertyId])).rows[0]?.currency === next.currency : false;
+        // VAY-2390 P5 (D2), VAY-2425: a change of the pricing currency (its revision above 1) leaves the published prices
+        // in the old currency, not selling. A publication in the property's locked pricing currency publishes them again,
+        // whatever its numbers, rooms or price step: no conversion. Finance must still take that currency (validate
+        // above). Every other currency change still needs FX and the guard.
+        const repriced = currencyChange ? (await client.query<{ currency: string }>(`SELECT currency::text AS currency FROM pms.property_pricing_settings
+          WHERE property_id=$1 AND pricing_currency_revision > 1 FOR SHARE`, [scope.propertyId])).rows[0]?.currency === next.currency : false;
         if (currencyChange && !repriced) {
           const rate = await lockReplacementPricingFxObservation(client, next.ownerReferences.fx ?? "", previous.currency, next.currency);
           const now = (await client.query("SELECT clock_timestamp() AS time")).rows[0].time as Date;

@@ -148,16 +148,7 @@ it("publishes the property's first prices from revision 0", async () => {
   ]);
 });
 
-it("refuses without writing when another currency or prices for this room were published meanwhile", async () => {
-  client.read.mockResolvedValueOnce({
-    currency: "USD",
-    ownerReferences: { finance: "finance" },
-    rooms: [],
-    revision: 3,
-    sources,
-    stale: false,
-  });
-  await expect(publishTyped()).rejects.toMatchObject({ status: 409 });
+it("refuses without writing when prices for this room were published meanwhile", async () => {
   client.read.mockResolvedValueOnce({
     currency: "EUR",
     ownerReferences: { finance: "finance" },
@@ -169,4 +160,21 @@ it("refuses without writing when another currency or prices for this room were p
   await expect(publishTyped()).rejects.toBeInstanceOf(ApiErrorResponse);
   expect(client.termsAction).not.toHaveBeenCalled();
   expect(client.prepare).not.toHaveBeenCalled();
+});
+
+it("leaves out the rooms still in the old currency after an Owner's currency change (VAY-2425)", async () => {
+  client.read.mockResolvedValueOnce({
+    currency: "USD",
+    ownerReferences: { finance: "finance" },
+    rooms: [{ ...otherRoom, currency: "USD" }],
+    revision: 3,
+    sources,
+    stale: false,
+  });
+  await publishTyped();
+  expect(saved.baseRevision).toBe(3);
+  expect(saved.snapshot.currency).toBe("EUR");
+  expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([
+    [created, 4],
+  ]);
 });

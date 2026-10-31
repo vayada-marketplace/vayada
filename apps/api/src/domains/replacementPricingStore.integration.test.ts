@@ -211,9 +211,13 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     };
     // No pricing row names CHF yet: CHF is still a conversion.
     await expect(f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF") })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    // A pricing row that never changed currency (revision 1) is no Owner's change either.
     // The fixture's legacy EUR room type would refuse the row through trigger 0050.
     await pool.query(`BEGIN; SET LOCAL session_replication_role=replica;
-      INSERT INTO pms.property_pricing_settings(property_id,currency,pricing_currency_revision) VALUES('${f.scope.propertyId}','CHF',2); COMMIT`);
+      INSERT INTO pms.property_pricing_settings(property_id,currency,pricing_currency_revision) VALUES('${f.scope.propertyId}','CHF',1); COMMIT`);
+    await expect(f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF") })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    await pool.query(`BEGIN; SET LOCAL session_replication_role=replica;
+      UPDATE pms.property_pricing_settings SET pricing_currency_revision=2 WHERE property_id='${f.scope.propertyId}'; COMMIT`);
     // A currency other than the pricing one still needs FX.
     await expect(f.store.save(f.scope, { ...f.command(1), snapshot: same("USD") })).rejects.toMatchObject({ code: "currency_conversion_required" });
     expect((await f.store.read(f.scope))?.currency).toBe("EUR");

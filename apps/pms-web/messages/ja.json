@@ -1157,6 +1157,7 @@
   "settings.currencyChange.blockedUnknownBody": "しばらくしてからもう一度お試しください。",
   "pricing.currencyChanged.title": "通貨が {code} に変更されました。すべての料金を確認してください。",
   "pricing.currencyChanged.body": "すべての料金は数字がそのままなので、{before} は {after} になりました。料金を確認して「保存して公開」を押すまで、予約ページは予約を受け付けません。",
+  "pricing.currencyChanged.thisRoomOnly": "ここで保存すると、この客室のみが公開されます。他の客室には {code} でそれぞれ料金を設定してください。",
   "pricing.currencyChanged.otherCurrency": "料金は施設の通貨ではないため、保存されませんでした。料金を再読み込みし、確認してからもう一度保存してください。",
   "pricing.bar.from": "予約ページでは1泊{amount}から。",
   "pricing.bar.seeFirst": "ゲストには最初に≈ {amount}と表示されます。"

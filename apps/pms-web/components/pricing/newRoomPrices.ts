@@ -27,22 +27,21 @@ export function pricesForRoom(
 }
 
 /** Publishes a just-created room's prices (see `pricesForRoom`) with every other room as the server has them now: one
- * whole-property save, like "Save prices" on the room's Prices tab. */
+ * whole-property save, like "Save prices" on the room's Prices tab. After an Owner's currency change (VAY-2425) the
+ * rooms still in the old currency are left out, as on a room's Prices tab: they don't sell, and only prices the Owner
+ * has seen go live. Storage takes another currency only as the property's pricing currency. */
 export async function publishNewRoomPrices(client: Client, prices: NewRoomPrices) {
   const saved = await client.read();
-  // Someone published another currency, or prices for this room, since the page loaded.
-  if (
-    saved &&
-    (saved.currency !== prices.room.currency ||
-      saved.rooms.some((room) => room.roomTypeId === prices.room.roomTypeId))
-  )
+  // Someone published prices for this room since the page loaded.
+  if (saved?.rooms.some((room) => room.roomTypeId === prices.room.roomTypeId))
     throw new ApiErrorResponse(409, { message: "The saved prices changed. Reload pricing." });
+  const others = saved?.currency === prices.room.currency ? saved.rooms : [];
   const baseRevision = saved?.revision ?? 0,
     revision = baseRevision + 1;
   const snapshot: PricingSnapshot = {
     currency: prices.room.currency,
     ownerReferences: { finance: saved?.ownerReferences.finance ?? "" },
-    rooms: [...(saved?.rooms ?? []), prices.room].map((room) => ({ ...room, revision })),
+    rooms: [...others, prices.room].map((room) => ({ ...room, revision })),
   };
   return pricingSave(client, { snapshot, baseRevision, terms: prices.terms })();
 }

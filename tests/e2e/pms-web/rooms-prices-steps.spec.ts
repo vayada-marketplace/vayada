@@ -882,15 +882,13 @@ test("sets the first price in IDR after the Owner changed from USD, and keeps ID
   await field.fill("500000");
   await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
-  // One publication in IDR: the other room's US$49.99 as IDR 50 (whole rupiah) and the first price.
+  // One publication in IDR with only this room: the USD room never goes live unseen as IDR 50.
   const published = pricing.publishes[0].snapshot as Room;
   expect(published.currency).toBe("IDR");
   expect(published.rooms.map((value: Room) => [value.roomTypeId, value.currency])).toEqual([
-    [DELUXE, "IDR"],
     [LAKE, "IDR"],
   ]);
-  expect(published.rooms[0].offers[0].price.calendar.base).toEqual(flat("5000"));
-  expect(published.rooms[1].offers[0].price.calendar.base).toEqual(flat("50000000"));
+  expect(published.rooms[0].offers[0].price.calendar.base).toEqual(flat("50000000"));
   // After a reload the room is priced in IDR, and the banner is gone.
   await page.reload();
   await expect(
@@ -899,6 +897,14 @@ test("sets the first price in IDR after the Owner changed from USD, and keeps ID
   await expect(main(page).getByText(/Guests from IDR\s?500,000 a night/)).toBeVisible();
   await expect(main(page).getByText("Your currency changed", { exact: false })).toHaveCount(0);
   await expect(main(page).getByText("has no price yet", { exact: false })).toHaveCount(0);
+  // The room left out has no price until its own page is saved, in IDR.
+  await prices(page, DELUXE);
+  await expect(
+    main(page).getByText("Deluxe Double Room has no price yet", { exact: false }),
+  ).toBeVisible();
+  await expect(main(page).getByLabel("Room price per night").locator("xpath=..")).not.toContainText(
+    "$",
+  );
   await assertHealthy();
 });
 

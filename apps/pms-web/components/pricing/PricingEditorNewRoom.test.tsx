@@ -153,6 +153,27 @@ it("starts empty and optional, with the page's button in place of Save prices (V
   expect(onPrices).toHaveBeenLastCalledWith(false);
 });
 
+it("after an Owner's currency change prices the new room in the new currency, still optional (VAY-2425)", async () => {
+  vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({
+    paymentSettings: {
+      payAtPropertyEnabled: true,
+      onlineCardPayment: false,
+      defaultCurrency: "IDR",
+    },
+  } as never);
+  client.read.mockResolvedValue({
+    ...published,
+    currency: "USD",
+    rooms: [{ ...existing, currency: "USD" }],
+  });
+  await mount();
+  await act(async () => {});
+  expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBe("IDR");
+  // Nothing typed yet: Create Room Type still creates the room without prices.
+  expect(take.current!()).toBeNull();
+  expect(onPrices).toHaveBeenLastCalledWith(false);
+});
+
 it("lets go of the page's handle when the tab goes away", async () => {
   await mount();
   expect(take.current).not.toBeNull();

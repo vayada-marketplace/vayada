@@ -58,10 +58,14 @@ import * as ui from "./pricingStyles";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 type Room = PricingSnapshot["rooms"][number];
-/** The prices with the same numbers in `currency` (VAY-2390 P5, VAY-2425), or null when a room can't carry them. */
-function withSameNumbers(snapshot: PricingSnapshot, currency: string): PricingSnapshot | null {
-  const rooms = snapshot.rooms.map((room) => pricingConfigurationWithSameNumbers(room, currency));
-  return rooms.some((room) => room === null) ? null : { ...snapshot, currency, rooms: rooms as Room[] };
+/** After an Owner's currency change (VAY-2390 P5, VAY-2425): only the room on screen, with its numbers in `currency`
+ * rounded to its price step (US$49.99 is IDR 50). Every other room still in the old currency is left out, so a save
+ * publishes only prices the Owner has seen; those rooms have no price until their own page is saved. A room whose
+ * numbers can't be carried (a positive price under half a step) starts with no price too. */
+function thisRoomIn(snapshot: PricingSnapshot, roomTypeId: string, currency: string): PricingSnapshot {
+  const room = snapshot.rooms.find((value) => value.roomTypeId === roomTypeId);
+  const carried = room ? pricingConfigurationWithSameNumbers(room, currency) : null;
+  return { ...snapshot, currency, rooms: carried ? [carried] : [] };
 }
 /** A room's unsaved edits carried over a reload after a refused save, with the room as it was loaded. */
 type Kept = { room: Room; base: Room | null; terms: Record<string, PricingTermsInput>; bases: Record<string, string | null> };
@@ -353,18 +357,18 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     let live = true;
     // Unreadable Payment settings only leave out the currency-change banner.
     bookingsService.getPaymentSettings().then(({ paymentSettings }) => {
-      if (live) setPricingCurrency(paymentSettings.defaultCurrency?.trim().toUpperCase() || null);
+      if (live) setPricingCurrency(paymentSettings?.defaultCurrency?.trim().toUpperCase() || null);
     }, () => { if (live) setPricingCurrency(null); });
     return () => { live = false; };
   }, []);
   const relabelFrom = pricingCurrency && publishedCurrency && publishedCurrency !== pricingCurrency ? publishedCurrency : null;
-  // VAY-2425: every currency, also one with another price step or minor unit (US$49.99 is IDR 50, whole rupiah). Left as
-  // published when a positive price would round to nothing.
-  const relabeled = relabelFrom && pricingCurrency && current && current.currency !== pricingCurrency ? withSameNumbers(current, pricingCurrency) : null;
+  // VAY-2425: every currency, also one with another price step or minor unit; see `thisRoomIn`.
+  const relabeled = relabelFrom && pricingCurrency && current && current.currency !== pricingCurrency ? thisRoomIn(current, focus, pricingCurrency) : null;
   useEffect(() => {
     if (!relabeled) return;
     setCurrent(relabeled);
-    setDirty(true);
+    // Unsaved only when there are prices to publish: a room without any (or the New room page) starts as before.
+    if (relabeled.rooms.length) setDirty(true);
   }, [relabeled]);
   // A first price is in the pricing currency Payment settings give (VAY-2390): never typed, so it can't drift from what
   // the hotel is paid in. With published prices it is theirs, shown in the pricing currency (above); until Payment
@@ -372,6 +376,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // Asked only when neither can be read.
   const holdFirst = !!display && pricingCurrency === undefined;
   const firstCurrency = display ? (holdFirst ? undefined : relabeled?.currency ?? display.currency) : paymentDefaults?.currency ?? undefined;
+  const firstMethods = holdFirst ? undefined : defaultMethods;
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
   // rates guests can book (VAY-2285).
@@ -416,7 +421,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {/* Before any typing (VAY-2383): Payment settings already say the server would refuse the first prices. */}
     {error === null && firstForm && paymentDefaults?.notReady && <p role="status" className={ui.warningBanner}>{t("pricing.editor.financeNotReadyBefore")}</p>}
     {relabelFrom && pricingCurrency && <div role="status" className={ui.warningBanner}><p className="font-semibold">{t("pricing.currencyChanged.title", { code: pricingCurrency })}</p>
-      <p>{t("pricing.currencyChanged.body", { before: money("10000", relabelFrom), after: money("10000", pricingCurrency) })}</p></div>}
+      <p>{t("pricing.currencyChanged.body", { before: money("10000", relabelFrom), after: money("10000", pricingCurrency) })} {t("pricing.currencyChanged.thisRoomOnly", { code: pricingCurrency })}</p></div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>
@@ -433,7 +438,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             <p className="text-[14px] leading-5 text-gray-600">{t("pricing.calendar.emptyText")}</p>
           </section>
         </div>;
-      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={firstCurrency} disabled={disabled} defaultMethods={holdFirst ? undefined : defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} id={firstFormId} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      })()} propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={firstCurrency} disabled={disabled} defaultMethods={firstMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} id={firstFormId} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
       const main = mainOffer(room), mi = room.offers.indexOf(main), mainLabel = offerLabel(room.roomTypeId, ri, mi);
@@ -629,7 +634,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
         : <button type="button" disabled={disabled || hasPendingEntries || !(dirty || stale)} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>)}
-      {firstForm && <button type="submit" form={firstFormId} disabled={disabled || defaultMethods === undefined} className={ui.actionBarPrimary} aria-describedby={declarationId}>{t("pricing.editor.save")}</button>}
+      {firstForm && <button type="submit" form={firstFormId} disabled={disabled || firstMethods === undefined} className={ui.actionBarPrimary} aria-describedby={declarationId}>{t("pricing.editor.save")}</button>}
     </div>}
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}

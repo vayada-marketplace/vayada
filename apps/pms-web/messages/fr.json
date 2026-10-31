@@ -1157,6 +1157,7 @@
   "settings.currencyChange.blockedUnknownBody": "Veuillez réessayer dans un instant.",
   "pricing.currencyChanged.title": "Votre devise est passée en {code}. Vérifiez tous les prix.",
   "pricing.currencyChanged.body": "Chaque prix a gardé son chiffre : {before} vaut maintenant {after}. Votre page de réservation n’accepte pas de réservations tant que vous n’avez pas vérifié les prix et cliqué sur Enregistrer et publier.",
+  "pricing.currencyChanged.thisRoomOnly": "Enregistrer ici ne publie que cette chambre : vos autres chambres ont besoin de leurs propres prix en {code}.",
   "pricing.currencyChanged.otherCurrency": "Vos prix n’ont pas été enregistrés, car ils ne sont pas dans la devise de votre établissement. Rechargez les prix, vérifiez-les et enregistrez à nouveau.",
   "pricing.bar.from": "Clients à partir de {amount} par nuit sur votre page de réservation.",
   "pricing.bar.seeFirst": "Ils voient d’abord ≈ {amount}."
