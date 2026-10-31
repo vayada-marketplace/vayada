@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
@@ -16,6 +16,13 @@ const TEST_DATABASE_NAME = TEST_DATABASE_URL
 
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 const MIGRATIONS_DIR = join(import.meta.dirname, "../migrations");
+// The identity fixture's expected counts, also checked by runParityChecks (one place to update).
+const IDENTITY_EXPECTED = JSON.parse(
+  await readFile(
+    join(FIXTURES_DIR, "cases/identity-organization-links/expected-target.json"),
+    "utf8",
+  ),
+) as { counts: Record<string, number> };
 
 describe("runParityChecks fixture config validation", () => {
   it("reports invalid shared expected-target config before connecting to the database", async () => {
@@ -211,7 +218,11 @@ async function dropTargetSchemas(): Promise<void> {
   }
 }
 
-describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
+// Each case rebuilds the target schemas with every migration, which takes longer than vitest's
+// default 5 s test and 10 s hook timeouts on a slow runner (VAY-2427).
+const slow = { timeout: 60_000 };
+
+describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", slow, () => {
   beforeEach(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
 
@@ -224,7 +235,7 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
       fixtureCase: "identity-organization-links",
       fixturesDir: FIXTURES_DIR,
     });
-  });
+  }, 60_000);
 
   afterEach(async () => {
     await dropTargetSchemas();
@@ -450,7 +461,7 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
   });
 });
 
-describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)", () => {
+describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)", slow, () => {
   afterEach(async () => {
     await dropTargetSchemas();
   });
@@ -556,7 +567,7 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
            bool_or(key = 'hotel_catalog.products.manage') AS has_products_manage
          FROM identity.permission_catalog`,
       );
-      expect(perms.rows[0].count).toBe(29);
+      expect(perms.rows[0].count).toBe(IDENTITY_EXPECTED.counts["identity.permission_catalog"]);
       expect(perms.rows[0].has_products_manage).toBe(true);
 
       const entitlements = await client.query(
