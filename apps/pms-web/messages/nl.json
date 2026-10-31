@@ -1157,7 +1157,7 @@
   "settings.currencyChange.blockedUnknownBody": "Probeer het zo meteen opnieuw.",
   "pricing.currencyChanged.title": "Je valuta is gewijzigd naar {code}. Controleer alle prijzen.",
   "pricing.currencyChanged.body": "Elke prijs hield zijn getal, dus {before} is nu {after}. Je boekingspagina neemt geen boekingen aan tot je de prijzen controleert en op Opslaan en publiceren drukt.",
-  "pricing.currencyChanged.publishUnchanged": "Publiceer je prijzen eerst ongewijzigd in de nieuwe valuta en wijzig ze daarna.",
+  "pricing.currencyChanged.otherCurrency": "Je prijzen zijn niet opgeslagen, omdat ze niet in de valuta van je accommodatie staan. Laad de prijzen opnieuw, controleer ze en sla ze opnieuw op.",
   "pricing.bar.from": "Gasten vanaf {amount} per nacht op je boekingspagina.",
   "pricing.bar.seeFirst": "Ze zien eerst ≈ {amount}."
 }

@@ -4120,7 +4120,7 @@
   "settings.currencyChange.blockedUnknownBody": "Please try again in a moment.",
   "pricing.currencyChanged.title": "Your currency changed to {code}. Please review all prices.",
   "pricing.currencyChanged.body": "Every price kept its number, so {before} is now {after}. Your booking page isn’t taking bookings until you check the prices and press Save and publish.",
-  "pricing.currencyChanged.publishUnchanged": "Publish your prices unchanged in the new currency first, then change them.",
+  "pricing.currencyChanged.otherCurrency": "Your prices were not saved because they aren’t in your property’s currency. Reload pricing, check the prices and save again.",
   "layout.sidebar.guests": "Guests",
   "search.categoryGuests": "Guests",
   "search.openProfile": "Open profile",

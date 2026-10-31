@@ -4134,7 +4134,7 @@
   "settings.currencyChange.blockedUnknownBody": "Bitte versuchen Sie es gleich noch einmal.",
   "pricing.currencyChanged.title": "Ihre Währung wurde auf {code} geändert. Bitte prüfen Sie alle Preise.",
   "pricing.currencyChanged.body": "Jeder Preis hat seine Zahl behalten, also sind {before} jetzt {after}. Ihre Buchungsseite nimmt keine Buchungen an, bis Sie die Preise prüfen und auf Speichern und veröffentlichen klicken.",
-  "pricing.currencyChanged.publishUnchanged": "Veröffentlichen Sie Ihre Preise zuerst unverändert in der neuen Währung und ändern Sie sie danach.",
+  "pricing.currencyChanged.otherCurrency": "Ihre Preise wurden nicht gespeichert, weil sie nicht in der Währung Ihrer Unterkunft sind. Laden Sie die Preise neu, prüfen Sie sie und speichern Sie erneut.",
   "layout.sidebar.guests": "Gäste",
   "search.categoryGuests": "Gäste",
   "search.openProfile": "Profil öffnen",

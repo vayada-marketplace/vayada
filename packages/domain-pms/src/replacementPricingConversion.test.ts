@@ -6,7 +6,7 @@ import {
 import {
   convertPricingConfigurationCurrency as convert,
   isCompletePricingCurrencyConversion as complete,
-  isSamePricingNumbersInCurrency as sameNumbers,
+  pricingConfigurationWithSameNumbers as sameNumbers,
   type PricingConversionRate,
 } from "./replacementPricingConversion.js";
 const now = Date.parse("2026-09-10T12:00:00.000Z");
@@ -346,41 +346,69 @@ describe("complete PMS pricing currency conversion", () => {
   });
 });
 
-// VAY-2390 P5 (D2): an Owner's currency change publishes the same numbers again, no FX.
-describe("the same numbers in another currency", () => {
-  const room = (currency: string, revision = 4, roomTypeId = "room-1"): PricingConfiguration => ({
-    ...fixture(),
-    currency,
-    revision,
-    roomTypeId,
+// VAY-2390 P5 (D2), VAY-2425: after an Owner's currency change the editor shows the published
+// prices with the same numbers in the new currency, for review before they are published again.
+describe("the same numbers in the pricing currency an Owner changed to", () => {
+  const base = (room: PricingConfiguration) => {
+    const price = room.offers[0]!.price;
+    return price.kind === "independent" ? price.calendar.base : null;
+  };
+
+  it("keeps every amount, rule and the revision between currencies of one scale and step", () => {
+    expect(sameNumbers(fixture(), "CHF")).toEqual({ ...fixture(), currency: "CHF" });
+    expect(sameNumbers(fixture(), "EUR")).toEqual(fixture());
   });
 
-  it("accepts every room unchanged but for its currency and revision", () => {
-    expect(
-      sameNumbers(
-        [room("EUR"), room("EUR", 4, "room-2")],
-        [room("CHF", 5, "room-2"), room("CHF", 5)],
-        "EUR",
-        "CHF",
+  it("rounds each amount half-up to whole rupiah, keeping its number (VAY-2425)", () => {
+    const usd = fixture();
+    const room = {
+      ...usd,
+      currency: "USD",
+      offers: usd.offers.map((offer, index) =>
+        index === 0 && offer.price.kind === "independent"
+          ? {
+              ...offer,
+              price: {
+                ...offer.price,
+                calendar: {
+                  ...offer.price.calendar,
+                  base: { mode: "occupancy" as const, amountsMinor: ["4999", "15050"] },
+                },
+              },
+            }
+          : offer,
       ),
-    ).toBe(true);
+    };
+    const idr = sameNumbers(room, "IDR")!;
+    expect(idr).toMatchObject({ currency: "IDR", revision: 4, roomTypeId: "room-1" });
+    // US$49.99 is IDR 50 and US$150.50 is IDR 151: whole rupiah, still the same numbers.
+    expect(base(idr)).toEqual({ mode: "occupancy", amountsMinor: ["5000", "15100"] });
+    expect(idr.children.bands[0]!.nightlyMinor).toBe("500");
+    expect(idr.offers[0]!.meal.charge).toEqual({
+      kind: "person",
+      adultMinor: "1000",
+      childBandAmountsMinor: ["300"],
+    });
+    expect(idr.offers[0]!.price).toMatchObject({
+      calendar: { weekdays: [{ adjustment: { kind: "fixed", deltaMinor: "-100" } }, {}] },
+    });
+    expect(parsePricingConfiguration(idr)).toEqual(idr);
   });
 
-  it("refuses a changed amount, another room set, a currency of another scale or no change", () => {
-    const chf = room("CHF", 5);
-    const changed = {
-      ...chf,
-      children: { ...chf.children, bands: [{ ...chf.children.bands[0]!, nightlyMinor: "600" }] },
+  it("moves the decimal point between currencies with different minor units", () => {
+    const jpy = sameNumbers(fixture(), "JPY")!;
+    expect(base(jpy)).toEqual({ mode: "occupancy", amountsMinor: ["100", "150"] });
+    expect(base(sameNumbers(jpy, "EUR")!)).toEqual(occupancy);
+  });
+
+  it("refuses an invalid room, an unknown currency or a positive tariff that rounds to nothing", () => {
+    expect(sameNumbers({}, "IDR")).toBeNull();
+    expect(sameNumbers(fixture(), "ZZZ")).toBeNull();
+    const usd = { ...fixture(), currency: "USD" };
+    const cheap = {
+      ...usd,
+      children: { ...usd.children, bands: [{ ...usd.children.bands[0]!, nightlyMinor: "40" }] },
     };
-    expect(sameNumbers([room("EUR")], [changed], "EUR", "CHF")).toBe(false);
-    expect(
-      sameNumbers([room("EUR"), room("EUR", 4, "room-2")], [room("CHF", 5)], "EUR", "CHF"),
-    ).toBe(false);
-    expect(sameNumbers([room("EUR")], [room("CHF", 5, "room-2")], "EUR", "CHF")).toBe(false);
-    // JPY has no minor unit: the same minor amounts would be a hundred times the price.
-    expect(sameNumbers([room("EUR")], [room("JPY", 5)], "EUR", "JPY")).toBe(false);
-    expect(sameNumbers([room("EUR")], [room("EUR", 5)], "EUR", "EUR")).toBe(false);
-    expect(sameNumbers([room("EUR")], [room("USD", 5)], "EUR", "CHF")).toBe(false);
-    expect(sameNumbers([], [], "EUR", "CHF")).toBe(false);
+    expect(sameNumbers(cheap, "IDR")).toBeNull();
   });
 });

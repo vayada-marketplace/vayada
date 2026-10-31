@@ -1157,7 +1157,7 @@
   "settings.currencyChange.blockedUnknownBody": "请稍后再试。",
   "pricing.currencyChanged.title": "您的货币已更改为 {code}。请检查所有价格。",
   "pricing.currencyChanged.body": "每个价格都保留了原有数字，因此 {before} 现在是 {after}。在您检查价格并点击“保存并发布”之前，预订页面不会接受预订。",
-  "pricing.currencyChanged.publishUnchanged": "请先在新货币下不加修改地发布价格，然后再进行修改。",
+  "pricing.currencyChanged.otherCurrency": "价格未保存，因为它们不是您住宿的货币。请重新加载价格，检查后再次保存。",
   "pricing.bar.from": "客人在您的预订页面上每晚 {amount} 起。",
   "pricing.bar.seeFirst": "客人首先看到 ≈ {amount}。"
 }

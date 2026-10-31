@@ -14,6 +14,7 @@ export {
   type PricingOfferSale,
 } from "./replacementPricingConfiguration.js";
 export { parseFlexibleCancellationTerms } from "./pricing.js";
+export { pricingConfigurationWithSameNumbers } from "./replacementPricingConversion.js";
 export {
   calculateReplacementRoomStay,
   projectReplacementRoomNights,

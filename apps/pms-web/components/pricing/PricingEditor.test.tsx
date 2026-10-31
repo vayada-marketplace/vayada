@@ -4202,13 +4202,78 @@ it("after an Owner's currency change shows the prices in the new currency and pu
     expect(saved.snapshot.rooms.map((room) => [room.currency, room.offers[0].price])).toEqual(published().rooms.map((room) => ["CHF", room.offers[0].price]));
   } finally { settings.mockRestore(); }
 });
-it("names the same-numbers rule when edited prices are refused in the new currency (VAY-2390)", async () => {
+it("names the property's currency rule when prices in another currency are refused (VAY-2390, VAY-2425)", async () => {
   const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "CHF" } } as never);
   try {
     client.read.mockResolvedValue(published()); await mountRoom(); await act(async () => {});
     client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "currency_conversion_required" } as never));
     await click("Save and publish");
-    expect(JSON.stringify(view.toJSON())).toContain("Publish your prices unchanged in the new currency first, then change them.");
+    expect(JSON.stringify(view.toJSON())).toContain("Your prices were not saved because they aren’t in your property’s currency.");
+  } finally { settings.mockRestore(); }
+});
+// VAY-2425 (Mertha Carik): one room published in USD with US$49.99, then the Owner changed the currency to IDR. The
+// first price for another room showed "$" and every save was refused.
+const usdRoom = { ...snapshot.rooms[0], currency: "USD", offers: [{ ...snapshot.rooms[0].offers[0], price: { kind: "independent" as const, calendar: { base: { mode: "flat" as const, amountMinor: "4999" }, months: [], seasons: [], weekdays: [], dates: [] } } }] };
+const idrSettings = { paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "IDR" } };
+const firstIn = (currency: string, base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"], room: familyId, currency, base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "flexible", freeDays: "3", payment: "full" });
+/** No "$" in the first-price form: the currency it prices in is the property's. */
+const formSymbols = () => view.root.findByType(StepFirstPrices).findAll((node) => node.children.some((child) => typeof child === "string" && child.includes("$")));
+it("prices a room in IDR after the Owner changed from USD, with another room's US$49.99 kept as IDR 50, and stays in IDR after reload (VAY-2425)", async () => {
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue(idrSettings as never);
+  try {
+    const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
+    client.read.mockResolvedValueOnce({ ...snapshot, currency: "USD", rooms: [usdRoom], revision: 1, sources, stale: false });
+    await mountRoom(); await act(async () => {});
+    const shown = () => JSON.stringify(view.toJSON());
+    expect(shown()).toContain("Your currency changed to IDR. Please review all prices.");
+    expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "IDR" });
+    expect(formSymbols()).toHaveLength(0);
+    const first = firstIn("IDR", "500000");
+    const idrRooms = [{ ...usdRoom, currency: "IDR", revision: 2, offers: [{ ...usdRoom.offers[0], price: { ...usdRoom.offers[0].price, calendar: { ...usdRoom.offers[0].price.calendar, base: { mode: "flat" as const, amountMinor: "5000" } } }] }, { ...first.configuration, revision: 2 }];
+    client.read.mockResolvedValue({ ...snapshot, currency: "IDR", rooms: idrRooms, revision: 2, sources, stale: false });
+    await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
+    // One save: the other room's numbers in IDR, rounded to whole rupiah, and the first price, in one publication.
+    expect(saved.snapshot.currency).toBe("IDR");
+    expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.currency, room.offers[0].price])).toEqual(idrRooms.map((room) => [room.roomTypeId, "IDR", room.offers[0].price]));
+    expect(publish).toHaveBeenCalledOnce();
+    // Reloaded from the IDR publication: no banner, no first-price form, the price in IDR.
+    await act(async () => {});
+    expect(shown()).not.toContain("Your currency changed");
+    expect(view.root.findAllByType(StepFirstPrices)).toHaveLength(0);
+    expect(shown()).toMatch(/Guests from IDR\s?500,000 a night/);
+    expect(shown()).not.toContain("$");
+  } finally { settings.mockRestore(); }
+});
+it("prices a room in LKR after the Owner changed from EUR, in one save with the other room's numbers (VAY-2425)", async () => {
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "LKR" } } as never);
+  try {
+    const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
+    client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false });
+    await mountRoom(); await act(async () => {});
+    expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBe("LKR");
+    expect(formSymbols()).toHaveLength(0);
+    const first = firstIn("LKR", "12000");
+    const lkrRooms = [{ ...snapshot.rooms[0], currency: "LKR", revision: 2 }, { ...first.configuration, revision: 2 }];
+    client.read.mockResolvedValue({ ...snapshot, currency: "LKR", rooms: lkrRooms, revision: 2, sources, stale: false });
+    await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
+    expect(saved.snapshot.currency).toBe("LKR");
+    expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.currency, room.offers[0].price])).toEqual(lkrRooms.map((room) => [room.roomTypeId, "LKR", room.offers[0].price]));
+    await act(async () => {});
+    expect(JSON.stringify(view.toJSON())).not.toContain("Your currency changed");
+    expect(JSON.stringify(view.toJSON())).toMatch(/Guests from LKR\s?12,000 a night/);
+  } finally { settings.mockRestore(); }
+});
+it("shows no currency in the first-price form and can't save it until Payment settings answer (VAY-2425)", async () => {
+  let answer: (value: unknown) => void = () => {};
+  const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockReturnValue(new Promise((resolve) => { answer = resolve; }) as never);
+  try {
+    client.read.mockResolvedValueOnce({ ...snapshot, currency: "USD", rooms: [usdRoom], revision: 1, sources, stale: false });
+    await mountRoom(); await act(async () => {});
+    expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ fixedCurrency: undefined, defaultMethods: undefined });
+    expect(formSymbols()).toHaveLength(0);
+    await act(async () => answer(idrSettings));
+    expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ fixedCurrency: "IDR", defaultMethods: ["pay_at_property"] });
+    expect(formSymbols()).toHaveLength(0);
   } finally { settings.mockRestore(); }
 });
 it("drops this room's edits when someone else changed the room, so a later save cannot overwrite their change", async () => {
