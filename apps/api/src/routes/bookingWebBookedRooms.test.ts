@@ -112,6 +112,48 @@ it("lists each booked room of a pricing booking with its own terms", () => {
   ]);
 });
 
+// VAY-2428: a booked partial refund carries its last refund day, so My booking can say when refunds end.
+it("gives a booked partial refund its last refund day, when its steps name one", () => {
+  const partial = (terms: Record<string, unknown>) => ({
+    kind: "flexible",
+    terms: {
+      type: "free_until_days_before_arrival",
+      freeCancellationDeadlineDays: 7,
+      afterDeadlinePenalty: "full_booking_amount",
+      noShowPenalty: "full_booking_amount",
+      flexibleCancellationType: "partial_refund",
+      ...terms,
+    },
+  });
+  const rooms = serializeTargetBooking(
+    row({
+      bookedTerms: [
+        {
+          roomTypeId: DELUXE,
+          offerId: "flex",
+          cancellation: partial({
+            partialRefundTiers: [
+              { minDaysBeforeCheckIn: 14, refundPercent: 50 },
+              { minDaysBeforeCheckIn: 5, refundPercent: 25 },
+              { minDaysBeforeCheckIn: 0, refundPercent: 0 },
+            ],
+          }),
+        },
+        {
+          roomTypeId: GARDEN,
+          offerId: "flex",
+          cancellation: partial({ partialRefundAmountPercent: 50 }),
+        },
+      ],
+    }),
+  )["bookedRooms"] as Record<string, unknown>[];
+  expect(rooms.map(({ cancellation }) => cancellation)).toEqual([
+    { kind: "partial_refund", days: 5 },
+    { kind: "partial_refund" },
+    null,
+  ]);
+});
+
 it("names what it can't read as unknown and leaves other bookings unchanged", () => {
   const missing = serializeTargetBooking(
     row({ bookedTerms: undefined, bookedPricedRooms: null, bookedRoomNames: null }),

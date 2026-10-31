@@ -1045,7 +1045,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           context("l"),
         )) as { bookedRooms?: unknown };
         // With mixed terms the second room type is free until a week before arrival, or
-        // non-refundable.
+        // non-refundable. A partial refund names its last refunding step, 7 days before (VAY-2428).
         expect(looked.bookedRooms).toEqual(
           [types[0], types[1], types[0]].map((roomTypeId) => ({
             roomTypeId,
@@ -1058,7 +1058,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
                 ? { kind: "free_until_days_before_arrival", days: 7 }
                 : nonRefundableRoom && roomTypeId === types[1]
                   ? { kind: "non_refundable" }
-                  : { kind: "partial_refund" },
+                  : { kind: "partial_refund", days: 7 },
           })),
         );
         // VAY-2360: the confirmation page gets the booked terms the cancel route works from, and the

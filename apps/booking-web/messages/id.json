@@ -143,6 +143,7 @@
       "windowPassed": "Pembatalan gratis berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "refundsPassed": "Pengembalian dana berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "freeEnded": "Pembatalan gratis sudah berakhir",
+      "refundsEnded": "Tidak ada pengembalian dana lagi",
       "meal": {
         "room_only": "Hanya kamar",
         "breakfast": "Termasuk sarapan",

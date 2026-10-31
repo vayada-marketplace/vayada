@@ -8,6 +8,7 @@ import {
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
 import { bookedAddonLinesSql, groupBookedAddonLines } from "../domains/bookedAddonLines.js";
+import { guestOfferCancellation } from "../domains/replacementPublicOfferMapping.js";
 import { readGuestModuleSwitches } from "../domains/bookingGuestModules.js";
 import {
   createPublicPricingStayPrices,
@@ -54,7 +55,6 @@ import {
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
   parseFunnelEventMetadata,
-  publicOfferCancellation,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
@@ -4301,8 +4301,8 @@ function pricingBookedRooms(booking: TargetBookingRow, metadata: Record<string, 
         cancellation:
           cancellation &&
           (cancellation["kind"] === "non_refundable" || cancellation["kind"] === "flexible")
-            ? publicOfferCancellation(
-                cancellation as unknown as Parameters<typeof publicOfferCancellation>[0],
+            ? guestOfferCancellation(
+                cancellation as unknown as Parameters<typeof guestOfferCancellation>[0],
               )
             : null,
       };

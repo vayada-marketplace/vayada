@@ -108,7 +108,8 @@ export type BookedRoom = {
   cancellation:
     | { kind: "non_refundable" }
     | { kind: "free_until_days_before_arrival"; days: number }
-    | { kind: "partial_refund" }
+    /** `days`: the last refund day, before arrival (VAY-2428); absent when the steps name none. */
+    | { kind: "partial_refund"; days?: number }
     | null;
 };
 export type RoomCombination = {

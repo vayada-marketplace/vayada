@@ -42,10 +42,11 @@ export function useBookedRoomLine() {
       noMeals: tc2("noMeals"),
       meal: (plan) => th(`choice.meal.${plan}`),
     });
-    // A booked stay's free cancellation that is over has simply ended (VAY-2392).
-    const cancellation = rate?.cancellationPassed
-      ? th("choice.freeEnded")
-      : rate?.cancellationTerms;
+    // A booked stay's free cancellation that is over has simply ended (VAY-2392); a partial refund
+    // past its last refund day gives nothing back any more (VAY-2428), as Review & pay says.
+    const ended =
+      room.cancellation?.kind === "partial_refund" ? "choice.refundsEnded" : "choice.freeEnded";
+    const cancellation = rate?.cancellationPassed ? th(ended) : rate?.cancellationTerms;
     return [meal, cancellation].filter(Boolean).join(" · ");
   };
 }

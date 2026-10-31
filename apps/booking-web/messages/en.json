@@ -143,6 +143,7 @@
       "windowPassed": "Free cancellation ends {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
       "refundsPassed": "Refunds end {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
       "freeEnded": "Free cancellation has ended",
+      "refundsEnded": "No refund any more",
       "meal": {
         "room_only": "Room only",
         "breakfast": "Breakfast included",

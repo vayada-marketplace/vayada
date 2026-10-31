@@ -134,6 +134,18 @@ describe("toConfirmationBooking", () => {
         {},
       ).bookedRooms?.[0]?.cancellation,
     ).toBeNull();
+    // A partial refund keeps its last refund day, and reads without one when it is missing or bad (VAY-2428).
+    const partial = (cancellation: Record<string, unknown>) =>
+      toConfirmationBooking(
+        { ...source, bookedRooms: [{ ...rooms[0], cancellation }] } as BookingConfirmationSource,
+        {},
+      ).bookedRooms?.[0]?.cancellation;
+    expect(partial({ kind: "partial_refund", days: 5 })).toEqual({
+      kind: "partial_refund",
+      days: 5,
+    });
+    expect(partial({ kind: "partial_refund" })).toEqual({ kind: "partial_refund" });
+    expect(partial({ kind: "partial_refund", days: -1 })).toEqual({ kind: "partial_refund" });
   });
 
   it("rejects invalid public-response fields and never creates NaN confirmation values", () => {
