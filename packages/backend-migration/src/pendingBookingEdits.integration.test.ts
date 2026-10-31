@@ -8,8 +8,8 @@ import { assertSafeTestDatabase } from "./testUtils.js";
 
 const connectionString = process.env["TEST_DATABASE_URL"];
 
-describe.skipIf(!connectionString)("pending booking edit storage", () => {
-  it("isolates revisions and rejects cross-property attempts without losing historical evidence", async () => {
+describe.skipIf(!connectionString)("booking edit revisions", () => {
+  it("isolates add-on revisions without losing historical evidence", async () => {
     assertSafeTestDatabase(connectionString!);
     const migrations = await runMigrations({
       connectionString: connectionString!,
@@ -22,26 +22,17 @@ describe.skipIf(!connectionString)("pending booking edit storage", () => {
     await client.query("BEGIN");
     try {
       const propertyId = randomUUID();
-      const otherPropertyId = randomUUID();
       const bookingId = randomUUID();
-      const quoteId = randomUUID();
       await client.query(
         `INSERT INTO hotel_catalog.properties (id,public_id,display_name)
-         VALUES ($1::uuid,$1::text,'Edit test'),($2::uuid,$2::text,'Other property')`,
-        [propertyId, otherPropertyId],
+         VALUES ($1::uuid,$1::text,'Edit test')`,
+        [propertyId],
       );
       await client.query(
         `INSERT INTO booking.guest_bookings
            (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
          VALUES ($1::uuid,$2::uuid,$1::text,'pending_payment','2027-01-01','2027-01-03','EUR')`,
         [bookingId, propertyId],
-      );
-      await client.query(
-        `INSERT INTO booking.quote_sessions
-           (id,property_id,request_hash,public_quote_reference,requested_check_in,
-            requested_check_out,currency,expires_at)
-         VALUES ($1::uuid,$2::uuid,$1::text,$1::text,'2027-01-01','2027-01-03','EUR',now()+interval '1 hour')`,
-        [quoteId, propertyId],
       );
       const selections = await client.query<{ id: string }>(
         `INSERT INTO booking.booking_addon_selections
@@ -90,20 +81,6 @@ describe.skipIf(!connectionString)("pending booking edit storage", () => {
         [selections.rows[0]!.id],
         "55000",
       );
-      const attemptSql = `INSERT INTO booking.pending_booking_edit_attempts
-        (property_id,guest_booking_id,expected_revision,idempotency_key,request_fingerprint,
-         quote_session_id,payment_method,expires_at)
-        VALUES ($1,$2,0,'test-edit','fingerprint',$3,'pay_at_property',now()+interval '15 minutes')`;
-      await rejects(attemptSql, [otherPropertyId, bookingId, quoteId], "23503");
-      await client.query(attemptSql, [propertyId, bookingId, quoteId]);
-      await rejects(attemptSql, [propertyId, bookingId, quoteId], "23505");
-      expect(
-        (
-          await client.query("SELECT id FROM finance.payments WHERE guest_booking_id=$1", [
-            bookingId,
-          ])
-        ).rows,
-      ).toHaveLength(0);
       expect(
         (
           await client.query("SELECT edit_revision FROM booking.guest_bookings WHERE id=$1", [

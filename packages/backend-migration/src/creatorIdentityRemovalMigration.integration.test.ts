@@ -351,8 +351,9 @@ describe.skipIf(!URL)("creator identity and media removal 0500", () => {
       for (const name of await readdir(MIGRATIONS)) {
         if (!/^\d{4}_/.test(name)) continue;
         const version = Number(name.slice(0, 4));
-        // Production applies 0500 after 0503 and 0504, which were live before W3.
-        if (version < MIGRATION || version > 502)
+        // Production applies 0500 after 0503 and 0504, which were live before W3. It ran long before
+        // 0529, which drops booking.pending_booking_edit_attempts, a table 0500 reads.
+        if (version < MIGRATION || (version > 502 && version !== 529))
           await cp(join(MIGRATIONS, name), join(before, name));
         if (version === MIGRATION) file = name;
       }
