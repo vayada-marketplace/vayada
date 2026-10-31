@@ -484,7 +484,10 @@ for (const width of [1440, 390]) {
     await expect(garden).toBeVisible();
     await expect(garden.locator(`[data-offer-key="${key("e")}"]`)).toBeVisible();
     await expect(page.getByRole("dialog", { name: "Deluxe Double Room" })).toHaveCount(0);
-    await page.screenshot({ path: testInfo.outputPath(`room-link-${width}.png`) });
+    await page.screenshot({
+      path: testInfo.outputPath(`room-link-${width}.png`),
+      animations: "disabled",
+    });
     await page.keyboard.press("Escape");
     await expect(garden).toHaveCount(0);
     // Behind it, the page went to the room cards; closing doesn't open it again.

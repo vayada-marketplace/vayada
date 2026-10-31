@@ -579,19 +579,18 @@ function HomePageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // VAY-2422: a room button on the hotel's website links here with `room=<roomTypeId>`. Once
-  // the rooms are in: straight to the room cards, with that room's details open.
+  // the rooms are in: straight to the room cards, with that room's details open. The jump is
+  // instant: a smooth scroll would still be running behind the details, which lock the page.
   const linkedRoom = useRef(searchParams.get("room"));
   useEffect(() => {
     const roomTypeId = linkedRoom.current;
     if (!roomTypeId || !rooms?.some((room) => room.roomTypeId === roomTypeId)) return;
     linkedRoom.current = null;
-    toRoomList();
+    document.getElementById("rooms")?.scrollIntoView();
     setDetailsRequests((requests) => ({
       ...requests,
       [roomTypeId]: (requests[roomTypeId] ?? 0) + 1,
     }));
-    // Once, when the rooms arrive.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rooms]);
   const progressRooms: RoomsProgressRoom[] = picks.map((pick, index) => {
     const room = pickedRoom(pick);
