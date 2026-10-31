@@ -2641,6 +2641,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "channex_adoption_rollback_approval_records",
         "channex_adoption_rollback_approval_revocations",
         "channex_adoption_rollbacks",
+        "channex_management_worker_claimed_operations",
         "channex_management_worker_operations",
         "channex_management_worker_properties",
         "dead_letter_events",
