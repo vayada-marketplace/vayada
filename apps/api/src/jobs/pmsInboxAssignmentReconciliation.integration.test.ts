@@ -325,6 +325,9 @@ describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
   });
 
   it("persists a failed attempt and continues to the next job", async () => {
+    // Analyzed while JOB is the only job (as in CI's fresh database), PostgreSQL can plan the
+    // claim as a nested loop, where a claim joining its LIMIT 1 candidate took both (VAY-2398).
+    await admin.query("ANALYZE platform.jobs");
     await admin.query("UPDATE platform.jobs SET max_attempts = 1 WHERE id = $1::uuid", [JOB]);
     await admin.query(
       `INSERT INTO platform.jobs

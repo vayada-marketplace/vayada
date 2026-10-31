@@ -221,6 +221,9 @@ describe.skipIf(!URL)("PMS Inbox follow-up release worker", () => {
   });
 
   it("records a poison job failure and continues to a later due release", async () => {
+    // Analyzed while JOB is the only job (as in CI's fresh database), PostgreSQL can plan the
+    // claim as a nested loop, where a claim joining its LIMIT 1 candidate took both (VAY-2398).
+    await admin.query("ANALYZE platform.jobs");
     await admin.query("UPDATE platform.jobs SET max_attempts = 1 WHERE id = $1::uuid", [JOB]);
     await seedFollowUp({
       jobId: SECOND_JOB,
@@ -383,6 +386,8 @@ describe.skipIf(!URL)("PMS Inbox follow-up release worker", () => {
   });
 
   it("contains a lost lease while finalizing processing failure and continues the batch", async () => {
+    // Same nested-loop plan as the poison job test above (VAY-2398).
+    await admin.query("ANALYZE platform.jobs");
     await admin.query("UPDATE platform.jobs SET max_attempts = 1 WHERE id = $1::uuid", [JOB]);
     await seedFollowUp({
       jobId: SECOND_JOB,

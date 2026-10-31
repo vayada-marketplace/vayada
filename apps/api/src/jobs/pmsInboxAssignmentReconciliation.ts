@@ -286,7 +286,7 @@ async function claimJob(
       `UPDATE platform.jobs job
        SET status = 'running', attempts_count = attempts_count + 1,
            locked_at = now(), locked_by = $3, updated_at = now()
-       FROM (
+       WHERE job.id = (
          SELECT id
          FROM platform.jobs
          WHERE queue_name = $1 AND job_type = $2
@@ -298,8 +298,7 @@ async function claimJob(
          ORDER BY priority DESC, created_at, id
          FOR UPDATE SKIP LOCKED
          LIMIT 1
-       ) candidate
-       WHERE job.id = candidate.id
+       )
        RETURNING job.id::text AS id, job.attempts_count AS "attemptsCount",
          job.max_attempts AS "maxAttempts", job.locked_by AS "workerId",
          job.organization_id::text AS "organizationId",

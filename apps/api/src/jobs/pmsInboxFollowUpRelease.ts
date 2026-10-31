@@ -153,7 +153,7 @@ async function claimJob(
                ELSE COALESCE((job.job_metadata ->> 'leaseReclaimCount')::integer, 0)
              END),
            locked_at = now(), locked_by = $2, updated_at = now()
-       FROM (
+       WHERE job.id = (
          SELECT id
          FROM platform.jobs
          WHERE queue_name = $1 AND job_type = $1
@@ -167,8 +167,7 @@ async function claimJob(
          ORDER BY priority DESC, run_after, created_at, id
          FOR UPDATE SKIP LOCKED
          LIMIT 1
-       ) candidate
-       WHERE job.id = candidate.id
+       )
        RETURNING job.id::text AS id, job.attempts_count AS "attemptsCount",
          job.max_attempts AS "maxAttempts", job.locked_by AS "workerId",
          job.property_id::text AS "propertyId", job.resource_id AS "threadId",
