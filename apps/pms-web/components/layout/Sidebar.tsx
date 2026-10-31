@@ -17,6 +17,7 @@ import { useTranslation } from "@/lib/i18n";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 import { pmsNavigationModuleClient } from "@/services/api/pmsNavigationModuleClient";
+import { guestsSectionOn } from "@/lib/guests/useGuestsSectionOn";
 import {
   getStoredPmsPropertyId,
   resolveSelectedPmsPropertyId,
@@ -115,8 +116,6 @@ const NAVIGATION_MODULE_BY_HREF: Record<string, string> = {
   "/inbox": "inbox",
   "/reviews": "reviews",
 };
-// On until a read says otherwise: Guests is on by default (VAY-2423).
-const ON_BY_DEFAULT = ["guests"];
 const NAVIGATION_MODULE_CACHE_PREFIX = "pms-navigation-modules:";
 
 export function visiblePmsNavigation(
@@ -171,10 +170,10 @@ export default function Sidebar({
   );
   const [inboxUnread, setInboxUnread] = useState(0);
   const [financialsAvailable, setFinancialsAvailable] = useState(false);
-  // Inbox and Reviews are hidden until read (or cached); a failed read shows every item rather
-  // than hiding the Inbox.
+  // Inbox and Reviews are hidden until read (or cached), Guests shows (on by default, VAY-2423); a
+  // failed read shows every item rather than hiding the Inbox.
   const [navigationModules, setNavigationModules] = useState<ReadonlySet<string> | null>(
-    () => new Set(ON_BY_DEFAULT),
+    () => new Set(["guests"]),
   );
   const { t } = useTranslation();
   const switcherRef = useRef<HTMLDivElement>(null);
@@ -266,17 +265,14 @@ export default function Sidebar({
         .list()
         .then((response) => {
           if (current !== sequence) return;
-          // A module the API doesn't switch yet stays on, so a web release ahead of the API
-          // never hides Guests.
-          const active = [
-            ...response.activeModules,
-            ...ON_BY_DEFAULT.filter((id) => !response.supportedModules.includes(id)),
-          ];
-          setNavigationModules(new Set(active));
+          // An API that doesn't switch Guests yet leaves it on (VAY-2423).
+          const active = new Set(response.activeModules);
+          if (guestsSectionOn(response)) active.add("guests");
+          setNavigationModules(active);
           try {
             localStorage.setItem(
               NAVIGATION_MODULE_CACHE_PREFIX + response.hotelId,
-              JSON.stringify(active),
+              JSON.stringify(Array.from(active)),
             );
           } catch {
             // Storage may be unavailable; the sidebar still follows the server read.

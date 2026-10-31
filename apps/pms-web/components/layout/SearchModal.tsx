@@ -187,8 +187,9 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   const [activeIndex, setActiveIndex] = useState(0);
   const [rooms, setRooms] = useState<RoomType[]>([]);
   const [roomsLoaded, setRoomsLoaded] = useState(false);
-  // With Guests off in Feature Hub, search leaves out the Guests page and guests (VAY-2423).
-  const guestsOn = useGuestsSectionOn(open);
+  // With Guests off in Feature Hub, search leaves out the Guests page and guests (VAY-2423). Read
+  // when the header mounts, so the answer is known before anyone types.
+  const guestsOn = useGuestsSectionOn();
 
   // Load room types once (small dataset, OK to filter client-side)
   useEffect(() => {

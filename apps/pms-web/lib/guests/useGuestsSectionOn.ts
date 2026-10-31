@@ -17,13 +17,11 @@ export function guestsSectionOn(modules: NavigationModules | null | undefined): 
 
 /**
  * Whether the property's Guests section is switched on in Feature Hub (VAY-2423). On until a read
- * says otherwise, so a slow or failed read never hides it. Pass `false` to skip the read, e.g.
- * while the search window is closed.
+ * says otherwise, so a slow or failed read never hides it.
  */
-export function useGuestsSectionOn(enabled = true): boolean {
+export function useGuestsSectionOn(): boolean {
   const [on, setOn] = useState(true);
   useEffect(() => {
-    if (!enabled) return;
     let sequence = 0;
     const refresh = () => {
       const current = ++sequence;
@@ -43,6 +41,6 @@ export function useGuestsSectionOn(enabled = true): boolean {
       sequence += 1;
       window.removeEventListener("vayada-feature-modules-changed", refresh);
     };
-  }, [enabled]);
+  }, []);
   return on;
 }
