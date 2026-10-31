@@ -174,7 +174,8 @@ describe("Finance subscription webhook lifecycle", () => {
 
   it("asks the subscription when an event left before the website tag was set", async () => {
     const fixture = setup("commission");
-    vi.spyOn(fixture.store, "findEntitlement").mockResolvedValue(null);
+    const store: FinanceSubscriptionWebhookStore = fixture.store;
+    vi.spyOn(store, "findEntitlement").mockResolvedValue(null);
     // Stripe froze the first invoice's metadata before the tag (and the hotel's ids) were added.
     const untagged = { ...payload("invoice.paid", 46), propertyId: null, organizationId: null };
     fixture.provider.snapshot.addon = "hotel_website";
