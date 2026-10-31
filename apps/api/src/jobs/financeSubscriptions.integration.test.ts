@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import type { StripeSubscriptionSnapshot } from "@vayada/domain-finance";
@@ -6,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createPgFinanceSubscriptionWebhookStore,
+  runFinanceSubscriptionNotificationJobs,
   type FinanceSubscriptionWebhookPayload,
 } from "./financeSubscriptions.js";
 import { readPropertyPlan } from "../domains/propertyPlanReadModel.js";
@@ -72,6 +74,40 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL sco
   afterAll(async () => {
     await cleanup();
     await pool.end();
+  });
+
+  // First in the file: platform.jobs must hold only the first job when it is analyzed (VAY-2426).
+  it("claims one notification job per statement, so a batch notifies both", async () => {
+    const run = randomUUID();
+    const enqueue = (eventId: string) =>
+      pool.query(
+        `INSERT INTO platform.jobs (job_key, queue_name, job_type, payload)
+         VALUES ($1, 'finance.notifications',
+           'finance.subscription-payment-failed.notify-internal', $2::jsonb)`,
+        [
+          `vay2426:${eventId}`,
+          JSON.stringify({
+            eventId,
+            propertyId,
+            organizationId: organizationA,
+            subscriptionId: "sub_vay2426",
+          }),
+        ],
+      );
+    await enqueue(`evt_first_${run}`);
+    // Analyzed while it holds one job, PostgreSQL plans a claim that joins its LIMIT 1 candidate
+    // as a nested loop, and that claim took both jobs (VAY-2398).
+    await pool.query("ANALYZE platform.jobs");
+    await enqueue(`evt_second_${run}`);
+    const notified: string[] = [];
+    await expect(
+      runFinanceSubscriptionNotificationJobs(
+        TEST_DATABASE_URL!,
+        (notification) => void notified.push(notification.eventId),
+        { pool, limit: 2 },
+      ),
+    ).resolves.toEqual({ processed: 2, failed: 0 });
+    expect(notified).toEqual([`evt_first_${run}`, `evt_second_${run}`]);
   });
 
   it("links only the exact organization, product, entitlement key, and Checkout session", async () => {
@@ -295,6 +331,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL sco
   });
 
   async function cleanup() {
+    await pool.query("DELETE FROM platform.jobs WHERE job_key LIKE 'vay2426:%'");
     await pool.query(
       `DELETE FROM finance.billing_entitlements
        WHERE property_id = $1::uuid OR organization_id = ANY($2::uuid[])`,
