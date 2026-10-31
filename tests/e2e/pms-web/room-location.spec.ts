@@ -425,8 +425,9 @@ test.describe("pms-web room location", () => {
       .getByLabel("Arrival directions")
       .fill("Walk through the blue gate next to the bakery. Reception is on the first floor.");
 
-    // Moving the pin away leaves the older room at its own pin, and says so.
-    await modal.getByText("Coordinates", { exact: true }).click();
+    // Moving the pin away leaves the older room at its own pin, and says so. Without a Maps key
+    // there is no map, so the coordinates are open from the start.
+    if (hasMapsKey) await modal.getByText("Coordinates", { exact: true }).click();
     await modal.getByLabel("Latitude").fill("48.1394");
     await modal.getByLabel("Longitude").fill("");
     await expect(save).toBeDisabled();
