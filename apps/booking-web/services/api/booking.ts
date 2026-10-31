@@ -5,7 +5,7 @@ import {
   type StayExtrasRequest,
 } from "@/lib/bookingStay";
 import { Booking } from "@/lib/types";
-import { bookingWebPublic } from "./client";
+import { bookingWebDirect, bookingWebPublic } from "./client";
 
 export interface BookingLookupResponse extends Booking {
   confirmationToken: string;
@@ -172,9 +172,12 @@ export const bookingService = {
     guestEmail: string,
   ): Promise<BookingLookupResponse> {
     const body = { bookingReference, guestEmail };
-    return bookingWebPublic.post(
+    // The API allows five lookups a minute per address, so the guest's browser asks it directly
+    // (VAY-2220). No cookies: the reference and email are the only proof.
+    return bookingWebDirect().post(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/lookup`,
       body,
+      { mode: "cors", credentials: "omit" },
     );
   },
 

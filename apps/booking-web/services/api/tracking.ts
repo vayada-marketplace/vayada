@@ -5,7 +5,7 @@ import {
   type FunnelEventProperties,
   type FunnelEventType,
 } from "@vayada/domain-booking/conversion-funnel";
-import { bookingWebPublic } from "./client";
+import { bookingWebDirect } from "./client";
 import { getBookingWebSessionId } from "./session";
 
 /** One of our own API's refusal codes, or nothing: never free text or a card decline code. */
@@ -36,10 +36,7 @@ export function trackEvent<T extends FunnelEventType>(
     // Straight to the API, not through this site's proxy, so its rate limit sees the guest's
     // address rather than this server's (VAY-2214). text/plain keeps it a CORS "simple" request:
     // no preflight, which keepalive requests can't always make. No cookies are sent.
-    // A plain read, so Next.js inlines the build-time value.
-    const configured = process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL;
-    const api = configured ? configured.replace(/\/+$/, "") : bookingWebPublic.baseURL;
-    void fetch(`${api}/api/booking-web/events`, {
+    void fetch(`${bookingWebDirect().baseURL}/api/booking-web/events`, {
       method: "POST",
       mode: "cors",
       credentials: "omit",

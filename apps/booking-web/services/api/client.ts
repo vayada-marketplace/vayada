@@ -88,8 +88,19 @@ async function parse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-// Browser requests stay same-origin and are proxied by Next.js. This keeps
+// Most browser requests stay same-origin and are proxied by Next.js. This keeps
 // verified hotel custom domains functional without trusting arbitrary origins
 // in the public API's CORS policy.
 export const bookingWebPublic = new ApiClient("");
+
+/**
+ * Straight to the API, for calls whose per-address limit must count the guest: through this
+ * site's proxy every guest shares this server's address (VAY-2214, VAY-2220). Same-origin when
+ * the API address isn't configured (browser specs, plain local dev).
+ */
+export function bookingWebDirect(): ApiClient {
+  // A plain read, so Next.js inlines the build-time value.
+  const configured = process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL;
+  return new ApiClient(configured ? configured.replace(/\/+$/, "") : "");
+}
 export { ApiError };
