@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRightIcon, MinusIcon, PauseCircleIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
+  lastRefundDays,
   paidWhenBooking,
   PREPAID_PRICING_PAYMENT_METHODS,
   type PricingPaymentMethod,
@@ -364,6 +365,8 @@ function FlexibleParts({
   const { t } = useTranslation();
   const current = simple.cancellation;
   const days = current.kind === "free" ? current.days : defaultFreeDays;
+  // VAY-2428: a partial refund's last refund day, after which guests get nothing back.
+  const lastRefund = current.kind === "own" ? lastRefundDays(simple.mainTerms.cancellation) : null;
   const choices = Array.from(new Set<number>([...cancellationDays, days])).sort((a, b) => a - b);
   const dayText = (count: number) =>
     t(
@@ -447,6 +450,12 @@ function FlexibleParts({
                 {t("pricing.steps.options.edit")}
               </button>
             )}
+          </p>
+        )}
+        {/* VAY-2428: what last-minute guests get, as VAY-2392 says for free cancellation. */}
+        {lastRefund !== null && lastRefund > 0 && (
+          <p className="text-[12px] text-gray-500">
+            {t("pricing.rates.partialUntilHint", { days: dayText(lastRefund) })}
           </p>
         )}
         {simple.breakfast && current.kind !== "own" && (

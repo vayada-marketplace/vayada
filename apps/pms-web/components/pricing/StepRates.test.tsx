@@ -178,6 +178,41 @@ it("says what guests booking inside the free cancellation window get (VAY-2392)"
   );
 });
 
+it("says from when guests of a partial-refund rate get no refund (VAY-2428)", () => {
+  const partial = (tiers: { minDaysBeforeCheckIn: number; refundPercent: number }[]) => {
+    const optionTerms = terms(["pay_at_property"], ["bank_transfer"]);
+    optionTerms["flexible"] = {
+      ...optionTerms["flexible"]!,
+      cancellation: {
+        kind: "flexible",
+        terms: {
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: 30,
+          afterDeadlinePenalty: "full_booking_amount",
+          noShowPenalty: "full_booking_amount",
+          flexibleCancellationType: "partial_refund",
+          partialRefundTiers: tiers,
+        },
+      } as OptionTerms["cancellation"],
+    };
+    mount(room(), optionTerms, ["bank_transfer"]);
+    return textOf(card("Flexible rate"));
+  };
+  const hint = (days: string) =>
+    `Guests booking less than ${days} before arrival get no refund. The booking engine shows this rate as Non-refundable for those dates.`;
+  const steps = partial([
+    { minDaysBeforeCheckIn: 30, refundPercent: 100 },
+    { minDaysBeforeCheckIn: 14, refundPercent: 50 },
+    { minDaysBeforeCheckIn: 3, refundPercent: 0 },
+  ]);
+  expect(steps).toContain("This rate refunds part of the stay, in steps.");
+  // The last step that still refunds is 14 days before arrival.
+  expect(steps).toContain(hint("14 days"));
+  expect(steps).not.toContain("can't cancel for free");
+  // Refunds until arrival day leave no one without one.
+  expect(partial([{ minDaysBeforeCheckIn: 0, refundPercent: 50 }])).not.toContain("get no refund");
+});
+
 it("changes the cancellation days, opens the refund steps, and sets each rate's methods on its own options (VAY-2282)", () => {
   mount(room(), terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
   act(() => card("Flexible rate").findByProps({ "aria-label": "14 days" }).props.onClick());
