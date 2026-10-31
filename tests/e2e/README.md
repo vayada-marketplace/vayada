@@ -178,7 +178,7 @@ to Playwright, or `E2E_SETUP_HOST_BASE_URL`.
 Start pms-web with `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places` and give Playwright the same
 variable: the room Location box then loads Google Maps, which `support/googleMapsFake.ts` answers with a
 fake (the shared pms-web mocks install it for every spec). Without the key, `room-location.spec.ts`
-skips its address-search test.
+skips its Google Maps tests and runs the rest without a map.
 
 ## Booking Tenant Smoke
 
