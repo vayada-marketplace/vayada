@@ -847,6 +847,67 @@ test("sets the first price of an unpriced room with one Save, next to the other 
   await assertHealthy();
 });
 
+test("sets the first price in IDR after the Owner changed from USD, and keeps IDR after a reload (VAY-2425)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  // Mertha Carik Guest House: one room published in USD with US$49.99, then the pricing currency changed to IDR.
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/payment-settings`, (route) =>
+    route.fulfill({
+      json: {
+        paymentSettings: {
+          payAtPropertyEnabled: true,
+          onlineCardPayment: false,
+          defaultCurrency: "IDR",
+        },
+        cancellationPolicy: { freeCancellationDays: 7, partialRefundPct: 50 },
+      },
+    }),
+  );
+  const usdRoom = structuredClone(designRoom(3));
+  usdRoom.currency = "USD";
+  usdRoom.offers[0].price.calendar.base = flat("4999");
+  const pricing = await mockPricing(page, { ...publicationOf(3, [usdRoom]), currency: "USD" });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, LAKE);
+  await expect(
+    main(page).getByText("Your currency changed to IDR. Please review all prices.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  // The price field is in IDR, never "$".
+  const field = main(page).getByLabel("Room price per night");
+  await expect(field.locator("xpath=..")).not.toContainText("$");
+  await expect(main(page).getByText("IDR", { exact: true }).first()).toBeVisible();
+  await field.fill("500000");
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  // One publication in IDR with only this room: the USD room never goes live unseen as IDR 50.
+  const published = pricing.publishes[0].snapshot as Room;
+  expect(published.currency).toBe("IDR");
+  expect(published.rooms.map((value: Room) => [value.roomTypeId, value.currency])).toEqual([
+    [LAKE, "IDR"],
+  ]);
+  expect(published.rooms[0].offers[0].price.calendar.base).toEqual(flat("50000000"));
+  // After a reload the room is priced in IDR, and the banner is gone.
+  await page.reload();
+  await expect(
+    main(page).getByRole("heading", { name: "Prices and seasons", exact: true }).first(),
+  ).toBeVisible();
+  await expect(main(page).getByText(/Guests from IDR\s?500,000 a night/)).toBeVisible();
+  await expect(main(page).getByText("Your currency changed", { exact: false })).toHaveCount(0);
+  await expect(main(page).getByText("has no price yet", { exact: false })).toHaveCount(0);
+  // The room left out has no price until its own page is saved, in IDR.
+  await prices(page, DELUXE);
+  await expect(
+    main(page).getByText("Deluxe Double Room has no price yet", { exact: false }),
+  ).toBeVisible();
+  await expect(main(page).getByLabel("Room price per night").locator("xpath=..")).not.toContainText(
+    "$",
+  );
+  await assertHealthy();
+});
+
 test("adds the switches and a season to a first price before saving it (VAY-2188)", async ({
   page,
 }, testInfo) => {

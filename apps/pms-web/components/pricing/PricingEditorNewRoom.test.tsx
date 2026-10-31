@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { ApiErrorResponse } from "@/services/api/client";
+import { bookingsService } from "@/services/bookings";
 import type {
   createReplacementPricingClient,
   PricingSnapshot,
@@ -126,6 +127,9 @@ beforeEach(() => {
     deposits: { ready: false },
   });
   take.current = null;
+  // Payment settings can't be read here (VAY-2425: settled at once, so the first-price form's currency isn't held by a
+  // real request that fails whenever the network gives up).
+  vi.spyOn(bookingsService, "getPaymentSettings").mockRejectedValue(new Error("offline"));
 });
 afterEach(() => {
   if (view) act(() => view.unmount());
@@ -147,6 +151,43 @@ it("starts empty and optional, with the page's button in place of Save prices (V
   expect(text()).not.toContain("By creating the room type");
   expect(take.current!()).toBeNull();
   expect(onPrices).toHaveBeenLastCalledWith(false);
+});
+
+it("after an Owner's currency change prices the new room in the new currency, still optional (VAY-2425)", async () => {
+  vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({
+    paymentSettings: {
+      payAtPropertyEnabled: true,
+      onlineCardPayment: false,
+      defaultCurrency: "IDR",
+    },
+  } as never);
+  client.read.mockResolvedValue({
+    ...published,
+    currency: "USD",
+    rooms: [{ ...existing, currency: "USD" }],
+  });
+  await mount();
+  await act(async () => {});
+  expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBe("IDR");
+  // Nothing typed yet: Create Room Type still creates the room without prices.
+  expect(take.current!()).toBeNull();
+  expect(onPrices).toHaveBeenLastCalledWith(false);
+  act(() => view.unmount());
+  // Also between currencies of one price step, where the other rooms are carried with their numbers.
+  vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({
+    paymentSettings: {
+      payAtPropertyEnabled: true,
+      onlineCardPayment: false,
+      defaultCurrency: "CHF",
+    },
+  } as never);
+  client.read.mockResolvedValue(published);
+  onPrices.mockClear();
+  await mount();
+  await act(async () => {});
+  expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBe("CHF");
+  expect(take.current!()).toBeNull();
+  expect(onPrices).not.toHaveBeenCalledWith(true);
 });
 
 it("lets go of the page's handle when the tab goes away", async () => {

@@ -1157,7 +1157,8 @@
   "settings.currencyChange.blockedUnknownBody": "Riprova tra un momento.",
   "pricing.currencyChanged.title": "La tua valuta è passata a {code}. Controlla tutti i prezzi.",
   "pricing.currencyChanged.body": "Ogni prezzo ha mantenuto il suo numero, quindi {before} ora è {after}. La pagina di prenotazione non accetta prenotazioni finché non controlli i prezzi e premi Salva e pubblica.",
-  "pricing.currencyChanged.publishUnchanged": "Pubblica prima i prezzi invariati nella nuova valuta, poi modificali.",
+  "pricing.currencyChanged.thisRoomOnly": "Salvando qui pubblichi solo questa camera: le altre camere hanno bisogno dei propri prezzi in {code}.",
+  "pricing.currencyChanged.otherCurrency": "I tuoi prezzi non sono stati salvati perché non sono nella valuta della struttura. Ricarica i prezzi, controllali e salva di nuovo.",
   "pricing.bar.from": "Ospiti da {amount} a notte sulla tua pagina di prenotazione.",
   "pricing.bar.seeFirst": "Prima vedono ≈ {amount}."
 }
