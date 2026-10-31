@@ -55,6 +55,41 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     await emails.close();
     await pool.end();
   });
+  // First in the file: platform.jobs must hold only the first email when it is analyzed (VAY-2426).
+  it("claims one email job per statement, so a batch sends both queued emails", async () => {
+    const otherBooking = randomUUID();
+    await pool.query(
+      `INSERT INTO booking.guest_bookings(id, property_id, public_reference, lifecycle_status, check_in, check_out, currency, total_amount, balance_amount, booking_metadata)
+      VALUES ($1::uuid,$2,$1::text,'confirmed','2026-10-01','2026-10-04','EUR',300,100,'{"paymentMethod":"pay_at_property"}')`,
+      [otherBooking, property],
+    );
+    await pool.query(
+      `INSERT INTO booking.booking_guests(guest_booking_id, guest_role, first_name, last_name, email) VALUES ($1,'booker','Grace','Hopper','grace@example.test')`,
+      [otherBooking],
+    );
+    const snapshot = (await loadBookingNotificationSnapshot(pool, {
+      propertyId: property,
+      guestBookingId: otherBooking,
+    }))!;
+    const enqueue = (resendKey: string) =>
+      enqueueBookingLifecycleEmailJob(pool, {
+        kind: "booking_accepted",
+        occurredAt: new Date().toISOString(),
+        booking: snapshot,
+        resendKey,
+      });
+    await enqueue(`vay2426-first-${otherBooking}`);
+    // Analyzed while it holds one job, PostgreSQL plans a claim that joins its LIMIT 1 candidate
+    // as a nested loop, and that claim took both jobs (VAY-2398).
+    await pool.query("ANALYZE platform.jobs");
+    await enqueue(`vay2426-second-${otherBooking}`);
+    const send = vi.fn(async () => {});
+    expect(await runBookingEmailDeliveryJobs(url!, { send }, { pool, limit: 2 })).toEqual({
+      processed: 2,
+      failed: 0,
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
   it("sends current details once, attributes staff history, and preserves booking data on failure", async () => {
     await pool.query(
       `UPDATE booking.booking_guests SET email='updated@example.test' WHERE guest_booking_id=$1`,

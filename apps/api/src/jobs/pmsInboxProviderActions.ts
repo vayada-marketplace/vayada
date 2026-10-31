@@ -52,11 +52,11 @@ export async function runPmsInboxProviderActions(
           ELSE job.max_attempts
         END,
         updated_at = now()
-      FROM (SELECT id FROM platform.jobs WHERE job_type = $1
+      WHERE job.id = (SELECT id FROM platform.jobs WHERE job_type = $1
         AND ((status = 'pending' AND run_after <= now() AND attempts_count < max_attempts)
           OR (status = 'running' AND locked_at < now() - interval '2 minutes'))
-        ORDER BY run_after FOR UPDATE SKIP LOCKED LIMIT 1) candidate
-      WHERE job.id = candidate.id RETURNING job.*`,
+        ORDER BY run_after FOR UPDATE SKIP LOCKED LIMIT 1)
+      RETURNING job.*`,
       [JOB, worker],
     );
     const job = claimed.rows[0];

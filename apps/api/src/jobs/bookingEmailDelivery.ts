@@ -167,7 +167,7 @@ async function claimBookingEmailJob(
          locked_at = now(),
          locked_by = $3,
          updated_at = now()
-     FROM (
+     WHERE job.id = (
        SELECT id
        FROM platform.jobs
        WHERE queue_name = $1
@@ -181,8 +181,7 @@ async function claimBookingEmailJob(
        ORDER BY priority DESC, created_at
        FOR UPDATE SKIP LOCKED
        LIMIT 1
-     ) candidate
-     WHERE job.id = candidate.id
+     )
      RETURNING job.id::text AS id,
        job.job_key AS "jobKey",
        job.attempts_count AS "attemptsCount",

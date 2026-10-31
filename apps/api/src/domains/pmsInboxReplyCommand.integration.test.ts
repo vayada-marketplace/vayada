@@ -291,6 +291,23 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox manual reply command", () => {
     ).toEqual([{ acknowledgedAt }]);
   });
 
+  it("claims one delivery job per statement, so a batch sends both queued replies", async () => {
+    await expect(reply.reply(command("claim-one-first"))).resolves.toMatchObject({ ok: true });
+    await relayPmsInboxDeliveryOutbox(URL!, { now: new Date(NOW) });
+    // Analyzed while it holds one job, PostgreSQL plans a claim that joins its LIMIT 1 candidate
+    // as a nested loop, and that claim took both jobs (VAY-2398, VAY-2426).
+    await admin.query("ANALYZE platform.jobs");
+    await expect(
+      reply.reply(command("claim-one-second", { expectedThreadVersion: 5 })),
+    ).resolves.toMatchObject({ ok: true });
+    let sent = 0;
+    const send = vi.fn<PmsInboxDeliveryProvider["send"]>(async () => ({
+      ok: true,
+      providerReference: `ota-claim-one-${(sent += 1)}`,
+    }));
+    await expect(deliver(send)).resolves.toMatchObject({ processed: 2, sent: 2 });
+  });
+
   it("fails closed when an accepted provider reference exists in two properties", async () => {
     await admin.query(
       `INSERT INTO pms.messages
