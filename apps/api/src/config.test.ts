@@ -918,22 +918,22 @@ describe("api config", () => {
     const methods = (
       manual: boolean,
       paypal: boolean,
-      financeBankTransferKms: typeof kms | undefined = kms,
+      bankBinding = true,
       financeSource: "target" | "legacy" = "target",
     ) =>
       replacementPricingManualPaymentMethods({
         replacementPricingManualPaymentAcceptanceEnabled: manual,
         replacementPricingPaypalAcceptanceEnabled: paypal,
         financeSource,
-        financeBankTransferKms,
+        financeBankTransferKms: bankBinding ? kms : undefined,
       });
     expect(methods(false, true)).toEqual([]);
     expect(methods(true, false)).toEqual(["bank_transfer"]);
     expect(methods(true, true)).toEqual(["bank_transfer", "paypal"]);
     // Without the bank-details binding there is no bank transfer to take.
-    expect(methods(true, false, undefined)).toEqual([]);
-    expect(methods(true, true, undefined)).toEqual(["paypal"]);
-    expect(methods(true, false, kms, "legacy")).toEqual([]);
+    expect(methods(true, false, false)).toEqual([]);
+    expect(methods(true, true, false)).toEqual(["paypal"]);
+    expect(methods(true, false, true, "legacy")).toEqual([]);
   });
 
   it("keeps the hotel first run (VAY-2247) unmounted unless explicitly enabled", () => {
