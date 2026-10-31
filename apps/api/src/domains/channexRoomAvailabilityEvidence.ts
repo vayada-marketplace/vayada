@@ -412,7 +412,7 @@ function uuid(value: unknown): value is string {
   );
 }
 
-async function boundedProviderCall<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+export async function boundedProviderCall<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_, reject) => {

@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
 import { reconcileCurrentChannexRoomAvailability } from "./channexRoomAvailabilityEvidence.js";
+import { supersedeChannexRoomAvailabilityAttempt } from "./channexRoomAvailabilitySupersede.js";
 import type { PmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
 
 type Inventory = Pick<PmsInventoryMaterializationRepository, "getCurrentInventoryDay">;
@@ -71,17 +72,36 @@ export async function reconcilePendingChannexRoomAvailability(
     client.release(discard);
   }
   for (const candidate of candidates.slice(0, 10)) {
-    if (!candidate.admissible)
-      return { kind: "unavailable" as const, reason: "availability_receipt_history_unavailable" };
-    const result = await reconcileCurrentChannexRoomAvailability(
+    // VAY-2352: a send that can never be reconciled as current would block its room and every
+    // later sync of the hotel. Supersede it when its night changed or passed, or once an
+    // ambiguous send has settled; the current value is then sent in this same run.
+    const result = candidate.admissible
+      ? await reconcileCurrentChannexRoomAvailability(
+          pool,
+          inventory,
+          lease,
+          { roomTypeId: candidate.roomTypeId, date: candidate.date },
+          candidate.attemptId,
+          get,
+        )
+      : ({ kind: "unavailable", reason: "availability_receipt_history_unavailable" } as const);
+    if (result.kind === "availability_reconciled") continue;
+    const superseded = await supersedeChannexRoomAvailabilityAttempt(
       pool,
       inventory,
       lease,
-      { roomTypeId: candidate.roomTypeId, date: candidate.date },
       candidate.attemptId,
       get,
     );
-    if (result.kind !== "availability_reconciled") return result;
+    if (
+      superseded.kind === "availability_superseded" ||
+      superseded.kind === "availability_attempt_resolved"
+    )
+      continue;
+    // A lost response is only resent once Channex can no longer be taking the first request in.
+    if (superseded.kind === "availability_send_settling")
+      return { kind: "unavailable" as const, reason: "availability_send_settling" };
+    return result;
   }
   return candidates.length > 10
     ? { kind: "unavailable" as const, reason: "availability_reconciliation_batch_pending" }

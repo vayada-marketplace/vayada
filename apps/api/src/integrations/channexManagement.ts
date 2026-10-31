@@ -410,8 +410,10 @@ export function createChannexManagementProvider(config: {
             const reconciled = await config.reconcileRoomAvailability(lease, readClosedUpload);
             if (reconciled.kind !== "pending_availability_reconciled")
               return failure(
+                // VAY-2352: a lost response is resent once it has settled, on a later try.
                 "reason" in reconciled &&
-                  reconciled.reason === "availability_reconciliation_batch_pending"
+                  (reconciled.reason === "availability_reconciliation_batch_pending" ||
+                    reconciled.reason === "availability_send_settling")
                   ? "provider_unavailable"
                   : "invalid_state",
                 new Error("Saved Channex availability still requires reconciliation."),

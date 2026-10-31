@@ -30,10 +30,20 @@ export async function verifyChannexAvailabilityTaskFinish(
   return verifyTaskFinish(expected, "Property.UpdateAvailability", get);
 }
 
+/** VAY-2352: an availability task that ended, successfully or not. Either way it can no longer
+ * change Channex, so a later send of the same room-night cannot be overtaken by it. */
+export async function observeChannexAvailabilityTaskEnd(
+  expected: Readonly<{ taskId: string; externalPropertyId: string; request: unknown }>,
+  get: (method: "GET", path: string) => Promise<unknown>,
+) {
+  return verifyTaskFinish(expected, "Property.UpdateAvailability", get, true);
+}
+
 async function verifyTaskFinish(
   expected: Readonly<{ taskId: string; externalPropertyId: string; request: unknown }>,
   expectedTask: "Property.UpdateRestrictions" | "Property.UpdateAvailability",
   get: (method: "GET", path: string) => Promise<unknown>,
+  acceptUnsuccessful = false,
 ) {
   const { taskId, externalPropertyId } = expected;
   if (![taskId, externalPropertyId].every((id) => typeof id === "string" && uuid.test(id)))
@@ -74,9 +84,8 @@ async function verifyTaskFinish(
   if (
     value.id !== taskId ||
     value.task !== expectedTask ||
-    value.success !== true ||
-    !Array.isArray(value.errors) ||
-    value.errors.length !== 0 ||
+    (!acceptUnsuccessful &&
+      (value.success !== true || !Array.isArray(value.errors) || value.errors.length !== 0)) ||
     !isDeepStrictEqual(value.payload, request) ||
     !received ||
     !executed ||
@@ -92,5 +101,6 @@ async function verifyTaskFinish(
     receivedAt: value.received_at as string,
     executedAt: value.executed_at as string,
     finishedAt: value.finished_at as string,
+    ...(acceptUnsuccessful ? { success: value.success === true } : {}),
   };
 }
