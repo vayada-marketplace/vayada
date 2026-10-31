@@ -6,10 +6,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
-/** Feature Hub switches that only decide whether a module's PMS sidebar item shows (VAY-2078).
- * They never gate the module's pages, APIs or data. */
-export const PMS_NAVIGATION_MODULE_IDS = ["inbox", "reviews"] as const;
+/** Feature Hub switches that only decide whether a module shows in the PMS (VAY-2078). They
+ * never gate the module's APIs or data; with Guests off the PMS also hides its pages (VAY-2423). */
+export const PMS_NAVIGATION_MODULE_IDS = ["inbox", "reviews", "guests"] as const;
 export type PmsNavigationModuleId = (typeof PMS_NAVIGATION_MODULE_IDS)[number];
+// A property without a row has these on; the others are off until switched on (VAY-2423).
+const ON_BY_DEFAULT: readonly PmsNavigationModuleId[] = ["guests"];
 
 // Anyone who sees a PMS sidebar item reads the switches; front desk staff hold only these.
 const READ_PERMISSIONS = ["pms.operations.read", "pms.inbox.read", "pms.dashboard.read"] as const;
@@ -106,7 +108,11 @@ export async function registerPmsNavigationModuleRoutes(
           hotelId: propertyId,
           canManage: canManage(context, propertyId),
           supportedModules: [...PMS_NAVIGATION_MODULE_IDS],
-          activeModules: activations.filter((row) => row.isActive).map((row) => row.moduleId),
+          activeModules: PMS_NAVIGATION_MODULE_IDS.filter(
+            (id) =>
+              activations.find((row) => row.moduleId === id)?.isActive ??
+              ON_BY_DEFAULT.includes(id),
+          ),
           activations,
         } satisfies PmsNavigationModulesResponse);
       } catch (error) {

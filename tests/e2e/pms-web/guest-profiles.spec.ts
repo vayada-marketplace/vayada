@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   PMS_WEB_PROPERTY_ID,
   PMS_WEB_RESERVATION_ID,
@@ -169,6 +169,19 @@ test("keeps staff notes on the guest and shows them on their reservation (VAY-24
   await expect(notes.getByRole("listitem")).toHaveCount(0);
 
   // The booker's reservation shows the same notes, with a link to the profile.
+  await mockBookerReservation(page);
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+  const kept = page.getByRole("region", { name: "Guest notes" });
+  await expect(kept).toContainText("Prefers a quiet room");
+  await expect(kept.getByRole("link", { name: "Open guest profile" })).toHaveAttribute(
+    "href",
+    `/guests/${TIMO}`,
+  );
+  await assertHealthy();
+});
+
+/** The booker's reservation, linked to Timo's guest record with one kept note. */
+async function mockBookerReservation(page: Page) {
   const reservation = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
   for (const path of ["notes", "additional-guests"])
     await page.route(`${reservation}/${path}`, (route) => route.fulfill({ json: { items: [] } }));
@@ -200,12 +213,61 @@ test("keeps staff notes on the guest and shows them on their reservation (VAY-24
       },
     }),
   );
+}
+
+test("hides Guests everywhere when it is switched off in Feature Hub (VAY-2423)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockGuests(page);
+  await page.route(
+    new RegExp(`/api/pms/properties/${PMS_WEB_PROPERTY_ID}/navigation-modules$`),
+    (route) =>
+      route.fulfill({
+        json: {
+          hotelId: PMS_WEB_PROPERTY_ID,
+          canManage: true,
+          supportedModules: ["inbox", "reviews", "guests"],
+          activeModules: ["inbox", "reviews"],
+          activations: [],
+        },
+      }),
+  );
+  const guestSearches: string[] = [];
+  page.on("request", (request) => {
+    if (/\/guests\?/.test(request.url())) guestSearches.push(request.url());
+  });
+  await page.goto("/bookings");
+
+  const navigation = page.getByRole("navigation");
+  await expect(navigation.getByRole("link", { name: /Reservations/ })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: /Inbox/ })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: /Guests/ })).toHaveCount(0);
+
+  // Search finds neither the Guests page nor guests; reservations still show.
+  await expect(page.getByRole("button", { name: "Alpenrose Munich" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("textbox").fill("guests");
+  await expect(dialog.getByRole("option").first()).toBeVisible();
+  await expect(dialog.getByText("Guest records and their stays")).toHaveCount(0);
+  await dialog.getByRole("textbox").fill("timo");
+  await expect(dialog.getByText("Reservations", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Guests", { exact: true })).toHaveCount(0);
+  expect(guestSearches).toEqual([]);
+  await page.keyboard.press("Escape");
+
+  // The reservation keeps the guest's notes, without the profile link.
+  await mockBookerReservation(page);
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
   const kept = page.getByRole("region", { name: "Guest notes" });
   await expect(kept).toContainText("Prefers a quiet room");
-  await expect(kept.getByRole("link", { name: "Open guest profile" })).toHaveAttribute(
-    "href",
-    `/guests/${TIMO}`,
-  );
+  await expect(kept.getByRole("link", { name: "Open guest profile" })).toHaveCount(0);
+
+  // An old link to the list or a profile goes to the Dashboard.
+  await page.goto("/guests");
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.goto(`/guests/${TIMO}`);
+  await expect(page).toHaveURL(/\/dashboard$/);
   await assertHealthy();
 });

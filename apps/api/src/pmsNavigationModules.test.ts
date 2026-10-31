@@ -142,7 +142,7 @@ describe("PMS navigation module routes", () => {
     app = null;
   });
 
-  it("lists both modules with the stored switches for an operator who can manage them", async () => {
+  it("lists the modules with the stored switches for an operator who can manage them", async () => {
     app = buildAuthenticatedApp({
       repository: createRepository([
         {
@@ -162,8 +162,9 @@ describe("PMS navigation module routes", () => {
     expect(response.json<PmsNavigationModulesResponse>()).toEqual({
       hotelId: propertyId,
       canManage: true,
-      supportedModules: ["inbox", "reviews"],
-      activeModules: ["inbox"],
+      supportedModules: ["inbox", "reviews", "guests"],
+      // Guests is on without a row (VAY-2423); Inbox and Reviews are off without one.
+      activeModules: ["inbox", "guests"],
       activations: [
         {
           moduleId: "inbox",
@@ -190,7 +191,7 @@ describe("PMS navigation module routes", () => {
       headers,
     });
     expect(read.statusCode).toBe(200);
-    expect(read.body).toMatchObject({ canManage: false, activeModules: [] });
+    expect(read.body).toMatchObject({ canManage: false, activeModules: ["guests"] });
 
     const write = await app.inject({
       method: "PATCH",
@@ -226,6 +227,42 @@ describe("PMS navigation module routes", () => {
       isActive: true,
     });
     expect(repository.updates).toEqual([{ propertyId, moduleId: "reviews", isActive: true }]);
+  });
+
+  it("turns Guests off and on again for a manager (VAY-2423)", async () => {
+    const repository = createRepository();
+    app = buildAuthenticatedApp({ repository });
+
+    const off = await app.inject({
+      method: "PATCH",
+      url: `${url}/guests`,
+      headers,
+      payload: { moduleId: "guests", isActive: false },
+    });
+    expect(off.statusCode).toBe(200);
+    const read = await injectJson<PmsNavigationModulesResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(read.body.activeModules).toEqual([]);
+
+    await app.inject({
+      method: "PATCH",
+      url: `${url}/guests`,
+      headers,
+      payload: { isActive: true },
+    });
+    const again = await injectJson<PmsNavigationModulesResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(again.body.activeModules).toEqual(["guests"]);
+    expect(repository.updates).toEqual([
+      { propertyId, moduleId: "guests", isActive: false },
+      { propertyId, moduleId: "guests", isActive: true },
+    ]);
   });
 
   it("rejects modules it does not own and malformed bodies before writing", async () => {

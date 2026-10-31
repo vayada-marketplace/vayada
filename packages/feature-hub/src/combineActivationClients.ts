@@ -1,7 +1,8 @@
 import type { FeatureActivationClient, ModuleActivationsResponse } from "./types";
 
-/** Inbox and Reviews are stored as PMS navigation modules, apart from Financials (VAY-2078). */
-export const PMS_NAVIGATION_MODULE_IDS = ["inbox", "reviews"] as const;
+/** Inbox, Reviews and Guests are stored as PMS navigation modules, apart from Financials
+ * (VAY-2078, VAY-2423). */
+export const PMS_NAVIGATION_MODULE_IDS = ["inbox", "reviews", "guests"] as const;
 
 /** Add-ons and Promos are stored in the Booking Engine settings (VAY-2200). */
 export const BOOKING_MODULE_IDS = ["add-ons", "promos"] as const;

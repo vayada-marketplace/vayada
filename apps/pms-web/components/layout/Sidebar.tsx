@@ -109,11 +109,14 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
   },
 ];
 
-// Feature Hub switches decide whether these show (VAY-2078); they never gate the pages.
+// Feature Hub switches decide whether these show (VAY-2078, VAY-2423).
 const NAVIGATION_MODULE_BY_HREF: Record<string, string> = {
+  "/guests": "guests",
   "/inbox": "inbox",
   "/reviews": "reviews",
 };
+// On until a read says otherwise: Guests is on by default (VAY-2423).
+const ON_BY_DEFAULT = ["guests"];
 const NAVIGATION_MODULE_CACHE_PREFIX = "pms-navigation-modules:";
 
 export function visiblePmsNavigation(
@@ -168,9 +171,10 @@ export default function Sidebar({
   );
   const [inboxUnread, setInboxUnread] = useState(0);
   const [financialsAvailable, setFinancialsAvailable] = useState(false);
-  // Hidden until read (or cached); a failed read shows both rather than hiding the Inbox.
+  // Inbox and Reviews are hidden until read (or cached); a failed read shows every item rather
+  // than hiding the Inbox.
   const [navigationModules, setNavigationModules] = useState<ReadonlySet<string> | null>(
-    () => new Set(),
+    () => new Set(ON_BY_DEFAULT),
   );
   const { t } = useTranslation();
   const switcherRef = useRef<HTMLDivElement>(null);
@@ -262,11 +266,17 @@ export default function Sidebar({
         .list()
         .then((response) => {
           if (current !== sequence) return;
-          setNavigationModules(new Set(response.activeModules));
+          // A module the API doesn't switch yet stays on, so a web release ahead of the API
+          // never hides Guests.
+          const active = [
+            ...response.activeModules,
+            ...ON_BY_DEFAULT.filter((id) => !response.supportedModules.includes(id)),
+          ];
+          setNavigationModules(new Set(active));
           try {
             localStorage.setItem(
               NAVIGATION_MODULE_CACHE_PREFIX + response.hotelId,
-              JSON.stringify(response.activeModules),
+              JSON.stringify(active),
             );
           } catch {
             // Storage may be unavailable; the sidebar still follows the server read.

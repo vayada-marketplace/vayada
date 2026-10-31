@@ -36,6 +36,7 @@ import {
   type ReservationGuestProfile,
 } from "@/services/bookings";
 import { GuestNotes } from "@/components/guests/GuestNotes";
+import { useGuestsSectionOn } from "@/lib/guests/useGuestsSectionOn";
 import { guestDataSettingsService, type GuestDataSettings } from "@/services/guests";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import { isChannelBooking } from "@/lib/bookings/channelLabel";
@@ -1345,6 +1346,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [bookerSaving, setBookerSaving] = useState(false);
   // The booker's guest record with its staff-only notes, kept across all their stays (VAY-2420).
   const [bookerRecord, setBookerRecord] = useState<ReservationGuestProfile | null>(null);
+  // The notes stay when Guests is off in Feature Hub; only the profile link goes (VAY-2423).
+  const guestsOn = useGuestsSectionOn();
   // Settings › Guest data: phone and nationality can be switched off for the account (VAY-2420).
   const [guestFieldStatus, setGuestFieldStatus] = useState<GuestDataSettings["fields"] | null>(
     null,
@@ -3018,7 +3021,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             onNotesChange={(update) =>
               setBookerRecord((current) => current && { ...current, notes: update(current.notes) })
             }
-            profileHref={`/guests/${bookerRecord.guestProfileId}`}
+            profileHref={guestsOn ? `/guests/${bookerRecord.guestProfileId}` : undefined}
             compact
           />
         )}

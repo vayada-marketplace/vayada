@@ -10,10 +10,12 @@ import {
 
 const inbox = FEATURE_MODULES.find(({ id }) => id === "inbox")!;
 const financials = FEATURE_MODULES.find(({ id }) => id === "financials")!;
+const guests = FEATURE_MODULES.find(({ id }) => id === "guests")!;
 
 describe("Feature Hub modules (VAY-2200)", () => {
-  it("lists five switchable modules", () => {
+  it("lists six switchable modules, Guests first (VAY-2423)", () => {
     expect(FEATURE_MODULES.map(({ id }) => id)).toEqual([
+      "guests",
       "inbox",
       "reviews",
       "financials",
@@ -28,6 +30,8 @@ describe("Feature Hub modules (VAY-2200)", () => {
     expect(isModuleNew(inbox, new Date("2026-11-08T23:59:59Z"))).toBe(true);
     expect(isModuleNew(inbox, new Date("2026-11-09T00:00:00Z"))).toBe(false);
     expect(isModuleNew(financials, new Date("2026-10-15T00:00:00Z"))).toBe(false);
+    expect(isModuleNew(guests, new Date("2026-11-28T23:59:59Z"))).toBe(true);
+    expect(isModuleNew(guests, new Date("2026-11-29T00:00:00Z"))).toBe(false);
   });
 
   it("keeps a Booking Engine item unless its store says it is off", () => {

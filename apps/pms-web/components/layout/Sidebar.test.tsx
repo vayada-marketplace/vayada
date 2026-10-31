@@ -33,14 +33,15 @@ it("shows Financials only after the property access check succeeds", () => {
   expect(visiblePmsNavigation([], true).map((item) => item.href)).not.toContain("/financials");
 });
 
-it("shows Inbox and Reviews only while their Feature Hub switch is on", () => {
+it("shows Guests, Inbox and Reviews only while their Feature Hub switch is on", () => {
   const permissions = ["pms.inbox.read", "pms.operations.read", "pms.reservation.read"];
   const hrefs = (modules: ReadonlySet<string> | null) =>
     visiblePmsNavigation(permissions, false, modules).map((item) => item.href);
 
-  expect(hrefs(new Set())).toEqual(["/bookings", "/guests"]);
-  expect(hrefs(new Set(["inbox"]))).toEqual(["/bookings", "/guests", "/inbox"]);
-  expect(hrefs(new Set(["inbox", "reviews"]))).toEqual([
+  expect(hrefs(new Set())).toEqual(["/bookings"]);
+  expect(hrefs(new Set(["guests"]))).toEqual(["/bookings", "/guests"]);
+  expect(hrefs(new Set(["inbox"]))).toEqual(["/bookings", "/inbox"]);
+  expect(hrefs(new Set(["guests", "inbox", "reviews"]))).toEqual([
     "/bookings",
     "/guests",
     "/inbox",
@@ -52,8 +53,10 @@ it("shows Inbox and Reviews only while their Feature Hub switch is on", () => {
 
 it("keeps permissions authoritative over an active switch", () => {
   expect(
-    visiblePmsNavigation(["pms.reservation.read"], false, new Set(["inbox", "reviews"])).map(
-      (item) => item.href,
-    ),
+    visiblePmsNavigation(
+      ["pms.reservation.read"],
+      false,
+      new Set(["guests", "inbox", "reviews"]),
+    ).map((item) => item.href),
   ).toEqual(["/bookings", "/guests"]);
 });

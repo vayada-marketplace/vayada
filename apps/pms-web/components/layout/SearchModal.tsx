@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { bookingsService } from "@/services/bookings";
-import { guestsService } from "@/services/guests";
+import { guestsService, type GuestSummary } from "@/services/guests";
 import { roomsService, RoomType } from "@/services/rooms";
 import { useTranslation } from "@/lib/i18n";
 import { BOOKING_STATUS_LABEL_KEYS } from "@/lib/constants/statusStyles";
@@ -13,6 +13,7 @@ import {
   guestInitials,
   localToday,
 } from "@/lib/guests/guestDisplay";
+import { useGuestsSectionOn } from "@/lib/guests/useGuestsSectionOn";
 import { SearchResultList, searchResultOptionId, type SearchResult } from "@vayada/settings-ui";
 
 interface PageEntry {
@@ -186,6 +187,8 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   const [activeIndex, setActiveIndex] = useState(0);
   const [rooms, setRooms] = useState<RoomType[]>([]);
   const [roomsLoaded, setRoomsLoaded] = useState(false);
+  // With Guests off in Feature Hub, search leaves out the Guests page and guests (VAY-2423).
+  const guestsOn = useGuestsSectionOn(open);
 
   // Load room types once (small dataset, OK to filter client-side)
   useEffect(() => {
@@ -221,6 +224,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
       // Pages match instantly against the translated label so the user
       // can jump between sections regardless of UI language.
       const pageResults: SearchResult[] = PAGES.filter((p) => {
+        if (p.id === "guests" && !guestsOn) return false;
         const label = t(p.labelKey).toLowerCase();
         return label.includes(q) || p.id.includes(q);
       }).map((p) => ({
@@ -254,8 +258,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
       const statusLabel = (status: string) =>
         BOOKING_STATUS_LABEL_KEYS[status] ? t(BOOKING_STATUS_LABEL_KEYS[status]) : "";
       const [guestResults, bookingResults] = await Promise.all([
-        guestsService
-          .search(query.trim(), 5)
+        (guestsOn ? guestsService.search(query.trim(), 5) : Promise.resolve<GuestSummary[]>([]))
           .then((guests) =>
             guests.map(
               (guest): SearchResult => ({
@@ -328,7 +331,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [query, rooms, locale, t]);
+  }, [query, rooms, locale, t, guestsOn]);
 
   const navigate = useCallback(
     (result: SearchResult) => {
