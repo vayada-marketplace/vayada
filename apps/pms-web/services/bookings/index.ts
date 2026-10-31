@@ -1658,7 +1658,7 @@ function toAddonSelections(addOns: NonNullable<PmsOperationalReservation["addOns
   // VAY-2409: a per-night extra is one line per night; check-in and check-out list it once, with
   // its days, and fulfil all its nights together.
   const extras = new Map<string, Extra>();
-  for (const selection of selections.values()) {
+  selections.forEach((selection) => {
     const key = JSON.stringify([selection.addonId, selection.name]);
     const extra = extras.get(key);
     if (!extra) extras.set(key, selection);
@@ -1667,7 +1667,7 @@ function toAddonSelections(addOns: NonNullable<PmsOperationalReservation["addOns
       extra.quantities.push(...selection.quantities);
       extra.dates.push(...selection.dates);
     }
-  }
+  });
   return Array.from(extras.values(), ({ quantities, dates, ...extra }) => ({
     ...extra,
     quantity: bookedQuantity(quantities),
