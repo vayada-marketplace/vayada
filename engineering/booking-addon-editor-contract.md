@@ -65,14 +65,19 @@ When the guest sends no day, the quote fills it in:
 - `departure`: the check-out day;
 - `daily`: every night;
 - `anytime`: no day, booked as one line with a NULL `service_date`;
-- `guest_pick`: no day is filled in. Such a line stays unbookable until the guest picks one.
+- `guest_pick`: no day is filled in. The guest has to pick one.
 
 The guest sends a day only for a `guest_pick` add-on (VAY-2391 part 4, once the booking page that
 sends no other day was live). The quote refuses:
 
 - a day for an `arrival`, `departure` or `anytime` add-on other than its own;
-- a `guest_pick` day on a weekday the add-on isn't bookable on, or on the check-out day;
+- a `guest_pick` add-on without a day (VAY-2409), or with more than one, a day on a weekday the
+  add-on isn't bookable on, or the check-out day;
 - nights for a `daily` add-on other than every night of the stay.
+
+These refusals answer 422 `ADDON_DATES_NOT_ALLOWED` (VAY-2409), so callers and logs can tell them
+apart from other refusals. The booking page only sends days the schedule allows, so a guest meets
+this only when the hotel changes an add-on's schedule while the page is open.
 
 Quotes issued before 0525 have a stale add-ons source revision, so guests get a new quote.
 Booked `anytime` lines have no `service_date`: finance counts their revenue on the check-in day

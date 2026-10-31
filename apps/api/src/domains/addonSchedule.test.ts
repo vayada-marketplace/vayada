@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addonLineDates,
   addonScheduledDates,
   defaultAddonScheduleMode,
   isoWeekday,
@@ -81,5 +82,33 @@ describe("add-on schedule (VAY-2391)", () => {
     expect(addonScheduledDates("guest_pick", stay)).toBeNull();
     // 2026-11-02 is a Monday, 2026-11-08 a Sunday.
     expect(["2026-11-02", "2026-11-06", "2026-11-08"].map(isoWeekday)).toEqual([1, 5, 7]);
+  });
+
+  it("dates a line by when it happens and refuses days its schedule doesn't allow (VAY-2409)", () => {
+    // Tuesday 3 to Friday 6 November.
+    const stay = { checkIn: "2026-11-03", checkOut: "2026-11-06" };
+    const mode = (scheduleMode: Parameters<typeof addonLineDates>[0]["scheduleMode"]) => ({
+      scheduleMode,
+      bookableWeekdays: every,
+    });
+    const nights = ["2026-11-03", "2026-11-04", "2026-11-05"];
+    expect(addonLineDates(mode("daily"), null, stay)).toEqual(nights);
+    expect(addonLineDates(mode("daily"), [...nights].reverse(), stay)).toEqual(nights);
+    expect(addonLineDates(mode("daily"), nights.slice(1), stay)).toBeNull();
+    expect(addonLineDates(mode("arrival"), null, stay)).toEqual(["2026-11-03"]);
+    expect(addonLineDates(mode("arrival"), ["2026-11-03"], stay)).toEqual(["2026-11-03"]);
+    expect(addonLineDates(mode("arrival"), ["2026-11-04"], stay)).toBeNull();
+    expect(addonLineDates(mode("departure"), ["2026-11-06"], stay)).toEqual(["2026-11-06"]);
+    expect(addonLineDates(mode("anytime"), null, stay)).toEqual([]);
+    expect(addonLineDates(mode("anytime"), ["2026-11-03"], stay)).toBeNull();
+    // A guest picks one night, on a weekday it is offered; never none, two, a day before check-in
+    // or the check-out day.
+    const thursdays = { scheduleMode: "guest_pick" as const, bookableWeekdays: [4] };
+    expect(addonLineDates(thursdays, ["2026-11-05"], stay)).toEqual(["2026-11-05"]);
+    expect(addonLineDates(thursdays, ["2026-11-04"], stay)).toBeNull();
+    expect(addonLineDates(thursdays, null, stay)).toBeNull();
+    expect(addonLineDates(mode("guest_pick"), ["2026-11-04", "2026-11-05"], stay)).toBeNull();
+    expect(addonLineDates(mode("guest_pick"), ["2026-11-06"], stay)).toBeNull();
+    expect(addonLineDates(mode("guest_pick"), ["2026-11-02"], stay)).toBeNull();
   });
 });

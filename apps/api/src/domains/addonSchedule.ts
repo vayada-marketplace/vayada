@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from "node:util";
+import type { PoolClient } from "pg";
+
 /** VAY-2391: when an add-on happens. Only guest_pick asks the guest for a day. */
 export const ADDON_SCHEDULE_MODES = [
   "arrival",
@@ -99,4 +102,62 @@ export function addonScheduledDates(
   if (mode === "departure") return [stay.checkOut];
   if (mode === "anytime") return [];
   return null;
+}
+
+/**
+ * The days an add-on's line is for, from the days the guest sent (null: none). Null when they break
+ * its schedule (VAY-2391):
+ * - guest_pick: exactly one night of the stay, on a weekday it is offered (VAY-2409: also refused
+ *   without one, as the booking would be);
+ * - the others are dated by when they happen, and days sent for one must be its own: every night for
+ *   daily, check-in for arrival, check-out for departure, none for anytime.
+ */
+export function addonLineDates(
+  schedule: { scheduleMode: AddonScheduleMode; bookableWeekdays: readonly number[] },
+  sent: readonly string[] | null,
+  stay: { checkIn: string; checkOut: string },
+): string[] | null {
+  const days = sent === null ? null : [...sent].sort();
+  if (schedule.scheduleMode === "guest_pick")
+    return days?.length === 1 &&
+      days[0]! >= stay.checkIn &&
+      days[0]! < stay.checkOut &&
+      schedule.bookableWeekdays.includes(isoWeekday(days[0]!))
+      ? days
+      : null;
+  const own =
+    schedule.scheduleMode === "daily"
+      ? Array.from(
+          { length: (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86400000 },
+          (_, i) => new Date(Date.parse(stay.checkIn) + i * 86400000).toISOString().slice(0, 10),
+        )
+      : addonScheduledDates(schedule.scheduleMode, stay)!;
+  return days === null || isDeepStrictEqual(days, own) ? own : null;
+}
+
+/** VAY-2409: whether every selected add-on's days fit its schedule. Only names the reason a quote was
+ * refused; the quote owner enforces the rule. An add-on that is gone is refused for another reason. */
+export async function selectedAddonDatesAllow(
+  client: Pick<PoolClient, "query">,
+  propertyId: string,
+  selection: {
+    checkIn: string;
+    checkOut: string;
+    addons: readonly { id: string; dates: readonly string[] | null }[];
+  },
+): Promise<boolean> {
+  if (!selection.addons.length) return true;
+  const rows = (
+    await client.query(
+      `SELECT id::text AS id, pricing_model, schedule_mode, bookable_weekdays
+       FROM booking.addon_definitions WHERE property_id=$1 AND id::text = ANY($2::text[])`,
+      [propertyId, selection.addons.map((addon) => addon.id.toLowerCase())],
+    )
+  ).rows;
+  return selection.addons.every((addon) => {
+    const row = rows.find((candidate) => candidate.id === addon.id.toLowerCase());
+    const schedule =
+      row && readAddonSchedule(row.pricing_model, row.schedule_mode, row.bookable_weekdays);
+    return !schedule || addonLineDates(schedule, addon.dates, selection) !== null;
+  });
 }

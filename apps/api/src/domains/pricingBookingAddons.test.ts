@@ -109,7 +109,7 @@ it("uses explicit resolved dates for all-night selections without inventing a mi
   rebind(current);
   expect(project(current)?.[0].addonSnapshot.selection.dates).toBeNull();
   current.calculation.addons.lines[0].definition.pricingModel = "per_guest";
-  current.calculation.addons.lines[0].dates = null;
+  current.calculation.addons.lines[0].dates = [];
   expect(project(current)).toBeNull();
 });
 it("books an anytime extra as one line without a day, and nothing else without one (VAY-2391)", () => {

@@ -57,8 +57,8 @@ export function projectPricingBookingAddons(current: CurrentQuote) {
       !isDeepStrictEqual(line.people, selected.people) ||
       !isMinorAmount(line.amountMinor) ||
       quotedLines[index]?.amountMinor !== line.amountMinor ||
-      // VAY-2391: only an anytime add-on has no day ([]); a guest-pick one without a day (null) isn't bookable.
-      !line.dates ||
+      // VAY-2391: only an anytime add-on has no day ([]); the quote refuses a guest-pick one without
+      // a day (VAY-2409).
       (line.dates.length
         ? !nightly && line.dates.length > 1
         : nightly || definition.scheduleMode !== "anytime") ||

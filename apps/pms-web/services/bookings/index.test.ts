@@ -240,10 +240,11 @@ describe("PMS target booking projection", () => {
       addonQuantities: { "addon-1": 2, "addon-2": 1 },
       addonSelections: [
         {
-          selectionId: "selection-1",
+          selectionIds: ["selection-1"],
           addonId: "addon-1",
           name: "Breakfast, Coffee",
           quantity: 3,
+          dates: [],
         },
       ],
     });
@@ -278,6 +279,23 @@ describe("PMS target booking projection", () => {
       addonNames: ["Breakfast", "Welcome bottle"],
       addonQuantities: { breakfast: 2, bottle: 1 },
       addonDates: { breakfast: ["2026-11-06", "2026-11-07"], bottle: [] },
+      // VAY-2409: check-in and check-out list it once too, and fulfil both nights together.
+      addonSelections: [
+        {
+          selectionIds: ["night-2", "night-1"],
+          addonId: "breakfast",
+          name: "Breakfast",
+          quantity: 2,
+          dates: ["2026-11-06", "2026-11-07"],
+        },
+        {
+          selectionIds: ["bottle"],
+          addonId: "bottle",
+          name: "Welcome bottle",
+          quantity: 1,
+          dates: [],
+        },
+      ],
     });
     // Lines whose quantities differ add up.
     mocks.get.mockImplementation(async (endpoint: string) =>
@@ -296,6 +314,9 @@ describe("PMS target booking projection", () => {
     await expect(bookingsService.get("booking-1")).resolves.toMatchObject({
       addonIds: ["spa"],
       addonQuantities: { spa: 3 },
+      addonSelections: [
+        { selectionIds: ["a", "b"], addonId: "spa", name: "Spa", quantity: 3, dates: [] },
+      ],
     });
   });
 

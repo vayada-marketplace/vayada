@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../app.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
+import { createTargetPmsOperationsReadRepository } from "../domains/pmsOperationsReadModel.js";
+import { createTargetBookingReservationsReadRepository } from "../platform/bookingReservations.js";
 import {
   createTargetBookingWebCheckoutAdapter,
   resolveTargetCheckoutProperty,
@@ -126,7 +128,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
       expect(await auditRows()).toEqual(before);
     });
 
-    it("returns the booked extras per extra with their days, and none for a booking without (VAY-2408)", async () => {
+    it("returns the booked extras per extra with their days, and none for a booking without (VAY-2408, VAY-2409)", async () => {
       const breakfastId = uuid(6);
       await admin.query(
         `INSERT INTO booking.addon_definitions
@@ -137,6 +139,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
       for (const [id, reference] of [
         [uuid(7), "VAY-2408-EXTRAS"],
         [uuid(8), "VAY-2408-NONE"],
+        [uuid(9), "VAY-2409-OLDER"],
       ] as const) {
         await admin.query(
           `INSERT INTO booking.guest_bookings
@@ -165,6 +168,16 @@ describe.skipIf(!TEST_DATABASE_URL)(
          ($1::uuid, $2::uuid, $4::uuid, '{"name":"Partner spa","selection":{"quantity":1,"people":[{"selectionId":"room","kind":"adult","index":0},{"selectionId":"room","kind":"adult","index":1}]}}',
           1, '2027-02-01', 20.5, 'EUR')`,
         [propertyId, uuid(7), breakfastId, addonId],
+      );
+      // VAY-2409: an older booking's lines of one extra with different quantities.
+      await admin.query(
+        `INSERT INTO booking.booking_addon_selections
+         (property_id, guest_booking_id, addon_definition_id, addon_snapshot, quantity,
+          service_date, total_amount, currency)
+       VALUES
+         ($1::uuid, $2::uuid, $3::uuid, '{"name":"Garden breakfast"}', 1, '2027-02-01', 12, 'EUR'),
+         ($1::uuid, $2::uuid, $3::uuid, '{"name":"Garden breakfast"}', 2, '2027-02-02', 24, 'EUR')`,
+        [propertyId, uuid(9), breakfastId],
       );
       const app = buildApp({
         logger: false,
@@ -202,6 +215,33 @@ describe.skipIf(!TEST_DATABASE_URL)(
       } finally {
         await app.close();
       }
+      // VAY-2409: the PMS reads the lines in checkout's order too, and Booking Admin's reservations
+      // count the breakfast for 2 once, not once per night.
+      const pms = await createTargetPmsOperationsReadRepository({
+        connectionString: TEST_DATABASE_URL!,
+        pool: admin as never,
+      }).findReservationByGuestBookingId(propertyId, uuid(7));
+      expect(pms?.addOns.map(({ addonId }) => addonId)).toEqual([
+        "spa_partner",
+        breakfastId,
+        breakfastId,
+      ]);
+      const reservations = createTargetBookingReservationsReadRepository({
+        connectionString: TEST_DATABASE_URL!,
+        pool: admin as never,
+      });
+      const quantities = async (search: string) =>
+        (
+          await reservations.listReservationsByPropertyId(propertyId, {
+            search,
+            limit: 10,
+            offset: 0,
+            canReadGuestContact: false,
+          })
+        ).reservations.map(({ addonQuantities }) => addonQuantities);
+      expect(await quantities("VAY-2408-EXTRAS")).toEqual([{ [breakfastId]: 2, spa_partner: 1 }]);
+      // Lines that differ (older bookings) add up.
+      expect(await quantities("VAY-2409-OLDER")).toEqual([{ [breakfastId]: 3 }]);
     });
 
     function createAdapter(pool: pg.Pool) {

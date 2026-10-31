@@ -338,7 +338,10 @@ export function createTargetBookingReservationsReadRepository(config: {
                SELECT
                  source.addon_key,
                  MIN(source.addon_name) AS addon_name,
-                 SUM(source.quantity) AS quantity,
+                 -- VAY-2409: a per-night extra is one line per night with the same quantity, which
+                 -- counts once (as the PMS); lines that differ (older bookings) add up.
+                 CASE WHEN MIN(source.quantity) = MAX(source.quantity) THEN MIN(source.quantity)
+                   ELSE SUM(source.quantity) END AS quantity,
                  (
                    SELECT COALESCE(jsonb_agg(service_date.value ORDER BY service_date.value), '[]')
                    FROM expanded dated

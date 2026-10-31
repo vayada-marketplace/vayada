@@ -144,6 +144,11 @@ export function createReplacementBookingQuoteIssuer(
         throw Object.assign(httpError(422, "An extra needs more notice than this stay gives."), {
           code: "ADDON_NEEDS_NOTICE",
         });
+      // VAY-2409: an extra's days don't fit when it happens, or a guest-pick extra has none.
+      if (error.code === "denied" && error.reason === "addon_dates_not_allowed")
+        throw Object.assign(httpError(422, "An extra's day doesn't fit when it happens."), {
+          code: "ADDON_DATES_NOT_ALLOWED",
+        });
       // VAY-2309: a chosen rate doesn't take this way to pay (a non-refundable rate never takes
       // pay at the property).
       if (error.code === "denied" && error.reason === "payment_method_not_accepted")

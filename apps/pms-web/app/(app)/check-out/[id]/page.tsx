@@ -13,6 +13,7 @@ import {
   bookingsService,
 } from "@/services/bookings";
 import { CheckoutInspectionStep, settingsService } from "@/services/settings";
+import { formatServiceDays } from "@/lib/bookings/serviceDays";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
@@ -139,6 +140,7 @@ export default function CheckOutPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  // Each extra's answer, keyed by its first add-on line (a per-night extra has one per night).
   const [addonFulfillment, setAddonFulfillment] = useState<
     Record<string, "fulfilled" | "not_confirmed">
   >({});
@@ -190,11 +192,14 @@ export default function CheckOutPage() {
     [inspection, steps],
   );
 
-  const addonSelections = booking?.addonSelections ?? [];
+  const addonSelections = (booking?.addonSelections ?? []).map((addOn) => ({
+    ...addOn,
+    days: formatServiceDays(addOn.dates, locale),
+  }));
   const addonClassificationUnavailable =
     Boolean(booking?.addonIds.length) && addonSelections.length === 0;
   const hasUnclassifiedAddons = addonSelections.some(
-    ({ selectionId }) => !addonFulfillment[selectionId],
+    ({ selectionIds }) => !addonFulfillment[selectionIds[0]!],
   );
 
   const checkInNotes = notes.filter((note) => note.source === "check-in");
@@ -307,9 +312,10 @@ export default function CheckOutPage() {
         results,
         flaggedResults,
         noteBody || undefined,
+        // One answer covers all of an extra's nights.
         addonSelections
-          .filter(({ selectionId }) => addonFulfillment[selectionId] === "fulfilled")
-          .map(({ selectionId }) => selectionId),
+          .filter(({ selectionIds }) => addonFulfillment[selectionIds[0]!] === "fulfilled")
+          .flatMap(({ selectionIds }) => selectionIds),
       );
       if (noteBody) {
         const saved = await bookingsService.createNote(booking.id, noteBody, "check-out");
@@ -488,7 +494,7 @@ export default function CheckOutPage() {
                   <div className="space-y-3">
                     {addonSelections.map((addOn) => (
                       <div
-                        key={addOn.selectionId}
+                        key={addOn.selectionIds[0]}
                         className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3"
                       >
                         <div>
@@ -496,6 +502,7 @@ export default function CheckOutPage() {
                           <p className="text-xs text-gray-500">
                             {t("bookings.detail.quantity", { quantity: addOn.quantity })}
                           </p>
+                          {addOn.days && <p className="text-xs text-gray-500">{addOn.days}</p>}
                         </div>
                         <div className="flex gap-2">
                           {(["fulfilled", "not_confirmed"] as const).map((value) => (
@@ -507,16 +514,16 @@ export default function CheckOutPage() {
                                   ? "checkOut.addonFulfilled"
                                   : "checkOut.addonNotConfirmed",
                               )}`}
-                              aria-pressed={addonFulfillment[addOn.selectionId] === value}
+                              aria-pressed={addonFulfillment[addOn.selectionIds[0]!] === value}
                               onClick={() => {
                                 setWarning("");
                                 setAddonFulfillment((current) => ({
                                   ...current,
-                                  [addOn.selectionId]: value,
+                                  [addOn.selectionIds[0]!]: value,
                                 }));
                               }}
                               className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                                addonFulfillment[addOn.selectionId] === value
+                                addonFulfillment[addOn.selectionIds[0]!] === value
                                   ? value === "fulfilled"
                                     ? "border-green-300 bg-green-100 text-green-800"
                                     : "border-amber-300 bg-amber-100 text-amber-900"

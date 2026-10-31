@@ -7570,9 +7570,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           VALUES($1,'EUR','{"enabled":true,"stackWithPromo":true,"tiers":[{"daysBeforeMin":0,"daysBeforeMax":null,"discountPercent":20}]}')`,
       [f.scope.propertyId],
     );
+    // An extra without a day, so the selection needs none (a guest-pick one needs a day, VAY-2409).
     await pool.query(
-      `INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,price_amount,currency,metadata)
-          VALUES($1,$2,'Transfer','per_stay',20,'EUR','{"maxQuantity":2}')`,
+      `INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,price_amount,currency,metadata,schedule_mode)
+          VALUES($1,$2,'Transfer','per_stay',20,'EUR','{"maxQuantity":2}','anytime')`,
       [id, f.scope.propertyId],
     );
     await pool.query(
@@ -8827,6 +8828,28 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await revalidate(f, issued.quote.quoteId)).toBeNull();
     expect(await revalidate(f, plain.quote.quoteId)).not.toBeNull();
   });
+  // VAY-2409: a quote refused for an extra's day says so.
+  it("names a quote refused for a day the extra's schedule doesn't allow", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    await pool.query(
+      "UPDATE booking.addon_definitions SET schedule_mode='guest_pick' WHERE id=$1",
+      [f.id],
+    );
+    const issue = (dates: string[] | null) =>
+      store.issue(f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection: { ...f.selection, addons: [{ ...f.selection.addons[0], dates }] },
+        paymentMethod: "pay_at_property",
+      });
+    // A guest-pick extra without a day, or on the check-out day.
+    for (const dates of [null, [f.selection.checkOut]])
+      await expect(issue(dates)).rejects.toMatchObject({
+        code: "denied",
+        reason: "addon_dates_not_allowed",
+      });
+    expect((await issue([f.selection.checkIn])).quote.stay.addons).toHaveLength(1);
+  });
   it("retains current owner locks for the caller's subsequent acceptance work", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       store = createCurrentPricingQuoteStore(pool, 300);
@@ -9632,9 +9655,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(run).toMatchObject({ kind: "prepared", targetId: third.targetId });
     // With the rejected target still skipped, a current run reports it.
     const prepared = run as Extract<typeof run, { kind: "prepared" }>;
-    expect(
-      await prepared.dispatch(async () => f.accepted()),
-    ).toMatchObject({ kind: "retained" });
+    expect(await prepared.dispatch(async () => f.accepted())).toMatchObject({ kind: "retained" });
     expect(await f.reconcile(lease)).toMatchObject({ kind: "pending_deliveries_reconciled" });
     expect(await f.next(lease)).toEqual({
       kind: "offer_ari_current",
@@ -9653,7 +9674,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     // offer "ghost" on the same room and binding): every night of its rate plan is closed; the
     // published targets stay current.
     const binding = (
-      await pool.query<{ connectionId: string; generation: string; external: string; room: string }>(
+      await pool.query<{
+        connectionId: string;
+        generation: string;
+        external: string;
+        room: string;
+      }>(
         `SELECT c.id::text AS "connectionId",c.binding_generation::text AS generation,
            c.external_property_id AS external,m.external_room_type_id AS room
          FROM pms.channel_connections c
@@ -9681,7 +9707,15 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
          (target_id,version,intent_id,binding_generation,external_property_id,external_room_type_id,
           external_rate_plan_id,configuration,readback_evidence)
        VALUES($1,$2,$3,$4,$5,$6,$7,'{"currency":"EUR"}','{"verified":true}')`,
-      [ghost, ghostIntent.version, ghostIntent.id, binding.generation, binding.external, binding.room, ghostRate],
+      [
+        ghost,
+        ghostIntent.version,
+        ghostIntent.id,
+        binding.generation,
+        binding.external,
+        binding.room,
+        ghostRate,
+      ],
     );
     await pool.query("UPDATE pms.channex_offer_targets SET active_version=$2 WHERE id=$1", [
       ghost,
@@ -9699,7 +9733,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       },
     ]);
     expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
-    expect(await f.next()).toMatchObject({ kind: "offer_ari_current", targetCount: 3, skipped: [] });
+    expect(await f.next()).toMatchObject({
+      kind: "offer_ari_current",
+      targetCount: 3,
+      skipped: [],
+    });
     // A room mapping that moved to another external room makes every target not current.
     await pool.query(
       "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1 AND room_type_id=$3",

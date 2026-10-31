@@ -49,8 +49,14 @@ const booking = {
   currency: "EUR",
   addonIds: ["breakfast", "parking"],
   addonSelections: [
-    { selectionId: "selection-1", addonId: "breakfast", name: "Breakfast", quantity: 2 },
-    { selectionId: "selection-2", addonId: "parking", name: "Parking", quantity: 1 },
+    {
+      selectionIds: ["selection-1"],
+      addonId: "breakfast",
+      name: "Breakfast",
+      quantity: 2,
+      dates: [],
+    },
+    { selectionIds: ["selection-2"], addonId: "parking", name: "Parking", quantity: 1, dates: [] },
   ],
 };
 
@@ -106,11 +112,39 @@ it("requires every named selection and submits only those marked fulfilled", asy
 
   await act(async () => completeButton().props.onClick());
 
-  expect(mocks.completeCheckOut).toHaveBeenCalledWith(
-    "booking-1",
-    [],
-    [],
-    undefined,
-    ["selection-1"],
+  expect(mocks.completeCheckOut).toHaveBeenCalledWith("booking-1", [], [], undefined, [
+    "selection-1",
+  ]);
+});
+
+it("lists a per-night extra once with its days and fulfils all its nights (VAY-2409)", async () => {
+  mocks.getBooking.mockResolvedValue({
+    ...booking,
+    checkOut: "2026-09-16",
+    nights: 2,
+    addonIds: ["breakfast"],
+    addonSelections: [
+      {
+        selectionIds: ["night-1", "night-2"],
+        addonId: "breakfast",
+        name: "Breakfast",
+        quantity: 2,
+        dates: ["2026-09-14", "2026-09-15"],
+      },
+    ],
+  });
+  await mount();
+
+  const rendered = JSON.stringify(view.toJSON());
+  expect(rendered.split('"Breakfast"').length - 1).toBe(1);
+  expect(rendered).toContain("Sep 14 – Sep 15");
+  act(() =>
+    view.root.findByProps({ "aria-label": "Breakfast: checkOut.addonFulfilled" }).props.onClick(),
   );
+  await act(async () => completeButton().props.onClick());
+
+  expect(mocks.completeCheckOut).toHaveBeenCalledWith("booking-1", [], [], undefined, [
+    "night-1",
+    "night-2",
+  ]);
 });
