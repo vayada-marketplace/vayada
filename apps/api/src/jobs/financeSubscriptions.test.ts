@@ -131,6 +131,49 @@ describe("Finance subscription webhook lifecycle", () => {
     ).rejects.toThrow("configured Vayada Fixed Plan");
   });
 
+  it("skips the hotel website's own subscription without reading Stripe or the billing row", async () => {
+    for (const planKey of ["commission", "fixed"] as const) {
+      const fixture = setup(planKey);
+      fixture.provider.snapshot.fixedPlanVerified = false;
+      const findEntitlement = vi.spyOn(fixture.store, "findEntitlement");
+      const before = { ...fixture.store.entitlement };
+      for (const eventType of [
+        "invoice.paid",
+        "invoice.payment_failed",
+        "invoice.upcoming",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+      ]) {
+        await expect(
+          processFinanceSubscriptionWebhook(
+            {
+              ...payload(eventType, 43),
+              subscriptionId: "sub_website",
+              vayadaAddon: "hotel_website",
+            },
+            fixture.dependencies,
+          ),
+        ).resolves.toBe("ignored_addon");
+      }
+      expect(findEntitlement).not.toHaveBeenCalled();
+      expect(fixture.provider.retrieveSubscription).not.toHaveBeenCalled();
+      expect(fixture.provider.updateRoomQuantity).not.toHaveBeenCalled();
+      expect(fixture.store.entitlement).toEqual(before);
+      expect(fixture.store.notificationCount).toBe(0);
+    }
+  });
+
+  it("still rejects an unverified subscription tagged with an unknown add-on", async () => {
+    const fixture = setup("fixed");
+    fixture.provider.snapshot.fixedPlanVerified = false;
+    await expect(
+      processFinanceSubscriptionWebhook(
+        { ...payload("invoice.paid", 44), vayadaAddon: "hotel-website" },
+        fixture.dependencies,
+      ),
+    ).rejects.toThrow("configured Vayada Fixed Plan");
+  });
+
   it("updates next-invoice room quantity without proration and reverts at subscription end", async () => {
     const fixture = setup("fixed");
     await processFinanceSubscriptionWebhook(payload("invoice.upcoming", 50), fixture.dependencies);

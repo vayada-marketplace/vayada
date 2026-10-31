@@ -12,6 +12,9 @@ const QUEUE = "finance.subscriptions";
 const JOB_TYPE = "finance.subscription-webhook";
 const NOTIFICATION_QUEUE = "finance.notifications";
 const NOTIFICATION_JOB_TYPE = "finance.subscription-payment-failed.notify-internal";
+/** VAY-2422: the hotel website, billed by its own Stripe subscription tagged
+ * `vayada_addon=hotel_website`, which Finance doesn't track. */
+export const HOTEL_WEBSITE_ADDON = "hotel_website";
 
 export type FinanceSubscriptionWebhookPayload = {
   provider: "stripe";
@@ -24,6 +27,8 @@ export type FinanceSubscriptionWebhookPayload = {
   propertyId: string | null;
   organizationId: string | null;
   customerId: string | null;
+  /** The subscription's `vayada_addon` metadata; absent on the plan's own subscription. */
+  vayadaAddon?: string | null;
 };
 
 export type FinanceSubscriptionWebhookEntitlement = {
@@ -73,8 +78,11 @@ export async function processFinanceSubscriptionWebhook(
     roomInventory: RoomInventoryReadPort;
     refreshPublicBookability?: (propertyId: string) => Promise<void>;
   },
-): Promise<"applied" | "ignored_stale"> {
+): Promise<"applied" | "ignored_stale" | "ignored_addon"> {
   validatePayload(payload);
+  // The website's events carry the hotel's ids too: matched to its billing row they failed the
+  // Fixed Plan check, and with no row they had nothing to map to. Each retried to dead letter.
+  if (payload.vayadaAddon === HOTEL_WEBSITE_ADDON) return "ignored_addon";
   const existing = await dependencies.store.findEntitlement(payload);
   if (!existing) {
     if (payload.eventType === "checkout.session.completed") return "ignored_stale";
@@ -490,6 +498,7 @@ function parsePayload(value: Record<string, unknown>): FinanceSubscriptionWebhoo
     propertyId: optionalText(value.propertyId),
     organizationId: optionalText(value.organizationId),
     customerId: optionalText(value.customerId),
+    vayadaAddon: optionalText(value.vayadaAddon),
   };
 }
 
