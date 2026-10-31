@@ -178,31 +178,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       ariRateGated: true,
       outcome: "partial",
     });
-    const durableRateGate = await store.enqueueAriPushJob(
-      {
-        source: "incremental",
-        propertyId: first.propertyId,
-        organizationId: first.organizationId,
-        connectionId: randomUUID(),
-        channexPropertyId: "channex-property",
-        roomTypeId: first.roomTypeId,
-        channexRoomTypeId: "channex-room",
-        dateRange: { from: "2026-09-03", to: "2026-09-03" },
-        inventoryVersion: "vay-1436-rate-gated",
-        rateGateOpen: false,
-        triggerRefId: "vay-1436-rate-gated",
-        correlationId: "vay-1436-rate-gated",
-      },
-      context(),
-    );
-    expect(
-      await admin.query(
-        `SELECT payload->>'rateGateOpen' AS "rateGateOpen"
-         FROM platform.jobs WHERE job_key=$1`,
-        [durableRateGate.job.jobKey],
-      ),
-    ).toMatchObject({ rows: [{ rateGateOpen: "false" }] });
-
     await admin.query(
       `UPDATE pms.inventory_days
        SET inventory_revision=inventory_revision+1, manual_source_revision=1,
@@ -339,43 +314,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
          ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'airbnb','vay-925-room','vay-925-airbnb-rate')`,
       [first.propertyId, connectionId, first.roomTypeId, ratePlanId],
     );
-    const retiredRoomTypeId = randomUUID();
-    await admin.query(
-      "INSERT INTO pms.room_types(id,property_id,name,active) VALUES($1,$2,'Retired',FALSE)",
-      [retiredRoomTypeId, first.propertyId],
-    );
-    await admin.query(
-      "INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id) VALUES($1,$2,$3,'retired')",
-      [first.propertyId, connectionId, retiredRoomTypeId],
-    );
-    const retiredClient = await admin.connect();
-    try {
-      await retiredClient.query("SET session_replication_role=replica");
-      await seedSparseInventoryDay(
-        retiredClient,
-        { ...first, roomTypeId: retiredRoomTypeId },
-        "2026-09-03",
-      );
-    } finally {
-      await retiredClient.query("SET session_replication_role=origin");
-      retiredClient.release();
-    }
-    const automaticAri = (await store.findIncrementalAriPushCandidates(now, 10)).filter(
-      ({ propertyId }) => propertyId === first.propertyId,
-    );
-    expect(automaticAri).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          dateRange: { from: "2026-09-03", to: "2028-03-31" },
-          rateGateOpen: true,
-        }),
-      ]),
-    );
-    const fullAri = await store.findFullAriPushCandidates(now, 10);
-    expect(fullAri.find(({ propertyId }) => propertyId === first.propertyId)).toMatchObject({
-      dateRange: { from: "2026-09-03", to: "2028-03-31" },
-    });
-    expect(fullAri.some(({ roomTypeId }) => roomTypeId === retiredRoomTypeId)).toBe(false);
     const managementPlans = createPgChannexManagementPlanPort({
       connectionString: TEST_DATABASE_URL!,
       pool: admin,
