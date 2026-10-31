@@ -89,10 +89,10 @@ export async function claimPmsInboxDeliveryJob(
   const result = await pool.query<PmsInboxDeliveryJob>(
     `UPDATE platform.jobs job
      SET status = 'running', attempts_count = job.attempts_count +
-           CASE WHEN candidate.status = 'pending' THEN 1 ELSE 0 END,
+           CASE WHEN job.status = 'pending' THEN 1 ELSE 0 END,
          locked_at = now(), locked_by = $3, updated_at = now()
-     FROM (
-       SELECT id, status
+     WHERE job.id = (
+       SELECT id
        FROM platform.jobs
        WHERE queue_name = $1 AND job_type = $2
          AND (
@@ -103,8 +103,7 @@ export async function claimPmsInboxDeliveryJob(
        ORDER BY priority DESC, run_after, created_at
        FOR UPDATE SKIP LOCKED
        LIMIT 1
-     ) candidate
-     WHERE job.id = candidate.id
+     )
      RETURNING job.id::text AS id, job.locked_by AS "workerId",
        job.property_id::text AS "propertyId", job.resource_id AS "messageId",
        job.attempts_count AS "attemptNumber", job.max_attempts AS "maxAttempts",

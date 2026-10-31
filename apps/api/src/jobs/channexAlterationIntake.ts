@@ -190,12 +190,11 @@ export async function runChannexAlterationIntake(options: {
         maxAttempts: number;
       }>(
         `UPDATE platform.jobs job SET status='running',locked_at=now(),locked_by=$4,updated_at=now()
-         FROM (SELECT id FROM platform.jobs WHERE queue_name=$1 AND job_type=$2
+         WHERE job.id=(SELECT id FROM platform.jobs WHERE queue_name=$1 AND job_type=$2
              AND (status='pending' OR (status='running' AND locked_at<now()-make_interval(mins=>$5)))
              AND run_after<=now() AND attempts_count<max_attempts
              AND ($3::uuid[] IS NULL OR property_id=ANY($3::uuid[]))
-           ORDER BY run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1) candidate
-         WHERE job.id=candidate.id
+           ORDER BY run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1)
          RETURNING job.id,job.payload,job.job_metadata->'page' AS page,job.property_id AS "propertyId",
            job.attempts_count AS attempts,job.max_attempts AS "maxAttempts"`,
         [queue, type, properties, workerId, LEASE_MINUTES],
