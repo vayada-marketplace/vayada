@@ -9,6 +9,8 @@ describe.skipIf(!databaseUrl)("Channex review worker (PostgreSQL)", () => {
   let client: pg.Client;
 
   beforeEach(async () => {
+    // Each case drops the platform, pms and hotel_catalog schemas.
+    assertSafeTestDatabase(databaseUrl!);
     client = new pg.Client({ connectionString: databaseUrl });
     await client.connect();
     await client.query(`
@@ -171,3 +173,10 @@ describe.skipIf(!databaseUrl)("Channex review worker (PostgreSQL)", () => {
     );
   }
 });
+
+function assertSafeTestDatabase(url: string): void {
+  const databaseName = new URL(url).pathname.replace(/^\//, "");
+  if (!/(^|[_-])test([_-]|$)/i.test(databaseName)) {
+    throw new Error(`Refusing to use non-test database "${databaseName}"`);
+  }
+}

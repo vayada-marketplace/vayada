@@ -4,8 +4,10 @@
 //   node scripts/ci/integration-suites.mjs nightly   # the nightly groups as JSON, one database each
 //
 // PR Checks (pr-checks.yml, api_postgres) names the files it runs. Every other
-// `apps/api/src/**/*.integration.test.ts` file runs in the nightly job on main, unless NOT_IN_CI
-// says why it cannot. integration-suites.test.mjs holds the contract; the frontend job runs it.
+// `apps/api/src/**/*.integration.test.ts` file, and every other `*.test.ts` file that reads
+// TEST_DATABASE_URL (its PostgreSQL part skips itself without one, VAY-2407), runs in the nightly
+// job on main, unless NOT_IN_CI says why it cannot. integration-suites.test.mjs holds the
+// contract; the frontend job runs it.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +18,7 @@ export const WORKFLOW_FILE = ".github/workflows/pr-checks.yml";
 export const API_WORKSPACE = "vayada-api";
 export const API_SOURCE_DIR = "apps/api/src";
 const INTEGRATION_FILE = /\.integration\.test\.ts$/;
+const TEST_FILE = /\.test\.ts$/;
 
 // Files that no CI run executes, each with the reason and the ticket that takes the file off the
 // list. A file here still runs in PR Checks where a step names it with a `-t` filter.
@@ -29,11 +32,13 @@ export const NOT_IN_CI = {
 export const ISOLATED_GROUPS = [
   {
     name: "guest-reviews",
-    reason: "drop and rebuild the pms, identity, hotel_catalog and platform schemas in beforeEach",
+    reason:
+      "drop and rebuild the pms, hotel_catalog, platform (and identity) schemas in beforeEach",
     migrate: false,
     files: [
       "src/domains/pmsGuestReviews.integration.test.ts",
       "src/domains/pmsReviewReplies.integration.test.ts",
+      "src/jobs/channexReviews.test.ts",
     ],
   },
   {
@@ -61,7 +66,8 @@ export const ISOLATED_GROUPS = [
 // suite's leftovers cannot reach the whole run.
 export const DEFAULT_GROUP_SIZE = 12;
 
-// Every apps/api integration file, as `src/...` (the form pr-checks.yml uses), sorted.
+// Every apps/api integration file and every other test file that reads TEST_DATABASE_URL, as
+// `src/...` (the form pr-checks.yml uses), sorted.
 export function integrationFiles(root = ROOT) {
   const base = join(root, API_SOURCE_DIR);
   const found = [];
@@ -69,7 +75,10 @@ export function integrationFiles(root = ROOT) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (INTEGRATION_FILE.test(entry.name)) {
+      else if (
+        INTEGRATION_FILE.test(entry.name) ||
+        (TEST_FILE.test(entry.name) && readFileSync(path, "utf8").includes("TEST_DATABASE_URL"))
+      ) {
         found.push(`src/${relative(base, path).split("\\").join("/")}`);
       }
     }
@@ -88,17 +97,23 @@ function commandsOf(step) {
 const runsApi = (command) => /(?:--workspace|-w)[= ]vayada-api\b/.test(command);
 const hasTestFilter = (command) => /(?:^|\s)-t(?:\s|$)/.test(command);
 const filesOf = (command) =>
-  command.split(/\s+/).filter((token) => INTEGRATION_FILE.test(token) && token.startsWith("src/"));
+  command.split(/\s+/).filter((token) => TEST_FILE.test(token) && token.startsWith("src/"));
+// Without a test database URL in the step's env or the command, a file's PostgreSQL part skips
+// itself (TARGET_DATABASE_URL alone only migrates).
+const setsDatabase = (env, command) =>
+  Object.keys(env).some((name) => name.endsWith("TEST_DATABASE_URL")) ||
+  /\b[A-Z_]*TEST_DATABASE_URL=/.test(command);
 
-// The integration files PR Checks runs: `full` when a vayada-api command names the file without
-// a `-t` filter, `filteredOnly` when every command naming it filters by test name.
+// The files PR Checks runs with a database: `full` when a vayada-api command names the file
+// without a `-t` filter, `filteredOnly` when every command naming it filters by test name.
 export function prChecksCoverage(workflowText) {
   const full = new Set();
   const filtered = new Set();
   for (const job of Object.values(parse(workflowText).jobs ?? {})) {
     for (const step of job.steps ?? []) {
+      const env = { ...job.env, ...step.env };
       for (const command of commandsOf(step)) {
-        if (!runsApi(command)) continue;
+        if (!runsApi(command) || !setsDatabase(env, command)) continue;
         for (const file of filesOf(command)) (hasTestFilter(command) ? filtered : full).add(file);
       }
     }

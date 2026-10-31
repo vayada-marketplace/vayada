@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
@@ -26,10 +27,27 @@ const NIGHTLY = new Set(GROUPS.flatMap((group) => group.files));
 const exists = (file) => existsSync(join(ROOT, API_SOURCE_DIR, file.slice("src/".length)));
 
 // A small pr-checks.yml: one unfiltered api command, one `-t` filtered command, a two-line
-// continuation, and a chained backend-migration command whose file could share an api file's name.
+// continuation, a chained backend-migration command whose file could share an api file's name,
+// and test database URLs from the job env, a step env, the command itself, or nowhere.
 const FIXTURE = `
 jobs:
+  api_unit:
+    steps:
+      - name: No database
+        run: npm --workspace vayada-api run test -- src/h.integration.test.ts src/i.test.ts
+      - name: Migration database only
+        env:
+          TARGET_DATABASE_URL: postgresql://db/x_test
+        run: npm --workspace vayada-api run test -- src/l.test.ts
+      - name: Inline database
+        run: TEST_DATABASE_URL=postgresql://db/x_test npm --workspace vayada-api run test -- src/j.test.ts
+      - name: Other database env
+        env:
+          GROWTH_TEST_DATABASE_URL: postgresql://db/growth_test
+        run: npm --workspace vayada-api run test -- src/k.integration.test.ts
   api_postgres:
+    env:
+      TEST_DATABASE_URL: postgresql://db/x_test
     steps:
       - name: Batch
         run: >-
@@ -51,15 +69,37 @@ jobs:
           npm --workspace @vayada/backend-migration run test -- src/f.integration.test.ts && npm --workspace vayada-api run test -- src/g.integration.test.ts
 `;
 
-test("prChecksCoverage reads unfiltered, filtered and continued vayada-api commands", () => {
+test("prChecksCoverage reads unfiltered, filtered and continued vayada-api commands with a database", () => {
   const coverage = prChecksCoverage(FIXTURE);
   assert.deepEqual([...coverage.full].sort(), [
     "src/a.integration.test.ts",
     "src/b.integration.test.ts",
     "src/d.integration.test.ts",
+    "src/e.unit.test.ts",
     "src/g.integration.test.ts",
+    "src/j.test.ts",
+    "src/k.integration.test.ts",
   ]);
   assert.deepEqual([...coverage.filteredOnly], ["src/c.integration.test.ts"]);
+});
+
+test("integrationFiles also tracks test files that read TEST_DATABASE_URL (VAY-2407)", () => {
+  const root = mkdtempSync(join(tmpdir(), "integration-suites-"));
+  try {
+    const dir = join(root, API_SOURCE_DIR, "jobs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "a.integration.test.ts"), "");
+    writeFileSync(join(dir, "b.test.ts"), 'describe.skipIf(!process.env["TEST_DATABASE_URL"])');
+    writeFileSync(join(dir, "c.test.ts"), 'it("needs no database")');
+    writeFileSync(join(dir, "b.ts"), "process.env.TEST_DATABASE_URL");
+    assert.deepEqual(integrationFiles(root), [
+      "src/jobs/a.integration.test.ts",
+      "src/jobs/b.test.ts",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.ok(FILES.includes("src/hotelSetupTrackCommand.test.ts"));
 });
 
 test("nightlyGroups keeps the isolated groups and chunks the rest alphabetically", () => {
