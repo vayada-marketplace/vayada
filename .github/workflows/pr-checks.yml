@@ -673,6 +673,39 @@ jobs:
           TARGET_DATABASE_URL="$VAY2017_LIFECYCLE_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/platform/legacyOwnerLifecycleMutations.integration.test.ts
 
+      # VAY-2427: each suite accepts only a new, empty database with this exact name on 127.0.0.1;
+      # all but the evidence snapshot apply every migration to it themselves.
+      - name: Verify legacy owner approvals, bootstrap readers, evidence snapshot and identity provenance
+        if: matrix.shard == 'platform'
+        env:
+          VAY2017_APPROVAL_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_approval_fixture
+          VAY2017_SOURCE_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_source_reader_fixture
+          VAY2017_TARGET_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_target_reader_fixture
+          VAY2017_SNAPSHOT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_snapshot_fixture
+          VAY2017_PROVENANCE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_provenance_fixture
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.VAY2017_APPROVAL_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            for (const database of [
+              "vay2017_approval_fixture",
+              "vay2017_source_reader_fixture",
+              "vay2017_target_reader_fixture",
+              "vay2017_snapshot_fixture",
+              "vay2017_provenance_fixture",
+            ]) await client.query(`CREATE DATABASE ${database}`);
+            await client.end();
+          '
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism \
+            src/legacyOwnerApprovalRegistry.integration.test.ts \
+            src/legacyOwnerBootstrapSourceReader.integration.test.ts \
+            src/legacyOwnerBootstrapTargetReader.integration.test.ts \
+            src/legacyOwnerEvidenceSnapshot.test.ts \
+            src/productionIdentityProvenance.integration.test.ts
+
       - name: Verify PMS navigation module migration backfill
         if: matrix.shard == 'pms-migrations'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/pmsNavigationModules.test.ts
@@ -684,14 +717,21 @@ jobs:
         env:
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify restricted identity staff access update, PMS Inbox enqueue and the invitation join read
+      # The whole file, including the restricted identity login cases (VAY-2395), in its own
+      # database: each case first deletes every staff invitation (VAY-2427).
+      - name: Verify staff invitations, access updates and PMS Inbox enqueue, also as the restricted identity login
         if: matrix.shard == 'platform'
-        run: >-
-          npm --workspace @vayada/backend-auth run test -- --no-file-parallelism
-          src/staffInvitations.test.ts
-          -t "updates staff access as the restricted identity login|enqueues an unreadable PMS Inbox job|shows the invitee only the current invitation|verifies a joining WorkOS identity|claims a replaced invitation"
         env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2427_staff_invitations_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vay2427_staff_invitations_test"); await client.end();
+          '
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace @vayada/backend-auth run test -- --no-file-parallelism src/staffInvitations.test.ts
 
       # The transfer suites need their own database. This one also runs the transfer as the
       # restricted identity login with the platform grant contract (VAY-2396).
@@ -711,6 +751,29 @@ jobs:
           '
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace @vayada/backend-auth run test -- --no-file-parallelism src/accountAdminTransferCommand.test.ts
+
+      # VAY-2427: the other transfer and role suites, each in the database it accepts. The transfer
+      # proofs rebuild the identity schema themselves, so theirs stays unmigrated.
+      - name: Verify the admin transfer proofs and snapshot, role reconciliation and team roles
+        if: matrix.shard == 'platform'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vayada_api_test
+          DATABASES: postgresql://vayada_test:vayada_test@127.0.0.1:5432
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const client = new pg.Client({ connectionString: process.env.ADMIN_URL }); await client.connect();
+            for (const database of ["vay1439_transfer_proof_test", "vay1439_restack_test", "vay1439_role_worker_test", "vay2427_team_roles_test"])
+              await client.query(`CREATE DATABASE ${database}`);
+            await client.end();
+          '
+          for database in vay1439_restack_test vay1439_role_worker_test vay2427_team_roles_test; do
+            TARGET_DATABASE_URL="$DATABASES/$database" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          done
+          TEST_DATABASE_URL="$DATABASES/vay1439_transfer_proof_test" npm --workspace @vayada/backend-auth run test -- --no-file-parallelism src/accountAdminTransferProofs.test.ts
+          TEST_DATABASE_URL="$DATABASES/vay1439_restack_test" npm --workspace @vayada/backend-auth run test -- --no-file-parallelism src/accountAdminTransferSnapshot.test.ts
+          TEST_DATABASE_URL="$DATABASES/vay1439_role_worker_test" npm --workspace @vayada/backend-auth run test -- --no-file-parallelism src/adminRoleReconciliation.test.ts
+          TEST_DATABASE_URL="$DATABASES/vay2427_team_roles_test" npm --workspace @vayada/backend-auth run test -- --no-file-parallelism src/teamRoles.test.ts
 
       - name: Verify Finance expense worker permissions and real handlers
         if: matrix.shard == 'platform'
@@ -823,11 +886,21 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # The whole file, with the role permission and entitlement repositories, in its own
+      # database: the suites truncate identity tables (VAY-2427).
       - name: Verify current authorization and effective property access
         if: matrix.shard == 'platform'
-        run: npm --workspace @vayada/backend-authorization run test -- --no-file-parallelism src/index.test.ts -t 'createPgPropertyAccessRepository|createAuthorizationResolver|resolveMembershipRolePermissions'
         env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2427_authorization_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vay2427_authorization_test"); await client.end();
+          '
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace @vayada/backend-authorization run test -- --no-file-parallelism src/index.test.ts
 
       - name: Verify PMS dashboard reads per staff role preset
         if: matrix.shard == 'platform'
@@ -1493,7 +1566,7 @@ jobs:
             src/jobs/pmsNoShowReporting.integration.test.ts \
             src/pmsRoomFactsActiveList.integration.test.ts
 
-      - name: Verify pricing sources, snapshots and Channex pricing jobs on PostgreSQL (VAY-2111)
+      - name: Verify pricing sources, snapshots, the owner's currency change and Channex pricing jobs on PostgreSQL (VAY-2111)
         if: matrix.shard == 'pricing'
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
@@ -1512,7 +1585,8 @@ jobs:
             src/domains/replacementPricingSnapshot.integration.test.ts \
             src/domains/replacementPricingStorageGuard.integration.test.ts \
             src/jobs/channexUnverifiedAlterations.integration.test.ts \
-            src/jobs/pmsChannexPricingJobLease.integration.test.ts
+            src/jobs/pmsChannexPricingJobLease.integration.test.ts \
+            src/pmsPricingCurrencyChangeOrdinary.integration.test.ts
 
       - name: Verify hotel catalog, setup lifecycle, media and sessions on PostgreSQL (VAY-2111)
         if: matrix.shard == 'platform'
