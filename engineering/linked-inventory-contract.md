@@ -213,9 +213,10 @@ ranges:
 The channel-manager intent maps the internal `pms.inventory.changed` domain
 event to the concrete `pms.inventory.ari_changed` outbox event. Its insert
 trigger (migration 0323) queues a `channex.sync_ari` management job for a
-hotel with a connected Channex connection. For claimed hotels the ARI schedule
-(`pmsChannexAriSchedule.ts`) also queues one when the `pms.inventory_days`
-fingerprint changes. The management worker sends each room-night whose current
+hotel with a connected or degraded Channex connection. For claimed hotels the
+ARI schedule (`pmsChannexAriSchedule.ts`) also queues one when its source
+fingerprint changes; `pms.inventory_days` is one of the tables it watches. The
+management worker sends each room-night whose current
 inventory evidence has no reconciled Channex attempt, so duplicate jobs send
 nothing twice. VAY-2352 removed the earlier `channex.push-ari` outbox reader,
 which nothing ran.

@@ -314,6 +314,29 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
          ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'airbnb','vay-925-room','vay-925-airbnb-rate')`,
       [first.propertyId, connectionId, first.roomTypeId, ratePlanId],
     );
+    // A retired room keeps its Channex room mapping and an inventory day, but no rate mapping.
+    // The ARI status checks below stay "ok" only while the status read ignores inactive rooms.
+    const retiredRoomTypeId = randomUUID();
+    await admin.query(
+      "INSERT INTO pms.room_types(id,property_id,name,active) VALUES($1,$2,'Retired',FALSE)",
+      [retiredRoomTypeId, first.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id) VALUES($1,$2,$3,'retired')",
+      [first.propertyId, connectionId, retiredRoomTypeId],
+    );
+    const retiredClient = await admin.connect();
+    try {
+      await retiredClient.query("SET session_replication_role=replica");
+      await seedSparseInventoryDay(
+        retiredClient,
+        { ...first, roomTypeId: retiredRoomTypeId },
+        "2026-09-03",
+      );
+    } finally {
+      await retiredClient.query("SET session_replication_role=origin");
+      retiredClient.release();
+    }
     const managementPlans = createPgChannexManagementPlanPort({
       connectionString: TEST_DATABASE_URL!,
       pool: admin,
