@@ -158,7 +158,7 @@ async function claim(pool: Pool, workerId: string): Promise<JobRow | null> {
          locked_at = now(),
          locked_by = $1,
          updated_at = now()
-     FROM (
+     WHERE job.id = (
        SELECT id FROM platform.jobs
        WHERE queue_name = $2
          AND job_type = $3
@@ -170,8 +170,7 @@ async function claim(pool: Pool, workerId: string): Promise<JobRow | null> {
        ORDER BY priority DESC, run_after, created_at, id
        FOR UPDATE SKIP LOCKED
        LIMIT 1
-     ) candidate
-     WHERE job.id = candidate.id
+     )
      RETURNING job.id::text AS id,
                job.attempts_count::int AS "attemptsCount",
                job.max_attempts::int AS "maxAttempts",

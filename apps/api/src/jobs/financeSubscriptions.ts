@@ -438,13 +438,12 @@ async function claimJob(pool: pg.Pool, workerId: string, queue: string, jobType:
   const result = await pool.query<{ id: string; payload: Record<string, unknown> }>(
     `UPDATE platform.jobs job SET status = 'running', attempts_count = attempts_count + 1,
        locked_at = now(), locked_by = $3
-     FROM (SELECT id FROM platform.jobs
+     WHERE job.id = (SELECT id FROM platform.jobs
        WHERE queue_name = $1 AND job_type = $2
          AND (status = 'pending' OR (status = 'running'
            AND (locked_at IS NULL OR locked_at < now() - interval '5 minutes')))
          AND run_after <= now() AND attempts_count < max_attempts
-       ORDER BY priority DESC, created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1) candidate
-     WHERE job.id = candidate.id
+       ORDER BY priority DESC, created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1)
      RETURNING job.id::text, job.payload`,
     [queue, jobType, workerId],
   );
