@@ -44,7 +44,10 @@ describe.skipIf(!url)("Finance bank-transfer and PayPal launch readiness (VAY-21
         [propertyId, Buffer.alloc(40)],
       );
     const ready = () => reader.readyMethods({ propertyId });
-    return Object.assign(ready, { accepted: () => reader.acceptedMethods({ propertyId }) });
+    return Object.assign(ready, {
+      accepted: () => reader.acceptedMethods({ propertyId }),
+      propertyId,
+    });
   }
 
   it("counts bank transfer and PayPal only with their details, on a committed row", async () => {
@@ -63,6 +66,31 @@ describe.skipIf(!url)("Finance bank-transfer and PayPal launch readiness (VAY-21
     await expect((await hotel(["bank_transfer"], { bank: true, bound: false }))()).resolves.toEqual(
       [],
     );
+  });
+
+  it("offers only the manual methods the booking page takes: bank transfer while PayPal is off", async () => {
+    const bankOnly = createFinanceManualPaymentReadinessReader({
+      pool,
+      methods: ["bank_transfer"],
+    });
+    const both = await hotel(["bank_transfer", "paypal"], {
+      bank: true,
+      email: "pay@hotel.example",
+    });
+    const paypal = await hotel(["paypal"], { email: "pay@hotel.example" });
+    await expect(bankOnly.readyMethods({ propertyId: both.propertyId })).resolves.toEqual([
+      "bank_transfer",
+    ]);
+    await expect(bankOnly.acceptedMethods({ propertyId: both.propertyId })).resolves.toEqual([
+      "bank_transfer",
+    ]);
+    // A PayPal-only hotel can't go live, and its rate screens don't offer PayPal.
+    await expect(bankOnly.readyMethods({ propertyId: paypal.propertyId })).resolves.toEqual([]);
+    await expect(bankOnly.acceptedMethods({ propertyId: paypal.propertyId })).resolves.toEqual([]);
+    const cardAndPaypal = await hotel(["card", "paypal"], { email: "pay@hotel.example" });
+    await expect(
+      bankOnly.acceptedMethods({ propertyId: cardAndPaypal.propertyId }),
+    ).resolves.toEqual([]);
   });
 
   it("leaves hotels with card or pay at property to the usual Finance readiness", async () => {

@@ -24,8 +24,9 @@ export function requirePublicQuoteKey(request: FastifyRequest): string {
 export function createReplacementBookingQuoteIssuer(
   store: Pick<ReturnType<typeof createCurrentPricingQuoteStore>, "issue">,
   /** The bank-transfer and PayPal methods acceptance can take: none while
-   * REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED is off, and bank transfer only with the
-   * bank-details binding. */
+   * REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED is off, PayPal only with
+   * REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED, and bank transfer only with the bank-details
+   * binding. */
   manualMethods: readonly string[] = [],
   /** The hotel's Feature Hub Add-ons and Promos switches (VAY-2200). */
   guestModules?: (slug: string) => Promise<GuestModuleSwitches>,

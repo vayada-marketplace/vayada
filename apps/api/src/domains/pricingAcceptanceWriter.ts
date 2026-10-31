@@ -70,8 +70,12 @@ export async function writePricingAcceptance(
   /** Request-mode pay-at-property quotes (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED). */
   requests = false,
   /** Bank-transfer and PayPal quotes (REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED). Bank
-   * transfer also needs the bank-details binding, which exists only with the KMS settings. */
-  manualPayments?: { bankTransfers?: Pick<BankTransferBookingOperations, "bind"> },
+   * transfer also needs the bank-details binding, which exists only with the KMS settings; PayPal
+   * needs `paypal` (REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED). */
+  manualPayments?: {
+    bankTransfers?: Pick<BankTransferBookingOperations, "bind">;
+    paypal?: boolean;
+  },
 ) {
   let client: pg.PoolClient | undefined;
   try {
@@ -113,7 +117,10 @@ export async function writePricingAcceptance(
     const quote = prepared.current.quote;
     let manualTerms: PricingManualPaymentTerms | undefined;
     if (manualPayments && pricingManualQuoteSupported(quote)) {
-      if (quote.paymentMethod === "bank_transfer" && !manualPayments.bankTransfers)
+      if (
+        (quote.paymentMethod === "bank_transfer" && !manualPayments.bankTransfers) ||
+        (quote.paymentMethod === "paypal" && manualPayments.paypal !== true)
+      )
         throw new Error("Manual payment acceptance unavailable");
       // The hotel removed its bank details or PayPal email since the quote: offer a new quote.
       manualTerms =

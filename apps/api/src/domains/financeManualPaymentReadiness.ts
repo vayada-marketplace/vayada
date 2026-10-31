@@ -1,5 +1,8 @@
 import type pg from "pg";
-import type { ManualPricingPaymentMethod } from "@vayada/domain-booking";
+import {
+  MANUAL_PRICING_PAYMENT_METHODS,
+  type ManualPricingPaymentMethod,
+} from "@vayada/domain-booking";
 
 /** Bank transfer and PayPal for booking launch (VAY-2139), read only while their acceptance is on.
  * Ready on a committed Finance row (payment methods saved through either writer) that takes them,
@@ -19,10 +22,15 @@ export type FinanceManualPaymentMethodsReadPort = {
 
 type QueryPool = { query(text: string, values?: unknown[]): Promise<{ rows: any[] }> };
 
+/** `methods` limits the result to the manual methods the booking page takes (REPLACEMENT_PRICING_*):
+ * the server passes only bank transfer while PayPal is off. Defaults to both. */
 export function createFinanceManualPaymentReadinessReader(config: {
   pool: Pick<pg.Pool, "query"> | QueryPool;
+  methods?: readonly ManualPricingPaymentMethod[];
 }): FinanceManualPaymentReadinessReadPort & FinanceManualPaymentMethodsReadPort {
   const { pool } = config;
+  const offered: readonly ManualPricingPaymentMethod[] =
+    config.methods ?? MANUAL_PRICING_PAYMENT_METHODS;
   const read = async (propertyId: string) => {
     const row = (
       await pool.query(
@@ -37,10 +45,18 @@ export function createFinanceManualPaymentReadinessReader(config: {
     ).rows[0];
     const accepted: unknown[] = Array.isArray(row?.accepted_methods) ? row.accepted_methods : [];
     const methods: ManualPricingPaymentMethod[] = [];
-    if (accepted.includes("bank_transfer") && row.bank_destination === true)
+    if (
+      offered.includes("bank_transfer") &&
+      accepted.includes("bank_transfer") &&
+      row.bank_destination === true
+    )
       methods.push("bank_transfer");
     const email = typeof row?.paypal_email === "string" ? row.paypal_email.trim() : "";
-    if (accepted.includes("paypal") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    if (
+      offered.includes("paypal") &&
+      accepted.includes("paypal") &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    )
       methods.push("paypal");
     return {
       methods,

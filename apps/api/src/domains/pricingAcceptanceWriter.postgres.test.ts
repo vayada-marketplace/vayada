@@ -2894,7 +2894,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       );
       await finance(fixture, "paypal", { paypalEmail: "not an email" });
       const accept = () =>
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {});
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, { paypal: true });
       // The hotel's PayPal email went bad after the quote: a conflict, nothing written.
       await expect(accept()).rejects.toMatchObject({ code: "conflict" });
       await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ bookings: 0 });
@@ -2903,6 +2903,13 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
           '{"paypalEmail":" pay@writer.example.test ","paypalPaymentWindowHours":6}' WHERE property_id=$1`,
         [fixture.propertyId],
       );
+      // VAY-2139: with PayPal's own switch off, a PayPal quote is unavailable and nothing is written.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+          bankTransfers: bankOperations(),
+        }),
+      ).rejects.toMatchObject({ code: "manual_unavailable" });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ bookings: 0 });
       const pending = await accept();
       if (pending.kind !== "payment_pending" || !("acceptedAt" in pending))
         throw new Error(`unexpected ${pending.kind}`);
@@ -2964,7 +2971,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         paypalFixture.input,
         undefined,
         false,
-        {},
+        { paypal: true },
       );
       expect(pending.kind).toBe("payment_pending");
     } finally {
@@ -3117,13 +3124,9 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         new Date().toISOString(),
       );
       await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
-      const pending = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        false,
-        {},
-      );
+      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+        paypal: true,
+      });
       const refused = { ok: false, code: "invalid_status_transition" };
       const reservations = createTargetPmsOperationsReadRepository({
         connectionString: url!,
@@ -3528,13 +3531,9 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         new Date().toISOString(),
       );
       await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
-      const pending = await writePricingAcceptance(
-        fixture.pool,
-        fixture.input,
-        undefined,
-        false,
-        {},
-      );
+      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+        paypal: true,
+      });
       await fixture.observer.query(
         "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
         [actorUserId, `${actorUserId}@example.test`],
@@ -3555,7 +3554,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
       // A retry of the guest's booking is now a conflict, not a confirmation.
       await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {}),
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, { paypal: true }),
       ).rejects.toMatchObject({ code: "conflict" });
     } finally {
       await actions.close();

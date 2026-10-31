@@ -1339,6 +1339,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingRequestAcceptanceEnabled?: boolean;
   /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
   replacementPricingManualPaymentAcceptanceEnabled?: boolean;
+  /** PayPal among those; without it manual payments are bank transfer only (VAY-2139). */
+  replacementPricingPaypalAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -1423,6 +1425,7 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
+  const manualMethods = bookingPageManualMethods(config);
   const pricingOffers = createPublicPricingOfferCatalog(pool, {
     mediaServing: config.mediaServing,
     // VAY-2304: only rates guests can pay with what this booking page accepts now.
@@ -1432,10 +1435,7 @@ export function createTargetBookingWebCheckoutAdapter(
         config.replacementPricingCardAcceptanceEnabled === true &&
         !!config.stripePaymentProvider,
       deposits: config.replacementPricingDepositAcceptanceEnabled === true,
-      manual:
-        config.replacementPricingManualPaymentAcceptanceEnabled === true
-          ? ["paypal", ...(config.bankTransfers ? (["bank_transfer"] as const) : [])]
-          : [],
+      manual: manualMethods,
     },
   });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
@@ -1452,9 +1452,7 @@ export function createTargetBookingWebCheckoutAdapter(
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
-    config.replacementPricingManualPaymentAcceptanceEnabled === true
-      ? ["paypal", ...(config.bankTransfers ? ["bank_transfer"] : [])]
-      : [],
+    manualMethods,
     async (slug) =>
       readGuestModuleSwitches(pool, (await resolveTargetCheckoutProperty(pool, slug)).propertyId),
     config.replacementPricingDepositAcceptanceEnabled === true,
@@ -1834,7 +1832,10 @@ export function createTargetBookingWebCheckoutAdapter(
           cardPayments,
           config.replacementPricingRequestAcceptanceEnabled === true,
           config.replacementPricingManualPaymentAcceptanceEnabled
-            ? { bankTransfers: config.bankTransfers }
+            ? {
+                bankTransfers: config.bankTransfers,
+                paypal: config.replacementPricingPaypalAcceptanceEnabled === true,
+              }
             : undefined,
         );
         if (result.kind !== "payment_pending") return result;
@@ -2915,6 +2916,7 @@ function bookingPagePaymentMethods(
     PgTargetBookingWebCheckoutAdapterConfig,
     | "replacementPricingAcceptanceEnabled"
     | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingPaypalAcceptanceEnabled"
     | "replacementPricingCardAcceptanceEnabled"
     | "stripePaymentProvider"
     | "bankTransfers"
@@ -2929,15 +2931,31 @@ function bookingPagePaymentMethods(
     config.replacementPricingAcceptanceEnabled === true &&
     config.replacementPricingCardAcceptanceEnabled === true &&
     !!config.stripePaymentProvider;
-  const manualAcceptance = config.replacementPricingManualPaymentAcceptanceEnabled === true;
-  // Bank transfer needs the bank-details binding (KMS settings) to be accepted.
+  const manual = bookingPageManualMethods(config);
   return ["card", "pay_at_property", "bank_transfer", "paypal"].filter(
     (method) =>
       ready.includes(method) &&
       (method !== "card" || cardAcceptance) &&
-      (!isManualPricingPaymentMethod(method) || manualAcceptance) &&
-      (method !== "bank_transfer" || !!config.bankTransfers),
+      (!isManualPricingPaymentMethod(method) || manual.includes(method)),
   );
+}
+
+/** The bank-transfer and PayPal methods this booking page takes (VAY-2139): none while manual
+ * payment acceptance is off, PayPal only with its own switch, and bank transfer only with the
+ * bank-details binding (KMS settings). The offer catalog, quotes and checkout use the same list. */
+function bookingPageManualMethods(
+  config: Pick<
+    PgTargetBookingWebCheckoutAdapterConfig,
+    | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingPaypalAcceptanceEnabled"
+    | "bankTransfers"
+  >,
+): ManualPricingPaymentMethod[] {
+  if (config.replacementPricingManualPaymentAcceptanceEnabled !== true) return [];
+  return [
+    ...(config.replacementPricingPaypalAcceptanceEnabled === true ? (["paypal"] as const) : []),
+    ...(config.bankTransfers ? (["bank_transfer"] as const) : []),
+  ];
 }
 
 /** VAY-2145: the first property-local arrival date each offered bank-transfer or PayPal method

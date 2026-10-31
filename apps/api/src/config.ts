@@ -212,6 +212,9 @@ export type ApiConfig = {
    * the hotel confirms receipt. Off until acceptance, payment confirmation, decline and expiry
    * handle these bookings (VAY-2139). */
   replacementPricingManualPaymentAcceptanceEnabled: boolean;
+  /** PayPal among those manual methods. Off by default, so turning manual payments on offers only
+   * bank transfer (Flamur, 2026-10-31). Needs manual payment acceptance too. */
+  replacementPricingPaypalAcceptanceEnabled: boolean;
   /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
   hotelFirstRunEnabled: boolean;
   bookingHostBase?: string;
@@ -1299,6 +1302,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     replacementPricingManualPaymentAcceptanceEnabled: readBooleanEnv(
       env,
       "REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED",
+    ),
+    replacementPricingPaypalAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED",
     ),
     hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),

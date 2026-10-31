@@ -530,6 +530,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   replacementPricingManualPaymentAcceptanceEnabled:
     config.replacementPricingManualPaymentAcceptanceEnabled,
+  replacementPricingPaypalAcceptanceEnabled: config.replacementPricingPaypalAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -1476,9 +1477,15 @@ const bookingGuestPolicyApplication = pmsRoomPublicationRuntime
       currentOwnerEvidence: bookingGuestPolicyCurrentOwnerEvidence,
     })
   : undefined;
-// Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139).
+// Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139),
+// PayPal only with its own switch too.
 const financeManualPaymentReadiness = config.replacementPricingManualPaymentAcceptanceEnabled
-  ? createFinanceManualPaymentReadinessReader({ pool: propertySetupOwnerPool })
+  ? createFinanceManualPaymentReadinessReader({
+      pool: propertySetupOwnerPool,
+      methods: config.replacementPricingPaypalAcceptanceEnabled
+        ? ["bank_transfer", "paypal"]
+        : ["bank_transfer"],
+    })
   : undefined;
 const bookingPublicationRuntime = (() => {
   const dependenciesMissing =

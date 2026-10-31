@@ -479,7 +479,7 @@ export function PricingStep({
           {onlyAtProperty && (
             <p className="mt-3 text-sm text-gray-600">
               Non-refundable stays are paid in advance, so they can&apos;t be paid at the property.
-              To offer them, make bank transfer or PayPal ready in Payments.
+              To offer them, make bank transfer ready in Payments.
             </p>
           )}
           {cancellation.kind === "free" && (

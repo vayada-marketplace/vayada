@@ -900,6 +900,18 @@ describe("api config", () => {
     ).toBe(true);
   });
 
+  it("keeps PayPal out of manual payment acceptance unless explicitly enabled (VAY-2139)", () => {
+    expect(loadConfig({}).replacementPricingPaypalAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingPaypalAcceptanceEnabled,
+    ).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingPaypalAcceptanceEnabled,
+    ).toBe(true);
+  });
+
   it("keeps the hotel first run (VAY-2247) unmounted unless explicitly enabled", () => {
     expect(loadConfig({}).hotelFirstRunEnabled).toBe(false);
     expect(loadConfig({ HOTEL_FIRST_RUN_ENABLED: "true" }).hotelFirstRunEnabled).toBe(true);
