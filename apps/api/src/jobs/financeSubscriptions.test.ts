@@ -218,7 +218,7 @@ describe("Finance subscription webhook lifecycle", () => {
       },
     });
 
-    expect(query.mock.calls[0]?.[1]?.[5]).toBe(
+    expect(query.mock.calls[0]?.[1]?.[4]).toBe(
       `sha256:${createHash("sha256").update(event.rawEventId).digest("hex")}`,
     );
   });

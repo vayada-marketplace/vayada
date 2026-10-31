@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-import type { StripeSubscriptionSnapshot } from "@vayada/domain-finance";
+import type {
+  StripeFinanceSubscriptionProvider,
+  StripeSubscriptionSnapshot,
+} from "@vayada/domain-finance";
+import type { RoomInventoryReadPort } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createPgFinanceSubscriptionWebhookStore,
+  processFinanceSubscriptionWebhook,
   runFinanceSubscriptionNotificationJobs,
   type FinanceSubscriptionWebhookPayload,
 } from "./financeSubscriptions.js";
@@ -330,8 +335,125 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL sco
     });
   });
 
+  it("queues one property-scoped alert for a Fixed Fee payment failure; a retry changes nothing", async () => {
+    const checkout = checkoutPayload();
+    await store.recordCheckoutCompleted({
+      payload: checkout,
+      snapshot: subscriptionSnapshot(),
+      activeRoomCount: 3,
+    });
+    await store.applySubscriptionSnapshot({
+      payload: {
+        ...checkout,
+        eventType: "invoice.paid",
+        rawEventId: "evt_vay2431_paid",
+        eventCreated: checkout.eventCreated + 1,
+        objectId: "in_vay2431_paid",
+        checkoutSessionId: null,
+      },
+      snapshot: subscriptionSnapshot(),
+      transition: "paid",
+      activeRoomCount: 3,
+    });
+    const failed: FinanceSubscriptionWebhookPayload = {
+      ...checkout,
+      eventType: "invoice.payment_failed",
+      rawEventId: "evt_vay2431_failed",
+      eventCreated: checkout.eventCreated + 2,
+      objectId: "in_vay2431_failed",
+      checkoutSessionId: null,
+    };
+    const dependencies = {
+      store,
+      stripe: {
+        retrieveSubscription: async () => ({ ...subscriptionSnapshot(), status: "past_due" }),
+      } as unknown as StripeFinanceSubscriptionProvider,
+      roomInventory: {} as RoomInventoryReadPort,
+    };
+
+    // The snapshot is saved before the alert; a failure in between retries the whole event.
+    const losesAlert = {
+      ...store,
+      enqueuePaymentFailureNotification: async () => {
+        throw new Error("connection lost");
+      },
+    };
+    await expect(
+      processFinanceSubscriptionWebhook(failed, { ...dependencies, store: losesAlert }),
+    ).rejects.toThrow("connection lost");
+    const billing = await readFixedBilling();
+    // Before VAY-2431 this insert failed chk_platform_jobs_scope on every attempt.
+    await expect(processFinanceSubscriptionWebhook(failed, dependencies)).resolves.toBe("applied");
+    await expect(readFixedBilling()).resolves.toEqual(billing);
+    expect(billing).toMatchObject({
+      planKey: "fixed",
+      billingStatus: "past_due",
+      providerStatus: "past_due",
+      lastProviderEventId: "evt_vay2431_failed",
+      identity: { status: "suspended" },
+    });
+
+    await expect(processFinanceSubscriptionWebhook(failed, dependencies)).resolves.toBe("applied");
+    await expect(readFixedBilling()).resolves.toEqual(billing);
+
+    const alert = {
+      eventId: "evt_vay2431_failed",
+      propertyId,
+      organizationId: organizationA,
+      subscriptionId: "sub_vay1120_a",
+    };
+    const jobs = await pool.query(
+      `SELECT tenant_scope AS "tenantScope", organization_id::text AS "organizationId",
+         property_id::text AS "propertyId", status, payload
+       FROM platform.jobs
+       WHERE queue_name = 'finance.notifications' AND property_id = $1::uuid`,
+      [propertyId],
+    );
+    expect(jobs.rows).toEqual([
+      {
+        tenantScope: "property",
+        organizationId: null,
+        propertyId,
+        status: "pending",
+        payload: { ...alert, providerStatus: "past_due" },
+      },
+    ]);
+
+    const notified: unknown[] = [];
+    await expect(
+      runFinanceSubscriptionNotificationJobs(
+        TEST_DATABASE_URL!,
+        (notification) => void notified.push(notification),
+        { pool },
+      ),
+    ).resolves.toEqual({ processed: 1, failed: 0 });
+    expect(notified).toEqual([alert]);
+  });
+
+  async function readFixedBilling() {
+    const result = await pool.query(
+      `SELECT plan_key AS "planKey", billing_status AS "billingStatus",
+         provider_subscription_status AS "providerStatus",
+         billing_subscription_ref AS "subscriptionRef", billing_customer_ref AS "customerRef",
+         billing_period_start_at::text AS "periodStart", billing_period_end_at::text AS "periodEnd",
+         billing_amount_minor AS "amountMinor", billing_currency AS currency,
+         active_room_count AS "activeRoomCount", entitlement_metadata AS metadata,
+         starts_at::text AS "startsAt",
+         last_provider_event_created_at::text AS "lastProviderEventCreatedAt",
+         last_provider_event_id AS "lastProviderEventId"
+       FROM finance.billing_entitlements
+       WHERE organization_id = $1::uuid AND property_id = $2::uuid
+         AND product = 'booking' AND entitlement_key = 'direct-booking-finance'`,
+      [organizationA, propertyId],
+    );
+    return { ...result.rows[0], identity: await readIdentityEntitlement(organizationA) };
+  }
+
   async function cleanup() {
     await pool.query("DELETE FROM platform.jobs WHERE job_key LIKE 'vay2426:%'");
+    await pool.query(`DELETE FROM platform.jobs WHERE property_id = ANY($1::uuid[])`, [
+      [propertyId, propertyB],
+    ]);
     await pool.query(
       `DELETE FROM finance.billing_entitlements
        WHERE property_id = $1::uuid OR organization_id = ANY($2::uuid[])`,
