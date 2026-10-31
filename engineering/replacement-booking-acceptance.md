@@ -196,6 +196,7 @@ with success status200. No receipt means only “no recorded command”; the fut
 writer must reserve the command/quote keys and repeat the read after any wait.
 These readers neither reserve inventory nor create a booking or validate current
 PMS occupancy. The immutable bundle retains opaque PMS receipt IDs for its owner.
+
 ## Finance capture prerequisite
 
 `lockFinancePricingAcceptanceTerms(client, slug)` resolves public scope itself,
