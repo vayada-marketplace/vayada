@@ -363,8 +363,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     setCurrent(relabeled.snapshot);
     // Typed amounts are kept by room position and in the old units: rooms left out or rounded would misplace them.
     if (!relabeled.every) setInputs({});
-    // Unsaved only when there are prices to publish: a room without any (or the New room page) starts as before.
-    if (relabeled.snapshot.rooms.length) setDirty(true);
+    // Unsaved only when there are prices to publish: a room without any starts as before. The New room page never is:
+    // its save carries the other rooms itself (`publishNewRoomPrices`), and nothing typed means no prices.
+    if (relabeled.snapshot.rooms.length && !newRoom) setDirty(true);
   }, [relabeled]);
   // A first price is in the pricing currency Payment settings give (VAY-2390): never typed, so it can't drift from what
   // the hotel is paid in. With published prices it is theirs, shown in the pricing currency (above); until Payment

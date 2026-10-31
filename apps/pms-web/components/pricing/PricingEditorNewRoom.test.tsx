@@ -172,6 +172,22 @@ it("after an Owner's currency change prices the new room in the new currency, st
   // Nothing typed yet: Create Room Type still creates the room without prices.
   expect(take.current!()).toBeNull();
   expect(onPrices).toHaveBeenLastCalledWith(false);
+  act(() => view.unmount());
+  // Also between currencies of one price step, where the other rooms are carried with their numbers.
+  vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({
+    paymentSettings: {
+      payAtPropertyEnabled: true,
+      onlineCardPayment: false,
+      defaultCurrency: "CHF",
+    },
+  } as never);
+  client.read.mockResolvedValue(published);
+  onPrices.mockClear();
+  await mount();
+  await act(async () => {});
+  expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBe("CHF");
+  expect(take.current!()).toBeNull();
+  expect(onPrices).not.toHaveBeenCalledWith(true);
 });
 
 it("lets go of the page's handle when the tab goes away", async () => {
