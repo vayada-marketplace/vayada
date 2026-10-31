@@ -13,8 +13,14 @@ export type PmsNavigationModuleId = (typeof PMS_NAVIGATION_MODULE_IDS)[number];
 // A property without a row has these on; the others are off until switched on (VAY-2423).
 const ON_BY_DEFAULT: readonly PmsNavigationModuleId[] = ["guests"];
 
-// Anyone who sees a PMS sidebar item reads the switches; front desk staff hold only these.
-const READ_PERMISSIONS = ["pms.operations.read", "pms.inbox.read", "pms.dashboard.read"] as const;
+// Anyone who sees a switched PMS sidebar item reads the switches; Guests needs
+// pms.reservation.read (VAY-2423).
+const READ_PERMISSIONS = [
+  "pms.operations.read",
+  "pms.inbox.read",
+  "pms.dashboard.read",
+  "pms.reservation.read",
+] as const;
 const MANAGE_RELATIONSHIPS = ["owner", "operator"] as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

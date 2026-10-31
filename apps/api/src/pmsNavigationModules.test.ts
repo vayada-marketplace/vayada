@@ -203,6 +203,20 @@ describe("PMS navigation module routes", () => {
     expect(repository.updates).toEqual([]);
   });
 
+  it("lets staff who only see Reservations and Guests read the switches (VAY-2423)", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.reservation.read"],
+      relationship: "front_desk",
+    });
+    const read = await injectJson<PmsNavigationModulesResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.body).toMatchObject({ canManage: false, activeModules: ["guests"] });
+  });
+
   it("refuses readers without a PMS sidebar permission and unauthenticated requests", async () => {
     app = buildAuthenticatedApp({ permissions: ["pms.finance.read"] });
     expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
