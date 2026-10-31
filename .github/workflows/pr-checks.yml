@@ -1623,6 +1623,7 @@ jobs:
             src/domains/financeDashboardFacts.integration.test.ts \
             src/domains/financeManualBookingSettlement.integration.test.ts \
             src/domains/financePaymentReadinessCommandRepository.integration.test.ts \
+            src/domains/financePayoutDestinationRepository.integration.test.ts \
             src/domains/financeProfitLossFacts.integration.test.ts \
             src/domains/financeReplacementPricingReadiness.integration.test.ts \
             src/domains/financeRevenueAddonFacts.integration.test.ts \

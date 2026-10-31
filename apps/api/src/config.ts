@@ -189,6 +189,9 @@ export type ApiConfig = {
   };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
+  /** VAY-2442: vayada Payment (guest card payments on Vayada's own Stripe account, paid out to
+   * the hotel's bank). Off by default; no real money until Flamur switches it on. */
+  vayadaPaymentEnabled: boolean;
   /** Browser origins allowed on the identity privacy routes. */
   identityPrivacyAllowedOrigins: string[];
   /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
@@ -1264,6 +1267,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         : readPropertyIdAllowlistEnv(env, "PMS_ROOM_TYPE_DELETE_CLEANUP_PROPERTY_IDS"),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
+    vayadaPaymentEnabled: readBooleanEnv(env, "VAYADA_PAYMENT_ENABLED"),
     identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),
     // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
     contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [

@@ -1360,6 +1360,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "payment_provider_accounts",
         "payment_settings",
         "payments",
+        "payout_destinations",
         "payout_settings",
         "payouts",
         "pricing_v2_fx_observations",

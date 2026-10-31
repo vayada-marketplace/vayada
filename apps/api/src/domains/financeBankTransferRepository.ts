@@ -184,24 +184,28 @@ export async function recordBankTransferAudit(
     actorId?: string;
     auditKey: string;
     bookingId?: string;
+    /** A hotel's payout account (VAY-2442) audits the same way, under its own names. */
+    kind?: "bank_transfer_destination" | "payout_destination";
   },
 ) {
+  const kind = input.kind ?? "bank_transfer_destination";
   await queryable.query(
     `INSERT INTO platform.product_audit_events
     (audit_key, product, action, action_version, occurred_at, tenant_scope, property_id,
      actor_type, actor_user_id, target_resource_product, target_resource_type, target_resource_id,
      redacted_payload, private_payload, audit_metadata, retention_class, privacy_scope)
     VALUES ($1,'finance',$2,1,now(),'property',$3::uuid,$4,$5::uuid,'finance',
-      'bank_transfer_destination',$6,$7::jsonb,'{}'::jsonb,'{}'::jsonb,'financial','confidential')
+      $8,$6,$7::jsonb,'{}'::jsonb,'{}'::jsonb,'financial','confidential')
     ON CONFLICT (product,audit_key) DO NOTHING`,
     [
-      `bank-transfer:${input.auditKey}`,
-      `finance.bank_transfer_destination.${input.action}`,
+      `${kind === "payout_destination" ? "payout-destination" : "bank-transfer"}:${input.auditKey}`,
+      `finance.${kind}.${input.action}`,
       input.propertyId,
       input.actorId ? "user" : "system",
       input.actorId ?? null,
       input.id,
       JSON.stringify({ destinationId: input.id, bookingId: input.bookingId ?? null }),
+      kind,
     ],
   );
 }
