@@ -172,7 +172,6 @@ describe("booking lifecycle email jobs", () => {
       "booking_rejected",
       "booking_canceled",
       "host_new_booking",
-      "host_request_updated",
     ] as const)
       expect(await text(kind)).not.toContain("Where you'll stay");
 
@@ -904,7 +903,7 @@ describe("booking lifecycle email jobs", () => {
     "rejects a directly supplied invalid host recipient: %s",
     async (email) => {
       const target = createTargetEmailStore();
-      const input = bookingEmailInput({ kind: "host_request_updated" });
+      const input = bookingEmailInput({ kind: "host_new_booking" });
       input.recipient = { role: "host", email };
       await expect(enqueueBookingLifecycleEmailJob(target, input)).rejects.toThrow(
         "A valid host notification recipient is required.",

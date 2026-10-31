@@ -14,7 +14,6 @@ import {
 import {
   createTargetBookingWebCheckoutAdapter,
   recordTargetCheckoutCommand,
-  resolveTargetCheckoutAmountSnapshot,
   targetCardPaymentIdempotencyKey,
   type BookingWebCheckoutAdapter,
   type BookingWebQueryExecutor,
@@ -1825,61 +1824,6 @@ describe("Booking Web public bootstrap parity", () => {
     expect(calls.some((text) => text.includes("UPDATE pms.inventory_days"))).toBe(false);
     expect(calls.some((text) => text.includes("WITH updated AS"))).toBe(false);
     expect(calls.filter((text) => text === "ROLLBACK")).toHaveLength(1);
-  });
-
-  it("requires target checkout creates to snapshot the expected quote total", () => {
-    const quote = {
-      totalAmount: "561600.00",
-      balanceAmount: "280800.00",
-    };
-
-    expect(
-      resolveTargetCheckoutAmountSnapshot(
-        {
-          expectedTotalAmount: 561600,
-          totalAmount: 561600,
-          balanceAmount: 561600,
-        },
-        quote,
-      ),
-    ).toEqual({
-      totalAmount: "561600.00",
-      balanceAmount: "561600.00",
-    });
-
-    expect(() =>
-      resolveTargetCheckoutAmountSnapshot(
-        {
-          expectedTotalAmount: 561600,
-          balanceAmount: 280800,
-        },
-        quote,
-      ),
-    ).toThrow("Booking balance changed");
-
-    expect(() =>
-      resolveTargetCheckoutAmountSnapshot(
-        {
-          expectedTotalAmount: 497250,
-          totalAmount: 497250,
-        },
-        quote,
-      ),
-    ).toThrow("Booking total changed");
-
-    expect(() =>
-      resolveTargetCheckoutAmountSnapshot(
-        {
-          expectedTotalAmount: 561600,
-          balanceAmount: 700000,
-        },
-        quote,
-      ),
-    ).toThrow("Booking balance changed");
-
-    expect(() => resolveTargetCheckoutAmountSnapshot({ totalAmount: 561600 })).toThrow(
-      "expectedTotalAmount is required",
-    );
   });
 
   afterEach(() => vi.useRealTimers());

@@ -52,7 +52,7 @@ export type HostNotificationBooking = {
   cancelledBy: "guest" | "hotel" | "system" | null;
   cancelReason: "request_expired" | "payment_not_completed" | null;
   change: {
-    kind: "dates" | "request";
+    kind: "dates";
     previousTotal: string | null;
     newTotal: string | null;
   } | null;
@@ -243,14 +243,13 @@ function classifyBookingEvent(row: BookingEventRow): Classified | null {
         ? { kind: "booking_new", category: "bookings" }
         : null;
     case "guest_booking.host_dates_updated":
-    case "guest_booking.change_accepted":
-    case "guest_booking.request_updated": {
+    case "guest_booking.change_accepted": {
       const payload = (row.payload ?? {}) as Record<string, unknown>;
       return {
         kind: "booking_modified",
         category: "bookings",
         change: {
-          kind: row.eventType === "guest_booking.request_updated" ? "request" : "dates",
+          kind: "dates",
           previousTotal: amountText(payload["oldTotal"]),
           newTotal: amountText(payload["newTotal"]),
         },
@@ -291,7 +290,6 @@ export const HOST_NOTIFICATION_BOOKING_EVENTS = [
   "guest_booking.payment_received",
   "guest_booking.host_dates_updated",
   "guest_booking.change_accepted",
-  "guest_booking.request_updated",
   "guest_booking.canceled",
   "guest_booking.expired",
   "guest_booking.withdrawn",

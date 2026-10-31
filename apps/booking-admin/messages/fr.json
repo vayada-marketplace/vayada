@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "en attente de paiement",
   "notifications.awaitingAnswer": "en attente de votre réponse",
   "notifications.datesChanged": "dates modifiées : {dates}",
-  "notifications.requestUpdated": "demande modifiée par le client",
   "notifications.nowTotal": "désormais {amount}",
   "notifications.cancelledByGuest": "annulée par le client",
   "notifications.cancelledByHotel": "annulée par votre équipe",

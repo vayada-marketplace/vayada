@@ -33,7 +33,6 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   booking_updated: "email.booking-updated",
   booking_expired: "email.booking-expired",
   host_new_booking: "email.booking-host-new-booking",
-  host_request_updated: "email.booking-host-request-updated",
   host_review_required: "email.booking-host-review-required",
   host_request_expired: "email.booking-host-request-expired",
   host_payment_pending: "email.booking-host-payment-pending",
@@ -819,18 +818,6 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       ].join("\n\n"),
     };
   }
-  if (input.kind === "host_request_updated") {
-    return {
-      template: "booking_host_request_updated",
-      subject: `Booking request updated - ${booking.bookingReference}`,
-      text: [
-        `${name} updated their pending booking request.`,
-        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
-        ...confirmationDetails(booking),
-        `Booking reference: ${booking.bookingReference}`,
-      ].join("\n\n"),
-    };
-  }
   if (input.kind === "host_payment_pending") {
     return {
       template: "booking_host_payment_pending",
@@ -1053,8 +1040,6 @@ function notificationsForTransition(
   transition: BookingLifecycleTransition,
   booking: BookingNotificationSnapshot,
 ): Array<{ kind: BookingLifecycleEmailKind; role: BookingNotificationRecipientRole }> {
-  if (transition.eventType === "guest_booking.request_updated")
-    return [{ kind: "host_request_updated", role: "host" }];
   // VAY-2348: the reminder a day before a booking-page bank transfer's deadline.
   if (transition.eventType === "guest_booking.payment_reminder")
     return manualPricingPayment(booking) && booking.paymentMethod === "bank_transfer"

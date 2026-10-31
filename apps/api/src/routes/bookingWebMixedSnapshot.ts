@@ -1,66 +1,11 @@
 import { quoteTargetRoomSelection, type TargetQuotedRoomLine } from "./bookingWebMixedQuote.js";
 import {
   createHttpError,
-  createTargetCheckoutQuote,
-  loadTargetCheckoutConfig,
   objectValue,
   moneyToCents,
   moneyFromCents,
-  type BookingWebCheckoutRequest,
-  type BookingWebQueryExecutor,
-  type TargetCheckoutPropertyRow,
   type TargetCheckoutQuoteOfferRow,
 } from "./bookingWebPublic.js";
-
-/** Internal preparation; public mixed checkout is enabled only with lifecycle support. */
-export async function createTargetMixedCheckoutQuote(
-  pool: BookingWebQueryExecutor,
-  property: TargetCheckoutPropertyRow,
-  request: BookingWebCheckoutRequest,
-  now: Date,
-  edit?: Parameters<typeof createTargetCheckoutQuote>[4],
-  credits?: ReadonlyMap<string, { checkIn: string; checkOut: string; roomCount: number }>,
-) {
-  const config = await loadTargetCheckoutConfig(pool, property.propertyId);
-  const currency = config?.defaultCurrency ?? "EUR";
-  if (
-    request["currency"] !== undefined &&
-    (typeof request["currency"] !== "string" ||
-      request["currency"].trim().toUpperCase() !== currency)
-  )
-    throw createHttpError(409, "Property currency changed. Please refresh the checkout quote.");
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: property.timezone ?? "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-  const mixed = await quoteTargetRoomSelection(pool, {
-    propertyId: property.propertyId,
-    selection: request["roomSelection"],
-    checkIn: String(request["checkIn"] ?? ""),
-    checkOut: String(request["checkOut"] ?? ""),
-    currency,
-    today,
-    requestedAt: now,
-    promotionSettings: config?.promotionSettings,
-    credits,
-  });
-  if (
-    mixed.party.adults !== request["adults"] ||
-    mixed.party.children !== request["children"] ||
-    mixed.party.rooms !== request["numberOfRooms"]
-  )
-    throw createHttpError(400, "Room allocations must match the requested guests and room count.");
-  return createTargetCheckoutQuote(
-    pool,
-    property,
-    { ...request, currency, roomTypeId: mixed.selection.lines[0]!.roomTypeId },
-    now,
-    edit,
-    mixed,
-  );
-}
 
 type MixedQuote = Awaited<ReturnType<typeof quoteTargetRoomSelection>>;
 export function mixedSelectionOffer(mixed: MixedQuote): TargetCheckoutQuoteOfferRow {

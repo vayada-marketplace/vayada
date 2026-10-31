@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "等待付款",
   "notifications.awaitingAnswer": "等待您的答复",
   "notifications.datesChanged": "日期改为 {dates}",
-  "notifications.requestUpdated": "客人更新了预订请求",
   "notifications.nowTotal": "现为 {amount}",
   "notifications.cancelledByGuest": "客人取消",
   "notifications.cancelledByHotel": "您的团队取消",

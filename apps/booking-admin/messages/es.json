@@ -187,7 +187,6 @@
   "notifications.awaitingPayment": "pendiente de pago",
   "notifications.awaitingAnswer": "pendiente de su respuesta",
   "notifications.datesChanged": "fechas cambiadas a {dates}",
-  "notifications.requestUpdated": "solicitud modificada por el huésped",
   "notifications.nowTotal": "ahora {amount}",
   "notifications.cancelledByGuest": "cancelada por el huésped",
   "notifications.cancelledByHotel": "cancelada por su equipo",

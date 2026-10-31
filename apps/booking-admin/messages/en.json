@@ -185,7 +185,6 @@
   "notifications.awaitingPayment": "waiting for payment",
   "notifications.awaitingAnswer": "waiting for your answer",
   "notifications.datesChanged": "dates changed to {dates}",
-  "notifications.requestUpdated": "request updated by the guest",
   "notifications.nowTotal": "now {amount}",
   "notifications.cancelledByGuest": "cancelled by the guest",
   "notifications.cancelledByHotel": "cancelled by your team",

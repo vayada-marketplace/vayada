@@ -125,10 +125,10 @@ gate again afterward. A rejected gate requires full transaction rollback.
 
 ## Remaining blockers and validation
 
-The legacy `createTargetGuestBooking` converts `quote_sessions`, constructs legacy
-selected-offer/policy snapshots and numeric amount projections, and performs
-lifecycle/read-model work. It is not a replacement writer and cannot safely be
-called with a fabricated old quote. The retained-owner reservation/promo helpers and draft booking/add-on staging now exist.
+The legacy `createTargetGuestBooking` (removed in VAY-2429) converted `quote_sessions`,
+constructed legacy selected-offer/policy snapshots and numeric amount projections, and
+performed lifecycle/read-model work. It was not a replacement writer and could not safely
+be called with a fabricated old quote. The retained-owner reservation/promo helpers and draft booking/add-on staging now exist.
 Required next slices are replacement lifecycle/revenue projections, receipt and
 acceptance persistence, and the complete orchestrator. Finance capture and historical replay
 readers below remain internal prerequisites until that composition is verified.
@@ -196,6 +196,7 @@ with success status200. No receipt means only “no recorded command”; the fut
 writer must reserve the command/quote keys and repeat the read after any wait.
 These readers neither reserve inventory nor create a booking or validate current
 PMS occupancy. The immutable bundle retains opaque PMS receipt IDs for its owner.
+
 ## Finance capture prerequisite
 
 `lockFinancePricingAcceptanceTerms(client, slug)` resolves public scope itself,

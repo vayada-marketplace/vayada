@@ -31,7 +31,7 @@ export type HostNotificationBooking = {
   cancelledBy: "guest" | "hotel" | "system" | null;
   cancelReason: "request_expired" | "payment_not_completed" | null;
   change: {
-    kind: "dates" | "request";
+    kind: "dates";
     previousTotal: string | null;
     newTotal: string | null;
   } | null;
