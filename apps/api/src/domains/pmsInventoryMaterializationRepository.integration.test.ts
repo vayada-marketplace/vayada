@@ -1958,6 +1958,86 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       }
     },
   );
+  it.each(["ambiguous", "changed"] as const)(
+    "supersedes a stuck %s availability send on the restricted Channex login (VAY-2352)",
+    async (mode) => {
+      const f = await availabilityReconciliationFixture(true);
+      let get = vi.fn(async (_path: string) => structuredClone(f.task) as unknown);
+      if (mode === "ambiguous") {
+        // Make it a send whose response never arrived, past its settle window.
+        await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+        await admin.query(
+          `UPDATE pms.channex_room_availability_receipts
+           SET outcome='transport_error',http_status=NULL,provider_request_id=NULL,task_ids='{}',
+             has_warnings=TRUE,warning_reason=NULL,captured_at=captured_at-interval '1 hour'
+           WHERE attempt_id=$1`,
+          [f.prepared.attemptId],
+        );
+        await admin.query("COMMIT");
+      } else {
+        // The night changed after the send, and Channex refused the task: it still ended.
+        await admin.query(
+          `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+             booking_source_revision=booking_source_revision+1,
+             inventory_revision=inventory_revision+1
+           WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3`,
+          [f.propertyId, f.roomTypeId, f.selection.date],
+        );
+        const refused = structuredClone(f.task);
+        refused.data.attributes.success = false;
+        refused.data.attributes.errors = [{ code: "validation_error" }] as never;
+        get = vi.fn(async (_path: string) => structuredClone(refused) as unknown);
+      }
+      const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
+      await admin.query(
+        `CREATE ROLE ${role} LOGIN PASSWORD 'fixture' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
+      );
+      const login = new URL(TEST_DATABASE_URL!);
+      login.username = role;
+      login.password = "fixture";
+      const worker = new pg.Pool({ connectionString: login.toString() });
+      const inventory = f.workerRepository(login.toString());
+      try {
+        await admin.query(
+          `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
+        );
+        for (const [table, grants] of Object.entries(channexManagementWorkerPrivileges))
+          for (const [kind, columns] of Object.entries(grants))
+            await admin.query(
+              `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
+            );
+        await admin.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [
+          f.propertyId,
+        ]);
+        await expect(
+          reconcilePendingChannexRoomAvailability(worker, inventory, f.lease, get),
+        ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 1 });
+        expect(get).toHaveBeenCalledTimes(mode === "changed" ? 1 : 0);
+        expect(
+          (
+            await admin.query(
+              `SELECT state,reconciliation_evidence->>'reason' AS reason,
+                 reconciliation_evidence->>'tasksSucceeded' AS "tasksSucceeded"
+               FROM pms.channex_room_availability_attempts WHERE id=$1`,
+              [f.prepared.attemptId],
+            )
+          ).rows[0],
+        ).toEqual(
+          mode === "changed"
+            ? { state: "reconciled", reason: "inventory_changed", tasksSucceeded: "false" }
+            : { state: "reconciled", reason: "receipt_ambiguous", tasksSucceeded: null },
+        );
+      } finally {
+        await inventory.close();
+        await worker.end();
+        await admin.query(
+          "DELETE FROM platform.channex_management_worker_properties WHERE property_id=$1",
+          [f.propertyId],
+        );
+        await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+      }
+    },
+  );
   it("keeps provision availability current when an unrelated room awaits materialization", async () => {
     const f = await channelInventoryFixture(1, true);
     const unrelatedRoomTypeId = randomUUID();
@@ -2613,7 +2693,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     expect(await f.state()).toEqual({ state: "unresolved", reconciliation_evidence: {} });
     expect(get).toHaveBeenCalledOnce();
   });
-  it("does no provider IO for a discovered non-clean availability receipt", async () => {
+  it("supersedes a discovered non-clean availability receipt once it settles, without provider IO", async () => {
     const f = await channelInventoryFixture(),
       claimed = await f.claim(),
       get = vi.fn();
@@ -2628,13 +2708,31 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         connectionId: f.connectionId,
       })
     )();
+    const state = async () =>
+      (
+        await admin.query(
+          `SELECT state,reconciliation_evidence->>'reason' AS reason
+           FROM pms.channex_room_availability_attempts WHERE id=$1`,
+          [claimed.attemptId],
+        )
+      ).rows[0];
+    // VAY-2352: a lost response first waits out its settle window, then stops blocking the room.
     await expect(
       reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, get),
-    ).resolves.toEqual({
-      kind: "unavailable",
-      reason: "availability_receipt_history_unavailable",
-    });
+    ).resolves.toEqual({ kind: "unavailable", reason: "availability_send_settling" });
+    expect(await state()).toEqual({ state: "unresolved", reason: null });
+    await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    await admin.query(
+      "UPDATE pms.channex_room_availability_receipts SET captured_at=captured_at-interval '1 hour' WHERE attempt_id=$1",
+      [claimed.attemptId],
+    );
+    await admin.query("COMMIT");
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, get),
+    ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 1 });
     expect(get).not.toHaveBeenCalled();
+    expect(await state()).toEqual({ state: "reconciled", reason: "receipt_ambiguous" });
+    expect(await f.claim()).toMatchObject({ kind: "availability_claimed" });
   });
   it("selects the earliest current covered day and creates only a fresh local claim", async () => {
     const f = await channelInventoryFixture(2, true);
@@ -4174,7 +4272,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       const nights = new Map<string, number>(),
         tasks = new Map<string, unknown>(),
         posts: { date: string; availability: number }[] = [],
+        readbacks: string[] = [],
+        taskReads: string[] = [],
         foreign: unknown[] = [];
+      // Channex applies the next POST but its response never arrives (timeout or dropped link).
+      let loseNextResponse = false;
+      // Channex has not run its queued tasks yet.
+      let tasksPending = false;
       const respond = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
       const send = vi.fn<typeof fetch>(async (input, init) => {
         const url = new URL(String(input));
@@ -4200,10 +4304,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           }
           const id = randomUUID();
           tasks.set(id, body);
+          if (loseNextResponse) {
+            loseNextResponse = false;
+            throw new Error("Channex response lost");
+          }
           return respond({ data: [{ type: "task", id }], meta: { message: "Success" } });
         }
         if (init?.method === "GET" && url.pathname.startsWith("/api/v1/tasks/")) {
           const id = url.pathname.slice("/api/v1/tasks/".length);
+          taskReads.push(id);
           return respond({
             data: {
               type: "task",
@@ -4215,14 +4324,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
                 success: true,
                 errors: [],
                 received_at: "2026-09-16T00:00:00.000001",
-                executed_at: "2026-09-16T00:00:00.000002",
-                finished_at: "2026-09-16T00:00:00.000003",
+                executed_at: tasksPending ? null : "2026-09-16T00:00:00.000002",
+                finished_at: tasksPending ? null : "2026-09-16T00:00:00.000003",
               },
             },
           });
         }
         if (init?.method === "GET" && url.pathname === "/api/v1/availability") {
           const date = url.searchParams.get("filter[date][gte]")!;
+          readbacks.push(date);
           return respond({
             data: { [f.externalRoomTypeId]: { [date]: nights.get(date) } },
             meta: { warnings: [] },
@@ -4233,8 +4343,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       return {
         send,
         foreign,
+        readbacks,
+        taskReads,
+        loseNextResponse: () => {
+          loseNextResponse = true;
+        },
+        setTasksPending: (pending: boolean) => {
+          tasksPending = pending;
+        },
         nights: () => Object.fromEntries([...nights].sort(([a], [b]) => a.localeCompare(b))),
-        /** POSTs since the last call, by night. */
+        /** POSTs since the last call, by night (in send order within a night). */
         sent: () => posts.splice(0).sort((a, b) => a.date.localeCompare(b.date)),
       };
     }
@@ -4302,6 +4420,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         return runPmsChannexManagementWorkerOnce({ store, provider, workerId: "vay-2352-worker" });
       };
       return {
+        store,
         step,
         /** Runs the hotel's queue until it is empty; returns each run's outcome. */
         async drain() {
@@ -4552,6 +4671,318 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [f.propertyId],
         );
         await schedule.close();
+      }
+    });
+
+    // A send that can never be checked against current inventory must not stall the room or the
+    // hotel: these used to dead-letter every later sync with "Saved Channex availability still
+    // requires reconciliation" and leave Channex selling the old count.
+    async function ownedHotel() {
+      const f = await heldHotelFixture();
+      const channex = fakeChannex(f);
+      const worker = managementWorker(f, channex, {
+        ariSyncMutating: true,
+        claimedOwnedPropertyIds: [f.propertyId],
+      });
+      const schedule = createPgChannexAriSchedule(TEST_DATABASE_URL!, {
+        propertyIds: [f.propertyId],
+      });
+      const close = async () => {
+        await admin.query(
+          `UPDATE platform.jobs SET status='canceled',finished_at=now()
+           WHERE property_id=$1 AND queue_name='pms.channex.management' AND status='pending'`,
+          [f.propertyId],
+        );
+        await schedule.close();
+      };
+      return { f, channex, worker, schedule, close };
+    }
+
+    async function switchOn(hotel: Awaited<ReturnType<typeof ownedHotel>>) {
+      expect(await hotel.schedule.enqueue()).toBe(1);
+      expect(await hotel.worker.drain()).toEqual([
+        "continued",
+        "continued",
+        "continued",
+        "continued",
+        "succeeded",
+      ]);
+      expect(hotel.channex.sent()).toHaveLength(4);
+    }
+
+    const supersededSends = async (propertyId: string) =>
+      (
+        await admin.query(
+          `SELECT service_date::text AS date,available_count AS "availableCount",
+             reconciliation_evidence->>'reason' AS reason,
+             reconciliation_evidence->>'receiptOutcome' AS "receiptOutcome"
+           FROM pms.channex_room_availability_attempts
+           WHERE property_id=$1 AND reconciliation_evidence->>'resolution'='superseded'
+           ORDER BY created_at,id`,
+          [propertyId],
+        )
+      ).rows;
+
+    const unresolvedSends = async (propertyId: string) =>
+      (
+        await admin.query(
+          `SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts
+           WHERE property_id=$1 AND state='unresolved'`,
+          [propertyId],
+        )
+      ).rows[0].count;
+
+    /** Moves a send's clock back, past its settle window; a test can't wait out a real one. */
+    async function ageUnresolvedSend(propertyId: string) {
+      await admin.query("BEGIN");
+      try {
+        await admin.query("SET LOCAL session_replication_role=replica");
+        await admin.query(
+          `UPDATE pms.channex_room_availability_attempts SET created_at=created_at-interval '1 hour'
+           WHERE property_id=$1 AND state='unresolved'`,
+          [propertyId],
+        );
+        await admin.query(
+          `UPDATE pms.channex_room_availability_receipts SET captured_at=captured_at-interval '1 hour'
+           WHERE attempt_id IN (SELECT id FROM pms.channex_room_availability_attempts
+             WHERE property_id=$1 AND state='unresolved')`,
+          [propertyId],
+        );
+        await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        throw error;
+      }
+    }
+
+    it("resends a night once when a hold lands between its send and its check", async () => {
+      const hotel = await ownedHotel();
+      const { f, channex, worker, schedule } = hotel;
+      const [d0, d1, d2, d3] = f.days;
+      try {
+        expect(await schedule.enqueue()).toBe(1);
+        // The first night is sent; before the next run checks it, a hold takes a room that night.
+        expect(await worker.step()).toMatchObject({ outcome: "continued" });
+        expect(channex.sent()).toEqual([{ date: d0, availability: 2 }]);
+        await hold(channelPool, f, d0, d1);
+        // While Channex has not run that send, the newer value must wait for it.
+        channex.setTasksPending(true);
+        expect(await worker.step()).toMatchObject({ outcome: "retry_scheduled" });
+        expect(channex.sent()).toEqual([]);
+        expect(await unresolvedSends(f.propertyId)).toBe(1);
+        channex.setTasksPending(false);
+        expect(await worker.drain()).toEqual([
+          "continued",
+          "continued",
+          "continued",
+          "continued",
+          "succeeded",
+          "succeeded",
+        ]);
+        expect(channex.sent()).toEqual([
+          { date: d0, availability: 1 },
+          { date: d1, availability: 2 },
+          { date: d2, availability: 2 },
+          { date: d3, availability: 2 },
+        ]);
+        expect(channex.nights()).toEqual({ [d0]: 1, [d1]: 2, [d2]: 2, [d3]: 2 });
+        expect(await supersededSends(f.propertyId)).toEqual([
+          {
+            date: d0,
+            availableCount: 2,
+            reason: "inventory_changed",
+            receiptOutcome: "complete_json",
+          },
+        ]);
+        expect(await unresolvedSends(f.propertyId)).toBe(0);
+        // Nothing is sent twice: the next scheduled sync finds every night current.
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.drain()).toEqual(["succeeded"]);
+        expect(channex.sent()).toEqual([]);
+      } finally {
+        await hotel.close();
+      }
+    });
+
+    it("resends a night once when Channex's response to its send is lost", async () => {
+      const hotel = await ownedHotel();
+      const { f, channex, worker, schedule } = hotel;
+      const [d0, d1, d2, d3] = f.days;
+      try {
+        await switchOn(hotel);
+        await hold(channelPool, f, d1, d3);
+        channex.loseNextResponse();
+        expect(await worker.step()).toMatchObject({ outcome: "continued" });
+        // Channex may still be taking the first request in: wait, without resending.
+        expect(await worker.step()).toMatchObject({ outcome: "retry_scheduled" });
+        expect(channex.sent()).toEqual([{ date: d1, availability: 1 }]);
+        expect(await unresolvedSends(f.propertyId)).toBe(1);
+        await ageUnresolvedSend(f.propertyId);
+        expect(await worker.drain()).toEqual(["continued", "continued", "succeeded"]);
+        expect(channex.sent()).toEqual([
+          { date: d1, availability: 1 },
+          { date: d2, availability: 1 },
+        ]);
+        expect(channex.nights()).toEqual({ [d0]: 2, [d1]: 1, [d2]: 1, [d3]: 2 });
+        expect(await supersededSends(f.propertyId)).toEqual([
+          {
+            date: d1,
+            availableCount: 1,
+            reason: "receipt_ambiguous",
+            receiptOutcome: "transport_error",
+          },
+        ]);
+        expect(await unresolvedSends(f.propertyId)).toBe(0);
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.drain()).toEqual(["succeeded"]);
+        expect(channex.sent()).toEqual([]);
+      } finally {
+        await hotel.close();
+      }
+    });
+
+    it.each([
+      ["died before saving it, and its job's lease ran out", "lease"],
+      ["failed to save it, and its job attempt ended", "failed"],
+    ] as const)(
+      "resends a night once when the worker sent it to Channex and %s",
+      async (_label, way) => {
+        const hotel = await ownedHotel();
+        const { f, channex, worker, schedule } = hotel;
+        const [d0, d1, d2, d3] = f.days;
+        try {
+          await switchOn(hotel);
+          await hold(channelPool, f, d1, d2);
+          // A worker takes the hold's job, records the night as being sent and reaches Channex,
+          // but no receipt of the answer is saved.
+          const job = await worker.store.claim({ workerId: "vay-2352-sender", now: new Date() });
+          if (!job) throw new Error("The hold's sync job was not claimed");
+          const lease = {
+            jobId: job.jobId,
+            workerId: "vay-2352-sender",
+            attemptNumber: job.attemptNumber,
+          };
+          const claimed = await claimChannexRoomAvailability(channelPool, f.repository, lease, {
+            roomTypeId: f.roomTypeId,
+            date: d1,
+          });
+          if (claimed.kind !== "availability_claimed") throw new Error("The night was not claimed");
+          await channex.send(new URL("/api/v1/availability", "https://staging.channex.io"), {
+            method: "POST",
+            body: JSON.stringify(claimed.request.body),
+          });
+          if (way === "lease") {
+            // The worker died: another takes the job over once its lease has run out.
+            await admin.query(
+              "UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1",
+              [job.jobId],
+            );
+            await ageUnresolvedSend(f.propertyId);
+          } else {
+            // The worker failed the job attempt a minute ago; the job retries.
+            await worker.store.fail(
+              job,
+              { ok: false, code: "provider_unavailable", message: "Receipt not saved" },
+              {
+                workerId: "vay-2352-sender",
+                now: new Date(),
+                retryable: true,
+                retryAt: new Date(),
+              },
+            );
+            await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+            await admin.query(
+              `UPDATE platform.job_attempts SET started_at=started_at-interval '1 minute',
+                 finished_at=finished_at-interval '1 minute'
+               WHERE job_id=$1 AND attempt_number=$2`,
+              [job.jobId, job.attemptNumber],
+            );
+            await admin.query("COMMIT");
+          }
+          expect(await worker.drain()).toEqual(["continued", "succeeded"]);
+          expect(channex.sent()).toEqual([
+            { date: d1, availability: 1 },
+            { date: d1, availability: 1 },
+          ]);
+          expect(channex.nights()).toEqual({ [d0]: 2, [d1]: 1, [d2]: 2, [d3]: 2 });
+          expect(await supersededSends(f.propertyId)).toEqual([
+            { date: d1, availableCount: 1, reason: "receipt_ambiguous", receiptOutcome: null },
+          ]);
+          expect(await unresolvedSends(f.propertyId)).toBe(0);
+          expect(await schedule.enqueue()).toBe(1);
+          expect(await worker.drain()).toEqual(["succeeded"]);
+          expect(channex.sent()).toEqual([]);
+        } finally {
+          await hotel.close();
+        }
+      },
+    );
+
+    it("settles a night sent before local midnight and checked after it", async () => {
+      const hotel = await ownedHotel();
+      const { f, channex, worker, schedule } = hotel;
+      const [d0, d1, d2, d3] = f.days;
+      try {
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.step()).toMatchObject({ outcome: "continued" });
+        // Midnight passes before the next run checks the send: its night is now yesterday.
+        const yesterday = (
+          await admin.query<{ day: string }>("SELECT ($1::date-1)::text AS day", [d0])
+        ).rows[0]!.day;
+        const sent = (
+          await admin.query<{ attemptId: string; request: { values: object[] }; taskId: string }>(
+            `SELECT a.id::text AS "attemptId",a.request_body AS request,r.task_ids[1]::text AS "taskId"
+             FROM pms.channex_room_availability_attempts a
+             JOIN pms.channex_room_availability_receipts r ON r.attempt_id=a.id
+             WHERE a.property_id=$1 AND a.state='unresolved'`,
+            [f.propertyId],
+          )
+        ).rows[0]!;
+        await admin.query("BEGIN");
+        try {
+          await admin.query("SET LOCAL session_replication_role=replica");
+          await admin.query(
+            `UPDATE pms.channex_room_availability_attempts
+             SET service_date=$2::date,request_body=$3::jsonb,
+               inventory_evidence=jsonb_set(inventory_evidence,'{day,stayDate}',to_jsonb($2::text))
+             WHERE id=$1`,
+            [
+              sent.attemptId,
+              yesterday,
+              JSON.stringify({
+                values: [{ ...sent.request.values[0], date_from: yesterday, date_to: yesterday }],
+              }),
+            ],
+          );
+          await admin.query("COMMIT");
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+        const readbacks = channex.readbacks.length;
+        expect(await worker.drain()).toEqual([
+          "continued",
+          "continued",
+          "continued",
+          "continued",
+          "succeeded",
+        ]);
+        // Nothing is sent for a passed night again, so it is settled without asking Channex.
+        expect(channex.taskReads).not.toContain(sent.taskId);
+        expect(channex.readbacks.slice(readbacks)).not.toContain(yesterday);
+        expect(await supersededSends(f.propertyId)).toEqual([
+          {
+            date: yesterday,
+            availableCount: 2,
+            reason: "service_date_passed",
+            receiptOutcome: "complete_json",
+          },
+        ]);
+        expect(await unresolvedSends(f.propertyId)).toBe(0);
+        expect(channex.nights()).toMatchObject({ [d0]: 2, [d1]: 2, [d2]: 2, [d3]: 2 });
+        expect(await schedule.enqueue()).toBe(0);
+      } finally {
+        await hotel.close();
       }
     });
   });
