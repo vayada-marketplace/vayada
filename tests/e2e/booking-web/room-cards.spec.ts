@@ -461,6 +461,49 @@ test("shows a room's details with its choices, as the old page did", async ({ pa
   await assertHealthy();
 });
 
+for (const width of [1440, 390]) {
+  test(`VAY-2422: opens the room a hotel website's link names, once, at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    await page.addInitScript(
+      ({ slug, version }) =>
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: false }),
+        ),
+      { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+    );
+    await mockBookingApis(page);
+    await mockRooms(page);
+    // The website's link carries no dates: the page's own default stay applies.
+    await page.goto("/?room=garden");
+
+    const garden = page.getByRole("dialog", { name: "Garden Suite" });
+    await expect(garden).toBeVisible();
+    await expect(garden.locator(`[data-offer-key="${key("e")}"]`)).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Deluxe Double Room" })).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath(`room-link-${width}.png`),
+      animations: "disabled",
+    });
+    await page.keyboard.press("Escape");
+    await expect(garden).toHaveCount(0);
+    // Behind it, the page went to the room cards; closing doesn't open it again.
+    await expect(page.locator("#rooms")).toBeInViewport();
+    await page.waitForTimeout(500);
+    await expect(garden).toHaveCount(0);
+
+    // A room the hotel doesn't sell (renamed, removed) leaves the page as it always was.
+    await page.goto("/?room=gone");
+    await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await assertHealthy();
+  });
+}
+
 test("VAY-2410: shows a room's details wide, with a 5:4 photo and the rates pinned beside it", async ({
   page,
 }, testInfo) => {
