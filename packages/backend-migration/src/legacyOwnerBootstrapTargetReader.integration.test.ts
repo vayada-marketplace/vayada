@@ -51,8 +51,8 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
       ]);
     await client.query(
       `INSERT INTO identity.external_identities(user_id,provider,provider_user_id,provider_email)
-      VALUES($1,'workos','user_other',$3),($2,'workos','user_seven_a',NULL),
-        ($2,'workos','user_seven_b',NULL),($4,'workos','user_ownereight',$5)`,
+      VALUES($1,'workos','user_other',$3),($2,'workos','user_sevenA',NULL),
+        ($2,'workos','user_sevenB',NULL),($4,'workos','user_ownereight',$5)`,
       [id(99), id(7), "\u00a0owner6@example.invalid\ufeff", id(8), "owner8@example.invalid"],
     );
   }, 120000);
@@ -87,7 +87,7 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
         null,
         null,
         null,
-        "user_seven_a",
+        "user_sevenA",
         "user_ownereight",
       ]);
       expect(result[7]!.providerEmailMatches).toBe(true);
