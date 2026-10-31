@@ -563,6 +563,7 @@ function internalStripeMetadata(metadata: Record<string, unknown> | undefined) {
   return definedObject({
     vayada_property_id: optionalString(metadata, "vayada_property_id"),
     vayada_organization_id: optionalString(metadata, "vayada_organization_id"),
+    vayada_addon: optionalString(metadata, "vayada_addon"),
   });
 }
 
@@ -1089,6 +1090,8 @@ function previewStripeEvent(
         propertyId,
         organizationId,
         customerId,
+        // VAY-2422: add-ons (the hotel website) are their own subscriptions; the worker skips them.
+        vayadaAddon: optionalString(metadata, "vayada_addon"),
       },
     };
   }

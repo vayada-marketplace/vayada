@@ -13,6 +13,7 @@ import {
   createPgFinanceSubscriptionWebhookStore,
   processFinanceSubscriptionWebhook,
   runFinanceSubscriptionNotificationJobs,
+  runFinanceSubscriptionWebhookJobs,
   type FinanceSubscriptionWebhookPayload,
 } from "./financeSubscriptions.js";
 import { readPropertyPlan } from "../domains/propertyPlanReadModel.js";
@@ -430,6 +431,67 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL sco
     expect(notified).toEqual([alert]);
   });
 
+  it("completes the hotel website's own subscription events without touching Commission billing", async () => {
+    const billing = await readFixedBilling();
+    const event = (eventId: string, eventPropertyId: string) =>
+      pool.query(
+        `INSERT INTO platform.jobs (job_key, queue_name, job_type, payload)
+         VALUES ($1, 'finance.subscriptions', 'finance.subscription-webhook', $2::jsonb)
+         RETURNING id::text`,
+        [
+          `vay2422:${eventId}`,
+          JSON.stringify({
+            provider: "stripe",
+            eventType: "invoice.paid",
+            rawEventId: eventId,
+            eventCreated: 1_786_363_200,
+            objectId: `in_${eventId}`,
+            subscriptionId: "sub_vay2422_website",
+            checkoutSessionId: null,
+            propertyId: eventPropertyId,
+            organizationId: organizationA,
+            customerId: "cus_vay2422",
+            vayadaAddon: "hotel_website",
+          }),
+        ],
+      );
+    // One hotel with a Commission billing row the ids match, one with no row at all.
+    const jobs = [
+      (await event("evt_vay2422_commission", propertyId)).rows[0]!.id,
+      (await event("evt_vay2422_no_row", propertyB)).rows[0]!.id,
+    ];
+    let stripeReads = 0;
+    const stripe = {
+      retrieveSubscription: async () => {
+        stripeReads += 1;
+        return {
+          ...subscriptionSnapshot(),
+          subscriptionId: "sub_vay2422_website",
+          fixedPlanVerified: false,
+        };
+      },
+    } as unknown as StripeFinanceSubscriptionProvider;
+
+    await expect(
+      runFinanceSubscriptionWebhookJobs(TEST_DATABASE_URL!, stripe, {} as RoomInventoryReadPort, {
+        limit: 10,
+      }),
+    ).resolves.toEqual({ processed: 2, failed: 0 });
+
+    const after = await pool.query(
+      `SELECT status, attempts_count AS attempts, job_metadata->>'lastError' AS "lastError"
+       FROM platform.jobs WHERE id = ANY($1::uuid[]) ORDER BY job_key`,
+      [jobs],
+    );
+    // Before VAY-2422 both went back to pending with an error, to retry until dead-lettered.
+    expect(after.rows).toEqual([
+      { status: "succeeded", attempts: 1, lastError: null },
+      { status: "succeeded", attempts: 1, lastError: null },
+    ]);
+    expect(stripeReads).toBe(0);
+    await expect(readFixedBilling()).resolves.toEqual(billing);
+  });
+
   async function readFixedBilling() {
     const result = await pool.query(
       `SELECT plan_key AS "planKey", billing_status AS "billingStatus",
@@ -450,7 +512,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL sco
   }
 
   async function cleanup() {
-    await pool.query("DELETE FROM platform.jobs WHERE job_key LIKE 'vay2426:%'");
+    await pool.query(
+      "DELETE FROM platform.jobs WHERE job_key LIKE 'vay2426:%' OR job_key LIKE 'vay2422:%'",
+    );
     await pool.query(`DELETE FROM platform.jobs WHERE property_id = ANY($1::uuid[])`, [
       [propertyId, propertyB],
     ]);

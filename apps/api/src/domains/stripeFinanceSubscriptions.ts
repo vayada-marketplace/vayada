@@ -434,6 +434,7 @@ function subscriptionSnapshot(value: StripeObject): StripeSubscriptionSnapshot {
     status: text(value["status"]) ?? "unknown",
     propertyId,
     organizationId,
+    addon: text(subscriptionMetadata["vayada_addon"]),
     fixedPlanVerified:
       validCurrency &&
       text(price["billing_scheme"]) === "tiered" &&
