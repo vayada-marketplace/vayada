@@ -461,7 +461,7 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical public location projection", () =
             altText: "Property logo",
           },
           {
-            type: "hero_image",
+            type: "gallery_image",
             url: "https://cdn.vayada.test/property/hero.webp",
             altText: "Mountain view",
           },
@@ -477,8 +477,10 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical public location projection", () =
        WHERE property_id = $1::uuid`,
       [publicLocationPropertyId],
     );
+    // The Booking projection publishes gallery photos only (VAY-1219).
     expect(result.rows[0]?.media).toEqual([
       {
+        type: "gallery_image",
         url: "https://cdn.vayada.test/property/hero.webp",
         alt: "Mountain view",
       },
@@ -593,15 +595,13 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical public location projection", () =
     await client.query(
       `INSERT INTO finance.payment_settings (
          property_id, payments_enabled, accepted_methods, default_currency,
-         supported_currencies, deposit_policy, requires_manual_review
+         deposit_policy, requires_manual_review
        )
-       VALUES ($1::uuid, TRUE, ARRAY['pay_at_property', 'cash']::text[], 'EUR',
-         ARRAY['EUR']::text[], '{}'::jsonb, FALSE)
+       VALUES ($1::uuid, TRUE, ARRAY['pay_at_property', 'cash']::text[], 'EUR', '{}'::jsonb, FALSE)
        ON CONFLICT (property_id) DO UPDATE
        SET payments_enabled = EXCLUDED.payments_enabled,
            accepted_methods = EXCLUDED.accepted_methods,
-           default_currency = EXCLUDED.default_currency,
-           supported_currencies = EXCLUDED.supported_currencies`,
+           default_currency = EXCLUDED.default_currency`,
       [publicLocationPropertyId],
     );
 

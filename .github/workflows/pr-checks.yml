@@ -911,6 +911,7 @@ jobs:
           src/jobs/channexFeedPull.integration.test.ts
           src/jobs/channexBookingAlerts.integration.test.ts
           src/domains/channexAlterationIntake.integration.test.ts
+          src/domains/channexAlterationAvailability.test.ts
           src/jobs/channexMessages.integration.test.ts
           src/jobs/channexStagingImport.integration.test.ts
           src/domains/channexStagingAlertRecovery.integration.test.ts
@@ -972,6 +973,7 @@ jobs:
             src/domains/pricingBookingRevenue.postgres.test.ts \
             src/domains/pricingInventoryAdoption.postgres.test.ts \
             src/domains/pricingRevenueClear.postgres.test.ts \
+            src/domains/persistPricingBookingAddons.test.ts \
             src/domains/pricingCardRefund.integration.test.ts \
             src/domains/pricingCardReconciliation.integration.test.ts \
             src/domains/bookingHostActionLocks.postgres.test.ts \
@@ -985,11 +987,13 @@ jobs:
             src/domains/replacementPricingOfferOwners.integration.test.ts
 
       # The whole file, including the INSERT-only privilege proof (VAY-2342) that the former
-      # `-t` filtered steps (payment readiness, concurrent provisioning) left out.
+      # `-t` filtered steps (payment readiness, concurrent provisioning) left out. The setup track
+      # command and public location projection suites skip their PostgreSQL part without a
+      # database, so they run here too (VAY-2407).
       - name: Verify the canonical setup profile repository
         if: matrix.shard == 'hotel-setup'
         run: |
-          npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts src/hotelSetupTrackCommand.test.ts src/platform/publicBookabilityPublication.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1152,7 +1156,6 @@ jobs:
           src/hotelSetupLogoRuntime.test.ts
           src/pmsPricingCommandRepository.test.ts
           src/financeStarterCategories.test.ts
-          src/platform/publicBookabilityPublication.test.ts
           src/platformMedia.test.ts
           src/propertyMedia.test.ts
           src/platform/platformMediaRepository.test.ts
@@ -1531,8 +1534,8 @@ jobs:
             src/preparedHotelImportRepository.integration.test.ts \
             src/propertySetupLifecycleStatusRepository.integration.test.ts
 
-      # Both suites drop and rebuild the pms, identity, hotel_catalog and platform schemas themselves,
-      # so nothing else may share their database.
+      # These suites drop and rebuild the pms, hotel_catalog and platform (and identity) schemas
+      # themselves, so nothing else may share their database.
       - name: Verify guest reviews and review replies in their own database
         if: matrix.shard == 'hotel-setup'
         env:
@@ -1543,7 +1546,8 @@ jobs:
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/pmsGuestReviews.integration.test.ts \
-            src/domains/pmsReviewReplies.integration.test.ts
+            src/domains/pmsReviewReplies.integration.test.ts \
+            src/jobs/channexReviews.test.ts
 
       # Shares the email queue with every other suite in its database (VAY-2239).
       - name: Verify bank transfer bookings in their own database
@@ -1631,6 +1635,7 @@ jobs:
           npm --workspace vayada-api run test --
           --no-file-parallelism
           src/propertySetupDraftCommand.test.ts
+          src/propertySetupDraftRepository.test.ts
           src/propertySetupCalendarDraftManifest.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
