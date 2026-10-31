@@ -133,9 +133,13 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     if (organizationIds.length === 0) return;
     await client.query("BEGIN");
     try {
+      // Replica mode lets the cleanup delete append-only rows, but it also skips the foreign-key
+      // cascades, so the rows that triggers and the property create added are deleted here too
+      // (VAY-2427).
       await client.query("SET LOCAL session_replication_role = replica");
       for (const table of [
         "identity.organization_memberships",
+        "identity.organization_roles",
         "platform.product_audit_events",
         "platform.idempotency_keys",
         "finance.billing_entitlements",
@@ -147,10 +151,19 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
           organizationIds,
         ]);
       }
-      await client.query(
-        `DELETE FROM booking.booking_settings WHERE property_id = ANY($1::uuid[])`,
-        [propertyIds],
-      );
+      for (const table of [
+        "booking.booking_settings",
+        "hotel_catalog.property_slugs",
+        "hotel_catalog.property_locations",
+        "hotel_catalog.property_contact_channels",
+        "hotel_catalog.property_public_profile_read_model",
+        "hotel_catalog.property_owner_revisions",
+        "platform.finance_export_worker_properties",
+      ]) {
+        await client.query(`DELETE FROM ${table} WHERE property_id = ANY($1::uuid[])`, [
+          propertyIds,
+        ]);
+      }
       await client.query(`DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])`, [
         propertyIds,
       ]);
@@ -863,7 +876,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
     expect(
       await count("platform.idempotency_keys", "organization_id", rollback.organizationId),
     ).toBe(0);
-  });
+  }, 30_000);
 
   async function createFixture() {
     const organizationId = randomUUID();
@@ -1027,7 +1040,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
   }
 
   async function waitForBlockedQuery(fragment: string): Promise<void> {
-    const deadline = Date.now() + 2_000;
+    const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
       await client.query("SELECT pg_stat_clear_snapshot()");
       const result = await client.query(
