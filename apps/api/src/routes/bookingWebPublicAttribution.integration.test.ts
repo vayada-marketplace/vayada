@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../app.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
+import { createTargetPmsOperationsReadRepository } from "../domains/pmsOperationsReadModel.js";
+import { createTargetBookingReservationsReadRepository } from "../platform/bookingReservations.js";
 import {
   createTargetBookingWebCheckoutAdapter,
   resolveTargetCheckoutProperty,
@@ -126,7 +128,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
       expect(await auditRows()).toEqual(before);
     });
 
-    it("returns the booked extras per extra with their days, and none for a booking without (VAY-2408)", async () => {
+    it("returns the booked extras per extra with their days, and none for a booking without (VAY-2408, VAY-2409)", async () => {
       const breakfastId = uuid(6);
       await admin.query(
         `INSERT INTO booking.addon_definitions
@@ -202,6 +204,29 @@ describe.skipIf(!TEST_DATABASE_URL)(
       } finally {
         await app.close();
       }
+      // VAY-2409: the PMS reads the lines in checkout's order too, and Booking Admin's reservations
+      // count the breakfast for 2 once, not once per night.
+      const pms = await createTargetPmsOperationsReadRepository({
+        connectionString: TEST_DATABASE_URL!,
+        pool: admin as never,
+      }).findReservationByGuestBookingId(propertyId, uuid(7));
+      expect(pms?.addOns.map(({ addonId }) => addonId)).toEqual([
+        "spa_partner",
+        breakfastId,
+        breakfastId,
+      ]);
+      const listed = await createTargetBookingReservationsReadRepository({
+        connectionString: TEST_DATABASE_URL!,
+        pool: admin as never,
+      }).listReservationsByPropertyId(propertyId, {
+        search: "VAY-2408-EXTRAS",
+        limit: 10,
+        offset: 0,
+        canReadGuestContact: false,
+      });
+      expect(listed.reservations).toEqual([
+        expect.objectContaining({ addonQuantities: { [breakfastId]: 2, spa_partner: 1 } }),
+      ]);
     });
 
     function createAdapter(pool: pg.Pool) {

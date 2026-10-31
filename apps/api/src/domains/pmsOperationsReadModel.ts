@@ -1219,6 +1219,8 @@ LEFT JOIN LATERAL (
     AND assignment.property_id = booking.property_id
 ) assignments ON TRUE
 LEFT JOIN LATERAL (
+  -- One booking writes its lines at once, so they share created_at: checkout's order (the
+  -- catalogue's, by add-on id) comes next, not a random selection id (VAY-2409).
   SELECT jsonb_agg(
            jsonb_build_object(
              'selectionId', item.selection_id::text,
@@ -1226,7 +1228,8 @@ LEFT JOIN LATERAL (
              'name', item.addon_name,
              'quantity', item.quantity,
              'serviceDates', item.service_dates
-           ) ORDER BY item.created_at, item.selection_id, item.item_ordinality
+           ) ORDER BY item.created_at, active_selection.addon_definition_id, item.selection_id,
+             item.item_ordinality
          ) AS items
   FROM booking.booking_addon_selection_items item
   JOIN booking.active_booking_addon_selections active_selection

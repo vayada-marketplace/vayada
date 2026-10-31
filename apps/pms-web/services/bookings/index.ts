@@ -165,11 +165,15 @@ export interface Booking {
   addonTotal: number;
   addonQuantities: Record<string, number>;
   addonDates: Record<string, string[]>;
+  /** What check-out marks fulfilled, one entry per extra: a per-night extra's nights are one entry
+   * with all its add-on lines (VAY-2409). */
   addonSelections?: Array<{
-    selectionId: string;
+    selectionIds: string[];
     addonId: string;
     name: string;
     quantity: number;
+    /** The days it happens on; none for an extra without a day. */
+    dates: string[];
   }>;
   estimatedArrivalTime: string | null;
   numberOfGuests: number | null;
@@ -1524,9 +1528,7 @@ function toBooking(
     addonId,
     name,
     dates,
-    quantity: quantities.every((quantity) => quantity === quantities[0])
-      ? quantities[0]!
-      : quantities.reduce((sum, quantity) => sum + quantity, 0),
+    quantity: bookedQuantity(quantities),
   }));
   // prettier-ignore
   const capacities = reservation.assignments.map((assignment) => maxOccupancy(roomTypesById.get(assignment.roomTypeId)));
@@ -1624,19 +1626,53 @@ function toBooking(
   };
 }
 
+/** Lines of one extra with equal quantities are its nights and count once; lines that differ (older
+ * bookings) add up (VAY-2391). */
+function bookedQuantity(quantities: number[]): number {
+  return quantities.every((quantity) => quantity === quantities[0])
+    ? quantities[0]!
+    : quantities.reduce((sum, quantity) => sum + quantity, 0);
+}
+
 function toAddonSelections(addOns: NonNullable<PmsOperationalReservation["addOns"]>) {
-  const selections = new Map<string, NonNullable<Booking["addonSelections"]>[number]>();
+  type Extra = {
+    selectionIds: string[];
+    addonId: string;
+    name: string;
+    quantities: number[];
+    dates: string[];
+  };
+  // An older booking's one add-on line can hold several extras: one entry, fulfilled at once.
+  const selections = new Map<string, Extra>();
   for (const addOn of addOns) {
     if (!addOn.selectionId) continue;
     const current = selections.get(addOn.selectionId);
     selections.set(addOn.selectionId, {
-      selectionId: addOn.selectionId,
+      selectionIds: [addOn.selectionId],
       addonId: current?.addonId ?? addOn.addonId,
       name: current ? `${current.name}, ${addOn.name}` : addOn.name,
-      quantity: (current?.quantity ?? 0) + addOn.quantity,
+      quantities: [(current?.quantities[0] ?? 0) + addOn.quantity],
+      dates: [...(current?.dates ?? []), ...(addOn.serviceDates ?? [])],
     });
   }
-  return Array.from(selections.values());
+  // VAY-2409: a per-night extra is one line per night; check-in and check-out list it once, with
+  // its days, and fulfil all its nights together.
+  const extras = new Map<string, Extra>();
+  for (const selection of selections.values()) {
+    const key = JSON.stringify([selection.addonId, selection.name]);
+    const extra = extras.get(key);
+    if (!extra) extras.set(key, selection);
+    else {
+      extra.selectionIds.push(...selection.selectionIds);
+      extra.quantities.push(...selection.quantities);
+      extra.dates.push(...selection.dates);
+    }
+  }
+  return Array.from(extras.values(), ({ quantities, dates, ...extra }) => ({
+    ...extra,
+    quantity: bookedQuantity(quantities),
+    dates: Array.from(new Set(dates)).sort(),
+  }));
 }
 
 function toPaymentBreakdown(

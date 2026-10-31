@@ -9,6 +9,7 @@ import { pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
 import { selectedAddonLeadTimesAllow } from "./addonLeadTime.js";
+import { selectedAddonDatesAllow } from "./addonSchedule.js";
 import { lockPricingManualPaymentTerms } from "./pricingManualPayment.js";
 import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
 import { pricingPaymentWindowAllows } from "./pricingPaymentWindows.js";
@@ -113,6 +114,9 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
             ))
           )
             throw new PricingStorageError("denied", "addon_lead_time");
+          // VAY-2409: an extra's days don't fit when it happens (a guest-pick one without a day).
+          if (!(await selectedAddonDatesAllow(client, scope.propertyId, selection)))
+            throw new PricingStorageError("denied", "addon_dates_not_allowed");
           // VAY-2309: a chosen rate doesn't take this way to pay (a non-refundable rate never
           // takes pay at the property). Other refusals stay unnamed.
           if (!(await selectedRatesTakePaymentMethod(client, slug, selection, method)))

@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { lockReplacementAddonAmounts } from "./replacementAddonAmounts.js";
 import type { ReplacementStay } from "@vayada/domain-booking";
 import { lockReplacementAddons } from "./replacementAddons.js";
+import { selectedAddonDatesAllow } from "./addonSchedule.js";
 import { pricingLeadTimeTestZone } from "./pricingLeadTimeTestZone.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("current Booking add-on owner", () => {
@@ -189,6 +190,10 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
   });
   async function amountFixture() {
     const f = await fixture();
+    // An extra without a day, so a selection without one prices (a guest-pick one needs a day).
+    await pool.query("UPDATE booking.addon_definitions SET schedule_mode='anytime' WHERE id=$1", [
+      f.id,
+    ]);
     const stay: ReplacementStay = {
       propertyId: f.input.propertyId,
       currency: "EUR",
@@ -253,6 +258,10 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
   it("enforces model-specific selections, limits and date boundaries without legacy inference", async () => {
     const f = await amountFixture(),
       a = f.stay.addons[0];
+    await pool.query(
+      "UPDATE booking.addon_definitions SET schedule_mode='guest_pick' WHERE id=$1",
+      [f.id],
+    );
     for (const addon of [
       { id: f.id, quantity: 1, dates: null },
       { ...a, quantity: 2 },
@@ -281,7 +290,12 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
       await f.amounts({ ...f.stay, addons: [{ ...a, quantity: 2, people: people.slice(0, 1) }] }),
     ).toBeNull();
     expect(
-      (await f.amounts({ ...f.stay, addons: [{ ...a, people: people.slice(0, 1) }] }))?.totalMinor,
+      (
+        await f.amounts({
+          ...f.stay,
+          addons: [{ ...a, people: people.slice(0, 1), dates: ["2026-10-03"] }],
+        })
+      )?.totalMinor,
     ).toBe("1250");
   });
   it("fails unavailable owners/lead-time rules and retains economic snapshots and empty evidence", async () => {
@@ -314,7 +328,11 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
       [f.id],
     );
     expect(await f.amounts()).toBeNull();
-    await pool.query("UPDATE booking.addon_definitions SET metadata='{}' WHERE id=$1", [f.id]);
+    // A guest's day is part of the request.
+    await pool.query(
+      "UPDATE booking.addon_definitions SET metadata='{}',schedule_mode='guest_pick' WHERE id=$1",
+      [f.id],
+    );
     const scheduled = await f.amounts({
       ...f.stay,
       addons: [{ ...f.stay.addons[0], dates: ["2026-10-02"] }],
@@ -374,8 +392,9 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
         [f.id, mode, weekdays, model],
       );
     const dates = async (value: unknown = f.stay) => (await f.amounts(value))?.lines[0]?.dates;
-    // The stay runs Thursday 1 to Sunday 4 October. A guest-pick add-on without a day stays undated.
-    expect(await dates()).toBeNull();
+    // The stay runs Thursday 1 to Sunday 4 October. A guest-pick add-on needs a day (VAY-2409).
+    await schedule("guest_pick");
+    expect(await f.amounts()).toBeNull();
     await schedule("arrival");
     expect(await dates()).toEqual(["2026-10-01"]);
     expect((await f.amounts())?.totalMinor).toBe("1250");
@@ -407,6 +426,42 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
     await expect(schedule("arrival", "{0}")).rejects.toMatchObject({
       constraint: "chk_addon_definitions_bookable_weekdays",
     });
+  });
+  it("tells a refusal of an extra's days apart from other refusals (VAY-2409)", async () => {
+    const f = await amountFixture(),
+      a = f.stay.addons[0];
+    const schedule = (mode: string, weekdays = "{1,2,3,4,5,6,7}", model = "per_stay") =>
+      pool.query(
+        "UPDATE booking.addon_definitions SET schedule_mode=$2,bookable_weekdays=$3,pricing_model=$4 WHERE id=$1",
+        [f.id, mode, weekdays, model],
+      );
+    // Whether the quote prices the days, and whether a refusal is named as one of the days.
+    const check = async (dates: string[] | null) => {
+      const stay = { ...f.stay, addons: [{ ...a, dates }] };
+      return {
+        priced: (await f.amounts(stay)) !== null,
+        allowed: await selectedAddonDatesAllow(pool, f.input.propertyId, stay),
+      };
+    };
+    const refused = { priced: false, allowed: false };
+    // The stay runs Thursday 1 to Sunday 4 October. Friday and Saturday only.
+    await schedule("guest_pick", "{5,6}");
+    expect(await check(["2026-10-02"])).toEqual({ priced: true, allowed: true });
+    // No day, a weekday it isn't offered on, the check-out day.
+    for (const dates of [null, ["2026-10-01"], ["2026-10-04"]])
+      expect(await check(dates)).toEqual(refused);
+    await schedule("arrival");
+    expect(await check(["2026-10-01"])).toEqual({ priced: true, allowed: true });
+    expect(await check(["2026-10-02"])).toEqual(refused);
+    // Every night or none, never some of them.
+    await schedule("daily", undefined, "per_night");
+    expect(await check(null)).toEqual({ priced: true, allowed: true });
+    expect(await check(["2026-10-01", "2026-10-02"])).toEqual(refused);
+    // A refusal for another reason isn't named as one of the days.
+    await pool.query("UPDATE booking.addon_definitions SET public_visible=false WHERE id=$1", [
+      f.id,
+    ]);
+    expect(await check(null)).toEqual({ priced: false, allowed: true });
   });
   it("bounds aggregate arithmetic and uses exact saved KWD unit prices", async () => {
     const f = await amountFixture();

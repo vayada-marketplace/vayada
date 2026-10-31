@@ -221,6 +221,17 @@ describe("replacement booking quote issuer", () => {
     });
   });
 
+  it("names a day an extra's schedule doesn't allow (VAY-2409)", async () => {
+    const issue = vi
+      .fn()
+      .mockRejectedValue(new PricingStorageError("denied", "addon_dates_not_allowed"));
+    const on = createReplacementBookingQuoteIssuer({ issue }, []);
+    await expect(on("hotel", request("card"), "key")).rejects.toMatchObject({
+      statusCode: 422,
+      code: "ADDON_DATES_NOT_ALLOWED",
+    });
+  });
+
   it("refuses new quotes with extras or a code the hotel switched off in Feature Hub (VAY-2200)", async () => {
     const issue = vi.fn().mockRejectedValue(new PricingStorageError("stale"));
     const switches = { addOns: false, promoCodes: false };

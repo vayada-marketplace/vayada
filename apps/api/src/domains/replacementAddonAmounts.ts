@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
 import {
   parseReplacementStay,
@@ -8,7 +7,7 @@ import {
 import { isMinorAmount } from "@vayada/domain-pms";
 import { lockReplacementAddons } from "./replacementAddons.js";
 import { addonLeadTimeAllows } from "./addonLeadTime.js";
-import { addonScheduledDates, isoWeekday } from "./addonSchedule.js";
+import { addonLineDates } from "./addonSchedule.js";
 import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 
 /** Caller must already own authorization and validated room allocation in this transaction.
@@ -78,35 +77,11 @@ export async function lockReplacementAddonAmounts(client: PoolClient, value: unk
     const participants = perPerson ? selected.people!.length : guestCount;
     if (definition.maxGuests !== null && participants > definition.maxGuests) return null;
     // VAY-2391: the days follow when the add-on happens. The guest sends a day only for a guest-pick
-    // add-on; a day list for any other must be the add-on's own.
-    const sent = selected.dates === null ? null : [...selected.dates].sort();
-    let dates: string[] | null = sent;
-    if (perNight) {
-      // Every night of the stay.
-      const nights = Array.from(
-        { length: (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86400000 },
-        (_, i) => new Date(Date.parse(stay.checkIn) + i * 86400000).toISOString().slice(0, 10),
-      );
-      if (sent !== null && !isDeepStrictEqual(sent, nights)) return null;
-      dates = nights;
-    } else if (definition.scheduleMode === "guest_pick") {
-      // A night of the stay on a weekday it is offered; without one it stays undated, which the
-      // booking refuses.
-      if (
-        sent !== null &&
-        (sent.length !== 1 ||
-          sent[0]! >= stay.checkOut ||
-          !definition.bookableWeekdays.includes(isoWeekday(sent[0]!)))
-      )
-        return null;
-    } else {
-      // Check-in for arrival, check-out for departure, no day for anytime.
-      const scheduled = addonScheduledDates(definition.scheduleMode, stay);
-      if (sent !== null && !isDeepStrictEqual(sent, scheduled)) return null;
-      dates = scheduled;
-    }
+    // add-on, which needs one (VAY-2409); a day list for any other must be the add-on's own.
+    const dates = addonLineDates(definition, selected.dates, stay);
+    if (!dates) return null;
     const peopleMultiplier = perPerson ? participants : 1,
-      daysMultiplier = perNight ? dates!.length : 1;
+      daysMultiplier = perNight ? dates.length : 1;
     const amount =
       BigInt(definition.amountMinor) *
       BigInt(selected.quantity) *

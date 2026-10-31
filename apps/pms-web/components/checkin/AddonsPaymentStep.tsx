@@ -7,6 +7,7 @@ import type { AddonOffer } from "@/lib/checkin/addons";
 import { countLabel } from "@/lib/checkin/labels";
 import { deskMethods, type DeskMethod, type PaymentChoice } from "@/lib/checkin/payment";
 import type { CheckinRoom } from "@/lib/checkin/rooms";
+import { formatServiceDays } from "@/lib/bookings/serviceDays";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
 
@@ -49,14 +50,16 @@ export function AddonsPaymentStep({
   /** Part of the balance is settled outside the desk (a channel collects it, or the booking is closed). */
   settledElsewhere: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const money = (amount: number) => formatCurrency(amount, booking.currency);
+  // Each extra once, with its days (VAY-2409).
   const booked = booking.addonSelections?.length
     ? booking.addonSelections.map((selection) => ({
-        key: selection.selectionId,
+        key: selection.selectionIds[0]!,
         name: selection.quantity > 1 ? `${selection.name} × ${selection.quantity}` : selection.name,
+        days: formatServiceDays(selection.dates, locale),
       }))
-    : booking.addonNames.map((name, index) => ({ key: `${index}`, name }));
+    : booking.addonNames.map((name, index) => ({ key: `${index}`, name, days: null }));
   const added = offers.filter((offer) => (quantities[offer.addon.id] ?? 0) > 0);
   const addedTotal = added.reduce(
     (sum, offer) => sum + offer.amount * (quantities[offer.addon.id] ?? 0),
@@ -93,7 +96,10 @@ export function AddonsPaymentStep({
               >
                 <CheckIcon className="h-4 w-4" strokeWidth={2.5} />
               </span>
-              <p className="min-w-0 flex-1 text-[15px] font-bold text-gray-900">{item.name}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-bold text-gray-900">{item.name}</p>
+                {item.days && <p className="text-sm text-gray-600">{item.days}</p>}
+              </div>
               <p className="shrink-0 text-sm font-semibold text-green-700">
                 {t("checkIn.flow.payment.inTheBooking")}
               </p>

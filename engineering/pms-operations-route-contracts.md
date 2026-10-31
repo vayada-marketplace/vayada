@@ -216,7 +216,8 @@ type PmsOperationalReservation = {
     phone: string | null;
     specialRequests: string | null;
   };
-  // One line per booked selection; a per-night extra has one line per night (VAY-2391).
+  // One line per booked selection; a per-night extra has one line per night (VAY-2391). Lines
+  // come in checkout's order: by created_at, then add-on definition id (VAY-2409).
   addOns: {
     selectionId: string;
     addonId: string;
