@@ -472,14 +472,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance subscription webhook PostgreSQL sco
       },
     } as unknown as StripeFinanceSubscriptionProvider;
 
-    await runFinanceSubscriptionWebhookJobs(
-      TEST_DATABASE_URL!,
-      stripe,
-      {} as RoomInventoryReadPort,
-      {
+    await expect(
+      runFinanceSubscriptionWebhookJobs(TEST_DATABASE_URL!, stripe, {} as RoomInventoryReadPort, {
         limit: 10,
-      },
-    );
+      }),
+    ).resolves.toEqual({ processed: 2, failed: 0 });
 
     const after = await pool.query(
       `SELECT status, attempts_count AS attempts, job_metadata->>'lastError' AS "lastError"

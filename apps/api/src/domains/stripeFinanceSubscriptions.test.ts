@@ -469,6 +469,26 @@ describe("Stripe fixed-plan provider", () => {
     });
   });
 
+  it("reads an add-on subscription's vayada_addon tag, and none on the plan's (VAY-2422)", async () => {
+    const website = {
+      ...subscription(),
+      id: "sub_website",
+      metadata: { ...subscription().metadata, vayada_addon: "hotel_website" },
+    };
+    const provider = createStripeFinanceSubscriptionProvider({
+      secretKey: "sk_test_secret",
+      fetch: async (input) =>
+        response(String(input).includes("sub_website") ? website : subscription()),
+    });
+
+    await expect(provider.retrieveSubscription("sub_website")).resolves.toMatchObject({
+      addon: "hotel_website",
+    });
+    await expect(provider.retrieveSubscription("sub_fixed")).resolves.toMatchObject({
+      addon: null,
+    });
+  });
+
   it("rejects a configured Price with mismatched terms before creating Checkout", async () => {
     const calls: string[] = [];
     const provider = createStripeFinanceSubscriptionProvider({

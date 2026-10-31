@@ -197,6 +197,9 @@ export type StripeSubscriptionSnapshot = {
   cancelAtPeriodEnd: boolean;
   subscriptionItemId: string | null;
   currency: string;
+  /** The subscription's `vayada_addon` metadata (VAY-2422): an add-on billed on its own
+   * subscription, such as the hotel website; absent on the plan's subscription. */
+  addon?: string | null;
 };
 
 export type StripeFinanceSubscriptionProvider = {

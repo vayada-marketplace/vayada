@@ -131,11 +131,10 @@ describe("Finance subscription webhook lifecycle", () => {
     ).rejects.toThrow("configured Vayada Fixed Plan");
   });
 
-  it("skips the hotel website's own subscription without reading Stripe or the billing row", async () => {
+  it("skips the hotel website's own subscription without reading Stripe or changing billing", async () => {
     for (const planKey of ["commission", "fixed"] as const) {
       const fixture = setup(planKey);
       fixture.provider.snapshot.fixedPlanVerified = false;
-      const findEntitlement = vi.spyOn(fixture.store, "findEntitlement");
       const before = { ...fixture.store.entitlement };
       for (const eventType of [
         "invoice.paid",
@@ -155,12 +154,37 @@ describe("Finance subscription webhook lifecycle", () => {
           ),
         ).resolves.toBe("ignored_addon");
       }
-      expect(findEntitlement).not.toHaveBeenCalled();
       expect(fixture.provider.retrieveSubscription).not.toHaveBeenCalled();
       expect(fixture.provider.updateRoomQuantity).not.toHaveBeenCalled();
       expect(fixture.store.entitlement).toEqual(before);
       expect(fixture.store.notificationCount).toBe(0);
     }
+  });
+
+  it("keeps applying the plan's own subscription when it was tagged as the website by mistake", async () => {
+    const fixture = setup("fixed");
+    await expect(
+      processFinanceSubscriptionWebhook(
+        { ...payload("invoice.paid", 45), vayadaAddon: "hotel_website" },
+        fixture.dependencies,
+      ),
+    ).resolves.toBe("applied");
+    expect(fixture.provider.retrieveSubscription).toHaveBeenCalledWith("sub_fixed");
+  });
+
+  it("asks the subscription when an event left before the website tag was set", async () => {
+    const fixture = setup("commission");
+    vi.spyOn(fixture.store, "findEntitlement").mockResolvedValue(null);
+    // Stripe froze the first invoice's metadata before the tag (and the hotel's ids) were added.
+    const untagged = { ...payload("invoice.paid", 46), propertyId: null, organizationId: null };
+    fixture.provider.snapshot.addon = "hotel_website";
+    await expect(processFinanceSubscriptionWebhook(untagged, fixture.dependencies)).resolves.toBe(
+      "ignored_addon",
+    );
+    fixture.provider.snapshot.addon = null;
+    await expect(processFinanceSubscriptionWebhook(untagged, fixture.dependencies)).rejects.toThrow(
+      "does not map to a Finance entitlement",
+    );
   });
 
   it("still rejects an unverified subscription tagged with an unknown add-on", async () => {

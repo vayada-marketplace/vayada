@@ -1989,21 +1989,31 @@ describe("target provider webhook routes", () => {
         },
       },
     });
+    // Older Stripe API versions put subscription_details on the invoice itself; upcoming
+    // invoices have no id.
+    await postProviderPayload(app, "stripe", {
+      id: "evt_website_upcoming",
+      type: "invoice.upcoming",
+      data: {
+        object: {
+          customer: "cus_fixed",
+          subscription_details: { subscription: "sub_website", metadata },
+        },
+      },
+    });
 
+    const tagged = {
+      queueName: "finance.subscriptions",
+      payload: { subscriptionId: "sub_website", vayadaAddon: "hotel_website" },
+    };
     expect(store.receipts.map((receipt) => receipt.normalizedPreview)).toMatchObject([
-      {
-        queueName: "finance.subscriptions",
-        payload: { subscriptionId: "sub_website", vayadaAddon: "hotel_website" },
-      },
-      {
-        queueName: "finance.subscriptions",
-        payload: { subscriptionId: "sub_website", vayadaAddon: "hotel_website" },
-      },
+      tagged,
+      tagged,
+      tagged,
     ]);
-    expect(store.receipts.map((receipt) => JSON.stringify(receipt.rawPayload))).toEqual([
-      expect.stringContaining('"vayada_addon":"hotel_website"'),
-      expect.stringContaining('"vayada_addon":"hotel_website"'),
-    ]);
+    expect(store.receipts.map((receipt) => JSON.stringify(receipt.rawPayload))).toEqual(
+      Array(3).fill(expect.stringContaining('"vayada_addon":"hotel_website"')),
+    );
     await app.close();
   });
 });

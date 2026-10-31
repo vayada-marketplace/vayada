@@ -80,12 +80,24 @@ export async function processFinanceSubscriptionWebhook(
   },
 ): Promise<"applied" | "ignored_stale" | "ignored_addon"> {
   validatePayload(payload);
+  const existing = await dependencies.store.findEntitlement(payload);
   // The website's events carry the hotel's ids too: matched to its billing row they failed the
   // Fixed Plan check, and with no row they had nothing to map to. Each retried to dead letter.
-  if (payload.vayadaAddon === HOTEL_WEBSITE_ADDON) return "ignored_addon";
-  const existing = await dependencies.store.findEntitlement(payload);
+  // The plan's own subscription is never skipped, even when it was tagged by mistake.
+  const planSubscription =
+    !!existing?.subscriptionRef && existing.subscriptionRef === payload.subscriptionId;
+  if (payload.vayadaAddon === HOTEL_WEBSITE_ADDON && !planSubscription) return "ignored_addon";
   if (!existing) {
     if (payload.eventType === "checkout.session.completed") return "ignored_stale";
+    // Stripe freezes an invoice's copy of the metadata when it is finalized, so the first invoice
+    // of a subscription tagged afterwards arrives untagged: the subscription itself decides.
+    if (
+      payload.subscriptionId &&
+      (await dependencies.stripe.retrieveSubscription(payload.subscriptionId)).addon ===
+        HOTEL_WEBSITE_ADDON
+    ) {
+      return "ignored_addon";
+    }
     throw new Error("Stripe subscription webhook does not map to a Finance entitlement.");
   }
   const subscriptionId = payload.subscriptionId ?? existing.subscriptionRef;
