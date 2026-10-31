@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { calculateReplacementRoomStay, pricingCurrencyScale, type RoomStayPricingResult } from "@vayada/domain-pms/replacement-pricing";
+import { calculateReplacementRoomStay, type RoomStayPricingResult } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import type { PricingSnapshot } from "@/services/api/replacementPricingClient";
-import { decimalAmount, editedSnapshot, errorText, type MessageKey, PricingError } from "./pricingAmounts";
+import { amountInput, editedSnapshot, errorText, type MessageKey, PricingError } from "./pricingAmounts";
 import * as ui from "./pricingStyles";
 
 /** `roomTypeId` limits the choice to that room's offers (a room page); `names` are its options' names (step 4). */
@@ -44,7 +44,7 @@ export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomName
       setAnswer({ key, result });
     } catch (error) { setAnswer({ key, error: errorText(error, t, "pricing.preview.errorFailed") }); }
   }
-  const money = (minor: string) => `${decimalAmount(minor, pricingCurrencyScale(snapshot.currency)!)} ${snapshot.currency}`;
+  const money = (minor: string) => `${amountInput(minor, snapshot.currency)} ${snapshot.currency}`;
   return <section aria-label={t("pricing.preview.label")} className={ui.card}>
     <h2 className={ui.cardHeading}>{t("pricing.preview.title")}</h2>
     <p className={ui.help}>{t(saved ? "pricing.preview.saved" : "pricing.preview.unsaved")} {t("pricing.preview.scope")}</p>

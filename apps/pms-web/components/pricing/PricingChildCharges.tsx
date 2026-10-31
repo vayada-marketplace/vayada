@@ -7,7 +7,7 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
+import { amountInput, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
 import { PricingSection } from "./PricingSection";
 import * as ui from "./pricingStyles";
 
@@ -85,7 +85,7 @@ export function PricingChildCharges({
               {t("pricing.childCharges.band", {
                 from: band.fromAge,
                 through: band.throughAge,
-                amount: decimalAmount(band.nightlyMinor, scale),
+                amount: amountInput(band.nightlyMinor, room.currency),
                 currency: room.currency,
               })}{" "}
               {t(
@@ -125,7 +125,9 @@ export function PricingChildCharges({
           disabled={disabled}
           onClick={() => {
             if (disabled) return;
-            setEntry(room.children.bands.map((band) => decimalAmount(band.nightlyMinor, scale)));
+            setEntry(
+              room.children.bands.map((band) => amountInput(band.nightlyMinor, room.currency)),
+            );
             setError("");
             onPending(true);
           }}

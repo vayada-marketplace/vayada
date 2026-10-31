@@ -7,7 +7,7 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
+import { amountInput, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
 import { PricingSection } from "./PricingSection";
 import * as ui from "./pricingStyles";
 
@@ -134,9 +134,7 @@ export function PricingMealPlan({
             setEntry({
               kind: offer.meal.kind,
               basis: charge.kind,
-              amounts: amounts.map((minor) =>
-                decimalAmount(minor, pricingCurrencyScale(room.currency)!),
-              ),
+              amounts: amounts.map((minor) => amountInput(minor, room.currency)),
             });
             setAck(false);
             setError("");

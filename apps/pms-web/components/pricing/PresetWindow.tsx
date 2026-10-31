@@ -1,15 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import {
-  pricingCurrencyScale,
-  type PricingConfiguration,
-} from "@vayada/domain-pms/replacement-pricing";
+import { type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
 import { paidInAdvance } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
-import { decimalAmount, errorText } from "./pricingAmounts";
+import { amountInput, errorText } from "./pricingAmounts";
 import { mainOffer, presetOption, presets, type OptionTerms, type PresetKey } from "./stepPricing";
 import * as ui from "./pricingStyles";
 
@@ -43,9 +40,7 @@ export function PresetWindow({
   )?.meal.charge;
   const [discount, setDiscount] = useState("10");
   const [mealAmount, setMealAmount] = useState(
-    known?.kind === "room"
-      ? decimalAmount(known.amountMinor, pricingCurrencyScale(room.currency)!)
-      : "",
+    known?.kind === "room" ? amountInput(known.amountMinor, room.currency) : "",
   );
   const [mealBasis, setMealBasis] = useState<"room" | "person">(
     meal === "breakfast" ? "room" : "person",

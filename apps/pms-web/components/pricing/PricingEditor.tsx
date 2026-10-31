@@ -7,7 +7,7 @@ import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import { samePricingValue, type createReplacementPricingClient, type PricingGuestDisplay, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
-import { baseAmounts, decimalAmount, editedSnapshot, errorText, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
+import { amountInput, baseAmounts, editedSnapshot, errorText, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
 import type { NewRoomPrices } from "./newRoomPrices";
 import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
@@ -545,7 +545,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
             {priceShown && group(t("pricing.steps.option.price"))}
             {other && offer.price.kind === "independent" && <div><p className={ui.label}>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</p>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">{baseAmounts(offer.price.calendar.base, t).map(([name, minor], ai) => <label key={ai} className="block"><span className="mb-1.5 block text-[11px] text-gray-500">{name}</span><input aria-label={`${label} ${name}`} inputMode="decimal" className={ui.input} disabled={disabled || exclusiveEditPending}
-                value={inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setNotice(""); }} /></label>)}</div>
+                value={inputs[`${ri}:${oi}:${ai}`] ?? amountInput(minor, room.currency)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setNotice(""); }} /></label>)}</div>
               {!offer.price.calendar.base && <p className={ui.hint}>{t("pricing.editor.calendarOnly")}</p>}</div>}
             <div className="space-y-2" hidden={!priceShown}>
               <PricingIncludedAdjustments room={room} offer={offer} label={label} baseValue={inputs[`${ri}:${oi}:0`]} disabled={disabled} blocked={hasPendingEntries} onPending={pend(`included:${ri}:${oi}`)} onChange={changeRoom(ri)} />

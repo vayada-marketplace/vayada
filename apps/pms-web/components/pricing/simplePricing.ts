@@ -5,7 +5,7 @@ import {
   type PricingOfferSale,
 } from "@vayada/domain-pms/replacement-pricing";
 import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
-import { decimalAmount, PricingError } from "./pricingAmounts";
+import { amountInput, PricingError } from "./pricingAmounts";
 import { changeLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { changeMealCharges } from "./PricingMealCharges";
 import {
@@ -208,7 +208,7 @@ export function setBreakfastAmount(room: Room, offerId: string, amount: string):
   return changeMealCharges(room, offerId, [
     amount,
     ...(charge.kind === "person"
-      ? charge.childBandAmountsMinor.map((minor) => decimalAmount(minor, scale))
+      ? charge.childBandAmountsMinor.map((minor) => amountInput(minor, room.currency))
       : []),
   ]);
 }

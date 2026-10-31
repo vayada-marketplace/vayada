@@ -13,7 +13,7 @@ import {
   type IncludedInput,
 } from "./IncludedPricing";
 import { useTranslation } from "@/lib/i18n";
-import { decimalAmount, errorText, PricingError } from "./pricingAmounts";
+import { amountInput, errorText, PricingError } from "./pricingAmounts";
 import { PricingSection } from "./PricingSection";
 import * as ui from "./pricingStyles";
 
@@ -75,7 +75,7 @@ export function PricingIncludedAdjustments({
     return null;
   const base = offer.price.calendar.base,
     scale = pricingCurrencyScale(room.currency)!;
-  const amount = baseValue ?? decimalAmount(base.baseMinor, scale);
+  const amount = baseValue ?? amountInput(base.baseMinor, room.currency);
   const cancel = () => {
     setEntry(null);
     setError("");
@@ -102,7 +102,7 @@ export function PricingIncludedAdjustments({
           disabled={disabled || blocked}
           onClick={() => {
             if (disabled || blocked) return;
-            setEntry(includedInput(base, scale));
+            setEntry(includedInput(base, scale, pricingAmountStep(room.currency)));
             setError("");
             onPending(true);
           }}

@@ -60,7 +60,7 @@ export function includedPrice(
   });
   return { mode: "included_guests" as const, baseGuests, baseMinor, adjustments };
 }
-export function includedInput(price: IncludedBase, scale: number): IncludedInput {
+export function includedInput(price: IncludedBase, scale: number, step = 1): IncludedInput {
   return {
     adults: String(price.baseGuests),
     adjustments: price.adjustments.map((adjustment) => {
@@ -68,7 +68,7 @@ export function includedInput(price: IncludedBase, scale: number): IncludedInput
         adjustment.kind === "fixed" ? adjustment.deltaMinor : String(adjustment.basisPoints);
       return {
         kind: adjustment.kind,
-        value: `${minor.startsWith("-") ? "-" : ""}${decimalAmount(minor.replace(/^-/, ""), adjustment.kind === "fixed" ? scale : 2)}`,
+        value: `${minor.startsWith("-") ? "-" : ""}${adjustment.kind === "fixed" ? decimalAmount(minor.replace(/^-/, ""), scale, step) : decimalAmount(minor.replace(/^-/, ""), 2)}`,
       };
     }),
   };
