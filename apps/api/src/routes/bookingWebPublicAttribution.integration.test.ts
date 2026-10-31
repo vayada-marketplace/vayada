@@ -139,6 +139,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
       for (const [id, reference] of [
         [uuid(7), "VAY-2408-EXTRAS"],
         [uuid(8), "VAY-2408-NONE"],
+        [uuid(9), "VAY-2409-OLDER"],
       ] as const) {
         await admin.query(
           `INSERT INTO booking.guest_bookings
@@ -167,6 +168,16 @@ describe.skipIf(!TEST_DATABASE_URL)(
          ($1::uuid, $2::uuid, $4::uuid, '{"name":"Partner spa","selection":{"quantity":1,"people":[{"selectionId":"room","kind":"adult","index":0},{"selectionId":"room","kind":"adult","index":1}]}}',
           1, '2027-02-01', 20.5, 'EUR')`,
         [propertyId, uuid(7), breakfastId, addonId],
+      );
+      // VAY-2409: an older booking's lines of one extra with different quantities.
+      await admin.query(
+        `INSERT INTO booking.booking_addon_selections
+         (property_id, guest_booking_id, addon_definition_id, addon_snapshot, quantity,
+          service_date, total_amount, currency)
+       VALUES
+         ($1::uuid, $2::uuid, $3::uuid, '{"name":"Garden breakfast"}', 1, '2027-02-01', 12, 'EUR'),
+         ($1::uuid, $2::uuid, $3::uuid, '{"name":"Garden breakfast"}', 2, '2027-02-02', 24, 'EUR')`,
+        [propertyId, uuid(9), breakfastId],
       );
       const app = buildApp({
         logger: false,
@@ -215,18 +226,22 @@ describe.skipIf(!TEST_DATABASE_URL)(
         breakfastId,
         breakfastId,
       ]);
-      const listed = await createTargetBookingReservationsReadRepository({
+      const reservations = createTargetBookingReservationsReadRepository({
         connectionString: TEST_DATABASE_URL!,
         pool: admin as never,
-      }).listReservationsByPropertyId(propertyId, {
-        search: "VAY-2408-EXTRAS",
-        limit: 10,
-        offset: 0,
-        canReadGuestContact: false,
       });
-      expect(listed.reservations).toEqual([
-        expect.objectContaining({ addonQuantities: { [breakfastId]: 2, spa_partner: 1 } }),
-      ]);
+      const quantities = async (search: string) =>
+        (
+          await reservations.listReservationsByPropertyId(propertyId, {
+            search,
+            limit: 10,
+            offset: 0,
+            canReadGuestContact: false,
+          })
+        ).reservations.map(({ addonQuantities }) => addonQuantities);
+      expect(await quantities("VAY-2408-EXTRAS")).toEqual([{ [breakfastId]: 2, spa_partner: 1 }]);
+      // Lines that differ (older bookings) add up.
+      expect(await quantities("VAY-2409-OLDER")).toEqual([{ [breakfastId]: 3 }]);
     });
 
     function createAdapter(pool: pg.Pool) {

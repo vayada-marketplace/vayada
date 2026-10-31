@@ -101,12 +101,14 @@ describe("add-on schedule (VAY-2391)", () => {
     expect(addonLineDates(mode("departure"), ["2026-11-06"], stay)).toEqual(["2026-11-06"]);
     expect(addonLineDates(mode("anytime"), null, stay)).toEqual([]);
     expect(addonLineDates(mode("anytime"), ["2026-11-03"], stay)).toBeNull();
-    // A guest picks one night, on a weekday it is offered; never none, two or the check-out day.
+    // A guest picks one night, on a weekday it is offered; never none, two, a day before check-in
+    // or the check-out day.
     const thursdays = { scheduleMode: "guest_pick" as const, bookableWeekdays: [4] };
     expect(addonLineDates(thursdays, ["2026-11-05"], stay)).toEqual(["2026-11-05"]);
     expect(addonLineDates(thursdays, ["2026-11-04"], stay)).toBeNull();
     expect(addonLineDates(thursdays, null, stay)).toBeNull();
     expect(addonLineDates(mode("guest_pick"), ["2026-11-04", "2026-11-05"], stay)).toBeNull();
     expect(addonLineDates(mode("guest_pick"), ["2026-11-06"], stay)).toBeNull();
+    expect(addonLineDates(mode("guest_pick"), ["2026-11-02"], stay)).toBeNull();
   });
 });

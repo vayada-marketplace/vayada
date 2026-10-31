@@ -258,17 +258,20 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
   it("enforces model-specific selections, limits and date boundaries without legacy inference", async () => {
     const f = await amountFixture(),
       a = f.stay.addons[0];
-    await pool.query(
-      "UPDATE booking.addon_definitions SET schedule_mode='guest_pick' WHERE id=$1",
-      [f.id],
-    );
+    // The fixture's extra has no day, so each case is refused for its own rule.
     for (const addon of [
       { id: f.id, quantity: 1, dates: null },
       { ...a, quantity: 2 },
       { ...a, people: [{ selectionId: "room", kind: "adult", index: 0 }] },
-      { ...a, dates: ["2026-10-01", "2026-10-02"] },
     ])
       expect(await f.amounts({ ...f.stay, addons: [addon] })).toBeNull();
+    await pool.query(
+      "UPDATE booking.addon_definitions SET schedule_mode='guest_pick' WHERE id=$1",
+      [f.id],
+    );
+    expect(
+      await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-01", "2026-10-02"] }] }),
+    ).toBeNull();
     expect(
       (await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-03"] }] }))?.totalMinor,
     ).toBe("1250");
@@ -280,7 +283,7 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
     for (const dates of [["2026-10-04"], ["2026-10-01"], ["2026-10-01", "2026-10-03"]])
       expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates }] })).toBeNull();
     await pool.query(
-      "UPDATE booking.addon_definitions SET pricing_model='per_guest',metadata='{\"maxQuantity\":3,\"maxGuests\":1}' WHERE id=$1",
+      "UPDATE booking.addon_definitions SET pricing_model='per_guest',schedule_mode='anytime',metadata='{\"maxQuantity\":3,\"maxGuests\":1}' WHERE id=$1",
       [f.id],
     );
     expect(await f.amounts()).toBeNull();
@@ -290,12 +293,7 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
       await f.amounts({ ...f.stay, addons: [{ ...a, quantity: 2, people: people.slice(0, 1) }] }),
     ).toBeNull();
     expect(
-      (
-        await f.amounts({
-          ...f.stay,
-          addons: [{ ...a, people: people.slice(0, 1), dates: ["2026-10-03"] }],
-        })
-      )?.totalMinor,
+      (await f.amounts({ ...f.stay, addons: [{ ...a, people: people.slice(0, 1) }] }))?.totalMinor,
     ).toBe("1250");
   });
   it("fails unavailable owners/lead-time rules and retains economic snapshots and empty evidence", async () => {

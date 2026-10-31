@@ -120,6 +120,7 @@ export function addonLineDates(
   const days = sent === null ? null : [...sent].sort();
   if (schedule.scheduleMode === "guest_pick")
     return days?.length === 1 &&
+      days[0]! >= stay.checkIn &&
       days[0]! < stay.checkOut &&
       schedule.bookableWeekdays.includes(isoWeekday(days[0]!))
       ? days
