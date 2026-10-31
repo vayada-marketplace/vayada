@@ -7,6 +7,7 @@ import { pricingCurrencyScale } from "@vayada/domain-pms";
 import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
 import type { PoolClient, QueryResultRow } from "pg";
+import { bookedAddonLinesSql, groupBookedAddonLines } from "../domains/bookedAddonLines.js";
 import type { MapPin } from "../domains/bookingLocationMap.js";
 import {
   loadOpenPricingBookingCancellationTerms,
@@ -358,8 +359,9 @@ type BookingNotificationSnapshot = QueryResultRow & {
 export async function loadBookingNotificationSnapshot(
   queryable: Queryable,
   input: { propertyId: string; guestBookingId: string },
-) {
-  const result = await queryable.query<BookingNotificationSnapshot>(
+): Promise<BookingNotificationSnapshot | null> {
+  // The query reads the extras' lines; the snapshot carries them as text.
+  const result = await queryable.query<BookingNotificationSnapshot & { addonLines: unknown }>(
     `SELECT
        booking.property_id::text AS "propertyId",
        booking.id::text AS "guestBookingId",
@@ -396,10 +398,7 @@ export async function loadBookingNotificationSnapshot(
        )) AS accommodation,
        booking.lifecycle_status AS status, booking.adults, booking.children, booking.room_count AS "roomCount",
        guest.special_requests AS "specialRequests",
-       (SELECT string_agg(item.addon_name || ' × ' || item.quantity, ', ' ORDER BY item.created_at)
-        FROM booking.booking_addon_selection_items item
-        JOIN booking.active_booking_addon_selections current_selection ON current_selection.id = item.selection_id
-        WHERE item.guest_booking_id = booking.id AND item.property_id = booking.property_id) AS addons,
+       ${bookedAddonLinesSql("booking")} AS "addonLines",
        -- VAY-2322: the booked room types and their places, for "Where you'll stay": the PMS's rooms (a room
        -- can move to another type; a canceled one is gone), else the booked pricing rooms, else the booked
        -- offer's room lines, else its room.
@@ -442,7 +441,41 @@ export async function loadBookingNotificationSnapshot(
      LIMIT 1`,
     [input.propertyId, input.guestBookingId],
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const { addonLines, ...booking } = row;
+  return { ...booking, addons: bookedAddonsText(addonLines) };
+}
+
+/** VAY-2428: the booked extras for the "Add-ons" line, each once with its days, as the confirmation page lists
+ * them: "Breakfast × 2 (1 Nov – 2 Nov), Airport transfer × 1 (Sun 1 Nov)". Null without extras. */
+export function bookedAddonsText(lines: unknown): string | null {
+  const extras = groupBookedAddonLines(lines).map(({ name, quantity, dates }) => {
+    const days = extraDays(dates);
+    return `${name} × ${quantity}${days ? ` (${days})` : ""}`;
+  });
+  return extras.length ? extras.join(", ") : null;
+}
+
+/** When an extra happens, in the emails' British dates (PMS's formatServiceDays): "Sun 1 Nov"; "1 Nov – 3 Nov" over
+ * consecutive days, "Sun 1 Nov · Tue 3 Nov" otherwise; null without a day. */
+function extraDays(dates: readonly string[]): string | null {
+  const days = dates.filter((date) => Number.isFinite(Date.parse(`${date}T00:00:00Z`)));
+  const day = (date: string, weekday: boolean) =>
+    new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", {
+      ...(weekday ? { weekday: "short" as const } : {}),
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    });
+  if (!days.length) return null;
+  if (days.length === 1) return day(days[0]!, true);
+  const consecutive = days.every(
+    (date, index) => index === 0 || Date.parse(date) - Date.parse(days[index - 1]!) === 86400000,
+  );
+  return consecutive
+    ? `${day(days[0]!, false)} – ${day(days[days.length - 1]!, false)}`
+    : days.map((date) => day(date, true)).join(" · ");
 }
 
 /** The emails whose guest copy has the cancellation line. */

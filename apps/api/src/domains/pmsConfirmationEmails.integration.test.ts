@@ -14,6 +14,7 @@ const url = process.env.TEST_DATABASE_URL;
 const property = randomUUID();
 const booking = randomUUID();
 const actor = randomUUID();
+const dinner = randomUUID();
 describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
   const pool = new pg.Pool({ connectionString: url });
   const emails = createPmsConfirmationEmails(url ?? "");
@@ -48,6 +49,16 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     await pool.query(
       `INSERT INTO booking.booking_addon_selections(property_id, guest_booking_id, addon_snapshot, quantity, total_amount, currency) VALUES ($1,$2,'{"name":"Breakfast"}',2,30,'EUR')`,
       [property, booking],
+    );
+    // VAY-2428: an extra for every night is one line per night, listed once with its days.
+    await pool.query(
+      `INSERT INTO booking.addon_definitions(id, property_id, name, pricing_model, price_amount, currency) VALUES ($2,$1,'Dinner','per_night',20,'EUR')`,
+      [property, dinner],
+    );
+    await pool.query(
+      `INSERT INTO booking.booking_addon_selections(property_id, guest_booking_id, addon_definition_id, addon_snapshot, quantity, service_date, total_amount, currency)
+       VALUES ($1,$2,$3,'{"name":"Dinner"}',2,'2026-10-01',40,'EUR'), ($1,$2,$3,'{"name":"Dinner"}',2,'2026-10-02',40,'EUR')`,
+      [property, booking, dinner],
     );
   });
   // Audit records are append-only; this suite requires a disposable local test database.
@@ -89,7 +100,11 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     ]);
     const payload = (await pool.query(`SELECT payload FROM platform.jobs WHERE id=$1`, [jobId]))
       .rows[0].payload;
-    for (const value of ["400.00 EUR", "Pay at the hotel", "Breakfast × 2"])
+    for (const value of [
+      "400.00 EUR",
+      "Pay at the hotel",
+      "Add-ons: Breakfast × 2, Dinner × 2 (1 Oct – 2 Oct)",
+    ])
       expect(payload.text).toContain(value);
     // The hotel's time zone comes with the booking, for payment deadlines (VAY-2195).
     expect(
