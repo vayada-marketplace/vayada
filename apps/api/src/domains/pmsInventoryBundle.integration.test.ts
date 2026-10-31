@@ -11,7 +11,6 @@ const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("mixed room inventory transactions", () => {
   const pool = new pg.Pool({ connectionString: url });
   const propertyId = randomUUID();
-  const addonId = randomUUID();
   const rooms = [randomUUID(), randomUUID()].sort();
   const port = createTargetPmsInventoryReservationPort();
   const input = {
@@ -98,11 +97,6 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       await client.query(
         `UPDATE distribution.public_hotel_bookability_profiles SET capabilities='{"paymentMethods":["pay_at_property"]}' WHERE property_id=$1`,
         [propertyId],
-      );
-      await client.query(
-        `INSERT INTO booking.addon_definitions(id,property_id,source_addon_id,name,pricing_model,price_amount,currency,ownership_kind,partner_commission_rate)
-        VALUES($1::uuid,$2::uuid,$1::text,'One booking add-on','per_stay',10.25,'EUR','partner',18.75)`,
-        [addonId, propertyId],
       );
       await client.query("SET LOCAL session_replication_role=replica");
       await client.query(
