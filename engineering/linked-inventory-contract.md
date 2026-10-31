@@ -208,14 +208,18 @@ ranges:
 
 - `distribution.public-bookability` refreshes public offers;
 - `pms.calendar-projection` refreshes the PMS calendar; and
-- `pms.channel-manager` enqueues durable `channex.push-ari` work.
+- `pms.channel-manager` queues a full Channex ARI sync.
 
 The channel-manager intent maps the internal `pms.inventory.changed` domain
-event to the concrete `pms.inventory.ari_changed` outbox event. The outbox
-payload carries `inventoryVersion`, and its envelope supplies `outboxKey`; the
-scheduler copies both into the job payload. The durable `channex.push-ari`
-idempotency key contains the inventory version, and the request fingerprint
-covers the complete job payload, including the source outbox key.
+event to the concrete `pms.inventory.ari_changed` outbox event. Its insert
+trigger (migration 0323) queues a `channex.sync_ari` management job for a
+hotel with a connected or degraded Channex connection. For claimed hotels the
+ARI schedule (`pmsChannexAriSchedule.ts`) also queues one when its source
+fingerprint changes; `pms.inventory_days` is one of the tables it watches. The
+management worker sends each room-night whose current
+inventory evidence has no reconciled Channex attempt, so duplicate jobs send
+nothing twice. VAY-2352 removed the earlier `channex.push-ari` outbox reader,
+which nothing ran.
 
 Channex remains PMS-owned. The Booking domain never calls it directly. Existing
 idempotency, retry, provider-attempt, and dead-letter behavior applies. Before a

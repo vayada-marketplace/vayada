@@ -1,4 +1,3 @@
-import { DEFAULT_FULL_ARI_DAYS_AHEAD } from "./pmsChannexAriHorizon.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -12,35 +11,14 @@ import {
 } from "@vayada/domain-pms";
 import pg from "pg";
 
-export const PMS_CHANNEX_SCHEDULER_QUEUE = "pms.channex.scheduler";
 export const PMS_CALENDAR_AUTO_OPEN_QUEUE = "pms.inventory.scheduler";
 export const DEFAULT_PMS_CHANNEX_LIMIT = 100;
-export const DEFAULT_CHANNEX_ARI_MAX_ATTEMPTS = 5;
-export { DEFAULT_FULL_ARI_DAYS_AHEAD } from "./pmsChannexAriHorizon.js";
+const CALENDAR_AUTO_OPEN_MAX_ATTEMPTS = 5;
 
-export type PmsChannexSchedulerRunName = "incrementalAriPush" | "fullAriPush" | "calendarAutoOpen";
-
-export type PmsChannexAriPushSource = "incremental" | "full";
-
-export type PmsChannexAriPushCandidate = {
-  source: PmsChannexAriPushSource;
-  propertyId: string;
-  organizationId: string;
-  connectionId: string;
-  channexPropertyId: string;
-  roomTypeId: string;
-  channexRoomTypeId: string;
-  dateRange: {
-    from: string;
-    to: string;
-  };
-  inventoryVersion: string;
-  rateGateOpen: boolean;
-  triggerRefId: string;
-  sourceOutboxEventId?: string;
-  outboxKey?: string;
-  correlationId?: string;
-};
+// VAY-2352: this module once also pushed ARI from the outbox (`channex.push-ari`). Nothing ran it
+// and it had no Channex sender. Availability reaches Channex through `channex.sync_ari` jobs
+// (pmsChannexAriSchedule.ts and the 0323 inventory trigger) run by the management worker.
+export type PmsChannexSchedulerRunName = "calendarAutoOpen";
 
 export type PmsCalendarAutoOpenCandidate = {
   propertyId: string;
@@ -58,21 +36,6 @@ export type PmsChannexSchedulerContext = {
   now: Date;
   workerId: string;
   correlationId: string;
-};
-
-export type PmsChannexAriPushJob = {
-  jobId: string;
-  jobKey: string;
-  domainEventKey: string;
-  status: "queued" | "running" | "succeeded" | "retry_scheduled" | "dead_lettered";
-  attemptsMade: number;
-  maxAttempts: number;
-  payload: PmsChannexAriPushCandidate;
-};
-
-export type PmsChannexJobEnqueueResult = {
-  createdNewJob: boolean;
-  job: PmsChannexAriPushJob;
 };
 
 export type PmsCalendarAutoOpenResult = {
@@ -93,119 +56,25 @@ export type PmsCalendarAutoOpenSelection = {
   failures: PmsCalendarAutoOpenFailure[];
 };
 
-export type ChannexProviderAttemptRecord = {
-  jobId: string;
-  jobKey: string;
-  idempotencyKey: string;
-  attemptNumber: number;
-  provider: "channex";
-  providerRequestId?: string;
-  requestPayloadHash: string;
-  status: "succeeded" | "failed";
-  statusCode?: number;
-  errorCategory?: PmsChannexProviderFailureCategory;
-  errorMessage?: string;
-  retryable: boolean;
-  recordedAt: string;
-  workerId: string;
-};
-
-export type PmsChannexProviderFailureCategory =
-  | "provider_429"
-  | "provider_5xx"
-  | "network_timeout"
-  | "mapping_missing"
-  | "provider_rejected"
-  | "validation_failed";
-
-export type ChannexAriProviderSuccess = {
-  ok: true;
-  providerRequestId: string;
-  statusCode: number;
-};
-
-export type ChannexAriProviderFailure = {
-  ok: false;
-  providerRequestId?: string;
-  statusCode?: number;
-  retryable: boolean;
-  errorCategory: PmsChannexProviderFailureCategory;
-  message: string;
-};
-
-export type ChannexAriProviderResult = ChannexAriProviderSuccess | ChannexAriProviderFailure;
-
-export type ChannexAriProvider = {
-  pushAri(
-    job: PmsChannexAriPushJob,
-    context: PmsChannexSchedulerContext,
-  ): Promise<ChannexAriProviderResult>;
-};
-
-export type PmsChannexDeadLetterRecord = {
-  jobId: string;
-  jobKey: string;
-  idempotencyKey: string;
-  reasonCode: "max_attempts_exhausted" | "non_retryable_error";
-  errorCategory: PmsChannexProviderFailureCategory;
-  failureSummary: string;
-  attemptCount: number;
-  replayEligible: boolean;
-  ownerPackage: "backend-events";
-  createdAt: string;
-};
-
-export type PmsChannexSchedulerStore = {
-  findIncrementalAriPushCandidates(now: Date, limit: number): Promise<PmsChannexAriPushCandidate[]>;
-  findFullAriPushCandidates(now: Date, limit: number): Promise<PmsChannexAriPushCandidate[]>;
-  findCalendarAutoOpenCandidates(now: Date, limit: number): Promise<PmsCalendarAutoOpenSelection>;
-  enqueueAriPushJob(
-    candidate: PmsChannexAriPushCandidate,
-    context: PmsChannexSchedulerContext,
-  ): Promise<PmsChannexJobEnqueueResult>;
-  recordChannexProviderAttempt(attempt: ChannexProviderAttemptRecord): Promise<void>;
-  markAriPushSucceeded(
-    job: PmsChannexAriPushJob,
-    attempt: ChannexProviderAttemptRecord,
-    context: PmsChannexSchedulerContext,
-  ): Promise<void>;
-  scheduleAriPushRetry(
-    job: PmsChannexAriPushJob,
-    attempt: ChannexProviderAttemptRecord,
-    failure: ChannexAriProviderFailure,
-    retryAt: Date,
-    context: PmsChannexSchedulerContext,
-  ): Promise<void>;
-  deadLetterAriPush(
-    job: PmsChannexAriPushJob,
-    attempt: ChannexProviderAttemptRecord,
-    failure: ChannexAriProviderFailure,
-    context: PmsChannexSchedulerContext,
-  ): Promise<PmsChannexDeadLetterRecord>;
-  enqueueCalendarAutoOpenJob(
-    candidate: PmsCalendarAutoOpenCandidate,
-    context: PmsChannexSchedulerContext,
-  ): Promise<PmsCalendarAutoOpenResult>;
-};
-
 export type PmsChannexSchedulerOptions = {
   now?: Date;
   workerId?: string;
   limit?: number;
-  run?: readonly PmsChannexSchedulerRunName[];
 };
 
 export type PgPmsChannexSchedulerStoreConfig = {
   connectionString: string;
   max?: number;
-  fullAriDaysAhead?: number;
 };
 
-/** The auto-open half of the scheduler store. It has no ARI methods, so no Channex path. */
-export type PmsCalendarAutoOpenSchedulerStore = Pick<
-  PmsChannexSchedulerStore,
-  "findCalendarAutoOpenCandidates" | "enqueueCalendarAutoOpenJob"
->;
+/** The scheduler store: auto-open selection and enqueue. It has no Channex path. */
+export type PmsCalendarAutoOpenSchedulerStore = {
+  findCalendarAutoOpenCandidates(now: Date, limit: number): Promise<PmsCalendarAutoOpenSelection>;
+  enqueueCalendarAutoOpenJob(
+    candidate: PmsCalendarAutoOpenCandidate,
+    context: PmsChannexSchedulerContext,
+  ): Promise<PmsCalendarAutoOpenResult>;
+};
 
 /** One scheduler run's database session; every query runs on the connection holding the lock. */
 export type PmsCalendarAutoOpenSchedulerSession = PmsCalendarAutoOpenSchedulerStore & {
@@ -236,24 +105,6 @@ export type PgPmsCalendarAutoOpenSchedulerStore = {
 export const PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK = "pms.calendar-auto-open.scheduler";
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
-
-type AriCandidateRow = {
-  source: PmsChannexAriPushSource;
-  propertyId: string;
-  organizationId: string;
-  connectionId: string;
-  channexPropertyId: string;
-  roomTypeId: string;
-  channexRoomTypeId: string;
-  dateFrom: string | Date;
-  dateTo: string | Date;
-  inventoryVersion: string;
-  rateGateOpen: boolean;
-  triggerRefId: string;
-  sourceOutboxEventId?: string | null;
-  outboxKey?: string | null;
-  correlationId?: string | null;
-};
 
 type CalendarSourceRow = {
   propertyId: string;
@@ -290,96 +141,22 @@ export type PmsChannexSchedulerRunResult = {
   scanned: number;
   enqueued: number;
   reused: number;
-  providerAttempts: number;
-  succeeded: number;
-  retryScheduled: number;
-  deadLettered: number;
   autoOpenEnqueued: number;
   autoOpenFailures: PmsCalendarAutoOpenFailure[];
 };
 
-export type PmsChannexSchedulerResult = {
-  runs: PmsChannexSchedulerRunResult[];
-  scanned: number;
-  enqueued: number;
-  reused: number;
-  providerAttempts: number;
-  succeeded: number;
-  retryScheduled: number;
-  deadLettered: number;
-  autoOpenEnqueued: number;
-  autoOpenFailures: PmsCalendarAutoOpenFailure[];
-};
-
-const SCHEDULER_RUNS: readonly PmsChannexSchedulerRunName[] = [
-  "incrementalAriPush",
-  "fullAriPush",
-  "calendarAutoOpen",
-];
-
+/** A pool-backed scheduler store without the run lock; the API uses the locked store below. */
 export function createPgPmsChannexSchedulerStore(
   config: PgPmsChannexSchedulerStoreConfig,
-): PmsChannexSchedulerStore & { close(): Promise<void> } {
+): PmsCalendarAutoOpenSchedulerStore & { close(): Promise<void> } {
   const pool = new pg.Pool({
     connectionString: config.connectionString,
     max: config.max,
   });
-  const fullAriDaysAhead = config.fullAriDaysAhead ?? DEFAULT_FULL_ARI_DAYS_AHEAD;
 
   return {
-    async findIncrementalAriPushCandidates(now, limit) {
-      return selectIncrementalAriPushCandidates(pool, now, limit);
-    },
-    async findFullAriPushCandidates(now, limit) {
-      return selectFullAriPushCandidates(pool, now, fullAriDaysAhead, limit);
-    },
     async findCalendarAutoOpenCandidates(now, limit) {
       return selectCalendarAutoOpenCandidates(pool, now, limit);
-    },
-    async enqueueAriPushJob(candidate, context) {
-      return enqueuePgAriPushJob(pool, candidate, context);
-    },
-    async recordChannexProviderAttempt(attempt) {
-      await insertPgProviderAttempt(pool, attempt);
-    },
-    async markAriPushSucceeded(job, _attempt, context) {
-      await pool.query(
-        `UPDATE platform.jobs
-         SET status = 'succeeded',
-             attempts_count = GREATEST(attempts_count, $2),
-             finished_at = $3::timestamptz,
-             updated_at = now()
-         WHERE id = $1::uuid`,
-        [job.jobId, job.attemptsMade + 1, context.now.toISOString()],
-      );
-      job.status = "succeeded";
-      job.attemptsMade += 1;
-    },
-    async scheduleAriPushRetry(job, _attempt, failure, retryAt, context) {
-      await pool.query(
-        `UPDATE platform.jobs
-         SET status = 'pending',
-             attempts_count = GREATEST(attempts_count, $2),
-             run_after = $3::timestamptz,
-             updated_at = now(),
-             job_metadata = job_metadata || $4::jsonb
-         WHERE id = $1::uuid`,
-        [
-          job.jobId,
-          job.attemptsMade + 1,
-          retryAt.toISOString(),
-          JSON.stringify({
-            retryScheduledAt: context.now.toISOString(),
-            retryAfter: retryAt.toISOString(),
-            lastErrorCategory: failure.errorCategory,
-          }),
-        ],
-      );
-      job.status = "retry_scheduled";
-      job.attemptsMade += 1;
-    },
-    async deadLetterAriPush(job, attempt, failure, context) {
-      return deadLetterPgAriPush(pool, job, attempt, failure, context);
     },
     async enqueueCalendarAutoOpenJob(candidate, context) {
       return enqueuePgCalendarAutoOpenJob(pool, candidate, context);
@@ -594,13 +371,10 @@ async function readCalendarAutoOpenSelectionStats(
   return result.rows[0] ?? { enabledSettings: 0, pausedNotReady: 0, skippedUnverifiedLabels: 0 };
 }
 
-/**
- * Enqueues calendar auto-open jobs and nothing else. Unlike runPmsChannexSchedulerJobs it takes
- * no Channex provider, so it cannot push ARI.
- */
+/** Enqueues calendar auto-open jobs and nothing else; it takes no Channex provider. */
 export async function runPmsCalendarAutoOpenScheduler(
   store: PmsCalendarAutoOpenSchedulerStore,
-  options: Omit<PmsChannexSchedulerOptions, "run"> = {},
+  options: PmsChannexSchedulerOptions = {},
 ): Promise<PmsChannexSchedulerRunResult> {
   const now = options.now ?? new Date();
   return runCalendarAutoOpen(store, {
@@ -612,64 +386,6 @@ export async function runPmsCalendarAutoOpenScheduler(
     },
     limit: options.limit ?? DEFAULT_PMS_CHANNEX_LIMIT,
   });
-}
-
-export async function runPmsChannexSchedulerJobs(
-  store: PmsChannexSchedulerStore,
-  provider: ChannexAriProvider,
-  options: PmsChannexSchedulerOptions = {},
-): Promise<PmsChannexSchedulerResult> {
-  const now = options.now ?? new Date();
-  const context: PmsChannexSchedulerContext = {
-    now,
-    workerId: options.workerId ?? "pms-channex-scheduler",
-    correlationId: `pms.channex.scheduler:${now.toISOString()}`,
-  };
-  const input = {
-    now,
-    context,
-    limit: options.limit ?? DEFAULT_PMS_CHANNEX_LIMIT,
-  };
-  const selectedRuns = options.run ?? SCHEDULER_RUNS;
-  const runs: PmsChannexSchedulerRunResult[] = [];
-
-  for (const runName of selectedRuns) {
-    if (runName === "calendarAutoOpen") {
-      runs.push(await runCalendarAutoOpen(store, input));
-    } else {
-      runs.push(await runAriPush(store, provider, runName, input));
-    }
-  }
-
-  return {
-    runs,
-    scanned: sumBy(runs, "scanned"),
-    enqueued: sumBy(runs, "enqueued"),
-    reused: sumBy(runs, "reused"),
-    providerAttempts: sumBy(runs, "providerAttempts"),
-    succeeded: sumBy(runs, "succeeded"),
-    retryScheduled: sumBy(runs, "retryScheduled"),
-    deadLettered: sumBy(runs, "deadLettered"),
-    autoOpenEnqueued: sumBy(runs, "autoOpenEnqueued"),
-    autoOpenFailures: runs.flatMap(({ autoOpenFailures }) => autoOpenFailures),
-  };
-}
-
-export function buildAriPushDomainEventKey(input: {
-  propertyId: string;
-  roomTypeId: string;
-  dateRange: { from: string; to: string };
-  inventoryVersion: string;
-}): string {
-  return `channex.push-ari:${input.propertyId}:${input.roomTypeId}:${input.dateRange.from}_${input.dateRange.to}:${input.inventoryVersion}:v1`;
-}
-
-export function buildAriPushJobKey(input: {
-  roomTypeId: string;
-  dateRange: { from: string; to: string };
-  inventoryVersion: string;
-}): string {
-  return `channex.push-ari:room_type:${input.roomTypeId}:${input.dateRange.from}_${input.dateRange.to}:${input.inventoryVersion}:v1`;
 }
 
 export function buildCalendarAutoOpenEventKey(input: {
@@ -686,230 +402,6 @@ export function buildCalendarAutoOpenJobKey(input: {
   sourceFingerprint: string;
 }): string {
   return `pms.calendar-auto-open:property:${input.propertyId}:open-through-${input.openThrough}:source-${input.sourceFingerprint}:v2`;
-}
-
-export function buildPmsChannexAriPushJob(
-  candidate: PmsChannexAriPushCandidate,
-  jobId: string,
-): PmsChannexAriPushJob {
-  return {
-    jobId,
-    jobKey: buildAriPushJobKey(candidate),
-    domainEventKey: buildAriPushDomainEventKey(candidate),
-    status: "queued",
-    attemptsMade: 0,
-    maxAttempts: DEFAULT_CHANNEX_ARI_MAX_ATTEMPTS,
-    payload: candidate,
-  };
-}
-
-export function channexProviderAttemptFromResult(input: {
-  job: PmsChannexAriPushJob;
-  result: ChannexAriProviderResult;
-  context: PmsChannexSchedulerContext;
-}): ChannexProviderAttemptRecord {
-  const attemptNumber = input.job.attemptsMade + 1;
-  const base = {
-    jobId: input.job.jobId,
-    jobKey: input.job.jobKey,
-    idempotencyKey: input.job.jobKey,
-    attemptNumber,
-    provider: "channex" as const,
-    requestPayloadHash: sha256Key(stableJson(input.job.payload)),
-    recordedAt: input.context.now.toISOString(),
-    workerId: input.context.workerId,
-  };
-
-  if (input.result.ok) {
-    return {
-      ...base,
-      providerRequestId: input.result.providerRequestId,
-      status: "succeeded",
-      statusCode: input.result.statusCode,
-      retryable: false,
-    };
-  }
-
-  return {
-    ...base,
-    providerRequestId: input.result.providerRequestId,
-    status: "failed",
-    statusCode: input.result.statusCode,
-    errorCategory: input.result.errorCategory,
-    errorMessage: input.result.message,
-    retryable: input.result.retryable,
-  };
-}
-
-export function nextAriRetryAt(now: Date, attemptNumber: number): Date {
-  const delaySeconds = Math.min(5 * 60, 2 ** Math.max(attemptNumber - 1, 0) * 30);
-  return new Date(now.getTime() + delaySeconds * 1000);
-}
-
-async function runAriPush(
-  store: PmsChannexSchedulerStore,
-  provider: ChannexAriProvider,
-  runName: Extract<PmsChannexSchedulerRunName, "incrementalAriPush" | "fullAriPush">,
-  input: {
-    now: Date;
-    context: PmsChannexSchedulerContext;
-    limit: number;
-  },
-): Promise<PmsChannexSchedulerRunResult> {
-  const candidates =
-    runName === "incrementalAriPush"
-      ? await store.findIncrementalAriPushCandidates(input.now, input.limit)
-      : await store.findFullAriPushCandidates(input.now, input.limit);
-  const run = emptyRun(runName, candidates.length);
-
-  for (const candidate of candidates) {
-    const enqueued = await store.enqueueAriPushJob(candidate, input.context);
-    if (enqueued.createdNewJob) run.enqueued += 1;
-    else run.reused += 1;
-
-    if (enqueued.job.status === "succeeded" || enqueued.job.status === "dead_lettered") {
-      continue;
-    }
-
-    const providerResult = await provider.pushAri(enqueued.job, input.context);
-    const attempt = channexProviderAttemptFromResult({
-      job: enqueued.job,
-      result: providerResult,
-      context: input.context,
-    });
-    await store.recordChannexProviderAttempt(attempt);
-    run.providerAttempts += 1;
-
-    if (providerResult.ok) {
-      await store.markAriPushSucceeded(enqueued.job, attempt, input.context);
-      run.succeeded += 1;
-      continue;
-    }
-
-    const attemptsExhausted = attempt.attemptNumber >= enqueued.job.maxAttempts;
-    if (providerResult.retryable && !attemptsExhausted) {
-      await store.scheduleAriPushRetry(
-        enqueued.job,
-        attempt,
-        providerResult,
-        nextAriRetryAt(input.now, attempt.attemptNumber),
-        input.context,
-      );
-      run.retryScheduled += 1;
-      continue;
-    }
-
-    await store.deadLetterAriPush(enqueued.job, attempt, providerResult, input.context);
-    run.deadLettered += 1;
-  }
-
-  return run;
-}
-
-async function selectIncrementalAriPushCandidates(
-  queryable: Queryable,
-  _now: Date,
-  limit: number,
-): Promise<PmsChannexAriPushCandidate[]> {
-  const result = await queryable.query<AriCandidateRow>(
-    `SELECT
-       'incremental'::text AS source,
-       COALESCE(outbox.payload ->> 'propertyId', outbox.property_id::text) AS "propertyId",
-       COALESCE(outbox.payload ->> 'organizationId', connection.connection_metadata ->> 'organizationId') AS "organizationId",
-       connection.id::text AS "connectionId",
-       connection.external_property_id AS "channexPropertyId",
-       COALESCE(outbox.payload ->> 'roomTypeId', room_mapping.room_type_id::text) AS "roomTypeId",
-       room_mapping.external_room_type_id AS "channexRoomTypeId",
-       COALESCE(outbox.payload #>> '{dateRange,from}', outbox.payload ->> 'dateFrom') AS "dateFrom",
-       COALESCE(outbox.payload #>> '{dateRange,to}', outbox.payload ->> 'dateTo') AS "dateTo",
-       COALESCE(outbox.payload ->> 'inventoryVersion', outbox.id::text) AS "inventoryVersion",
-       CASE
-         WHEN outbox.payload ->> 'rateGateOpen' IN ('true', 'false')
-           THEN (outbox.payload ->> 'rateGateOpen')::boolean
-         ELSE EXISTS (
-           SELECT 1 FROM pms.rate_plans canonical_rate
-           WHERE canonical_rate.property_id=outbox.property_id
-             AND canonical_rate.room_type_id=room_mapping.room_type_id
-             AND canonical_rate.pricing_contract_version='pms-pricing.v1'
-         )
-       END AS "rateGateOpen",
-       COALESCE(outbox.payload ->> 'triggerRefId', outbox.outbox_key) AS "triggerRefId",
-       outbox.id::text AS "sourceOutboxEventId",
-       outbox.outbox_key AS "outboxKey",
-       outbox.correlation_id AS "correlationId"
-     FROM platform.outbox_events outbox
-     JOIN pms.channel_connections connection
-       ON connection.property_id = outbox.property_id
-      AND connection.provider = 'channex'
-      AND connection.connection_status = 'connected'
-     JOIN pms.channel_room_type_mappings room_mapping
-       ON room_mapping.connection_id = connection.id
-      AND room_mapping.property_id = connection.property_id
-      AND room_mapping.status = 'active'
-      AND room_mapping.room_type_id::text = outbox.payload ->> 'roomTypeId'
-     WHERE outbox.event_type = 'pms.inventory.ari_changed'
-       AND outbox.status IN ('pending', 'failed')
-       AND EXISTS (SELECT 1 FROM pms.room_types room WHERE room.id = room_mapping.room_type_id AND room.active)
-       AND connection.external_property_id IS NOT NULL
-       AND outbox.payload ->> 'roomTypeId' IS NOT NULL
-       AND COALESCE(outbox.payload ->> 'organizationId', connection.connection_metadata ->> 'organizationId') IS NOT NULL
-       AND COALESCE(outbox.payload #>> '{dateRange,from}', outbox.payload ->> 'dateFrom') IS NOT NULL
-       AND COALESCE(outbox.payload #>> '{dateRange,to}', outbox.payload ->> 'dateTo') IS NOT NULL
-     ORDER BY outbox.available_at ASC, outbox.created_at ASC
-     LIMIT $1`,
-    [limit],
-  );
-  void _now;
-  return result.rows.map(ariCandidateFromRow);
-}
-
-async function selectFullAriPushCandidates(
-  queryable: Queryable,
-  now: Date,
-  daysAhead: number,
-  limit: number,
-): Promise<PmsChannexAriPushCandidate[]> {
-  const from = toDateOnly(now);
-  const to = toDateOnly(new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000));
-  const result = await queryable.query<AriCandidateRow>(
-    `SELECT
-       'full'::text AS source,
-       connection.property_id::text AS "propertyId",
-       connection.connection_metadata ->> 'organizationId' AS "organizationId",
-       connection.id::text AS "connectionId",
-       connection.external_property_id AS "channexPropertyId",
-       room_mapping.room_type_id::text AS "roomTypeId",
-       room_mapping.external_room_type_id AS "channexRoomTypeId",
-       $1::date AS "dateFrom",
-       GREATEST($2::date, COALESCE(coverage.coverage_through, $2::date)) AS "dateTo",
-       $3::text AS "inventoryVersion",
-       EXISTS (
-         SELECT 1 FROM pms.rate_plans canonical_rate
-         WHERE canonical_rate.property_id=connection.property_id
-           AND canonical_rate.room_type_id=room_mapping.room_type_id
-           AND canonical_rate.pricing_contract_version='pms-pricing.v1'
-       ) AS "rateGateOpen",
-       $3::text AS "triggerRefId",
-       NULL::text AS "sourceOutboxEventId",
-       NULL::text AS "outboxKey",
-       $4::text AS "correlationId"
-     FROM pms.channel_connections connection
-     LEFT JOIN pms.inventory_materialization_coverage coverage
-       ON coverage.property_id = connection.property_id
-     JOIN pms.channel_room_type_mappings room_mapping
-       ON room_mapping.connection_id = connection.id
-      AND room_mapping.property_id = connection.property_id
-      AND room_mapping.status = 'active'
-     WHERE connection.provider = 'channex'
-       AND connection.connection_status = 'connected'
-       AND EXISTS (SELECT 1 FROM pms.room_types room WHERE room.id = room_mapping.room_type_id AND room.active)
-       AND connection.external_property_id IS NOT NULL
-       AND connection.connection_metadata ->> 'organizationId' IS NOT NULL
-     ORDER BY connection.property_id, room_mapping.room_type_id
-     LIMIT $5`,
-    [from, to, `full-${from}`, `pms.channex.full-ari:${from}`, limit],
-  );
-  return result.rows.map(ariCandidateFromRow);
 }
 
 async function selectCalendarAutoOpenCandidates(
@@ -1117,301 +609,6 @@ async function existingCalendarAutoOpenJobKeys(
   return new Set(result.rows.map(({ jobKey }) => jobKey));
 }
 
-async function enqueuePgAriPushJob(
-  pool: pg.Pool,
-  candidate: PmsChannexAriPushCandidate,
-  context: PmsChannexSchedulerContext,
-): Promise<PmsChannexJobEnqueueResult> {
-  const client = await pool.connect();
-  const jobKey = buildAriPushJobKey(candidate);
-  const domainEventKey = buildAriPushDomainEventKey(candidate);
-  const keyHash = sha256Key(jobKey);
-  const payload = ariJobPayload(candidate);
-
-  try {
-    await client.query("BEGIN");
-    await insertOrTouchIdempotencyKey(client, {
-      operation: "channex_ari_push",
-      keyHash,
-      requestFingerprintHash: sha256Key(stableJson(payload)),
-      responseResourceType: "room_type",
-      responseResourceId: candidate.roomTypeId,
-      candidate,
-      context,
-      metadata: { jobKey, domainEventKey, source: candidate.source },
-    });
-    const domainEventId = await insertOrFindPmsDomainEvent(client, {
-      eventKey: domainEventKey,
-      eventType: "channex.push-ari",
-      propertyId: candidate.propertyId,
-      resourceType: "room_type",
-      resourceId: candidate.roomTypeId,
-      keyHash,
-      payload,
-      context,
-      metadata: { source: candidate.source, sourceOutboxEventId: candidate.sourceOutboxEventId },
-    });
-    const inserted = await client.query<{
-      id: string;
-      status: string;
-      attemptsMade: number;
-      maxAttempts: number;
-    }>(
-      `INSERT INTO platform.jobs
-         (
-           job_key,
-           queue_name,
-           job_type,
-           source_domain_event_id,
-           status,
-           max_attempts,
-           run_after,
-           tenant_scope,
-           property_id,
-           resource_product,
-           resource_type,
-           resource_id,
-           correlation_id,
-           idempotency_key_hash,
-           payload,
-           job_metadata
-         )
-       VALUES (
-         $1,
-         $2,
-         'channex.push-ari',
-         $3::uuid,
-         'pending',
-         $4,
-         $5::timestamptz,
-         'property',
-         $6::uuid,
-         'pms',
-         'room_type',
-         $7,
-         $8,
-         $9,
-         $10::jsonb,
-         $11::jsonb
-       )
-       ON CONFLICT (queue_name, job_key) DO NOTHING
-       RETURNING id, status, attempts_count AS "attemptsMade", max_attempts AS "maxAttempts"`,
-      [
-        jobKey,
-        PMS_CHANNEX_SCHEDULER_QUEUE,
-        domainEventId,
-        DEFAULT_CHANNEX_ARI_MAX_ATTEMPTS,
-        context.now.toISOString(),
-        candidate.propertyId,
-        candidate.roomTypeId,
-        candidate.correlationId ?? context.correlationId,
-        keyHash,
-        JSON.stringify(payload),
-        JSON.stringify({ source: "pms-channex-scheduler", ariSource: candidate.source }),
-      ],
-    );
-    const insertedRow = inserted.rows[0];
-    if (insertedRow) {
-      await client.query("COMMIT");
-      return {
-        createdNewJob: true,
-        job: {
-          jobId: insertedRow.id,
-          jobKey,
-          domainEventKey,
-          status: rowJobStatus(insertedRow.status),
-          attemptsMade: insertedRow.attemptsMade,
-          maxAttempts: insertedRow.maxAttempts,
-          payload: candidate,
-        },
-      };
-    }
-
-    const existing = await selectExistingAriJob(client, jobKey);
-    if (!existing) throw new Error(`Unable to resolve ARI job ${jobKey}`);
-    await client.query("COMMIT");
-    return {
-      createdNewJob: false,
-      job: {
-        jobId: existing.id,
-        jobKey,
-        domainEventKey,
-        status: rowJobStatus(existing.status),
-        attemptsMade: existing.attemptsMade,
-        maxAttempts: existing.maxAttempts,
-        payload: candidate,
-      },
-    };
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-async function insertPgProviderAttempt(
-  queryable: Queryable,
-  attempt: ChannexProviderAttemptRecord,
-): Promise<void> {
-  await queryable.query(
-    `INSERT INTO platform.job_attempts
-       (
-         job_id,
-         attempt_number,
-         status,
-         worker_id,
-         started_at,
-         finished_at,
-         error_type,
-         error_message,
-         error_metadata
-       )
-     VALUES (
-       $1::uuid,
-       $2,
-       $3,
-       $4,
-       $5::timestamptz,
-       $5::timestamptz,
-       $6,
-       $7,
-       $8::jsonb
-     )
-     ON CONFLICT (job_id, attempt_number) DO UPDATE SET
-       status = EXCLUDED.status,
-       finished_at = EXCLUDED.finished_at,
-       error_type = EXCLUDED.error_type,
-       error_message = EXCLUDED.error_message,
-       error_metadata = platform.job_attempts.error_metadata || EXCLUDED.error_metadata`,
-    [
-      attempt.jobId,
-      attempt.attemptNumber,
-      attempt.status,
-      attempt.workerId,
-      attempt.recordedAt,
-      attempt.errorCategory ?? null,
-      attempt.errorMessage ?? null,
-      JSON.stringify({
-        provider: attempt.provider,
-        providerRequestId: attempt.providerRequestId ?? null,
-        requestPayloadHash: attempt.requestPayloadHash,
-        statusCode: attempt.statusCode ?? null,
-        retryable: attempt.retryable,
-        idempotencyKey: attempt.idempotencyKey,
-      }),
-    ],
-  );
-}
-
-async function deadLetterPgAriPush(
-  pool: pg.Pool,
-  job: PmsChannexAriPushJob,
-  attempt: ChannexProviderAttemptRecord,
-  failure: ChannexAriProviderFailure,
-  context: PmsChannexSchedulerContext,
-): Promise<PmsChannexDeadLetterRecord> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      `UPDATE platform.jobs
-       SET status = 'dead_lettered',
-           attempts_count = GREATEST(attempts_count, $2),
-           finished_at = $3::timestamptz,
-           updated_at = now(),
-           job_metadata = job_metadata || $4::jsonb
-       WHERE id = $1::uuid`,
-      [
-        job.jobId,
-        attempt.attemptNumber,
-        context.now.toISOString(),
-        JSON.stringify({
-          deadLetteredAt: context.now.toISOString(),
-          lastErrorCategory: failure.errorCategory,
-        }),
-      ],
-    );
-    const attemptRow = await client.query<{ id: string }>(
-      `SELECT id
-       FROM platform.job_attempts
-       WHERE job_id = $1::uuid AND attempt_number = $2
-       LIMIT 1`,
-      [job.jobId, attempt.attemptNumber],
-    );
-    const deadLetter: PmsChannexDeadLetterRecord = {
-      jobId: job.jobId,
-      jobKey: job.jobKey,
-      idempotencyKey: job.jobKey,
-      reasonCode: failure.retryable ? "max_attempts_exhausted" : "non_retryable_error",
-      errorCategory: failure.errorCategory,
-      failureSummary: failure.message,
-      attemptCount: attempt.attemptNumber,
-      replayEligible: failure.retryable,
-      ownerPackage: "backend-events",
-      createdAt: context.now.toISOString(),
-    };
-    await client.query(
-      `INSERT INTO platform.dead_letter_events
-         (
-           source_kind,
-           job_id,
-           job_attempt_id,
-           tenant_scope,
-           property_id,
-           resource_product,
-           resource_type,
-           resource_id,
-           correlation_id,
-           idempotency_key_hash,
-           reason_code,
-           failure_summary,
-           failure_payload
-         )
-       VALUES (
-         'job',
-         $1::uuid,
-         $2::uuid,
-         'property',
-         $3::uuid,
-         'pms',
-         'room_type',
-         $4,
-         $5,
-         $6,
-         $7,
-         $8,
-         $9::jsonb
-       )
-       ON CONFLICT DO NOTHING`,
-      [
-        job.jobId,
-        attemptRow.rows[0]?.id ?? null,
-        job.payload.propertyId,
-        job.payload.roomTypeId,
-        job.payload.correlationId ?? context.correlationId,
-        sha256Key(job.jobKey),
-        deadLetter.reasonCode,
-        deadLetter.failureSummary,
-        JSON.stringify({
-          ...deadLetter,
-          providerRequestId: attempt.providerRequestId ?? null,
-          statusCode: attempt.statusCode ?? null,
-        }),
-      ],
-    );
-    await client.query("COMMIT");
-    job.status = "dead_lettered";
-    job.attemptsMade = attempt.attemptNumber;
-    return deadLetter;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 async function enqueuePgCalendarAutoOpenJob(
   pool: pg.Pool,
   candidate: PmsCalendarAutoOpenCandidate,
@@ -1513,7 +710,7 @@ async function enqueueCalendarAutoOpenJobOnClient(
         jobKey,
         PMS_CALENDAR_AUTO_OPEN_QUEUE,
         domainEventId,
-        DEFAULT_CHANNEX_ARI_MAX_ATTEMPTS,
+        CALENDAR_AUTO_OPEN_MAX_ATTEMPTS,
         context.now.toISOString(),
         candidate.propertyId,
         candidate.correlationId ?? context.correlationId,
@@ -1569,10 +766,6 @@ function emptyRun(name: PmsChannexSchedulerRunName, scanned: number): PmsChannex
     scanned,
     enqueued: 0,
     reused: 0,
-    providerAttempts: 0,
-    succeeded: 0,
-    retryScheduled: 0,
-    deadLettered: 0,
     autoOpenEnqueued: 0,
     autoOpenFailures: [],
   };
@@ -1736,56 +929,6 @@ async function insertOrFindPmsDomainEvent(
   return existingId;
 }
 
-async function selectExistingAriJob(
-  client: pg.PoolClient,
-  jobKey: string,
-): Promise<{
-  id: string;
-  status: string;
-  attemptsMade: number;
-  maxAttempts: number;
-} | null> {
-  const result = await client.query<{
-    id: string;
-    status: string;
-    attemptsMade: number;
-    maxAttempts: number;
-  }>(
-    `SELECT
-       id,
-       status,
-       attempts_count AS "attemptsMade",
-       max_attempts AS "maxAttempts"
-     FROM platform.jobs
-     WHERE queue_name = $1 AND job_key = $2
-     LIMIT 1`,
-    [PMS_CHANNEX_SCHEDULER_QUEUE, jobKey],
-  );
-  return result.rows[0] ?? null;
-}
-
-function ariCandidateFromRow(row: AriCandidateRow): PmsChannexAriPushCandidate {
-  return {
-    source: row.source,
-    propertyId: row.propertyId,
-    organizationId: row.organizationId,
-    connectionId: row.connectionId,
-    channexPropertyId: row.channexPropertyId,
-    roomTypeId: row.roomTypeId,
-    channexRoomTypeId: row.channexRoomTypeId,
-    dateRange: {
-      from: dateOnly(row.dateFrom),
-      to: dateOnly(row.dateTo),
-    },
-    inventoryVersion: row.inventoryVersion,
-    rateGateOpen: row.rateGateOpen,
-    triggerRefId: row.triggerRefId,
-    sourceOutboxEventId: row.sourceOutboxEventId ?? undefined,
-    outboxKey: row.outboxKey ?? undefined,
-    correlationId: row.correlationId ?? undefined,
-  };
-}
-
 function calendarCandidateFromSourceRow(
   row: CalendarSourceRow,
   now: Date,
@@ -1887,44 +1030,6 @@ function calendarCandidateFromSourceRow(
   };
 }
 
-function ariJobPayload(candidate: PmsChannexAriPushCandidate): Record<string, unknown> {
-  return {
-    provider: "channex",
-    source: candidate.source,
-    propertyId: candidate.propertyId,
-    organizationId: candidate.organizationId,
-    connectionId: candidate.connectionId,
-    channexPropertyId: candidate.channexPropertyId,
-    roomTypeId: candidate.roomTypeId,
-    channexRoomTypeId: candidate.channexRoomTypeId,
-    dateRange: candidate.dateRange,
-    inventoryVersion: candidate.inventoryVersion,
-    rateGateOpen: candidate.rateGateOpen,
-    triggerRefId: candidate.triggerRefId,
-    sourceOutboxEventId: candidate.sourceOutboxEventId ?? null,
-    outboxKey: candidate.outboxKey ?? null,
-  };
-}
-
-function rowJobStatus(status: string): PmsChannexAriPushJob["status"] {
-  switch (status) {
-    case "succeeded":
-      return "succeeded";
-    case "dead_lettered":
-      return "dead_lettered";
-    case "running":
-      return "running";
-    case "failed":
-      return "retry_scheduled";
-    default:
-      return "queued";
-  }
-}
-
-function toDateOnly(value: Date): string {
-  return value.toISOString().slice(0, 10);
-}
-
 function dateOnly(value: Date | string): string {
   if (value instanceof Date) {
     return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(
@@ -1977,11 +1082,4 @@ function sortJson(value: unknown): unknown {
     );
   }
   return value;
-}
-
-function sumBy<T extends Record<K, number>, K extends keyof T>(
-  values: readonly T[],
-  key: K,
-): number {
-  return values.reduce((sum, value) => sum + value[key], 0);
 }
