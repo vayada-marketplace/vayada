@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { pricingAmountStep, pricingConfigurationWithSameNumbers, pricingCurrencyScale, parsePricingConfiguration, pricingOfferOnBookingPage } from "@vayada/domain-pms/replacement-pricing";
+import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration, pricingOfferOnBookingPage } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
@@ -45,6 +45,7 @@ import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepOpening } from "./StepOpening";
 import { StepFirstPrices, type FirstPrices, type FirstThen } from "./StepFirstPrices";
 import { paymentSettingsDefaults, type PaymentSettingsDefaults } from "./pricingPaymentDefaults";
+import { carriesEveryRoom, roomsInPricingCurrency } from "./pricingCurrencyCarry";
 import { bookingsService } from "@/services/bookings";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
 import { GuestPreview } from "./GuestPreview";
@@ -58,15 +59,6 @@ import * as ui from "./pricingStyles";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 type Room = PricingSnapshot["rooms"][number];
-/** After an Owner's currency change (VAY-2390 P5, VAY-2425): only the room on screen, with its numbers in `currency`
- * rounded to its price step (US$49.99 is IDR 50). Every other room still in the old currency is left out, so a save
- * publishes only prices the Owner has seen; those rooms have no price until their own page is saved. A room whose
- * numbers can't be carried (a positive price under half a step) starts with no price too. */
-function thisRoomIn(snapshot: PricingSnapshot, roomTypeId: string, currency: string): PricingSnapshot {
-  const room = snapshot.rooms.find((value) => value.roomTypeId === roomTypeId);
-  const carried = room ? pricingConfigurationWithSameNumbers(room, currency) : null;
-  return { ...snapshot, currency, rooms: carried ? [carried] : [] };
-}
 /** A room's unsaved edits carried over a reload after a refused save, with the room as it was loaded. */
 type Kept = { room: Room; base: Room | null; terms: Record<string, PricingTermsInput>; bases: Record<string, string | null> };
 /** The New room page (VAY-2147): prices for a room that does not exist yet, under a temporary id. The page's "Create Room
@@ -362,20 +354,24 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     return () => { live = false; };
   }, []);
   const relabelFrom = pricingCurrency && publishedCurrency && publishedCurrency !== pricingCurrency ? publishedCurrency : null;
-  // VAY-2425: every currency, also one with another price step or minor unit; see `thisRoomIn`.
-  const relabeled = relabelFrom && pricingCurrency && current && current.currency !== pricingCurrency ? thisRoomIn(current, focus, pricingCurrency) : null;
+  // VAY-2425: every currency, also one with another price step or minor unit; see `roomsInPricingCurrency`.
+  const relabeled = relabelFrom && pricingCurrency && current && current.currency !== pricingCurrency ? { every: carriesEveryRoom(current.currency, pricingCurrency),
+    snapshot: { ...current, currency: pricingCurrency, rooms: roomsInPricingCurrency(current.rooms, current.currency, pricingCurrency, focus) } } : null;
+  const thisRoomOnly = !!relabelFrom && !!pricingCurrency && !carriesEveryRoom(relabelFrom, pricingCurrency);
   useEffect(() => {
     if (!relabeled) return;
-    setCurrent(relabeled);
+    setCurrent(relabeled.snapshot);
+    // Typed amounts are kept by room position and in the old units: rooms left out or rounded would misplace them.
+    if (!relabeled.every) setInputs({});
     // Unsaved only when there are prices to publish: a room without any (or the New room page) starts as before.
-    if (relabeled.rooms.length) setDirty(true);
+    if (relabeled.snapshot.rooms.length) setDirty(true);
   }, [relabeled]);
   // A first price is in the pricing currency Payment settings give (VAY-2390): never typed, so it can't drift from what
   // the hotel is paid in. With published prices it is theirs, shown in the pricing currency (above); until Payment
   // settings answer, the form shows no currency and can't save (VAY-2425: the published one may be the old currency).
   // Asked only when neither can be read.
   const holdFirst = !!display && pricingCurrency === undefined;
-  const firstCurrency = display ? (holdFirst ? undefined : relabeled?.currency ?? display.currency) : paymentDefaults?.currency ?? undefined;
+  const firstCurrency = display ? (holdFirst ? undefined : relabeled?.snapshot.currency ?? display.currency) : paymentDefaults?.currency ?? undefined;
   const firstMethods = holdFirst ? undefined : defaultMethods;
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
@@ -421,7 +417,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {/* Before any typing (VAY-2383): Payment settings already say the server would refuse the first prices. */}
     {error === null && firstForm && paymentDefaults?.notReady && <p role="status" className={ui.warningBanner}>{t("pricing.editor.financeNotReadyBefore")}</p>}
     {relabelFrom && pricingCurrency && <div role="status" className={ui.warningBanner}><p className="font-semibold">{t("pricing.currencyChanged.title", { code: pricingCurrency })}</p>
-      <p>{t("pricing.currencyChanged.body", { before: money("10000", relabelFrom), after: money("10000", pricingCurrency) })} {t("pricing.currencyChanged.thisRoomOnly", { code: pricingCurrency })}</p></div>}
+      <p>{t("pricing.currencyChanged.body", { before: money("10000", relabelFrom), after: money("10000", pricingCurrency) })}{thisRoomOnly && ` ${t("pricing.currencyChanged.thisRoomOnly", { code: pricingCurrency })}`}</p></div>}
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>

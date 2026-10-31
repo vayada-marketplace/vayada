@@ -7,6 +7,7 @@ import type {
 } from "@/services/api/replacementPricingClient";
 
 import { PricingError } from "./pricingAmounts";
+import { roomsInPricingCurrency } from "./pricingCurrencyCarry";
 import { pricingSave } from "./savePricing";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
@@ -27,15 +28,19 @@ export function pricesForRoom(
 }
 
 /** Publishes a just-created room's prices (see `pricesForRoom`) with every other room as the server has them now: one
- * whole-property save, like "Save prices" on the room's Prices tab. After an Owner's currency change (VAY-2425) the
- * rooms still in the old currency are left out, as on a room's Prices tab: they don't sell, and only prices the Owner
- * has seen go live. Storage takes another currency only as the property's pricing currency. */
+ * whole-property save, like "Save prices" on the room's Prices tab. After an Owner's currency change the rooms still in
+ * the old currency are carried as on a room's Prices tab (`roomsInPricingCurrency`, VAY-2425); storage takes another
+ * currency only as the property's pricing currency. */
 export async function publishNewRoomPrices(client: Client, prices: NewRoomPrices) {
   const saved = await client.read();
   // Someone published prices for this room since the page loaded.
   if (saved?.rooms.some((room) => room.roomTypeId === prices.room.roomTypeId))
     throw new ApiErrorResponse(409, { message: "The saved prices changed. Reload pricing." });
-  const others = saved?.currency === prices.room.currency ? saved.rooms : [];
+  const others = !saved
+    ? []
+    : saved.currency === prices.room.currency
+      ? saved.rooms
+      : roomsInPricingCurrency(saved.rooms, saved.currency, prices.room.currency, null);
   const baseRevision = saved?.revision ?? 0,
     revision = baseRevision + 1;
   const snapshot: PricingSnapshot = {

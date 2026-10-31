@@ -162,7 +162,8 @@ it("refuses without writing when prices for this room were published meanwhile",
   expect(client.prepare).not.toHaveBeenCalled();
 });
 
-it("leaves out the rooms still in the old currency after an Owner's currency change (VAY-2425)", async () => {
+it("after an Owner's currency change carries the other rooms as their Prices tab does (VAY-2390, VAY-2425)", async () => {
+  // One scale and price step (USD to EUR): every room goes out again with its numbers.
   client.read.mockResolvedValueOnce({
     currency: "USD",
     ownerReferences: { finance: "finance" },
@@ -174,7 +175,24 @@ it("leaves out the rooms still in the old currency after an Owner's currency cha
   await publishTyped();
   expect(saved.baseRevision).toBe(3);
   expect(saved.snapshot.currency).toBe("EUR");
+  expect(
+    saved.snapshot.rooms.map((room) => [room.roomTypeId, room.currency, room.revision]),
+  ).toEqual([
+    [other, "EUR", 4],
+    [created, "EUR", 4],
+  ]);
+  // Another price step (IDR to EUR): the rooms nobody has seen in EUR are left out.
+  client.read.mockResolvedValueOnce({
+    currency: "IDR",
+    ownerReferences: { finance: "finance" },
+    rooms: [{ ...otherRoom, currency: "IDR" }],
+    revision: 5,
+    sources,
+    stale: false,
+  });
+  await publishTyped();
+  expect(saved.baseRevision).toBe(5);
   expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([
-    [created, 4],
+    [created, 6],
   ]);
 });
