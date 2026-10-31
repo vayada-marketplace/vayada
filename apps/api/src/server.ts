@@ -65,7 +65,7 @@ import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
 import pg from "pg";
 import { createHmac, randomUUID } from "node:crypto";
 
-import { buildApp, type ApiAuthOptions } from "./app.js";
+import { buildApp, PRODUCTION_TRUST_PROXY, type ApiAuthOptions } from "./app.js";
 import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
 import {
   createOrdinaryHotelSetupActivation,
@@ -1755,7 +1755,7 @@ const hotelSetupChecklist = (() => {
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
-  trustProxy: ["loopback", "linklocal", "uniquelocal"],
+  trustProxy: PRODUCTION_TRUST_PROXY,
   auth: buildAuthOptions(config.auth),
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
   authSession:

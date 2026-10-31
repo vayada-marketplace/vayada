@@ -140,6 +140,7 @@ import {
   type StaffInvitationRoutesOptions,
 } from "./routes/staffInvitations.js";
 import {
+  BOOKING_LOOKUP_PATH,
   registerBookingWebPublicRoutes,
   type BookingWebAttributionSink,
   type BookingWebCheckoutAdapter,
@@ -487,6 +488,12 @@ export function handleApiError(error: FastifyError, request: FastifyRequest, rep
   });
 }
 
+/**
+ * The production proxy trust: only private hops (the load balancer) are trusted, so
+ * `request.ip` is the address the load balancer appended, never one a client wrote itself.
+ */
+export const PRODUCTION_TRUST_PROXY = ["loopback", "linklocal", "uniquelocal"];
+
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logger ?? {
@@ -497,6 +504,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       // VAY-2197: an access log line (with the IP address) would pair up with the stored funnel
       // event by its time.
       request.url.startsWith("/api/booking-web/events") ||
+      // VAY-2220: guests' browsers call the booking lookup directly, so its line (preflight
+      // included) would hold the guest's IP address.
+      BOOKING_LOOKUP_PATH.test(request.url.split("?", 1)[0] ?? "") ||
       (request.url.startsWith("/api/pms/properties/") &&
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });

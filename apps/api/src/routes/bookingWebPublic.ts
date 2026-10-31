@@ -450,7 +450,11 @@ export async function registerBookingWebPublicRoutes(
   const checkoutAdapter = options.checkoutAdapter;
 
   app.addHook("onRequest", async (request, reply) => {
-    writeBookingWebCorsHeaders(request, reply);
+    writeBookingWebCorsHeaders(
+      request,
+      reply,
+      await isOwnCustomDomainLookup(request, options.profileRepository),
+    );
   });
 
   app.options("/*", async (_request, reply) => {
@@ -690,6 +694,14 @@ export async function registerBookingWebPublicRoutes(
 
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebLookupRequest }>(
     "/hotels/:slug/bookings/lookup",
+    {
+      // Fastify's own lines for this route are off: they would carry the guest's address
+      // (VAY-2220). Log a failure without the request instead.
+      onError: async (request, _reply, error) => {
+        if ((error.statusCode ?? 500) >= 500)
+          request.log.error({ err: error }, "Booking lookup failed");
+      },
+    },
     async (request, reply) => {
       // Counted in memory before any database work; nothing about the caller goes to the
       // database (VAY-2222).
@@ -1027,12 +1039,48 @@ export async function registerBookingWebPublicRoutes(
   );
 }
 
-function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
+/**
+ * Guests' browsers post the booking lookup straight to this API, so its per-address limit counts
+ * each guest rather than Booking Web's server (VAY-2220). Its path, without the query string.
+ */
+export const BOOKING_LOOKUP_PATH = /^\/api\/booking-web\/hotels\/([^/]+)\/bookings\/lookup\/?$/;
+
+/** A hotel's verified custom domain may read that hotel's lookups, and no other hotel's. */
+async function isOwnCustomDomainLookup(
+  request: FastifyRequest,
+  repository: PublicHotelProfileRepository,
+): Promise<boolean> {
+  const slug = BOOKING_LOOKUP_PATH.exec(request.url.split("?", 1)[0] ?? "")?.[1];
+  const origin = request.headers.origin;
+  if (!slug || !isHttpsOrigin(origin) || isAllowedBookingWebOrigin(origin)) return false;
+  const profile = await repository.findProfileByCustomDomain?.(
+    normalizeHost(new URL(origin).hostname),
+  );
+  if (!profile) return false;
+  if (encodeURIComponent(profile.hotel.slug).toLowerCase() === slug.toLowerCase()) return true;
+  // A page loaded before the hotel changed its slug still asks with the old one.
+  let requested: string;
+  try {
+    requested = decodeURIComponent(slug);
+  } catch {
+    return false;
+  }
+  return (
+    (await repository.findProfileBySlug(requested))?.hotel.propertyId === profile.hotel.propertyId
+  );
+}
+
+function writeBookingWebCorsHeaders(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  ownCustomDomainLookup: boolean,
+): void {
   const origin = request.headers.origin;
   // Funnel events come from any hotel's booking site, custom domains included (VAY-2214). The
   // endpoint is public, takes no credentials and answers with no body, so any https origin may post.
   const allowed =
     isAllowedBookingWebOrigin(origin) ||
+    ownCustomDomainLookup ||
     (request.url.split("?", 1)[0] === "/api/booking-web/events" && isHttpsOrigin(origin));
   if (!allowed || typeof origin !== "string") {
     reply.header("Vary", "Origin");

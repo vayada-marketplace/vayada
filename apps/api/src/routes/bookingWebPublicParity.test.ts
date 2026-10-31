@@ -4,7 +4,7 @@ import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildApp } from "../app.js";
+import { buildApp, PRODUCTION_TRUST_PROXY } from "../app.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
 import {
   toPublicHotelProfileProjection,
@@ -826,6 +826,177 @@ describe("Booking Web public bootstrap parity", () => {
       [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13].map((attempt) => `VAY-${attempt}`),
     );
     await app.close();
+  });
+
+  describe("booking lookup straight from the guest's browser (VAY-2220)", () => {
+    const lookupUrl = "/api/booking-web/hotels/hotel-alpenrose/bookings/lookup";
+    const bookingSite = "https://hotel-alpenrose.next-booking.vayada.com";
+    const lookupApp = ({
+      repository,
+      logs,
+      lookup,
+    }: {
+      repository?: PublicHotelProfileRepository;
+      logs?: { text: string };
+      lookup?: BookingWebCheckoutAdapter["lookup"];
+    } = {}) =>
+      buildApp({
+        logger: logs
+          ? { level: "info", stream: { write: (chunk: string) => (logs.text += chunk) } }
+          : false,
+        trustProxy: PRODUCTION_TRUST_PROXY,
+        bookingWebPublicNow: () => new Date("2026-09-02T10:00:30.000Z"),
+        publicHotelProfileRepository: repository ?? createProfileRepository(legacyHotel, {}),
+        bookingWebCheckoutAdapter: {
+          ...unusedBookingWebCheckoutAdapter,
+          lookup: lookup ?? (async () => ({})),
+        },
+      });
+    // The load balancer (a private address) appends the address it saw to X-Forwarded-For;
+    // anything the browser sent itself comes before it.
+    const viaLoadBalancer = (
+      app: ReturnType<typeof buildApp>,
+      forwardedFor: string,
+      origin = bookingSite,
+      url = lookupUrl,
+    ) =>
+      app.inject({
+        method: "POST",
+        url,
+        remoteAddress: "10.0.12.34",
+        headers: { "x-forwarded-for": forwardedFor, origin },
+        payload: { bookingReference: "VAY-1", guestEmail: "guest@example.test" },
+      });
+    const statuses = async (app: ReturnType<typeof buildApp>, forwardedFor: string, times = 1) => {
+      const codes: number[] = [];
+      for (let attempt = 0; attempt < times; attempt += 1)
+        codes.push((await viaLoadBalancer(app, forwardedFor)).statusCode);
+      return codes;
+    };
+
+    it("gives every guest five lookups a minute of their own", async () => {
+      const app = lookupApp();
+      expect(await statuses(app, "203.0.113.9", 5)).toEqual([200, 200, 200, 200, 200]);
+      const refused = await viaLoadBalancer(app, "203.0.113.9");
+      expect(refused.statusCode).toBe(429);
+      // The browser can read the refusal, so the guest sees "too many tries".
+      expect(refused.headers["access-control-allow-origin"]).toBe(bookingSite);
+      // Made-up hops before the one the load balancer added don't open a new bucket.
+      expect(await statuses(app, "192.0.2.1, 203.0.113.9")).toEqual([429]);
+      // A second guest still has all five.
+      expect(await statuses(app, "198.51.100.20", 5)).toEqual([200, 200, 200, 200, 200]);
+      expect(await statuses(app, "198.51.100.20")).toEqual([429]);
+      await app.close();
+    });
+
+    it("shares one bucket among all guests whose last hop is the same, as through Booking Web's proxy", async () => {
+      // Why the lookup can't go through Booking Web's server: there the load balancer's hop is
+      // Booking Web's own public address, whoever the guest is.
+      const app = lookupApp();
+      const bookingWebServer = "198.51.100.250";
+      for (let guest = 1; guest <= 5; guest += 1)
+        expect(await statuses(app, `203.0.113.${guest}, ${bookingWebServer}`)).toEqual([200]);
+      expect(await statuses(app, `203.0.113.6, ${bookingWebServer}`)).toEqual([429]);
+      await app.close();
+    });
+
+    it("writes no log line with the guest's address, preflight and failures included", async () => {
+      const logs = { text: "" };
+      const app = lookupApp({ logs });
+      const preflight = await app.inject({
+        method: "OPTIONS",
+        url: lookupUrl,
+        remoteAddress: "10.0.12.34",
+        headers: {
+          "x-forwarded-for": "203.0.113.9",
+          origin: bookingSite,
+          "access-control-request-method": "POST",
+        },
+      });
+      expect(preflight.statusCode).toBe(204);
+      expect(await statuses(app, "203.0.113.9", 6)).toEqual([200, 200, 200, 200, 200, 429]);
+      expect(logs.text).not.toContain("203.0.113.9");
+      // Other routes still log the caller, so the check above would catch a leak.
+      await app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose",
+        remoteAddress: "10.0.12.34",
+        headers: { "x-forwarded-for": "198.51.100.20" },
+      });
+      expect(logs.text).toContain("198.51.100.20");
+      await app.close();
+
+      // A failing lookup is still logged, without the request.
+      const failureLogs = { text: "" };
+      const failing = lookupApp({
+        logs: failureLogs,
+        lookup: async () => {
+          throw new Error("lookup store unavailable");
+        },
+      });
+      expect(await statuses(failing, "203.0.113.9")).toEqual([500]);
+      expect(failureLogs.text).toContain("Booking lookup failed");
+      expect(failureLogs.text).toContain("lookup store unavailable");
+      expect(failureLogs.text).not.toContain("203.0.113.9");
+      await failing.close();
+    });
+
+    it("lets a hotel's verified custom domain read its own lookups, and nothing else", async () => {
+      const otherHotel = { ...legacyHotel, id: "booking_hotel_other", slug: "other-hotel" };
+      const repository = createProfileRepository(legacyCustomDomainHotel, {
+        // The hotel's slug before a rename (still open in a guest's tab), and another hotel.
+        "alpenrose-old": legacyCustomDomainHotel,
+        "other-hotel": otherHotel,
+      });
+      const domainsAsked: string[] = [];
+      const findProfileByCustomDomain = repository.findProfileByCustomDomain!;
+      repository.findProfileByCustomDomain = (domain) => {
+        domainsAsked.push(domain);
+        return findProfileByCustomDomain(domain);
+      };
+      const app = lookupApp({ repository });
+      const ownDomain = "https://book.alpenrose.example";
+      let guest = 0;
+      const allowedOrigin = async (origin: string, slug = "hotel-alpenrose") =>
+        (
+          await viaLoadBalancer(
+            app,
+            `203.0.113.${(guest += 1)}`,
+            origin,
+            `/api/booking-web/hotels/${slug}/bookings/lookup`,
+          )
+        ).headers["access-control-allow-origin"];
+
+      const preflight = await app.inject({
+        method: "OPTIONS",
+        url: lookupUrl,
+        headers: { origin: ownDomain, "access-control-request-method": "POST" },
+      });
+      expect(preflight.statusCode).toBe(204);
+      expect(preflight.headers["access-control-allow-origin"]).toBe(ownDomain);
+      expect(preflight.headers["access-control-allow-credentials"]).toBeUndefined();
+      expect(await allowedOrigin(ownDomain)).toBe(ownDomain);
+      expect(await allowedOrigin(ownDomain, "alpenrose-old")).toBe(ownDomain);
+      // Another hotel's lookups, an unknown slug or domain, or plain http: no.
+      expect(await allowedOrigin(ownDomain, "other-hotel")).toBeUndefined();
+      expect(await allowedOrigin(ownDomain, "no-such-hotel")).toBeUndefined();
+      expect(await allowedOrigin("https://www.hotel-example.com")).toBeUndefined();
+      expect(await allowedOrigin("http://book.alpenrose.example")).toBeUndefined();
+      // The other routes keep going through Booking Web's proxy: Vayada origins only.
+      const profilePreflight = await app.inject({
+        method: "OPTIONS",
+        url: "/api/booking-web/hotels/hotel-alpenrose",
+        headers: { origin: ownDomain, "access-control-request-method": "GET" },
+      });
+      expect(profilePreflight.headers["access-control-allow-origin"]).toBeUndefined();
+      // Vayada's own booking sites need no domain lookup.
+      expect(await allowedOrigin(bookingSite)).toBe(bookingSite);
+      expect(domainsAsked).toEqual([
+        ...Array(5).fill("book.alpenrose.example"),
+        "www.hotel-example.com",
+      ]);
+      await app.close();
+    });
   });
 
   it("rejects public booking references as authorization handles", async () => {
