@@ -2009,6 +2009,35 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           ["2026-10-02", 2],
           ["2026-10-02", 1],
         ]);
+        if (scenario === "repository-date-change")
+          // VAY-2428: extras the guest asked for after booking are priced for the booked nights, so a
+          // waiting or accepted request keeps the dates; a declined one doesn't.
+          for (const status of ["pending", "accepted"]) {
+            const request = (
+              await db.query<{ id: string }>(
+                `INSERT INTO booking.booking_change_requests
+                   (guest_booking_id,request_type,requested_by,status,decided_at)
+                 VALUES($1,'addon_change','guest',$2,CASE WHEN $2='accepted' THEN now() END)
+                 RETURNING id::text`,
+                [bookingId, status],
+              )
+            ).rows[0]!.id;
+            await expect(
+              actions.preview(hostScope, {
+                action: "edit_dates",
+                checkIn: amendedStay.checkIn,
+                checkOut: amendedStay.checkOut,
+                reason: "Guest asked",
+              }),
+            ).rejects.toMatchObject({
+              code: "unsupported_edit",
+              message: "Bookings with requested extras can't change dates here yet.",
+            });
+            await db.query(
+              `UPDATE booking.booking_change_requests SET status='declined',decided_at=now() WHERE id=$1`,
+              [request],
+            );
+          }
         const hostPreview = await actions.preview(hostScope, {
           action: "edit_dates",
           checkIn: amendedStay.checkIn,

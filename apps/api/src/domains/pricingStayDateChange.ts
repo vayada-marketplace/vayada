@@ -244,6 +244,17 @@ export async function quotePricingStayDateChange(
     return refuse("Booking requests can't change dates here yet.");
   if (booked.stay.addons.length)
     return refuse("Bookings with add-ons can't change dates here yet.");
+  // VAY-2428: extras the guest asked for after booking are priced for the booked nights, so a waiting
+  // or accepted request keeps the dates too. One saved before this runs is seen: the extras route
+  // locks the same booking row.
+  const extrasRequest = await client.query(
+    `SELECT 1 FROM booking.booking_change_requests
+     WHERE guest_booking_id=$1::uuid AND request_type='addon_change' AND status IN ('pending','accepted')
+     LIMIT 1`,
+    [booking.guestBookingId],
+  );
+  if (extrasRequest.rows.length)
+    return refuse("Bookings with requested extras can't change dates here yet.");
   if (discounted(booked)) return refuse("Discounted bookings can't change dates here yet.");
   // The PMS must have adopted the stay: its assignments carry the holds that move.
   const adopted = (
