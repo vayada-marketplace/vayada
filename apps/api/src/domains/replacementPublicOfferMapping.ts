@@ -92,16 +92,21 @@ export function publicOfferCancellations(
         (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
       );
       if (!terms || !binding) continue;
-      const cancellation = publicOfferCancellation(terms.cancellation);
-      const days = lastRefundDays(terms.cancellation);
-      cancellations.set(
-        binding.publicOfferKey,
-        cancellation.kind === "partial_refund" && days !== null
-          ? { ...cancellation, days }
-          : cancellation,
-      );
+      cancellations.set(binding.publicOfferKey, guestOfferCancellation(terms.cancellation));
     }
   return cancellations;
+}
+
+/** An offer's cancellation as guests see it; a partial refund adds its last refund day, so a stay past it reads as
+ * no refund (VAY-2406). The offers list and the booked rooms of a booking (VAY-2428) both use it. */
+export function guestOfferCancellation(
+  terms: Parameters<typeof publicOfferCancellation>[0],
+): PublicOfferCancellation {
+  const cancellation = publicOfferCancellation(terms);
+  const days = lastRefundDays(terms);
+  return cancellation.kind === "partial_refund" && days !== null
+    ? { ...cancellation, days }
+    : cancellation;
 }
 
 export type PublicOfferPaymentSchedule =

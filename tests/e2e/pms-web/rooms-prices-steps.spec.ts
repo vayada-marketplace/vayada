@@ -214,13 +214,14 @@ async function mockPricing(
     payment = storedPayment,
     notSelling = [] as Record<string, unknown>[],
     guestDisplay = null as Record<string, unknown> | null,
+    cancellation = flexible as Record<string, unknown>,
   } = {},
 ) {
   const terms = new Map<string, Record<string, unknown>>([
-    ["flexible", { revision: TERMS, cancellation: flexible }],
-    ["breakfast", { revision: TERMS, cancellation: flexible }],
-    ["standard", { revision: TERMS, cancellation: flexible }],
-    ["package", { revision: TERMS, cancellation: flexible }],
+    ["flexible", { revision: TERMS, cancellation }],
+    ["breakfast", { revision: TERMS, cancellation }],
+    ["standard", { revision: TERMS, cancellation }],
+    ["package", { revision: TERMS, cancellation }],
   ]);
   const state = {
     publication: initial,
@@ -726,6 +727,38 @@ test("edits a season's price in the table and adds dates to a season (VAY-2280)"
     ]),
   );
   expect(deluxe.offers[0].restrictions.seasons).toHaveLength(3);
+  await assertHealthy();
+});
+
+// VAY-2428: like VAY-2392's hint for free cancellation, a partial-refund rate says when refunds end.
+test("says from when guests of a partial-refund rate get no refund", async ({ page }, testInfo) => {
+  await openPms(page);
+  await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]), [], {
+    cancellation: {
+      kind: "flexible",
+      terms: {
+        ...flexible.terms,
+        freeCancellationDeadlineDays: 30,
+        flexibleCancellationType: "partial_refund",
+        partialRefundTiers: [
+          { minDaysBeforeCheckIn: 30, refundPercent: 100 },
+          { minDaysBeforeCheckIn: 14, refundPercent: 50 },
+          { minDaysBeforeCheckIn: 3, refundPercent: 0 },
+        ],
+      },
+    },
+  });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const steps = main(page).getByText("This rate refunds part of the stay, in steps.");
+  await steps.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("rates-partial-refund-hint.png") });
+  await expect(steps).toBeVisible();
+  await expect(
+    main(page).getByText(
+      "Guests booking less than 14 days before arrival get no refund. The booking engine shows this rate as Non-refundable for those dates.",
+    ),
+  ).toBeVisible();
   await assertHealthy();
 });
 

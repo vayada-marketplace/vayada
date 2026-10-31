@@ -226,13 +226,14 @@ function bookedRooms(value: unknown): BookedRoom[] | undefined {
   const rooms: BookedRoom[] = [];
   for (const room of value as Record<string, unknown>[]) {
     const c = room?.cancellation as Record<string, unknown> | null | undefined;
+    const days = Number.isInteger(c?.days) && (c?.days as number) >= 0 ? (c?.days as number) : null;
+    // A partial refund keeps its last refund day when the API sends one (VAY-2428).
     const cancellation =
-      c?.kind === "non_refundable" || c?.kind === "partial_refund"
+      c?.kind === "non_refundable" || (c?.kind === "partial_refund" && days === null)
         ? { kind: c.kind }
-        : c?.kind === "free_until_days_before_arrival" &&
-            Number.isInteger(c.days) &&
-            (c.days as number) >= 0
-          ? { kind: c.kind, days: c.days as number }
+        : (c?.kind === "free_until_days_before_arrival" || c?.kind === "partial_refund") &&
+            days !== null
+          ? { kind: c.kind, days }
           : null;
     if (
       !room ||

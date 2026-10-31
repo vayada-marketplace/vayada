@@ -143,6 +143,7 @@
       "windowPassed": "Die kostenlose Stornierung endet {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
       "refundsPassed": "Erstattungen enden {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
       "freeEnded": "Die kostenlose Stornierung ist abgelaufen",
+      "refundsEnded": "Keine Erstattung mehr",
       "meal": {
         "room_only": "Nur Zimmer",
         "breakfast": "Frühstück inklusive",

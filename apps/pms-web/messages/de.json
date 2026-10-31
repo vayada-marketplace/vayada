@@ -2960,6 +2960,7 @@
   "pricing.rates.flexibleLocked": "Dieser Tarif ist gerade nicht erstattbar. Wähle kostenlose Stornierung oder eine Teilerstattung.",
   "pricing.rates.freeUntil": "Kostenlos bis wie viele Tage vor Anreise?",
   "pricing.rates.freeUntilHint": "Gäste, die weniger als {days} vor der Anreise buchen, können nicht kostenlos stornieren. Die Buchungsseite zeigt diesen Tarif für diese Daten als „Nicht erstattbar“ an.",
+  "pricing.rates.partialUntilHint": "Gäste, die weniger als {days} vor der Anreise buchen, erhalten keine Erstattung. Die Buchungsseite zeigt diesen Tarif für diese Daten als „Nicht erstattbar“ an.",
   "pricing.rates.nonRefundableSub": "{percent} % günstiger, keine Erstattung",
   "pricing.rates.nonRefundableOffSub": "Günstiger, keine Erstattung",
   "pricing.rates.nonRefundableOff": "Aus. Schalte ihn an, um einen günstigeren Preis ohne Erstattung anzubieten.",

@@ -7,12 +7,42 @@ import {
   CANCEL_LINE_TEXT,
   BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE,
   BOOKING_RESERVED_PENDING_PAYMENT_EMAIL_JOB_TYPE,
+  bookedAddonsText,
   bookingLifecycleEmailJobKey,
   enqueueBookingLifecycleEmailJob,
   enqueueBookingTransitionNotifications,
   type BookingLifecycleEmailInput,
   type BookingLifecycleTransition,
 } from "./bookingEmails.js";
+
+describe("booked extras in booking emails (VAY-2428)", () => {
+  const line = (addonId: string, name: string, quantity: number, serviceDates: string[] = []) => ({
+    addonId,
+    name,
+    quantity,
+    serviceDates,
+  });
+  it("lists an extra booked for every night once, with its days", () => {
+    expect(
+      bookedAddonsText([
+        line("breakfast", "Breakfast", 2, ["2026-11-01"]),
+        line("breakfast", "Breakfast", 2, ["2026-11-02"]),
+        line("transfer", "Airport transfer", 1, ["2026-11-01"]),
+        line("late", "Late check-out", 1),
+      ]),
+    ).toBe("Breakfast × 2 (1 Nov – 2 Nov), Airport transfer × 1 (Sun 1 Nov), Late check-out × 1");
+  });
+  it("names separate days apart, adds up older lines that differ, and says nothing without extras", () => {
+    expect(
+      bookedAddonsText([
+        line("spa", "Spa", 1, ["2026-11-03"]),
+        line("spa", "Spa", 2, ["2026-11-01"]),
+      ]),
+    ).toBe("Spa × 3 (Sun 1 Nov · Tue 3 Nov)");
+    expect(bookedAddonsText([])).toBeNull();
+    expect(bookedAddonsText(null)).toBeNull();
+  });
+});
 
 describe("booking lifecycle email jobs", () => {
   it("rejects unverified booking money before serializing or queueing email", async () => {

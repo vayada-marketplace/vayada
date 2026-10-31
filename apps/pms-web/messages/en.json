@@ -2946,6 +2946,7 @@
   "pricing.rates.flexibleLocked": "This rate is non-refundable now. Pick free cancellation or a partial refund.",
   "pricing.rates.freeUntil": "Free until how many days before arrival?",
   "pricing.rates.freeUntilHint": "Guests booking less than {days} before arrival can't cancel for free. The booking engine shows this rate as Non-refundable for those dates.",
+  "pricing.rates.partialUntilHint": "Guests booking less than {days} before arrival get no refund. The booking engine shows this rate as Non-refundable for those dates.",
   "pricing.rates.nonRefundableSub": "{percent}% cheaper, no refund",
   "pricing.rates.nonRefundableOffSub": "Cheaper, no refund",
   "pricing.rates.nonRefundableOff": "Off. Turn it on to offer a cheaper price without refunds.",

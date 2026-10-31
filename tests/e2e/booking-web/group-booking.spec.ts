@@ -216,3 +216,38 @@ test("shows each booked room on the confirmation and on My booking", async ({ pa
   );
   await assertHealthy();
 });
+
+// VAY-2428: a partial-refund room past its last refund day says so, as Review & pay does.
+test("says when a booked partial-refund room's refunds have ended", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo, {
+    expectedMissingUrls: [/\/change-request/],
+  });
+  // Two days before arrival: the Deluxe room's refunds ended 5 days before it, the Garden room's last until arrival.
+  await page.clock.setFixedTime(new Date("2026-11-08T08:00:00Z"));
+  const partialBooking = {
+    ...groupBooking,
+    bookedRooms: [
+      { ...groupBooking.bookedRooms[0], cancellation: { kind: "partial_refund", days: 5 } },
+      { ...groupBooking.bookedRooms[1], cancellation: { kind: "partial_refund", days: 0 } },
+    ],
+  };
+  await mockBookingApis(page);
+  await page.route(`${hotelApi}/bookings/lookup`, (route) =>
+    route.fulfill({ json: partialBooking }),
+  );
+  await page.route("**/change-request**", (route) => route.fulfill({ status: 404, json: {} }));
+
+  for (const path of [
+    `/booking/VAY-2320?email=${encodeURIComponent(groupBooking.guestEmail)}`,
+    `/my-booking?reference=VAY-2320&email=${encodeURIComponent(groupBooking.guestEmail)}`,
+  ]) {
+    await page.goto(path);
+    const rooms = page.getByTestId("booked-rooms");
+    await expect(rooms).toContainText("Room 1 · Deluxe Double Room");
+    await expect(rooms).toContainText("No meals included · No refund any more");
+    await expect(rooms).toContainText(
+      "Breakfast included · Part of the price is refunded if you cancel.",
+    );
+  }
+  await assertHealthy();
+});
