@@ -24,6 +24,12 @@ import {
 import { reconcilePendingChannexRoomAvailability } from "./channexPendingRoomAvailabilityReconciliation.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
+import { createPgChannexAriSchedule } from "../jobs/pmsChannexAriSchedule.js";
+import { runPmsChannexManagementWorkerOnce } from "../jobs/pmsChannexManagementWorker.js";
+import { createPmsChannexManagementTargetState } from "../jobs/pmsChannexManagementTargetState.js";
+import { createChannexManagementProvider } from "../integrations/channexManagement.js";
+import { createHotelSetupOrdinaryLoginFixture } from "../hotelSetupOrdinaryLogin.fixture.js";
+import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { createHash, randomUUID } from "node:crypto";
 import { runChannexBookingJobs } from "../jobs/channexBookings.js";
 import { persistChannexAssignments } from "./channexBookingAssignments.js";
@@ -4073,6 +4079,481 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         ),
       ).resolves.toEqual({ ok: false, error: { code: "inventory_invariant_violation" } });
     }
+  });
+
+  // VAY-2352: a booking-page hold and its release reach Channex through the path production runs
+  // for a claimed hotel with ARI on: the fingerprint schedule, the 0323 inventory trigger and the
+  // management worker. Not proven here:
+  // - the published-offer steps that run before availability in a full sync; the hotel has no
+  //   offer targets, and VAY-2108's suites own that path;
+  // - the worker login's grants; the worker side runs on the test database owner, and
+  //   channexManagementWorkerBoundary covers the grants.
+  // The hold runs on a login shaped like the production API role.
+  describe("booking-page holds and Channex availability (VAY-2352)", () => {
+    const reservations = createTargetPmsInventoryReservationPort();
+    type HeldHotel = Awaited<ReturnType<typeof heldHotelFixture>>;
+    type WorkerScope = Pick<
+      Parameters<typeof createPgPmsChannexManagementWorkerStore>[0],
+      "ariSyncMutating" | "connectionOnly" | "claimedOwnedPropertyIds"
+    >;
+
+    async function heldHotelFixture() {
+      const f = await createFixture(admin, repositories, [2]);
+      // The hotel's today from the database clock, as the availability coordinator reads it.
+      const days = (
+        await admin.query<{ day: string }>(
+          `SELECT ((clock_timestamp() AT TIME ZONE 'Europe/Berlin')::date + n)::text AS day
+           FROM generate_series(0,3) n ORDER BY n`,
+        )
+      ).rows.map(({ day }) => day) as [string, string, string, string];
+      await f.repository.materializeInventory(
+        materializationCommand(f, "vay-2352", 1, days[0], days[3]),
+      );
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship)
+        VALUES($1,'hotel_catalog','property',$2,'owner'),($1,'pms','pms_property',$2,'owner')`,
+        [f.organizationId, f.propertyId],
+      );
+      await admin.query(
+        "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management')",
+        [f.organizationId],
+      );
+      await admin.query(
+        `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+        VALUES($1,'channex',$2,'active','enable')`,
+        [f.propertyId, f.propertyId],
+      );
+      const connectionId = (
+        await admin.query(
+          `INSERT INTO pms.channel_connections(property_id,provider,external_property_id,connection_status)
+          VALUES($1,'channex',$2,'connected') RETURNING id`,
+          [f.propertyId, f.propertyId],
+        )
+      ).rows[0].id;
+      const externalRoomTypeId = randomUUID();
+      await admin.query(
+        `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+        VALUES($1,$2,$3,$4)`,
+        [f.propertyId, connectionId, f.roomTypeId, externalRoomTypeId],
+      );
+      // The public booking page the hold is taken from.
+      await admin.query(
+        `INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose,status)
+        VALUES($1::uuid,$1::text,'canonical','active')`,
+        [f.propertyId],
+      );
+      await admin.query(
+        `INSERT INTO hotel_catalog.property_public_profile_read_model
+          (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
+        VALUES($1::uuid,$2,'VAY-2352 hold',$1::text,'en',ARRAY['en'],'complete')`,
+        [f.propertyId, `vay-1063-${f.propertyId}`],
+      );
+      await admin.query(
+        `INSERT INTO distribution.public_hotel_bookability_profiles
+          (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,default_currency,
+           supported_currencies,profile_status,freshness_status,public_setup_completeness)
+        VALUES($1::uuid,$2,$1::text,'https://example.test','https://example.test','Europe/Berlin','EUR',
+          ARRAY['EUR'],'public','fresh','{"status":"ready"}')`,
+        [f.propertyId, `vay-1063-${f.propertyId}`],
+      );
+      await admin.query(
+        `INSERT INTO distribution.public_room_offer_snapshots
+          (property_id,room_type_id,stay_date,public_offer_key,available_rooms,base_price_amount,currency,
+           payment_options,freshness_status,occupancy,rate_summary)
+        SELECT property_id,room_type_id,stay_date,room_type_id::text,available_count,100,'EUR',
+          ARRAY['pay_at_property'],'fresh','{"maxAdults":2,"maxChildren":0,"maxOccupancy":2}',
+          '{"minStayNights":1}'
+        FROM pms.inventory_days WHERE property_id=$1`,
+        [f.propertyId],
+      );
+      return { ...f, days, externalRoomTypeId };
+    }
+
+    /** Channex's availability API: each POST is one task; readback returns the last value sent. */
+    function fakeChannex(f: HeldHotel) {
+      const nights = new Map<string, number>(),
+        tasks = new Map<string, unknown>(),
+        posts: { date: string; availability: number }[] = [],
+        foreign: unknown[] = [];
+      const respond = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+      const send = vi.fn<typeof fetch>(async (input, init) => {
+        const url = new URL(String(input));
+        if (init?.method === "POST" && url.pathname === "/api/v1/availability") {
+          const body = JSON.parse(String(init.body)) as {
+            values: {
+              property_id: string;
+              room_type_id: string;
+              date_from: string;
+              date_to: string;
+              availability: number;
+            }[];
+          };
+          for (const value of body.values) {
+            if (
+              value.property_id !== f.propertyId ||
+              value.room_type_id !== f.externalRoomTypeId ||
+              value.date_to !== value.date_from
+            )
+              foreign.push(value);
+            nights.set(value.date_from, value.availability);
+            posts.push({ date: value.date_from, availability: value.availability });
+          }
+          const id = randomUUID();
+          tasks.set(id, body);
+          return respond({ data: [{ type: "task", id }], meta: { message: "Success" } });
+        }
+        if (init?.method === "GET" && url.pathname.startsWith("/api/v1/tasks/")) {
+          const id = url.pathname.slice("/api/v1/tasks/".length);
+          return respond({
+            data: {
+              type: "task",
+              id,
+              attributes: {
+                id,
+                task: "Property.UpdateAvailability",
+                payload: tasks.get(id),
+                success: true,
+                errors: [],
+                received_at: "2026-09-16T00:00:00.000001",
+                executed_at: "2026-09-16T00:00:00.000002",
+                finished_at: "2026-09-16T00:00:00.000003",
+              },
+            },
+          });
+        }
+        if (init?.method === "GET" && url.pathname === "/api/v1/availability") {
+          const date = url.searchParams.get("filter[date][gte]")!;
+          return respond({
+            data: { [f.externalRoomTypeId]: { [date]: nights.get(date) } },
+            meta: { warnings: [] },
+          });
+        }
+        throw new Error(`Unexpected Channex request ${init?.method} ${url.pathname}`);
+      });
+      return {
+        send,
+        foreign,
+        nights: () => Object.fromEntries([...nights].sort(([a], [b]) => a.localeCompare(b))),
+        /** POSTs since the last call, by night. */
+        sent: () => posts.splice(0).sort((a, b) => a.date.localeCompare(b.date)),
+      };
+    }
+
+    function managementWorker(
+      f: HeldHotel,
+      channex: ReturnType<typeof fakeChannex>,
+      scope: WorkerScope,
+    ) {
+      // The production claim query, limited to this hotel so other suites' jobs stay where they are.
+      const limitToHotel = (text: string) => {
+        if (!text.includes('max_attempts AS "maxAttempts"')) return text;
+        const limited = text.replace(
+          "WHERE queue_name = $1",
+          `WHERE property_id='${f.propertyId}'::uuid AND queue_name = $1`,
+        );
+        if (limited === text) throw new Error("The worker claim query changed shape");
+        return limited;
+      };
+      const pool = {
+        connect: async () => {
+          const client = await channelPool.connect();
+          return {
+            release: client.release.bind(client),
+            query: (text: string, values?: unknown[]) => client.query(limitToHotel(text), values),
+          };
+        },
+        end: async () => {},
+      };
+      const store = createPgPmsChannexManagementWorkerStore({
+        connectionString: TEST_DATABASE_URL!,
+        pool,
+        targetState: createPmsChannexManagementTargetState(),
+        claimedEnableJobs: false,
+        ...scope,
+      });
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        canSyncAri: scope.ariSyncMutating === true,
+        fetch: channex.send,
+        plans: {
+          plan: vi.fn(async () => {
+            throw new Error("The legacy ARI plan must not run");
+          }),
+        },
+        reconcileClosedUploads: async () => ({
+          kind: "pending_uploads_reconciled" as const,
+          count: 0,
+        }),
+        dispatchClosedUpload: async () => ({ kind: "no_closed_upload" as const }),
+        activatePublishedOffers: async () => ({ kind: "no_targets" as const }),
+        reconcileRoomAvailability: (lease, get) =>
+          reconcilePendingChannexRoomAvailability(channelPool, f.repository, lease, get),
+        prepareRoomAvailability: (lease) =>
+          prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease),
+      });
+      const step = async () => {
+        // A continued upload waits one second before its next attempt; skip the wait.
+        await admin.query(
+          `UPDATE platform.jobs SET run_after=now()
+           WHERE property_id=$1 AND queue_name='pms.channex.management' AND status='pending'`,
+          [f.propertyId],
+        );
+        return runPmsChannexManagementWorkerOnce({ store, provider, workerId: "vay-2352-worker" });
+      };
+      return {
+        step,
+        /** Runs the hotel's queue until it is empty; returns each run's outcome. */
+        async drain() {
+          const outcomes: string[] = [];
+          for (let run = 0; run < 30; run += 1) {
+            const result = await step();
+            if (result.outcome === "idle") return outcomes;
+            outcomes.push(result.outcome);
+          }
+          throw new Error("The Channex worker did not drain the hotel's queue");
+        },
+      };
+    }
+
+    async function onApiLogin<T>(pool: pg.Pool, run: (client: pg.PoolClient) => Promise<T>) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await run(client);
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    const hold = (pool: pg.Pool, f: HeldHotel, checkIn: string, checkOut: string) =>
+      onApiLogin(pool, async (transaction) => {
+        const reservation = await reservations.reserve({
+          transaction,
+          propertyId: f.propertyId,
+          quoteSessionId: randomUUID(),
+          roomTypeId: f.roomTypeId,
+          publicOfferKey: f.roomTypeId,
+          checkIn,
+          checkOut,
+          roomCount: 1,
+          currency: "EUR",
+          occurredAt: new Date(),
+        });
+        if (!reservation) throw new Error("The booking page hold was refused");
+        return reservation;
+      });
+
+    const reservationChanges = async (propertyId: string) =>
+      (
+        await admin.query(
+          `SELECT payload->>'reason' AS reason,payload->>'coverageFrom' AS "from",
+             payload->>'coverageThroughExclusive' AS "throughExclusive"
+           FROM platform.outbox_events
+           WHERE property_id=$1 AND destination='pms.channel-manager'
+             AND event_type='pms.inventory.ari_changed' AND resource_type='inventory_reservation'
+           ORDER BY created_at,id`,
+          [propertyId],
+        )
+      ).rows;
+
+    const managementJobs = async (propertyId: string) =>
+      (
+        await admin.query(
+          `SELECT job_metadata->>'source' AS source,status FROM platform.jobs
+           WHERE property_id=$1 AND queue_name='pms.channex.management' ORDER BY created_at,id`,
+          [propertyId],
+        )
+      ).rows;
+
+    it("lowers each held night once and raises it once on release, with the hold on the API login", async () => {
+      const f = await heldHotelFixture();
+      const [d0, d1, d2, d3] = f.days;
+      const channex = fakeChannex(f);
+      const worker = managementWorker(f, channex, {
+        ariSyncMutating: true,
+        claimedOwnedPropertyIds: [f.propertyId],
+      });
+      const schedule = createPgChannexAriSchedule(TEST_DATABASE_URL!, {
+        propertyIds: [f.propertyId],
+      });
+      const login = await createHotelSetupOrdinaryLoginFixture(admin, TEST_DATABASE_URL!);
+      const api = new pg.Pool({ connectionString: login.connectionString });
+      try {
+        // ARI switched on for the owned hotel: one scheduled full sync sends every night once.
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.drain()).toEqual([
+          "continued",
+          "continued",
+          "continued",
+          "continued",
+          "succeeded",
+        ]);
+        expect(channex.sent()).toEqual([d0, d1, d2, d3].map((date) => ({ date, availability: 2 })));
+        // A successful sync does not schedule itself again.
+        expect(await schedule.enqueue()).toBe(0);
+
+        // The hold, taken on a login shaped like production's API role.
+        const reservation = await hold(api, f, d1, d3);
+        expect(await reservationChanges(f.propertyId)).toEqual([
+          { reason: "reservation_held", from: d1, throughExclusive: d3 },
+        ]);
+        expect(await schedule.enqueue()).toBe(1);
+        // The 0323 trigger queued a full sync from the held row, and the schedule saw the change.
+        expect(await managementJobs(f.propertyId)).toEqual([
+          { source: "channex-ari-schedule", status: "succeeded" },
+          { source: "canonical_inventory", status: "pending" },
+          { source: "channex-ari-schedule", status: "pending" },
+        ]);
+        // The first job sends both nights; the second finds them current. No retries.
+        expect(await worker.drain()).toEqual(["continued", "continued", "succeeded", "succeeded"]);
+        expect(channex.sent()).toEqual([
+          { date: d1, availability: 1 },
+          { date: d2, availability: 1 },
+        ]);
+        expect(channex.nights()).toEqual({ [d0]: 2, [d1]: 1, [d2]: 1, [d3]: 2 });
+
+        // Running again changes nothing: the schedule has no new change, and another full sync
+        // finds every night already current.
+        expect(await schedule.enqueue()).toBe(0);
+        await admin.query("SELECT pms.enqueue_inventory_ari($1::uuid,'vay-2352-held-rerun')", [
+          f.propertyId,
+        ]);
+        expect(await worker.drain()).toEqual(["succeeded"]);
+        expect(channex.sent()).toEqual([]);
+
+        // The release (expired, rejected or withdrawn booking), also on the API login.
+        await onApiLogin(api, (transaction) =>
+          reservations.release({
+            transaction,
+            propertyId: f.propertyId,
+            reservation,
+            occurredAt: new Date(),
+          }),
+        );
+        expect(await reservationChanges(f.propertyId)).toEqual([
+          { reason: "reservation_held", from: d1, throughExclusive: d3 },
+          { reason: "reservation_released", from: d1, throughExclusive: d3 },
+        ]);
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.drain()).toEqual(["continued", "continued", "succeeded", "succeeded"]);
+        expect(channex.sent()).toEqual([
+          { date: d1, availability: 2 },
+          { date: d2, availability: 2 },
+        ]);
+        expect(channex.nights()).toEqual({ [d0]: 2, [d1]: 2, [d2]: 2, [d3]: 2 });
+
+        expect(await schedule.enqueue()).toBe(0);
+        await admin.query("SELECT pms.enqueue_inventory_ari($1::uuid,'vay-2352-released-rerun')", [
+          f.propertyId,
+        ]);
+        expect(await worker.drain()).toEqual(["succeeded"]);
+        expect(channex.sent()).toEqual([]);
+
+        expect(new Set((await managementJobs(f.propertyId)).map((job) => job.status))).toEqual(
+          new Set(["succeeded"]),
+        );
+        expect(channex.foreign).toEqual([]);
+      } finally {
+        await api.end();
+        await login.drop();
+        await schedule.close();
+      }
+    });
+
+    it("sends nothing while ARI sync is observe_only or the hotel is not owned", async () => {
+      const f = await heldHotelFixture();
+      const [, d1, , d3] = f.days;
+      const channex = fakeChannex(f);
+      const schedule = createPgChannexAriSchedule(TEST_DATABASE_URL!, {
+        propertyIds: [f.propertyId],
+      });
+      try {
+        await hold(channelPool, f, d1, d3);
+        // The 0323 trigger still queues the job; nothing may pick it up or send it.
+        expect(await managementJobs(f.propertyId)).toEqual([
+          { source: "canonical_inventory", status: "pending" },
+        ]);
+        // Production today, and a claimed hotel before ARI is switched on: connection scope only.
+        expect(
+          await managementWorker(f, channex, {
+            ariSyncMutating: false,
+            connectionOnly: true,
+          }).drain(),
+        ).toEqual([]);
+        // ARI on, but this hotel is not on the owned list: no job is claimed and none is scheduled,
+        // although the schedule does see its change once the hotel is owned.
+        const otherHotel = randomUUID();
+        expect(
+          await managementWorker(f, channex, {
+            ariSyncMutating: true,
+            claimedOwnedPropertyIds: [otherHotel],
+          }).drain(),
+        ).toEqual([]);
+        const unowned = createPgChannexAriSchedule(TEST_DATABASE_URL!, {
+          propertyIds: [otherHotel],
+        });
+        try {
+          expect(await unowned.enqueue()).toBe(0);
+        } finally {
+          await unowned.close();
+        }
+        expect(await schedule.enqueue()).toBe(1);
+        expect(
+          await managementWorker(f, channex, {
+            ariSyncMutating: true,
+            claimedOwnedPropertyIds: [otherHotel],
+          }).drain(),
+        ).toEqual([]);
+        // Even a job handed straight to the provider sends nothing while ARI is not mutating.
+        const job = (
+          await admin.query(
+            `SELECT id::text AS "jobId",payload FROM platform.jobs
+             WHERE property_id=$1 AND queue_name='pms.channex.management'
+               AND job_metadata->>'source'='canonical_inventory'`,
+            [f.propertyId],
+          )
+        ).rows[0];
+        const observeOnly = createChannexManagementProvider({
+          apiBaseUrl: "https://staging.channex.io",
+          apiKey: "synthetic",
+          canSyncAri: false,
+          fetch: channex.send,
+          plans: { plan: vi.fn() },
+        });
+        expect(
+          await observeOnly.execute(
+            {
+              jobId: job.jobId,
+              propertyId: f.propertyId,
+              correlationId: null,
+              attemptNumber: 1,
+              maxAttempts: 5,
+              input: job.payload,
+            },
+            { workerId: "vay-2352-worker" },
+          ),
+        ).toMatchObject({ ok: false, code: "invalid_state" });
+        expect(channex.send).not.toHaveBeenCalled();
+        expect(await managementJobs(f.propertyId)).toEqual([
+          { source: "canonical_inventory", status: "pending" },
+          { source: "channex-ari-schedule", status: "pending" },
+        ]);
+      } finally {
+        // Leave no claimable sync job behind for later suites on this database.
+        await admin.query(
+          `UPDATE platform.jobs SET status='canceled',finished_at=now()
+           WHERE property_id=$1 AND queue_name='pms.channex.management' AND status='pending'`,
+          [f.propertyId],
+        );
+        await schedule.close();
+      }
+    });
   });
 });
 
