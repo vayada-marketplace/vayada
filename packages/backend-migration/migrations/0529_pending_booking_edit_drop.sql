@@ -21,9 +21,14 @@
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '15s';
 
+-- The views go first. DROP VIEW locks only the view, and a reader locks a view before its tables, so
+-- dropping them after the table lock below could deadlock with one. 0163 defines the support view on
+-- the receipts view. A refused gate rolls these back too.
+DROP VIEW pms.pending_booking_edit_support;
+DROP VIEW pms.pending_booking_edit_receipts;
+
 -- The dropped tables and every table one of them references (dropping a foreign key removes its
--- triggers there), in one statement and one order. The views are not locked here: locking a view
--- locks the tables it reads, and DROP VIEW needs only the view.
+-- triggers there), in one statement and one order.
 LOCK TABLE
   booking.edit_authorization_releases, booking.guest_bookings, booking.pending_booking_edit_attempts,
   booking.quote_sessions, finance.payment_provider_accounts, hotel_catalog.properties
@@ -40,7 +45,4 @@ BEGIN
   END IF;
 END $$;
 
--- 0163 defines the support view on the receipts view.
-DROP VIEW pms.pending_booking_edit_support;
-DROP VIEW pms.pending_booking_edit_receipts;
 DROP TABLE booking.pending_booking_edit_attempts, booking.edit_authorization_releases;

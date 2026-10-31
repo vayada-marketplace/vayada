@@ -124,6 +124,22 @@ describe.skipIf(!URL)("pending booking edit drop 0529", () => {
         [property],
       );
 
+      const rows = async () => ({
+        attempts: (
+          await db.query<{ status: string }>(
+            `SELECT status FROM booking.pending_booking_edit_attempts ORDER BY status`,
+          )
+        ).rows.map((row) => row.status),
+        releases: (
+          await db.query<{ n: number }>(
+            `SELECT count(*)::int AS n FROM booking.edit_authorization_releases
+             WHERE released_at IS NOT NULL`,
+          )
+        ).rows[0]!.n,
+      });
+      const seeded = { attempts: ["committed", "released"], releases: 1 };
+      expect(await rows()).toEqual(seeded);
+
       // Each gate stops the drop and changes nothing.
       await cp(join(MIGRATIONS, file), join(before, file));
       const gates: [string, string, string][] = [
@@ -155,7 +171,11 @@ describe.skipIf(!URL)("pending booking edit drop 0529", () => {
           ).rows,
         ).toEqual([{ failure_reason: message }]);
         await db.query(undo);
-        expect({ trip, present: await present() }).toEqual({ trip, present: [...DROPPED].sort() });
+        expect({ trip, present: await present(), rows: await rows() }).toEqual({
+          trip,
+          present: [...DROPPED].sort(),
+          rows: seeded,
+        });
       }
 
       // Closed rows don't stop it: the drop takes them along.
@@ -173,6 +193,10 @@ describe.skipIf(!URL)("pending booking edit drop 0529", () => {
          SELECT 'view ' || table_name FROM information_schema.views
          WHERE table_schema = 'booking' AND table_name = 'active_booking_addon_selections'
          UNION ALL
+         SELECT 'function ' || p.proname FROM pg_catalog.pg_proc p
+         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'booking' AND p.proname = 'protect_addon_edit_revision'
+         UNION ALL
          SELECT 'trigger ' || t.tgname FROM pg_catalog.pg_trigger t
          WHERE t.tgrelid = 'booking.booking_addon_selections'::regclass
            AND t.tgname = 'trg_booking_addon_edit_revision_immutable'
@@ -180,6 +204,7 @@ describe.skipIf(!URL)("pending booking edit drop 0529", () => {
       );
       expect(kept.rows.map((row) => row.name)).toEqual([
         "booking_addon_selections.edit_revision",
+        "function protect_addon_edit_revision",
         "guest_bookings.active_card_payment_id",
         "guest_bookings.edit_revision",
         "trigger trg_booking_addon_edit_revision_immutable",
