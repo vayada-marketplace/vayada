@@ -474,14 +474,6 @@ export function PaymentWindowsCard({
             </div>
           );
         })}
-        {WINDOWED_PAYMENT_METHODS.filter((method) => !methods[method]).map((method) => (
-          <p
-            key={method}
-            className="border-b border-gray-100 px-4 py-3 text-[12px] text-gray-400 md:px-5"
-          >
-            {t("settings.paymentWindows.notOffered", { method: t(METHOD_LABEL[method]) })}
-          </p>
-        ))}
       </div>
       <div
         aria-hidden="true"

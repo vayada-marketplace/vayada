@@ -37,7 +37,7 @@ for (const locale of ["de", "fr", "es", "id", "ja", "zh", "ru", "it", "nl"]) {
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("Guest pays online with credit or debit card via Stripe", { exact: true }),
+      page.getByText("Guest pays online with a credit or debit card", { exact: true }),
     ).toHaveCount(0);
     await page.goto("/add-ons");
     await page.getByRole("button", { name: messages["addons.list.new"], exact: true }).click();

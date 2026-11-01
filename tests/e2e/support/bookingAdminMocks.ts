@@ -601,6 +601,17 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // VAY-2424: Payments reads why card isn't ready once Stripe is connected; ready by default.
+  await page.route(
+    `**/api/pms/properties/${BOOKING_ADMIN_PROPERTY_ID}/pricing-v2/card-readiness`,
+    (route) =>
+      route.fulfill({
+        json: {
+          card: { ready: true, reason: null, charge: "at_booking" },
+          deposits: { ready: false },
+        },
+      }),
+  );
   // VAY-2348: no booking windows per way to pay saved yet.
   await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_WINDOWS_PATH}`, (route) =>
     route.fulfill({

@@ -2143,6 +2143,96 @@ test("saves bank details first and says what saved when the methods don't", asyn
   await expect(save).toBeDisabled();
 });
 
+// VAY-2424: Credit card on, but guests can't use it yet: say so at the top, and why.
+function cardPaymentSettings(connected: boolean, acceptedMethods = ["card", "pay_at_property"]) {
+  return {
+    contractVersion: "finance-route-contracts.v1",
+    propertyId: BOOKING_ADMIN_PROPERTY_ID,
+    paymentSettings: {
+      paymentsEnabled: true,
+      paymentProvider: "stripe",
+      acceptedMethods,
+      defaultCurrency: "EUR",
+      supportedCurrencies: ["EUR"],
+      depositPolicy: {},
+      requiresManualReview: false,
+      providerAccount: {
+        providerAccountId: connected
+          ? "f7000000-0000-4000-8000-000000000424"
+          : `settings-choice:${BOOKING_ADMIN_PROPERTY_ID}:stripe`,
+        provider: "stripe",
+        status: connected ? "active" : "not_configured",
+        onboardingStatus: connected ? "completed" : "not_started",
+        chargesEnabled: connected,
+        payoutsEnabled: connected,
+        capabilities: connected ? ["card_payments", "transfers"] : [],
+      },
+    },
+  };
+}
+
+test("warns that guests can't pay by card yet, and why", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingAdminAuthenticatedSession(page);
+  await mockBookingAdminShellRoutes(page);
+  let settings = cardPaymentSettings(false);
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, (route) =>
+    route.fulfill({ json: settings }),
+  );
+  let readiness: { ready: boolean; reason: string | null } = {
+    ready: false,
+    reason: "not_approved",
+  };
+  const readinessReads: string[] = [];
+  await page.route(
+    `**/api/pms/properties/${BOOKING_ADMIN_PROPERTY_ID}/pricing-v2/card-readiness`,
+    (route) => {
+      readinessReads.push(route.request().url());
+      return route.fulfill({
+        json: { card: { ...readiness, charge: "at_booking" }, deposits: { ready: false } },
+      });
+    },
+  );
+
+  // No account: the page knows, and links to where one is connected.
+  await page.goto("/settings/payments");
+  const banner = page.getByTestId("card-not-ready-banner");
+  await expect(banner).toContainText("Guests can't pay by card yet.");
+  await expect(banner).toContainText("No account for card payments is connected.");
+  await expect(paymentMethodTiles(page).getByText("Credit card", { exact: true })).toBeVisible();
+  await expect(
+    paymentMethodTiles(page).getByText("Guest pays online with a credit or debit card", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText(/via Stripe|Stripe fees/)).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("vay2424-card-not-connected.png") });
+  await banner.getByRole("link", { name: "Connect an account" }).click();
+  await expect(page).toHaveURL(/#payment-provider$/);
+  await expect(
+    page.getByRole("heading", { name: "Payment Provider", exact: true }),
+  ).toBeInViewport();
+  expect(readinessReads).toEqual([]);
+
+  // Connected: card readiness says what else is missing.
+  settings = cardPaymentSettings(true);
+  await page.goto("/settings/payments");
+  await expect(banner).toContainText("Vayada still has to approve card payments for your hotel.");
+  await expect(banner.getByRole("link")).toHaveCount(0);
+
+  readiness = { ready: true, reason: null };
+  await page.reload();
+  await expect(page.getByRole("button", { name: "View Stripe Dashboard" })).toBeVisible();
+  await expect(banner).toHaveCount(0);
+
+  // Credit card off: nothing to warn about.
+  settings = cardPaymentSettings(false, ["pay_at_property"]);
+  await page.reload();
+  await expect(paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true })).toBeVisible();
+  await expect(banner).toHaveCount(0);
+  await assertHealthy();
+});
+
 // VAY-2401: billing, payout accounts and the bank account guests pay into are the owner's.
 const staffAccess = {
   membershipId: "booking-admin-staff-membership",
