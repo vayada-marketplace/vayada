@@ -5,6 +5,8 @@ import {
   PricingCardPaymentError,
   settlePricingCardPayment,
 } from "./pricingCardPaymentCompletion.js";
+import { applyCardRefundMoney } from "./pricingCardRefund.js";
+import { stripeAmountDecimal } from "./stripeMoney.js";
 import { recordVayadaPaymentDispute } from "./vayadaPaymentLedger.js";
 
 type StripeEvent = {
@@ -102,17 +104,25 @@ async function handle(
         { propertyId: payment.propertyId, paymentId: payment.id, disputeId, type },
         "vayada Payment: dispute fee unknown in the stay's currency; adjust the hotel's balance by hand",
       );
-    const recorded = await recordVayadaPaymentDispute(client, {
-      propertyId: payment.propertyId,
-      guestBookingId: payment.guestBookingId,
-      paymentId: payment.id,
-      disputeId,
-      phase: withdrawn ? "withdrawn" : "reinstated",
-      currency: payment.currency,
-      amountMinor,
-      stripeFeeMinor: stripeFeeMinor ?? 0,
-      livemode: event.livemode === true,
-    });
+    let recorded: Awaited<ReturnType<typeof recordVayadaPaymentDispute>>;
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      recorded = await recordVayadaPaymentDispute(client, {
+        propertyId: payment.propertyId,
+        guestBookingId: payment.guestBookingId,
+        paymentId: payment.id,
+        disputeId,
+        phase: withdrawn ? "withdrawn" : "reinstated",
+        currency: payment.currency,
+        amountMinor,
+        stripeFeeMinor: stripeFeeMinor ?? 0,
+        livemode: event.livemode === true,
+      });
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
     if (recorded === "no_charge") {
       // The hotel was never credited this payment, so it can't owe the dispute.
       log.warn(
@@ -123,6 +133,8 @@ async function handle(
     }
     return "handled";
   }
+  if (type === "refund.created" || type === "refund.updated" || type === "charge.refund.updated")
+    return recordDashboardRefund(client, event, object, log);
   if (type === "charge.dispute.created" || type === "charge.dispute.closed") {
     const paymentIntentId = text(object["payment_intent"]);
     const payment = paymentIntentId ? await findPayment(client, paymentIntentId) : null;
@@ -145,7 +157,109 @@ async function handle(
   return "ignored";
 }
 
-/** The vayada Payment charge behind a PaymentIntent of Vayada's own account, if any. */
+/** A refund someone made in Stripe's dashboard on Vayada's own account (VAY-2442): recorded like
+ * Vayada's own refunds, once it succeeded, so the payment, the booking and the hotel's balance
+ * agree with Stripe. Vayada's own refund commands carry their command id and settle through the
+ * refund sweep, so they're left alone here. A refund that would exceed what was paid, one on a
+ * payment that never became paid, or one that fails after being recorded is flagged for a person
+ * (ids only). */
+async function recordDashboardRefund(
+  client: pg.PoolClient,
+  event: StripeEvent,
+  refund: Record<string, unknown>,
+  log: Log,
+): Promise<VayadaPaymentWebhookResult> {
+  const refundId = text(refund["id"]);
+  const paymentIntentId = text(refund["payment_intent"]);
+  if (!refundId || !paymentIntentId || text(record(refund["metadata"])["vayada_refund_command_id"]))
+    return "ignored";
+  const payment = await findPayment(client, paymentIntentId);
+  if (!payment) return "ignored";
+  const ids = { propertyId: payment.propertyId, paymentId: payment.id, refundId };
+  const sourcePaymentId = `stripe-refund:${refundId}`;
+  const recorded = async () =>
+    (
+      await client.query(
+        "SELECT 1 FROM finance.payments WHERE source_system='finance' AND source_payment_id=$1",
+        [sourcePaymentId],
+      )
+    ).rows.length > 0;
+  const status = text(refund["status"]);
+  if (status !== "succeeded") {
+    if ((status === "failed" || status === "canceled") && (await recorded()))
+      log.warn(
+        { ...ids, status },
+        "vayada Payment: a recorded dashboard refund failed at Stripe; correct the hotel's balance by hand",
+      );
+    return "ignored";
+  }
+  const amountMinor = minor(refund["amount"]);
+  if (
+    amountMinor === null ||
+    amountMinor <= 0 ||
+    text(refund["currency"])?.toUpperCase() !== payment.currency
+  )
+    throw new Error("Stripe sent a refund that doesn't match its payment.");
+  try {
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+    // The booking, then the payment: the order a cancellation's refund takes them in. Under these
+    // locks a copy of this event that's being recorded at the same time has finished.
+    await client.query(
+      "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE",
+      [payment.guestBookingId, payment.propertyId],
+    );
+    const current = (
+      await client.query<{ status: string }>(
+        "SELECT status FROM finance.payments WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE",
+        [payment.id, payment.propertyId],
+      )
+    ).rows[0]?.status;
+    if (await recorded()) {
+      await client.query("ROLLBACK");
+      return "handled";
+    }
+    if (current === "requires_action" || current === "authorized" || current === "pending")
+      // Stripe's payment event may still be on its way; Stripe retries this one until it's paid
+      // here, or the payment ends unpaid (below).
+      throw new Error("vayada Payment refund arrived before its payment was settled.");
+    if (current !== "paid" && current !== "partially_refunded" && current !== "refunded") {
+      await client.query("ROLLBACK");
+      log.warn(
+        { ...ids, status: current },
+        "vayada Payment: a dashboard refund on a payment that was never paid here; check it in Stripe",
+      );
+      return "ignored";
+    }
+    await applyCardRefundMoney(client, {
+      propertyId: payment.propertyId,
+      guestBookingId: payment.guestBookingId,
+      paymentId: payment.id,
+      amount: stripeAmountDecimal(amountMinor, payment.currency),
+      currency: payment.currency,
+      providerRefundId: refundId,
+      providerPaymentIntentId: paymentIntentId,
+      sourcePaymentId,
+      idempotencyKey: sourcePaymentId,
+      ledgerSourceKey: `refund:stripe:${refundId}`,
+      metadata: { source: "stripe_dashboard", eventId: text(event.id) },
+    });
+    await client.query("COMMIT");
+    return "handled";
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof Error && error.message === "A card refund exceeds its payment.") {
+      log.warn(
+        ids,
+        "vayada Payment: a dashboard refund exceeds what Vayada recorded as paid; check it in Stripe",
+      );
+      return "ignored";
+    }
+    // A concurrent copy of this event recorded it first.
+    if ((error as { code?: string }).code === "23505") return "handled";
+    throw error;
+  }
+}
+
 async function findPayment(client: Pick<pg.PoolClient, "query">, paymentIntentId: string) {
   const row = (
     await client.query(
