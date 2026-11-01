@@ -933,6 +933,8 @@ jobs:
           src/pmsBookingModules.test.ts
           src/bookingLocationMap.integration.test.ts
           src/bookingLocationMapRoutes.test.ts
+          src/bookingRoomSorting.integration.test.ts
+          src/bookingRoomSortingRoutes.test.ts
           src/bookingHostNotifications.integration.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
           src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts

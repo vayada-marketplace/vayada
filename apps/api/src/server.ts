@@ -336,6 +336,7 @@ import { createPgPmsGuestProfileRepository } from "./routes/pmsGuestProfiles.js"
 import { createPgPmsCheckinSettingsRepository } from "./routes/pmsCheckinSettings.js";
 import { createPgBookingModuleRepository } from "./routes/pmsBookingModules.js";
 import { createPgBookingLocationMapRepository } from "./domains/bookingLocationMap.js";
+import { createPgBookingRoomSortingRepository } from "./domains/bookingRoomSorting.js";
 import { createPgBookingHostNotificationsRepository } from "./domains/bookingHostNotifications.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
 import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
@@ -663,6 +664,10 @@ const bookingModuleRepository = config.auth
   : undefined;
 const bookingLocationMapRepository = config.auth
   ? createPgBookingLocationMapRepository({ connectionString: targetDatabaseUrl, max: 2 })
+  : undefined;
+// Booking Admin › Settings › Room Sorting (VAY-2449).
+const bookingRoomSortingRepository = config.auth
+  ? createPgBookingRoomSortingRepository({ connectionString: targetDatabaseUrl, max: 2 })
   : undefined;
 // Booking Admin's bell, read every 60 s per open tab (VAY-2349).
 const bookingHostNotificationsRepository = config.auth
@@ -1916,6 +1921,12 @@ const app = buildApp({
   bookingLocationMap: bookingLocationMapRepository
     ? {
         repository: bookingLocationMapRepository,
+        propertyAccessRepository: bookingPropertyAccessRepository,
+      }
+    : undefined,
+  bookingRoomSorting: bookingRoomSortingRepository
+    ? {
+        repository: bookingRoomSortingRepository,
         propertyAccessRepository: bookingPropertyAccessRepository,
       }
     : undefined,
