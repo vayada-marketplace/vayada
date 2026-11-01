@@ -11,6 +11,8 @@ const navItems = [
   { label: "Users", href: "/dashboard", icon: UsersIcon },
   { label: "Hotels", href: "/dashboard/hotels", icon: HotelIcon },
   { label: "Bookings", href: "/dashboard/bookings", icon: BookingsIcon },
+  // VAY-2442 P5: vayada Payment payouts; the page says when vayada Payment is switched off.
+  { label: "Payouts", href: "/dashboard/payouts", icon: PayoutsIcon },
   { label: "Invite Codes", href: "/dashboard/invite-codes", icon: InviteCodesIcon },
   { label: "Settings", href: "/dashboard/settings", icon: SettingsIcon },
 ];
@@ -215,6 +217,24 @@ function LogoutIcon({ className }: { className?: string }) {
       <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
+function PayoutsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M6 12h.01M18 12h.01" />
     </svg>
   );
 }
