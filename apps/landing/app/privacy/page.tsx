@@ -122,8 +122,11 @@ export default function PrivacyPage() {
                         <td className={`${TD} font-medium`}>Business and Payout Data</td>
                         <td className={TD}>
                           Company details, VAT number, invoice address, the plan you chose,
-                          invoices, and the Stripe account used for card payouts. Bank and identity
-                          details for payouts are collected and held by Stripe, not by vayada.
+                          invoices, and the Stripe account used for card payouts. With Stripe
+                          Connect, bank and identity details for payouts are collected and held by
+                          Stripe, not by vayada. With vayada Payment, we store the bank account we pay
+                          you out to (account holder, account number, bank and branch codes, address),
+                          encrypted, and only our finance team can see it in full.
                         </td>
                         <td className={TD}>
                           To bill you, pay out card payments and meet tax and accounting rules
@@ -251,7 +254,8 @@ export default function PrivacyPage() {
                 </li>
                 <li>
                   <strong>To Bill You:</strong> To calculate commissions or subscriptions, issue
-                  invoices and pay out card payments through Stripe.
+                  invoices and pay out card payments: through Stripe, or, with vayada Payment, by
+                  bank transfer from vayada.
                 </li>
                 <li>
                   <strong>To Communicate:</strong> To send service-related, administrative or
@@ -298,6 +302,10 @@ export default function PrivacyPage() {
                   <li>
                     <strong>Payments:</strong> Stripe, for card payments on your booking site, your
                     payout account and our own invoicing.
+                  </li>
+                  <li>
+                    <strong>Payouts:</strong> Wise, to send vayada Payment payouts to your bank
+                    account.
                   </li>
                   <li>
                     <strong>Email:</strong> Resend, for the service and booking emails we send and
@@ -613,6 +621,15 @@ export default function PrivacyPage() {
                   </a>
                   . To prevent fraud, Stripe.js stores two cookies on the booking site once the card
                   payment form opens: __stripe_mid (for one year) and __stripe_sid (for 30 minutes).
+                </p>
+                <p className="mb-3">
+                  Some hotels use vayada Payment. Then vayada receives your card payment on the
+                  hotel&apos;s behalf on vayada&apos;s own Stripe account, and your card statement
+                  shows vayada and the hotel&apos;s name. For that payment record (amount, card
+                  brand, last four digits, payment and refund status) vayada is the controller; we
+                  use it to pay the hotel, to handle refunds and disputes and to meet tax and
+                  accounting rules (Article 6(1) lit. b and c GDPR), and we keep it for as long as
+                  those rules require, up to 10 years.
                 </p>
                 <p className="mb-3">
                   If the hotel shows a map of where its rooms are, the map comes from Google Maps
