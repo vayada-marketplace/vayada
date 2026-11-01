@@ -1912,7 +1912,7 @@ test("says what went wrong when payments don't save, and offers Try again", asyn
 test("saves bank details first and says what saved when the methods don't", async ({
   page,
 }, testInfo) => {
-  const assertHealthy = watchPageHealth(page, testInfo);
+  // The 503 below is on purpose, so no page health watch (as in the Try again test above).
   const writes = await mockPaymentWrites(
     page,
     ["pay_at_property", "cash", "manual_card"],
@@ -1995,7 +1995,6 @@ test("saves bank details first and says what saved when the methods don't", asyn
   await page.getByRole("button", { name: "Discard", exact: true }).click();
   await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
   await expect(save).toBeDisabled();
-  await assertHealthy();
 });
 
 // VAY-2401: billing, payout accounts and the bank account guests pay into are the owner's.
