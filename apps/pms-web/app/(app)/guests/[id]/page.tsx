@@ -122,7 +122,7 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
   if (!guest)
     return (
       <div className="p-4 md:p-6">
-        <div className="max-w-[960px] mx-auto">
+        <div className="max-w-[960px]">
           <Breadcrumb name={null} />
           <p className="mt-10 text-center text-sm text-[#5B6474]">
             {loadError === "not_found"
@@ -244,7 +244,8 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="p-4 md:px-6 md:pt-7 md:pb-12">
-      <div className="max-w-[960px] mx-auto flex flex-col gap-5">
+      {/* Starts at the same left edge as the Guests list and every PMS page (VAY-2423). */}
+      <div className="max-w-[960px] flex flex-col gap-5">
         <Breadcrumb name={name} />
 
         {notice && (

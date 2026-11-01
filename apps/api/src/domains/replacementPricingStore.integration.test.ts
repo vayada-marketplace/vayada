@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { convertPricingConfigurationCurrency, type PricingConversionRate } from "@vayada/domain-pms";
+import { convertPricingConfigurationCurrency, pricingConfigurationWithSameNumbers, type PricingConversionRate } from "@vayada/domain-pms";
 import { createReplacementPricingStore, type PricingStorageSnapshot } from "./replacementPricingStore.js";
 import { createReplacementPricingFxStore } from "./replacementPricingFxStore.js";
 import { readCurrentPricingSnapshot, PricingStorageError } from "./replacementPricingSnapshot.js";
@@ -202,24 +202,52 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     f.allowConversion(); await f.store.save(f.scope, command);
     expect(await f.store.read(f.scope)).toMatchObject({ currency: "USD", revision: 2, rooms: [{ currency: "USD" }] });
   });
-  it("publishes the same numbers again in the pricing currency an Owner changed to, without FX (VAY-2390)", async () => {
+  it("publishes in the pricing currency an Owner changed to without FX, with any numbers (VAY-2390, VAY-2425)", async () => {
     const f = await fixture(); await f.store.save(f.scope, f.command());
     const same = (currency: string, nightlyMinor = "2000") => {
       const eur = f.snapshot(2);
       return { ...eur, currency, rooms: eur.rooms.map((r) => ({ ...r, currency,
         children: { ...r.children, bands: r.children.bands.map((b) => ({ ...b, nightlyMinor })) } })) };
     };
-    // No pricing row names CHF yet: the same numbers in CHF are still a conversion.
+    // No pricing row names CHF yet: CHF is still a conversion.
     await expect(f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF") })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    // A pricing row that never changed currency (revision 1) is no Owner's change either.
     // The fixture's legacy EUR room type would refuse the row through trigger 0050.
     await pool.query(`BEGIN; SET LOCAL session_replication_role=replica;
-      INSERT INTO pms.property_pricing_settings(property_id,currency,pricing_currency_revision) VALUES('${f.scope.propertyId}','CHF',2); COMMIT`);
-    // Edited numbers, or a currency other than the pricing one, still need FX.
-    for (const snapshot of [same("CHF", "2100"), same("USD")])
-      await expect(f.store.save(f.scope, { ...f.command(1), snapshot })).rejects.toMatchObject({ code: "currency_conversion_required" });
+      INSERT INTO pms.property_pricing_settings(property_id,currency,pricing_currency_revision) VALUES('${f.scope.propertyId}','CHF',1); COMMIT`);
+    await expect(f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF") })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    await pool.query(`BEGIN; SET LOCAL session_replication_role=replica;
+      UPDATE pms.property_pricing_settings SET pricing_currency_revision=2 WHERE property_id='${f.scope.propertyId}'; COMMIT`);
+    // A currency other than the pricing one still needs FX.
+    await expect(f.store.save(f.scope, { ...f.command(1), snapshot: same("USD") })).rejects.toMatchObject({ code: "currency_conversion_required" });
     expect((await f.store.read(f.scope))?.currency).toBe("EUR");
-    await f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF") });
-    expect(await f.store.read(f.scope)).toMatchObject({ currency: "CHF", revision: 2, rooms: [{ currency: "CHF" }] });
+    // VAY-2425: edited numbers in the pricing currency are published straight away.
+    await f.store.save(f.scope, { ...f.command(1), snapshot: same("CHF", "2100") });
+    expect(await f.store.read(f.scope)).toMatchObject({ currency: "CHF", revision: 2,
+      rooms: [{ currency: "CHF", children: { bands: [{ nightlyMinor: "2100" }] } }] });
+  });
+  it("publishes a first price for another room in IDR after an Owner's change from USD with a fractional price (VAY-2425)", async () => {
+    // Mertha Carik Guest House: one room published in USD at US$49.99, then the pricing currency changed to IDR.
+    const f = await fixture(), secondId = randomUUID();
+    await pool.query("INSERT INTO pms.room_types(id,property_id,name,base_rate_amount,currency) VALUES($1,$2,'Second',100,'EUR')", [secondId, f.scope.propertyId]);
+    const inCurrency = (room: PricingStorageSnapshot["rooms"][number], currency: string, base: string[]) => ({ ...room, currency,
+      offers: room.offers.map((o) => ({ ...o, price: { kind: "independent" as const, calendar: { base: { mode: "occupancy" as const, amountsMinor: base },
+        months: [], seasons: [], weekdays: [], dates: [] } } })) });
+    const usd = f.snapshot(1), usdRoom = inCurrency(usd.rooms[0], "USD", ["4999", "13000", "15500"]);
+    await f.store.save(f.scope, { ...f.command(), snapshot: { ...usd, currency: "USD", rooms: [usdRoom] } });
+    const idr = (rooms: PricingStorageSnapshot["rooms"]) => ({ ...f.snapshot(2), currency: "IDR", rooms: rooms.map((r) => ({ ...r, revision: 2 })) });
+    // The editor's same numbers in IDR (US$49.99 is IDR 50) plus the other room's first price.
+    const sameRoom = pricingConfigurationWithSameNumbers(usdRoom, "IDR")!, firstPrice = { ...inCurrency(usdRoom, "IDR", ["50000000", "60000000", "70000000"]), roomTypeId: secondId };
+    expect(sameRoom.offers[0].price).toMatchObject({ calendar: { base: { amountsMinor: ["5000", "13000", "15500"] } } });
+    // Before the change reaches the pricing row, IDR is a conversion.
+    await expect(f.store.save(f.scope, { ...f.command(1), snapshot: idr([sameRoom, firstPrice]) })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    await pool.query(`BEGIN; SET LOCAL session_replication_role=replica;
+      INSERT INTO pms.property_pricing_settings(property_id,currency,pricing_currency_revision) VALUES('${f.scope.propertyId}','IDR',2); COMMIT`);
+    expect(await f.store.save(f.scope, { ...f.command(1), snapshot: idr([sameRoom, firstPrice]) })).toEqual({ revision: 2, replayed: false });
+    const read = await f.store.read(f.scope);
+    expect(read).toMatchObject({ currency: "IDR", revision: 2 });
+    expect(Object.fromEntries(read!.rooms.map((r) => [r.roomTypeId, [r.currency, r.offers[0].price]]))).toEqual({
+      [f.snapshot(1).rooms[0].roomTypeId]: ["IDR", sameRoom.offers[0].price], [secondId]: ["IDR", firstPrice.offers[0].price] });
   });
   it("rejects missing/wrong FX and partial or edited multi-room conversion even with owner approval", async () => {
     const f = await fixture(), initial = f.command(), room = initial.snapshot.rooms[0], secondId = randomUUID();

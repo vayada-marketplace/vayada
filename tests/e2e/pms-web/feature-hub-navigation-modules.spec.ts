@@ -7,7 +7,7 @@ import {
 
 type Write = { store: string; moduleId: string; isActive: boolean };
 
-// VAY-2200: five switchable modules from three stores.
+// VAY-2200: six switchable modules from three stores; Guests joined in VAY-2423, on by default.
 async function setup(page: Page) {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
@@ -52,7 +52,7 @@ async function setup(page: Page) {
       },
     );
   };
-  await store("navigation-modules", ["inbox", "reviews"], []);
+  await store("navigation-modules", ["inbox", "reviews", "guests"], ["guests"]);
   await store("booking-modules", ["add-ons", "promos"], ["add-ons"]);
   // An operator: the Owner-only Financials switch stays read-only.
   await page.route(
@@ -84,41 +84,48 @@ test("lists every module in one grid and previews both menus as they switch", as
   await page.goto("/settings/feature-hub");
 
   const cards = page.locator("article");
-  for (const name of ["Inbox", "Reviews", "Financials", "Add-ons", "Promos"])
+  for (const name of ["Guests", "Inbox", "Reviews", "Financials", "Add-ons", "Promos"])
     await expect(cards.getByRole("heading", { level: 2, name, exact: true })).toBeVisible();
-  await expect(cards).toHaveCount(5);
-  await expect(page.getByText("/ 5 active", { exact: true })).toBeVisible();
+  await expect(cards).toHaveCount(6);
+  await expect(page.getByText("/ 6 active", { exact: true })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "Deactivate Guests" })).toBeChecked();
   await expect(page.getByRole("button", { name: "All", exact: true })).toHaveCount(0);
   await expect(page.getByPlaceholder("Search modules...")).toHaveCount(0);
   await expect(
     page.getByText("Disabled modules stay hidden from the sidebar.", { exact: false }),
   ).toBeVisible();
-  await expect(preview(page).getByText("10 items", { exact: true })).toBeVisible();
-  await expect(preview(page).getByText("1 from modules", { exact: true })).toBeVisible();
+  await expect(preview(page).getByText("11 items", { exact: true })).toBeVisible();
+  await expect(preview(page).getByText("2 from modules", { exact: true })).toBeVisible();
   await expect(page.getByRole("switch", { name: "Activate Financials" })).toBeDisabled();
   await page.screenshot({ path: testInfo.outputPath("feature-hub-1440.png") });
 
   await page.getByRole("switch", { name: "Activate Inbox" }).click();
   await expect(page.getByRole("switch", { name: "Deactivate Inbox" })).toBeChecked();
-  await expect(preview(page).getByText("2 from modules", { exact: true })).toBeVisible();
+  await expect(preview(page).getByText("3 from modules", { exact: true })).toBeVisible();
   const items = preview(page).getByRole("listitem");
   const reservationsBox = await items.filter({ hasText: /^Reservations$/ }).boundingBox();
+  const guestsBox = await items.filter({ hasText: /^Guests$/ }).boundingBox();
   const inboxBox = await items.filter({ hasText: /^Inbox$/ }).boundingBox();
-  expect(inboxBox!.y).toBeGreaterThan(reservationsBox!.y);
+  // The sidebar order: Reservations, Guests, Inbox.
+  expect(guestsBox!.y).toBeGreaterThan(reservationsBox!.y);
+  expect(inboxBox!.y).toBeGreaterThan(guestsBox!.y);
 
   await page.getByRole("switch", { name: "Activate Promos" }).click();
   await expect(page.getByRole("switch", { name: "Deactivate Promos" })).toBeChecked();
   await expect(items.filter({ hasText: /^Promos$/ })).toBeVisible();
-  await expect(preview(page).getByText("12 items", { exact: true })).toBeVisible();
+  await expect(preview(page).getByText("13 items", { exact: true })).toBeVisible();
   await expect(page.getByText("Promos activated.")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("feature-hub-promos-on.png") });
 
   await page.getByRole("switch", { name: "Deactivate Add-ons" }).click();
   await expect(items.filter({ hasText: /^Add-ons$/ })).toHaveCount(0);
+  await page.getByRole("switch", { name: "Deactivate Guests" }).click();
+  await expect(items.filter({ hasText: /^Guests$/ })).toHaveCount(0);
   expect(writes).toEqual([
     { store: "navigation-modules", moduleId: "inbox", isActive: true },
     { store: "booking-modules", moduleId: "promos", isActive: true },
     { store: "booking-modules", moduleId: "add-ons", isActive: false },
+    { store: "navigation-modules", moduleId: "guests", isActive: false },
   ]);
 });
 

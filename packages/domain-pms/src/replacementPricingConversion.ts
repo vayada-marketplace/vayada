@@ -191,36 +191,35 @@ export function isCompletePricingCurrencyConversion(
   });
 }
 
-/** VAY-2390 P5 (D2): the same rooms with the same numbers in another currency, as an Owner's
- * currency change publishes them again. Only `currency` and `revision` may differ, and only
- * between currencies of one scale and amount step, so every amount means the same number. The
- * caller must still check that `to` is the property's locked pricing currency. */
-export function isSamePricingNumbersInCurrency(
-  before: readonly unknown[],
-  after: readonly unknown[],
-  from: string,
+/** VAY-2390 P5 (D2), VAY-2425: a room's prices with the same numbers in the pricing currency an
+ * Owner changed to, as the editor shows them for review before they are published again. Each
+ * amount keeps its number, rounded half-up to the new currency's price step (US$49.99 is IDR 50,
+ * since IDR is priced in whole rupiah); rules, identities and the revision stay. Null when the
+ * room is invalid or a positive tariff would round to nothing. Not a conversion: storage takes a
+ * currency change without FX only in the property's locked pricing currency. */
+export function pricingConfigurationWithSameNumbers(
+  value: unknown,
   to: string,
-): boolean {
-  const scale = pricingCurrencyScale(from);
-  if (
-    from === to ||
-    scale === null ||
-    pricingCurrencyScale(to) !== scale ||
-    pricingAmountStep(from) !== pricingAmountStep(to) ||
-    !Array.isArray(before) ||
-    !Array.isArray(after) ||
-    !before.length ||
-    before.length !== after.length
-  )
-    return false;
-  const old = Array.from(before, parsePricingConfiguration),
-    next = Array.from(after, parsePricingConfiguration);
-  if (old.some((r) => r?.currency !== from) || next.some((r) => r?.currency !== to)) return false;
-  const numbers = (r: PricingConfiguration) => canonical({ ...r, currency: "", revision: 0 });
-  const kept = new Map(old.map((r) => [r!.roomTypeId, numbers(r!)]));
-  return (
-    kept.size === old.length &&
-    new Set(next.map((r) => r!.roomTypeId)).size === next.length &&
-    next.every((r) => kept.get(r!.roomTypeId) === numbers(r!))
+): PricingConfiguration | null {
+  const source = parsePricingConfiguration(value);
+  const fromScale = source ? pricingCurrencyScale(source.currency) : null,
+    toScale = pricingCurrencyScale(to);
+  if (!source || fromScale === null || toScale === null) return null;
+  if (source.currency === to) return source;
+  // A fixed instant: the ratio is exact, so no clock is involved.
+  const at = "2000-01-01T00:00:00.000Z";
+  const converted = convertPricingConfigurationCurrency(
+    source,
+    {
+      id: "same-numbers",
+      from: source.currency,
+      to,
+      numerator: String(10 ** toScale),
+      denominator: String(10 ** fromScale),
+      observedAt: at,
+      expiresAt: "2000-01-01T00:00:01.000Z",
+    },
+    Date.parse(at),
   );
+  return converted && parsePricingConfiguration({ ...converted, revision: source.revision });
 }

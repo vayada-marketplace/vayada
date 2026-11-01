@@ -149,9 +149,9 @@ describe("PMS navigation preview", () => {
       "Settings",
     ]);
     expect(core[FEATURE_MODULE_NAV_INDEX.pms - 1]).toBe("Reservations");
-    expect(activeNavModules("pms", ["financials", "reviews", "inbox"]).map(({ id }) => id)).toEqual(
-      ["inbox", "reviews", "financials"],
-    );
+    expect(
+      activeNavModules("pms", ["financials", "reviews", "inbox", "guests"]).map(({ id }) => id),
+    ).toEqual(["guests", "inbox", "reviews", "financials"]);
   });
 });
 

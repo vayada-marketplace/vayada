@@ -4,14 +4,26 @@ import {
   CubeIcon,
   StarIcon,
   TicketIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { CoreNavItem, FeatureModule, FeatureProduct } from "./types";
 
 /** NEW marks a module for this long after it joins Feature Hub (VAY-2200). */
 const NEW_FOR_MS = 30 * 24 * 60 * 60 * 1000;
 
-// Grid order. PMS modules keep the sidebar order: Inbox, Reviews, Financials after Reservations.
+// Grid order. PMS modules keep the sidebar order: Guests, Inbox, Reviews, Financials after
+// Reservations.
 export const FEATURE_MODULES: FeatureModule[] = [
+  {
+    id: "guests",
+    category: "Guest",
+    product: "pms",
+    icon: UsersIcon,
+    launchedOn: "2026-10-30",
+    navItem: { label: "Guests", href: "/guests", icon: UsersIcon },
+    points: 3,
+    offNote: true,
+  },
   {
     id: "inbox",
     category: "Guest",

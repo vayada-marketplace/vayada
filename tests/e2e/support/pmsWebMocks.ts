@@ -1119,14 +1119,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** VAY-2078: Inbox and Reviews sidebar switches, both on unless a spec overrides the route. */
+/** VAY-2078, VAY-2423: Inbox, Reviews and Guests sidebar switches, all on unless a spec
+ * overrides the route. */
 export async function mockNavigationModules(
   page: Page,
   propertyId: string,
-  activeModules: string[] = ["inbox", "reviews"],
+  activeModules: string[] = ["inbox", "reviews", "guests"],
 ): Promise<void> {
   await page.route(
-    new RegExp(`/api/pms/properties/${propertyId}/navigation-modules(?:/(?:inbox|reviews))?$`),
+    new RegExp(
+      `/api/pms/properties/${propertyId}/navigation-modules(?:/(?:inbox|reviews|guests))?$`,
+    ),
     (route) =>
       route.request().method() === "PATCH"
         ? route.fulfill({
@@ -1141,7 +1144,7 @@ export async function mockNavigationModules(
             json: {
               hotelId: propertyId,
               canManage: true,
-              supportedModules: ["inbox", "reviews"],
+              supportedModules: ["inbox", "reviews", "guests"],
               activeModules,
               activations: [],
             },

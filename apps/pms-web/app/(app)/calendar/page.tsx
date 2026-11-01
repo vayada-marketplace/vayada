@@ -1034,7 +1034,7 @@ export default function CalendarPage() {
               </div>
             )
           }
-          className="mb-4"
+          className="mb-4 md:mb-5"
         />
 
         {reorderMode && (

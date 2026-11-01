@@ -148,16 +148,7 @@ it("publishes the property's first prices from revision 0", async () => {
   ]);
 });
 
-it("refuses without writing when another currency or prices for this room were published meanwhile", async () => {
-  client.read.mockResolvedValueOnce({
-    currency: "USD",
-    ownerReferences: { finance: "finance" },
-    rooms: [],
-    revision: 3,
-    sources,
-    stale: false,
-  });
-  await expect(publishTyped()).rejects.toMatchObject({ status: 409 });
+it("refuses without writing when prices for this room were published meanwhile", async () => {
   client.read.mockResolvedValueOnce({
     currency: "EUR",
     ownerReferences: { finance: "finance" },
@@ -169,4 +160,39 @@ it("refuses without writing when another currency or prices for this room were p
   await expect(publishTyped()).rejects.toBeInstanceOf(ApiErrorResponse);
   expect(client.termsAction).not.toHaveBeenCalled();
   expect(client.prepare).not.toHaveBeenCalled();
+});
+
+it("after an Owner's currency change carries the other rooms as their Prices tab does (VAY-2390, VAY-2425)", async () => {
+  // One scale and price step (USD to EUR): every room goes out again with its numbers.
+  client.read.mockResolvedValueOnce({
+    currency: "USD",
+    ownerReferences: { finance: "finance" },
+    rooms: [{ ...otherRoom, currency: "USD" }],
+    revision: 3,
+    sources,
+    stale: false,
+  });
+  await publishTyped();
+  expect(saved.baseRevision).toBe(3);
+  expect(saved.snapshot.currency).toBe("EUR");
+  expect(
+    saved.snapshot.rooms.map((room) => [room.roomTypeId, room.currency, room.revision]),
+  ).toEqual([
+    [other, "EUR", 4],
+    [created, "EUR", 4],
+  ]);
+  // Another price step (IDR to EUR): the rooms nobody has seen in EUR are left out.
+  client.read.mockResolvedValueOnce({
+    currency: "IDR",
+    ownerReferences: { finance: "finance" },
+    rooms: [{ ...otherRoom, currency: "IDR" }],
+    revision: 5,
+    sources,
+    stale: false,
+  });
+  await publishTyped();
+  expect(saved.baseRevision).toBe(5);
+  expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([
+    [created, 6],
+  ]);
 });

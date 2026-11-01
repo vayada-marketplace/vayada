@@ -139,6 +139,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS navigation modules (runtime login)", ()
       },
     ]);
   });
+
+  it("stores a Guests switch-off, which migration 0530 allows (VAY-2423)", async () => {
+    const propertyId = await seedProperty(admin);
+    const audit = { actorUserId, organizationId, requestId: randomUUID(), correlationId: null };
+
+    const off = await repository.update({ propertyId, moduleId: "guests", isActive: false, audit });
+    expect(off).toMatchObject({ moduleId: "guests", isActive: false, activatedAt: null });
+    expect(off.deactivatedAt).toEqual(expect.any(String));
+    expect(
+      (await repository.list(propertyId)).map(({ moduleId, isActive }) => ({ moduleId, isActive })),
+    ).toEqual([{ moduleId: "guests", isActive: false }]);
+  });
 });
 
 async function seedProperty(admin: pg.Pool): Promise<string> {

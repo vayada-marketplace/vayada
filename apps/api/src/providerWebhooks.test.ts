@@ -1957,6 +1957,65 @@ describe("target provider webhook routes", () => {
     ]);
     await app.close();
   });
+
+  it("carries the hotel website's add-on tag into the Finance job and the stored receipt", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { stripe: "whsec_stripe_test" },
+        modes: { stripe: "mutating" },
+        store,
+        now: () => fixedNow,
+      },
+    });
+    const metadata = {
+      vayada_property_id: "property-1",
+      vayada_organization_id: "organization-1",
+      vayada_addon: "hotel_website",
+    };
+    await postProviderPayload(app, "stripe", {
+      id: "evt_website_updated",
+      type: "customer.subscription.updated",
+      data: { object: { id: "sub_website", customer: "cus_fixed", metadata } },
+    });
+    await postProviderPayload(app, "stripe", {
+      id: "evt_website_paid",
+      type: "invoice.paid",
+      data: {
+        object: {
+          id: "in_website",
+          customer: "cus_fixed",
+          parent: { subscription_details: { subscription: "sub_website", metadata } },
+        },
+      },
+    });
+    // Older Stripe API versions put subscription_details on the invoice itself; upcoming
+    // invoices have no id.
+    await postProviderPayload(app, "stripe", {
+      id: "evt_website_upcoming",
+      type: "invoice.upcoming",
+      data: {
+        object: {
+          customer: "cus_fixed",
+          subscription_details: { subscription: "sub_website", metadata },
+        },
+      },
+    });
+
+    const tagged = {
+      queueName: "finance.subscriptions",
+      payload: { subscriptionId: "sub_website", vayadaAddon: "hotel_website" },
+    };
+    expect(store.receipts.map((receipt) => receipt.normalizedPreview)).toMatchObject([
+      tagged,
+      tagged,
+      tagged,
+    ]);
+    expect(store.receipts.map((receipt) => JSON.stringify(receipt.rawPayload))).toEqual(
+      Array(3).fill(expect.stringContaining('"vayada_addon":"hotel_website"')),
+    );
+    await app.close();
+  });
 });
 
 type MemoryProviderWebhookStore = ProviderWebhookStore & {
