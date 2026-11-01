@@ -10,10 +10,10 @@ import { resolveLocale } from "@/lib/utils";
 import { roomGuestProblem } from "@/lib/roomPicker";
 import type { PricingRoom, RoomChoice } from "@/services/api/replacementOffers";
 
-/** VAY-2320: the first /book step for a group that chose its rooms on the hotel page, while
- * children's ages are still to give. Who sleeps where is set on the hotel page (VAY-2393); here
- * each room shows its guests and asks its children's ages, and the quote prices every room for
- * its own guests. */
+/** VAY-2320: the first /book step for rooms chosen on the hotel page (a group's, or since
+ * VAY-2446 a room card's), while children's ages are still to give. Who sleeps where is set on
+ * the hotel page (VAY-2393); here each room shows its guests and asks its children's ages, and
+ * the quote prices every room for its own guests. */
 export default function RoomGuestsStep({
   choices,
   rooms,

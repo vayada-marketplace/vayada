@@ -505,6 +505,26 @@ test("opens the hotel page for /book without a room choice", async ({ page }) =>
   await page.goto("/rooms?checkIn=2026-11-06&checkOut=2026-11-08&adults=2");
   await expect(page).toHaveURL(/\/(en\/)?\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2$/);
   await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+  // A card's choice for dates that can't be booked (check-out first) is no stay to continue.
+  await page.goto(`/book?checkIn=2026-11-08&checkOut=2026-11-06&adults=2&offer=${key("a")}`);
+  await expect(page).toHaveURL(/\/(en\/)?\?checkIn=2026-11-08&checkOut=2026-11-06&adults=2$/);
+});
+
+test("says when the rooms can't be shown, and loads them again", async ({ page }) => {
+  await mockBookingApis(page);
+  await mockRooms(page);
+  let failing = true;
+  await page.route("**/pricing-offers", (route) =>
+    failing ? route.fulfill({ status: 503, json: {} }) : route.fallback(),
+  );
+  await page.goto(STAY);
+  const notice = page.getByTestId("rooms-unavailable");
+  await expect(notice).toContainText("We can't show our rooms right now.");
+  await expect(page.getByText("Choose rooms and get a price")).toHaveCount(0);
+  failing = false;
+  await notice.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+  await expect(notice).toHaveCount(0);
 });
 
 test("shows a room's details with its choices, as the old page did", async ({ page }, testInfo) => {

@@ -44,6 +44,7 @@ for (const fontPairing of [
     baseURL,
   }) => {
     await mockBookingApis(page, { fontPairing });
+    await mockAnyPrice(page);
     const outside = otherOrigins(page, baseURL);
     const fontFiles: string[] = [];
     page.on("request", (request) => {
@@ -57,9 +58,12 @@ for (const fontPairing of [
     expect(fontFiles.length).toBeGreaterThan(0);
     for (const file of fontFiles) expect(new URL(file).origin).toBe(new URL(baseURL!).origin);
 
-    // /book with a room card's choice, before any price: still nothing from Google or Stripe.
-    await page.goto(`/book?checkIn=2026-09-12&checkOut=2026-09-15&adults=2&offer=${offerKey}`);
-    await expect(page.getByRole("button", { name: "Retry room options" })).toBeVisible();
+    // /book with the default catalogue room card's choice (VAY-2446: /book needs one): still
+    // nothing from Google or Stripe.
+    await page.goto(
+      `/book?checkIn=2026-09-12&checkOut=2026-09-15&adults=2&offer=pricing-offer.v2:${"a".repeat(64)}`,
+    );
+    await expect(page).toHaveURL(/[?&]step=(extras|details)/);
     // Nothing to wait for when all is well: give a late script tag a moment to show up.
     await page.waitForTimeout(1500);
     expect(outside).toEqual([]);

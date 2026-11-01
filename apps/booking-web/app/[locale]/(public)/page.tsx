@@ -195,8 +195,8 @@ function HomePageContent() {
   const nights = calculateNights(checkIn, checkOut);
   const hasAddons = useAddons().addons.length > 0;
 
-  // The legacy availability search is retired (VAY-1543 C.2): rooms, availability and
-  // prices come from the room-and-price page, which starts from the stay chosen here.
+  // The legacy availability search is retired (VAY-1543 C.2): the room cards below hand the
+  // stay chosen here and their room's choice to /book (VAY-2190, VAY-2446).
   const bookParams = new URLSearchParams({ checkIn, checkOut, adults: String(adults) });
   if (effectiveChildren > 0) bookParams.set("children", String(effectiveChildren));
   if (appliedPromo) bookParams.set("promoCode", appliedPromo.code);

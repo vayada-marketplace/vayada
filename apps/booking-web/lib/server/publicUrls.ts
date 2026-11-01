@@ -39,7 +39,7 @@ export function resolvePublicHotelUrls(input: PublicHotelUrlPolicyInput): Public
 }
 
 // The hotel page is the only public, indexable page: the former /rooms listing
-// redirects to the private room-and-price page.
+// redirects to it (VAY-2446).
 export function publicHotelSitemapEntries(
   policy: PublicHotelUrlPolicy,
 ): Array<{ url: string; alternates: Record<string, string> }> {

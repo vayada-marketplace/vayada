@@ -9,7 +9,7 @@ import {
 // claims anything about capacity or availability. Its room cards hand the chosen stay and
 // party to /book (VAY-2446: the only way there), which prices rooms and guests itself.
 for (const mobile of [false, true]) {
-  test(`hands the chosen stay to the room-and-price page without the retired search (${mobile ? "mobile" : "desktop"})`, async ({
+  test(`hands the chosen stay to /book from a room card without the retired search (${mobile ? "mobile" : "desktop"})`, async ({
     page,
   }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
@@ -29,7 +29,6 @@ for (const mobile of [false, true]) {
     await page.getByRole("button", { name: "Check Availability", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeInViewport();
     await expect(page).not.toHaveURL(/\/book/);
-    await page.getByRole("button", { name: "Reject analytics" }).click();
     await page.getByTestId("select-rate-suite").click();
     await expect(page).toHaveURL(
       /\/(en\/)?book\?checkIn=2026-09-12&checkOut=2026-09-15&adults=13&children=1&offer=/,

@@ -194,19 +194,27 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     const picks = decodePicks(params.getAll("pick"));
     const adults = Number(params.get("adults"));
     const offer = params.get("offer") ?? "";
+    const [stayIn, stayOut] = [params.get("checkIn") ?? "", params.get("checkOut") ?? ""];
+    const party = (name: string, min: number) => {
+      const value = Number(params.get(name));
+      return !!params.get(name) && Number.isInteger(value) && value >= min && value <= 99;
+    };
+    // The hotel page's search for this stay, with only a party it can read. A group's rooms are
+    // chosen again room by room (VAY-2320); a room card's party in one.
     const home = new URLSearchParams();
-    // A group's rooms are chosen again room by room (VAY-2320); a room card's party in one.
-    for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
+    for (const name of ["checkIn", "checkOut", "promoCode"])
       if (params.get(name)) home.set(name, params.get(name)!);
+    if (party("adults", 1)) home.set("adults", String(adults));
+    if (party("children", 0)) home.set("children", params.get("children")!);
     if (picks && params.get("rooms")) home.set("rooms", params.get("rooms")!);
-    // VAY-2446: /book only continues a choice made on the hotel page, a room card's or a group's.
-    // The old room form is gone: without one, the guest chooses on the hotel page.
+    // VAY-2446: /book only continues a choice made on the hotel page for a stay, a room card's or
+    // a group's. The old room form (which also took the dates) is gone: without one, the guest
+    // chooses on the hotel page.
     const choiceMade =
-      !!picks ||
-      (/^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) &&
-        Number.isInteger(adults) &&
-        adults >= 1 &&
-        adults <= 99);
+      /^\d{4}-\d{2}-\d{2}$/.test(stayIn) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(stayOut) &&
+      stayIn < stayOut &&
+      (!!picks || (/^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) && party("adults", 1)));
     if (!choiceMade) {
       router.replace(`/?${home}`);
       return;
@@ -570,10 +578,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled]);
   // VAY-2446: a choice the hotel no longer offers is made again on the hotel page's room cards
-  // (the room form that offered the others is gone).
+  // (the room form that offered the others is gone). Its draft goes too, or the same hand-off
+  // would restore it and come straight back.
   const notOffered = !!rooms?.length && choices.some((choice) => !roomOf(choice));
   useEffect(() => {
-    if (notOffered && !attemptOpen) router.replace(`/?${homeSearch}`);
+    if (!notOffered || attemptOpen) return;
+    clearBookFlowDraft(slug);
+    router.replace(`/?${homeSearch}`);
     // router changes identity on navigation; the choice decides.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notOffered]);
@@ -610,15 +621,25 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     payment,
     guest,
   ]);
-  // The price follows every change, on the rooms step too (each room's price, VAY-2320); a
-  // refused way to pay moves to the next one.
+  // The price follows every change; on the rooms step (each room's price, VAY-2320) once the page
+  // knows it stays there, so a complete hand-off is priced on the next step. A refused way to
+  // pay moves to the next one.
   useEffect(() => {
-    if (!request || noWayToPay || guestProblems || quote || loading || error) return;
+    if (
+      (step === "rooms" && !settled) ||
+      !request ||
+      noWayToPay ||
+      guestProblems ||
+      quote ||
+      loading ||
+      error
+    )
+      return;
     const timer = setTimeout(submit, 400);
     return () => clearTimeout(timer);
     // submit belongs to this request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(request), step, noWayToPay, guestProblems, quote, loading, error]);
+  }, [JSON.stringify(request), step, settled, noWayToPay, guestProblems, quote, loading, error]);
   // Only a refusal of this price moves on; a failed request can be tried again.
   const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
   useEffect(() => {
@@ -650,11 +671,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     } else if (!payment && fallback + 1 < defaultMethods.length) setFallback((value) => value + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
-  // VAY-2197: an error the guest sees, once per price; a refusal the steps recover from by
-  // themselves (pricing again without promo codes or extras, or another way to pay) isn't one,
-  // and neither is one hidden behind an open booking attempt or on the room form.
+  // VAY-2197: an error the guest sees, once per price (the rooms step shows them too since
+  // VAY-2446); a refusal the steps recover from by themselves (pricing again without promo codes
+  // or extras, or another way to pay) isn't one, and neither is one hidden behind an open
+  // booking attempt. One that came before the page settled counts once it does.
   useEffect(() => {
-    if (!error || !settled || attemptOpen || step === "rooms") return;
+    if (!error || !settled || attemptOpen) return;
     const recovers =
       refused &&
       !quote &&
@@ -669,7 +691,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       code: funnelErrorCode(errorCode),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [error]);
+  }, [error, settled]);
   // VAY-2309: no price is asked for when no way to pay fits the chosen rates, so no refusal
   // reports it; the funnel still counts the dead end on each step it shows.
   useEffect(() => {

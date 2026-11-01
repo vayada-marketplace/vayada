@@ -4,7 +4,8 @@ import type { RoomChoice } from "@/services/api/replacementOffers";
 import type { ReplacementExtrasValue } from "@/services/api/replacementAddonSelection";
 import { emptyGuest, type GuestDetails } from "@/components/booking/GuestDetailsForm";
 
-/** The booking steps on /book (VAY-2195): `step` in the URL, no step is the room form. */
+/** The booking steps on /book (VAY-2195): `step` in the URL; no step is the rooms step (the
+ * children's ages per room, VAY-2446). */
 export type BookStep = "rooms" | "extras" | "details" | "payment";
 
 const ORDER: readonly BookStep[] = ["rooms", "extras", "details", "payment"];

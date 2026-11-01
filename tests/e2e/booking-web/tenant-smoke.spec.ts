@@ -33,7 +33,7 @@ test.describe("booking-web tenant smoke", () => {
     await expect(guestSelector.getByText("Ages 0-17", { exact: true })).toBeVisible();
     await guestSelector.getByRole("button", { name: "Done" }).click();
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
-    await expect(page.getByTestId("rooms-unavailable")).toBeVisible();
+    await expect(page.getByTestId("room-card-suite")).toBeVisible();
     const nav = page.locator("nav");
     await nav.getByRole("button", { name: "Contact", exact: true }).click();
     await expect(nav.getByText("Phone", { exact: true })).toBeVisible();
