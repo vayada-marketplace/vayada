@@ -145,8 +145,6 @@ describe("QuickHotelEdit", () => {
     renderer.root.findAll((node) => node.type === "button" && textOf(node) === "Back")[0]!;
   const saveAndExit = (renderer: ReactTestRenderer) =>
     renderer.root.find((node) => node.type === "button" && textOf(node) === "Save & exit");
-  const adjust = (renderer: ReactTestRenderer) =>
-    renderer.root.find((node) => node.type === "button" && textOf(node) === "Adjust");
   const nameField = (renderer: ReactTestRenderer) =>
     renderer.root.findAllByType("input").find((input) => input.props.value === "Hotel Alpenrose")!;
 
@@ -422,7 +420,7 @@ describe("QuickHotelEdit", () => {
         });
         const moved = await mount({ profile: UNPINNED, googleMapsApiKey: "key" });
         await openWhereItIs(moved.renderer);
-        await act(async () => adjust(moved.renderer).props.onClick());
+        // VAY-2444: the room editor's map takes a pin at once, without "Adjust".
         await act(async () =>
           moved.renderer.root.findByType(GoogleAddressMap).props.onPick({ lat: 48.14, lng: 11.58 }),
         );

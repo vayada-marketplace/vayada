@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import GoogleMapsLinkField from "./GoogleMapsLinkField";
 
 const messages = {
+  resolving: "Reading the short link…",
   label: "Google Maps link",
   hint: "Copy the link of a place or a dropped pin.",
   placed: (coordinates: string) => `Pin placed at ${coordinates}`,
@@ -12,7 +13,7 @@ const messages = {
   searchInstead: "Search an address instead",
 };
 
-function render() {
+function render(resolveShortLink: ((url: string) => Promise<string | null>) | null = null) {
   const onPin = vi.fn();
   const onClose = vi.fn();
   let renderer!: ReactTestRenderer;
@@ -24,6 +25,7 @@ function render() {
         onPin={onPin}
         onClose={onClose}
         classNames={{ label: "label", input: "input", link: "link" }}
+        resolveShortLink={resolveShortLink}
       />,
     );
   });
@@ -62,5 +64,54 @@ describe("GoogleMapsLinkField (VAY-2321, VAY-2444)", () => {
     expect(preventDefault).toHaveBeenCalled();
     act(() => field.renderer.root.findByProps({ type: "button" }).props.onClick());
     expect(field.onClose).toHaveBeenCalled();
+  });
+
+  it("reads a short link's long link through the API, once the typing pauses", async () => {
+    vi.useFakeTimers();
+    try {
+      const resolve = vi.fn(async (url: string) =>
+        url.endsWith("/good")
+          ? "https://www.google.com/maps/place/x/data=!3d5.9762!4d80.7063"
+          : null,
+      );
+      const field = render(resolve);
+      field.type("https://maps.app.goo.gl/goo");
+      field.type("https://maps.app.goo.gl/good");
+      expect(field.result().props.children).toBe(messages.resolving);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      // Only the last text was read.
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(field.onPin).toHaveBeenCalledWith({ latitude: 5.9762, longitude: 80.7063 });
+      expect(field.result().props.children).toBe("Pin placed at 5.9762, 80.7063");
+
+      field.type("https://maps.app.goo.gl/bad");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(field.result().props.children).toBe(messages.shortLink);
+      expect(field.onPin).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops an answer that arrives after the text changed", async () => {
+    vi.useFakeTimers();
+    try {
+      let answer!: (url: string | null) => void;
+      const field = render(() => new Promise((resolve) => (answer = resolve)));
+      field.type("https://maps.app.goo.gl/abc");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      field.type("https://example.com");
+      await act(async () => answer("https://www.google.com/maps/@6.03,80.21,17z"));
+      expect(field.onPin).not.toHaveBeenCalled();
+      expect(field.result().props.children).toBe(messages.noPin);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

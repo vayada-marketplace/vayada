@@ -16,6 +16,8 @@ export type QuickHotelDraft = {
   phone: string;
   /** Another currency than the country's; "" follows the country. */
   currency: string;
+  /** The pin came from a pasted Google Maps link (VAY-2444): typing the address keeps it. */
+  pinFromLink?: boolean;
 };
 
 export type QuickHotelField = "displayName" | "propertyType" | "address" | "contactEmail" | "phone";
@@ -60,7 +62,8 @@ export function quickHotelErrors(draft: QuickHotelDraft): QuickHotelErrors {
     !COUNTRY_OPTIONS.some((country) => country.code === draft.countryCode) ||
     !draft.timezone.trim()
   ) {
-    errors.address = "Choose your address from the list, or enter it manually.";
+    errors.address =
+      "Choose your address from the list, paste a Google Maps link, or enter it manually.";
   }
   if (!draft.contactEmail.trim()) errors.contactEmail = "Enter an email guests can write to.";
   else if (!EMAIL.test(draft.contactEmail.trim()))

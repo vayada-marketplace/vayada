@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   availableTimezones,
+  countryForCoordinates,
   defaultTimezoneForCountry,
   filterTimezones,
   timezoneForCoordinates,
@@ -36,5 +37,14 @@ describe("property time-zone detection", () => {
 
   it("filters the picker by city name", () => {
     expect(filterTimezones(["Europe/Berlin", "Europe/Paris"], "berlin")).toEqual(["Europe/Berlin"]);
+  });
+});
+
+describe("countryForCoordinates (VAY-2444)", () => {
+  it("names the country of a pin whose time zone has only one", () => {
+    // Hiriketiya, Sri Lanka.
+    expect(countryForCoordinates(5.9762, 80.7063)).toBe("LK");
+    // Bali (Asia/Makassar).
+    expect(countryForCoordinates(-8.6705, 115.2126)).toBe("ID");
   });
 });

@@ -45,6 +45,7 @@
     "./GoogleAddressMap": "./src/GoogleAddressMap.tsx",
     "./googleMaps": "./src/googleMaps.ts",
     "./googleMapsLink": "./src/googleMapsLink.ts",
+    "./addressFromPin": "./src/addressFromPin.ts",
     "./GoogleMapsLinkField": "./src/GoogleMapsLinkField.tsx",
     "./GuestsWillSeeCard": "./src/GuestsWillSeeCard.tsx",
     "./PinMapFrame": "./src/PinMapFrame.tsx",

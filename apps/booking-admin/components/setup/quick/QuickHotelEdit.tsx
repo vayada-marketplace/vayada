@@ -5,6 +5,7 @@ import type { SharedHotelSetupApi, SharedPropertyTypeOption } from "@vayada/prod
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiErrorResponse } from "@/services/api/client";
+import { mapsLinkApi } from "@/services/api/sharedHotelSetupClient";
 
 import { QuickHotelAddress } from "./QuickHotelAddress";
 import { QuickHotelStep } from "./QuickHotelStep";
@@ -102,9 +103,10 @@ export function QuickHotelEdit({
   // Whether the screen differs from the hotel as loaded (or last saved) with any looked-up pin: Save & exit,
   // or Back from the first screen, without an edit leaves without a write, and typing a value back to what it
   // was counts as no edit.
+  // Where a pin came from (a pasted link, VAY-2444) isn't saved, so it isn't an edit by itself.
   const dirty =
     logo !== null ||
-    JSON.stringify(draft) !==
+    JSON.stringify({ ...draft, pinFromLink: undefined }) !==
       JSON.stringify({
         ...quickHotelDraftFromProfile(loaded.profile.profile, loaded.savedCurrency),
         ...lookedUpPin,
@@ -112,7 +114,10 @@ export function QuickHotelEdit({
 
   /** The one save of this screen, for Continue, Save & exit and Back alike: the profile, a new logo, the currency. */
   const save = async (next: QuickHotelDraft) => {
-    if (!currency) throw new Error("Choose your address from the list, or enter it manually.");
+    if (!currency)
+      throw new Error(
+        "Choose your address from the list, paste a Google Maps link, or enter it manually.",
+      );
     const { profile, savedCurrency } = loaded;
     let saved: PropertyProfileResponse;
     try {
@@ -174,6 +179,8 @@ export function QuickHotelEdit({
           apiKey={googleMapsApiKey}
           currency={currency}
           onCurrencyChange={(code) => change({ currency: code })}
+          hotelName={draft.displayName}
+          resolveShortLink={mapsLinkApi.resolveShortLink}
         />
       )}
       logoPreviewUrl={logo?.url ?? null}

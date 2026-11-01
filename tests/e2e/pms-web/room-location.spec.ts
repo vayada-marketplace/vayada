@@ -526,7 +526,7 @@ test.describe("pms-web room location", () => {
       ]);
   });
 
-  test("places the pin from a pasted Google Maps link or the property's address", async ({
+  test("places the pin from a pasted Google Maps link, a short one too, or the property's address", async ({
     page,
   }) => {
     test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
@@ -536,12 +536,28 @@ test.describe("pms-web room location", () => {
     await page.getByRole("radio", { name: /Separate location/ }).click();
     const map = page.getByTestId("google-address-map-canvas");
 
+    // VAY-2444: the API reads a short share link's long link (the browser can't follow it).
+    const resolved: string[] = [];
+    await page.route("**/api/maps-links/resolve", (route) => {
+      const { url } = route.request().postDataJSON() as { url: string };
+      resolved.push(url);
+      return url.endsWith("/Unknown1")
+        ? route.fulfill({ status: 404, json: { code: "unresolved" } })
+        : route.fulfill({
+            json: { url: "https://www.google.com/maps/place/Isar/data=!3d48.14021!4d11.59693" },
+          });
+    });
     await page.getByRole("button", { name: "Paste a Google Maps link" }).click();
     const link = page.getByLabel("Google Maps link");
+    await link.fill("https://maps.app.goo.gl/Unknown1");
+    await expect(page.getByText(/This short link couldn't be read/)).toBeVisible();
     await link.fill("https://maps.app.goo.gl/AbCdEf123");
-    await expect(
-      page.getByText(/Short links \(maps\.app\.goo\.gl\) carry no coordinates/),
-    ).toBeVisible();
+    await expect(page.getByText("Pin placed at 48.14021, 11.59693")).toBeVisible();
+    await expect(map).toHaveAttribute("data-marker", "48.14021,11.59693");
+    expect(resolved).toEqual([
+      "https://maps.app.goo.gl/Unknown1",
+      "https://maps.app.goo.gl/AbCdEf123",
+    ]);
     await link.fill(
       "https://www.google.com/maps/place/Isar/@48.1301,11.5869,16z/data=!3d48.13021!4d11.58693",
     );
