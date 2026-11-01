@@ -13,6 +13,7 @@ import {
 import { CalendarRoom, CalendarRoomType, calendarService } from "@/services/calendar";
 import type { BookingAddon } from "@/services/bookings";
 import {
+  addonHasQuantity,
   addonMaxQuantity,
   addonSelection,
   isTransfer,
@@ -383,51 +384,48 @@ export default function TargetManualBookingModal({
   const party = partyOf(stays);
   /** How an extra's amount follows the party, e.g. "2 guests × 3 nights" (VAY-2417). */
   function addonDetail(addon: BookingAddon, line: AddonLine): string[] {
-    const count = (value: number, one: string, other: string) =>
-      value === 1 ? t(one) : t(other, { count: value });
-    const guests = (value: number) =>
-      count(
-        value,
-        "calendar.targetManualBooking.addonGuestOne",
-        "calendar.targetManualBooking.addonGuests",
-      );
+    // prettier-ignore
+    const guests = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonGuestOne") : t("calendar.targetManualBooking.addonGuests", { count }),
+      nights = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonNightOne") : t("calendar.targetManualBooking.addonNights", { count }),
+      trips = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonTripOne") : t("calendar.targetManualBooking.addonTrips", { count }),
+      vehicles = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonVehicleOne") : t("calendar.targetManualBooking.addonVehicles", { count });
+    const units = line.serviceUnits.length;
     const counts = line.serviceUnits.map((unit) => unit.guestCount ?? 0);
-    if (isTransfer(addon)) {
-      const trips = count(
-        line.serviceUnits.length,
-        "calendar.targetManualBooking.addonTripOne",
-        "calendar.targetManualBooking.addonTrips",
-      );
-      if (addon.perPerson)
-        return counts.every((guestCount) => guestCount === counts[0])
-          ? [guests(counts[0]!), trips]
-          : [guests(counts.reduce((sum, value) => sum + value, 0))];
-      if (!addon.maxGuests) return [trips];
-      return [
-        count(
-          line.packageCount,
-          "calendar.targetManualBooking.addonVehicleOne",
-          "calendar.targetManualBooking.addonVehicles",
-        ),
-        trips,
-      ];
-    }
-    const nights = count(
-      line.serviceUnits.length,
-      "calendar.targetManualBooking.addonNightOne",
-      "calendar.targetManualBooking.addonNights",
-    );
-    if (addon.perNight && addon.perPerson)
-      return counts.every((guestCount) => guestCount === counts[0])
-        ? [guests(counts[0]!), nights]
+    const per = isTransfer(addon) ? trips(units) : addon.perNight ? nights(units) : null;
+    if (addon.perPerson)
+      return counts.every((count) => count === counts[0])
+        ? [guests(counts[0]!), ...(per ? [per] : [])]
         : [
-            t("calendar.targetManualBooking.addonGuestNights", {
-              count: counts.reduce((sum, value) => sum + value, 0),
-            }),
+            addon.perNight
+              ? t("calendar.targetManualBooking.addonGuestNights", {
+                  count: counts.reduce((sum, count) => sum + count, 0),
+                })
+              : guests(counts.reduce((sum, count) => sum + count, 0)),
           ];
-    if (addon.perNight)
-      return line.packageCount > 1 ? [String(line.packageCount), nights] : [nights];
-    return addon.perPerson ? [guests(counts[0]!)] : [];
+    const amount = addonHasQuantity(addon)
+      ? line.packageCount > 1
+        ? String(line.packageCount)
+        : null
+      : vehicles(line.packageCount);
+    return [amount, per].filter((part): part is string => Boolean(part));
+  }
+  // aria-disabled, not disabled: a button that disables itself at the limit would drop focus.
+  function stepButton(addon: BookingAddon, next: AddonChoice, more: boolean, atLimit: boolean) {
+    return (
+      <button
+        type="button"
+        aria-label={
+          more
+            ? t("calendar.targetManualBooking.addonMore", { addon: addon.name })
+            : t("calendar.targetManualBooking.addonFewer", { addon: addon.name })
+        }
+        aria-disabled={atLimit}
+        onClick={() => !atLimit && chooseAddon(addon.id, next)}
+        className="size-11 rounded-lg border border-gray-300 text-base aria-disabled:opacity-40"
+      >
+        {more ? "+" : "−"}
+      </button>
+    );
   }
   function chooseAddon(addonId: string, choice: AddonChoice | null) {
     setPreviewEvidence(null);
@@ -1104,9 +1102,9 @@ export default function TargetManualBookingModal({
                     transfer = isTransfer(addon),
                     max = addonMaxQuantity(addon),
                     serverAddon = preview?.addOns.find((item) => item.addonId === addon.id);
-                  // Quantities follow the party (VAY-2417): only a per-stay or per-night extra
-                  // with a limit above 1 has a stepper, and a transfer is picked by trip.
-                  const stepper = !transfer && !addon.perPerson && max > 1 ? line : null;
+                  // Quantities follow the party (VAY-2417): a stepper only where neither the
+                  // guests nor the vehicles decide and the extra allows more than 1.
+                  const stepper = addonHasQuantity(addon) && max > 1 ? line : null;
                   const detail = line ? addonDetail(addon, line) : [];
                   return (
                     <div
@@ -1134,7 +1132,7 @@ export default function TargetManualBookingModal({
                             <span className="truncate">{addon.name}</span>
                           </label>
                         )}
-                        {stepper && (
+                        {stepper && choice && (
                           <div
                             role="group"
                             aria-label={t("calendar.targetManualBooking.addonQuantity", {
@@ -1142,43 +1140,24 @@ export default function TargetManualBookingModal({
                             })}
                             className="flex items-center gap-1 text-xs"
                           >
-                            <button
-                              type="button"
-                              aria-label={t("calendar.targetManualBooking.addonFewer", {
-                                addon: addon.name,
-                              })}
-                              disabled={stepper.packageCount <= 1}
-                              onClick={() =>
-                                chooseAddon(addon.id, {
-                                  quantity: stepper.packageCount - 1,
-                                  pickup: false,
-                                  dropOff: false,
-                                })
-                              }
-                              className="size-11 rounded-lg border border-gray-300 text-base disabled:opacity-40"
+                            {stepButton(
+                              addon,
+                              { ...choice, quantity: stepper.packageCount - 1 },
+                              false,
+                              stepper.packageCount <= 1,
+                            )}
+                            <span
+                              aria-live="polite"
+                              className="w-6 text-center text-sm tabular-nums"
                             >
-                              −
-                            </button>
-                            <span className="w-6 text-center text-sm tabular-nums">
                               {stepper.packageCount}
                             </span>
-                            <button
-                              type="button"
-                              aria-label={t("calendar.targetManualBooking.addonMore", {
-                                addon: addon.name,
-                              })}
-                              disabled={stepper.packageCount >= max}
-                              onClick={() =>
-                                chooseAddon(addon.id, {
-                                  quantity: stepper.packageCount + 1,
-                                  pickup: false,
-                                  dropOff: false,
-                                })
-                              }
-                              className="size-11 rounded-lg border border-gray-300 text-base disabled:opacity-40"
-                            >
-                              +
-                            </button>
+                            {stepButton(
+                              addon,
+                              { ...choice, quantity: stepper.packageCount + 1 },
+                              true,
+                              stepper.packageCount >= max,
+                            )}
                             <span className="text-gray-500">
                               {t("calendar.targetManualBooking.addonMax", { count: max })}
                             </span>
@@ -1206,7 +1185,7 @@ export default function TargetManualBookingModal({
                                   disabled={!date}
                                   onChange={(event) => {
                                     const next = {
-                                      quantity: 1,
+                                      quantity: choice?.quantity ?? 1,
                                       pickup: choice?.pickup ?? false,
                                       dropOff: choice?.dropOff ?? false,
                                       [trip]: event.target.checked,

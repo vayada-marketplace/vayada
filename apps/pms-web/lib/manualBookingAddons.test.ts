@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BookingAddon } from "@/services/bookings";
-import { addonSelection, partyOf } from "./manualBookingAddons";
+import { addonHasQuantity, addonSelection, partyOf } from "./manualBookingAddons";
 
 const addon = (patch: Partial<BookingAddon>): BookingAddon => ({
   id: "addon",
@@ -66,11 +66,13 @@ describe("addonSelection", () => {
       packageCount: 1,
       serviceUnits: [{ serviceDate: "2026-09-12", guestCount: null }],
     });
-    // Without a group size it's one per trip, whatever the quantity says.
-    const plain = addon({ category: "transport" });
+    // Without a group size staff pick how many, up to the extra's own limit.
+    const plain = addon({ category: "transport", maxQuantity: 2 });
     expect(addonSelection(plain, pick({ pickup: true, quantity: 9 }), together)?.packageCount).toBe(
-      1,
+      2,
     );
+    expect(addonHasQuantity(plain)).toBe(true);
+    expect(addonHasQuantity(transfer)).toBe(false);
   });
 
   it("charges a per-guest transfer for the guests arriving or leaving that day", () => {
@@ -100,6 +102,19 @@ describe("addonSelection", () => {
     expect(addonSelection(welcome, pick(), moved)?.serviceUnits).toEqual([
       { serviceDate: null, guestCount: 2 },
     ]);
+  });
+
+  it("counts vehicles for any transport extra with a group size, as the server does", () => {
+    const scooter = addon({ category: "transport", perNight: true, maxGuests: 2, maxQuantity: 1 });
+    expect(addonSelection(scooter, pick({ quantity: 1 }), together)).toEqual({
+      addonId: "addon",
+      packageCount: 3,
+      serviceUnits: [
+        { serviceDate: "2026-09-10", guestCount: null },
+        { serviceDate: "2026-09-11", guestCount: null },
+      ],
+    });
+    expect(addonHasQuantity(scooter)).toBe(false);
   });
 
   it("keeps other extras within their own limit, 1 when unset", () => {

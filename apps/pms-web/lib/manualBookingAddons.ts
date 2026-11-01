@@ -16,6 +16,18 @@ export function addonMaxQuantity(addon: BookingAddon): number {
   return Number.isInteger(addon.maxQuantity) && addon.maxQuantity! > 0 ? addon.maxQuantity! : 1;
 }
 
+/** A transport extra with a group size ("up to N guests") counts vehicles for the guests, as the
+ * server's limit does, whatever its pricing; null for anything else. */
+export function addonVehicles(addon: BookingAddon, guests: number): number | null {
+  return addon.category === "transport" && addon.maxGuests && addon.maxGuests > 0
+    ? Math.max(1, Math.ceil(guests / addon.maxGuests))
+    : null;
+}
+
+/** Staff pick how many only where neither the guests nor the vehicles decide it. */
+export const addonHasQuantity = (addon: BookingAddon) =>
+  !addon.perPerson && addonVehicles(addon, 1) === null;
+
 function nightsOf(stay: Stay): string[] {
   const nights: string[] = [];
   const date = new Date(`${stay.checkIn}T00:00:00Z`);
@@ -59,9 +71,10 @@ export function partyOf(stays: Stay[]) {
   };
 }
 
-/** The extra's request line, or null while nothing is picked. Every
- * amount follows the party, so staff can't book more than it needs: one per guest, a transfer's
- * vehicles from its group size, anything else up to its own limit. */
+/** The extra's request line, or null while nothing is picked. Every amount follows the party, so
+ * staff can't book more than it needs: one per guest, vehicles from a group size, anything else
+ * up to its own limit. One count serves both trips of a transfer (the API has one per extra), so
+ * a staggered stay gets the busier trip's vehicles both ways. */
 export function addonSelection(
   addon: BookingAddon,
   choice: AddonChoice | undefined,
@@ -86,15 +99,14 @@ export function addonSelection(
         trips.map((serviceDate) => ({ serviceDate, guestCount: party.travelling(serviceDate) })),
       );
     const busiest = Math.max(...trips.map(party.travelling));
-    const vehicles = addon.maxGuests ? Math.max(1, Math.ceil(busiest / addon.maxGuests)) : 1;
     return line(
-      vehicles,
+      addonVehicles(addon, busiest) ?? quantity,
       trips.map((serviceDate) => ({ serviceDate, guestCount: null })),
     );
   }
   if (addon.perNight)
     return line(
-      addon.perPerson ? 1 : quantity,
+      addon.perPerson ? 1 : (addonVehicles(addon, party.size) ?? quantity),
       party.nights.map((serviceDate) => ({
         serviceDate,
         guestCount: addon.perPerson ? party.occupancy(serviceDate) : null,

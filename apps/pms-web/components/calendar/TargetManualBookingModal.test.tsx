@@ -260,7 +260,10 @@ describe("target manual booking fields", () => {
     // Parking may be booked twice, Flowers once: only Parking has a stepper, which stops at 2.
     expect(view.root.findAllByProps({ "aria-label": "More: Flowers" })).toHaveLength(0);
     act(() => field("More: Parking").props.onClick());
-    expect(field("More: Parking").props.disabled).toBe(true);
+    // At the limit the button stays focusable but does nothing.
+    expect(field("More: Parking").props["aria-disabled"]).toBe(true);
+    act(() => field("More: Parking").props.onClick());
+    expect(field("Fewer: Parking").props["aria-disabled"]).toBe(false);
     await settlePreview();
     const markup = JSON.stringify(view.toJSON());
     expect(markup).toContain("€10 × 2 vehicles × 2 trips");
@@ -301,6 +304,11 @@ describe("target manual booking fields", () => {
         serviceUnits: [{ serviceDate: null, guestCount: null }],
       },
     ]);
+    // Picked extras follow later changes to the party.
+    act(() => field("Room 1 adults").props.onChange({ target: { value: "3" } }));
+    await settlePreview();
+    expect(JSON.stringify(view.toJSON())).toContain("€10 × 3 guests × 2 nights");
+    expect(JSON.stringify(view.toJSON())).toContain("€10 × 1 vehicle × 2 trips");
   });
 
   it("keeps the latest evidence when an older preview resolves last", async () => {
