@@ -40,6 +40,28 @@ export async function readBankTransferDestination(
   ).destination;
 }
 
+function bankTransferDetailsEdited(details: DirectTransferDetails): boolean {
+  const { accountType: _accountType, ...fields } = details;
+  return Object.values(fields).some((value) => value.trim().length > 0);
+}
+
+/** Whether a save would refuse these details: bank transfer on, and either no saved account to
+ * keep or details typed in, but not complete. Lets a page check before it saves anything. */
+export function bankTransferDetailsIncomplete(input: {
+  enabled: boolean;
+  details: DirectTransferDetails;
+  saved: SavedBankTransferDestination | null;
+}): boolean {
+  if (!input.enabled) return false;
+  if (!bankTransferDetailsEdited(input.details) && input.saved?.enabled && !input.saved.deleted)
+    return false;
+  return (
+    !input.details.bankName.trim() ||
+    !input.details.accountHolder.trim() ||
+    input.details.accountNumber.replace(/[ -]/g, "").length < 8
+  );
+}
+
 export async function saveBankTransferDestination(
   client: Transport,
   input: {
@@ -58,15 +80,14 @@ export async function saveBankTransferDestination(
       ? await readBankTransferDestination(client, input.propertyId)
       : input.saved;
   if (!input.enabled && !saved?.enabled) return saved;
-  const { accountType: _accountType, ...fields } = input.details;
-  const edited = Object.values(fields).some((value) => value.trim().length > 0);
-  if (input.enabled && !edited && saved?.enabled && !saved.deleted) return saved;
   if (
     input.enabled &&
-    (!input.details.bankName.trim() ||
-      !input.details.accountHolder.trim() ||
-      input.details.accountNumber.replace(/[ -]/g, "").length < 8)
-  ) {
+    !bankTransferDetailsEdited(input.details) &&
+    saved?.enabled &&
+    !saved.deleted
+  )
+    return saved;
+  if (bankTransferDetailsIncomplete({ ...input, saved })) {
     throw new BankTransferValidationError(
       "Enter the complete bank details, or leave all fields empty to keep the saved account.",
     );

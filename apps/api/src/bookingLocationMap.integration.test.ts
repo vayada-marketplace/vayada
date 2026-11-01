@@ -9,6 +9,7 @@ import {
 } from "./hotelSetupOrdinaryLogin.fixture.js";
 import {
   createPgBookingLocationMapRepository,
+  readGuestLocation,
   readGuestLocationMap,
   type BookingLocationMapRepository,
 } from "./domains/bookingLocationMap.js";
@@ -150,6 +151,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking location map (runtime login)", () =
       },
     });
     expect(await readGuestLocationMap(admin, propertyId)).toBeNull();
+    // VAY-2445: the rooms' details maps still get the property's place while the switch is off.
+    expect(await readGuestLocation(admin, propertyId)).toEqual({
+      enabled: false,
+      map: { property: { latitude: 48.14, longitude: 11.58, approximate: true } },
+      propertyPin: { latitude: 48.1394, longitude: 11.5835 },
+    });
 
     const audit = { actorUserId, organizationId, requestId: randomUUID(), correlationId: null };
     expect(await repository.setEnabled({ propertyId, enabled: true, audit })).toEqual({

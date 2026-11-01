@@ -79,7 +79,8 @@ export default function PropertyGallery({
     };
   }, [close, next, open, previous]);
 
-  if (galleryImages.length === 0) return null;
+  // A gallery of one photo adds nothing to the hero: the button needs two or more (VAY-2447).
+  if (galleryImages.length < 2) return null;
 
   const currentImage = galleryImages[index]!;
   const currentAlt = t("photoAlt", { hotelName, index: index + 1 });

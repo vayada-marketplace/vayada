@@ -304,6 +304,38 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     expect((await branding())?.displayDefaultCurrency).toBeUndefined();
   });
 
+  it("takes the Gallery button switch live from Booking settings, on by default (VAY-2447)", async () => {
+    // A page as setup publishes it, never with the switch.
+    await seedRevision(propertyA, brandedRevision, "hotel-alpenrose", 3, false, (profile) => {
+      profile.hotel.branding = {
+        showContactButton: true,
+        heroImage: null,
+        heroHeading: null,
+        heroSubtext: null,
+        primaryColor: null,
+        fontPairing: null,
+      };
+    });
+    await admin.query(
+      "UPDATE distribution.active_public_booking_revision SET content_revision_id = $2::uuid WHERE property_id = $1::uuid",
+      [propertyA, brandedRevision],
+    );
+    const galleryButton = async () =>
+      (await repository.findProfileBySlug("hotel-alpenrose"))?.hotel.branding?.showGalleryButton;
+    // No settings row: on, as before the switch existed.
+    expect(await galleryButton()).toBe(true);
+    // The column default keeps every hotel's button on at release.
+    await admin.query("INSERT INTO booking.booking_settings (property_id) VALUES ($1::uuid)", [
+      propertyA,
+    ]);
+    expect(await galleryButton()).toBe(true);
+    await admin.query(
+      "UPDATE booking.booking_settings SET show_gallery_button = FALSE WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect(await galleryButton()).toBe(false);
+  });
+
   async function seedLegacyProperty(propertyId: string, slug: string): Promise<void> {
     await admin.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name, lifecycle_status)

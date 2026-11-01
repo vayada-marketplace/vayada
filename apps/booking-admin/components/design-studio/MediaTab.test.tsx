@@ -1,4 +1,4 @@
-import { createRef } from "react";
+import { createRef, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,7 +8,7 @@ import MediaTab, { type PropertyGalleryImage } from "./MediaTab";
 function renderMediaTab(
   galleryImages: PropertyGalleryImage[],
   selectorsAvailable = true,
-  hero: { heroImage?: string; heroBusy?: boolean } = {},
+  hero: Partial<ComponentProps<typeof MediaTab>> = {},
 ) {
   return renderToStaticMarkup(
     <LanguageProvider>
@@ -112,6 +112,39 @@ describe("MediaTab header toggles", () => {
     expect(currency).toContain('aria-checked="false"');
     expect(currency).toContain('disabled=""');
     expect(markup).toContain("Hidden automatically when only one currency is configured.");
+  });
+
+  it("adds the Gallery button switch below Contact once the API reports it (VAY-2447)", () => {
+    expect(renderMediaTab([])).not.toContain('aria-label="Gallery button"');
+
+    const markup = renderMediaTab([], true, {
+      showGalleryButton: true,
+      setShowGalleryButton: vi.fn(),
+      galleryButtonAvailable: true,
+    });
+    const gallery = switchTag(markup, "Gallery button");
+
+    expect(gallery).toContain('aria-checked="true"');
+    expect(gallery).not.toContain('disabled=""');
+    expect(markup.indexOf('aria-label="Contact button"')).toBeLessThan(
+      markup.indexOf('aria-label="Gallery button"'),
+    );
+    expect(markup.indexOf('aria-label="Gallery button"')).toBeLessThan(
+      markup.indexOf('aria-label="Language selector"'),
+    );
+    expect(markup).toContain("Hidden automatically when only one image is in the gallery.");
+  });
+
+  it("greys out the Gallery button switch with fewer than two photos", () => {
+    const markup = renderMediaTab([], true, {
+      showGalleryButton: true,
+      setShowGalleryButton: vi.fn(),
+      galleryButtonAvailable: false,
+    });
+    const gallery = switchTag(markup, "Gallery button");
+
+    expect(gallery).toContain('aria-checked="false"');
+    expect(gallery).toContain('disabled=""');
   });
 });
 

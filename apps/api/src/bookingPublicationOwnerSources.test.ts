@@ -287,6 +287,9 @@ describe("production Booking publication owner sources", () => {
     });
 
     expect(evidence.entities[1]?.bindings).toBeUndefined();
+    // VAY-2447: the public page reads the Gallery button switch live, so the settings row hashed
+    // here never includes it and adding it marked no page as edited.
+    expect(String((pool.query.mock.calls[0] as unknown[])[0])).not.toContain("show_gallery_button");
 
     // VAY-2318: Design Studio's hero heading replaces the hotel name. Without one, the settings
     // row hashes exactly as before, so live pages without a heading are not marked as edited.

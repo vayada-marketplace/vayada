@@ -61,7 +61,6 @@ describe("hotel operations setup client", () => {
     mocks.post.mockResolvedValue({ onboardingUrl: "https://connect.stripe.test/onboard" });
     const input = {
       email: "host@example.test",
-      country: "DE",
       providerAccountId: "provider-account-1",
     };
 
@@ -88,6 +87,28 @@ describe("hotel operations setup client", () => {
     );
     expect(bodies[0]).not.toHaveProperty("propertyId");
     expect(bodies[0]).not.toHaveProperty("returnUrl");
+  });
+
+  it("creates a Stripe account without a country: the API reads the hotel's (VAY-2424)", async () => {
+    mocks.post.mockResolvedValue({ onboardingUrl: "https://connect.stripe.test/onboard" });
+
+    await hotelOperationsSetupApi.startStripeOnboarding("property-1", {
+      email: " Host@Example.test ",
+    });
+
+    expect(mocks.post).toHaveBeenCalledWith(
+      "/api/finance/properties/property-1/provider-accounts/stripe",
+      {
+        commandId: stableSetupCommandId("finance-stripe-account", "property-1", {
+          email: "host@example.test",
+        }),
+        idempotencyKey: stableSetupCommandId("finance-stripe-account", "property-1", {
+          email: "host@example.test",
+        }),
+        email: "host@example.test",
+        returnSurface: "booking_admin_setup",
+      },
+    );
   });
 
   it("reconciles only the exact property's stored Stripe account", async () => {

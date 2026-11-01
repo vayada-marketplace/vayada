@@ -76,7 +76,8 @@ describe("where you'll stay (VAY-2323)", () => {
     expect(roomPlace(room({}), property)?.name).toBe("Hotel Alpenrose");
   });
 
-  it("shows nothing while the map is off, the room's details map is off, or there is no place", () => {
+  // VAY-2445: the hotel's location map switch no longer decides; a catalog without the property's place does.
+  it("shows nothing without the property's place, while the room's details map is off, or without a pin", () => {
     const villa = room({
       atProperty: false,
       location: { latitude: 48.15634, longitude: 11.58242 },

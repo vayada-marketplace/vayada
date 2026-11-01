@@ -158,7 +158,7 @@
         "all_inclusive": "Semua makanan dan minuman termasuk"
       }
     },
-    "sortRooms": "Urutkan kamar",
+    "sortBy": "Urutkan menurut",
     "pricesFailed": "Kami tidak dapat memuat harga untuk tanggal ini. Anda tetap dapat memilih kamar; kami akan memeriksa harganya di langkah berikutnya.",
     "retryPrices": "Coba lagi",
     "childrenPricedLater": "Harga untuk orang dewasa. Kami menambahkan anak-anak setelah Anda memberi tahu usia mereka di langkah berikutnya.",
@@ -214,8 +214,6 @@
       "continueWithPlace": "Lanjut dengan tempat ini"
     },
     "oneRoom": {
-      "together": "Menampilkan tempat menginap untuk {count} tamu bersama.",
-      "preferSeparate": "Lebih suka kamar terpisah?",
       "noneFits": "Tidak ada satu tempat yang muat untuk {count} tamu.",
       "splitHint": "Bagi rombongan Anda dan pilih tempat untuk setiap bagian.",
       "bookRooms": "Pesan {count} kamar"

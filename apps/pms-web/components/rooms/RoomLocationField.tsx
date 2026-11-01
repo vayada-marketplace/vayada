@@ -492,7 +492,8 @@ export default function RoomLocationField({
               {detailsSwitch}
             </>
           ) : (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[400px_minmax(0,1fr)] lg:gap-x-6">
+            // The same two columns as the Same as property / Separate location cards above (VAY-2445).
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-x-3">
               <div className="space-y-2 lg:col-start-1 lg:row-start-1">
                 {pasting ? (
                   <GoogleMapsLinkField

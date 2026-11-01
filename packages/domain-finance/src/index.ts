@@ -470,9 +470,10 @@ export type FinanceProviderAccountOwner = {
  */
 export type StripeConnectReturnSurface = "booking_admin" | "booking_admin_setup";
 
+/** The account's country is the hotel's address country (hotel_catalog.property_locations), read
+ * by the API when it creates the account; the hotel doesn't pick it (VAY-2424). */
 export type CreateStripeProviderAccountPayload = {
   email: string;
-  country: string;
   returnSurface?: StripeConnectReturnSurface;
 };
 
@@ -644,7 +645,9 @@ export type FinanceProviderAccountCommandResult =
         | "idempotency_conflict"
         | "write_unavailable"
         | "provider_unavailable"
-        | "provider_rejected";
+        | "provider_rejected"
+        | "property_country_missing"
+        | "provider_country_unsupported";
       message: string;
     };
 
@@ -687,6 +690,11 @@ export type StripeConnectProviderAccountSnapshot = {
 
 export class StripeConnectAccountNotFoundError extends Error {
   readonly code = "stripe_connect_account_not_found";
+}
+
+/** Stripe won't open a connected account in the requested country (VAY-2424). */
+export class StripeConnectCountryUnsupportedError extends Error {
+  readonly code = "stripe_connect_country_unsupported";
 }
 
 export type FinanceStripeDashboardLoginLinkResult =

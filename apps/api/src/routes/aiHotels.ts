@@ -85,6 +85,7 @@ type TargetPublicHotelProfileRow = {
   bookingShowContactButton: boolean | null;
   bookingShowLanguageSelector: boolean | null;
   bookingShowCurrencySelector: boolean | null;
+  bookingShowGalleryButton: boolean | null;
   bookingDisplayCurrencies: unknown;
   bookingPromoCodes: boolean;
   bookingHeroImage: string | null;
@@ -392,6 +393,9 @@ function serializeHotelProfile(
             ...(hotel.branding.showCurrencySelector === undefined
               ? {}
               : { showCurrencySelector: hotel.branding.showCurrencySelector }),
+            ...(hotel.branding.showGalleryButton === undefined
+              ? {}
+              : { showGalleryButton: hotel.branding.showGalleryButton }),
             ...(hotel.branding.displayCurrencies === undefined
               ? {}
               : { displayCurrencies: hotel.branding.displayCurrencies.map((code) => code) }),
@@ -543,6 +547,7 @@ const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
            booking_branding.show_contact_button AS "bookingShowContactButton",
            booking_branding.show_language_selector AS "bookingShowLanguageSelector",
            booking_branding.show_currency_selector AS "bookingShowCurrencySelector",
+           booking_branding.show_gallery_button AS "bookingShowGalleryButton",
            booking_branding.supported_currencies AS "bookingDisplayCurrencies",
            ${LIVE_PROMO_CODES_SQL("profile.property_id")} AS "bookingPromoCodes",
            booking_branding.hero_image_url AS "bookingHeroImage",
@@ -719,6 +724,7 @@ function publicBookingBranding(
     showReferAGuestButton: false,
     showLanguageSelector: row.bookingShowLanguageSelector ?? true,
     showCurrencySelector: row.bookingShowCurrencySelector ?? true,
+    showGalleryButton: row.bookingShowGalleryButton ?? true,
     heroImage: stringValue(row.bookingHeroImage),
     heroHeading: stringValue(row.bookingHeroHeading),
     heroSubtext: stringValue(row.bookingHeroSubtext),

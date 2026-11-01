@@ -217,6 +217,9 @@ export type PublicBookabilityBranding = {
   showReferAGuestButton?: boolean;
   showLanguageSelector?: boolean;
   showCurrencySelector?: boolean;
+  /** Read live from Booking settings, never from a publication (VAY-2447). The page also hides
+   * the button when the hotel has fewer than two photos. */
+  showGalleryButton?: boolean;
   /** Display-only currencies a guest may switch to, defaultCurrency first; present only with
    * more than one. Quotes and charges stay in the pricing currency (supportedCurrencies). */
   displayCurrencies?: string[];

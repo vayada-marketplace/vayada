@@ -28,7 +28,7 @@ export default function RoomDetailModal({
   room: PricingRoom;
   roomCount: number;
   soldOut: boolean;
-  /** The hotel's location map while it shows one (VAY-2126), for "Where you'll stay" (VAY-2323). */
+  /** The property's place (VAY-2126), for "Where you'll stay" (VAY-2323), shown by the room's own switch (VAY-2445). */
   place?: GuestPlace | null;
   onClose: () => void;
   /** The card's choices and "Select This Rate", so both offer the same selection. */

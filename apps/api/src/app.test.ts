@@ -754,6 +754,7 @@ const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
       showContactButton: settings.showContactButton ?? true,
       showLanguageSelector: settings.showLanguageSelector ?? true,
       showCurrencySelector: settings.showCurrencySelector ?? true,
+      showGalleryButton: settings.showGalleryButton ?? true,
       heroImage: settings.heroImage ?? "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: settings.heroHeading ?? "Stay above the clouds",
       heroSubtext: settings.heroSubtext ?? "An independent alpine escape.",
@@ -2476,6 +2477,7 @@ function targetPublicHotelProfileRow(): QueryResultRow {
     bookingShowReferAGuestButton: true,
     bookingShowLanguageSelector: false,
     bookingShowCurrencySelector: true,
+    bookingShowGalleryButton: false,
     bookingReferAGuestModuleEnabled: true,
     bookingPromoCodes: true,
     bookingHeroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
@@ -4318,6 +4320,7 @@ describe("vayada-api", () => {
       showContactButton: true,
       showLanguageSelector: true,
       showCurrencySelector: true,
+      showGalleryButton: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Stay above the clouds",
       heroSubtext: "An independent alpine escape.",
@@ -4334,6 +4337,7 @@ describe("vayada-api", () => {
         showContactButton: false,
         showLanguageSelector: false,
         showCurrencySelector: true,
+        showGalleryButton: false,
         heroHeading: "Book the mountain directly",
         primaryColor: "#0F766E",
         fontPairing: "grand-classic",
@@ -4346,6 +4350,7 @@ describe("vayada-api", () => {
       showContactButton: false,
       showLanguageSelector: false,
       showCurrencySelector: true,
+      showGalleryButton: false,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Book the mountain directly",
       heroSubtext: "An independent alpine escape.",
@@ -6968,6 +6973,7 @@ describe("vayada-api", () => {
           showReferAGuestButton: false,
           showLanguageSelector: false,
           showCurrencySelector: true,
+          showGalleryButton: false,
           heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
           heroHeading: "Stay in the heart of the Alps",
           heroSubtext: "Book direct for our best available rates.",
@@ -7006,6 +7012,9 @@ describe("vayada-api", () => {
     expect(queries[0]?.text).toContain(
       'booking_branding.show_contact_button AS "bookingShowContactButton"',
     );
+    expect(queries[0]?.text).toContain(
+      'booking_branding.show_gallery_button AS "bookingShowGalleryButton"',
+    );
     expect(queries[0]?.text).toContain("booking_branding.header_logo_media_object_id");
     expect(queries[0]?.text).toContain("media.purpose = 'booking.header_logo'");
     expect(queries[0]?.text).toContain('booking_branding.hero_image_url AS "bookingHeroImage"');
@@ -7019,6 +7028,7 @@ describe("vayada-api", () => {
       showReferAGuestButton: false,
       showLanguageSelector: false,
       showCurrencySelector: true,
+      showGalleryButton: false,
       heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
       heroHeading: "Stay in the heart of the Alps",
       heroSubtext: "Book direct for our best available rates.",
@@ -7125,6 +7135,7 @@ describe("vayada-api", () => {
       show_refer_a_guest_button: boolean;
       show_language_selector: boolean;
       show_currency_selector: boolean;
+      show_gallery_button: boolean;
       last_minute_discount: {
         enabled: boolean;
         stackWithPromo: boolean;
@@ -7163,6 +7174,7 @@ describe("vayada-api", () => {
       show_refer_a_guest_button: false,
       show_language_selector: true,
       show_currency_selector: true,
+      show_gallery_button: true,
       last_minute_discount: {
         enabled: false,
         stackWithPromo: false,
@@ -7361,6 +7373,9 @@ describe("vayada-api", () => {
           }
           if (typeof design.showCurrencySelector === "boolean") {
             state.show_currency_selector = design.showCurrencySelector;
+          }
+          if (typeof design.showGalleryButton === "boolean") {
+            state.show_gallery_button = design.showGalleryButton;
           }
         } else if (text.includes("show_addons_step = $2")) {
           state.show_addons_step = values?.[1] as boolean;
@@ -7623,6 +7638,7 @@ describe("vayada-api", () => {
       payload: {
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
+        showGalleryButton: false,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -7637,6 +7653,7 @@ describe("vayada-api", () => {
       showContactButton: false,
       showLanguageSelector: false,
       showCurrencySelector: true,
+      showGalleryButton: false,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Book the mountain directly",
       heroSubtext: "An independent alpine escape.",
@@ -7668,6 +7685,7 @@ describe("vayada-api", () => {
       JSON.stringify({
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
         showContactButton: false,
+        showGalleryButton: false,
         showLanguageSelector: false,
         showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
@@ -7725,6 +7743,7 @@ describe("vayada-api", () => {
       showContactButton: false,
       showLanguageSelector: false,
       showCurrencySelector: true,
+      showGalleryButton: false,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Book the mountain directly",
       heroSubtext: "Come for the mountains. Stay for the quiet.",

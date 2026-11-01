@@ -237,6 +237,32 @@ describe("active immutable Booking publication profile reads", () => {
     expect((await read(false))?.hotel.capabilities.promoCodes).toBe(false);
     expect((await read(true))?.hotel.capabilities.promoCodes).toBe(true);
   });
+
+  it("takes the Gallery button switch from Booking settings, not the publication (VAY-2447)", async () => {
+    const published = structuredClone(profile);
+    published.hotel.branding = {
+      logoUrl: null,
+      heroImage: null,
+      heroHeading: null,
+      heroSubtext: null,
+      primaryColor: null,
+      fontPairing: null,
+    };
+    const read = async (showGalleryButton: boolean | null) =>
+      createActiveBookingPublicationProfileRepository({
+        connectionString: "postgresql://unused",
+        pool: pool(async (text) =>
+          text.includes('AS "promoCodes"')
+            ? [{ domainVerified: true, promoCodes: false, showGalleryButton }]
+            : [{ propertyId: published.hotel.propertyId, publicContent: content(published) }],
+        ),
+      }).findProfileBySlug(published.hotel.slug);
+
+    expect((await read(false))?.hotel.branding?.showGalleryButton).toBe(false);
+    expect((await read(true))?.hotel.branding?.showGalleryButton).toBe(true);
+    // No settings row: the button keeps showing, as before the switch existed.
+    expect((await read(null))?.hotel.branding?.showGalleryButton).toBe(true);
+  });
 });
 
 type PublicContentInput = Parameters<typeof buildBookingPublicContent>[0];

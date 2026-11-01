@@ -122,7 +122,6 @@ export const hotelOperationsSetupApi = {
     propertyId: string,
     input: {
       email: string;
-      country: string;
       providerAccountId?: string | null;
       linkAttemptId?: string;
     },
@@ -140,18 +139,18 @@ export const hotelOperationsSetupApi = {
             providerAccountId: input.providerAccountId,
             linkAttemptId: input.linkAttemptId ?? "initial",
           }
-        : { email: input.email.trim().toLowerCase(), country: input.country.trim().toUpperCase() },
+        : { email: input.email.trim().toLowerCase() },
     );
     return targetApiClient.post<StripeProviderAccountResponse>(
       endpoint,
       input.providerAccountId
-        // Stripe returns the owner to this app's /setup (API surface added in VAY-2262 #3385).
-        ? { commandId, idempotencyKey: commandId, returnSurface: "booking_admin_setup" }
+        ? // Stripe returns the owner to this app's /setup (API surface added in VAY-2262 #3385).
+          { commandId, idempotencyKey: commandId, returnSurface: "booking_admin_setup" }
         : {
             commandId,
             idempotencyKey: commandId,
+            // The API takes the account's country from the hotel's address (VAY-2424).
             email: input.email.trim().toLowerCase(),
-            country: input.country.trim().toUpperCase(),
             returnSurface: "booking_admin_setup",
           },
     );

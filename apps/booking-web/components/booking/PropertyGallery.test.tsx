@@ -26,6 +26,11 @@ type ImageProps = ComponentProps<"img"> & {
   quality?: number;
 };
 
+const twoPhotos = [
+  "https://cdn.vayada.com/gallery-1.webp",
+  "https://cdn.vayada.com/gallery-2.webp",
+];
+
 describe("PropertyGallery", () => {
   let root: Root | null = null;
 
@@ -41,8 +46,17 @@ describe("PropertyGallery", () => {
     document.body.innerHTML = "";
   });
 
-  it("does not render a trigger when the property has no gallery photos", () => {
+  it("does not render a trigger with fewer than two photos (VAY-2447)", () => {
     expect(renderGalleryToMarkup("en", [])).toBe("");
+    expect(renderGalleryToMarkup("en", ["https://cdn.vayada.com/gallery.webp"])).toBe("");
+    // Counted after duplicates and empty links are dropped.
+    expect(
+      renderGalleryToMarkup("en", [
+        "https://cdn.vayada.com/gallery.webp",
+        "",
+        "https://cdn.vayada.com/gallery.webp",
+      ]),
+    ).toBe("");
   });
 
   it("skips duplicate and empty photo links", () => {
@@ -67,7 +81,7 @@ describe("PropertyGallery", () => {
   });
 
   it("labels the nav pill Gallery and names the button for screen readers", () => {
-    const markup = renderGalleryToMarkup("en", ["https://cdn.vayada.com/gallery.webp"]);
+    const markup = renderGalleryToMarkup("en", twoPhotos);
 
     expect(markup).toContain('aria-label="Open photo gallery"');
     expect(markup).toContain('aria-haspopup="dialog"');
@@ -76,11 +90,7 @@ describe("PropertyGallery", () => {
 
   it("shows only the icon in the compact phone nav", () => {
     const container = document.createElement("div");
-    container.innerHTML = renderGalleryToMarkup(
-      "en",
-      ["https://cdn.vayada.com/gallery.webp"],
-      true,
-    );
+    container.innerHTML = renderGalleryToMarkup("en", twoPhotos, true);
     const trigger = container.querySelector("button");
 
     expect(trigger?.getAttribute("aria-label")).toBe("Open photo gallery");
@@ -88,7 +98,7 @@ describe("PropertyGallery", () => {
   });
 
   it("renders guest controls in the requested locale", () => {
-    const markup = renderGalleryToMarkup("de", ["https://cdn.vayada.com/gallery.webp"]);
+    const markup = renderGalleryToMarkup("de", twoPhotos);
 
     expect(markup).toContain('aria-label="Galerie öffnen"');
     expect(markup).toMatch(/Galerie<\/button>$/);

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { saveBankTransferDestination, type DirectTransferDetails } from "./bankTransferDestination";
+import {
+  bankTransferDetailsIncomplete,
+  saveBankTransferDestination,
+  type DirectTransferDetails,
+} from "./bankTransferDestination";
 
 const blank: DirectTransferDetails = {
   accountHolder: "",
@@ -111,5 +115,29 @@ describe("independent direct-transfer destination", () => {
       expectedVersion: 5,
       commandId: expect.any(String),
     });
+  });
+});
+
+describe("bank details check before saving (VAY-2424)", () => {
+  it("asks for complete details only when bank transfer is on and they would be sent", () => {
+    expect(bankTransferDetailsIncomplete({ enabled: false, details: blank, saved: null })).toBe(
+      false,
+    );
+    // Empty inputs keep the saved account.
+    expect(bankTransferDetailsIncomplete({ enabled: true, details: blank, saved })).toBe(false);
+    expect(bankTransferDetailsIncomplete({ enabled: true, details: blank, saved: null })).toBe(
+      true,
+    );
+    expect(
+      bankTransferDetailsIncomplete({ enabled: true, details: { ...blank, bankName: "X" }, saved }),
+    ).toBe(true);
+    expect(
+      bankTransferDetailsIncomplete({
+        enabled: true,
+        details: blank,
+        saved: { ...saved, enabled: false },
+      }),
+    ).toBe(true);
+    expect(bankTransferDetailsIncomplete({ enabled: true, details, saved: null })).toBe(false);
   });
 });

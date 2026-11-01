@@ -101,8 +101,9 @@ apps/api/src/routes/finance.ts.
   - booking.settings.manage with the direct-booking-finance entitlement.
 - Both alternatives require an exact pms_property or property resource link and
   an owner or finance_manager relationship.
-- The browser supplies command and idempotency IDs, email, country, and an
-  allowlisted return surface. It does not choose the Stripe account reference.
+- The browser supplies command and idempotency IDs, email, and an allowlisted
+  return surface. It does not choose the Stripe account reference or its
+  country: the account opens in the hotel's address country (VAY-2424).
 - createStripeProviderAccountInClient reuses the property account or creates one
   through FinanceStripeConnectProvider.
 - New accounts use owner-scoped Stripe idempotency keys and metadata.

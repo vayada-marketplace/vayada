@@ -226,6 +226,7 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
   });
   expect(await getReplacementCatalog("hotel")).toEqual({
     locationMap: { property: { latitude: 48.14, longitude: 11.58, approximate: true } },
+    detailsMap: null,
     rooms: [
       {
         ...rooms[0],
@@ -236,9 +237,27 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
     ],
   });
   catalog({ rooms, locationMap: { property: { latitude: 120, longitude: 11.58 } } });
-  expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: { property: null } });
+  expect(await getReplacementCatalog("hotel")).toEqual({
+    rooms,
+    locationMap: { property: null },
+    detailsMap: null,
+  });
   catalog({ rooms });
-  expect(await getReplacementCatalog("hotel")).toEqual({ rooms, locationMap: null });
+  expect(await getReplacementCatalog("hotel")).toEqual({
+    rooms,
+    locationMap: null,
+    detailsMap: null,
+  });
+  // VAY-2445: the property's place for the rooms' own details maps, sent while the location map is off.
+  catalog({
+    rooms,
+    detailsMap: { property: { latitude: 6.03, longitude: 80.21, approximate: false } },
+  });
+  expect(await getReplacementCatalog("hotel")).toEqual({
+    rooms,
+    locationMap: null,
+    detailsMap: { property: { latitude: 6.03, longitude: 80.21, approximate: false } },
+  });
 });
 
 it("reads where each room is: at the property, or an area without its street (VAY-2321)", async () => {

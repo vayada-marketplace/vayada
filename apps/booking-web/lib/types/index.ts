@@ -28,6 +28,8 @@ export interface HotelHeaderSettings {
   showContactButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
+  /** The Gallery pill; the page also hides it with fewer than two photos (VAY-2447). */
+  showGalleryButton: boolean;
 }
 
 export interface GuestTypeSettings {

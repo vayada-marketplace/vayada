@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { mockBookingApis } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -9,7 +9,7 @@ test.describe("booking-web gallery in the top nav", () => {
     test(`opens the photo gallery from the nav at ${width}px`, async ({ page }, testInfo) => {
       const assertHealthy = watchPageHealth(page, testInfo);
       await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
-      await mockBookingApis(page);
+      await mockHotel(page);
       await page.goto("/");
 
       const nav = page.locator("nav");
@@ -46,7 +46,7 @@ test.describe("booking-web gallery in the top nav", () => {
       await gallery.click();
       const dialog = page.getByRole("dialog", { name: "Our photo gallery for Hotel Alpenrose" });
       await expect(dialog).toBeVisible();
-      await expect(dialog.getByText("1 / 1", { exact: true })).toBeVisible();
+      await expect(dialog.getByText("1 / 2", { exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
       await expect(gallery).toBeFocused();
@@ -71,7 +71,7 @@ test.describe("booking-web gallery in the top nav", () => {
     const name = "Hotel Alpenrose Boutique & Wellness Resort Zermatt";
     await page.setViewportSize({ width: 768, height: 1024 });
     // Every header control on, so the nav is as full as it gets.
-    await mockBookingApis(page, {
+    await mockHotel(page, {
       hotelName: name,
       headerSettings: {
         showContactButton: true,
@@ -101,8 +101,118 @@ test.describe("booking-web gallery in the top nav", () => {
       await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
       await expect(page.getByRole("button", { name: "Open photo gallery" })).toHaveCount(0);
     });
+
+    // VAY-2447: one photo is no gallery (the shared mock hotel has exactly one).
+    test(`shows no gallery button for a hotel with one photo at ${width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+      await mockBookingApis(page);
+      await page.goto("/");
+
+      await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
+      await expect(contactButton(page, width)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Open photo gallery" })).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath(`gallery-nav-one-photo-${width}.png`) });
+    });
+
+    test(`hides the gallery button Design Studio switched off at ${width}px (VAY-2447)`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+      await mockHotel(page, { headerSettings: everyHeaderControl }, { showGalleryButton: false });
+      await page.goto("/");
+
+      await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
+      await expect(contactButton(page, width)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Open photo gallery" })).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath(`gallery-nav-switched-off-${width}.png`) });
+    });
   }
 });
+
+const everyHeaderControl = {
+  showContactButton: true,
+  showReferAGuestButton: false,
+  showLanguageSelector: true,
+  showCurrencySelector: true,
+};
+
+const SECOND_PHOTO = "/e2e-gallery-photo-2.png";
+
+type MockOptions = NonNullable<Parameters<typeof mockBookingApis>[1]>;
+type HotelProfileJson = {
+  hotel: Record<string, unknown> & { name: string; branding?: Record<string, unknown> };
+};
+
+/**
+ * VAY-2447: the Gallery button needs two photos, and the shared mock hotel has one. This runs the
+ * shared mock but patches the hotel profile it serves (the mock's only RegExp route) with these
+ * photos and, when given, the Gallery switch, so other specs keep the shared mock as it is.
+ */
+async function mockHotel(
+  page: Page,
+  options: MockOptions = {},
+  {
+    images = ["/vayada-logo.png", SECOND_PHOTO],
+    showGalleryButton,
+  }: { images?: string[]; showGalleryButton?: boolean } = {},
+) {
+  const patch = (json: HotelProfileJson): HotelProfileJson => ({
+    ...json,
+    hotel: {
+      ...json.hotel,
+      images: images.map((url) => ({ url, alt: json.hotel.name })),
+      ...(showGalleryButton === undefined
+        ? {}
+        : { branding: { ...json.hotel.branding, showGalleryButton } }),
+    },
+  });
+  const patchedPage = new Proxy(page, {
+    get(target, property) {
+      if (property !== "route") return bound(target, property);
+      return (
+        url: Parameters<Page["route"]>[0],
+        handler: Parameters<Page["route"]>[1],
+        routeOptions?: Parameters<Page["route"]>[2],
+      ) =>
+        target.route(
+          url,
+          url instanceof RegExp
+            ? (route: Route, request) => handler(withPatchedJson(route, patch), request)
+            : handler,
+          routeOptions,
+        );
+    },
+  });
+  await mockBookingApis(patchedPage, options);
+  // The second photo is the first one's file at another address.
+  await page.route(`**${SECOND_PHOTO}`, (route) =>
+    route.fulfill({ path: "apps/booking-web/public/vayada-logo.png" }),
+  );
+}
+
+function withPatchedJson(route: Route, patch: (json: HotelProfileJson) => HotelProfileJson) {
+  return new Proxy(route, {
+    get(target, property) {
+      if (property !== "fulfill") return bound(target, property);
+      return (response: Parameters<Route["fulfill"]>[0] = {}) =>
+        target.fulfill({ ...response, json: patch(response.json as HotelProfileJson) });
+    },
+  });
+}
+
+function bound(target: object, property: string | symbol) {
+  const value: unknown = Reflect.get(target, property, target);
+  return typeof value === "function" ? value.bind(target) : value;
+}
+
+function contactButton(page: Page, width: number) {
+  const nav = page.locator("nav");
+  return width > 600
+    ? nav.getByRole("button", { name: "Contact", exact: true })
+    : nav.getByTestId("mobile-contact-button");
+}
 
 /** The right edge of the nav's rightmost visible button (the page clips, so scrollWidth can't tell). */
 async function navRightEdge(nav: Locator) {

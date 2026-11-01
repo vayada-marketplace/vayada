@@ -12,14 +12,25 @@ import {
 } from "@/services/api/pmsManualBookingClient";
 import { CalendarRoom, CalendarRoomType, calendarService } from "@/services/calendar";
 import type { BookingAddon } from "@/services/bookings";
+import {
+  addonHasQuantity,
+  addonMaxQuantity,
+  addonSelection,
+  isTransfer,
+  partyOf,
+  type AddonChoice,
+  type AddonLine,
+} from "@/lib/manualBookingAddons";
 import { useTranslation } from "@/lib/i18n";
 import CountryPicker, { NATIONALITY_PICKER_OPTIONS } from "@/components/CountryPicker";
 import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
-import AdditionalGuestsEditor, {
-  additionalGuestNumber,
-  additionalGuestValid,
-  type AdditionalGuestDraft,
-} from "@/components/calendar/AdditionalGuestsEditor";
+import GuestCards, {
+  EMPTY_GUEST,
+  guestMissingName,
+  guestNamed,
+  guestSlots,
+  type GuestDraft,
+} from "@/components/calendar/GuestCards";
 
 // prettier-ignore
 const SOURCES = [["call", "calendar.targetManualBooking.sourceCall"], ["email", "calendar.targetManualBooking.sourceEmail"], ["whatsapp", "calendar.targetManualBooking.sourceWhatsApp"], ["walk_in", "calendar.targetManualBooking.sourceWalkIn"], ["social_media", "calendar.targetManualBooking.sourceSocialMedia"], ["other", "calendar.targetManualBooking.sourceOther"]] as const;
@@ -54,6 +65,15 @@ function addDay(value: string): string { if (!value) return ""; const date = new
 function childAge(value: string): number | null {
   const parsed = Number(value);
   return value.trim() && Number.isInteger(parsed) && parsed >= 0 && parsed <= 17 ? parsed : null;
+}
+
+/** The ages a stay sends: an offer prices children by age, so it waits (undefined) for all of them;
+ * a custom rate keeps them as a stay fact once all are entered, else goes without (null). */
+function stayChildAges(stay: StayDraft): number[] | null | undefined {
+  const ages = stay.childAges.map(childAge);
+  if (ages.length === stay.children && ages.every((age) => age !== null)) return ages as number[];
+  const mistyped = stay.childAges.some((age) => age.trim() && childAge(age) === null);
+  return stay.ratePlanId === "custom" && !mistyped ? null : undefined;
 }
 
 function amount(value: string): string | null {
@@ -145,9 +165,6 @@ function previewErrorDetails(
   return detail.stay ? { ...detail, retryable: false } : { message: fallback, retryable: true };
 }
 
-// prettier-ignore
-function addonSelection(addon: BookingAddon, packageCount: number, stays: StayDraft[]) { const dates = new Set<string>(); for (const stay of stays) for (let date = stay.checkIn; date < stay.checkOut; date = addDay(date)) dates.add(date); const serviceDates = Array.from(dates).sort(), occupancy = (date: string) => stays.filter((stay) => stay.checkIn <= date && date < stay.checkOut).reduce((sum, stay) => sum + stay.adults + stay.children, 0), serviceUnits = addon.perNight ? serviceDates.map((serviceDate) => ({ serviceDate, guestCount: addon.perPerson ? occupancy(serviceDate) : null })) : [{ serviceDate: null, guestCount: addon.perPerson ? stays.reduce((sum, stay) => sum + stay.adults + stay.children, 0) : null }]; return { addonId: addon.id, packageCount, serviceUnits }; }
-
 export default function TargetManualBookingModal({
   roomTypes,
   rooms,
@@ -161,12 +178,16 @@ export default function TargetManualBookingModal({
   const { t } = useTranslation();
   const firstRoom = rooms.find((room) => room.id === initialRoomId) ?? rooms[0];
   // prettier-ignore
-  const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonPackages, setAddonPackages] = useState<Record<string, number>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
+  const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonChoices, setAddonChoices] = useState<Record<string, AddonChoice>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
   const [phoneCountry, setPhoneCountry] = useState("");
   const [propertyCountry, setPropertyCountry] = useState("");
   const nationalityId = useId();
-  const [additionalGuests, setAdditionalGuests] = useState<AdditionalGuestDraft[]>([]);
-  const [guestFocus, setGuestFocus] = useState<{ key: number } | null>(null);
+  // Kept by card while a room's count drops, so raising it again brings the names back.
+  const [guestDrafts, setGuestDrafts] = useState<Record<string, GuestDraft>>({});
+  const [guestFocus, setGuestFocus] = useState<{
+    id: string;
+    field: "firstName" | "lastName";
+  } | null>(null);
   const [capacityBlocked, setCapacityBlocked] = useState(false);
   const [showPreviewSpinner, setShowPreviewSpinner] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
@@ -237,10 +258,8 @@ export default function TargetManualBookingModal({
         (stay.ratePlanId === "custom" && override === null)
       )
         return null;
-      // Offers price children by age; wait until every age is entered.
-      const ages = stay.ratePlanId === "custom" ? [] : stay.childAges.map(childAge);
-      if (ages.length !== (stay.ratePlanId === "custom" ? 0 : stay.children)) return null;
-      if (ages.some((age) => age === null)) return null;
+      const ages = stayChildAges(stay);
+      if (ages === undefined) return null;
       // Only a custom rate sets the nightly amount; offers take the published price. A room
       // type without a currency sends none: the server prices it in the property currency.
       const money =
@@ -257,7 +276,7 @@ export default function TargetManualBookingModal({
         checkOut: stay.checkOut,
         adults: stay.adults,
         children: stay.children,
-        ...(ages.length ? { childAgesAtCheckIn: ages as number[] } : {}),
+        ...(ages?.length ? { childAgesAtCheckIn: ages } : {}),
         ratePlanId: stay.ratePlanId === "custom" ? null : stay.ratePlanId,
         pricing:
           stay.ratePlanId === "custom"
@@ -266,8 +285,8 @@ export default function TargetManualBookingModal({
       };
     });
     // prettier-ignore
-    return mapped.some((stay) => !stay) ? null : { stays: mapped as PmsManualBookingPreviewInput["stays"], addOns: addons.filter((addon) => addonPackages[addon.id]).map((addon) => addonSelection(addon, addonPackages[addon.id]!, stays)) };
-  }, [addonPackages, addons, conflicts, roomTypes, rooms, stays]);
+    return mapped.some((stay) => !stay) ? null : { stays: mapped as PmsManualBookingPreviewInput["stays"], addOns: addons.flatMap((addon) => addonSelection(addon, addonChoices[addon.id], stays) ?? []) };
+  }, [addonChoices, addons, conflicts, roomTypes, rooms, stays]);
   const previewKey = previewInput ? JSON.stringify(previewInput) : null;
   const preview = previewEvidence?.key === previewKey ? previewEvidence.result : null;
   // Capacity is the busiest night: everyone named fits on the night the most rooms are booked, so a
@@ -288,11 +307,16 @@ export default function TargetManualBookingModal({
         ),
       )
     : stays.reduce((sum, stay) => sum + stayCapacity(stay), 0);
-  const partySize = stays.reduce((sum, stay) => sum + stay.adults + stay.children, 0);
-  const overCapacity = guestCapacity > 0 && additionalGuests.length + 1 > guestCapacity;
+  const guestCards = guestSlots(stays);
+  const namedGuests = guestCards.filter((slot) => guestNamed(guestDrafts[slot.id]));
+  const overCapacity = guestCapacity > 0 && namedGuests.length + 1 > guestCapacity;
   const customRatePending = stays.some(
     (stay) => stay.ratePlanId === "custom" && amount(stay.nightlyRate) === null,
   );
+  const childAgesPending = stays.some((stay) => stayChildAges(stay) === undefined);
+  const phoneCountryName = NATIONALITY_PICKER_OPTIONS.find(
+    (option) => option.code === phoneCountry,
+  )?.name;
 
   useEffect(() => {
     if (!previewInput) {
@@ -375,8 +399,61 @@ export default function TargetManualBookingModal({
     setPreviewEvidence(null);
     setFocusTarget(`${focus}:roomId`);
   }
-  // prettier-ignore
-  function updateAddon(addonId: string, packageCount: number) { setPreviewEvidence(null); setAddonPackages((current) => { const next = { ...current }; if (packageCount > 0) next[addonId] = packageCount; else delete next[addonId]; return next; }); }
+  const party = partyOf(stays);
+  /** How an extra's amount follows the party, e.g. "2 guests × 3 nights" (VAY-2417). */
+  function addonDetail(addon: BookingAddon, line: AddonLine): string[] {
+    // prettier-ignore
+    const guests = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonGuestOne") : t("calendar.targetManualBooking.addonGuests", { count }),
+      nights = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonNightOne") : t("calendar.targetManualBooking.addonNights", { count }),
+      trips = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonTripOne") : t("calendar.targetManualBooking.addonTrips", { count }),
+      vehicles = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonVehicleOne") : t("calendar.targetManualBooking.addonVehicles", { count });
+    const units = line.serviceUnits.length;
+    const counts = line.serviceUnits.map((unit) => unit.guestCount ?? 0);
+    const per = isTransfer(addon) ? trips(units) : addon.perNight ? nights(units) : null;
+    if (addon.perPerson)
+      return counts.every((count) => count === counts[0])
+        ? [guests(counts[0]!), ...(per ? [per] : [])]
+        : [
+            addon.perNight
+              ? t("calendar.targetManualBooking.addonGuestNights", {
+                  count: counts.reduce((sum, count) => sum + count, 0),
+                })
+              : guests(counts.reduce((sum, count) => sum + count, 0)),
+          ];
+    const amount = addonHasQuantity(addon)
+      ? line.packageCount > 1
+        ? String(line.packageCount)
+        : null
+      : vehicles(line.packageCount);
+    return [amount, per].filter((part): part is string => Boolean(part));
+  }
+  // aria-disabled, not disabled: a button that disables itself at the limit would drop focus.
+  function stepButton(addon: BookingAddon, next: AddonChoice, more: boolean, atLimit: boolean) {
+    return (
+      <button
+        type="button"
+        aria-label={
+          more
+            ? t("calendar.targetManualBooking.addonMore", { addon: addon.name })
+            : t("calendar.targetManualBooking.addonFewer", { addon: addon.name })
+        }
+        aria-disabled={atLimit}
+        onClick={() => !atLimit && chooseAddon(addon.id, next)}
+        className="size-11 rounded-lg border border-gray-300 text-base aria-disabled:opacity-40"
+      >
+        {more ? "+" : "−"}
+      </button>
+    );
+  }
+  function chooseAddon(addonId: string, choice: AddonChoice | null) {
+    setPreviewEvidence(null);
+    setAddonChoices((current) => {
+      const next = { ...current };
+      if (choice) next[addonId] = choice;
+      else delete next[addonId];
+      return next;
+    });
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -392,16 +469,15 @@ export default function TargetManualBookingModal({
       return setMessage(t("calendar.targetManualBooking.countryValidation"));
     // Shown by the form while it lasts, so removing a guest or adding a room clears it.
     if (!retry && overCapacity) return setCapacityBlocked(true);
-    const invalidGuest = additionalGuests.findIndex((guest) => !additionalGuestValid(guest));
-    if (!retry && invalidGuest >= 0) {
-      setAdditionalGuests((current) =>
-        current.map((guest, index) => (index === invalidGuest ? { ...guest, open: true } : guest)),
-      );
-      setGuestFocus({ key: additionalGuests[invalidGuest]!.key });
+    // A started card needs both names (the guest record requires them), or clearing (VAY-2417).
+    const startedGuest = guestCards.find((slot) => guestMissingName(guestDrafts[slot.id]));
+    if (!retry && startedGuest) {
+      setGuestFocus({
+        id: startedGuest.id,
+        field: guestMissingName(guestDrafts[startedGuest.id])!,
+      });
       return setMessage(
-        t("calendar.targetManualBooking.additionalGuestInvalid", {
-          number: additionalGuestNumber(invalidGuest),
-        }),
+        t("calendar.targetManualBooking.guestIncomplete", { number: startedGuest.number }),
       );
     }
     if (!retry && (!previewInput || !preview || previewState !== "idle"))
@@ -409,7 +485,7 @@ export default function TargetManualBookingModal({
     if (!retry && settlement === "paid" && !canRecordPaidPayment)
       return setMessage(t("calendar.targetManualBooking.paidPermissionRequired"));
     // prettier-ignore
-    attempt.current ??= { commandId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(), ...previewInput!, guest: { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phoneE164: phoneE164 || null, countryCode: isoCountry || null, specialRequests: specialRequests.trim() || null }, ...(preview?.pricingRevision ? { expectedPricingRevision: preview.pricingRevision } : {}), ...(additionalGuests.length ? { additionalGuests: additionalGuests.map((guest) => ({ firstName: guest.firstName.trim(), lastName: guest.lastName.trim(), email: guest.email.trim() || null, phoneE164: phoneToE164(guest.phoneCountry, guest.phone) || null, countryCode: guest.countryCode || null })) } : {}), privateNote: privateNote.trim() || null, directSource: source, payment: { expectedMethod: method, settlement: settlement === "paid" ? { status: "paid", reference: null } : { status: "unpaid" } } };
+    attempt.current ??= { commandId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(), ...previewInput!, guest: { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phoneE164: phoneE164 || null, countryCode: isoCountry || null, specialRequests: specialRequests.trim() || null }, ...(preview?.pricingRevision ? { expectedPricingRevision: preview.pricingRevision } : {}), ...(namedGuests.length ? { additionalGuests: namedGuests.map(({ id }) => ({ firstName: guestDrafts[id]!.firstName.trim(), lastName: guestDrafts[id]!.lastName.trim(), email: null, phoneE164: null, countryCode: guestDrafts[id]!.countryCode || null })) } : {}), privateNote: privateNote.trim() || null, directSource: source, payment: { expectedMethod: method, settlement: settlement === "paid" ? { status: "paid", reference: null } : { status: "unpaid" } } };
     attemptLocked.current = true;
     setRetryLocked(true);
     setSubmitting(true);
@@ -466,6 +542,8 @@ export default function TargetManualBookingModal({
     </span>
   ) : customRatePending ? (
     t("calendar.targetManualBooking.enterCustomRateForTotal")
+  ) : childAgesPending ? (
+    t("calendar.targetManualBooking.enterChildAgesForTotal")
   ) : (
     t("calendar.targetManualBooking.selectStayForTotal")
   );
@@ -797,42 +875,6 @@ export default function TargetManualBookingModal({
                           </label>
                         )}
                       </div>
-                      {stay.ratePlanId !== "custom" && stay.children > 0 && (
-                        <fieldset className="mt-3">
-                          <legend className="text-xs text-gray-600">
-                            {t("calendar.targetManualBooking.childAgesHint")}
-                          </legend>
-                          <div className="mt-1 grid grid-cols-3 gap-2 sm:grid-cols-6">
-                            {stay.childAges.map((age, child) => (
-                              <input
-                                key={child}
-                                aria-label={t("calendar.targetManualBooking.childAgeField", {
-                                  number: index + 1,
-                                  child: child + 1,
-                                })}
-                                aria-invalid={
-                                  serverError?.field === "childAgesAtCheckIn" ||
-                                  (age !== "" && childAge(age) === null)
-                                }
-                                type="number"
-                                min={0}
-                                max={17}
-                                step={1}
-                                value={age}
-                                onChange={(event) =>
-                                  updateStay(index, {
-                                    childAges: stay.childAges.map((value, position) =>
-                                      position === child ? event.target.value : value,
-                                    ),
-                                  })
-                                }
-                                className={inputClass}
-                                required
-                              />
-                            ))}
-                          </div>
-                        </fieldset>
-                      )}
                       {noPlanConfigured && (
                         <p id={`stay-no-plan-${stay.key}`} className="mt-2 text-xs text-gray-600">
                           {t("calendar.targetManualBooking.noRatePlanConfigured")}
@@ -929,91 +971,161 @@ export default function TargetManualBookingModal({
             </section>
             <section>
               {" "}
-              <h3 className={sectionClass}>{t("bookings.tableGuest")}</h3>{" "}
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <label className={labelClass}>
-                    {" "}
-                    {t("calendar.newBookingModal.firstNameLabel")} *{" "}
-                    <input
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      className={inputClass}
-                      required
-                    />{" "}
-                  </label>
-                  <label className={labelClass}>
-                    {" "}
-                    {t("calendar.newBookingModal.lastNameLabel")} *{" "}
-                    <input
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      className={inputClass}
-                      required
-                    />{" "}
-                  </label>{" "}
-                </div>
-                <label className={labelClass}>
-                  {" "}
-                  {t("calendar.newBookingModal.emailLabel")} *{" "}
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className={inputClass}
-                    required
-                  />{" "}
-                </label>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <PhoneNumberInput
-                    label={t("calendar.newBookingModal.phoneLabel")}
-                    countryLabel={t("calendar.targetManualBooking.phoneCountryCode")}
-                    countryPlaceholder={t("calendar.targetManualBooking.phoneCountryPlaceholder")}
-                    country={phoneCountry}
-                    number={phone}
-                    onChange={(next) => {
-                      setPhoneCountry(next.country);
-                      setPhone(next.number);
-                    }}
-                    suggestedCountries={[propertyCountry]}
-                    className="sm:col-span-2"
-                    labelClassName="block text-xs font-medium text-gray-700"
-                    inputClassName={inputClass}
-                  />
-                  <div>
-                    <label
-                      htmlFor={nationalityId}
-                      className="block text-xs font-medium text-gray-700"
-                    >
-                      {t("bookings.detail.nationality")}
+              <h3 className={sectionClass}>{t("bookings.detail.guests")}</h3>{" "}
+              <GuestCards
+                stays={stays}
+                drafts={guestDrafts}
+                onDraft={(id, patch) => {
+                  // A card that has both names again, or none, is no longer marked.
+                  const next = { ...(guestDrafts[id] ?? EMPTY_GUEST), ...patch };
+                  if (guestFocus?.id === id && !guestMissingName(next)) setGuestFocus(null);
+                  setGuestDrafts((current) => ({ ...current, [id]: next }));
+                }}
+                leadCountry={countryCode}
+                childAge={(stayIndex, child) => {
+                  const stay = stays[stayIndex]!,
+                    age = stay.childAges[child]!,
+                    serverError =
+                      stayError?.key === stay.key && stayError.field === "childAgesAtCheckIn";
+                  return (
+                    <label className={labelClass}>
+                      {t("calendar.targetManualBooking.childAge")}
+                      {stay.ratePlanId === "custom" ? "" : " *"}
+                      <input
+                        ref={(node) => {
+                          if (node && child === 0)
+                            controls.current.set(`${stay.key}:childAgesAtCheckIn`, node);
+                        }}
+                        aria-label={t("calendar.targetManualBooking.childAgeField", {
+                          number: stayIndex + 1,
+                          child: child + 1,
+                        })}
+                        aria-invalid={serverError || (age !== "" && childAge(age) === null)}
+                        aria-describedby={serverError ? `stay-server-${stay.key}` : undefined}
+                        type="number"
+                        min={0}
+                        max={17}
+                        step={1}
+                        value={age}
+                        onChange={(event) =>
+                          updateStay(stayIndex, {
+                            childAges: stay.childAges.map((value, position) =>
+                              position === child ? event.target.value : value,
+                            ),
+                          })
+                        }
+                        className={inputClass}
+                        required={stay.ratePlanId !== "custom"}
+                      />
                     </label>
-                    <CountryPicker
-                      id={nationalityId}
-                      label={t("bookings.detail.nationality")}
-                      options={NATIONALITY_PICKER_OPTIONS}
-                      value={countryCode}
-                      onChange={setCountryCode}
-                      placeholder={t("common.countryPicker.choose")}
-                      suggested={[propertyCountry, phoneCountry]}
-                      display="name"
-                      clearable
-                      className="mt-1"
-                      triggerClassName={inputClass}
-                    />
-                  </div>{" "}
-                </div>
-                <AdditionalGuestsEditor
-                  guests={additionalGuests}
-                  onChange={setAdditionalGuests}
-                  defaultPhoneCountry={phoneCountry}
-                  suggestedCountries={[countryCode, propertyCountry, phoneCountry]}
-                  guestCapacity={guestCapacity}
-                  partySize={partySize}
-                  focusGuest={guestFocus}
-                  inputClass={inputClass}
-                  labelClass={labelClass}
-                />
-              </div>{" "}
+                  );
+                }}
+                suggestedCountries={[countryCode, propertyCountry, phoneCountry]}
+                focus={guestFocus}
+                inputClass={inputClass}
+                labelClass={labelClass}
+                lead={
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className={labelClass}>
+                        {" "}
+                        {t("calendar.newBookingModal.firstNameLabel")} *{" "}
+                        <input
+                          value={firstName}
+                          onChange={(e) => setFirstName(e.target.value)}
+                          className={inputClass}
+                          required
+                        />{" "}
+                      </label>
+                      <label className={labelClass}>
+                        {" "}
+                        {t("calendar.newBookingModal.lastNameLabel")} *{" "}
+                        <input
+                          value={lastName}
+                          onChange={(e) => setLastName(e.target.value)}
+                          className={inputClass}
+                          required
+                        />{" "}
+                      </label>{" "}
+                    </div>
+                    <label className={labelClass}>
+                      {" "}
+                      {t("calendar.newBookingModal.emailLabel")} *{" "}
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className={inputClass}
+                        required
+                      />{" "}
+                    </label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <PhoneNumberInput
+                        label={t("calendar.newBookingModal.phoneLabel")}
+                        countryLabel={t("calendar.targetManualBooking.phoneCountryCode")}
+                        countryPlaceholder={t(
+                          "calendar.targetManualBooking.phoneCountryPlaceholder",
+                        )}
+                        country={phoneCountry}
+                        number={phone}
+                        onChange={(next) => {
+                          setPhoneCountry(next.country);
+                          setPhone(next.number);
+                        }}
+                        suggestedCountries={[propertyCountry]}
+                        className="sm:col-span-2"
+                        labelClassName="block text-xs font-medium text-gray-700"
+                        inputClassName={inputClass}
+                      />
+                      <div>
+                        <label
+                          htmlFor={nationalityId}
+                          className="block text-xs font-medium text-gray-700"
+                        >
+                          {t("bookings.detail.nationality")}
+                        </label>
+                        <CountryPicker
+                          id={nationalityId}
+                          label={t("bookings.detail.nationality")}
+                          options={NATIONALITY_PICKER_OPTIONS}
+                          value={countryCode}
+                          onChange={setCountryCode}
+                          placeholder={t("common.countryPicker.choose")}
+                          suggested={[propertyCountry, phoneCountry]}
+                          display="name"
+                          clearable
+                          className="mt-1"
+                          triggerClassName={inputClass}
+                        />
+                        {phone.trim() && phoneCountryName && !countryCode && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCountryCode(phoneCountry);
+                              // The button goes once used; keep keyboard focus in the dialog.
+                              globalThis.document?.getElementById(nationalityId)?.focus();
+                            }}
+                            className="mt-1 min-h-11 rounded-full border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            {t("calendar.targetManualBooking.useCountryFromPhone", {
+                              country: phoneCountryName,
+                            })}
+                          </button>
+                        )}
+                      </div>{" "}
+                    </div>
+                  </div>
+                }
+              />
+              {/* Shown as soon as one name too many is typed, next to the cards (VAY-2365/2366). */}
+              {overCapacity && (
+                <p role="alert" className="mt-2 text-xs text-red-700">
+                  {t("calendar.targetManualBooking.guestsOverCapacity", {
+                    count: namedGuests.length + 1,
+                    capacity: guestCapacity,
+                  })}
+                </p>
+              )}
             </section>
             <section>
               {" "}
@@ -1038,45 +1150,130 @@ export default function TargetManualBookingModal({
                   </p>
                 )}{" "}
                 {addons.map((addon) => {
-                  const selected = Boolean(addonPackages[addon.id]),
+                  const choice = addonChoices[addon.id],
+                    line = addonSelection(addon, choice, stays),
+                    transfer = isTransfer(addon),
+                    max = addonMaxQuantity(addon),
                     serverAddon = preview?.addOns.find((item) => item.addonId === addon.id);
+                  // Quantities follow the party (VAY-2417): a stepper only where neither the
+                  // guests nor the vehicles decide and the extra allows more than 1.
+                  const stepper = addonHasQuantity(addon) && max > 1 ? line : null;
+                  const detail = line ? addonDetail(addon, line) : [];
                   return (
                     <div
                       key={addon.id}
-                      className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                      data-addon
+                      className="rounded-lg border border-gray-200 px-3 py-1 text-sm"
                     >
-                      {" "}
-                      <label className="flex min-w-0 flex-1 items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={(event) => updateAddon(addon.id, event.target.checked ? 1 : 0)}
-                        />
-                        <span className="truncate">{addon.name}</span>
-                      </label>{" "}
-                      {selected && (
-                        <label className="flex items-center gap-2 text-xs">
-                          {t("calendar.targetManualBooking.packages")}{" "}
-                          <input
-                            aria-label={t("calendar.targetManualBooking.addonPackages", {
+                      <div className="flex flex-wrap items-center gap-3">
+                        {/* A minimum width for the name wraps the stepper below it on a phone. */}
+                        {transfer ? (
+                          <span className="min-w-[10rem] flex-1 truncate py-2">{addon.name}</span>
+                        ) : (
+                          <label className="flex min-h-11 min-w-[10rem] flex-1 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(choice)}
+                              onChange={(event) =>
+                                chooseAddon(
+                                  addon.id,
+                                  event.target.checked
+                                    ? { quantity: 1, pickup: false, dropOff: false }
+                                    : null,
+                                )
+                              }
+                            />
+                            <span className="truncate">{addon.name}</span>
+                          </label>
+                        )}
+                        {stepper && choice && (
+                          <div
+                            role="group"
+                            aria-label={t("calendar.targetManualBooking.addonQuantity", {
                               addon: addon.name,
                             })}
-                            type="number"
-                            min={1}
-                            max={99}
-                            value={addonPackages[addon.id]}
-                            onChange={(event) =>
-                              updateAddon(addon.id, Math.max(1, Number(event.target.value) || 1))
-                            }
-                            className="w-16 rounded border border-gray-300 px-2 py-1"
-                          />
-                        </label>
-                      )}{" "}
-                      <strong className="w-20 text-right">
-                        {serverAddon
-                          ? money(serverAddon.total.amountDecimal, preview!.currency)
-                          : "—"}
-                      </strong>{" "}
+                            className="flex items-center gap-1 text-xs"
+                          >
+                            {stepButton(
+                              addon,
+                              { ...choice, quantity: stepper.packageCount - 1 },
+                              false,
+                              stepper.packageCount <= 1,
+                            )}
+                            <span
+                              aria-live="polite"
+                              className="w-6 text-center text-sm tabular-nums"
+                            >
+                              {stepper.packageCount}
+                            </span>
+                            {stepButton(
+                              addon,
+                              { ...choice, quantity: stepper.packageCount + 1 },
+                              true,
+                              stepper.packageCount >= max,
+                            )}
+                            <span className="text-gray-500">
+                              {t("calendar.targetManualBooking.addonMax", { count: max })}
+                            </span>
+                          </div>
+                        )}
+                        <strong className="ml-auto w-20 text-right">
+                          {serverAddon
+                            ? money(serverAddon.total.amountDecimal, preview!.currency)
+                            : "—"}
+                        </strong>
+                      </div>
+                      {transfer && (
+                        <div
+                          role="group"
+                          aria-label={addon.name}
+                          className="flex flex-wrap gap-x-4 text-xs"
+                        >
+                          {(["pickup", "dropOff"] as const).map((trip) => {
+                            const date = trip === "pickup" ? party.arrival : party.departure;
+                            return (
+                              <label key={trip} className="flex min-h-11 items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(choice?.[trip])}
+                                  disabled={!date}
+                                  onChange={(event) => {
+                                    const next = {
+                                      quantity: choice?.quantity ?? 1,
+                                      pickup: choice?.pickup ?? false,
+                                      dropOff: choice?.dropOff ?? false,
+                                      [trip]: event.target.checked,
+                                    };
+                                    chooseAddon(
+                                      addon.id,
+                                      next.pickup || next.dropOff ? next : null,
+                                    );
+                                  }}
+                                />
+                                {trip === "pickup"
+                                  ? t("calendar.targetManualBooking.addonPickup", {
+                                      date: date ?? "—",
+                                    })
+                                  : t("calendar.targetManualBooking.addonDropOff", {
+                                      date: date ?? "—",
+                                    })}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {detail.length > 0 && (
+                        <p className="pb-1 text-xs text-gray-500">
+                          {[
+                            serverAddon
+                              ? money(serverAddon.unitPrice.amountDecimal, preview!.currency)
+                              : null,
+                            ...detail,
+                          ]
+                            .filter(Boolean)
+                            .join(" × ")}
+                        </p>
+                      )}
                     </div>
                   );
                 })}{" "}
@@ -1240,7 +1437,7 @@ export default function TargetManualBookingModal({
               className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
             >
               {t("calendar.targetManualBooking.guestsOverCapacity", {
-                count: additionalGuests.length + 1,
+                count: namedGuests.length + 1,
                 capacity: guestCapacity,
               })}
             </p>

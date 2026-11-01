@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   StripeConnectAccountNotFoundError,
+  StripeConnectCountryUnsupportedError,
   type FinanceProviderAccountOwner,
   type FinanceStripeConnectProvider,
   type StripeConnectReturnSurface,
@@ -47,9 +48,24 @@ export function createStripeConnectProvider(config: {
       if (response.status === 404) {
         throw new StripeConnectAccountNotFoundError();
       }
-      throw new Error(
-        text(object(payload["error"])["message"]) ?? `Stripe failed (${response.status}).`,
-      );
+      const error = object(payload["error"]);
+      const message = text(error["message"]) ?? `Stripe failed (${response.status}).`;
+      // VAY-2424: Stripe refusing a new account's country (country_unsupported,
+      // country_code_invalid, a country param error, or a refusal naming the country) is
+      // definite, not an outage. A key reused with other parameters is not such a refusal.
+      const country = path === "/accounts" ? fields.find(([key]) => key === "country")?.[1] : null;
+      if (
+        response.status === 400 &&
+        country &&
+        text(error["type"]) !== "idempotency_error" &&
+        (text(error["param"]) === "country" ||
+          /^country_/.test(text(error["code"]) ?? "") ||
+          /\bcountr(y|ies)\b/i.test(message) ||
+          new RegExp(`\\b${country}\\b`).test(message))
+      ) {
+        throw new StripeConnectCountryUnsupportedError(message);
+      }
+      throw new Error(message);
     }
     return payload;
   };

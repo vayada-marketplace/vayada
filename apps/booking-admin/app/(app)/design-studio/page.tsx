@@ -71,6 +71,10 @@ export default function DesignStudioPage() {
   const [showContactButton, setShowContactButton] = useState(true);
   const [showLanguageSelector, setShowLanguageSelector] = useState(true);
   const [showCurrencySelector, setShowCurrencySelector] = useState(true);
+  // null while the API doesn't report the switch yet: Save leaves it out then (VAY-2447).
+  const [showGalleryButton, setShowGalleryButton] = useState<boolean | null>(null);
+  // The photos the live page's gallery shows: the cover and the gallery photos, each once.
+  const [publicPhotoCount, setPublicPhotoCount] = useState(0);
   const [heroHeading, setHeroHeading] = useState("");
   const [heroSubtext, setHeroSubtext] = useState("");
   const [propertyName, setPropertyName] = useState("");
@@ -128,6 +132,13 @@ export default function DesignStudioPage() {
       profileRevisionRef.current = profile.profileRevision;
       const media = [...profile.publicProfile.media].sort(
         (left, right) => left.sortOrder - right.sortOrder,
+      );
+      setPublicPhotoCount(
+        new Set(
+          media
+            .filter(({ mediaType }) => mediaType === "hero_image" || mediaType === "gallery_image")
+            .map(({ mediaObjectId }) => mediaObjectId),
+        ).size,
       );
       const cover = media.find(({ mediaType }) => mediaType === "hero_image");
       coverAssignmentRef.current = cover
@@ -218,6 +229,7 @@ export default function DesignStudioPage() {
         setShowContactButton(settings.show_contact_button);
         setShowLanguageSelector(settings.show_language_selector);
         setShowCurrencySelector(settings.show_currency_selector);
+        setShowGalleryButton(settings.show_gallery_button ?? null);
         // Guests see the canonical cover; the settings URL only covers heroes saved before it existed.
         const savedHero =
           publicProfile.publicProfile.media.find(({ mediaType }) => mediaType === "hero_image")
@@ -758,6 +770,7 @@ export default function DesignStudioPage() {
           show_contact_button: showContactButton,
           show_language_selector: showLanguageSelector,
           show_currency_selector: showCurrencySelector,
+          ...(showGalleryButton === null ? {} : { show_gallery_button: showGalleryButton }),
           hero_image: heroImage,
           hero_heading: heroHeading,
           hero_subtext: heroSubtext,
@@ -817,6 +830,8 @@ export default function DesignStudioPage() {
   // the default currency).
   const currencySelectorAvailable =
     supportedCurrencies === null || new Set([defaultCurrency, ...supportedCurrencies]).size > 1;
+  // Guests get the Gallery button only with two photos or more (VAY-2447).
+  const galleryButtonAvailable = publicPhotoCount > 1;
 
   if (loading) {
     return (
@@ -937,6 +952,9 @@ export default function DesignStudioPage() {
                 showCurrencySelector={showCurrencySelector}
                 setShowCurrencySelector={setShowCurrencySelector}
                 currencySelectorAvailable={currencySelectorAvailable}
+                showGalleryButton={showGalleryButton}
+                setShowGalleryButton={setShowGalleryButton}
+                galleryButtonAvailable={galleryButtonAvailable}
                 resetContent={resetContent}
                 galleryImages={galleryImages}
                 galleryAtCapacity={
@@ -1021,6 +1039,7 @@ export default function DesignStudioPage() {
             font={currentFont}
             headerLogo={headerLogo}
             showContactButton={showContactButton}
+            showGalleryButton={showGalleryButton !== false && galleryButtonAvailable}
             showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
             showCurrencySelector={showCurrencySelector && currencySelectorAvailable}
             supportedLanguages={
