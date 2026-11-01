@@ -36,7 +36,10 @@ const isSortKey = (value: unknown): value is RoomSortKey =>
 export function catalogRoomSorting(raw: unknown): RoomSorting | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const { enabled, hideWithOneRoom, options, defaultOption } = raw as Record<string, unknown>;
-  const known = Array.isArray(options) ? [...new Set(options.filter(isSortKey))] : [];
+  // booking-web targets ES5: no Set spread.
+  const known = Array.isArray(options)
+    ? options.filter(isSortKey).filter((key, index, list) => list.indexOf(key) === index)
+    : [];
   if (!known.length) return null;
   return {
     enabled: typeof enabled === "boolean" ? enabled : DEFAULT_ROOM_SORTING.enabled,
