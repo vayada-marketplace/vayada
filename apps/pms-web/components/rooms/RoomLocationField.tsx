@@ -12,7 +12,6 @@ import {
 } from "react";
 import {
   ArrowPathIcon,
-  ArrowsPointingOutIcon,
   BuildingOffice2Icon,
   CheckCircleIcon,
   ChevronRightIcon,
@@ -22,14 +21,13 @@ import {
   MapPinIcon,
   PencilSquareIcon,
   TrashIcon,
-  ViewfinderCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import GoogleAddressMap, {
-  type MapPosition,
-  type MapType,
-} from "@vayada/product-onboarding/GoogleAddressMap";
+import GoogleAddressMap, { type MapPosition } from "@vayada/product-onboarding/GoogleAddressMap";
 import { importGoogleMapsLibrary } from "@vayada/product-onboarding/googleMaps";
+import GoogleMapsLinkField from "@vayada/product-onboarding/GoogleMapsLinkField";
+import GuestsWillSeeCard from "@vayada/product-onboarding/GuestsWillSeeCard";
+import PinMapFrame from "@vayada/product-onboarding/PinMapFrame";
 import { useTranslation } from "@/lib/i18n";
 import {
   areaFromAddressComponents,
@@ -37,7 +35,6 @@ import {
   formatDistance,
   metresBetween,
   parseCoordinatePair,
-  parseGoogleMapsLink,
   readCoordinates,
   roomLocationSource,
   roundCoordinate,
@@ -96,7 +93,6 @@ const inputClass =
 const labelClass = "block text-[12px] font-semibold text-gray-900 mb-1.5";
 const linkClass =
   "inline-flex items-center gap-1.5 text-[12px] font-semibold text-primary-600 hover:text-primary-700 disabled:opacity-50";
-const mapButtonClass = "rounded-lg bg-white shadow-[0_1px_4px_rgb(0_0_0_/_20%)]";
 
 /** A room type's place (VAY-2126, VAY-2321): "Same as property" (the default) uses the property's address and pin;
  * a "Separate location" has its own, from Google address search, a pasted Google Maps link, the map or typed
@@ -125,8 +121,6 @@ export default function RoomLocationField({
     GOOGLE_MAPS_API_KEY ? "ready" : "unavailable",
   );
   const [mapAttempt, setMapAttempt] = useState(0);
-  const [mapType, setMapType] = useState<MapType>("roadmap");
-  const [recenter, setRecenter] = useState(0);
   const [placesUnavailable, setPlacesUnavailable] = useState(false);
   const [picking, setPicking] = useState(false);
   const [pasting, setPasting] = useState(false);
@@ -500,8 +494,17 @@ export default function RoomLocationField({
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-[400px_minmax(0,1fr)] lg:gap-x-6">
               <div className="space-y-2 lg:col-start-1 lg:row-start-1">
                 {pasting ? (
-                  <GoogleMapsLink
+                  <GoogleMapsLinkField
                     inputId={`${id}-maps-link`}
+                    messages={{
+                      label: t("rooms.form.mapsLinkLabel"),
+                      hint: t("rooms.form.mapsLinkHint"),
+                      placed: (coordinates) => t("rooms.form.mapsLinkPlaced", { coordinates }),
+                      shortLink: t("rooms.form.mapsLinkShort"),
+                      noPin: t("rooms.form.mapsLinkNone"),
+                      searchInstead: t("rooms.form.searchInstead"),
+                    }}
+                    classNames={{ label: labelClass, input: inputClass, link: linkClass }}
                     onPin={(pin) => {
                       cancelPick();
                       // A new place: the previous address and area no longer describe it.
@@ -585,72 +588,26 @@ export default function RoomLocationField({
                   {map !== "ready" ? (
                     mapUnavailable
                   ) : (
-                    <>
-                      <GoogleAddressMap
-                        key={mapAttempt}
-                        active
-                        apiKey={GOOGLE_MAPS_API_KEY}
-                        latitude={value.latitude}
-                        longitude={value.longitude}
-                        markerTitle={t("rooms.form.roomPin")}
-                        onPick={pickOnMap}
-                        onUnavailable={onMapUnavailable}
-                        reference={place?.pin ? { ...place.pin, title: place.name } : null}
-                        mapType={mapType}
-                        area={approximate}
-                        recenter={recenter}
-                        focus={hasPin ? null : focus}
-                      />
-                      {!hasPin && (
-                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-gray-50/70 px-6 text-center">
-                          <span className="flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white">
-                            <MapPinIcon className="h-5 w-5 text-gray-500" />
-                          </span>
-                          <p className="text-[13px] font-medium text-gray-600">
-                            {t("rooms.form.mapEmpty")}
-                          </p>
-                        </div>
-                      )}
-                      <div
-                        role="group"
-                        aria-label={t("rooms.form.mapType")}
-                        className={`absolute left-2.5 top-2.5 flex gap-0.5 p-[3px] ${mapButtonClass}`}
-                      >
-                        {(["roadmap", "satellite"] as const).map((type) => (
-                          <button
-                            key={type}
-                            type="button"
-                            aria-pressed={mapType === type}
-                            onClick={() => setMapType(type)}
-                            className={`rounded-md px-2.5 py-1 text-[12px] font-semibold ${
-                              mapType === type ? "bg-gray-900 text-white" : "text-gray-600"
-                            }`}
-                          >
-                            {t(
-                              type === "roadmap"
-                                ? "rooms.form.mapView"
-                                : "rooms.form.satelliteView",
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                      {hasPin && !approximate && (
-                        <span className="pointer-events-none absolute left-2.5 top-[52px] inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1.5 text-[12px] font-medium text-gray-600 shadow">
-                          <ArrowsPointingOutIcon className="h-3.5 w-3.5" />
-                          {t("rooms.form.dragPin")}
-                        </span>
-                      )}
-                      {hasPin && (
-                        <button
-                          type="button"
-                          onClick={() => setRecenter((count) => count + 1)}
-                          className={`absolute bottom-7 right-2.5 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-semibold text-gray-700 ${mapButtonClass}`}
-                        >
-                          <ViewfinderCircleIcon className="h-3.5 w-3.5" />
-                          {t("rooms.form.recenter")}
-                        </button>
-                      )}
-                    </>
+                    <PinMapFrame
+                      attempt={mapAttempt}
+                      apiKey={GOOGLE_MAPS_API_KEY}
+                      latitude={value.latitude}
+                      longitude={value.longitude}
+                      markerTitle={t("rooms.form.roomPin")}
+                      messages={{
+                        mapType: t("rooms.form.mapType"),
+                        mapView: t("rooms.form.mapView"),
+                        satelliteView: t("rooms.form.satelliteView"),
+                        dragPin: t("rooms.form.dragPin"),
+                        recenter: t("rooms.form.recenter"),
+                        empty: t("rooms.form.mapEmpty"),
+                      }}
+                      onPick={pickOnMap}
+                      onUnavailable={onMapUnavailable}
+                      reference={place?.pin ? { ...place.pin, title: place.name } : null}
+                      area={approximate}
+                      focus={focus}
+                    />
                   )}
                 </div>
                 {map === "ready" && (
@@ -660,36 +617,31 @@ export default function RoomLocationField({
 
               <div className="space-y-4 lg:col-start-1 lg:row-start-2">
                 {hasPin && (
-                  <div className="space-y-1 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                      {t("rooms.form.guestsWillSee")}
-                    </p>
-                    <p className="text-[13px] font-semibold text-gray-900">
-                      {roomName.trim() || t("rooms.form.thisRoom")}
-                    </p>
-                    <p className="text-[12px] text-gray-600">
-                      {approximate
+                  <GuestsWillSeeCard
+                    label={t("rooms.form.guestsWillSee")}
+                    name={roomName.trim() || t("rooms.form.thisRoom")}
+                    address={
+                      approximate
                         ? value.locationArea?.trim()
                           ? t("rooms.form.areaSummary", { area: value.locationArea.trim() })
                           : t("rooms.form.areaSummaryUnnamed")
-                        : value.locationAddress}
-                    </p>
-                    {place?.pin && (
-                      <p className="inline-flex items-center gap-1 text-[12px] text-gray-500">
-                        <MapPinIcon className="h-3.5 w-3.5" />
-                        {t(approximate ? "rooms.form.distanceAbout" : "rooms.form.distanceFrom", {
-                          distance: formatDistance(
-                            metresBetween(place.pin, {
-                              latitude: value.latitude!,
-                              longitude: value.longitude!,
-                            }),
-                            locale,
-                          ),
-                          property: place.name,
-                        })}
-                      </p>
-                    )}
-                  </div>
+                        : value.locationAddress
+                    }
+                    note={
+                      place?.pin
+                        ? t(approximate ? "rooms.form.distanceAbout" : "rooms.form.distanceFrom", {
+                            distance: formatDistance(
+                              metresBetween(place.pin, {
+                                latitude: value.latitude!,
+                                longitude: value.longitude!,
+                              }),
+                              locale,
+                            ),
+                            property: place.name,
+                          })
+                        : null
+                    }
+                  />
                 )}
 
                 {hasPin && (
@@ -852,83 +804,6 @@ function SourceCard({
         <span className="mt-0.5 block text-[12px] text-gray-500">{hint}</span>
       </span>
     </button>
-  );
-}
-
-/** "Paste a Google Maps link": the pin from a long link; a short share link has no coordinates to read. */
-function GoogleMapsLink({
-  inputId,
-  onPin,
-  onClose,
-}: {
-  inputId: string;
-  onPin: (pin: { latitude: number; longitude: number }) => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const [text, setText] = useState("");
-  const [result, setResult] = useState<ReturnType<typeof parseGoogleMapsLink> | undefined>();
-
-  function read(link: string) {
-    setText(link);
-    const found = link.trim() ? parseGoogleMapsLink(link) : undefined;
-    setResult(found);
-    if (found && typeof found === "object") onPin(found);
-  }
-
-  return (
-    <div>
-      <label htmlFor={inputId} className={labelClass}>
-        {t("rooms.form.mapsLinkLabel")}
-      </label>
-      <div className="relative">
-        <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-        <input
-          id={inputId}
-          type="text"
-          inputMode="url"
-          autoFocus
-          autoComplete="off"
-          spellCheck={false}
-          value={text}
-          onChange={(event) => read(event.target.value)}
-          onKeyDown={(event) => {
-            // Enter reads the link instead of submitting the whole room form.
-            if (event.key === "Enter") event.preventDefault();
-          }}
-          aria-describedby={`${inputId}-result`}
-          className={`${inputClass} pl-9`}
-          placeholder="https://www.google.com/maps/place/…"
-        />
-      </div>
-      <p
-        id={`${inputId}-result`}
-        aria-live="polite"
-        className={`mt-1 text-[11px] ${
-          result && typeof result === "object"
-            ? "font-medium text-green-700"
-            : result
-              ? "font-medium text-amber-700"
-              : result === null
-                ? "font-medium text-amber-700"
-                : "text-gray-400"
-        }`}
-      >
-        {result && typeof result === "object"
-          ? t("rooms.form.mapsLinkPlaced", {
-              coordinates: `${formatCoordinate(result.latitude)}, ${formatCoordinate(result.longitude)}`,
-            })
-          : result === "short_link"
-            ? t("rooms.form.mapsLinkShort")
-            : result === null
-              ? t("rooms.form.mapsLinkNone")
-              : t("rooms.form.mapsLinkHint")}
-      </p>
-      <button type="button" onClick={onClose} className={`${linkClass} mt-2`}>
-        <MagnifyingGlassIcon className="h-3.5 w-3.5" />
-        {t("rooms.form.searchInstead")}
-      </button>
-    </div>
   );
 }
 
