@@ -103,13 +103,12 @@ describe("BookingPagePreview", () => {
           showGalleryButton={showGalleryButton}
         />,
       );
-      return renderer.root
-        .findAll(
-          (node) =>
-            node.type === "span" &&
-            typeof node.props.className === "string" &&
-            node.props.className.includes("rounded-full"),
-        )
+      // The header's actions, left to right.
+      const actions = renderer.root.findAll(
+        (node) => node.type === "div" && node.props.className === "flex items-center gap-1.5",
+      )[0]!;
+      return actions
+        .findAllByType("span")
         .map((node) => node.children.filter((child) => typeof child === "string").join(""));
     };
 
