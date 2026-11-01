@@ -201,11 +201,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     };
     // The hotel page's search for this stay, with only a party it can read. A group's rooms are
     // chosen again room by room (VAY-2320); a room card's party in one.
+    const valid: Record<string, boolean> = {
+      adults: party("adults", 1),
+      children: party("children", 0),
+    };
     const home = new URLSearchParams();
-    for (const name of ["checkIn", "checkOut", "promoCode"])
-      if (params.get(name)) home.set(name, params.get(name)!);
-    if (party("adults", 1)) home.set("adults", String(adults));
-    if (party("children", 0)) home.set("children", params.get("children")!);
+    for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
+      if (params.get(name) && valid[name] !== false) home.set(name, params.get(name)!);
     if (picks && params.get("rooms")) home.set("rooms", params.get("rooms")!);
     // VAY-2446: /book only continues a choice made on the hotel page for a stay, a room card's or
     // a group's. The old room form (which also took the dates) is gone: without one, the guest
@@ -214,7 +216,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       /^\d{4}-\d{2}-\d{2}$/.test(stayIn) &&
       /^\d{4}-\d{2}-\d{2}$/.test(stayOut) &&
       stayIn < stayOut &&
-      (!!picks || (/^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) && party("adults", 1)));
+      (!!picks || (/^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) && valid.adults));
     if (!choiceMade) {
       router.replace(`/?${home}`);
       return;
