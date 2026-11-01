@@ -101,6 +101,7 @@ const brandingSchema = z.strictObject({
   showReferAGuestButton: z.boolean().optional(),
   showLanguageSelector: z.boolean().optional(),
   showCurrencySelector: z.boolean().optional(),
+  showGalleryButton: z.boolean().optional(),
   displayCurrencies: uniqueArray(currency).min(2).optional(),
   displayDefaultCurrency: currency.optional(),
   heroImage: httpsUrl.nullable(),

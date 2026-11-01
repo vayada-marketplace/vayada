@@ -118,6 +118,7 @@ describe("Booking Web public hotel adapter", () => {
       showContactButton: false,
       showLanguageSelector: false,
       showCurrencySelector: true,
+      showGalleryButton: false,
       heroImage: null,
       heroHeading: null,
       heroSubtext: null,
@@ -130,8 +131,12 @@ describe("Booking Web public hotel adapter", () => {
         showContactButton: false,
         showLanguageSelector: false,
         showCurrencySelector: true,
+        showGalleryButton: false,
       },
     });
+    // A profile without the switch keeps the Gallery button (VAY-2447).
+    delete response.hotel.branding.showGalleryButton;
+    expect(toLegacyHotel(response).headerSettings?.showGalleryButton).toBe(true);
   });
 
   it("tells the booking pages whether guests can use promo codes (VAY-2200)", () => {

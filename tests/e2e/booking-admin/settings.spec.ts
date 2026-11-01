@@ -691,6 +691,118 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
+  for (const width of [1440, 390]) {
+    test(`switches the Gallery button with two photos and saves it at ${width}px (VAY-2447)`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(
+        !PROD,
+        "Requires a production booking-admin build so the authenticated shell hydrates.",
+      );
+
+      const assertHealthy = watchPageHealth(page, testInfo);
+      await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+      await mockBookingAdminAuthenticatedSession(page);
+      await mockBookingAdminShellRoutes(page);
+      await mockPublicPhotos(page, 2);
+      const designSettings = { ...defaultBookingAdminDesignSettings, showGalleryButton: true };
+      const { requests: designRequests } = await mockBookingAdminDesignSettings(
+        page,
+        designSettings,
+      );
+
+      await page.goto("/design-studio");
+      const gallery = page.getByRole("switch", { name: "Gallery button" });
+      await expect(gallery).toBeEnabled();
+      await expect(gallery).toBeChecked();
+      await expect(
+        page.getByText("Hidden automatically when only one image is in the gallery."),
+      ).toBeVisible();
+      const preview = page.getByLabel("Live booking page preview");
+      if (width > 600) await expect(preview.getByText("Gallery", { exact: true })).toBeVisible();
+      await gallery.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath(`design-studio-gallery-on-${width}.png`) });
+
+      await gallery.click();
+      await expect(gallery).not.toBeChecked();
+      await expect(preview.getByText("Gallery", { exact: true })).toHaveCount(0);
+      await page.screenshot({
+        path: testInfo.outputPath(`design-studio-gallery-off-${width}.png`),
+      });
+      // One Save Changes button per width: inline on desktop, in the sticky footer on phones.
+      await page.getByRole("button", { name: "Save Changes" }).click();
+      await expect
+        .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
+        .toMatchObject({ showGalleryButton: false });
+      await assertHealthy();
+    });
+  }
+
+  test("greys out the Gallery button with one photo and keeps the saved choice (VAY-2447)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    await mockPublicPhotos(page, 1);
+    const designSettings = { ...defaultBookingAdminDesignSettings, showGalleryButton: true };
+    const { requests: designRequests } = await mockBookingAdminDesignSettings(page, designSettings);
+
+    await page.goto("/design-studio");
+    const gallery = page.getByRole("switch", { name: "Gallery button" });
+    await expect(gallery).toBeDisabled();
+    await expect(gallery).not.toBeChecked();
+    await expect(
+      page.getByLabel("Live booking page preview").getByText("Gallery", { exact: true }),
+    ).toHaveCount(0);
+    await gallery.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("design-studio-gallery-one-photo.png") });
+
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
+      .toMatchObject({ showGalleryButton: true });
+    await assertHealthy();
+  });
+
+  test("leaves the Gallery button out until the API reports it (VAY-2447)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    await mockPublicPhotos(page, 2);
+    // An API from before the switch: its design settings have no showGalleryButton.
+    const { requests: designRequests } = await mockBookingAdminDesignSettings(page);
+
+    await page.goto("/design-studio");
+    await expect(page.getByRole("switch", { name: "Contact button" })).toBeChecked();
+    await expect(page.getByRole("switch", { name: "Gallery button" })).toHaveCount(0);
+    // Guests still see the button, so the preview does too.
+    await expect(
+      page.getByLabel("Live booking page preview").getByText("Gallery", { exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
+      .toBeDefined();
+    expect(designRequests.find((request) => request.method === "PATCH")?.body).not.toHaveProperty(
+      "showGalleryButton",
+    );
+    await assertHealthy();
+  });
+
   test("saves the brand colour and font to the booking design guests see", async ({
     page,
   }, testInfo) => {
@@ -1944,3 +2056,22 @@ test("tells staff that only the owner sees billing", async ({ page }, testInfo) 
   });
   await assertHealthy();
 });
+
+/** The hotel's public photos: a cover plus `count - 1` gallery photos (VAY-2447). */
+async function mockPublicPhotos(page: Page, count: number) {
+  const media = Array.from({ length: count }, (_, index) => ({
+    mediaObjectId: `c0000000-0000-4000-8000-00000000244${index}`,
+    mediaType: index === 0 ? "hero_image" : "gallery_image",
+    url: "/hotel-hero.JPG",
+    altText: null,
+    sortOrder: index,
+  }));
+  await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, (route) =>
+    route.fulfill({
+      json: {
+        ...defaultBookingAdminPublicPropertyProfile,
+        publicProfile: { ...defaultBookingAdminPublicPropertyProfile.publicProfile, media },
+      },
+    }),
+  );
+}

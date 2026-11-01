@@ -422,6 +422,29 @@ describe("settingsService next-stack bootstrap data", () => {
     ]);
   });
 
+  it("passes the Gallery button switch through only when it is set (VAY-2447)", async () => {
+    // An API without the switch reports no field, and the Design Studio Save then leaves it out.
+    const loaded = await settingsService.getDesignSettings("booking_hotel_alpenrose");
+    expect(loaded).not.toHaveProperty("show_gallery_button");
+    await settingsService.updateDesignSettings({ hero_heading: "Hi" }, "booking_hotel_alpenrose");
+
+    await expect(
+      settingsService.updateDesignSettings(
+        { show_gallery_button: false },
+        "booking_hotel_alpenrose",
+      ),
+    ).resolves.toMatchObject({ show_gallery_button: false });
+
+    const patchBodies = vi
+      .mocked(fetch)
+      .mock.calls.filter(
+        ([url, init]) => String(url).includes("/settings/design") && init?.method === "PATCH",
+      )
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(patchBodies[0]).not.toHaveProperty("showGalleryButton");
+    expect(patchBodies[1]).toEqual({ showGalleryButton: false });
+  });
+
   it.each([401, 500])(
     "does not hide a %i response from the canonical property settings request",
     async (status) => {

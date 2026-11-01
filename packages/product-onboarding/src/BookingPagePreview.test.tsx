@@ -87,4 +87,34 @@ describe("BookingPagePreview", () => {
 
     expect(headerSelectors).toHaveLength(0);
   });
+
+  it("shows the Gallery pill first in the header only when asked (VAY-2447)", () => {
+    const headerTexts = (showGalleryButton?: boolean) => {
+      const renderer = create(
+        <BookingPagePreview
+          currency="CHF"
+          defaultLanguage="de"
+          font={font}
+          heroHeading="Hotel One"
+          heroImage=""
+          heroSubtext="A quiet stay in the mountains."
+          primaryColor="#2D6A4F"
+          propertyName="Hotel One"
+          showGalleryButton={showGalleryButton}
+        />,
+      );
+      return renderer.root
+        .findAll(
+          (node) =>
+            node.type === "span" &&
+            typeof node.props.className === "string" &&
+            node.props.className.includes("rounded-full"),
+        )
+        .map((node) => node.children.filter((child) => typeof child === "string").join(""));
+    };
+
+    expect(headerTexts()).not.toContain("Gallery");
+    expect(headerTexts(false)).not.toContain("Gallery");
+    expect(headerTexts(true)).toEqual(["Gallery", "Contact", "DE", "CHF"]);
+  });
 });

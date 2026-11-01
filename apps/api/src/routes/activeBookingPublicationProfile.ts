@@ -22,6 +22,7 @@ type CurrentPublicGatesRow = QueryResultRow & {
   longitude: number | null;
   displayCurrencies: string[] | null;
   displayDefaultCurrency: string | null;
+  showGalleryButton: boolean | null;
 };
 
 const ACTIVE_PROFILE_SELECT = `SELECT
@@ -144,7 +145,9 @@ async function currentActiveProfile(
        (SELECT supported_currencies FROM booking.booking_settings
          WHERE property_id=$1::uuid) AS "displayCurrencies",
        (SELECT default_currency::text FROM booking.booking_settings
-         WHERE property_id=$1::uuid) AS "displayDefaultCurrency"`,
+         WHERE property_id=$1::uuid) AS "displayDefaultCurrency",
+       (SELECT show_gallery_button FROM booking.booking_settings
+         WHERE property_id=$1::uuid) AS "showGalleryButton"`,
     [row.propertyId],
   );
   const gates = result.rows[0];
@@ -183,6 +186,8 @@ async function currentActiveProfile(
             branding: {
               ...branding,
               showReferAGuestButton: false,
+              // Live, not from the publication, so the switch never changes a page's hash (VAY-2447).
+              showGalleryButton: gates?.showGalleryButton !== false,
               ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
               ...(showsDisplayDefault ? { displayDefaultCurrency: displayDefault } : {}),
             },
