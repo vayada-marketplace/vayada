@@ -474,9 +474,7 @@ export async function registerFinanceRoutes(
         setupIncompletePaymentSettings(propertyId, new Date().toISOString());
       return {
         ...toFinancePaymentSettingsResponse(settings),
-        vayadaPayment: {
-          available: options.repository.vayadaPaymentAvailable?.(propertyId) === true,
-        },
+        vayadaPayment: vayadaPaymentChoice(options.repository, propertyId),
       } satisfies FinancePaymentSettingsResponse;
     },
   );
@@ -535,9 +533,7 @@ export async function registerFinanceRoutes(
 
       return {
         ...toFinancePaymentSettingsResponse(result.settings),
-        vayadaPayment: {
-          available: options.repository.vayadaPaymentAvailable?.(propertyId) === true,
-        },
+        vayadaPayment: vayadaPaymentChoice(options.repository, propertyId),
         commandMeta: result.commandMeta,
       } satisfies FinancePaymentSettingsPatchResponse;
     },
@@ -1198,6 +1194,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
   /** VAY-2442: whether a hotel gets vayada Payment (VAYADA_PAYMENT_ENABLED and the hotel list).
    * Missing or false: that hotel can't choose vayada Payment and Vayada can't approve it. */
   vayadaPaymentOpen?: (propertyId: string) => boolean;
+  /** VAY-2442: VAYADA_PAYMENT_FEE_PERCENT, shown to hotels choosing vayada Payment. */
+  vayadaPaymentFeePercent?: number;
 }): FinancePropertyReadRepository {
   const pool: FinancePropertySettingsReadPool =
     config.pool ??
@@ -1265,6 +1263,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
   return {
     ...onlineCardEvidenceWrites,
     vayadaPaymentAvailable: (propertyId: string) => config.vayadaPaymentOpen?.(propertyId) === true,
+    vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
     async getPaymentSettings(propertyId) {
       const row = await loadPaymentSettingsRow(pool, propertyId);
       return row ? toFinancePaymentSettingsReadModel(row) : null;
@@ -6729,4 +6728,18 @@ function invalidQuery(
     category: "validation",
     message,
   };
+}
+
+/** VAY-2442: whether a hotel can choose vayada Payment, and its fee then. */
+function vayadaPaymentChoice(
+  repository: {
+    vayadaPaymentAvailable?: (propertyId: string) => boolean;
+    vayadaPaymentFeePercent?: number;
+  },
+  propertyId: string,
+): { available: boolean; feePercent?: number } {
+  const available = repository.vayadaPaymentAvailable?.(propertyId) === true;
+  return available && repository.vayadaPaymentFeePercent !== undefined
+    ? { available, feePercent: repository.vayadaPaymentFeePercent }
+    : { available };
 }

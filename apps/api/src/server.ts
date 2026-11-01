@@ -750,7 +750,9 @@ const financeRepository =
         connectionString: targetDatabaseUrl,
         stripeConnectProvider,
         afterPaymentChange,
-        vayadaPaymentOpen,
+        // A hotel can choose vayada Payment only where it can also save its payout account.
+        vayadaPaymentOpen: payoutDestinationRepository ? vayadaPaymentOpen : undefined,
+        vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
       })
     : undefined;
 
