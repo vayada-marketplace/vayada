@@ -447,7 +447,7 @@ export async function lockFinancePaymentSettings(
             online_card.execution_evidence_revoked_at AS "executionEvidenceRevokedAt",
             settings.updated_at AS "updatedAt"
      FROM finance.payment_settings settings
-     LEFT JOIN finance.online_card_readiness online_card
+     LEFT JOIN finance.online_card_readiness_by_provider online_card
        ON online_card.property_id = settings.property_id
      WHERE settings.property_id = $1::uuid
      FOR UPDATE OF settings`,

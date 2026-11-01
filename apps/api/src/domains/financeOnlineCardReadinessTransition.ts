@@ -45,7 +45,7 @@ export async function loadFinanceOnlineCardReadinessState(
     `SELECT provider_account_id::text AS "providerAccountId",
             card_capability_revision::int AS "providerCapabilityRevision",
             online_card_ready AS ready
-     FROM finance.online_card_readiness
+     FROM finance.online_card_readiness_by_provider
      WHERE property_id = $1::uuid
        AND provider_account_id IS NOT NULL`,
     [propertyId],

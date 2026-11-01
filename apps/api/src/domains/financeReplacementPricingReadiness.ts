@@ -38,7 +38,8 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
   let cardSource: unknown = null;
   if (settings.accepted_methods.includes("card") && settings.provider_account_id) {
     const account = (await client.query(`SELECT id,provider,account_scope,provider_account_id,status,onboarding_status,
-      charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata
+      charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata,
+      provider_account_id = 'vayada:' || property_id::text AS vayada_bound
       FROM finance.payment_provider_accounts WHERE property_id=$1 AND id=$2 FOR SHARE`, [request.propertyId, settings.provider_account_id])).rows[0];
     if (account) {
       if (!pricingObject(account.account_metadata)) return unavailable("invalid");
@@ -50,7 +51,9 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
       const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
       const providerAccount = {
         id: account.id, provider: account.provider, accountScope: account.account_scope,
-        providerBindingActive: typeof account.provider_account_id === "string" && !account.provider_account_id.startsWith("settings-choice:"),
+        // vayada Payment binds only as vayada:<property> (VAY-2442), as online_card_readiness_by_provider reads it.
+        providerBindingActive: account.provider === "vayada" ? account.vayada_bound === true
+          : typeof account.provider_account_id === "string" && !account.provider_account_id.startsWith("settings-choice:"),
         status: account.status, onboardingStatus: account.onboarding_status, chargesEnabled: account.charges_enabled,
         payoutsEnabled: account.payouts_enabled, detailsSubmitted: account.account_metadata.detailsSubmitted === true,
         cardPaymentsStatus: account.account_metadata.cardPaymentsStatus ?? null,

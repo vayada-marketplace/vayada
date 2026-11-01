@@ -1538,6 +1538,55 @@ describe("finance route contracts", () => {
     expect(repository.writeCount).toBe(1);
   });
 
+  it("offers vayada Payment only while VAYADA_PAYMENT_ENABLED is on (VAY-2442)", async () => {
+    const choose = (key: string) => ({
+      commandId: `cmd-vay-2442-${key}`,
+      idempotencyKey: `finance-payment-settings-vay-2442-${key}`,
+      paymentSettings: {
+        paymentsEnabled: true,
+        paymentProvider: "vayada",
+        acceptedMethods: ["card"],
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR"],
+        requiresManualReview: false,
+      },
+    });
+    for (const available of [false, true]) {
+      const repository = paymentSettingsWriteRepository();
+      app = buildFinanceApp({
+        repository: { ...repository, vayadaPaymentAvailable: available },
+        permissions: financeManagePermissions(),
+      });
+      const read = await injectJson<Record<string, unknown>>(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/payment-settings`,
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(read.statusCode).toBe(200);
+      expect(read.body).toMatchObject({ vayadaPayment: { available } });
+      const patch = await injectJson<Record<string, unknown>>(app, {
+        method: "PATCH",
+        url: `/api/finance/properties/${propertyId}/payment-settings`,
+        payload: choose(String(available)),
+        headers: { authorization: "Bearer valid-token" },
+      });
+      if (available) {
+        expect(patch.statusCode).toBe(200);
+        expect(patch.body).toMatchObject({ vayadaPayment: { available: true } });
+        expect(repository.writeCount).toBe(1);
+      } else {
+        expect(patch.statusCode).toBe(409);
+        expect(patch.body).toMatchObject({
+          code: "vayada_payment_unavailable",
+          category: "conflict",
+        });
+        expect(repository.writeCount).toBe(0);
+      }
+      await app.close();
+      app = null;
+    }
+  });
+
   it("allows Booking owners to update payment settings through the Booking entitlement", async () => {
     const repository = paymentSettingsWriteRepository();
     app = buildFinanceApp({

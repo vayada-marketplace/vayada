@@ -219,7 +219,7 @@ describe("Finance payment readiness read model", () => {
     expect(sql).toContain("resource.relationship IN ('owner', 'operator', 'finance_manager')");
     expect(sql).toContain("entitlement.status = 'active'");
     expect(sql).toContain("entitlement.status = 'suspended'");
-    expect(sql).toContain("finance.online_card_readiness");
+    expect(sql).toContain("finance.online_card_readiness_by_provider");
     expect(sql).not.toMatch(/\bFROM\s+pms\./i);
     expect(sql).not.toMatch(/\bJOIN\s+pms\./i);
   });

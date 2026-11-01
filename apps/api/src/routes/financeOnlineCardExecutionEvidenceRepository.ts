@@ -26,6 +26,7 @@ export type FinanceOnlineCardEvidencePool = {
 
 type ProviderRow = {
   providerAccountId: string;
+  provider: string;
   cardCapabilityRevision: number | string;
   propertyReadinessRevision: number | string;
   status: string;
@@ -64,7 +65,10 @@ const OUTBOX_DESTINATION = "booking.payment-source";
 
 export function createFinanceOnlineCardExecutionEvidenceRepository(
   pool: FinanceOnlineCardEvidencePool,
+  /** VAY-2442: Vayada approves vayada Payment accounts only while VAYADA_PAYMENT_ENABLED is on. */
+  options: { vayadaPaymentEnabled?: boolean } = {},
 ): FinancePlatformOnlineCardExecutionEvidenceRepository {
+  const vayada = options.vayadaPaymentEnabled === true;
   return {
     async readOnlineCardExecutionState(propertyId) {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(propertyId))
@@ -72,14 +76,14 @@ export function createFinanceOnlineCardExecutionEvidenceRepository(
       // Read-only, outside the write transaction helper (which maps errors to write results).
       const client = await pool.connect();
       try {
-        return await readState(client, propertyId.toLowerCase());
+        return await readState(client, propertyId.toLowerCase(), vayada);
       } finally {
         client.release();
       }
     },
     async acceptOnlineCardExecutionEvidence(command) {
       if (!validAcceptCommand(command)) return invalidCommand();
-      return transaction(pool, (client) => accept(client, command));
+      return transaction(pool, (client) => accept(client, command, vayada));
     },
     async revokeOnlineCardExecutionEvidence(command) {
       if (!validRevokeCommand(command)) return invalidCommand();
@@ -91,6 +95,7 @@ export function createFinanceOnlineCardExecutionEvidenceRepository(
 async function accept(
   client: Client,
   command: UserAcceptCommand,
+  vayada: boolean,
 ): Promise<FinanceOnlineCardExecutionEvidenceResult> {
   const operation = "finance.online_card_execution_evidence.accept";
   const keyHash = sha256(command.idempotencyKey);
@@ -99,7 +104,7 @@ async function accept(
   if (replay) return replay;
 
   await lockPropertySettings(client, command.propertyId);
-  const provider = await lockProvider(client, command.propertyId);
+  const provider = await lockProvider(client, command.propertyId, vayada);
   if (!provider) return failure(404, "provider_account_not_found", "Stripe account was not found.");
   const revision = positiveInteger(provider.cardCapabilityRevision);
   if (!revision || revision !== command.payload.expectedCardCapabilityRevision) {
@@ -231,6 +236,7 @@ async function revoke(
 async function readState(
   client: Client,
   propertyId: string,
+  vayada: boolean,
 ): Promise<FinanceOnlineCardExecutionState | null> {
   const property = await client.query(
     `SELECT 1 FROM hotel_catalog.properties WHERE id = $1::uuid`,
@@ -238,7 +244,7 @@ async function readState(
   );
   if (!property.rows[0]) return null;
   // What card readiness needs from the hotel's Payment settings besides Stripe and the approval:
-  // finance.online_card_readiness reads the same columns.
+  // finance.online_card_readiness_by_provider reads the same columns.
   const settings = await client.query<{
     revision: number | string | null;
     paymentsOn: boolean;
@@ -257,6 +263,7 @@ async function readState(
   const provider = (
     await client.query<ProviderRow>(
       `SELECT account.id::text AS "providerAccountId",
+              account.provider,
               account.card_capability_revision AS "cardCapabilityRevision",
               settings.online_card_readiness_revision AS "propertyReadinessRevision",
               account.status,
@@ -273,9 +280,8 @@ async function readState(
         AND account.property_id = settings.property_id
        WHERE settings.property_id = $1::uuid
          AND account.account_scope = 'property'
-         AND account.provider = 'stripe'
-         AND account.provider_account_id NOT LIKE 'settings-choice:%'`,
-      [propertyId],
+         AND ${APPROVABLE_PROVIDER}`,
+      [propertyId, vayada],
     )
   ).rows[0];
   const evidence = provider
@@ -342,9 +348,22 @@ async function lockPropertySettings(client: Client, propertyId: string): Promise
   );
 }
 
-async function lockProvider(client: Client, propertyId: string): Promise<ProviderRow | null> {
+/** The hotel's own Stripe account, or (VAY-2442, while the switch is on, $2) its vayada Payment
+ * account bound as vayada:<property> by a saved payout account. */
+const APPROVABLE_PROVIDER = `(
+  (account.provider = 'stripe' AND account.provider_account_id NOT LIKE 'settings-choice:%')
+  OR ($2::boolean AND account.provider = 'vayada'
+    AND account.provider_account_id = 'vayada:' || account.property_id::text)
+)`;
+
+async function lockProvider(
+  client: Client,
+  propertyId: string,
+  vayada: boolean,
+): Promise<ProviderRow | null> {
   const result = await client.query<ProviderRow>(
     `SELECT account.id::text AS "providerAccountId",
+            account.provider,
             account.card_capability_revision AS "cardCapabilityRevision",
             settings.online_card_readiness_revision AS "propertyReadinessRevision",
             account.status,
@@ -361,10 +380,9 @@ async function lockProvider(client: Client, propertyId: string): Promise<Provide
       AND account.property_id = settings.property_id
      WHERE settings.property_id = $1::uuid
        AND account.account_scope = 'property'
-       AND account.provider = 'stripe'
-       AND account.provider_account_id NOT LIKE 'settings-choice:%'
+       AND ${APPROVABLE_PROVIDER}
      FOR UPDATE OF settings, account`,
-    [propertyId],
+    [propertyId, vayada],
   );
   return result.rows[0] ?? null;
 }
@@ -375,16 +393,16 @@ function providerReady(row: ProviderRow): boolean {
     row.onboardingStatus === "completed" &&
     row.chargesEnabled &&
     row.payoutsEnabled &&
-    row.detailsSubmitted &&
-    row.cardPaymentsStatus === "active" &&
-    row.cardCapabilityActive
+    row.cardCapabilityActive &&
+    // Stripe verifies the hotel's own account; vayada Payment charges on Vayada's (VAY-2442).
+    (row.provider === "vayada" || (row.detailsSubmitted && row.cardPaymentsStatus === "active"))
   );
 }
 
 async function currentCardReady(client: Client, propertyId: string): Promise<boolean> {
   const result = await client.query<{ ready: boolean }>(
     `SELECT online_card_ready AS ready
-     FROM finance.online_card_readiness WHERE property_id = $1::uuid`,
+     FROM finance.online_card_readiness_by_provider WHERE property_id = $1::uuid`,
     [propertyId],
   );
   return result.rows[0]?.ready === true;

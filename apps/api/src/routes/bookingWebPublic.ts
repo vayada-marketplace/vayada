@@ -2885,7 +2885,7 @@ export async function loadTargetCheckoutConfig(
     LEFT JOIN finance.payment_provider_accounts account
        ON account.id = fs.provider_account_id
       AND account.property_id = p.id
-     LEFT JOIN finance.online_card_readiness readiness
+     LEFT JOIN finance.online_card_readiness_by_provider readiness
        ON readiness.property_id = p.id
      WHERE p.id = $1::uuid
      LIMIT 1`,

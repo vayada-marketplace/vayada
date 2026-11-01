@@ -25,6 +25,7 @@ import {
   type FinanceJsonPolicy,
   type FinancePaymentSettingsPatchCommand,
   type FinancePaymentSettingsPatchResponse,
+  type FinancePaymentSettingsResponse,
   type FinancePaymentSettingsPatchResult,
   type FinancePaymentSettingsPatchPayload,
   type FinancePaymentSettingsReadModel,
@@ -381,7 +382,8 @@ type FinanceCommandError = {
     | "rate_limited"
     | "write_unavailable"
     | "provider_unavailable"
-    | "provider_rejected";
+    | "provider_rejected"
+    | "vayada_payment_unavailable";
   category: "validation" | "not_found" | "conflict" | "rate_limit" | "write_model" | "provider";
   message: string;
 };
@@ -466,7 +468,10 @@ export async function registerFinanceRoutes(
       const settings =
         (await options.repository.getPaymentSettings(propertyId)) ??
         setupIncompletePaymentSettings(propertyId, new Date().toISOString());
-      return toFinancePaymentSettingsResponse(settings);
+      return {
+        ...toFinancePaymentSettingsResponse(settings),
+        vayadaPayment: { available: options.repository.vayadaPaymentAvailable === true },
+      } satisfies FinancePaymentSettingsResponse;
     },
   );
 
@@ -499,6 +504,19 @@ export async function registerFinanceRoutes(
         reply.code(parsed.statusCode);
         return parsed;
       }
+      // VAY-2442: nobody chooses vayada Payment before VAYADA_PAYMENT_ENABLED is on.
+      if (
+        parsed.payload.paymentProvider === "vayada" &&
+        options.repository.vayadaPaymentAvailable !== true
+      ) {
+        reply.code(409);
+        return {
+          statusCode: 409,
+          code: "vayada_payment_unavailable",
+          category: "conflict",
+          message: "vayada Payment is not available yet.",
+        } satisfies FinanceCommandError;
+      }
 
       const result = await options.repository.updatePaymentSettings(parsed);
       if (!result.ok) {
@@ -511,6 +529,7 @@ export async function registerFinanceRoutes(
 
       return {
         ...toFinancePaymentSettingsResponse(result.settings),
+        vayadaPayment: { available: options.repository.vayadaPaymentAvailable === true },
         commandMeta: result.commandMeta,
       } satisfies FinancePaymentSettingsPatchResponse;
     },
@@ -1168,6 +1187,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
   stripeConnectProvider?: FinanceStripeConnectProvider;
   /** VAY-2304: runs after a payment write has committed, to re-publish the hotel's prices. */
   afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
+  /** VAY-2442: VAYADA_PAYMENT_ENABLED. Off: vayada Payment can't be chosen or approved. */
+  vayadaPaymentEnabled?: boolean;
 }): FinancePropertyReadRepository {
   const pool: FinancePropertySettingsReadPool =
     config.pool ??
@@ -1177,16 +1198,20 @@ export function createTargetFinancePropertySettingsRepository(config: {
     });
 
   const onlineCardEvidenceRepository = pool.connect
-    ? createFinanceOnlineCardExecutionEvidenceRepository({
-        async connect() {
-          const client = await pool.connect!();
-          if (!client.release) throw new Error("Finance write client cannot release transactions.");
-          return {
-            query: client.query.bind(client),
-            release: client.release.bind(client),
-          };
+    ? createFinanceOnlineCardExecutionEvidenceRepository(
+        {
+          async connect() {
+            const client = await pool.connect!();
+            if (!client.release)
+              throw new Error("Finance write client cannot release transactions.");
+            return {
+              query: client.query.bind(client),
+              release: client.release.bind(client),
+            };
+          },
         },
-      })
+        { vayadaPaymentEnabled: config.vayadaPaymentEnabled },
+      )
     : null;
   const afterPaymentChange = async <T extends { ok: boolean }>(
     propertyId: string,
@@ -1230,6 +1255,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
 
   return {
     ...onlineCardEvidenceWrites,
+    vayadaPaymentAvailable: config.vayadaPaymentEnabled === true,
     async getPaymentSettings(propertyId) {
       const row = await loadPaymentSettingsRow(pool, propertyId);
       return row ? toFinancePaymentSettingsReadModel(row) : null;
