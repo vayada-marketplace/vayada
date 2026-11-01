@@ -110,7 +110,7 @@ export const RULES = [
   },
   {
     name: "frontend",
-    test: /^apps\/(vayada-admin|landing)\//,
+    test: /^apps\/(vayada-admin|landing|hotel-sites)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   {
@@ -141,11 +141,11 @@ export const RULES = [
     test: /^tests\/e2e\/next-stack-smoke\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth", "booking_admin_e2e"],
   },
-  // frontend_build runs the landing Playwright suite; first_party_auth runs the auth suite. The
+  // frontend_build runs the landing and hotel-sites Playwright suites; first_party_auth runs the auth suite. The
   // other projects here are not PR-gated. A new folder under tests/e2e/ matches no rule (every job).
   {
     name: "e2e",
-    test: /^tests\/e2e\/(landing|first-party-auth|vayada-admin|booking-public-canary)\//,
+    test: /^tests\/e2e\/(landing|hotel-sites|first-party-auth|vayada-admin|booking-public-canary)\//,
     jobs: [...FRONTEND_JOBS, "first_party_auth"],
   },
   ...Object.entries(FRONTEND_ONLY_PACKAGES).map(([name, jobs]) => ({

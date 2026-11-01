@@ -1,0 +1,236 @@
+/* The hotel website template (VAY-2422), from Timo's "Homepage" design. Colours come from the
+   site's content as --site-* variables on <body>; the font from its assets as --site-font. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--site-background);
+  color: var(--site-ink);
+  font-family: var(--site-font), system-ui, sans-serif;
+}
+
+a {
+  color: var(--site-ink);
+}
+
+a:hover {
+  color: var(--site-accent);
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
+
+img {
+  display: block;
+}
+
+.button-light,
+.button-light:hover {
+  background: #ffffff;
+  color: var(--site-ink);
+  text-decoration: none;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* Its ring sits on the photo or the dark footer, where the ink colour can't be seen. */
+.button-light:focus-visible {
+  outline-color: #ffffff;
+}
+
+/* Hero */
+
+.hero {
+  position: relative;
+  height: 760px;
+  overflow: hidden;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+}
+
+.hero-image {
+  object-fit: cover;
+}
+
+.hero-shade {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 18, 16, 0.34);
+}
+
+.nav {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 28px clamp(16px, 4vw, 48px);
+  text-transform: uppercase;
+}
+
+.nav a,
+.nav a:hover {
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.nav-brand {
+  font-size: 18px;
+  letter-spacing: 0.18em;
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(16px, 2.5vw, 36px);
+  font-size: 14px;
+  letter-spacing: 0.12em;
+}
+
+.nav-links a {
+  padding: 12px 0;
+}
+
+.hero-body {
+  position: relative;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 16px 80px;
+  gap: 20px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-weight: 300;
+  font-size: clamp(40px, 6vw, 84px);
+  letter-spacing: 0.06em;
+  line-height: 1.05;
+  text-transform: uppercase;
+}
+
+.hero-subline {
+  margin: 0;
+  font-size: clamp(18px, 1.8vw, 26px);
+  font-weight: 300;
+}
+
+.hero .button-light {
+  margin-top: 16px;
+  font-size: 14px;
+  padding: 18px 32px;
+}
+
+/* Intro */
+
+.intro {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: clamp(72px, 10vw, 144px) clamp(16px, 4vw, 48px);
+}
+
+.eyebrow {
+  margin: 0 0 20px;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--site-muted);
+  text-transform: uppercase;
+}
+
+.intro h2 {
+  margin: 0 0 16px;
+  font-weight: 400;
+  font-size: clamp(36px, 4.4vw, 60px);
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.intro-tagline {
+  margin: 0 0 40px;
+  font-size: clamp(20px, 2vw, 28px);
+  font-weight: 300;
+  letter-spacing: 0.02em;
+}
+
+.intro-text {
+  margin: 0;
+  max-width: 820px;
+  font-size: 20px;
+  line-height: 1.65;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+}
+
+/* Footer */
+
+.footer {
+  background: var(--site-footer);
+  color: #ffffff;
+  padding: 72px clamp(16px, 4vw, 48px) 48px;
+}
+
+.footer-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+.footer h2 {
+  margin: 0;
+  font-weight: 300;
+  font-size: clamp(28px, 3vw, 40px);
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.footer .button-light {
+  font-size: 13px;
+  padding: 16px 30px;
+}
+
+.footer-meta {
+  width: 100%;
+  margin-top: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 20px 32px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.footer-meta a,
+.footer-meta a:hover {
+  color: #ffffff;
+  text-decoration: none;
+}
