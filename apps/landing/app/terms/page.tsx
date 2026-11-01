@@ -201,7 +201,7 @@ export default function TermsPage() {
                   funds. With vayada Payment, the next paragraph applies.
                 </p>
                 <p>
-                  <strong>vayada Payment:</strong> If you choose vayada Payment, you appoint vayada
+                  <strong>vayada Payment: </strong>If you choose vayada Payment, you appoint vayada
                   to receive card payments from Guests on your behalf. Guests pay into vayada&apos;s
                   Stripe account, and their card statement shows vayada and your property&apos;s
                   name. We keep the amounts received for you until they are paid out and pay them to
@@ -229,7 +229,7 @@ export default function TermsPage() {
                   settle it with the Guest.
                 </p>
                 <p>
-                  <strong>Disputes:</strong> If a Guest disputes a card payment with their bank (a
+                  <strong>Disputes: </strong>If a Guest disputes a card payment with their bank (a
                   chargeback), Stripe handles the dispute on your Stripe account. You are
                   responsible for responding to it and for the disputed amount and any dispute fee
                   charged by Stripe. With vayada Payment, vayada answers the dispute on its Stripe
