@@ -107,6 +107,7 @@ import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepositor
 import { registerHotelFirstRunRoutes } from "./routes/hotelFirstRun.js";
 import { registerHotelSetupChecklistRoutes } from "./routes/hotelSetupChecklist.js";
 import { registerHotelAccountAgreementsRoutes } from "./routes/hotelAccountAgreements.js";
+import { registerGoogleMapsLinksRoutes } from "./routes/googleMapsLinks.js";
 import {
   registerSharedHotelSetupStatusRoutes,
   type SharedHotelSetupStatusRepository,
@@ -310,6 +311,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupChecklist?: import("./routes/hotelSetupChecklist.js").HotelSetupChecklistRouteOptions["createService"];
   /** VAY-2246: the hotel account's terms and DPA acceptance (GET/POST /api/hotel-account/agreements). */
   hotelAccountAgreements?: import("./routes/hotelAccountAgreements.js").HotelAccountAgreementsRouteOptions["repository"];
+  /** VAY-2444: resolve Google Maps short links for signed-in hotel accounts (POST /api/maps-links/resolve). */
+  googleMapsLinks?: import("./routes/googleMapsLinks.js").GoogleMapsLinksRouteOptions;
   /** Owner-only Feature Hub Financials on the ordinary login; unset keeps the shared repository. */
   hotelSetupFeatureHubCommands?: Pick<
     import("./routes/pmsModuleActivations.js").PmsModuleActivationRepository,
@@ -680,6 +683,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerHotelAccountAgreementsRoutes, {
       prefix: "/api/hotel-account",
       repository: options.hotelAccountAgreements,
+    });
+  }
+  if (options.googleMapsLinks) {
+    app.register(registerGoogleMapsLinksRoutes, {
+      prefix: "/api/maps-links",
+      ...options.googleMapsLinks,
     });
   }
   if (options.propertySetupRouteStateReadPort) {

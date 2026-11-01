@@ -2092,6 +2092,8 @@ const app = buildApp({
   hotelFirstRun,
   hotelSetupChecklist,
   hotelAccountAgreements,
+  // VAY-2444: needs signed-in users, so only with WorkOS auth configured.
+  googleMapsLinks: config.auth ? {} : undefined,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
