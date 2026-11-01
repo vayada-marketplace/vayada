@@ -6,7 +6,7 @@ const nextConfig = {
   poweredByHeader: false,
   output: "standalone",
   // Each hotel's site answers on its own host (`<slug>.site.localhost` in development).
-  allowedDevOrigins: ["127.0.0.1", "*.site.localhost"],
+  allowedDevOrigins: ["*.site.localhost"],
   turbopack: {
     root: path.join(__dirname, "../.."),
   },

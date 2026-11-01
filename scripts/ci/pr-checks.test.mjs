@@ -128,6 +128,10 @@ test("frontend-only changes skip the PostgreSQL and Python jobs", () => {
     ...FRONTEND,
     "first_party_auth",
   ]);
+  assert.deepEqual(
+    selectJobs(["apps/hotel-sites/middleware.ts", "tests/e2e/hotel-sites/home.spec.ts"]).jobs,
+    [...FRONTEND, "first_party_auth"],
+  );
 });
 
 test("Python backend changes run only the backend matrix", () => {
@@ -859,6 +863,7 @@ test("only the Playwright jobs run Playwright, and nothing imports the root conf
     "booking-admin",
     "booking-web",
     "first-party-auth",
+    "hotel-sites",
     "landing",
     "pms-web",
   ]);

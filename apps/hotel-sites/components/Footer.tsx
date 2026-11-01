@@ -14,11 +14,7 @@ export function Footer({ site }: { site: HotelSite }) {
           <span>
             {site.address.locality}, {site.address.country}
           </span>
-          {footer.instagramUrl && (
-            <a href={footer.instagramUrl} rel="noopener">
-              Instagram
-            </a>
-          )}
+          {footer.instagramUrl && <a href={footer.instagramUrl}>Instagram</a>}
           {footer.contactUrl && <a href={footer.contactUrl}>Contact</a>}
         </div>
       </div>

@@ -8,8 +8,12 @@ for (const width of [1440, 390]) {
     page,
   }, testInfo) => {
     await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    // Script errors and console errors (a failed request, a hydration mismatch).
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
     await page.goto("/");
 
     await expect(
@@ -72,6 +76,8 @@ test("answers only on a hotel's own host, except the load balancer's health chec
   baseURL,
 }) => {
   const other = new URL(baseURL!);
+  // Behind portless, 127.0.0.1 reaches the proxy rather than the app.
+  test.skip(other.protocol === "https:", "needs the app's own port");
   other.hostname = "127.0.0.1";
   expect((await request.get(other.href)).status()).toBe(404);
   other.pathname = "/api/health";

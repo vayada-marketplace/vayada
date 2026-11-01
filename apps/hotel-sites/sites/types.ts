@@ -24,7 +24,8 @@ export type HotelSite = {
     tint: string;
     footer: string;
   };
-  seo: { title: string; description: string; image: SiteImage };
+  /** The hero photo doubles as the link preview image. */
+  seo: { title: string; description: string };
   address: { locality: string; country: string; countryCode: string };
   nav: { label: string; href: string }[];
   hero: { image: SiteImage; headline: string; subline: string; cta: string };

@@ -26,7 +26,6 @@ export const animalsAhangama: HotelSite = {
     title: "Animals Ahangama · A place to land",
     description:
       "A place to land in Ahangama, Sri Lanka. Stay awhile. Eat well. Feel at home. Rooms by the pool, a restaurant and bar, a short walk to the beach.",
-    image: { src: photos.hero, alt: "Pool and lounge terrace at Animals Ahangama" },
   },
   address: { locality: "Ahangama", country: "Sri Lanka", countryCode: "LK" },
   nav: [

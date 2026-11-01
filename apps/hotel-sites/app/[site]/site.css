@@ -52,6 +52,11 @@ img {
   text-transform: uppercase;
 }
 
+/* Its ring sits on the photo or the dark footer, where the ink colour can't be seen. */
+.button-light:focus-visible {
+  outline-color: #ffffff;
+}
+
 /* Hero */
 
 .hero {

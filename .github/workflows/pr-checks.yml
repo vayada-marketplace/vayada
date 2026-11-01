@@ -185,6 +185,22 @@ jobs:
           E2E_LANDING_BASE_URL: http://127.0.0.1:3006
           E2E_LANDING_ANALYTICS: "1"
 
+      # A hotel site answers only on its own host; the health check answers on any (VAY-2422).
+      - name: Hotel site browser specs
+        run: |
+          npm --workspace vayada-hotel-sites run start -- --port 3007 &
+          sites_pid=$!
+          trap 'kill "$sites_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:3007/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          npm run e2e:hotel-sites
+        env:
+          CI: "false"
+          E2E_START_SERVERS: "0"
+          E2E_HOTEL_SITES_BASE_URL: http://animals-ahangama.site.localhost:3007
+
   first_party_auth:
     name: First-Party Auth Contracts
     runs-on: ubuntu-latest

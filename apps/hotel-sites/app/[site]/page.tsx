@@ -11,13 +11,12 @@ type Props = { params: Promise<{ site: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const site = siteBySlug((await params).site);
   if (!site) return {};
-  const { title, description, image } = site.seo;
+  const { title, description } = site.seo;
+  const { image } = site.hero;
   return {
-    metadataBase: new URL(site.url),
     title,
     description,
     alternates: { canonical: "/" },
-    robots: { index: site.indexable, follow: site.indexable },
     openGraph: {
       type: "website",
       url: "/",
@@ -39,7 +38,7 @@ export default async function SitePage({ params }: Props) {
     "@type": "Hotel",
     name: site.name,
     url: site.url,
-    image: new URL(site.seo.image.src.src, site.url).href,
+    image: new URL(site.hero.image.src.src, site.url).href,
     address: {
       "@type": "PostalAddress",
       addressLocality: site.address.locality,

@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { SITES, siteBySlug } from "@/sites";
@@ -9,6 +10,22 @@ import "./site.css";
 export const dynamicParams = false;
 export function generateStaticParams() {
   return SITES.map((site) => ({ site: site.slug }));
+}
+
+// For every page of the site: absolute URLs, and no indexing while it holds placeholders.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ site: string }>;
+}): Promise<Metadata> {
+  const site = siteBySlug((await params).site);
+  if (!site) return {};
+  return {
+    metadataBase: new URL(site.url),
+    robots: { index: site.indexable, follow: site.indexable },
+    // No favicon until the hotel's logo arrives; this stops browsers asking for /favicon.ico.
+    icons: { icon: "data:," },
+  };
 }
 
 export default async function SiteLayout({
