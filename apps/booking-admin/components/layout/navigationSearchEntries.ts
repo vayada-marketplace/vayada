@@ -145,6 +145,15 @@ export const SEARCH_ENTRIES = [
     "setting",
   ],
   [
+    "Room Sorting",
+    "/settings/room-sorting",
+    "Settings",
+    "settings",
+    "settings.cards.roomSorting.title",
+    "navigation.searchHint.roomSorting",
+    "setting",
+  ],
+  [
     "Book Direct Benefits",
     "/settings/book-direct-benefits",
     "Settings",

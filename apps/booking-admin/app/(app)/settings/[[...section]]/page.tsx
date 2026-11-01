@@ -5,6 +5,7 @@ import { DataExportPage } from "@/components/settings/DataExportPage";
 import { DeleteAccountPage } from "@/components/settings/DeleteAccountPage";
 import { PrivacyPage } from "@/components/settings/PrivacyPage";
 import { RoomFiltersPage } from "@/components/settings/RoomFiltersPage";
+import { RoomSortingPage } from "@/components/settings/RoomSortingPage";
 import { SettingsIndex } from "@/components/settings/SettingsIndex";
 import SettingsSectionPage from "@/components/settings/SettingsSectionPage";
 import { isSettingsPage } from "@/lib/utils/settingsSectionUrl";
@@ -21,6 +22,7 @@ export default async function SettingsRoute({
   if (rest.length > 0) notFound();
   if (page === "book-direct-benefits") return <BookDirectBenefitsPage />;
   if (page === "room-filters") return <RoomFiltersPage />;
+  if (page === "room-sorting") return <RoomSortingPage />;
   if (page === "guest-form") return <GuestFormPage />;
   if (page === "privacy") return <PrivacyPage />;
   if (page === "data-export") return <DataExportPage />;

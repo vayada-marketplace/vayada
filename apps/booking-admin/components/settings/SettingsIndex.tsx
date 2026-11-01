@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AdjustmentsHorizontalIcon,
+  ArrowsUpDownIcon,
   BoltIcon,
   ClipboardDocumentListIcon,
   Cog6ToothIcon,
@@ -66,6 +67,12 @@ const CARDS: SettingsCardLink[] = [
     description: "settings.cards.roomFilters.description",
     icon: FunnelIcon,
     href: "/settings/room-filters",
+  },
+  {
+    title: "settings.cards.roomSorting.title",
+    description: "settings.cards.roomSorting.description",
+    icon: ArrowsUpDownIcon,
+    href: "/settings/room-sorting",
   },
   {
     title: "settings.cards.guestForm.title",

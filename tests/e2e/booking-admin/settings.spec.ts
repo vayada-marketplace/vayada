@@ -869,6 +869,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
       ["Book Direct Benefits", "/settings/book-direct-benefits"],
       ["Policies", "/settings/policies"],
       ["Room Filters", "/settings/room-filters"],
+      // VAY-2449: next to Room Filters.
+      ["Room Sorting", "/settings/room-sorting"],
       ["Guest Form", "/settings/guest-form"],
       ["Billing", "/settings/billing"],
       ["Privacy & data", "/settings/privacy"],
