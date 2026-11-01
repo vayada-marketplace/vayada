@@ -172,6 +172,7 @@ import { registerFinanceProfitLossRoutes } from "./routes/financeProfitLoss.js";
 import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
+import { registerVayadaPaymentWebhookRoutes } from "./routes/vayadaPaymentWebhooks.js";
 import { registerFinancePaymentWindowsRoutes } from "./routes/financePaymentWindows.js";
 import {
   registerPlatformMediaRoutes,
@@ -463,6 +464,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   financePayoutDestination?: Parameters<typeof registerFinancePayoutDestinationRoutes>[1];
+  /** VAY-2442: events from vayada Payment's own Stripe account. */
+  vayadaPaymentWebhooks?: Parameters<typeof registerVayadaPaymentWebhookRoutes>[1];
   financePaymentWindows?: Parameters<typeof registerFinancePaymentWindowsRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
@@ -563,6 +566,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
   if (options.providerWebhooks) {
     app.register(registerProviderWebhookRoutes, options.providerWebhooks);
+  }
+  if (options.vayadaPaymentWebhooks) {
+    app.register(registerVayadaPaymentWebhookRoutes, options.vayadaPaymentWebhooks);
   }
   app.register(registerRouteGroups, { prefix: "/api" });
   if (options.publicHotelProfileRepository) {

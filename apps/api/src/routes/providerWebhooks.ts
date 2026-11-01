@@ -737,7 +737,7 @@ function bookingReceiptKey(propertyId: string, classification: ChannexClassifica
     : classification.receiptKey;
 }
 
-function verifyStripeSignature(input: {
+export function verifyStripeSignature(input: {
   payload: string;
   signatureHeader: string;
   secret: string;

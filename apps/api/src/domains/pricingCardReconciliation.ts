@@ -48,7 +48,8 @@ export async function reconcilePricingCardPayments(
        JOIN booking.guest_bookings booking
          ON booking.id=payment.guest_booking_id AND booking.property_id=payment.property_id
        WHERE payment.payment_method='card' AND payment.payment_kind IN ('full','deposit')
-         AND payment.payment_metadata->>'chargeType'='direct' AND payment.provider_payment_intent_id IS NOT NULL
+         AND payment.payment_metadata->>'chargeType' IN ('direct','vayada_payment')
+         AND payment.provider_payment_intent_id IS NOT NULL
          AND payment.status IN ('authorized','paid','partially_refunded','refunded')
          AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
          AND payment.updated_at>=now()-make_interval(days=>$1)

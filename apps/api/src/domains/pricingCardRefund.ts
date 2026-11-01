@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { recordVayadaPaymentRefund } from "./vayadaPaymentLedger.js";
+import { isVayadaPaymentAccountRef } from "./vayadaPaymentStripe.js";
 import type { Pool, PoolClient } from "pg";
 import { pricingAmountStep, pricingCurrencyScale } from "@vayada/domain-pms";
 import { pricingMinorDecimal } from "./pricingCardPayment.js";
@@ -58,7 +60,8 @@ export async function previewPricingCardRefund(
          ON payment.id=booking.active_card_payment_id AND payment.property_id=booking.property_id
        WHERE booking.property_id=$1::uuid AND booking.id=$2::uuid AND payment.payment_method='card'
          AND payment.status='paid' AND payment.refunded_amount=0
-         AND payment.payment_metadata->>'chargeType'='direct' AND payment.currency=booking.currency
+         AND payment.payment_metadata->>'chargeType' IN ('direct','vayada_payment')
+         AND payment.currency=booking.currency
          AND booking.payment_status IN ('paid','partially_paid')
          AND booking.booking_metadata->>'targetSource'='pricing_quote_draft'
          AND booking.booking_metadata->>'paymentMethod'='card'
@@ -138,7 +141,8 @@ export async function stagePricingCardRefund(
     payment.status !== "paid" ||
     // Refunds run on the hotel's own Stripe account: only its direct charges, in the stay's
     // currency, of a paid pricing-v2 card stay.
-    payment.chargeType !== "direct" ||
+    // vayada Payment (VAY-2442) refunds on Vayada's own account, by its vayada:<property> reference.
+    !(payment.chargeType === "direct" || payment.chargeType === "vayada_payment") ||
     payment.currency !== payment.bookingCurrency ||
     // A card deposit leaves the rest to pay at the property (VAY-2205).
     (payment.bookingPaid !== "paid" && payment.bookingPaid !== "partially_paid") ||
@@ -150,7 +154,9 @@ export async function stagePricingCardRefund(
     !paid ||
     typeof payment.intent !== "string" ||
     typeof payment.accountRef !== "string" ||
-    !payment.accountRef.startsWith("acct_") ||
+    !(payment.chargeType === "vayada_payment"
+      ? isVayadaPaymentAccountRef(payment.accountRef)
+      : payment.accountRef.startsWith("acct_")) ||
     !/^(0|[1-9][0-9]*)$/.test(input.retainedMinor)
   )
     throw new PricingCardRefundError("unavailable");
@@ -566,7 +572,10 @@ async function failRefund(client: PoolClient, command: Command, refund: StripeBo
 async function settleRefund(client: PoolClient, command: Command, refund: StripeBookingRefund) {
   const payment = (
     await client.query(
-      `SELECT amount::text AS amount,refunded_amount::text AS refunded,organization_id,provider_account_id
+      `SELECT amount::text AS amount,refunded_amount::text AS refunded,organization_id,provider_account_id,
+         payment_metadata->>'chargeType' AS charge_type,
+         payment_metadata->>'platformFeeAmount' AS platform_fee_amount,
+         COALESCE(payment_metadata->>'livemode'='true',false) AS livemode
        FROM finance.payments WHERE id=$1 AND property_id=$2 FOR UPDATE`,
       [command.payment_id, command.property_id],
     )
@@ -622,6 +631,20 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
      WHERE guest_booking_id=$1`,
     [command.guest_booking_id, bookingStatus],
   );
+  // vayada Payment (VAY-2442): the money left Vayada's account, so the hotel is owed that much less;
+  // the plan's fee on it comes back to the hotel, the vayada Payment fee doesn't.
+  if (payment.charge_type === "vayada_payment")
+    await recordVayadaPaymentRefund(client, {
+      propertyId: command.property_id,
+      guestBookingId: command.guest_booking_id,
+      paymentId: command.payment_id,
+      refundCommandId: command.id,
+      currency: command.currency,
+      paymentAmount: payment.amount,
+      platformFeeAmount: requiredPlatformFee(payment.platform_fee_amount),
+      refundAmount: command.amount,
+      livemode: payment.livemode === true,
+    });
   await client.query(
     `UPDATE finance.card_refund_commands SET status='succeeded',provider_refund_id=$2,provider_status=$3,
        failure_reason=NULL,settled_at=clock_timestamp(),updated_at=clock_timestamp()
@@ -630,6 +653,13 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
   );
   await audit(client, command, "finance.card_refund", refund);
   return "succeeded" as const;
+}
+
+/** Every vayada Payment charge records the plan's fee (P3): a missing one is an error, never 0. */
+function requiredPlatformFee(value: unknown): string {
+  if (typeof value !== "string" || !/^\d+\.\d{2}$/.test(value))
+    throw new Error("vayada Payment charge has no recorded plan fee.");
+  return value;
 }
 
 /** A guest who isn't refunded needs a person: the log line carries ids only, no guest data. */
