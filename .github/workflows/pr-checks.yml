@@ -1632,6 +1632,7 @@ jobs:
             src/domains/financeRevenueAddonFacts.integration.test.ts \
             src/domains/financeRevenueRoomFacts.integration.test.ts \
             src/domains/propertySetupFinanceOwnerScope.integration.test.ts \
+            src/domains/vayadaPaymentPayouts.integration.test.ts \
             src/jobs/financeOtaCommissionPreactivation.integration.test.ts \
             src/platform/financeOnlineCardExecutionEvidenceRepository.integration.test.ts \
             src/routes/bookingNightlyRevenueCapture.integration.test.ts
