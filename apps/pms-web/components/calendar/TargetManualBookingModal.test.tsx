@@ -216,6 +216,93 @@ describe("target manual booking fields", () => {
     });
   });
 
+  it("derives extras from the party: transfers by trip, breakfast by guests and nights", async () => {
+    // prettier-ignore
+    vi.spyOn(calendarService, "listAvailableAddons").mockResolvedValue([
+      { id: "transfer", name: "Airport transfer", description: "", price: 30, currency: "EUR", category: "transport", perPerson: false, perNight: false, maxGuests: 4, maxQuantity: 1 },
+      { id: "breakfast", name: "Breakfast", description: "", price: 10, currency: "EUR", category: "meal", perPerson: true, perNight: true, maxQuantity: 1 },
+      { id: "parking", name: "Parking", description: "", price: 5, currency: "EUR", category: "other", perPerson: false, perNight: true, maxQuantity: 2 },
+      { id: "flowers", name: "Flowers", description: "", price: 20, currency: "EUR", category: "other", perPerson: false, perNight: false },
+    ]);
+    vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) =>
+      previewFor(input),
+    );
+    const onSubmit = vi.fn().mockResolvedValue({});
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-12", onSubmit, onClose: vi.fn() })); });
+    const field = (label: string) => view.root.findByProps({ "aria-label": label });
+    const row = (name: string) =>
+      view.root
+        .findAllByProps({ "data-addon": true })
+        .find((node) => node.findAllByType("span").some((span) => span.children[0] === name))!;
+    const box = (name: string, label?: string) =>
+      row(name)
+        .findAllByType("label")
+        .find((node) => !label || node.children.join("").includes(label))!
+        .findByType("input");
+    const check = (name: string, label?: string) =>
+      act(() => box(name, label).props.onChange({ target: { checked: true } }));
+    act(() => field("Room 1 room").props.onChange({ target: { value: "room-2" } }));
+    act(() => field("Room 1 adults").props.onChange({ target: { value: "5" } }));
+
+    // No typed quantities any more (VAY-2417).
+    expect(
+      view.root
+        .findAllByProps({ type: "number" })
+        .some((node) => node.props["aria-label"]?.includes("packages")),
+    ).toBe(false);
+    check("Airport transfer", "Arrival pickup · 2026-09-10");
+    check("Airport transfer", "Departure drop-off · 2026-09-12");
+    check("Breakfast");
+    check("Parking");
+    check("Flowers");
+    // Parking may be booked twice, Flowers once: only Parking has a stepper, which stops at 2.
+    expect(view.root.findAllByProps({ "aria-label": "More: Flowers" })).toHaveLength(0);
+    act(() => field("More: Parking").props.onClick());
+    expect(field("More: Parking").props.disabled).toBe(true);
+    await settlePreview();
+    const markup = JSON.stringify(view.toJSON());
+    expect(markup).toContain("€10 × 2 vehicles per trip");
+    expect(markup).toContain("€10 × 5 guests × 2 nights");
+    expect(markup).toContain("€10 × 2 × 2 nights");
+
+    await act(async () => {
+      await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(onSubmit.mock.calls[0]![0].addOns).toEqual([
+      {
+        addonId: "transfer",
+        packageCount: 2,
+        serviceUnits: [
+          { serviceDate: "2026-09-10", guestCount: null },
+          { serviceDate: "2026-09-12", guestCount: null },
+        ],
+      },
+      {
+        addonId: "breakfast",
+        packageCount: 1,
+        serviceUnits: [
+          { serviceDate: "2026-09-10", guestCount: 5 },
+          { serviceDate: "2026-09-11", guestCount: 5 },
+        ],
+      },
+      {
+        addonId: "parking",
+        packageCount: 2,
+        serviceUnits: [
+          { serviceDate: "2026-09-10", guestCount: null },
+          { serviceDate: "2026-09-11", guestCount: null },
+        ],
+      },
+      {
+        addonId: "flowers",
+        packageCount: 1,
+        serviceUnits: [{ serviceDate: null, guestCount: null }],
+      },
+    ]);
+  });
+
   it("keeps the latest evidence when an older preview resolves last", async () => {
     const pending: Array<{
       input: PmsManualBookingPreviewInput;

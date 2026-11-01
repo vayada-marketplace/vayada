@@ -191,6 +191,9 @@ export interface BookingAddon {
   category: string;
   perPerson?: boolean | null;
   perNight?: boolean | null;
+  /** New Booking only (VAY-2417): a transfer's group size per vehicle, and the most per booking. */
+  maxGuests?: number | null;
+  maxQuantity?: number;
 }
 
 export interface BookingListResponse {
