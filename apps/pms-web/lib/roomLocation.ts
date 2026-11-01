@@ -86,34 +86,6 @@ export function readCoordinates(
 
 export type RoomPin = { latitude: number; longitude: number };
 
-/** Where a link copied from Google Maps puts its pin: a place's own point (!3d…!4d…), a search or route
- * point (?q=, query=, ll=, destination=), else the map's centre (@lat,lng). Short share links
- * (maps.app.goo.gl) carry no coordinates. */
-export function parseGoogleMapsLink(text: string): RoomPin | "short_link" | null {
-  const link = text.trim();
-  if (/^(https?:\/\/)?(maps\.app\.goo\.gl|goo\.gl\/maps)\//i.test(link)) return "short_link";
-  if (!/google\.[a-z.]+\/maps|maps\.google\./i.test(link)) return null;
-  let decoded = link;
-  try {
-    decoded = decodeURIComponent(link);
-  } catch {
-    // A malformed escape: read the link as it is.
-  }
-  const number = String.raw`(-?\d{1,3}(?:\.\d+)?)`;
-  const match =
-    decoded.match(new RegExp(String.raw`!3d${number}!4d${number}`)) ??
-    decoded.match(
-      new RegExp(String.raw`[?&](?:q|query|ll|destination|center)=${number},\s*${number}`),
-    ) ??
-    decoded.match(new RegExp(String.raw`@${number},${number}`));
-  if (!match) return null;
-  const latitude = parseCoordinate(match[1], "latitude");
-  const longitude = parseCoordinate(match[2], "longitude");
-  return latitude.kind === "value" && longitude.kind === "value"
-    ? { latitude: latitude.value, longitude: longitude.value }
-    : null;
-}
-
 /** Straight-line distance; fine for the few kilometres between a villa and its main property. */
 export function metresBetween(a: RoomPin, b: RoomPin): number {
   const toRadians = Math.PI / 180;
