@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "在“位置与周边”中编辑",
   "settings.locationMap.title": "预订页面上的位置地图",
   "settings.locationMap.description": "在房间列表下方向客人显示一张地图，标出您的房间所在位置。",
-  "settings.locationMap.off": "关闭：客人看不到地图。更改会立即显示在您的预订页面上。",
+  "settings.locationMap.off": "关闭：房间列表下方不显示地图。房间仍可在其详情中显示位置，可在 Rooms & Rates → 房间 → 位置 中设置。更改会立即显示在您的预订页面上。",
   "settings.locationMap.needsSetup": "完成预订引擎的设置后即可开启地图。",
   "settings.locationMap.loadFailed": "无法加载位置地图设置。",
   "settings.locationMap.retry": "重试",

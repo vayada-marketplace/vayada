@@ -101,7 +101,8 @@ test("turns the location map on and shows a pin for each room's place", async ({
   const card = page.getByRole("region", { name: "Location map on your booking page" });
   const toggle = card.getByRole("switch", { name: "Location map on your booking page" });
   await expect(toggle).toHaveAttribute("aria-checked", "false");
-  await expect(card.getByText("Off: guests see no map.", { exact: false })).toBeVisible();
+  // VAY-2445: off hides the map below the room list; a room's own details map still follows its switch.
+  await expect(card.getByText("Off: no map below your room list.", { exact: false })).toBeVisible();
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");

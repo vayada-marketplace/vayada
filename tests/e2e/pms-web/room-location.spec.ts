@@ -555,6 +555,25 @@ test.describe("pms-web room location", () => {
     );
     await expect(map).toHaveAttribute("data-marker", propertyPin);
   });
+
+  test("lines the map up with the Separate location card, in the cards' two columns (VAY-2445)", async ({
+    page,
+  }) => {
+    test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockRoomBackend(page);
+    await mockGoogleMaps(page, { places: [leopoldstrasse] });
+    await page.goto(`/rooms/${roomTypeId}`);
+    const separate = page.getByRole("radio", { name: /Separate location/ });
+    await separate.click();
+    const map = page.getByTestId("google-address-map-canvas");
+    await expect(map).toBeVisible();
+    const card = (await separate.boundingBox())!;
+    const box = (await map.boundingBox())!;
+    // The map sits inside a 1px border; its edges match the card's within that.
+    expect(Math.abs(box.x - card.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(box.x + box.width - (card.x + card.width))).toBeLessThanOrEqual(1.5);
+  });
 });
 
 async function paste(field: Locator, text: string) {

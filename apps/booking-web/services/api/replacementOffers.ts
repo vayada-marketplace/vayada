@@ -42,8 +42,9 @@ export type RoomContent = {
   bedrooms?: number;
   bathrooms?: number;
   amenities?: string[];
-  /** The room's own place, sent only while the hotel shows the location map (VAY-2126): its pin and address,
-   * or (VAY-2321) a pin rounded to its area with the area's name, never its street. */
+  /** The room's own place (VAY-2126): its pin and address, or (VAY-2321) a pin rounded to its area with the
+   * area's name, never its street. While the hotel's location map is off, only rooms that show their place in
+   * their details send it (VAY-2445). */
   location?:
     | { latitude: number; longitude: number; address?: string; approximate?: undefined }
     | { latitude: number; longitude: number; approximate: true; area?: string };
@@ -136,17 +137,22 @@ export async function getReplacementOffers(
   return (await getReplacementCatalog(slug, signal)).rooms;
 }
 
-/** The location map while the hotel shows it (VAY-2126, read live): the property's own pin as its visibility
- * shows it (rounded to the area for "Approximate"), used when no room has a pin. */
+/** The property's place on the guest maps (VAY-2126, read live): its own pin as its visibility shows it
+ * (rounded to the area for "Approximate"), used when no room has a pin. */
 export type CatalogLocationMap = {
   property: { latitude: number; longitude: number; approximate: boolean } | null;
 };
 
-/** The catalog's rooms, and the location map while the hotel shows it. */
+/** The catalog's rooms, the location map while the hotel shows it, and the property's place for the rooms'
+ * own details maps, sent whether the location map is on or not (VAY-2445). */
 export async function getReplacementCatalog(
   slug: string,
   signal?: AbortSignal,
-): Promise<{ rooms: PricingRoom[]; locationMap: CatalogLocationMap | null }> {
+): Promise<{
+  rooms: PricingRoom[];
+  locationMap: CatalogLocationMap | null;
+  detailsMap: CatalogLocationMap | null;
+}> {
   const raw = await bookingWebPublic.get<unknown>(
     `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
     { signal, cache: "no-store" },
@@ -205,7 +211,11 @@ export async function getReplacementCatalog(
       }),
     };
   });
-  return { rooms, locationMap: catalogLocationMap(raw.locationMap) };
+  return {
+    rooms,
+    locationMap: catalogLocationMap(raw.locationMap),
+    detailsMap: catalogLocationMap(raw.detailsMap),
+  };
 }
 
 function paymentSchedule(v: unknown): PricingOffer["paymentSchedule"] {

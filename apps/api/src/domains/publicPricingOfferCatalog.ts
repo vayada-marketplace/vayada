@@ -14,7 +14,13 @@ import {
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
-import { guestRoomLocation, readGuestLocation, type MapPin } from "./bookingLocationMap.js";
+import { isSamePlace } from "@vayada/domain-hotels";
+import {
+  guestRoomLocation,
+  readGuestLocation,
+  roomPin,
+  type MapPin,
+} from "./bookingLocationMap.js";
 
 type MediaServing = Pick<
   PlatformMediaServingConfig,
@@ -80,9 +86,10 @@ export function createPublicPricingOfferCatalog(
           }))
           .filter((room) => room.offers.length > 0);
         const content = await readRoomContent(client, propertyId, offered);
-        // The location map switch (VAY-2126) is read live; rooms' pins are sent only while it is on.
+        // The location map switch (VAY-2126) is read live. A room's own "Show map in room details" works
+        // without it (VAY-2445): while it is off, only those rooms carry their place.
         const guestLocation = await readGuestLocation(client, propertyId);
-        const locationMap = guestLocation?.map ?? null;
+        const locationMap = guestLocation?.enabled ? guestLocation.map : null;
         const offeredRooms = new Map(offered.map((room) => [room.roomTypeId, room]));
         const rooms = [];
         // In the hotel's saved room order (Calendar → Reorder rooms, VAY-2315), read live like the
@@ -98,7 +105,11 @@ export function createPublicPricingOfferCatalog(
             description: facts.description,
             occupancy: facts.occupancy,
             ...roomCardFacts(row),
-            ...(guestLocation && roomLocation(row, guestLocation.propertyPin)),
+            ...(guestLocation &&
+              roomLocation(row, guestLocation.propertyPin, {
+                listed: guestLocation.enabled,
+                propertyShown: guestLocation.map.property !== null,
+              })),
             images: await roomImages(client, options.mediaServing, organizationId, row),
             offers: room.offers.map((rate) => ({
               publicOfferKey: rate.ratePlanId,
@@ -129,6 +140,8 @@ export function createPublicPricingOfferCatalog(
           rooms,
           // Additive (VAY-2126): only while the hotel shows the location map.
           ...(locationMap && { locationMap }),
+          // Additive (VAY-2445): the property's place for the rooms' own details maps, whatever the switch says.
+          ...(guestLocation && { detailsMap: guestLocation.map }),
         };
       } finally {
         try {
@@ -286,10 +299,13 @@ async function roomImages(
 }
 
 /** A room's place for the guest location map (VAY-2321): at the property, or its own pin with its address. A
- * room shown as an area gets its pin rounded and its area's name, never its street. */
+ * room shown as an area gets its pin rounded and its area's name, never its street. While the location map is
+ * off (`listed` false), only a room that shows its place in its details sends it (VAY-2445). A room on the
+ * property's own spot never shows a pin the property's visibility hides (`propertyShown` false). */
 function roomLocation(
   row: RoomRow,
   propertyPin: MapPin | null,
+  { listed, propertyShown }: { listed: boolean; propertyShown: boolean },
 ): {
   atProperty: boolean;
   showMapInDetails: boolean;
@@ -301,7 +317,11 @@ function roomLocation(
     row.attributes,
     propertyPin,
   );
-  if (!pin) return { atProperty, showMapInDetails };
+  const own = roomPin(row.attributes);
+  const onHiddenProperty =
+    !propertyShown && own !== null && propertyPin !== null && isSamePlace(own, propertyPin);
+  if (!pin || onHiddenProperty || (!listed && !showMapInDetails))
+    return { atProperty, showMapInDetails };
   return {
     atProperty,
     showMapInDetails,

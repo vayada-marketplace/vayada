@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "Unter „Lage & Umgebung“ bearbeiten",
   "settings.locationMap.title": "Standortkarte auf Ihrer Buchungsseite",
   "settings.locationMap.description": "Zeigt Gästen unter der Zimmerliste eine Karte, wo Ihre Zimmer liegen.",
-  "settings.locationMap.off": "Aus: Gäste sehen keine Karte. Änderungen erscheinen sofort auf Ihrer Buchungsseite.",
+  "settings.locationMap.off": "Aus: keine Karte unter Ihrer Zimmerliste. Ein Zimmer kann trotzdem in seinen Details zeigen, wo es liegt, einstellbar unter Zimmer & Preise → Zimmer → Standort. Änderungen erscheinen sofort auf Ihrer Buchungsseite.",
   "settings.locationMap.needsSetup": "Schließen Sie die Einrichtung Ihrer Buchungsmaschine ab, um die Karte einzuschalten.",
   "settings.locationMap.loadFailed": "Die Einstellung für die Standortkarte konnte nicht geladen werden.",
   "settings.locationMap.retry": "Erneut versuchen",

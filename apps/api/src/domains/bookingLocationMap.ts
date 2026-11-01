@@ -77,7 +77,7 @@ type Queryable = {
   ): Promise<Pick<QueryResult<T>, "rows">>;
 };
 
-/** The location map as guests get it; null while the switch is off. */
+/** The property's place on the guest maps (the location map while its switch is on, and the rooms' details). */
 export type GuestLocationMap = {
   /** The property's own pin as its "Guest map visibility" shows it: rounded to the area for Approximate,
    * none for Hidden or a private location. Used when no room has a pin of its own. */
@@ -89,14 +89,17 @@ export async function readGuestLocationMap(
   db: Queryable,
   propertyId: string,
 ): Promise<GuestLocationMap | null> {
-  return (await readGuestLocation(db, propertyId))?.map ?? null;
+  const location = await readGuestLocation(db, propertyId);
+  return location?.enabled ? location.map : null;
 }
 
-/** The guest map, and the property's exact pin to place its rooms by (VAY-2321); never send the latter. */
+/** The property's place as guests may see it, whether the location map switch (`enabled`) is on, and the
+ * property's exact pin to place its rooms by (VAY-2321); never send the latter. A room's own "Show map in room
+ * details" works without the switch (VAY-2445). Null until the hotel has booking settings. */
 export async function readGuestLocation(
   db: Queryable,
   propertyId: string,
-): Promise<{ map: GuestLocationMap; propertyPin: MapPin | null } | null> {
+): Promise<{ enabled: boolean; map: GuestLocationMap; propertyPin: MapPin | null } | null> {
   const result = await db.query<{
     enabled: boolean;
     latitude: string | null;
@@ -113,14 +116,16 @@ export async function readGuestLocation(
     [propertyId],
   );
   const row = result.rows[0];
-  if (!row?.enabled) return null;
+  if (!row) return null;
+  const enabled = row.enabled === true;
   const pin = roomPin({
     latitude: row.latitude === null ? null : Number(row.latitude),
     longitude: row.longitude === null ? null : Number(row.longitude),
   });
   if (!pin || !row.geoPublic || row.mapDisplayMode === "hidden" || !row.mapDisplayMode)
-    return { map: { property: null }, propertyPin: pin };
+    return { enabled, map: { property: null }, propertyPin: pin };
   return {
+    enabled,
     map:
       row.mapDisplayMode === "approximate"
         ? { property: { ...roundToArea(pin), approximate: true } }

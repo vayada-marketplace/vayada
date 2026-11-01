@@ -210,6 +210,8 @@ function HomePageContent() {
   const [roomsFailed, setRoomsFailed] = useState(false);
   // The hotel's location map (VAY-2126), read live with the catalog; null while its switch is off.
   const [locationMap, setLocationMap] = useState<CatalogLocationMap | null>(null);
+  // The property's place for the rooms' own "Show map in room details", sent with the switch off too (VAY-2445).
+  const [detailsMap, setDetailsMap] = useState<CatalogLocationMap | null>(null);
   // A map pin's "View details" opens that room card's details: one counter per room.
   const [detailsRequests, setDetailsRequests] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -219,6 +221,7 @@ function HomePageContent() {
         if (controller.signal.aborted) return;
         setRooms(value.rooms);
         setLocationMap(value.locationMap);
+        setDetailsMap(value.detailsMap);
       })
       .catch(() => {
         if (!controller.signal.aborted) setRoomsFailed(true);
@@ -434,6 +437,11 @@ function HomePageContent() {
   const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
   const mapProperty = locationMap
     ? { name: hotel.name, locality: hotel.location, pin: locationMap.property }
+    : null;
+  // A room's details show where it is by its own switch, whether the location map is on or not (VAY-2445).
+  const detailsPlace = locationMap ?? detailsMap;
+  const detailsProperty = detailsPlace
+    ? { name: hotel.name, locality: hotel.location, pin: detailsPlace.property }
     : null;
   const guestPlaces = useGuestPlaces(rooms ?? [], mapProperty);
   const severalPlaces = guestPlaces.pins.length > 1;
@@ -691,7 +699,7 @@ function HomePageContent() {
       }
       onView={() => trackEvent(slug, "room_viewed", { roomTypeId: room.roomTypeId })}
       detailsRequest={detailsRequests[room.roomTypeId] ?? 0}
-      place={mapProperty}
+      place={detailsProperty}
       locationLine={severalPlaces ? locationLine(room) : null}
       compact={view.compact}
       active={view.active}

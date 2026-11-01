@@ -135,7 +135,10 @@ type CatalogMap = {
   property: { latitude: number; longitude: number; approximate: boolean } | null;
 };
 
-async function setup(page: Page, catalog: { locationMap?: CatalogMap; rooms: unknown[] }) {
+async function setup(
+  page: Page,
+  catalog: { locationMap?: CatalogMap; detailsMap?: CatalogMap; rooms: unknown[] },
+) {
   await mockBookingApis(page);
   await page.route("**/pricing-offers", (route) =>
     route.fulfill({ json: { version: "public-pricing-offers.v1", ...catalog } }),
@@ -526,6 +529,84 @@ test.describe("booking page location map", () => {
 
     // "Show map in room details" off.
     await cards.nth(2).click();
+    await expect(page.getByRole("dialog")).toContainText("Loft");
+    await expect(page.getByRole("dialog").getByText("Where you'll stay")).toHaveCount(0);
+  });
+
+  test("shows where a room is in its details by the room's own switch while the hotel's map is off (VAY-2445)", async ({
+    page,
+  }) => {
+    const google = await setup(page, {
+      // The hotel's location map is off: no locationMap, the property's place only for the rooms' details.
+      detailsMap: { property: { latitude: 48.1394, longitude: 11.5835, approximate: false } },
+      rooms: [
+        room(
+          "villa",
+          "Beach Villa",
+          "a",
+          { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12, Munich" },
+          false,
+        ),
+        room(
+          "garden",
+          "Garden Villa",
+          "b",
+          { latitude: 48.13, longitude: 11.57, approximate: true, area: "Isarvorstadt" },
+          false,
+        ),
+        room("suite", "Suite", "c", undefined, true),
+        { ...room("loft", "Loft", "d", undefined, true), showMapInDetails: false },
+      ],
+    });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
+    const cards = page.getByRole("button", { name: "View Details", exact: true });
+    await expect(cards).toHaveCount(4);
+    // With the rooms loaded: no map below the list or next to it, and no place lines on the cards. Those
+    // follow the hotel's switch.
+    await expect(page.getByTestId("rooms-location-map")).toHaveCount(0);
+    await expect(page.getByTestId("accommodations-map")).toHaveCount(0);
+    await expect(page.getByText(/Main house|Own location|from the main house/)).toHaveCount(0);
+
+    // A place of its own, exact: street, distance, Directions; Google only after "Show map".
+    await cards.nth(0).click();
+    let place = page
+      .getByRole("dialog")
+      .getByRole("region", { name: "Where you'll stay", exact: true });
+    await expect(place).toContainText("Leopoldstraße 12, Munich");
+    await expect(place).toContainText("1.9 km from the main property");
+    await expect(place.getByRole("link", { name: "Directions" })).toBeVisible();
+    await page.waitForTimeout(1000);
+    expect(google).toEqual([]);
+    await place.getByRole("button", { name: "Show map" }).click();
+    await expect
+      .poll(() => markers(page))
+      .toEqual([
+        { title: "Beach Villa", label: null },
+        { title: "Reception", label: "Reception" },
+      ]);
+    await page.getByRole("button", { name: "Close room details" }).click();
+
+    // Shown as an area: its circle and name, no street or Directions.
+    await cards.nth(1).click();
+    place = page
+      .getByRole("dialog")
+      .getByRole("region", { name: "Where you'll stay", exact: true });
+    await expect(place).toContainText("Isarvorstadt");
+    await expect(place.getByRole("link", { name: "Directions" })).toHaveCount(0);
+    await expect.poll(() => circles(page)).toEqual([{ lat: 48.13, lng: 11.57, radius: 1000 }]);
+    await page.getByRole("button", { name: "Close room details" }).click();
+
+    // "Same as property": the hotel's own place.
+    await cards.nth(2).click();
+    place = page
+      .getByRole("dialog")
+      .getByRole("region", { name: "Where you'll stay", exact: true });
+    await expect(place).toContainText("Hotel Alpenrose");
+    await page.getByRole("button", { name: "Close room details" }).click();
+
+    // The room's own switch off: nothing.
+    await cards.nth(3).click();
     await expect(page.getByRole("dialog")).toContainText("Loft");
     await expect(page.getByRole("dialog").getByText("Where you'll stay")).toHaveCount(0);
   });

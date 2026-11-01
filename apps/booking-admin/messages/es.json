@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "Editar en Ubicación y alrededores",
   "settings.locationMap.title": "Mapa de ubicación en tu página de reservas",
   "settings.locationMap.description": "Muestra a los huéspedes un mapa con la ubicación de tus habitaciones, debajo de la lista de habitaciones.",
-  "settings.locationMap.off": "Desactivado: los huéspedes no ven ningún mapa. Los cambios se ven en tu página de reservas al instante.",
+  "settings.locationMap.off": "Desactivado: no hay mapa debajo de tu lista de habitaciones. Una habitación puede seguir mostrando dónde está en sus detalles, desde Rooms & Rates → habitación → Ubicación. Los cambios se ven en tu página de reservas al instante.",
   "settings.locationMap.needsSetup": "Termina de configurar tu motor de reservas para activar el mapa.",
   "settings.locationMap.loadFailed": "No se pudo cargar el ajuste del mapa de ubicación.",
   "settings.locationMap.retry": "Reintentar",
