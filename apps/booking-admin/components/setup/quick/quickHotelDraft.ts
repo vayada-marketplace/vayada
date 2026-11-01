@@ -60,7 +60,8 @@ export function quickHotelErrors(draft: QuickHotelDraft): QuickHotelErrors {
     !COUNTRY_OPTIONS.some((country) => country.code === draft.countryCode) ||
     !draft.timezone.trim()
   ) {
-    errors.address = "Choose your address from the list, or enter it manually.";
+    errors.address =
+      "Choose your address from the list, paste a Google Maps link, or enter it manually.";
   }
   if (!draft.contactEmail.trim()) errors.contactEmail = "Enter an email guests can write to.";
   else if (!EMAIL.test(draft.contactEmail.trim()))

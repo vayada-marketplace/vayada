@@ -1,14 +1,24 @@
 "use client";
 
-import { CheckCircleIcon, MapPinIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
-import GoogleAddressMap from "@vayada/product-onboarding/GoogleAddressMap";
+import {
+  CheckCircleIcon,
+  LinkIcon,
+  MapPinIcon,
+  PencilSquareIcon,
+} from "@heroicons/react/24/outline";
+import { addressFromPin } from "@vayada/product-onboarding/addressFromPin";
+import GoogleMapsLinkField from "@vayada/product-onboarding/GoogleMapsLinkField";
+import type { MapsLinkPin } from "@vayada/product-onboarding/googleMapsLink";
 import GooglePlacesAddressField, {
   type GooglePlacesAddress,
 } from "@vayada/product-onboarding/GooglePlacesAddressField";
 import { findAddressOnMap } from "@vayada/product-onboarding/googleMaps";
+import GuestsWillSeeCard from "@vayada/product-onboarding/GuestsWillSeeCard";
+import PinMapFrame from "@vayada/product-onboarding/PinMapFrame";
 import TimezoneField from "@vayada/product-onboarding/TimezoneField";
 import {
   availableTimezones,
+  countryForCoordinates,
   defaultTimezoneForCountry,
   timezoneForCoordinates,
 } from "@vayada/product-onboarding/timezones";
@@ -36,7 +46,33 @@ export type QuickHotelAddressProps = {
   currency?: { code: string; label: string; note: string } | null;
   /** The owner picked another currency after "Change". */
   onCurrencyChange?: ((code: string) => void) | null;
+  /** The hotel's name, for "Guests will see". */
+  hotelName?: string;
+  /** The long link a maps.app.goo.gl share link opens (the API reads it); null without. */
+  resolveShortLink?: ((url: string) => Promise<string | null>) | null;
 };
+
+// The room editor's map and link copy (VAY-2444: the same tool as Rooms & Rates → room → Location).
+const MAP_MESSAGES = {
+  mapType: "Map type",
+  mapView: "Map",
+  satelliteView: "Satellite",
+  dragPin: "Drag the pin to the exact spot",
+  recenter: "Recenter",
+  empty: "Click the map where your entrance is.",
+};
+const LINK_MESSAGES = {
+  label: "Google Maps link",
+  hint: "Copy the link of a place or a dropped pin from Google Maps.",
+  placed: (coordinates: string) => `Pin placed at ${coordinates}`,
+  resolving: "Reading the short link…",
+  shortLink:
+    "This short link couldn't be read. Open it, copy the long link from the address bar, and paste that.",
+  noPin: "This link has no coordinates. Copy the link of a place or a dropped pin.",
+  searchInstead: "Search an address instead",
+};
+const LINK_CLASS =
+  "inline-flex items-center gap-1.5 rounded text-[13px] font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600";
 
 export function formattedAddress(draft: AddressDraft): string {
   const country = COUNTRY_OPTIONS.find((option) => option.code === draft.countryCode)?.name;
@@ -48,8 +84,9 @@ const hasPin = (draft: AddressDraft) =>
   typeof draft.latitude === "number" && typeof draft.longitude === "number";
 
 /**
- * VAY-2247 "Where it is" (Paper rev 4): search for the address (Google Places) or enter it by hand,
- * the pin on a small map, then the time zone and currency it implies, each with Change.
+ * VAY-2247 "Where it is" (Paper rev 4): search for the address (Google Places), paste a Google Maps link
+ * (VAY-2444, as in the room editor) or enter it by hand, the pin on the room editor's map, then the time zone
+ * and currency it implies, each with Change.
  */
 export function QuickHotelAddress({
   draft,
@@ -59,18 +96,25 @@ export function QuickHotelAddress({
   apiKey,
   currency,
   onCurrencyChange,
+  hotelName = "",
+  resolveShortLink = null,
 }: QuickHotelAddressProps) {
   const key = apiKey?.trim() || null;
   const addressRevision = useRef(0);
   const complete = Boolean(draft.streetAddress.trim() && draft.city.trim() && draft.countryCode);
-  const [mode, setMode] = useState<"search" | "manual" | "summary">(() =>
+  const [mode, setMode] = useState<"search" | "link" | "manual" | "summary">(() =>
     complete ? "summary" : key ? "search" : "manual",
   );
   const [adjusting, setAdjusting] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
   const [changingTimezone, setChangingTimezone] = useState(false);
   const [changingCurrency, setChangingCurrency] = useState(false);
   const timezones = useMemo(() => availableTimezones(), []);
   const timezoneFollowsAddress = useRef(!draft.timezone);
+  // A pin from a pasted link is the owner's: typing the address afterwards keeps it (VAY-2444).
+  const pinFromLink = useRef(false);
+  const linkLookup = useRef(0);
+  const [lookingUp, setLookingUp] = useState(false);
 
   // A complete address without a pin is looked up to place the first pin: a typed one, and a picked one
   // that Google only knows as an area (a street without a number, a postcode or a town), which the
@@ -110,6 +154,7 @@ export function QuickHotelAddress({
         ? timezoneForCoordinates(address.latitude, address.longitude)
         : defaultTimezoneForCountry(address.countryCode);
     timezoneFollowsAddress.current = true;
+    pinFromLink.current = false;
     onChange({
       streetAddress: address.streetAddress,
       postalCode: address.postalCode,
@@ -124,6 +169,7 @@ export function QuickHotelAddress({
 
   const editTyped = (patch: Partial<AddressDraft>) => {
     addressRevision.current += 1;
+    if (pinFromLink.current) return onChange(patch);
     onChange({
       ...patch,
       latitude: null,
@@ -131,6 +177,37 @@ export function QuickHotelAddress({
       ...(timezoneFollowsAddress.current && patch.countryCode
         ? { timezone: defaultTimezoneForCountry(patch.countryCode) }
         : {}),
+    });
+  };
+
+  /** A pasted link's pin, then the address Google gives it; without one, the owner types it next to the pin. */
+  const placeFromLink = (pin: MapsLinkPin) => {
+    if (!key) return;
+    const request = (linkLookup.current += 1);
+    pinFromLink.current = true;
+    timezoneFollowsAddress.current = true;
+    onChange({
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+      timezone: timezoneForCoordinates(pin.latitude, pin.longitude),
+    });
+    setLookingUp(true);
+    void addressFromPin(key, { lat: pin.latitude, lng: pin.longitude }).then((address) => {
+      if (request !== linkLookup.current) return;
+      setLookingUp(false);
+      if (address?.city && address.countryCode) {
+        onChange({
+          streetAddress: address.streetAddress,
+          postalCode: address.postalCode,
+          city: address.city,
+          countryCode: address.countryCode,
+        });
+        setMode(address.streetAddress ? "summary" : "manual");
+        return;
+      }
+      const country = countryForCoordinates(pin.latitude, pin.longitude);
+      if (country && !draft.countryCode) onChange({ countryCode: country });
+      setMode("manual");
     });
   };
 
@@ -143,7 +220,7 @@ export function QuickHotelAddress({
     });
   };
 
-  const switchLink = (label: string, next: "search" | "manual") => (
+  const switchLink = (label: string, next: "search" | "link" | "manual") => (
     <button
       type="button"
       onClick={() => setMode(next)}
@@ -178,6 +255,32 @@ export function QuickHotelAddress({
               We place your hotel on the map and pick the time zone and currency for you.
             </p>
           )}
+          <p className="mt-2 flex items-center gap-1.5">
+            <LinkIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
+            {switchLink("Paste a Google Maps link", "link")}
+          </p>
+          <p className="mt-2 flex items-center gap-1.5">
+            <PencilSquareIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
+            {switchLink("Can't find it? Enter the address manually", "manual")}
+          </p>
+        </div>
+      ) : null}
+
+      {mode === "link" && key ? (
+        <div>
+          <GoogleMapsLinkField
+            inputId="quick-hotel-maps-link"
+            messages={LINK_MESSAGES}
+            classNames={{
+              label: "mb-2 block text-sm font-semibold text-gray-950",
+              input: `${QUICK_SETUP_INPUT} ${error ? "border-red-600" : "border-gray-300"}`,
+              link: LINK_CLASS,
+            }}
+            onPin={placeFromLink}
+            onClose={() => setMode("search")}
+            resolveShortLink={resolveShortLink}
+          />
+          {error ? <QuickSetupFieldError message={error} /> : null}
           <p className="mt-2 flex items-center gap-1.5">
             <PencilSquareIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
             {switchLink("Can't find it? Enter the address manually", "manual")}
@@ -260,43 +363,60 @@ export function QuickHotelAddress({
             </select>
           </label>
           {error ? <QuickSetupFieldError message={error} /> : null}
+          {key ? (
+            <p className="flex items-center gap-1.5">
+              <LinkIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
+              {switchLink("Paste a Google Maps link", "link")}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      {key && complete ? (
-        <div>
-          <div className="mb-2 flex items-center justify-between">
+      {key && (complete || hasPin(draft)) ? (
+        <div className="flex flex-col gap-3">
+          <div>
             {hasPin(draft) ? (
-              <p className="flex items-center gap-1.5 text-[13px] font-medium text-green-700">
+              <p className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-green-700">
                 <CheckCircleIcon className="h-4 w-4" aria-hidden="true" />
                 Pin placed on the map
               </p>
             ) : (
-              <p className="text-[13px] text-gray-500">Click the map where your entrance is.</p>
+              <p className="mb-2 text-[13px] text-gray-500">
+                Click the map where your entrance is.
+              </p>
             )}
-            {hasPin(draft) && !adjusting ? (
-              <button
-                type="button"
-                onClick={() => setAdjusting(true)}
-                className="rounded text-[13px] font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600"
-              >
-                Adjust
-              </button>
+            <div className="relative h-[240px] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 lg:h-[300px]">
+              {mapFailed ? (
+                <div className="flex h-full items-center justify-center text-sm font-medium text-slate-500">
+                  Map unavailable
+                </div>
+              ) : (
+                <PinMapFrame
+                  apiKey={key}
+                  latitude={draft.latitude}
+                  longitude={draft.longitude}
+                  markerTitle={hotelName.trim() || "Your hotel"}
+                  messages={MAP_MESSAGES}
+                  onPick={pick}
+                  onUnavailable={() => setMapFailed(true)}
+                />
+              )}
+            </div>
+            {adjusting ? (
+              <p className="mt-2 text-[13px] text-gray-500">
+                Drag the pin to your entrance. Needed for the map on your page.
+              </p>
             ) : null}
           </div>
-          <div className="relative h-[200px] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 lg:h-[280px]">
-            <GoogleAddressMap
-              active
-              apiKey={key}
-              latitude={draft.latitude}
-              longitude={draft.longitude}
-              onPick={adjusting || !hasPin(draft) ? pick : undefined}
+          {hasPin(draft) ? (
+            <GuestsWillSeeCard
+              label="Guests will see"
+              name={hotelName.trim() || "Your hotel"}
+              address={
+                formattedAddress(draft) ||
+                (lookingUp ? "Looking up the address…" : "Add the address above.")
+              }
             />
-          </div>
-          {adjusting ? (
-            <p className="mt-2 text-[13px] text-gray-500">
-              Drag the pin to your entrance. Needed for the map on your page.
-            </p>
           ) : null}
         </div>
       ) : null}

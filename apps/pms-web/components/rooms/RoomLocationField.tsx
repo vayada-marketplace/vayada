@@ -41,6 +41,7 @@ import {
   type CoordinateAxis,
 } from "@/lib/roomLocation";
 import { getPmsPropertyPlace, type PmsPropertyPlace } from "@/services/api/pmsPropertyClient";
+import { mapsLinkApi } from "@/services/api/sharedHotelSetupClient";
 import type { RoomLocationPrecision, RoomLocationSource } from "@/services/rooms";
 import PropertyAddressModal from "./PropertyAddressModal";
 
@@ -501,10 +502,12 @@ export default function RoomLocationField({
                       hint: t("rooms.form.mapsLinkHint"),
                       placed: (coordinates) => t("rooms.form.mapsLinkPlaced", { coordinates }),
                       shortLink: t("rooms.form.mapsLinkShort"),
+                      resolving: t("rooms.form.mapsLinkResolving"),
                       noPin: t("rooms.form.mapsLinkNone"),
                       searchInstead: t("rooms.form.searchInstead"),
                     }}
                     classNames={{ label: labelClass, input: inputClass, link: linkClass }}
+                    resolveShortLink={mapsLinkApi.resolveShortLink}
                     onPin={(pin) => {
                       cancelPick();
                       // A new place: the previous address and area no longer describe it.

@@ -12,8 +12,22 @@ export type FakeGooglePlace = {
   area?: string;
 };
 
+/** What Google's reverse geocoding answers for any pin (VAY-2444), or "denied" when the API is off for the key. */
+export type FakeGeocode =
+  | {
+      results: {
+        types: string[];
+        address_components: { long_name: string; short_name: string; types: string[] }[];
+      }[];
+    }
+  | "denied";
+
 export type FakeGoogleMapsOptions = {
   places?: FakeGooglePlace[];
+  /** Reverse geocoding (the "geocoding" library); without it, the library isn't there. */
+  geocode?: FakeGeocode;
+  /** A plain input stands in for Places' <gmp-place-autocomplete>; without it, that search is unavailable. */
+  placeAutocompleteElement?: boolean;
   /** The script loads, then Google rejects the key through `gm_authFailure`. */
   authFailure?: boolean;
   /** Autocomplete requests fail (Places API off for the key). */
@@ -29,15 +43,32 @@ export const GOOGLE_MAPS_SCRIPT = /https:\/\/maps\.googleapis\.com\/maps\/api\/j
  * when hidden), `data-reference` the reference pin, `data-circle` an area ("lat,lng,radius"), `data-map-type`
  * the map type, `data-center`/`data-zoom` the camera. `element.vayadaE2eDragMarker(lat, lng)` drags the pin and
  * `element.vayadaE2eClickMap(lat, lng)` clicks the map. `window.vayadaE2ePlaceQueries` keeps every autocomplete
- * input and fetched field list.
+ * input and fetched field list, and `window.vayadaE2eGeocodeQueries` every reverse-geocoded pin (VAY-2444).
  */
 export function googleMapsFakeScript({
   places = [],
   authFailure = false,
   placesUnavailable = false,
+  geocode,
+  placeAutocompleteElement = false,
 }: FakeGoogleMapsOptions = {}) {
   return `
     const places = ${JSON.stringify(places)};
+    const geocode = ${JSON.stringify(geocode ?? null)};
+    window.vayadaE2eGeocodeQueries = [];
+    class Geocoder {
+      async geocode({ location }) {
+        window.vayadaE2eGeocodeQueries.push(location.lat + "," + location.lng);
+        if (geocode === "denied") throw new Error("REQUEST_DENIED: This API project is not authorized to use this API.");
+        return { results: geocode.results };
+      }
+    }
+    function PlaceAutocompleteElement(options) {
+      const input = document.createElement("input");
+      input.placeholder = options.placeholder;
+      input.setAttribute("aria-label", options.description);
+      return input;
+    }
     const latLng = (lat, lng) => ({ lat: () => lat, lng: () => lng });
     window.vayadaE2ePlaceQueries = [];
     class GoogleMap {
@@ -135,7 +166,9 @@ export function googleMapsFakeScript({
           library === "maps" ? { Map: GoogleMap, Circle: GoogleCircle }
           : library === "marker" ? { Marker: GoogleMarker }
           : library === "core" ? { ControlPosition: { RIGHT_TOP: 3 } }
-          : library === "places" ? { AutocompleteSessionToken, AutocompleteSuggestion }
+          : library === "places"
+            ? { AutocompleteSessionToken, AutocompleteSuggestion, ...(${placeAutocompleteElement} ? { PlaceAutocompleteElement } : {}) }
+          : library === "geocoding" && geocode ? { Geocoder }
           : Promise.reject(new Error("Unknown library " + library)),
       },
     };

@@ -21,6 +21,7 @@ import {
   quickSetupStepForFirstRun,
   type HotelFirstRunClient,
 } from "@/services/api/hotelFirstRunClient";
+import { mapsLinkApi } from "@/services/api/sharedHotelSetupClient";
 import { QuickAboutYouStep } from "./QuickAboutYouStep";
 import { QuickContactsFromAccountNote, QuickUseMyDetails } from "./QuickHotelDetails";
 import { QuickHotelAddress } from "./QuickHotelAddress";
@@ -320,6 +321,8 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
           apiKey={props.googleMapsApiKey}
           currency={currency}
           onCurrencyChange={(code) => changeDraft({ currency: code })}
+          hotelName={stored.draft.displayName}
+          resolveShortLink={mapsLinkApi.resolveShortLink}
         />
       )}
       contactsAction={
@@ -338,7 +341,9 @@ export function QuickSetupFlow(props: QuickSetupFlowProps) {
       footerNote="Kept on this device until you finish “How guests reach you”"
       onSubmit={async (draft) => {
         if (!status || !currency)
-          throw new Error("Choose your address from the list, or enter it manually.");
+          throw new Error(
+            "Choose your address from the list, paste a Google Maps link, or enter it manually.",
+          );
         const saved = await saveQuickHotel(
           {
             draft,

@@ -40,7 +40,8 @@ const PART_TEXT: Record<QuickHotelPart, { title: string; subtitle: string }> = {
   hotel: { title: "Your hotel", subtitle: "The name and type guests see first." },
   where: {
     title: "Where it is",
-    subtitle: "Search your address. We pin it on the map and set your time zone and currency.",
+    subtitle:
+      "Search your address or paste a Google Maps link. We pin it on the map and set your time zone and currency.",
   },
   contacts: { title: "How guests reach you", subtitle: "Your reception's email and phone." },
 };

@@ -5,6 +5,7 @@ import type { SharedHotelSetupApi, SharedPropertyTypeOption } from "@vayada/prod
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiErrorResponse } from "@/services/api/client";
+import { mapsLinkApi } from "@/services/api/sharedHotelSetupClient";
 
 import { QuickHotelAddress } from "./QuickHotelAddress";
 import { QuickHotelStep } from "./QuickHotelStep";
@@ -112,7 +113,10 @@ export function QuickHotelEdit({
 
   /** The one save of this screen, for Continue, Save & exit and Back alike: the profile, a new logo, the currency. */
   const save = async (next: QuickHotelDraft) => {
-    if (!currency) throw new Error("Choose your address from the list, or enter it manually.");
+    if (!currency)
+      throw new Error(
+        "Choose your address from the list, paste a Google Maps link, or enter it manually.",
+      );
     const { profile, savedCurrency } = loaded;
     let saved: PropertyProfileResponse;
     try {
@@ -174,6 +178,8 @@ export function QuickHotelEdit({
           apiKey={googleMapsApiKey}
           currency={currency}
           onCurrencyChange={(code) => change({ currency: code })}
+          hotelName={draft.displayName}
+          resolveShortLink={mapsLinkApi.resolveShortLink}
         />
       )}
       logoPreviewUrl={logo?.url ?? null}

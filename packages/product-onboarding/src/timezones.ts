@@ -1,4 +1,9 @@
-import { getAllTimezones, getCountry, type CountryCode } from "countries-and-timezones";
+import {
+  getAllTimezones,
+  getCountry,
+  getTimezone,
+  type CountryCode,
+} from "countries-and-timezones";
 import tzlookup from "tz-lookup";
 
 import { TIMEZONE_OPTIONS } from "@vayada/locale-constants";
@@ -15,6 +20,13 @@ const COUNTRY_DEFAULT_OVERRIDES: Record<string, string> = {
 
 export function timezoneForCoordinates(latitude: number, longitude: number): string {
   return tzlookup(latitude, longitude);
+}
+
+/** The country a pin is in when its time zone belongs to one country only (Asia/Colombo → LK), else "". A guess
+ * for a pin without an address (VAY-2444); the owner can change it. */
+export function countryForCoordinates(latitude: number, longitude: number): string {
+  const countries = getTimezone(timezoneForCoordinates(latitude, longitude))?.countries ?? [];
+  return countries.length === 1 ? countries[0]! : "";
 }
 
 export function defaultTimezoneForCountry(countryCode: string): string {

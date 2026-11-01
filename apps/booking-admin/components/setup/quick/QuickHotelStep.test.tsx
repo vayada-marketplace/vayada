@@ -386,7 +386,7 @@ describe("quickHotelDraft", () => {
       phone: "Enter a valid phone number.",
     });
     expect(quickHotelErrors({ ...FILLED, countryCode: "XX" })).toEqual({
-      address: "Choose your address from the list, or enter it manually.",
+      address: "Choose your address from the list, paste a Google Maps link, or enter it manually.",
     });
     expect(quickHotelErrors({ ...FILLED, timezone: "" })).toHaveProperty("address");
   });
