@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiSessionRecoveryHandlers } from "@vayada/product-onboarding/apiSessionRecovery";
 import { clearAuthData, setAuthKitSession } from "../auth/sessionStore";
-import { ApiClient } from "./client";
+import { ApiClient, followPageLeaving } from "./client";
 import { pmsOperationsRequestOptions } from "./pmsOperationsClient";
 
 afterEach(() => {
@@ -14,6 +14,43 @@ afterEach(() => {
 describe("PMS API client", () => {
   it("does not reuse stale operational read-model responses", () => {
     expect(pmsOperationsRequestOptions.cache).toBe("no-store");
+  });
+
+  it("doesn't report a read that a page being left aborted (VAY-2423)", async () => {
+    const page = new EventTarget();
+    followPageLeaving(page);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    const client = new ApiClient("https://api.localhost");
+    try {
+      // While the page stays, a failed read rejects and is logged.
+      await expect(client.get("/api/pms/properties/property_1/rooms")).rejects.toThrow(
+        "Failed to fetch",
+      );
+      expect(logged).toHaveBeenCalledOnce();
+
+      // Once the page is being left, the aborted read never settles, so nothing logs it.
+      page.dispatchEvent(new Event("pagehide"));
+      const settled = vi.fn();
+      void client.get("/api/pms/properties/property_1/rooms").then(settled, settled);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(settled).not.toHaveBeenCalled();
+      expect(logged).toHaveBeenCalledOnce();
+
+      // Back from the back/forward cache, reads report failures again.
+      page.dispatchEvent(new Event("pageshow"));
+      await expect(client.get("/api/pms/properties/property_1/rooms")).rejects.toThrow(
+        "Failed to fetch",
+      );
+    } finally {
+      page.dispatchEvent(new Event("pageshow"));
+      logged.mockRestore();
+    }
   });
 
   it("refreshes an expired AuthKit session and retries the request once", async () => {
