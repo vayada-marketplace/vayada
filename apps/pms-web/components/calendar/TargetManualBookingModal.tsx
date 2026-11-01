@@ -914,20 +914,14 @@ export default function TargetManualBookingModal({
               {" "}
               <h3 className={sectionClass}>{t("bookings.detail.guests")}</h3>{" "}
               <GuestCards
-                stays={stays.map((stay, index) => ({
-                  ...stay,
-                  label: t("calendar.targetManualBooking.roomGroup", {
-                    number: index + 1,
-                    room: rooms.find((room) => room.id === stay.roomId)?.roomNumber ?? "",
-                  }),
-                }))}
+                stays={stays}
                 drafts={guestDrafts}
-                onDraft={(id, patch) =>
-                  setGuestDrafts((current) => ({
-                    ...current,
-                    [id]: { ...(current[id] ?? EMPTY_GUEST), ...patch },
-                  }))
-                }
+                onDraft={(id, patch) => {
+                  // A card that has both names again, or none, is no longer marked.
+                  const next = { ...(guestDrafts[id] ?? EMPTY_GUEST), ...patch };
+                  if (guestFocus?.id === id && !guestMissingName(next)) setGuestFocus(null);
+                  setGuestDrafts((current) => ({ ...current, [id]: next }));
+                }}
                 leadCountry={countryCode}
                 childAge={(stayIndex, child) => {
                   const stay = stays[stayIndex]!,
@@ -1047,7 +1041,11 @@ export default function TargetManualBookingModal({
                         {phone.trim() && phoneCountryName && !countryCode && (
                           <button
                             type="button"
-                            onClick={() => setCountryCode(phoneCountry)}
+                            onClick={() => {
+                              setCountryCode(phoneCountry);
+                              // The button goes once used; keep keyboard focus in the dialog.
+                              globalThis.document?.getElementById(nationalityId)?.focus();
+                            }}
                             className="mt-1 min-h-11 rounded-full border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
                           >
                             {t("calendar.targetManualBooking.useCountryFromPhone", {
@@ -1060,6 +1058,15 @@ export default function TargetManualBookingModal({
                   </div>
                 }
               />
+              {/* Shown as soon as one name too many is typed, next to the cards (VAY-2365/2366). */}
+              {overCapacity && (
+                <p role="alert" className="mt-2 text-xs text-red-700">
+                  {t("calendar.targetManualBooking.guestsOverCapacity", {
+                    count: namedGuests.length + 1,
+                    capacity: guestCapacity,
+                  })}
+                </p>
+              )}
             </section>
             <section>
               {" "}

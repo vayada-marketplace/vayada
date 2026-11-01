@@ -18,9 +18,13 @@ describe("guestSlots", () => {
     expect(slots[1]).toMatchObject({ stayIndex: 0, child: 0 });
   });
 
-  it("ignores a count that isn't a whole number and stops at the API's 100 guests", () => {
+  it("ignores a count that isn't a whole number and keeps every child's card", () => {
     expect(guestSlots([{ key: 1, adults: 2.5, childAges: [] }])).toEqual([]);
-    expect(guestSlots([{ key: 1, adults: 500, childAges: [] }])).toHaveLength(100);
+    // A child's age prices its room, so even a very large group shows every child.
+    const big = guestSlots([
+      { key: 1, adults: 60, childAges: Array.from({ length: 60 }, () => "") },
+    ]);
+    expect(big.filter((slot) => slot.child !== null)).toHaveLength(60);
   });
 });
 

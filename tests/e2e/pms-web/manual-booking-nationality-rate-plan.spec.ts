@@ -223,7 +223,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   // priced by age: the stay is sent once every age is entered.
   await expect(dialog.getByLabel("Room 1 nightly rate")).toHaveCount(0);
   await dialog.getByLabel("Room 1 children").fill("1");
-  const childAge = dialog.getByLabel("Room 1 child 1 age");
+  const childAge = dialog.getByLabel("Age at check-in, room 1, child 1");
   await expect(childAge).toBeVisible();
   await childAge.fill("6");
   await expect.poll(() => previewBodies.at(-1)?.stays[0]?.childAgesAtCheckIn).toEqual([6]);

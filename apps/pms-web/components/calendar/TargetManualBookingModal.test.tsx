@@ -579,7 +579,7 @@ describe("target manual booking fields", () => {
     type("Guest 2 last name", "Hopper");
     type("Guest 4 first name", "Ada");
     type("Guest 4 last name", "King");
-    type("Room 1 child 1 age", "7");
+    type("Age at check-in, room 1, child 1", "7");
     await settlePreview();
     await act(async () => {
       await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
@@ -595,16 +595,17 @@ describe("target manual booking fields", () => {
     type("Room 1 adults", "2");
     expect(headings()).toEqual(["Guest 1 · Lead guest", "Guest 2", "Guest 3 · Child"]);
     expect(field("Guest 3 first name").props.value).toBe("Ada");
-    expect(field("Room 1 child 1 age").props.value).toBe("7");
+    expect(field("Age at check-in, room 1, child 1").props.value).toBe("7");
   });
 
   it("asks for both names on a started card, and sends nothing for an empty one", async () => {
     vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview);
     const onSubmit = vi.fn().mockResolvedValue({});
     const focus = vi.fn();
+    const firstNameFocus = vi.fn();
     let view!: ReactTestRenderer;
     // prettier-ignore
-    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() }), { createNodeMock: (element) => element.props["aria-label"] === "Guest 2 last name" ? { focus } : element.props.role === "dialog" ? { focus: vi.fn(), querySelectorAll: () => [] } : null }); });
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() }), { createNodeMock: (element) => element.props["aria-label"] === "Guest 2 last name" ? { focus } : element.props["aria-label"] === "Guest 2 first name" ? { focus: firstNameFocus } : element.props.role === "dialog" ? { focus: vi.fn(), querySelectorAll: () => [] } : null }); });
     const field = (label: string) => view.root.findByProps({ "aria-label": label });
     const submit = () =>
       act(async () => {
@@ -623,6 +624,9 @@ describe("target manual booking fields", () => {
 
     act(() => field("Clear guest 2").props.onClick());
     expect(field("Guest 2 first name").props.value).toBe("");
+    // The Clear button goes with the text, so focus moves to the card's first name.
+    expect(firstNameFocus).toHaveBeenCalled();
+    expect(field("Guest 2 last name").props["aria-invalid"]).toBeUndefined();
     await submit();
     expect(onSubmit.mock.calls[0]![0]).not.toHaveProperty("additionalGuests");
   });
@@ -652,7 +656,6 @@ describe("target manual booking fields", () => {
     type("Room 2 check-out", "2026-09-12");
     type("Room 1 adults", "2");
     type("Room 2 adults", "2");
-    expect(textOf(view.root)).toContain("Room 2 · #101");
     type("Guest 2 first name", "Grace");
     type("Guest 2 last name", "Hopper");
     type("Guest 3 first name", "Alan");
@@ -663,7 +666,7 @@ describe("target manual booking fields", () => {
     });
     expect(onSubmit).not.toHaveBeenCalled();
     expect(textOf(view.root)).toContain(
-      "3 guests is more than the 2 the selected rooms allow. Remove a guest or add a room.",
+      "3 guests is more than the 2 the selected rooms allow. Clear a guest card or add a room.",
     );
     // Clearing one card brings the named guests back within the places.
     act(() => view.root.findByProps({ "aria-label": "Clear guest 3" }).props.onClick());
@@ -689,7 +692,7 @@ describe("target manual booking fields", () => {
     });
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain(
-      "The selected rooms don't have space for everyone listed. Remove a guest or add a room.",
+      "The selected rooms don't have space for everyone listed. Clear a guest card or add a room.",
     );
   });
 
@@ -840,12 +843,16 @@ describe("target manual booking fields", () => {
     await act(async () => input("Room 1 children").props.onChange({ target: { value: "1" } }));
     await settlePreview();
     expect(request).not.toHaveBeenCalled();
-    await act(async () => input("Room 1 child 1 age").props.onChange({ target: { value: "18" } }));
+    await act(async () =>
+      input("Age at check-in, room 1, child 1").props.onChange({ target: { value: "18" } }),
+    );
     await settlePreview();
     expect(request).not.toHaveBeenCalled();
-    expect(input("Room 1 child 1 age").props["aria-invalid"]).toBe(true);
+    expect(input("Age at check-in, room 1, child 1").props["aria-invalid"]).toBe(true);
     expect(textOf(view.root)).toContain("Enter each child's age (0–17) to calculate the total");
-    await act(async () => input("Room 1 child 1 age").props.onChange({ target: { value: "5" } }));
+    await act(async () =>
+      input("Age at check-in, room 1, child 1").props.onChange({ target: { value: "5" } }),
+    );
     await settlePreview();
     expect(request.mock.calls[0]![0].stays[0]).toMatchObject({
       children: 1,
@@ -866,11 +873,15 @@ describe("target manual booking fields", () => {
       childAgesAtCheckIn: [5],
       pricing: { kind: "custom" },
     });
-    await act(async () => input("Room 1 child 1 age").props.onChange({ target: { value: "" } }));
+    await act(async () =>
+      input("Age at check-in, room 1, child 1").props.onChange({ target: { value: "" } }),
+    );
     await settlePreview();
     expect(request.mock.lastCall![0].stays[0]).not.toHaveProperty("childAgesAtCheckIn");
     request.mockClear();
-    await act(async () => input("Room 1 child 1 age").props.onChange({ target: { value: "18" } }));
+    await act(async () =>
+      input("Age at check-in, room 1, child 1").props.onChange({ target: { value: "18" } }),
+    );
     await settlePreview();
     expect(request).not.toHaveBeenCalled();
   });
