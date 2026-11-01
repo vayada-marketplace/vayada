@@ -10,12 +10,11 @@ import BookingFooter from "@/components/layout/BookingFooter";
 import DatePickerCalendar from "@/components/booking/DatePickerCalendar";
 import GuestSelector from "@/components/booking/GuestSelector";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useAddons, useHotel, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
 import { trackEvent } from "@/services/api/tracking";
 import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { hotelService } from "@/services/api/hotel";
-import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
 import RoomTabs, { RoomsHelp, type RoomsProgressRoom } from "@/components/booking/RoomsProgress";
@@ -160,7 +159,6 @@ function HomePageContent() {
   };
   const effectiveChildren = guestTypeSettings.childrenEnabled ? children : 0;
 
-  const currentStep = 1;
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [guestsOpen, setGuestsOpen] = useState(false);
   const [promoOpen, setPromoOpen] = useState(false);
@@ -195,7 +193,7 @@ function HomePageContent() {
   }, [slug]);
 
   const nights = calculateNights(checkIn, checkOut);
-  const { steps: STEPS, hasAddons } = useBookingSteps("rooms");
+  const hasAddons = useAddons().addons.length > 0;
 
   // The legacy availability search is retired (VAY-1543 C.2): rooms, availability and
   // prices come from the room-and-price page, which starts from the stay chosen here.
@@ -606,37 +604,48 @@ function HomePageContent() {
     setGuestsOpen(true);
     document.getElementById("stay-search")?.scrollIntoView({ block: "start" });
   };
-  // VAY-2412: a borderless select, labelled "Sort rooms" behind its icon.
+  // VAY-2448: the sort sits on the heading's row: its icon, "Sort by" and the select.
   const sortControl = (
-    <div className="flex items-center gap-1.5">
-      <label htmlFor="room-sort" className="text-gray-400">
+    <div className="flex items-center gap-2">
+      <svg
+        className="h-4 w-4 text-gray-500"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+        />
+      </svg>
+      <label htmlFor="room-sort" className="text-sm text-gray-500">
+        {t("sortBy")}
+      </label>
+      <div className="relative">
+        <select
+          id="room-sort"
+          value={sortOption}
+          onChange={(event) => setSortOption(event.target.value)}
+          className="min-h-[44px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-white pl-4 pr-10 text-sm font-medium text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+        >
+          <option value="recommended">{t("recommended")}</option>
+          <option value="priceLow">{t("priceLowHigh")}</option>
+          <option value="priceHigh">{t("priceHighLow")}</option>
+          <option value="roomSize">{t("roomSize")}</option>
+        </select>
         <svg
-          className="w-4 h-4"
+          className="pointer-events-none absolute right-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-700"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
           aria-hidden="true"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-          />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
         </svg>
-        <span className="sr-only">{t("sortRooms")}</span>
-      </label>
-      <select
-        id="room-sort"
-        value={sortOption}
-        onChange={(event) => setSortOption(event.target.value)}
-        className="min-h-[44px] cursor-pointer bg-transparent text-sm font-medium text-gray-700"
-      >
-        <option value="recommended">{t("recommended")}</option>
-        <option value="priceLow">{t("priceLowHigh")}</option>
-        <option value="priceHigh">{t("priceHighLow")}</option>
-        <option value="roomSize">{t("roomSize")}</option>
-      </select>
+      </div>
     </div>
   );
   const roomCard = (
@@ -735,24 +744,21 @@ function HomePageContent() {
             {t("oneRoom.bookRooms", { count: roomsNeeded })}
           </button>
         </div>
-      ) : (
-        adults > 1 && (
-          <p className="mb-5 text-sm text-gray-600">
-            {t("oneRoom.together", { count: adults + effectiveChildren })}{" "}
-            <button
-              type="button"
-              onClick={() => changeRoomCount(2)}
-              className="font-semibold text-primary-600 underline"
-            >
-              {t("oneRoom.preferSeparate")}
-            </button>
-          </p>
-        )
-      )}
+      ) : null}
       {!pickMode && effectiveChildren > 0 && (
         <p className="mb-5 text-sm text-gray-500">{t("childrenPricedLater")}</p>
       )}
     </>
+  );
+
+  const heading = (
+    <div className="min-w-0">
+      <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
+        {t("availableAccommodations")}
+      </h2>
+      {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
+      <ApproximateAmountsNote currency={hotel.currency} className="mt-2" />
+    </div>
   );
 
   const heroImage = hotel.heroImage;
@@ -763,8 +769,8 @@ function HomePageContent() {
     <div className="min-h-screen bg-white overflow-x-hidden">
       <PublicStructuredData hotel={hotel} rooms={[]} locale={locale} />
 
-      {/* Hero Section */}
-      <div className="relative h-[520px] w-full">
+      {/* Hero Section: about 55% of the window, 400–640px (VAY-2448). */}
+      <div className="relative h-[clamp(400px,55vh,640px)] w-full">
         <HotelHeroImage src={heroImage} alt={hotel.name} quality={90} sizes="100vw" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
 
@@ -1047,64 +1053,28 @@ function HomePageContent() {
       </div>
 
       {/* Main Content */}
-      <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 scroll-mt-36">
-        {/* Section Header + Step Indicator */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-          <div>
-            <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
-              {t("availableAccommodations")}
-            </h2>
-            {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
-            <ApproximateAmountsNote currency={hotel.currency} className="mt-2" />
-          </div>
-
-          {/* Step Indicator */}
-          <div className="flex items-center gap-2">
-            {STEPS.map((step, index) => (
-              <div key={step.number} className="flex items-center">
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      step.number === currentStep
-                        ? "bg-primary-600 text-white"
-                        : step.number < currentStep
-                          ? "bg-success-500 text-white"
-                          : "bg-gray-200 text-gray-500"
-                    }`}
-                  >
-                    {step.number}
-                  </div>
-                  <span
-                    className={`hidden md:inline text-sm font-medium ${
-                      step.number === currentStep ? "text-gray-900" : "text-gray-400"
-                    }`}
-                  >
-                    {step.label}
-                  </span>
-                </div>
-                {index < STEPS.length - 1 && <div className="w-8 md:w-12 h-px bg-gray-300 mx-2" />}
-              </div>
-            ))}
-          </div>
-        </div>
-
+      {/* VAY-2448: no stepper while choosing; the sort shares the heading's row. */}
+      <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-12 scroll-mt-36">
         {rooms === null && !roomsFailed ? (
-          <div className="space-y-6" aria-hidden="true">
-            {[0, 1].map((i) => (
-              <div
-                key={i}
-                className="bg-white border border-gray-200 rounded-2xl overflow-hidden animate-pulse flex flex-col md:flex-row"
-              >
-                <div className="w-full md:w-[420px] h-64 md:min-h-[320px] bg-gray-200" />
-                <div className="flex-1 p-5 space-y-4">
-                  <div className="h-6 bg-gray-200 rounded w-48" />
-                  <div className="h-4 bg-gray-200 rounded w-32" />
-                  <div className="h-16 bg-gray-200 rounded-xl" />
-                  <div className="h-16 bg-gray-200 rounded-xl" />
+          <>
+            <div className="mb-9">{heading}</div>
+            <div className="space-y-7" aria-hidden="true">
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  className="bg-white border border-gray-200 rounded-2xl overflow-hidden animate-pulse flex flex-col md:flex-row"
+                >
+                  <div className="w-full md:w-[420px] h-64 md:min-h-[320px] bg-gray-200" />
+                  <div className="flex-1 p-5 space-y-4">
+                    <div className="h-6 bg-gray-200 rounded w-48" />
+                    <div className="h-4 bg-gray-200 rounded w-32" />
+                    <div className="h-16 bg-gray-200 rounded-xl" />
+                    <div className="h-16 bg-gray-200 rounded-xl" />
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         ) : rooms?.length ? (
           <>
             <AccommodationViews
@@ -1138,6 +1108,7 @@ function HomePageContent() {
                   />
                 )
               }
+              heading={heading}
               toolbar={sortControl}
               notices={notices}
               renderCard={roomCard}
@@ -1153,13 +1124,16 @@ function HomePageContent() {
             )}
           </>
         ) : (
-          /* Without room cards, rooms and prices live on the room-and-price page. */
-          <Link
-            href={bookTarget}
-            className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
-          >
-            {t("chooseRoomsAndPrice")}
-          </Link>
+          <>
+            <div className="mb-9">{heading}</div>
+            {/* Without room cards, rooms and prices live on the room-and-price page. */}
+            <Link
+              href={bookTarget}
+              className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
+            >
+              {t("chooseRoomsAndPrice")}
+            </Link>
+          </>
         )}
       </div>
 

@@ -55,6 +55,7 @@ export default function AccommodationViews({
   rooms,
   map,
   stay,
+  heading,
   tabs,
   toolbar,
   notices,
@@ -68,9 +69,11 @@ export default function AccommodationViews({
   map: { pins: LocationMapPin[]; places: GuestMapPlace[]; apiKey: string } | null;
   /** The stay searched, for the phone map's summary, and Edit to change it. */
   stay: { label: string; onEdit: () => void };
-  /** A group's room tabs, left of the sort on the same row (VAY-2412). */
+  /** "Available Accommodations", left of the views and the sort on one row (VAY-2448). */
+  heading: ReactNode;
+  /** A group's room tabs, on their own row below the heading (VAY-2412, VAY-2448). */
   tabs: ReactNode;
-  /** The sort, next to the views. */
+  /** The sort, right of the views. */
   toolbar: ReactNode;
   /** Said above the cards, such as prices that failed. */
   notices: ReactNode;
@@ -103,24 +106,26 @@ export default function AccommodationViews({
     return () => observer.disconnect();
   }, [phoneCards]);
 
-  // With room tabs, the row gets a bottom border for their underline; on a phone the tabs scroll
-  // and the sort wraps below them.
-  const toolbarRow = (controls: ReactNode) =>
-    tabs ? (
-      <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between md:gap-6 md:border-b md:border-gray-200">
-        <div className="min-w-0 border-b border-gray-200 md:border-b-0">{tabs}</div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">{controls}</div>
+  // VAY-2448: the heading with the views and the sort on one row; on a phone the controls wrap
+  // below the heading. A group's tabs follow on their own row, their underline on its border.
+  const toolbarRow = (controls: ReactNode) => (
+    <>
+      <div
+        className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-3 ${tabs ? "mb-5" : "mb-9"}`}
+      >
+        {heading}
+        <div className="flex flex-wrap items-center gap-3">{controls}</div>
       </div>
-    ) : (
-      <div className="mb-5 flex flex-wrap items-center justify-end gap-3">{controls}</div>
-    );
+      {tabs && <div className="mb-3 min-w-0 border-b border-gray-200">{tabs}</div>}
+    </>
+  );
 
   if (!map || !wide) {
     return (
       <>
         {toolbarRow(toolbar)}
         {notices}
-        <div ref={map ? setPhoneCards : undefined} className="space-y-6">
+        <div ref={map ? setPhoneCards : undefined} className="space-y-7">
           {rooms.map((room) => renderCard(room, { compact: false, active: false }))}
         </div>
         {map && cardsOnScreen && (
@@ -247,7 +252,7 @@ export default function AccommodationViews({
           // List + map: the short cards scroll next to the map.
           <div
             ref={listRef}
-            className={view === "split" ? "space-y-3 overflow-y-auto pr-1" : "space-y-6"}
+            className={view === "split" ? "space-y-3 overflow-y-auto pr-1" : "space-y-7"}
           >
             {rooms.map((room) =>
               renderCard(room, {
