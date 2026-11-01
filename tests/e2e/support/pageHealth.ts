@@ -25,14 +25,16 @@ export function watchPageHealth(
   const failures: string[] = [];
   // A full navigation (page.goto, a reload) aborts the old page's fetches still in flight, and the
   // API clients log each one as "TypeError: Failed to fetch": the page being left, not a page
-  // error (filters.spec.ts's second goto raced the header's stats read, VAY-2316). From the
-  // navigation request until the new page's DOMContentLoaded, each such error is set aside and
-  // excused by one fetch the navigation aborted; the ones left over still fail.
+  // error (filters.spec.ts's second goto raced the header's stats read, VAY-2316). The page's own
+  // catch often logs the same rejection again (PMS Dashboard, "Failed to load PMS access"): leaving
+  // the Dashboard mid-load aborted 18 reads and logged 23 errors (VAY-2423 flake). From the
+  // navigation request until the new page's DOMContentLoaded, each such error is set aside, and
+  // each fetch the navigation aborted excuses up to two; the ones left over still fail.
   let leaving = false;
   let aborted = 0;
   let setAside: string[] = [];
   const settle = () => {
-    failures.push(...setAside.slice(aborted));
+    failures.push(...setAside.slice(aborted * 2));
     leaving = false;
     aborted = 0;
     setAside = [];
