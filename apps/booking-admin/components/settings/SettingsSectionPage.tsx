@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  bankTransferDetailsIncomplete,
   saveBankTransferDestination,
   type SavedBankTransferDestination,
   type BankTransferSaveAttempt,
@@ -21,6 +22,7 @@ import {
   issueFinanceStripeOnboardingLink,
   needsExplicitPayAtHotelChoice,
   reconcileFinanceStripeProviderAccount,
+  savePaymentMethodWindows,
   updateFinancePaymentSettings,
   payAtHotelMethodsFromFinance,
   type FinancePaymentSettingsResponse,
@@ -28,8 +30,22 @@ import {
 import { paymentSaveError } from "@/components/settings/paymentSaveError";
 import {
   PaymentWindowsCard,
+  paymentWindowsPlan,
+  paymentWindowsSaveError,
+  usePaymentWindows,
   type PaymentWindowMethods,
 } from "@/components/settings/PaymentWindowsCard";
+import {
+  bankDetailsEdited,
+  bankDetailsOf,
+  paymentsFormFields,
+  paymentsFormOf,
+  paymentsSaveFailureText,
+  samePaymentsForm,
+  type PaymentsForm,
+  type PaymentsPart,
+  type PaymentsSaveStatus,
+} from "@/components/settings/paymentsSave";
 import {
   createFixedPlanCheckout,
   getFinancePlanStatus,
@@ -342,6 +358,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
   // VAY-2348: the ways to pay guests are offered as saved, for the booking windows card.
   const [offeredMethods, setOfferedMethods] = useState<PaymentWindowMethods | null>(null);
+  // VAY-2424: the payment choices as saved, so one Save sends only what changed and Discard
+  // puts the form back; the windows card's state lives here for the same Save.
+  const [paymentBaseline, setPaymentBaseline] = useState<PaymentsForm | null>(null);
+  const [paymentsSaveStatus, setPaymentsSaveStatus] = useState<PaymentsSaveStatus | null>(null);
+  const paymentWindows = usePaymentWindows(activeSection === "payments" ? billingPropertyId : null);
   const [savedPropertyName, setSavedPropertyName] = useState("");
   // Null until the public profile loads, so a failed read can never save over the text.
   const [savedDescription, setSavedDescription] = useState<string | null>(null);
@@ -432,31 +453,22 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         : null;
     setStripeAccountId(stripeAccountId);
     setStripeOnboarded(isFinanceStripeReady(res));
-    setPaymentProvider(toSettingsPaymentProvider(ps.paymentProvider));
     setXenditChannelCode("ID_BCA");
     setXenditAccountNumber("");
     setXenditAccountHolderName("");
-    setSettings((prev) => ({
-      ...prev,
-      pay_at_property_enabled: ps.acceptedMethods.includes("pay_at_property"),
-      pay_at_hotel_methods: payAtHotelMethodsFromFinance(ps.acceptedMethods),
-      online_card_payment:
-        ps.acceptedMethods.includes("card") || ps.acceptedMethods.includes("xendit"),
-      bank_transfer: ps.acceptedMethods.includes("bank_transfer"),
-      paypal_enabled: ps.acceptedMethods.includes("paypal"),
-      paypal_email: paymentPolicyText(ps.depositPolicy, "paypalEmail"),
-      paypal_payment_window_hours: paymentPolicyNumber(
-        ps.depositPolicy,
-        "paypalPaymentWindowHours",
-        24,
-      ),
-      payout_bank_name: "",
-      payout_account_holder: "",
-      payout_iban: "",
-      payout_account_type: "account_number",
-      payout_account_number: "",
-      payout_swift: "",
-    }));
+    const saved: PaymentsForm = {
+      payAtProperty: ps.acceptedMethods.includes("pay_at_property"),
+      payAtHotelMethods: payAtHotelMethodsFromFinance(ps.acceptedMethods),
+      onlineCard: ps.acceptedMethods.includes("card") || ps.acceptedMethods.includes("xendit"),
+      bankTransfer: ps.acceptedMethods.includes("bank_transfer"),
+      paypal: ps.acceptedMethods.includes("paypal"),
+      paypalEmail: paymentPolicyText(ps.depositPolicy, "paypalEmail"),
+      paypalHours: paymentPolicyNumber(ps.depositPolicy, "paypalPaymentWindowHours", 24),
+      provider: toSettingsPaymentProvider(ps.paymentProvider),
+    };
+    setPaymentBaseline(saved);
+    setPaymentProvider(saved.provider);
+    setSettings((prev) => ({ ...prev, ...paymentsFormFields(saved) }));
     setBankDestination(res.bankDestination ?? null);
     setPaymentCurrency(ps.defaultCurrency);
     setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
@@ -757,7 +769,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       }
       let onboardingPropertyId = "";
       const result = await continueStripeAfterSavingSettings({
-        saveSettings: () => savePaymentProviderSettings(),
+        saveSettings: () => savePayments(),
         continueStripe: (propertyId) => {
           onboardingPropertyId = propertyId;
           return createFinanceStripeProviderAccount({
@@ -869,31 +881,96 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     }
   };
 
-  const savePaymentProviderSettings = async (showPageFeedback = false): Promise<string | null> => {
-    setSavingPayment(true);
+  // VAY-2424: what changed on Payments, against what was saved.
+  const paymentsForm = paymentsFormOf(settings, paymentProvider);
+  const paymentMethodsChanged =
+    paymentBaseline !== null && !samePaymentsForm(paymentsForm, paymentBaseline);
+  const bankDetailsChanged = (settings.bank_transfer ?? false) && bankDetailsEdited(settings);
+  const windowsPlan =
+    offeredMethods && paymentWindows.saved && paymentWindows.drafts
+      ? paymentWindowsPlan(offeredMethods, paymentWindows.saved, paymentWindows.drafts)
+      : null;
+  const paymentsChanged =
+    paymentMethodsChanged || bankDetailsChanged || (windowsPlan?.changed ?? false);
+  // Saving before the stored settings and windows load would write the form's defaults.
+  const paymentsReady =
+    paymentSettingsLoaded &&
+    paymentBaseline !== null &&
+    (!!windowsPlan || paymentWindows.loadError) &&
+    !refreshingStripe;
+
+  /**
+   * VAY-2424: one Save for the page, on today's three endpoints. Everything is checked before
+   * anything is sent; then bank details, payment settings and booking windows are saved in that
+   * order, each only when it changed. The first failure stops the rest: what saved becomes the
+   * new saved state, and the page says what saved and what didn't. Returns the property id when
+   * everything is saved (Stripe Connect continues from there).
+   */
+  const savePayments = async (): Promise<string | null> => {
+    setPaymentsSaveStatus(null);
     setPaymentError("");
     setPaymentSuccess("");
-    const fail = (message: string, retry = false) => {
-      setPaymentError(message);
-      if (showPageFeedback) setFeedback({ type: "error", message, retry });
+    const refuse = (message: string, params?: Record<string, string | number>) => {
+      setPaymentsSaveStatus({ kind: "invalid", message, params });
+      return null;
     };
+    if (!paymentsReady || !paymentCurrency || !paymentBaseline) {
+      return refuse("admin.paymentSettingsDidNotLoadRefreshBeforeSavingPayments");
+    }
+    if (
+      settings.online_card_payment &&
+      (paymentProvider === "xendit" || paymentProvider === "vayada")
+    ) {
+      return refuse("settings.billing.comingSoon");
+    }
+    const hotelId = readBookingHotelId(settings);
+    if (!hotelId) return refuse("admin.selectAHotelBeforeSavingPaymentSettings");
+    // Plain still means what the page shows (Cash and Card), so it goes back unchanged.
+    const keepPlain =
+      plainPayAtHotel &&
+      settings.pay_at_property_enabled &&
+      settings.pay_at_hotel_methods.includes("cash") &&
+      settings.pay_at_hotel_methods.includes("card");
+    const settingsBody = (keepPlainPayAtHotel: boolean) =>
+      buildFinancePaymentSettingsBody({
+        payAtPropertyEnabled: settings.pay_at_property_enabled,
+        payAtHotelMethods: settings.pay_at_hotel_methods,
+        keepPlainPayAtHotel,
+        onlineCardPayment: settings.online_card_payment ?? false,
+        bankTransfer: settings.bank_transfer ?? false,
+        paypalEnabled: settings.paypal_enabled ?? false,
+        paypalEmail: settings.paypal_email,
+        paypalPaymentWindowHours: settings.paypal_payment_window_hours,
+        paymentProvider,
+        defaultCurrency: paymentCurrency,
+        commandPrefix: `settings-payment-settings-${hotelId}`,
+      });
+    const bankDetails = bankDetailsOf(settings);
+    const windowsToSave = windowsPlan?.changed ? windowsPlan.next : null;
+    // 1. Check everything first.
+    if (windowsPlan?.invalid) return refuse("settings.paymentsSave.fixWindows");
+    if (
+      bankTransferDetailsIncomplete({
+        enabled: settings.bank_transfer ?? false,
+        details: bankDetails,
+        saved: bankDestination,
+      })
+    ) {
+      return refuse("admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty");
+    }
+    if (paymentMethodsChanged) {
+      try {
+        settingsBody(keepPlain);
+      } catch (error) {
+        return refuse(paymentSaveError(error).message);
+      }
+    }
+
+    // 2. Save what changed, in order.
+    setSavingPayment(true);
+    const saved: PaymentsPart[] = [];
+    let part: PaymentsPart = "bank";
     try {
-      if (!paymentSettingsLoaded || !paymentCurrency) {
-        fail("admin.paymentSettingsDidNotLoadRefreshBeforeSavingPayments");
-        return null;
-      }
-      if (
-        settings.online_card_payment &&
-        (paymentProvider === "xendit" || paymentProvider === "vayada")
-      ) {
-        fail("settings.billing.comingSoon");
-        return null;
-      }
-      const hotelId = readBookingHotelId(settings);
-      if (!hotelId) {
-        fail("admin.selectAHotelBeforeSavingPaymentSettings");
-        return null;
-      }
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
       const destination = await saveBankTransferDestination(
         {
@@ -905,89 +982,90 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           enabled: settings.bank_transfer ?? false,
           saved: bankDestination,
           attempt: bankSaveAttempt.current,
-          details: {
-            accountHolder: settings.payout_account_holder ?? "",
-            accountType: settings.payout_account_type ?? "iban",
-            accountNumber:
-              (settings.payout_account_type === "account_number"
-                ? settings.payout_account_number
-                : settings.payout_iban) ?? "",
-            bankName: settings.payout_bank_name ?? "",
-            bicSwift: settings.payout_swift ?? "",
-            instructions: "",
-          },
+          details: bankDetails,
         },
       );
-      setBankDestination(destination ?? null);
-      const save = (keepPlainPayAtHotel: boolean) =>
-        updateFinancePaymentSettings({
-          propertyId: propertyLink.propertyId,
-          body: buildFinancePaymentSettingsBody({
-            payAtPropertyEnabled: settings.pay_at_property_enabled,
-            payAtHotelMethods: settings.pay_at_hotel_methods,
-            keepPlainPayAtHotel,
-            onlineCardPayment: settings.online_card_payment ?? false,
-            bankTransfer: settings.bank_transfer ?? false,
-            paypalEnabled: settings.paypal_enabled ?? false,
-            paypalEmail: settings.paypal_email,
-            paypalPaymentWindowHours: settings.paypal_payment_window_hours,
-            payoutAccountHolder: settings.payout_account_holder,
-            payoutAccountType: settings.payout_account_type,
-            payoutIban: settings.payout_iban,
-            payoutAccountNumber: settings.payout_account_number,
-            payoutBankName: settings.payout_bank_name,
-            payoutSwift: settings.payout_swift,
-            paymentProvider,
-            defaultCurrency: paymentCurrency,
-            commandPrefix: `settings-payment-settings-${hotelId}`,
-          }),
-        });
-      // Plain still means what the page shows (Cash and Card), so it goes back unchanged.
-      let keptPlain =
-        plainPayAtHotel &&
-        settings.pay_at_property_enabled &&
-        settings.pay_at_hotel_methods.includes("cash") &&
-        settings.pay_at_hotel_methods.includes("card");
-      try {
-        await save(keptPlain);
-      } catch (error) {
-        // An old row setup never saved needs the choice spelled out: send the Cash + Card shown.
-        if (!keptPlain || !needsExplicitPayAtHotelChoice(error)) throw error;
-        keptPlain = false;
-        await save(false);
+      if (destination !== bankDestination) {
+        saved.push("bank");
+        setBankDestination(destination ?? null);
+        setSettings((previous) => ({
+          ...previous,
+          payout_account_holder: "",
+          payout_account_number: "",
+          payout_iban: "",
+          payout_bank_name: "",
+          payout_swift: "",
+        }));
       }
-      setPlainPayAtHotel(keptPlain);
-      setOfferedMethods({
-        card:
-          (settings.online_card_payment ?? false) &&
-          paymentProvider === "stripe" &&
-          stripeOnboarded,
-        pay_at_property: settings.pay_at_property_enabled,
-        bank_transfer:
-          (settings.bank_transfer ?? false) && !!destination?.enabled && !destination.deleted,
-        paypalHours: settings.paypal_enabled
-          ? Math.max(1, Math.min(168, settings.paypal_payment_window_hours ?? 24))
-          : null,
-      });
-      setSettings((previous) => ({
-        ...previous,
-        payout_account_holder: "",
-        payout_account_number: "",
-        payout_iban: "",
-        payout_bank_name: "",
-        payout_swift: "",
-      }));
-      const message = "settings.billing.paymentSettingsSaved";
-      setPaymentSuccess(message);
-      if (showPageFeedback) setFeedback({ type: "success", message });
+
+      part = "methods";
+      if (paymentMethodsChanged) {
+        const save = (keepPlainPayAtHotel: boolean) =>
+          updateFinancePaymentSettings({
+            propertyId: propertyLink.propertyId,
+            body: settingsBody(keepPlainPayAtHotel),
+          });
+        let keptPlain = keepPlain;
+        try {
+          await save(keptPlain);
+        } catch (error) {
+          // An old row setup never saved needs the choice spelled out: send the Cash + Card shown.
+          if (!keptPlain || !needsExplicitPayAtHotelChoice(error)) throw error;
+          keptPlain = false;
+          await save(false);
+        }
+        saved.push("methods");
+        setPaymentBaseline(paymentsForm);
+        setPlainPayAtHotel(keptPlain);
+        setOfferedMethods({
+          card:
+            (settings.online_card_payment ?? false) &&
+            paymentProvider === "stripe" &&
+            stripeOnboarded,
+          pay_at_property: settings.pay_at_property_enabled,
+          bank_transfer:
+            (settings.bank_transfer ?? false) && !!destination?.enabled && !destination.deleted,
+          paypalHours: settings.paypal_enabled
+            ? Math.max(1, Math.min(168, settings.paypal_payment_window_hours ?? 24))
+            : null,
+        });
+      }
+
+      part = "windows";
+      if (windowsToSave) {
+        const response = await savePaymentMethodWindows({
+          propertyId: propertyLink.propertyId,
+          windows: windowsToSave,
+        });
+        saved.push("windows");
+        paymentWindows.apply(response.windows);
+      }
+      setPaymentsSaveStatus({ kind: "saved" });
       return propertyLink.propertyId;
     } catch (error) {
+      const windowsMessage =
+        part === "windows" && windowsToSave ? paymentWindowsSaveError(error, windowsToSave) : null;
       const { message, retry } = paymentSaveError(error);
-      fail(message, retry);
+      setPaymentsSaveStatus({
+        kind: "failed",
+        saved,
+        failed: part,
+        message: windowsMessage ?? message,
+        params: windowsMessage ? { hours: paymentWindows.deadlineHours } : undefined,
+        retry: !windowsMessage && retry,
+      });
       return null;
     } finally {
       setSavingPayment(false);
     }
+  };
+
+  const discardPayments = () => {
+    if (!paymentBaseline) return;
+    setSettings((previous) => ({ ...previous, ...paymentsFormFields(paymentBaseline) }));
+    setPaymentProvider(paymentBaseline.provider);
+    paymentWindows.discard();
+    setPaymentsSaveStatus(null);
   };
 
   useEffect(() => {
@@ -1047,12 +1125,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const handleSave = async () => {
     if (activeSection === "payments") {
       setFeedback(null);
-      setSaving(true);
-      try {
-        await savePaymentProviderSettings(true);
-      } finally {
-        setSaving(false);
-      }
+      await savePayments();
       return;
     }
 
@@ -1832,15 +1905,18 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               {t("settings.billing.paymentMethodsDesc")}
             </p>
             {/* Until the saved methods arrive (or while a Stripe refresh reloads them), a click
-                here would be undone when they do (VAY-2185). pointer-events-none also stops the
-                Pay at Hotel card, which is a div the disabled fieldset doesn't cover. */}
+                here would be undone when they do (VAY-2185); while Save runs, it would be lost
+                (VAY-2424). pointer-events-none also stops the Pay at Hotel card, which is a div
+                the disabled fieldset doesn't cover. */}
             <fieldset
               aria-labelledby="payment-methods-heading"
-              disabled={!paymentSettingsLoaded || refreshingStripe}
-              aria-disabled={!paymentSettingsLoaded || refreshingStripe}
+              disabled={!paymentSettingsLoaded || refreshingStripe || savingPayment}
+              aria-disabled={!paymentSettingsLoaded || refreshingStripe || savingPayment}
               aria-busy={(!paymentSettingsLoaded && !paymentError) || refreshingStripe}
               className={`grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 ${
-                paymentSettingsLoaded && !refreshingStripe ? "" : "pointer-events-none opacity-60"
+                paymentSettingsLoaded && !refreshingStripe && !savingPayment
+                  ? ""
+                  : "pointer-events-none opacity-60"
               }`}
             >
               {/* Online Card Payment */}
@@ -2319,9 +2395,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           {/* VAY-2348: each way to pay only for guests booking a certain time before arrival. */}
           {paymentSettingsLoaded && billingPropertyId && offeredMethods && (
             <PaymentWindowsCard
-              key={billingPropertyId}
-              propertyId={billingPropertyId}
               methods={offeredMethods}
+              windows={paymentWindows}
+              disabled={savingPayment}
             />
           )}
           {settings.bank_transfer && bankDestination?.maskedAccount && (
@@ -2342,7 +2418,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 </p>
               </div>
               <fieldset
-                disabled={ownerFinance === false}
+                disabled={ownerFinance === false || savingPayment}
                 className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-60 sm:grid-cols-2"
               >
                 <div className="sm:col-span-2">
@@ -2781,15 +2857,60 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               </div>
             </>
           )}
-          <div className="flex justify-end">
-            {/* Saving before the stored payment settings load would write the form's defaults. */}
-            <SaveButton
-              onClick={handleSave}
-              saving={saving || savingPayment}
-              disabled={!paymentSettingsLoaded}
-            >
-              {t("common.save")}
-            </SaveButton>
+          {/* VAY-2424: one save bar for the whole page (methods, bank details, booking windows). */}
+          <div
+            className="sticky bottom-0 z-10 rounded-lg border border-gray-200 bg-white p-3 shadow-sm md:px-5"
+            data-testid="payments-save-bar"
+          >
+            {paymentsSaveStatus && paymentsSaveStatus.kind !== "saved" && !savingPayment && (
+              <div role="alert" className="mb-3">
+                <FeedbackAlert
+                  type="error"
+                  message={
+                    paymentsSaveStatus.kind === "failed"
+                      ? paymentsSaveFailureText(paymentsSaveStatus, t)
+                      : t(paymentsSaveStatus.message, paymentsSaveStatus.params)
+                  }
+                  action={
+                    paymentsSaveStatus.kind === "failed" && paymentsSaveStatus.retry
+                      ? {
+                          label: t("settings.paymentsSave.tryAgain"),
+                          onClick: () => void handleSave(),
+                        }
+                      : undefined
+                  }
+                />
+              </div>
+            )}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p
+                role="status"
+                className={`text-[13px] font-medium ${paymentsChanged ? "text-amber-700" : "text-gray-500"}`}
+              >
+                {paymentsChanged
+                  ? t("settings.paymentsSave.unsaved")
+                  : paymentsSaveStatus?.kind === "saved"
+                    ? t("settings.billing.paymentSettingsSaved")
+                    : t("settings.paymentsSave.noChanges")}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={discardPayments}
+                  disabled={!paymentsChanged || savingPayment}
+                  className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                >
+                  {t("settings.paymentsSave.discard")}
+                </button>
+                <SaveButton
+                  onClick={handleSave}
+                  saving={savingPayment}
+                  disabled={!paymentsReady || !paymentsChanged}
+                >
+                  {t("settings.paymentsSave.saveChanges")}
+                </SaveButton>
+              </div>
+            </div>
           </div>
         </section>
       )}

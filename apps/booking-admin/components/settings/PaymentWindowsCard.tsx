@@ -12,12 +12,10 @@ import {
   type PaymentMethodGap,
   type WindowedPaymentMethod,
 } from "@vayada/domain-booking";
-import { SaveButton } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
 import {
   FinancePaymentSettingsClientError,
   getPaymentMethodWindows,
-  savePaymentMethodWindows,
 } from "@/services/api/financePaymentSettingsClient";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -181,40 +179,46 @@ function Lane({ name, children }: { name: string; children: ReactNode }) {
   );
 }
 
-/**
- * VAY-2348: Booking Admin › Payments › "When guests can pay each way". Each switched-on way to pay
- * (online card, pay at the hotel, bank transfer) can be offered only to guests booking a certain
- * time before arrival. Saved on its own: windows change no price.
- */
-export function PaymentWindowsCard({
-  propertyId,
-  methods,
-}: {
-  propertyId: string;
-  methods: PaymentWindowMethods;
-}) {
-  const { t } = useTranslation();
+export type WindowDrafts = Record<WindowedPaymentMethod, WindowDraft>;
+
+/** The booking windows as saved and as edited. Payments saves them with the rest of the page
+ * (VAY-2424), so the page holds this state and the card only shows it. */
+export type PaymentWindowsState = {
+  saved: PaymentMethodBookingWindows | null;
+  drafts: WindowDrafts | null;
+  deadlineHours: number;
+  loadError: boolean;
+  reload: () => void;
+  update: (method: WindowedPaymentMethod, patch: Partial<WindowDraft>) => void;
+  /** After a save: what the API stored becomes the saved state. */
+  apply: (windows: PaymentMethodBookingWindows) => void;
+  discard: () => void;
+};
+
+const draftsOf = (windows: PaymentMethodBookingWindows): WindowDrafts => ({
+  card: draftOf(windows.card),
+  pay_at_property: draftOf(windows.pay_at_property),
+  bank_transfer: draftOf(windows.bank_transfer),
+});
+
+export function usePaymentWindows(propertyId: string | null): PaymentWindowsState {
   const [saved, setSaved] = useState<PaymentMethodBookingWindows | null>(null);
-  const [drafts, setDrafts] = useState<Record<WindowedPaymentMethod, WindowDraft> | null>(null);
+  const [drafts, setDrafts] = useState<WindowDrafts | null>(null);
   const [deadlineHours, setDeadlineHours] = useState(BANK_TRANSFER_PAYMENT_DEADLINE_HOURS);
   const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   const apply = useCallback((windows: PaymentMethodBookingWindows) => {
     setSaved(windows);
-    setDrafts({
-      card: draftOf(windows.card),
-      pay_at_property: draftOf(windows.pay_at_property),
-      bank_transfer: draftOf(windows.bank_transfer),
-    });
+    setDrafts(draftsOf(windows));
   }, []);
 
-  const load = useCallback(() => {
+  useEffect(() => {
     let current = true;
     setLoadError(false);
     setSaved(null);
     setDrafts(null);
+    if (!propertyId) return;
     getPaymentMethodWindows({ propertyId }).then(
       (response) => {
         if (!current) return;
@@ -228,8 +232,81 @@ export function PaymentWindowsCard({
     return () => {
       current = false;
     };
-  }, [apply, propertyId]);
-  useEffect(load, [load]);
+  }, [apply, attempt, propertyId]);
+
+  const update = useCallback((method: WindowedPaymentMethod, patch: Partial<WindowDraft>) => {
+    setDrafts((previous) =>
+      previous ? { ...previous, [method]: { ...previous[method], ...patch } } : previous,
+    );
+  }, []);
+  const reload = useCallback(() => setAttempt((value) => value + 1), []);
+  const discard = useCallback(() => {
+    if (saved) setDrafts(draftsOf(saved));
+  }, [saved]);
+  return { saved, drafts, deadlineHours, loadError, reload, update, apply, discard };
+}
+
+/** What a save would send: the drafts of the ways guests are offered, the saved window for the
+ * rest (the save replaces every window), and whether that is valid and differs from saved. */
+export function paymentWindowsPlan(
+  methods: PaymentWindowMethods,
+  saved: PaymentMethodBookingWindows,
+  drafts: WindowDrafts,
+) {
+  const results = Object.fromEntries(
+    WINDOWED_PAYMENT_METHODS.map((method) => [method, windowOf(method, drafts[method])]),
+  ) as Record<WindowedPaymentMethod, ReturnType<typeof windowOf>>;
+  const next: PaymentMethodBookingWindows = {};
+  for (const method of WINDOWED_PAYMENT_METHODS) {
+    const result = results[method];
+    const window = methods[method] && "window" in result ? result.window : saved[method];
+    if (window) next[method] = window;
+  }
+  const invalid = WINDOWED_PAYMENT_METHODS.some(
+    (method) => methods[method] && "problem" in results[method],
+  );
+  const changed = WINDOWED_PAYMENT_METHODS.some((method) => {
+    const [before, after] = [saved[method], next[method]];
+    return (
+      before?.kind !== after?.kind ||
+      before?.amount !== after?.amount ||
+      before?.unit !== after?.unit
+    );
+  });
+  return { results, next, invalid, changed };
+}
+
+/** Why the API refused the windows, as Payments says it (D7: bank transfer's own rule). */
+export function paymentWindowsSaveError(
+  error: unknown,
+  next: PaymentMethodBookingWindows,
+): string | null {
+  if (
+    !(error instanceof FinancePaymentSettingsClientError) ||
+    error.code !== "bank_transfer_window_too_short"
+  )
+    return null;
+  return next.bank_transfer?.kind === "within"
+    ? "settings.paymentWindows.bankWithin"
+    : "settings.paymentWindows.bankAtLeast";
+}
+
+/**
+ * VAY-2348: Booking Admin › Payments › "When guests can pay each way". Each switched-on way to pay
+ * (online card, pay at the hotel, bank transfer) can be offered only to guests booking a certain
+ * time before arrival. Windows change no price; the page's one Save stores them (VAY-2424).
+ */
+export function PaymentWindowsCard({
+  methods,
+  windows,
+  disabled = false,
+}: {
+  methods: PaymentWindowMethods;
+  windows: PaymentWindowsState;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { saved, drafts, deadlineHours, loadError } = windows;
 
   const heading = (
     <div>
@@ -251,7 +328,7 @@ export function PaymentWindowsCard({
             <span className="text-red-600">{t("settings.paymentWindows.loadFailed")}</span>
             <button
               type="button"
-              onClick={load}
+              onClick={windows.reload}
               className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
             >
               {t("settings.paymentsSave.tryAgain")}
@@ -266,25 +343,7 @@ export function PaymentWindowsCard({
     );
 
   const shown = WINDOWED_PAYMENT_METHODS.filter((method) => methods[method]);
-  const results = Object.fromEntries(
-    WINDOWED_PAYMENT_METHODS.map((method) => [method, windowOf(method, drafts[method])]),
-  ) as Record<WindowedPaymentMethod, ReturnType<typeof windowOf>>;
-  // A way to pay guests aren't offered keeps its saved window; the save replaces every window.
-  const next: PaymentMethodBookingWindows = {};
-  for (const method of WINDOWED_PAYMENT_METHODS) {
-    const result = results[method];
-    const window = methods[method] && "window" in result ? result.window : saved[method];
-    if (window) next[method] = window;
-  }
-  const invalid = shown.some((method) => "problem" in results[method]);
-  const changed = WINDOWED_PAYMENT_METHODS.some((method) => {
-    const [before, after] = [saved[method], next[method]];
-    return (
-      before?.kind !== after?.kind ||
-      before?.amount !== after?.amount ||
-      before?.unit !== after?.unit
-    );
-  });
+  const { results, next } = paymentWindowsPlan(methods, saved, drafts);
   const gaps = noWayToPay(methods, next);
   const lanes: { name: string; range: PaymentMethodGap }[] = shown.map((method) => ({
     name: t(METHOD_LABEL[method]),
@@ -299,39 +358,6 @@ export function PaymentWindowsCard({
     from = gap.toHours ?? Number.POSITIVE_INFINITY;
   }
   if (from !== Number.POSITIVE_INFINITY) bookable.push({ fromHours: from, toHours: null });
-
-  const update = (method: WindowedPaymentMethod, patch: Partial<WindowDraft>) => {
-    setMessage(null);
-    setDrafts((previous) =>
-      previous ? { ...previous, [method]: { ...previous[method], ...patch } } : previous,
-    );
-  };
-  const save = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const response = await savePaymentMethodWindows({ propertyId, windows: next });
-      apply(response.windows);
-      setMessage({ type: "success", text: t("settings.paymentWindows.saved") });
-    } catch (error) {
-      const tooShort =
-        error instanceof FinancePaymentSettingsClientError &&
-        error.code === "bank_transfer_window_too_short";
-      setMessage({
-        type: "error",
-        text: t(
-          !tooShort
-            ? "settings.paymentWindows.saveFailed"
-            : next.bank_transfer?.kind === "within"
-              ? "settings.paymentWindows.bankWithin"
-              : "settings.paymentWindows.bankAtLeast",
-          { hours: deadlineHours },
-        ),
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const field =
     "h-9 rounded-lg border bg-white text-[13px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500";
@@ -369,9 +395,9 @@ export function PaymentWindowsCard({
                   <select
                     aria-label={t("settings.paymentWindows.whenOffered", { method: name })}
                     value={draft.kind}
-                    disabled={saving}
+                    disabled={disabled}
                     onChange={(event) =>
-                      update(method, { kind: event.target.value as WindowDraft["kind"] })
+                      windows.update(method, { kind: event.target.value as WindowDraft["kind"] })
                     }
                     className={`${field} border-gray-300 px-2.5 ${draft.kind === "any" ? "flex-1" : "shrink-0"}`}
                   >
@@ -394,8 +420,8 @@ export function PaymentWindowsCard({
                       aria-invalid={problem ? true : undefined}
                       aria-describedby={problem ? `payment-window-${method}-problem` : undefined}
                       value={draft.amount}
-                      disabled={saving}
-                      onChange={(event) => update(method, { amount: event.target.value })}
+                      disabled={disabled}
+                      onChange={(event) => windows.update(method, { amount: event.target.value })}
                       className={`${field} w-16 shrink-0 px-2 text-center ${problem ? "border-red-500 bg-red-50 text-red-700" : "border-gray-300"}`}
                     />
                   )}
@@ -408,9 +434,9 @@ export function PaymentWindowsCard({
                     <select
                       aria-label={t("settings.paymentWindows.unitFor", { method: name })}
                       value={draft.unit}
-                      disabled={saving}
+                      disabled={disabled}
                       onChange={(event) =>
-                        update(method, { unit: event.target.value as WindowDraft["unit"] })
+                        windows.update(method, { unit: event.target.value as WindowDraft["unit"] })
                       }
                       className={`${field} min-w-0 flex-1 border-gray-300 px-2.5`}
                     >
@@ -511,19 +537,6 @@ export function PaymentWindowsCard({
           <p className="text-amber-700">{t("settings.paymentWindows.gapHelp")}</p>
         </div>
       )}
-      <div className="flex flex-col gap-2 border-t border-gray-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-end md:px-5">
-        {message && (
-          <p
-            role={message.type === "error" ? "alert" : "status"}
-            className={`text-[12px] ${message.type === "error" ? "text-red-700" : "text-green-700"} sm:mr-auto`}
-          >
-            {message.text}
-          </p>
-        )}
-        <SaveButton onClick={() => void save()} saving={saving} disabled={invalid || !changed}>
-          {t("settings.paymentWindows.save")}
-        </SaveButton>
-      </div>
     </section>
   );
 }

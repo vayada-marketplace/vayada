@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import en from "@/messages/en.json";
-import { draftOf, leadText, methodRange, noWayToPay, windowOf } from "./PaymentWindowsCard";
+import { FinancePaymentSettingsClientError } from "@/services/api/financePaymentSettingsClient";
+import {
+  draftOf,
+  leadText,
+  methodRange,
+  noWayToPay,
+  paymentWindowsPlan,
+  paymentWindowsSaveError,
+  windowOf,
+} from "./PaymentWindowsCard";
 
 const t = (key: string, params: Record<string, string | number> = {}) =>
   Object.entries(params).reduce(
@@ -84,5 +93,55 @@ describe("Booking Admin payment windows (VAY-2348)", () => {
     expect(leadText(48, t)).toBe("48 hours");
     expect(leadText(72, t)).toBe("3 days");
     expect(leadText(100, t)).toBe("100 hours");
+  });
+
+  it("plans what the page's one save sends for the windows (VAY-2424)", () => {
+    const saved = {
+      card: { kind: "within", amount: 2, unit: "days" },
+      bank_transfer: { kind: "at_least", amount: 7, unit: "days" },
+    } as const;
+    const drafts = {
+      card: draftOf(undefined),
+      pay_at_property: { kind: "within", amount: "48", unit: "hours" },
+      bank_transfer: draftOf(saved.bank_transfer),
+    } as const;
+    const methods = { ...off, pay_at_property: true, bank_transfer: true };
+    // Card isn't offered: it keeps its saved window, whatever its row says.
+    expect(paymentWindowsPlan(methods, saved, drafts)).toMatchObject({
+      next: {
+        card: saved.card,
+        pay_at_property: { kind: "within", amount: 48, unit: "hours" },
+        bank_transfer: saved.bank_transfer,
+      },
+      invalid: false,
+      changed: true,
+    });
+    const unchanged = { ...drafts, pay_at_property: draftOf(undefined) };
+    expect(paymentWindowsPlan(methods, saved, unchanged).changed).toBe(false);
+    const tooShort = {
+      ...unchanged,
+      bank_transfer: { kind: "at_least", amount: "2", unit: "days" },
+    } as const;
+    expect(paymentWindowsPlan(methods, saved, tooShort).invalid).toBe(true);
+    // A row guests aren't offered can't block the save.
+    expect(paymentWindowsPlan({ ...methods, bank_transfer: false }, saved, tooShort).invalid).toBe(
+      false,
+    );
+  });
+
+  it("names the bank transfer rule when the API refuses the windows", () => {
+    const refused = new FinancePaymentSettingsClientError({
+      statusCode: 400,
+      code: "bank_transfer_window_too_short",
+      category: "validation",
+      detail: "too short",
+    });
+    expect(
+      paymentWindowsSaveError(refused, {
+        bank_transfer: { kind: "within", amount: 2, unit: "days" },
+      }),
+    ).toBe("settings.paymentWindows.bankWithin");
+    expect(paymentWindowsSaveError(refused, {})).toBe("settings.paymentWindows.bankAtLeast");
+    expect(paymentWindowsSaveError(new Error("down"), {})).toBeNull();
   });
 });
