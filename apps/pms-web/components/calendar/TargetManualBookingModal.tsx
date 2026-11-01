@@ -393,14 +393,23 @@ export default function TargetManualBookingModal({
       );
     const counts = line.serviceUnits.map((unit) => unit.guestCount ?? 0);
     if (isTransfer(addon)) {
-      if (addon.perPerson) return [guests(Math.max(...counts))];
-      if (!addon.maxGuests) return [];
+      const trips = count(
+        line.serviceUnits.length,
+        "calendar.targetManualBooking.addonTripOne",
+        "calendar.targetManualBooking.addonTrips",
+      );
+      if (addon.perPerson)
+        return counts.every((guestCount) => guestCount === counts[0])
+          ? [guests(counts[0]!), trips]
+          : [guests(counts.reduce((sum, value) => sum + value, 0))];
+      if (!addon.maxGuests) return [trips];
       return [
         count(
           line.packageCount,
           "calendar.targetManualBooking.addonVehicleOne",
           "calendar.targetManualBooking.addonVehicles",
         ),
+        trips,
       ];
     }
     const nights = count(

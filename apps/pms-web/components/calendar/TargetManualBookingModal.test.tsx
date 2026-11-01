@@ -263,7 +263,7 @@ describe("target manual booking fields", () => {
     expect(field("More: Parking").props.disabled).toBe(true);
     await settlePreview();
     const markup = JSON.stringify(view.toJSON());
-    expect(markup).toContain("€10 × 2 vehicles per trip");
+    expect(markup).toContain("€10 × 2 vehicles × 2 trips");
     expect(markup).toContain("€10 × 5 guests × 2 nights");
     expect(markup).toContain("€10 × 2 × 2 nights");
 
