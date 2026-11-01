@@ -192,7 +192,8 @@ async function syncVayadaProviderAccount(
     await client.query<{ id: string }>(
       `SELECT id::text FROM finance.payment_provider_accounts
        WHERE property_id=$1::uuid AND account_scope='property' AND provider='vayada'
-       ORDER BY (provider_account_id LIKE 'settings-choice:%'), updated_at DESC
+       ORDER BY CASE WHEN provider_account_id LIKE 'settings-choice:%' THEN 1 ELSE 0 END,
+         updated_at DESC
        LIMIT 1 FOR UPDATE`,
       [propertyId],
     )

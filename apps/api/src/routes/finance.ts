@@ -5292,8 +5292,10 @@ function toFinancePaymentSettingsReadModel(
     statementDescriptor: row.statementDescriptor,
     requiresManualReview: (row.requiresManualReview ?? false) || providerStatus !== "active",
     providerAccount: {
+      // Neither the settings placeholder nor vayada Payment's own `vayada:<property>` binding
+      // (VAY-2442) is a provider's account id.
       providerAccountId:
-        row.providerAccountId?.startsWith("settings-choice:") === true
+        row.providerAccountId?.startsWith("settings-choice:") === true || row.provider === "vayada"
           ? null
           : row.providerAccountId,
       provider: row.provider ? paymentProvider(row.provider) : null,
