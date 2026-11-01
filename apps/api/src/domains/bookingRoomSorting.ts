@@ -74,6 +74,35 @@ export function parseRoomSorting(value: unknown): RoomSorting | null {
   return { enabled, hideWithOneRoom, options: parsed, defaultOption: defaultOption as RoomSortKey };
 }
 
+/** A saved Room Sorting, read leniently so a later shape keeps what the hotel chose: unknown keys and
+ * options are dropped, missing switches take the defaults, missing options join hidden at the end, and a
+ * default no longer shown moves to the first shown option. Null (the defaults) when nothing is shown. */
+export function storedRoomSorting(value: unknown): RoomSorting | null {
+  if (!isRecord(value)) return null;
+  const options: RoomSorting["options"] = [];
+  for (const option of Array.isArray(value.options) ? value.options : [])
+    if (isRecord(option) && isSortKey(option.key) && !options.some(({ key }) => key === option.key))
+      options.push({ key: option.key, enabled: option.enabled === true });
+  for (const key of ROOM_SORT_KEYS)
+    if (!options.some((option) => option.key === key)) options.push({ key, enabled: false });
+  const shown = options.filter((option) => option.enabled).map((option) => option.key);
+  if (!shown.length) return null;
+  return {
+    enabled: typeof value.enabled === "boolean" ? value.enabled : DEFAULT_ROOM_SORTING.enabled,
+    hideWithOneRoom:
+      typeof value.hideWithOneRoom === "boolean"
+        ? value.hideWithOneRoom
+        : DEFAULT_ROOM_SORTING.hideWithOneRoom,
+    options,
+    defaultOption: shown.includes(value.defaultOption as RoomSortKey)
+      ? (value.defaultOption as RoomSortKey)
+      : shown[0]!,
+  };
+}
+
+/** A copy of the defaults, so no caller can change the shared one. */
+export const defaultRoomSorting = (): RoomSorting => structuredClone(DEFAULT_ROOM_SORTING);
+
 export function guestRoomSorting(sorting: RoomSorting): GuestRoomSorting {
   return {
     enabled: sorting.enabled,
@@ -91,7 +120,7 @@ type Queryable = {
 };
 
 /** The hotel's own Room Sorting for guests, read live; null while it uses the defaults (nothing saved, or
- * a saved value that no longer reads). */
+ * nothing shown in a saved value). */
 export async function readGuestRoomSorting(
   db: Queryable,
   propertyId: string,
@@ -100,7 +129,7 @@ export async function readGuestRoomSorting(
     "SELECT room_sorting AS sorting FROM booking.booking_settings WHERE property_id = $1::uuid",
     [propertyId],
   );
-  const sorting = parseRoomSorting(result.rows[0]?.sorting ?? null);
+  const sorting = storedRoomSorting(result.rows[0]?.sorting ?? null);
   return sorting ? guestRoomSorting(sorting) : null;
 }
 
@@ -152,8 +181,8 @@ export function createPgBookingRoomSortingRepository(config: {
       const row = result.rows[0];
       if (!row) return null;
       return {
-        sorting: parseRoomSorting(row.sorting) ?? DEFAULT_ROOM_SORTING,
-        defaults: DEFAULT_ROOM_SORTING,
+        sorting: storedRoomSorting(row.sorting) ?? defaultRoomSorting(),
+        defaults: defaultRoomSorting(),
         canSave: row.hasSettings,
       };
     },
@@ -189,7 +218,7 @@ export function createPgBookingRoomSortingRepository(config: {
         ],
       );
       const row = result.rows[0];
-      return row ? parseRoomSorting(row.sorting) : null;
+      return row ? storedRoomSorting(row.sorting) : null;
     },
 
     async close() {

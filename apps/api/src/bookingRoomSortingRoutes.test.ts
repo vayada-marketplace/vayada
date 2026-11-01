@@ -7,6 +7,7 @@ import {
   DEFAULT_ROOM_SORTING,
   guestRoomSorting,
   parseRoomSorting,
+  storedRoomSorting,
   type BookingRoomSortingRepository,
   type RoomSorting,
 } from "./domains/bookingRoomSorting.js";
@@ -74,6 +75,43 @@ describe("Room sorting values", () => {
       expect(parseRoomSorting(invalid), JSON.stringify(invalid)).toBeNull();
     // Off keeps its options: the menu comes back as it was when the hotel turns it on again.
     expect(parseRoomSorting({ ...custom, enabled: false })).toEqual({ ...custom, enabled: false });
+  });
+
+  it("reads a saved value leniently, so a later shape keeps what the hotel chose", () => {
+    expect(storedRoomSorting(custom)).toEqual(custom);
+    expect(
+      storedRoomSorting({
+        enabled: false,
+        future: "field",
+        options: [
+          { key: "priceHigh", enabled: true, label: "x" },
+          { key: "cheapest", enabled: true },
+          { key: "priceHigh", enabled: false },
+          { key: "capacity", enabled: true },
+        ],
+        defaultOption: "cheapest",
+      }),
+    ).toEqual({
+      enabled: false,
+      hideWithOneRoom: true,
+      options: [
+        { key: "priceHigh", enabled: true },
+        { key: "capacity", enabled: true },
+        { key: "recommended", enabled: false },
+        { key: "priceLow", enabled: false },
+        { key: "roomSize", enabled: false },
+        { key: "bestDeal", enabled: false },
+      ],
+      defaultOption: "priceHigh",
+    });
+    for (const nothingShown of [
+      null,
+      [],
+      "on",
+      {},
+      { options: [{ key: "priceLow", enabled: false }] },
+    ])
+      expect(storedRoomSorting(nothingShown)).toBeNull();
   });
 });
 

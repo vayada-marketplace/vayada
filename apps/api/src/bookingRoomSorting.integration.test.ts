@@ -130,13 +130,23 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking room sorting (runtime login)", () =
     );
   });
 
-  it("reads a saved value that no longer reads as the defaults", async () => {
+  it("reads a saved value from another shape leniently, and one showing nothing as the defaults", async () => {
     const propertyId = await seedProperty(admin, true);
-    await admin.query(
-      `UPDATE booking.booking_settings SET room_sorting = '{"enabled": true}'::jsonb
-       WHERE property_id=$1::uuid`,
-      [propertyId],
+    const store = (value: string) =>
+      admin.query(
+        "UPDATE booking.booking_settings SET room_sorting = $2::jsonb WHERE property_id=$1::uuid",
+        [propertyId, value],
+      );
+    await store(
+      '{"enabled": false, "future": 1, "options": [{"key": "priceHigh", "enabled": true}, {"key": "cheapest", "enabled": true}], "defaultOption": "cheapest"}',
     );
+    expect(await readGuestRoomSorting(admin, propertyId)).toEqual({
+      enabled: false,
+      hideWithOneRoom: true,
+      options: ["priceHigh"],
+      defaultOption: "priceHigh",
+    });
+    await store('{"enabled": true}');
     expect(await repository.read(propertyId)).toMatchObject({ sorting: DEFAULT_ROOM_SORTING });
     expect(await readGuestRoomSorting(admin, propertyId)).toBeNull();
     await expect(

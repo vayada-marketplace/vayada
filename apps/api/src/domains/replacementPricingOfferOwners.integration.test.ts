@@ -6556,6 +6556,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         options: ["recommended", "priceLow", "priceHigh", "roomSize"],
         defaultOption: "recommended",
       });
+      // Switched off it still reaches guests: the page then keeps the hotel's own room order.
+      await pool.query(
+        "UPDATE booking.booking_settings SET room_sorting = room_sorting || '{\"enabled\": false}' WHERE property_id = $1",
+        [scope.propertyId],
+      );
+      expect((await catalog.read(scope.propertyId))?.roomSorting?.enabled).toBe(false);
       await pool.query("DELETE FROM booking.booking_settings WHERE property_id = $1", [
         scope.propertyId,
       ]);
