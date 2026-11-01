@@ -1,6 +1,11 @@
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import type { Translate } from "./firstPricingSetupMessages";
-import { decimalAmount, parseMinorInput, PricingError } from "./pricingSetupAmounts";
+import {
+  decimalAmount,
+  parseMinorInput,
+  PricingError,
+  signedAmountText,
+} from "./pricingSetupAmounts";
 import { defaultPricingFormLook, type PricingFormLook } from "./pricingFormLook";
 type IncludedBase = Extract<
   Extract<
@@ -32,7 +37,11 @@ export function includedPrice(
     if (
       !row ||
       !["fixed", "percentage"].includes(row.kind) ||
-      !/^[+-]?\d+(?:\.\d+)?$/.test(row.value)
+      !signedAmountText(
+        row.value,
+        row.kind === "fixed" ? scale : 2,
+        row.kind === "fixed" ? step : 1,
+      )
     )
       throw new PricingError("pricing.included.errorAdjustment");
     const unsigned =

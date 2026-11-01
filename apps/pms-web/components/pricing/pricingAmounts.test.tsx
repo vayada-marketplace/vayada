@@ -56,7 +56,10 @@ describe("IDR whole-rupiah prices (VAY-2085)", () => {
 
   it("accepts whole rupiah and refuses a fractional rupiah with its own message", () => {
     expect(parseMinorInput("1500000", 2, false, 100)).toBe("150000000");
-    expect(parseMinorInput("1500000.00", 2, false, 100)).toBe("150000000");
+    // VAY-2425: no fraction at all, so "150.00" can't stand for a mistyped "150.000".
+    expect(() => parseMinorInput("1500000.00", 2, false, 100)).toThrow(
+      expect.objectContaining({ key: "pricing.error.wholeUnitsOnly" }),
+    );
     expect(() => parseMinorInput("1500000.50", 2, false, 100)).toThrow(
       expect.objectContaining({ key: "pricing.error.wholeUnitsOnly" }),
     );

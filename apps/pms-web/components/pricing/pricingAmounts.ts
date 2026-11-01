@@ -13,6 +13,7 @@ import {
   decimalAmount,
   parseMinorInput,
   PricingError as SetupPricingError,
+  signedAmountText,
 } from "@vayada/product-onboarding/pricingSetupAmounts";
 
 export { decimalAmount, parseMinorInput };
@@ -131,12 +132,16 @@ export function editedSnapshot(
 }
 
 export function parseAdjustmentInput(input: { kind: string; value: string }, currency: string) {
-  // A fixed amount may carry thousands separators (whole-unit currencies, VAY-2425); parseMinorInput decides.
-  const pattern =
-    input.kind === "fixed"
-      ? /^[+-]?(?:\d+(?:\.\d+)?|\d{1,3}(?:[.,\s]\d{3})+)$/
-      : /^[+-]?\d+(?:\.\d+)?$/;
-  if (!["fixed", "percentage"].includes(input.kind) || !pattern.test(input.value))
+  // A fixed amount may carry thousands separators in a whole-unit currency (VAY-2425).
+  const fixed = input.kind === "fixed";
+  if (
+    !["fixed", "percentage"].includes(input.kind) ||
+    !signedAmountText(
+      input.value,
+      fixed ? pricingCurrencyScale(currency)! : 2,
+      fixed ? pricingAmountStep(currency) : 1,
+    )
+  )
     throw new PricingError("pricing.error.adjustmentInvalid");
   const unsigned =
     input.kind === "fixed"

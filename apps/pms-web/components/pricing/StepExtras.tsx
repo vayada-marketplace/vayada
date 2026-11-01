@@ -72,7 +72,6 @@ export function StepExtras({
   preview?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const scale = pricingCurrencyScale(room.currency)!;
   const { nonRefundable, breakfast, mainTerms } = simple;
   const charge = breakfast && breakfast.meal.kind !== "room_only" ? breakfast.meal.charge : null;
   const savedDiscount = basisPoints(nonRefundable);
@@ -110,7 +109,7 @@ export function StepExtras({
           ? typed
           : amountInput(savedMinor, room.currency),
       );
-  }, [savedMinor, scale]);
+  }, [savedMinor, room.currency]);
   useEffect(
     () => setMealText((typed) => (typed.trim() === savedText ? typed : savedText)),
     [savedText],

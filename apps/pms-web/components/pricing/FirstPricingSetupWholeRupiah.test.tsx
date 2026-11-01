@@ -30,11 +30,14 @@ it("prices IDR first setups in whole rupiah (VAY-2085)", () => {
   expect(firstPricingInput(id, room, id, values).configuration.offers[0].price).toMatchObject({
     calendar: { base: { mode: "flat", amountMinor: "150000000" } },
   });
-  expect(
-    firstPricingInput(id, room, id, { ...values, base: "1500000.00" }).configuration.offers[0]
-      .price,
-  ).toMatchObject({ calendar: { base: { amountMinor: "150000000" } } });
+  // Thousands separators as typed in Indonesia (VAY-2425).
+  for (const base of ["1.500.000", "1,500,000", "1 500 000"])
+    expect(
+      firstPricingInput(id, room, id, { ...values, base }).configuration.offers[0].price,
+    ).toMatchObject({ calendar: { base: { amountMinor: "150000000" } } });
   for (const invalid of [
+    // No fraction at all, so a dropped digit can't mean a thousandth (VAY-2425).
+    { base: "1500000.00" },
     { base: "1500000.50" },
     { mode: "per_person", base: "750000.5" },
     { mode: "occupancy", occupancy: ["1000000", "1500000.25"] },
@@ -62,6 +65,12 @@ it("keeps included-guest IDR adjustments whole and rounds percentages like the c
     kind: "fixed",
     deltaMinor: "25000000",
   });
+  // Thousands separators in a fixed IDR adjustment (VAY-2425).
+  for (const value of ["+250.000", "+250,000", "+250 000"])
+    expect(included({ kind: "fixed", value }).adjustments[1]).toEqual({
+      kind: "fixed",
+      deltaMinor: "25000000",
+    });
   // 49% off Rp 1 leaves Rp 0.51 -> Rp 1; 51% off leaves Rp 0.49 -> Rp 0, which is refused.
   expect(included({ kind: "percentage", value: "-49" }).adjustments[1]).toEqual({
     kind: "percentage",
