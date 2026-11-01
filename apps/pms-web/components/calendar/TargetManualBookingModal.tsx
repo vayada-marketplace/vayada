@@ -1113,10 +1113,11 @@ export default function TargetManualBookingModal({
                       className="rounded-lg border border-gray-200 px-3 py-1 text-sm"
                     >
                       <div className="flex flex-wrap items-center gap-3">
+                        {/* A minimum width for the name wraps the stepper below it on a phone. */}
                         {transfer ? (
-                          <span className="min-w-0 flex-1 truncate py-2">{addon.name}</span>
+                          <span className="min-w-[10rem] flex-1 truncate py-2">{addon.name}</span>
                         ) : (
-                          <label className="flex min-h-11 min-w-0 flex-1 items-center gap-2">
+                          <label className="flex min-h-11 min-w-[10rem] flex-1 items-center gap-2">
                             <input
                               type="checkbox"
                               checked={Boolean(choice)}
@@ -1163,7 +1164,7 @@ export default function TargetManualBookingModal({
                             </span>
                           </div>
                         )}
-                        <strong className="w-20 text-right">
+                        <strong className="ml-auto w-20 text-right">
                           {serverAddon
                             ? money(serverAddon.total.amountDecimal, preview!.currency)
                             : "—"}
