@@ -65,7 +65,8 @@ const OUTBOX_DESTINATION = "booking.payment-source";
 
 export function createFinanceOnlineCardExecutionEvidenceRepository(
   pool: FinanceOnlineCardEvidencePool,
-  /** VAY-2442: Vayada approves vayada Payment accounts only while VAYADA_PAYMENT_ENABLED is on. */
+  /** VAY-2442: Vayada approves vayada Payment accounts only while VAYADA_PAYMENT_ENABLED is on.
+   * Reads and revokes always see them, so an approval can still be withdrawn after switching off. */
   options: { vayadaPaymentEnabled?: boolean } = {},
 ): FinancePlatformOnlineCardExecutionEvidenceRepository {
   const vayada = options.vayadaPaymentEnabled === true;
@@ -76,7 +77,7 @@ export function createFinanceOnlineCardExecutionEvidenceRepository(
       // Read-only, outside the write transaction helper (which maps errors to write results).
       const client = await pool.connect();
       try {
-        return await readState(client, propertyId.toLowerCase(), vayada);
+        return await readState(client, propertyId.toLowerCase());
       } finally {
         client.release();
       }
@@ -104,8 +105,10 @@ async function accept(
   if (replay) return replay;
 
   await lockPropertySettings(client, command.propertyId);
-  const provider = await lockProvider(client, command.propertyId, vayada);
+  const provider = await lockProvider(client, command.propertyId);
   if (!provider) return failure(404, "provider_account_not_found", "Stripe account was not found.");
+  if (provider.provider === "vayada" && !vayada)
+    return failure(409, "provider_capability_unavailable", "vayada Payment is not available yet.");
   const revision = positiveInteger(provider.cardCapabilityRevision);
   if (!revision || revision !== command.payload.expectedCardCapabilityRevision) {
     return failure(
@@ -236,7 +239,6 @@ async function revoke(
 async function readState(
   client: Client,
   propertyId: string,
-  vayada: boolean,
 ): Promise<FinanceOnlineCardExecutionState | null> {
   const property = await client.query(
     `SELECT 1 FROM hotel_catalog.properties WHERE id = $1::uuid`,
@@ -281,7 +283,7 @@ async function readState(
        WHERE settings.property_id = $1::uuid
          AND account.account_scope = 'property'
          AND ${APPROVABLE_PROVIDER}`,
-      [propertyId, vayada],
+      [propertyId],
     )
   ).rows[0];
   const evidence = provider
@@ -348,19 +350,15 @@ async function lockPropertySettings(client: Client, propertyId: string): Promise
   );
 }
 
-/** The hotel's own Stripe account, or (VAY-2442, while the switch is on, $2) its vayada Payment
- * account bound as vayada:<property> by a saved payout account. */
+/** The hotel's own Stripe account, or (VAY-2442) its vayada Payment account, bound as
+ * vayada:<property> by a saved payout account. Never a settings placeholder. */
 const APPROVABLE_PROVIDER = `(
   (account.provider = 'stripe' AND account.provider_account_id NOT LIKE 'settings-choice:%')
-  OR ($2::boolean AND account.provider = 'vayada'
+  OR (account.provider = 'vayada'
     AND account.provider_account_id = 'vayada:' || account.property_id::text)
 )`;
 
-async function lockProvider(
-  client: Client,
-  propertyId: string,
-  vayada: boolean,
-): Promise<ProviderRow | null> {
+async function lockProvider(client: Client, propertyId: string): Promise<ProviderRow | null> {
   const result = await client.query<ProviderRow>(
     `SELECT account.id::text AS "providerAccountId",
             account.provider,
@@ -382,7 +380,7 @@ async function lockProvider(
        AND account.account_scope = 'property'
        AND ${APPROVABLE_PROVIDER}
      FOR UPDATE OF settings, account`,
-    [propertyId, vayada],
+    [propertyId],
   );
   return result.rows[0] ?? null;
 }

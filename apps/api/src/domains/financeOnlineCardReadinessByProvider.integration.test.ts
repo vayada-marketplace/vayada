@@ -1,9 +1,11 @@
+import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import type { AcceptFinanceOnlineCardExecutionEvidenceCommand } from "@vayada/domain-finance";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFinanceOnlineCardExecutionEvidenceRepository } from "../routes/financeOnlineCardExecutionEvidenceRepository.js";
+import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 
 const url = process.env.TEST_DATABASE_URL;
 if (url && !new URL(url).pathname.endsWith("_test")) throw new Error("Unsafe test database");
@@ -257,19 +259,59 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
     }
   });
 
+  it("sells card in published prices exactly when the booking page shows it ready", async () => {
+    // The published-price check computes readiness in TypeScript; the booking page reads the view.
+    const terms: ReplacementOfferTerms[] = [
+      {
+        roomTypeId: randomUUID(),
+        offerId: "flex",
+        revision: randomUUID(),
+        cancellation: {
+          kind: "flexible",
+          terms: {
+            type: "free_until_days_before_arrival",
+            freeCancellationDeadlineDays: 7,
+            afterDeadlinePenalty: "full_booking_amount",
+            noShowPenalty: "full_booking_amount",
+          },
+        },
+        payment: { kind: "full" },
+      },
+    ];
+    for (const name of Object.keys(states)) {
+      const client = await pool.connect();
+      let sellsCard: boolean;
+      try {
+        await client.query("BEGIN");
+        const readiness = await lockFinanceReplacementPricingReadiness(client, {
+          propertyId: ids[name]!,
+          currency: "EUR",
+          pricingRevision: 1,
+          terms,
+        });
+        sellsCard = readiness.kind === "ready" && readiness.methods.includes("card");
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+      expect([name, sellsCard]).toEqual([name, (await row(NEW, ids[name]!)).online_card_ready]);
+    }
+  });
+
   it("lets Vayada approve a bound vayada Payment account only while the switch is on", async () => {
     const off = createFinanceOnlineCardExecutionEvidenceRepository(pool);
     const on = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
       vayadaPaymentEnabled: true,
     });
     const propertyId = ids.vayadaNoApproval!;
+    // Off: Vayada sees the account (so it can still withdraw an approval) but can't approve it.
     expect(await off.readOnlineCardExecutionState(propertyId)).toMatchObject({
-      providerAccount: null,
+      providerAccount: { ready: true, cardCapabilityRevision: 3 },
     });
     expect(await off.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
       ok: false,
-      statusCode: 404,
-      code: "provider_account_not_found",
+      statusCode: 409,
+      code: "provider_capability_unavailable",
     });
     // A placeholder or an account without payouts is never approvable.
     expect(await on.readOnlineCardExecutionState(ids.vayadaPlaceholder!)).toMatchObject({
@@ -293,6 +335,11 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
     });
     expect((await row(NEW, propertyId)).online_card_ready).toBe(true);
     expect((await row(OLD, propertyId)).online_card_ready).toBe(false);
+    // After switching off, the approval is still listed, so it can be withdrawn.
+    expect(await off.readOnlineCardExecutionState(propertyId)).toMatchObject({
+      evidence: { current: true },
+      cardReady: true,
+    });
 
     // Removing the payout account turns payouts off (P1): the approval no longer counts.
     await pool.query(
