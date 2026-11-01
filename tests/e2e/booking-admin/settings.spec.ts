@@ -1191,6 +1191,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
     let persistedProvider: "vayada" | "stripe" = "vayada";
     let failSave = false;
     let accountCreates = 0;
+    let createError: { code: string; message: string } | null = null;
+    const createBodies: Record<string, unknown>[] = [];
     const order: string[] = [];
     await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
       if (route.request().method() === "GET") {
@@ -1243,6 +1245,14 @@ test.describe("booking-admin settings no-legacy guard", () => {
       async (route) => {
         order.push("create");
         accountCreates += 1;
+        createBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+        if (createError) {
+          await route.fulfill({
+            status: 400,
+            json: { statusCode: 400, category: "validation", ...createError },
+          });
+          return;
+        }
         await route.fulfill({
           json: {
             contractVersion: "finance-route-contracts.v1",
@@ -1259,11 +1269,14 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await page.goto("/settings/payments");
     await page.getByRole("button", { name: /Stripe Connect/ }).click();
+    // VAY-2424: no country picker; the API opens the account in the hotel's address country.
+    await expect(page.getByText("Country", { exact: true })).toHaveCount(0);
     const firstPopup = page.waitForEvent("popup");
     await page.getByRole("button", { name: "Connect Payment Account" }).click();
     const onboarding = await firstPopup;
     await onboarding.waitForURL("about:blank#stripe-onboarding");
     expect(order).toEqual(["save", "create"]);
+    expect(createBodies[0]).not.toHaveProperty("country");
     await onboarding.close();
 
     await page.reload();
@@ -1288,6 +1301,27 @@ test.describe("booking-admin settings no-legacy guard", () => {
       page.getByText("Could not save payment settings. Please try again."),
     ).toBeVisible();
     await expect(page).toHaveURL(/\/settings\/payments$/);
+
+    // The hotel's address has no country, or Stripe doesn't take it: say so (VAY-2424).
+    for (const [code, text] of [
+      [
+        "property_country_missing",
+        "Your hotel's address has no country yet. Add it under Location & surroundings, then connect Stripe.",
+      ],
+      [
+        "provider_country_unsupported",
+        "Stripe Connect isn't available in your hotel's country. Contact Vayada about other ways to take card payments.",
+      ],
+    ] as const) {
+      failSave = false;
+      createError = { code, message: "API message" };
+      await page.reload();
+      await page.getByRole("button", { name: /Stripe Connect/ }).click();
+      const closingPopup = page.waitForEvent("popup");
+      await page.getByRole("button", { name: "Connect Payment Account" }).click();
+      await (await closingPopup).waitForEvent("close");
+      await expect(page.getByText(text)).toBeVisible();
+    }
   });
 
   test("relinks a persisted Stripe account once without rewriting payment settings", async ({

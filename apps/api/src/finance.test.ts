@@ -29,6 +29,7 @@ import type {
   FinanceXenditPayoutReconciliationCommand,
   FinanceXenditPayoutReconciliationResult,
 } from "@vayada/domain-finance";
+import { StripeConnectCountryUnsupportedError } from "@vayada/domain-finance";
 import { createHash } from "node:crypto";
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
 import { readFileSync } from "node:fs";
@@ -838,6 +839,83 @@ describe("finance route contracts", () => {
     });
     expect(provider.createAccountCount).toBe(2);
     expect([...new Set(provider.accountIdempotencyKeys)]).toHaveLength(1);
+  });
+
+  it("opens the Stripe account in the hotel's address country (VAY-2424)", async () => {
+    const provider = fakeStripeConnectProvider();
+    const target = targetStripeProviderAccountPool({ countryCode: "de" });
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+
+    await expect(
+      repository.createStripeProviderAccount!(stripePropertyTargetCommand()),
+    ).resolves.toMatchObject({ ok: true, status: "created" });
+    expect(provider.accountCountries).toEqual(["DE"]);
+    expect(target.requiredCall("FROM hotel_catalog.property_locations").values).toEqual([
+      propertyId,
+    ]);
+    expect(target.requiredCall("INSERT INTO finance.payment_provider_accounts").values?.[4]).toBe(
+      "DE",
+    );
+  });
+
+  it("asks for the hotel's country before Stripe when the address has none (VAY-2424)", async () => {
+    const provider = fakeStripeConnectProvider();
+    const target = targetStripeProviderAccountPool({ countryCode: null });
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+
+    await expect(
+      repository.createStripeProviderAccount!(stripePropertyTargetCommand()),
+    ).resolves.toEqual({
+      ok: false,
+      statusCode: 400,
+      code: "property_country_missing",
+      message:
+        "The hotel's address has no country. Add it under Location & surroundings, then connect Stripe.",
+    });
+    expect(provider.createAccountCount).toBe(0);
+    expect(
+      target.calls.some((call) => call.text.includes("INSERT INTO platform.idempotency_keys")),
+    ).toBe(false);
+  });
+
+  it("says Stripe refused the hotel's country and lets the same key ask again (VAY-2424)", async () => {
+    const provider = fakeStripeConnectProvider({ refusedCountries: ["ID"] });
+    const target = targetStripeProviderAccountPool({ countryCode: "ID" });
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+    const command = stripePropertyTargetCommand({ idempotencyKey: "finance-stripe-country-id" });
+
+    await expect(repository.createStripeProviderAccount!(command)).resolves.toEqual({
+      ok: false,
+      statusCode: 400,
+      code: "provider_country_unsupported",
+      message: "Stripe Connect isn't available for hotels in ID.",
+    });
+    expect(provider.compensationCount).toBe(0);
+    expect(
+      target.calls.some((call) =>
+        call.text.includes("INSERT INTO finance.payment_provider_accounts"),
+      ),
+    ).toBe(false);
+
+    // The hotel fixes its address; the setup wizard's stable key asks Stripe again.
+    target.countryCode = "AT";
+    await expect(repository.createStripeProviderAccount!(command)).resolves.toMatchObject({
+      ok: true,
+      status: "created",
+    });
+    expect(provider.accountCountries).toEqual(["ID", "AT"]);
   });
 
   it("reclaims a stale in-progress Stripe creation with the same provider key", async () => {
@@ -3062,8 +3140,14 @@ function targetPaymentSettingsRow(
 }
 
 function targetStripeProviderAccountPool(
-  options: { failInsert?: boolean; failCommitAfterWrite?: boolean } = {},
+  options: {
+    failInsert?: boolean;
+    failCommitAfterWrite?: boolean;
+    /** The hotel's address country (hotel_catalog.property_locations); null for none. */
+    countryCode?: string | null;
+  } = {},
 ): {
+  countryCode: string | null;
   calls: QueryCall[];
   existingAccount: FinanceProviderAccountRowFixture | null;
   compensationJobCount: number;
@@ -3088,6 +3172,7 @@ function targetStripeProviderAccountPool(
   expireProviderAccountReservation(): void;
 } {
   const state: {
+    countryCode: string | null;
     calls: QueryCall[];
     existingAccount: FinanceProviderAccountRowFixture | null;
     compensationJobCount: number;
@@ -3100,6 +3185,7 @@ function targetStripeProviderAccountPool(
       lastSeenAt: string;
     } | null;
   } = {
+    countryCode: options.countryCode === undefined ? "AT" : options.countryCode,
     calls: [],
     existingAccount: null,
     compensationJobCount: 0,
@@ -3126,6 +3212,11 @@ function targetStripeProviderAccountPool(
     }
     if (text.includes("SELECT") && text.includes("FROM platform.idempotency_keys")) {
       const rows = state.idempotency ? [state.idempotency as unknown as T] : [];
+      return { rows, rowCount: rows.length };
+    }
+    if (text.includes("FROM hotel_catalog.property_locations")) {
+      const rows =
+        state.countryCode === null ? [] : [{ countryCode: state.countryCode } as unknown as T];
       return { rows, rowCount: rows.length };
     }
     if (
@@ -3159,8 +3250,9 @@ function targetStripeProviderAccountPool(
           state.idempotency.status === "failed" &&
           state.idempotency.requestFingerprintHash === String(values?.[2]) &&
           state.idempotency.idempotencyMetadata["retryable"] === true &&
-          state.idempotency.idempotencyMetadata["errorCode"] ===
-            "provider_account_create_unconfirmed";
+          ["provider_account_create_unconfirmed", "provider_country_unsupported"].includes(
+            String(state.idempotency.idempotencyMetadata["errorCode"]),
+          );
         const stale =
           state.idempotency.status === "in_progress" &&
           new Date(state.idempotency.lastSeenAt).getTime() <= Date.now() - 5 * 60_000;
@@ -3243,6 +3335,12 @@ function targetStripeProviderAccountPool(
 
   const client = { query, release() {} };
   const result = {
+    get countryCode() {
+      return state.countryCode;
+    },
+    set countryCode(countryCode: string | null) {
+      state.countryCode = countryCode;
+    },
     get calls() {
       return state.calls;
     },
@@ -3499,22 +3597,26 @@ function fakeStripeConnectProvider(
     failCompensation?: boolean;
     failCreateAttempts?: number;
     providerAccountRef?: string;
+    refusedCountries?: string[];
   } = {},
 ): FinanceStripeConnectProvider & {
   createAccountCount: number;
   createOnboardingLinkCount: number;
   compensationCount: number;
   accountIdempotencyKeys: string[];
+  accountCountries: string[];
 } {
   let createAccountCount = 0;
   let createOnboardingLinkCount = 0;
   let compensationCount = 0;
   const accountIdempotencyKeys: string[] = [];
+  const accountCountries: string[] = [];
   const provider: FinanceStripeConnectProvider & {
     createAccountCount: number;
     createOnboardingLinkCount: number;
     compensationCount: number;
     accountIdempotencyKeys: string[];
+    accountCountries: string[];
   } = {
     get createAccountCount() {
       return createAccountCount;
@@ -3528,9 +3630,16 @@ function fakeStripeConnectProvider(
     get accountIdempotencyKeys() {
       return accountIdempotencyKeys;
     },
+    get accountCountries() {
+      return accountCountries;
+    },
     async createAccount(request) {
       createAccountCount += 1;
       accountIdempotencyKeys.push(request.idempotencyKey);
+      accountCountries.push(request.country);
+      if (options.refusedCountries?.includes(request.country)) {
+        throw new StripeConnectCountryUnsupportedError(`Not in ${request.country}.`);
+      }
       if (createAccountCount <= (options.failCreateAttempts ?? 0)) {
         throw new Error("simulated Stripe account creation timeout");
       }
@@ -3586,7 +3695,6 @@ function stripePropertyTargetCommand(
     },
     payload: {
       email: "owner@example.test",
-      country: "AT",
     },
   };
 }

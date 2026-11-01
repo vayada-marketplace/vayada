@@ -11,7 +11,7 @@ const native = { product: "pms", resourceType: "pms_property", resourceId: prope
 const command = { commandId: itemId, idempotencyKey: "synthetic-command" };
 const routes = [
   ["PATCH", "payment-settings", { ...command, paymentSettings: { paymentsEnabled: false } }],
-  ["POST", "provider-accounts/stripe", { ...command, email: "staff@example.test", country: "DE" }],
+  ["POST", "provider-accounts/stripe", { ...command, email: "staff@example.test" }],
   ["POST", `provider-accounts/${itemId}/onboarding-link`, command],
   ["POST", "provider-accounts/stripe/reconcile", command],
   ["POST", "provider-accounts/stripe/dashboard-link", command],

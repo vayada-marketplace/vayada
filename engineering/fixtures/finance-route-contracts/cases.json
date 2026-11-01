@@ -160,8 +160,7 @@
         "body": {
           "commandId": "cmd-stripe-property-001",
           "idempotencyKey": "finance-stripe-property-f300686",
-          "email": "owner@example.test",
-          "country": "AT"
+          "email": "owner@example.test"
         }
       },
       "expected": {

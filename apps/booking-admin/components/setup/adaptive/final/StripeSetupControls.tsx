@@ -42,7 +42,6 @@ export function StripeSetupControls({
   const active = useRef<AbortController | null>(null);
   const attempt = useRef<string | null>(null);
   const [email, setEmail] = useState(() => getAuthSessionUser()?.email ?? "");
-  const [country, setCountry] = useState("");
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,15 +136,11 @@ export function StripeSetupControls({
         signal: controller.signal,
         cache: "no-store",
       });
-      if (
-        !providerAccountId &&
-        (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || !/^[A-Z]{2}$/.test(country.trim()))
-      )
-        throw new Error("Enter your Stripe account email and two-letter business country code.");
+      if (!providerAccountId && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+        throw new Error("Enter your Stripe account email.");
       attempt.current ??= crypto.randomUUID();
       const value = await hotelOperationsSetupApi.startStripeOnboarding(propertyId, {
         email,
-        country,
         providerAccountId,
         linkAttemptId: attempt.current,
       });
@@ -189,18 +184,9 @@ export function StripeSetupControls({
             className="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5"
           />
         </label>
-        <label className="text-sm font-medium">
-          Business country code
-          <input
-            value={country}
-            maxLength={2}
-            placeholder="e.g. DE"
-            onChange={(event) => setCountry(event.target.value.toUpperCase())}
-            className="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5"
-          />
-        </label>
         <p className="text-sm text-gray-600 md:col-span-2">
-          Email and country are required only for a new Stripe account.
+          Email is required only for a new Stripe account. The account opens in your hotel&apos;s
+          country.
         </p>
         <button
           type="button"
