@@ -1252,6 +1252,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   disabled: attemptOpen,
                 }
       }
+      rooms={settled ? { onClick: backToRooms, disabled: attemptOpen } : undefined}
       title={titles[step]}
       subtitle={
         step === "extras"

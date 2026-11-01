@@ -158,7 +158,7 @@
         "all_inclusive": "All meals and drinks included"
       }
     },
-    "sortRooms": "Sort rooms",
+    "sortBy": "Sort by",
     "pricesFailed": "We couldn't load prices for these dates. You can still choose a room; we'll check the price on the next step.",
     "retryPrices": "Try again",
     "childrenPricedLater": "Prices are for the adults. We add children once you tell us their ages on the next step.",
@@ -214,8 +214,6 @@
       "continueWithPlace": "Continue with this place"
     },
     "oneRoom": {
-      "together": "Showing places for all {count} guests together.",
-      "preferSeparate": "Prefer separate rooms?",
       "noneFits": "No single place fits {count} guests.",
       "splitHint": "Split your group and pick a place for each part.",
       "bookRooms": "Book {count} rooms"

@@ -322,15 +322,20 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("offers separate rooms to a group one place holds", async ({ page }, testInfo) => {
+// VAY-2448: no "Prefer separate rooms?" line; a group one place holds adds rooms in Guests.
+test("lets a group one place holds choose separate rooms in Guests", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   await mockBookingApis(page);
   await mockGroup(page, []);
   await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=2");
-  await expect(page.getByText("Showing places for all 2 guests together.")).toBeVisible();
-  await expect(page.getByTestId("none-fits")).toHaveCount(0);
   await expect(page.getByTestId("select-rate-garden")).toHaveText("Select This Rate");
-  await page.getByRole("button", { name: "Prefer separate rooms?" }).click();
+  await expect(page.getByText("Showing places for all 2 guests together.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Prefer separate rooms?" })).toHaveCount(0);
+  await expect(page.getByTestId("none-fits")).toHaveCount(0);
+  await page.getByText("2 Adults", { exact: true }).click();
+  const picker = page.getByTestId("guest-selector");
+  await picker.getByRole("button", { name: "More Rooms" }).click();
+  await picker.getByRole("button", { name: "Done" }).click();
   const help = page.getByTestId("rooms-help");
   await expectChoosing(page, 1, 2);
   await expect(help).toContainText("Pick a place for 1 adult");
@@ -496,13 +501,17 @@ test("puts the room tabs and the sort on one row and moves between the tabs from
   );
   await expect(page.getByText("Room 1 of 2")).toHaveCount(0);
 
-  // The sort is a labelled select, right of the tabs on the same row.
-  const sort = page.getByRole("combobox", { name: "Sort rooms" });
+  // VAY-2448: the sort is a labelled select on the heading's row; the tabs follow below it.
+  const sort = page.getByRole("combobox", { name: "Sort by" });
   await expect(sort).toHaveJSProperty("tagName", "SELECT");
-  const [row, select] = await Promise.all([tabs.boundingBox(), sort.boundingBox()]);
-  expect(select!.x).toBeGreaterThan(row!.x + row!.width);
-  expect(select!.y).toBeLessThan(row!.y + row!.height);
-  expect(select!.y + select!.height).toBeGreaterThan(row!.y);
+  const heading = page.getByRole("heading", { name: "Available Accommodations" });
+  const [row, select, title] = await Promise.all([
+    tabs.boundingBox(),
+    sort.boundingBox(),
+    heading.boundingBox(),
+  ]);
+  expect(Math.abs(select!.y + select!.height / 2 - (title!.y + title!.height / 2))).toBeLessThan(3);
+  expect(row!.y).toBeGreaterThanOrEqual(select!.y + select!.height);
   await page.screenshot({
     path: testInfo.outputPath("room-tabs-1440.png"),
     fullPage: true,
@@ -531,7 +540,7 @@ test("puts the room tabs and the sort on one row and moves between the tabs from
   await assertHealthy();
 });
 
-test("scrolls the room tabs on a phone, with the sort below them and targets of 44px", async ({
+test("scrolls the room tabs on a phone, with the sort below the heading and targets of 44px", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
@@ -549,10 +558,17 @@ test("scrolls the room tabs on a phone, with the sort below them and targets of 
       (rooms) =>
         rooms.getBoundingClientRect().right - parseFloat(getComputedStyle(rooms).paddingRight),
     );
-  const sort = page.getByRole("combobox", { name: "Sort rooms" });
-  const [row, select] = await Promise.all([tabs.boundingBox(), sort.boundingBox()]);
+  // VAY-2448: on a phone the sort wraps below the heading, and the tabs follow below it.
+  const sort = page.getByRole("combobox", { name: "Sort by" });
+  const heading = page.getByRole("heading", { name: "Available Accommodations" });
+  const [row, select, title] = await Promise.all([
+    tabs.boundingBox(),
+    sort.boundingBox(),
+    heading.boundingBox(),
+  ]);
   expect(row!.x + row!.width).toBeLessThanOrEqual(right + 1);
-  expect(select!.y).toBeGreaterThanOrEqual(row!.y + row!.height - 1);
+  expect(select!.y).toBeGreaterThanOrEqual(title!.y + title!.height);
+  expect(row!.y).toBeGreaterThanOrEqual(select!.y + select!.height);
   for (const target of [
     page.getByTestId("room-tab-1"),
     page.getByRole("button", { name: "Remove Room 1 from booking" }),
@@ -576,7 +592,7 @@ test("scrolls the room tabs on a phone, with the sort below them and targets of 
   await assertHealthy();
 });
 
-test("shows no room tabs for one room and keeps the sort on the right", async ({
+test("shows no room tabs for one room and keeps the sort right of the heading", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
@@ -584,10 +600,10 @@ test("shows no room tabs for one room and keeps the sort on the right", async ({
   await mockBookingApis(page);
   await mockGroup(page, []);
   await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=2");
-  await expect(page.getByText("Showing places for all 2 guests together.")).toBeVisible();
+  await expect(page.getByTestId("select-rate-garden")).toBeVisible();
   await expect(page.getByTestId("room-tabs")).toHaveCount(0);
   await expect(page.getByTestId("rooms-help")).toHaveCount(0);
-  const sort = page.getByRole("combobox", { name: "Sort rooms" });
+  const sort = page.getByRole("combobox", { name: "Sort by" });
   const right = await page
     .locator("#rooms")
     .evaluate(

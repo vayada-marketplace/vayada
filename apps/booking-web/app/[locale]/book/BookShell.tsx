@@ -2,14 +2,15 @@
 
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
-import HeroSection from "@/components/booking/HeroSection";
 import StepIndicator from "@/components/booking/StepIndicator";
 import BookingFooter from "@/components/layout/BookingFooter";
-import { useHotel } from "@/contexts/HotelContext";
+import BookingNavigation from "@/components/layout/BookingNavigation";
 import type { BookStep } from "@/lib/bookFlow";
 
-/** The old booking pages' frame around each /book step (VAY-2195): the hotel's hero, the step's
- * title with the step indicator, and the footer. VAY-2416: "Back to …" sits above the title. */
+/** The frame around each /book step (VAY-2195): a slim bar with the hotel's name, Contact and
+ * language instead of the hero (VAY-2448), the step's title with the step indicator, and the
+ * footer. VAY-2416: "Back to …" sits above the title. VAY-2448: once the rooms are chosen, the
+ * indicator's Rooms goes back to them. */
 export default function BookShell({
   steps,
   current,
@@ -17,6 +18,7 @@ export default function BookShell({
   subtitle,
   children,
   back,
+  rooms,
 }: {
   steps: readonly BookStep[];
   current: BookStep;
@@ -24,9 +26,10 @@ export default function BookShell({
   subtitle?: string;
   children: ReactNode;
   back?: { label: string; onClick: () => void; disabled?: boolean };
+  /** Back to the rooms from the indicator's Rooms, after the rooms step. */
+  rooms?: { onClick: () => void; disabled?: boolean };
 }) {
   const t = useTranslations("steps");
-  const { hotel } = useHotel();
   const labels: Record<BookStep, string> = {
     rooms: t("rooms"),
     extras: t("addons"),
@@ -36,11 +39,7 @@ export default function BookShell({
   return (
     // The step's "Your stay" bar is fixed to the bottom of a phone's screen: the footer clears it.
     <div className="min-h-screen bg-gray-50 pb-[var(--fixed-bottom-bar,0px)]">
-      <HeroSection
-        heroImage={hotel.heroImage}
-        heading={hotel.branding?.heroHeading || hotel.name}
-        subtext={hotel.branding?.heroSubtext || hotel.description}
-      />
+      <BookingNavigation solid />
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
           <div>
@@ -74,6 +73,7 @@ export default function BookShell({
           <StepIndicator
             steps={steps.map((step, index) => ({ number: index + 1, label: labels[step] }))}
             currentStep={steps.indexOf(current) + 1}
+            back={rooms && current !== "rooms" ? { step: 1, ...rooms } : undefined}
           />
         </div>
         {children}

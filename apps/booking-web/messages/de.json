@@ -158,7 +158,7 @@
         "all_inclusive": "Alle Mahlzeiten und Getränke inklusive"
       }
     },
-    "sortRooms": "Zimmer sortieren",
+    "sortBy": "Sortieren nach",
     "pricesFailed": "Wir konnten die Preise für diese Daten nicht laden. Sie können trotzdem ein Zimmer wählen; den Preis prüfen wir im nächsten Schritt.",
     "retryPrices": "Erneut versuchen",
     "childrenPricedLater": "Die Preise gelten für die Erwachsenen. Kinder rechnen wir hinzu, sobald Sie uns im nächsten Schritt ihr Alter nennen.",
@@ -214,8 +214,6 @@
       "continueWithPlace": "Mit dieser Unterkunft weiter"
     },
     "oneRoom": {
-      "together": "Wir zeigen Unterkünfte für alle {count} Gäste zusammen.",
-      "preferSeparate": "Lieber getrennte Zimmer?",
       "noneFits": "Keine Unterkunft bietet allein Platz für {count} Gäste.",
       "splitHint": "Teilen Sie Ihre Gruppe auf und wählen Sie für jeden Teil eine Unterkunft.",
       "bookRooms": "{count} Zimmer buchen"
