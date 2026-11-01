@@ -79,3 +79,63 @@ it.skipIf(!process.env.TEST_DATABASE_URL)(
     }
   },
 );
+
+it.skipIf(!process.env.TEST_DATABASE_URL)(
+  "keeps payout destination revisions immutable and wipes superseded ciphertext only (VAY-2442)",
+  async () => {
+    assertSafeTestDatabase(process.env.TEST_DATABASE_URL!);
+    const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`CREATE SCHEMA hotel_catalog; CREATE SCHEMA finance;
+      CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY);
+      INSERT INTO hotel_catalog.properties VALUES ('22222222-2222-4222-8222-222222222222');`);
+      await client.query(
+        await readFile(
+          new URL("../migrations/0531_finance_payout_destinations.sql", import.meta.url),
+          "utf8",
+        ),
+      );
+      const insert = (revision: number, ciphertext: Buffer, country = "ID") =>
+        client.query(
+          `INSERT INTO finance.payout_destinations
+          (property_id, revision, state_version, ciphertext, key_arn, account_last4, country_code)
+          VALUES ('22222222-2222-4222-8222-222222222222', $1, $1, $2, 'key', '3000', $3)`,
+          [revision, ciphertext, country],
+        );
+      for (const [ciphertext, country, code] of [
+        [Buffer.alloc(2), "ID", "23514"],
+        [Buffer.alloc(40), "id", "23514"],
+      ] as const) {
+        await client.query("SAVEPOINT invalid");
+        await expect(insert(1, ciphertext, country)).rejects.toMatchObject({ code });
+        await client.query("ROLLBACK TO invalid");
+      }
+      await insert(1, Buffer.alloc(40));
+      await client.query("SAVEPOINT active");
+      await expect(insert(2, Buffer.alloc(40))).rejects.toMatchObject({ code: "23505" });
+      await client.query("ROLLBACK TO active");
+      for (const change of ["country_code = 'LK'", "account_last4 = '9999'", "revision = 2"]) {
+        await client.query("SAVEPOINT immutable");
+        await expect(
+          client.query(`UPDATE finance.payout_destinations SET ${change}`),
+        ).rejects.toMatchObject({ code: "55000" });
+        await client.query("ROLLBACK TO immutable");
+      }
+      await client.query(`UPDATE finance.payout_destinations
+      SET ciphertext = NULL, enabled = FALSE, deleted_at = now(), state_version = 2`);
+      await insert(2, Buffer.alloc(40));
+      for (const change of ["ciphertext = '\\x00'::bytea", "enabled = TRUE", "deleted_at = NULL"]) {
+        await client.query("SAVEPOINT revive");
+        await expect(
+          client.query(`UPDATE finance.payout_destinations SET ${change} WHERE revision = 1`),
+        ).rejects.toMatchObject({ code: "55000" });
+        await client.query("ROLLBACK TO revive");
+      }
+    } finally {
+      await client.query("ROLLBACK");
+      await client.end();
+    }
+  },
+);

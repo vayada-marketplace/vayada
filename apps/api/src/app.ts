@@ -166,6 +166,7 @@ import { registerFinanceDashboardRoutes } from "./routes/financeDashboard.js";
 import { registerFinanceProfitLossRoutes } from "./routes/financeProfitLoss.js";
 import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
+import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
 import { registerFinancePaymentWindowsRoutes } from "./routes/financePaymentWindows.js";
 import {
   registerPlatformMediaRoutes,
@@ -453,6 +454,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeProfitLoss?: Parameters<typeof registerFinanceProfitLossRoutes>[1];
   financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
+  financePayoutDestination?: Parameters<typeof registerFinancePayoutDestinationRoutes>[1];
   financePaymentWindows?: Parameters<typeof registerFinancePaymentWindowsRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
@@ -1102,6 +1104,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api",
       publicBookabilityPublisher: options.publicBookabilityPublisher,
       ...options.financeBankTransfer,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
+  }
+  if (options.financePayoutDestination) {
+    app.register(registerFinancePayoutDestinationRoutes, {
+      prefix: "/api",
+      publicBookabilityPublisher: options.publicBookabilityPublisher,
+      ...options.financePayoutDestination,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }

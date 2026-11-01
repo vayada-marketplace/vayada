@@ -19,13 +19,27 @@ export type BankTransferDetails = z.infer<typeof bankTransferDetailsSchema>;
 type Scope = { propertyId: string; id: string; revision: number };
 const scopeSchema = z.object({ propertyId: z.uuid(), id: z.uuid(), revision: z.int().positive() });
 const arnSchema = z.string().regex(/^arn:[a-z0-9-]+:kms:[a-z0-9-]+:\d{12}:key\/[a-z0-9-]+$/);
-const unavailable = () => new Error("Bank transfer destination unavailable.");
-
-export function createBankTransferCodec(config: {
+export type KmsDestinationCodecConfig = {
   kms: Pick<FinanceFolioKmsWritePort, "encrypt"> & FinanceFolioKmsDecryptPort;
   currentKeyArn: string;
   allowedKeyArns: readonly string[];
-}) {
+};
+
+export function createBankTransferCodec(config: KmsDestinationCodecConfig) {
+  return createKmsDestinationCodec(config, {
+    purpose: "finance-bank-transfer-v1",
+    schema: bankTransferDetailsSchema,
+    unavailableMessage: "Bank transfer destination unavailable.",
+  });
+}
+
+/** Bank details of one destination revision under KMS, bound to the property, the destination,
+ * its revision and a purpose: guests' bank transfers (VAY-1041) or hotel payouts (VAY-2442). */
+export function createKmsDestinationCodec<T extends { accountNumber: string }>(
+  config: KmsDestinationCodecConfig,
+  options: { purpose: string; schema: z.ZodType<T>; unavailableMessage: string },
+) {
+  const unavailable = () => new Error(options.unavailableMessage);
   if (
     !arnSchema.safeParse(config.currentKeyArn).success ||
     !config.allowedKeyArns.includes(config.currentKeyArn) ||
@@ -35,7 +49,7 @@ export function createBankTransferCodec(config: {
   function context(scope: Scope) {
     const parsed = scopeSchema.parse(scope);
     return {
-      purpose: "finance-bank-transfer-v1",
+      purpose: options.purpose,
       propertyId: parsed.propertyId,
       destinationId: parsed.id,
       revision: String(parsed.revision),
@@ -44,7 +58,7 @@ export function createBankTransferCodec(config: {
   return {
     async encrypt(scope: Scope, input: unknown) {
       try {
-        const details = bankTransferDetailsSchema.parse(input);
+        const details = options.schema.parse(input);
         const plaintext = Buffer.from(JSON.stringify(details));
         if (plaintext.length > 4096) throw unavailable();
         const result = await config.kms.encrypt({
@@ -90,9 +104,7 @@ export function createBankTransferCodec(config: {
           result.Plaintext.length > 4096
         )
           throw unavailable();
-        return bankTransferDetailsSchema.parse(
-          JSON.parse(Buffer.from(result.Plaintext).toString("utf8")),
-        );
+        return options.schema.parse(JSON.parse(Buffer.from(result.Plaintext).toString("utf8")));
       } catch {
         throw unavailable();
       }

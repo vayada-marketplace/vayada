@@ -99,6 +99,8 @@ import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
+import { createPayoutDestinationCodec } from "./domains/financePayoutDestinationCodec.js";
+import { createPayoutDestinationRepository } from "./domains/financePayoutDestinationRepository.js";
 import { createPaymentMethodWindowsRepository } from "./domains/pricingPaymentWindows.js";
 import { createPgFinanceExpenseCategoryRepository } from "./domains/financeExpenseCategoryRepository.js";
 import { createPgFinanceManualExpenseRepository } from "./domains/financeManualExpenseRepository.js";
@@ -682,6 +684,19 @@ const stripeConnectProvider = config.stripeSubscriptions.secretKey
 const afterPaymentChange = config.pricingPaymentRepublishEnabled
   ? (pool: pg.Pool, propertyId: string) => republishPricingAfterCommit(pool, propertyId, app.log)
   : undefined;
+// VAY-2442: vayada Payment payout accounts, on the bank-transfer KMS key under their own purpose.
+// Dark until VAYADA_PAYMENT_ENABLED; no route exists while it is off.
+const payoutDestinationRepository =
+  config.vayadaPaymentEnabled && bankTransferKms && config.financeBankTransferKms
+    ? createPayoutDestinationRepository(
+        targetDatabaseUrl,
+        createPayoutDestinationCodec({
+          ...config.financeBankTransferKms,
+          kms: { ...bankTransferKms.write, ...bankTransferKms.decrypt },
+        }),
+        afterPaymentChange,
+      )
+    : undefined;
 const financeRepository =
   config.financeSource === "target"
     ? createTargetFinancePropertySettingsRepository({
@@ -2124,6 +2139,9 @@ const app = buildApp({
   bookingGuestPiiPort,
   financeRepository,
   financeBankTransfer: bankTransferRepository ? { repository: bankTransferRepository } : undefined,
+  financePayoutDestination: payoutDestinationRepository
+    ? { repository: payoutDestinationRepository }
+    : undefined,
   // VAY-2348: booking windows per payment method, on the ordinary API login (finance).
   financePaymentWindows: config.auth
     ? {
@@ -2451,6 +2469,7 @@ app.addHook("onClose", async () => {
     financeProfitLossRuntime?.close(),
     financeFolioRuntime?.close(),
     bankTransferRepository?.close(),
+    payoutDestinationRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
     bookingDesignMediaAdapter?.close?.(),
