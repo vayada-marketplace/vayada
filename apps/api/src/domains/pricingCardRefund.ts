@@ -570,6 +570,50 @@ async function failRefund(client: PoolClient, command: Command, refund: StripeBo
 /** The refund is money now: the card payment records it, a refund payment row corrects it, and
  * the booking says refunded when nothing paid is left (as manual refunds do). */
 async function settleRefund(client: PoolClient, command: Command, refund: StripeBookingRefund) {
+  await applyCardRefundMoney(client, {
+    propertyId: command.property_id,
+    guestBookingId: command.guest_booking_id,
+    paymentId: command.payment_id,
+    amount: command.amount,
+    currency: command.currency,
+    providerRefundId: refund.refundId,
+    providerPaymentIntentId: command.provider_payment_intent_id,
+    sourcePaymentId: `pricing-card-refund:${command.id}`,
+    idempotencyKey: `${command.idempotency_key}:settlement`,
+    ledgerSourceKey: `refund:${command.id}`,
+    metadata: { commandId: command.id, requestedBy: command.requested_by },
+  });
+  await client.query(
+    `UPDATE finance.card_refund_commands SET status='succeeded',provider_refund_id=$2,provider_status=$3,
+       failure_reason=NULL,settled_at=clock_timestamp(),updated_at=clock_timestamp()
+     WHERE id=$1`,
+    [command.id, refund.refundId, refund.status],
+  );
+  await audit(client, command, "finance.card_refund", refund);
+  return "succeeded" as const;
+}
+
+/** A card refund Stripe made, as money, inside the caller's transaction: the card payment records
+ * it (never above what was paid), a refund payment row corrects it, the booking says refunded
+ * when nothing paid is left, and a vayada Payment charge's hotel is owed that much less (the plan's
+ * fee on it comes back, the vayada Payment fee doesn't). Vayada's own refund commands and refunds
+ * made in Stripe's dashboard (VAY-2442) both settle here. */
+export async function applyCardRefundMoney(
+  client: Pick<PoolClient, "query">,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    paymentId: string;
+    amount: string;
+    currency: string;
+    providerRefundId: string;
+    providerPaymentIntentId: string;
+    sourcePaymentId: string;
+    idempotencyKey: string;
+    ledgerSourceKey: string;
+    metadata: Record<string, unknown>;
+  },
+): Promise<"refunded" | "partially_refunded"> {
   const payment = (
     await client.query(
       `SELECT amount::text AS amount,refunded_amount::text AS refunded,organization_id,provider_account_id,
@@ -577,17 +621,17 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
          payment_metadata->>'platformFeeAmount' AS platform_fee_amount,
          COALESCE(payment_metadata->>'livemode'='true',false) AS livemode
        FROM finance.payments WHERE id=$1 AND property_id=$2 FOR UPDATE`,
-      [command.payment_id, command.property_id],
+      [input.paymentId, input.propertyId],
     )
   ).rows[0];
   const cents = (value: string) => BigInt(value.replace(".", ""));
-  const refunded = cents(payment.refunded) + cents(command.amount);
+  const refunded = cents(payment.refunded) + cents(input.amount);
   if (refunded > cents(payment.amount)) throw new Error("A card refund exceeds its payment.");
   const status = refunded === cents(payment.amount) ? "refunded" : "partially_refunded";
   await client.query(
     `UPDATE finance.payments SET refunded_amount=refunded_amount+$3::numeric,status=$4,updated_at=clock_timestamp()
      WHERE id=$1 AND property_id=$2`,
-    [command.payment_id, command.property_id, command.amount, status],
+    [input.paymentId, input.propertyId, input.amount, status],
   );
   await client.query(
     `INSERT INTO finance.payments
@@ -597,21 +641,20 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
      VALUES ($1,$2,$3,$4,'finance',$5,$6,'refund','card','refunded',$7::numeric,-$7::numeric,$7::numeric,$8,
        $9,$10,$11::jsonb,'pms_finance',clock_timestamp())`,
     [
-      command.property_id,
+      input.propertyId,
       payment.organization_id,
-      command.guest_booking_id,
+      input.guestBookingId,
       payment.provider_account_id,
-      `pricing-card-refund:${command.id}`,
-      `${command.idempotency_key}:settlement`,
-      command.amount,
-      command.currency,
-      refund.refundId,
-      command.provider_payment_intent_id,
+      input.sourcePaymentId,
+      input.idempotencyKey,
+      input.amount,
+      input.currency,
+      input.providerRefundId,
+      input.providerPaymentIntentId,
       JSON.stringify({
         contractVersion: "finance-card-refund.v1",
-        correctsPaymentEvidenceId: command.payment_id,
-        commandId: command.id,
-        requestedBy: command.requested_by,
+        correctsPaymentEvidenceId: input.paymentId,
+        ...input.metadata,
         resultStatus: status,
       }),
     ],
@@ -622,37 +665,28 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
       `UPDATE booking.guest_bookings
        SET payment_status=CASE WHEN $3 THEN 'refunded' ELSE payment_status END,updated_at=clock_timestamp()
        WHERE id=$1 AND property_id=$2 RETURNING payment_status`,
-      [command.guest_booking_id, command.property_id, status === "refunded"],
+      [input.guestBookingId, input.propertyId, status === "refunded"],
     )
   ).rows[0]?.payment_status;
   // PMS lists read the summary; a stay without one has nothing to update.
   await client.query(
     `UPDATE booking.direct_booking_summary_read_model SET payment_status=$2,projected_at=clock_timestamp()
      WHERE guest_booking_id=$1`,
-    [command.guest_booking_id, bookingStatus],
+    [input.guestBookingId, bookingStatus],
   );
-  // vayada Payment (VAY-2442): the money left Vayada's account, so the hotel is owed that much less;
-  // the plan's fee on it comes back to the hotel, the vayada Payment fee doesn't.
   if (payment.charge_type === "vayada_payment")
     await recordVayadaPaymentRefund(client, {
-      propertyId: command.property_id,
-      guestBookingId: command.guest_booking_id,
-      paymentId: command.payment_id,
-      refundCommandId: command.id,
-      currency: command.currency,
+      propertyId: input.propertyId,
+      guestBookingId: input.guestBookingId,
+      paymentId: input.paymentId,
+      sourceKey: input.ledgerSourceKey,
+      currency: input.currency,
       paymentAmount: payment.amount,
       platformFeeAmount: requiredPlatformFee(payment.platform_fee_amount),
-      refundAmount: command.amount,
+      refundAmount: input.amount,
       livemode: payment.livemode === true,
     });
-  await client.query(
-    `UPDATE finance.card_refund_commands SET status='succeeded',provider_refund_id=$2,provider_status=$3,
-       failure_reason=NULL,settled_at=clock_timestamp(),updated_at=clock_timestamp()
-     WHERE id=$1`,
-    [command.id, refund.refundId, refund.status],
-  );
-  await audit(client, command, "finance.card_refund", refund);
-  return "succeeded" as const;
+  return status;
 }
 
 /** Every vayada Payment charge records the plan's fee (P3): a missing one is an error, never 0. */

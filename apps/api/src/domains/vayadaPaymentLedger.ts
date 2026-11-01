@@ -57,7 +57,8 @@ export async function recordVayadaPaymentRefund(
     propertyId: string;
     guestBookingId: string;
     paymentId: string;
-    refundCommandId: string;
+    /** refund:<command> for Vayada's own refunds, refund:stripe:<re_…> for one made in Stripe. */
+    sourceKey: string;
     currency: string;
     paymentAmount: string;
     platformFeeAmount: string;
@@ -80,7 +81,7 @@ export async function recordVayadaPaymentRefund(
     guestBookingId: input.guestBookingId,
     paymentId: input.paymentId,
     livemode: input.livemode,
-    sourceKey: `refund:${input.refundCommandId}`,
+    sourceKey: input.sourceKey,
     onConflict: "fail",
   });
   // A refunded vayada payment was paid, so its charge row exists; anything else needs a person.
@@ -90,8 +91,11 @@ export async function recordVayadaPaymentRefund(
 
 /** A guest's card dispute on a vayada Payment charge moved money (VAY-2442). Withdrawn: the
  * disputed amount and Stripe's dispute fee leave Vayada's account and are taken from the hotel's
- * balance. Reinstated (Vayada won): the amount, and any fee Stripe gave back, are owed again.
- * Webhooks can arrive twice, so a second row for the same dispute phase is ignored. */
+ * balance, but never twice: only what the hotel still holds of the payment (paid less refunded)
+ * is taken, and after a full refund nothing, not even the fee (Flamur, 2026-11-01; Vayada
+ * contests such a dispute with the refund). Reinstated (Vayada won): exactly what was taken comes
+ * back, and the fee only as far as Stripe returned it. Inside the caller's transaction; webhooks
+ * can arrive twice, so a second row for the same dispute phase is ignored. */
 export async function recordVayadaPaymentDispute(
   client: Pick<pg.PoolClient, "query">,
   input: {
@@ -116,13 +120,42 @@ export async function recordVayadaPaymentDispute(
     throw new Error("vayada Payment dispute is invalid for the payout ledger.");
   const amount = BigInt(input.amountMinor);
   const fee = BigInt(input.stripeFeeMinor);
-  const withdrawn = input.phase === "withdrawn";
+  let gross: bigint, entryFee: bigint;
+  if (input.phase === "withdrawn") {
+    // Locked like a refund's settlement, so a refund and a dispute never both take the same money.
+    const payment = (
+      await client.query<{ amount: string; refunded: string }>(
+        `SELECT amount::text AS amount, refunded_amount::text AS refunded FROM finance.payments
+         WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE`,
+        [input.paymentId, input.propertyId],
+      )
+    ).rows[0];
+    if (!payment) return "no_charge";
+    const held =
+      BigInt(stripeAmountMinor(payment.amount, input.currency)) -
+      BigInt(stripeAmountMinor(payment.refunded, input.currency));
+    const taken = amount < held ? amount : held > 0n ? held : 0n;
+    gross = -taken;
+    entryFee = taken > 0n ? fee : 0n;
+  } else {
+    const withdrawn = (
+      await client.query<{ gross: string; fee: string }>(
+        `SELECT gross_minor::text AS gross, fee_minor::text AS fee FROM finance.hotel_payout_ledger
+         WHERE source_key=$1 AND property_id=$2::uuid`,
+        [`dispute:${input.disputeId}:withdrawn`, input.propertyId],
+      )
+    ).rows[0];
+    const taken = withdrawn ? -BigInt(withdrawn.gross) : 0n;
+    const feeTaken = withdrawn ? BigInt(withdrawn.fee) : 0n;
+    gross = amount < taken ? amount : taken;
+    entryFee = -(fee < feeTaken ? fee : feeTaken);
+  }
   return insertEntry(client, {
     propertyId: input.propertyId,
-    kind: withdrawn ? "dispute" : "dispute_reversal",
+    kind: input.phase === "withdrawn" ? "dispute" : "dispute_reversal",
     currency: input.currency,
-    gross: withdrawn ? -amount : amount,
-    fee: withdrawn ? fee : -fee,
+    gross,
+    fee: entryFee,
     guestBookingId: input.guestBookingId,
     paymentId: input.paymentId,
     livemode: input.livemode,
