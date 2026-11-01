@@ -114,7 +114,8 @@ export default function AccommodationViews({
         className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-3 ${tabs ? "mb-5" : "mb-9"}`}
       >
         {heading}
-        <div className="flex flex-wrap items-center gap-3">{controls}</div>
+        {/* Wrapped below the heading, they stay on the right from tablets up. */}
+        <div className="flex flex-wrap items-center gap-3 md:ml-auto">{controls}</div>
       </div>
       {tabs && <div className="mb-3 min-w-0 border-b border-gray-200">{tabs}</div>}
     </>

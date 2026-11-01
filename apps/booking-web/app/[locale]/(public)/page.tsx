@@ -751,14 +751,16 @@ function HomePageContent() {
     </>
   );
 
+  // On the heading's row the "≈" note takes a line of its own below it, so the sort stays
+  // centred on the title.
   const heading = (
-    <div className="min-w-0">
-      <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
+    <>
+      <h2 className="min-w-0 text-2xl md:text-3xl font-heading text-gray-900">
         {t("availableAccommodations")}
       </h2>
       {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
-      <ApproximateAmountsNote currency={hotel.currency} className="mt-2" />
-    </div>
+      <ApproximateAmountsNote currency={hotel.currency} className="order-last basis-full" />
+    </>
   );
 
   const heroImage = hotel.heroImage;
@@ -781,7 +783,8 @@ function HomePageContent() {
           <h1 className="text-5xl md:text-6xl lg:text-7xl font-heading italic text-white mb-4">
             {heroHeading}
           </h1>
-          <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed">
+          {/* The hero can be 400px: a long description stays clear of the search card. */}
+          <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed line-clamp-3">
             {heroSubtext}
           </p>
         </div>
