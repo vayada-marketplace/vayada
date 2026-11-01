@@ -21,6 +21,7 @@ import {
   roomPin,
   type MapPin,
 } from "./bookingLocationMap.js";
+import { readGuestRoomSorting } from "./bookingRoomSorting.js";
 
 type MediaServing = Pick<
   PlatformMediaServingConfig,
@@ -90,6 +91,8 @@ export function createPublicPricingOfferCatalog(
         // without it (VAY-2445): while it is off, only those rooms carry their place.
         const guestLocation = await readGuestLocation(client, propertyId);
         const locationMap = guestLocation?.enabled ? guestLocation.map : null;
+        // The hotel's Room Sorting (VAY-2449), read live; none while it uses the defaults.
+        const roomSorting = await readGuestRoomSorting(client, propertyId);
         const offeredRooms = new Map(offered.map((room) => [room.roomTypeId, room]));
         const rooms = [];
         // In the hotel's saved room order (Calendar → Reorder rooms, VAY-2315), read live like the
@@ -142,6 +145,8 @@ export function createPublicPricingOfferCatalog(
           ...(locationMap && { locationMap }),
           // Additive (VAY-2445): the property's place for the rooms' own details maps, whatever the switch says.
           ...(guestLocation && { detailsMap: guestLocation.map }),
+          // Additive (VAY-2449): only once the hotel saved its own Room Sorting.
+          ...(roomSorting && { roomSorting }),
         };
       } finally {
         try {

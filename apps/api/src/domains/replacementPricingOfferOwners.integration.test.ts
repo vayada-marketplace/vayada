@@ -125,6 +125,7 @@ import { createReplacementPricingStore } from "./replacementPricingStore.js";
 import { createReplacementPricingStorageGuard } from "./replacementPricingStorageGuard.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingRoomStay, publicPricingOfferBindings } from "./publicPricingRoomStay.js";
+import { DEFAULT_ROOM_SORTING } from "./bookingRoomSorting.js";
 type TermsSetup = (
   terms: Omit<ReplacementOfferTerms, "revision">,
 ) => Omit<ReplacementOfferTerms, "revision">;
@@ -6543,6 +6544,18 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
          WHERE property_id = $1`,
         [scope.propertyId],
       );
+      // VAY-2449: the hotel's Room Sorting, read live, reaches guests only once it saved its own.
+      expect(mapped).not.toHaveProperty("roomSorting");
+      await pool.query(
+        "UPDATE booking.booking_settings SET room_sorting = $2 WHERE property_id = $1",
+        [scope.propertyId, JSON.stringify({ ...DEFAULT_ROOM_SORTING, hideWithOneRoom: false })],
+      );
+      expect((await catalog.read(scope.propertyId))?.roomSorting).toEqual({
+        enabled: true,
+        hideWithOneRoom: false,
+        options: ["recommended", "priceLow", "priceHigh", "roomSize"],
+        defaultOption: "recommended",
+      });
       await pool.query("DELETE FROM booking.booking_settings WHERE property_id = $1", [
         scope.propertyId,
       ]);
