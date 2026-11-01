@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { EatAndDrink, Location } from "@/components/EatAndLocation";
 import { Footer } from "@/components/Footer";
+import { Gallery } from "@/components/Gallery";
 import { Hero } from "@/components/Hero";
 import { Intro } from "@/components/Intro";
+import { Reviews } from "@/components/Reviews";
+import { RoomCards, RoomDetails } from "@/components/Rooms";
 import { siteBySlug } from "@/sites";
 
 type Props = { params: Promise<{ site: string }> };
@@ -57,6 +61,12 @@ export default async function SitePage({ params }: Props) {
       <Hero site={site} />
       <main>
         <Intro site={site} />
+        <RoomCards site={site} />
+        <Gallery gallery={site.gallery} />
+        {site.reviews && <Reviews reviews={site.reviews} />}
+        <RoomDetails site={site} />
+        <EatAndDrink eat={site.eat} />
+        <Location site={site} />
       </main>
       <Footer site={site} />
     </>
