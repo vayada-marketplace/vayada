@@ -66,7 +66,6 @@ export default function GoogleMapsLinkField({
             if (event.key === "Enter") event.preventDefault();
           }}
           aria-describedby={`${inputId}-result`}
-          aria-invalid={result === null || result === "short_link" || undefined}
           className={`${classNames.input} pl-9`}
           placeholder="https://www.google.com/maps/place/…"
         />

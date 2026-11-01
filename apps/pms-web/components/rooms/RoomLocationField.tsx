@@ -589,7 +589,7 @@ export default function RoomLocationField({
                     mapUnavailable
                   ) : (
                     <PinMapFrame
-                      attempt={mapAttempt}
+                      key={mapAttempt}
                       apiKey={GOOGLE_MAPS_API_KEY}
                       latitude={value.latitude}
                       longitude={value.longitude}

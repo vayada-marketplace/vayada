@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isGoogleMapsShortLink, parseGoogleMapsLink } from "./googleMapsLink";
+import { parseGoogleMapsLink } from "./googleMapsLink";
 
 describe("parseGoogleMapsLink (VAY-2321, VAY-2444)", () => {
   it("reads the pin from a long Google Maps link, and knows a short one has none", () => {
@@ -33,9 +33,12 @@ describe("parseGoogleMapsLink (VAY-2321, VAY-2444)", () => {
     ).toEqual({ latitude: 5.95553, longitude: 80.71114 });
   });
 
-  it("tells short share links apart", () => {
-    expect(isGoogleMapsShortLink(" https://maps.app.goo.gl/xyz ")).toBe(true);
-    expect(isGoogleMapsShortLink("goo.gl/maps/xyz")).toBe(true);
-    expect(isGoogleMapsShortLink("https://www.google.com/maps/@1,2,3z")).toBe(false);
+  it("tells short share links apart, and rounds before checking the range", () => {
+    expect(parseGoogleMapsLink(" https://maps.app.goo.gl/xyz ")).toBe("short_link");
+    expect(parseGoogleMapsLink("goo.gl/maps/xyz")).toBe("short_link");
+    expect(parseGoogleMapsLink("https://www.google.com/maps/@90.0000004,11.5,15z")).toEqual({
+      latitude: 90,
+      longitude: 11.5,
+    });
   });
 });

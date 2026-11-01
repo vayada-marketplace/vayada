@@ -27,8 +27,9 @@ export type PinMapFrameMessages = {
 const mapButtonClass = "rounded-lg bg-white shadow-[0_1px_4px_rgb(0_0_0_/_20%)]";
 
 /** The pin editor's map (VAY-2321), shared by the PMS room editor and onboarding (VAY-2444): a draggable pin,
- * click to place, Map/Satellite, Recenter, and a grey reference pin. It fills its parent, which sets the size and
- * shows what to do when the map can't load. */
+ * click to place, Map/Satellite, Recenter, and a grey reference pin. It fills its parent, which must be
+ * `relative` (the controls sit on top of the map), sets the size and shows what to do when the map can't load.
+ * Give it a new `key` to load the map again after a failure. */
 export default function PinMapFrame({
   apiKey,
   latitude,
@@ -40,7 +41,6 @@ export default function PinMapFrame({
   reference = null,
   area = false,
   focus = null,
-  attempt = 0,
 }: {
   apiKey: string;
   latitude: number | null;
@@ -54,8 +54,6 @@ export default function PinMapFrame({
   area?: boolean;
   /** Where the map opens while there is no pin. */
   focus?: MapPosition | null;
-  /** Bumped to load the map again after it failed. */
-  attempt?: number;
 }) {
   const [mapType, setMapType] = useState<MapType>("roadmap");
   const [recenter, setRecenter] = useState(0);
@@ -63,7 +61,6 @@ export default function PinMapFrame({
   return (
     <>
       <GoogleAddressMap
-        key={attempt}
         active
         apiKey={apiKey}
         latitude={latitude}

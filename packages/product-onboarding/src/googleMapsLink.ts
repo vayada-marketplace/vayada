@@ -3,8 +3,8 @@ export type MapsLinkPin = { latitude: number; longitude: number };
 
 const NUMBER = String.raw`(-?\d{1,3}(?:\.\d+)?)`;
 
-/** Whether the text is a Google Maps short share link (maps.app.goo.gl, goo.gl/maps), which carries no coordinates. */
-export function isGoogleMapsShortLink(text: string): boolean {
+/** A Google Maps short share link (maps.app.goo.gl, goo.gl/maps), which carries no coordinates. */
+function isGoogleMapsShortLink(text: string): boolean {
   return /^(https?:\/\/)?(maps\.app\.goo\.gl|goo\.gl\/maps)\//i.test(text.trim());
 }
 
@@ -28,11 +28,10 @@ export function parseGoogleMapsLink(text: string): MapsLinkPin | "short_link" | 
     ) ??
     decoded.match(new RegExp(String.raw`@${NUMBER},${NUMBER}`));
   if (!match) return null;
-  const latitude = Number(match[1]);
-  const longitude = Number(match[2]);
-  return Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180
-    ? { latitude: roundCoordinate(latitude), longitude: roundCoordinate(longitude) }
-    : null;
+  // Rounded first, then checked, as the room editor's coordinate fields do.
+  const latitude = roundCoordinate(Number(match[1]));
+  const longitude = roundCoordinate(Number(match[2]));
+  return Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 ? { latitude, longitude } : null;
 }
 
 /** Six decimals is about 10 cm, as the room editor stores a pin. */
