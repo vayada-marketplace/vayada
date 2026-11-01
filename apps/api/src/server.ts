@@ -708,6 +708,7 @@ const financeRepository =
         connectionString: targetDatabaseUrl,
         stripeConnectProvider,
         afterPaymentChange,
+        vayadaPaymentEnabled: config.vayadaPaymentEnabled,
       })
     : undefined;
 

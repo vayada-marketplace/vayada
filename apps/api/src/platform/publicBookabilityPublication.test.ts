@@ -128,7 +128,9 @@ describe("target public bookability publication", () => {
       "'refundWindowDays', input.finance_refund_policy -> 'refundWindowDays'",
     );
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).not.toContain("'USD'");
-    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("finance.online_card_readiness");
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
+      "finance.online_card_readiness_by_provider",
+    );
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("input.finance_online_card_ready");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).not.toContain(
       "payment_provider_onboarding_status = 'completed'",

@@ -153,17 +153,15 @@ export function resolveFinanceOnlineCardReadiness(
     return "provider_restricted";
   }
   if (
-    account.provider !== "stripe" ||
     account.accountScope !== "property" ||
     !account.providerBindingActive ||
     account.status !== "active" ||
     account.onboardingStatus !== "completed" ||
     !account.chargesEnabled ||
     !account.payoutsEnabled ||
-    !account.detailsSubmitted ||
-    account.cardPaymentsStatus !== "active" ||
     !account.capabilities.includes("card_payments") ||
-    account.cardCapabilityRevision < 1
+    account.cardCapabilityRevision < 1 ||
+    !providerCardRequirementsMet(account)
   ) {
     return "provider_capability_lost";
   }
@@ -175,6 +173,18 @@ export function resolveFinanceOnlineCardReadiness(
     evidence.revokedAt === null
     ? "ready"
     : "execution_unavailable";
+}
+
+/** What each provider adds to the shared account checks above. Stripe Connect: the hotel's own
+ * Stripe account, with Stripe's verification. vayada Payment (VAY-2442): the charge runs on
+ * Vayada's Stripe account, so the hotel's side is its saved payout account (payouts on) and the
+ * `vayada:<property>` binding the caller reports as active. */
+function providerCardRequirementsMet(
+  account: NonNullable<FinanceOnlineCardReadinessEvidence["providerAccount"]>,
+): boolean {
+  if (account.provider === "stripe")
+    return account.detailsSubmitted && account.cardPaymentsStatus === "active";
+  return account.provider === "vayada";
 }
 
 function providerAccount(

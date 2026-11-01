@@ -128,7 +128,7 @@ SELECT
     ELSE 'default'
   END AS "guestTerms",
   COALESCE(
-    (SELECT readiness.online_card_ready FROM finance.online_card_readiness readiness
+    (SELECT readiness.online_card_ready FROM finance.online_card_readiness_by_provider readiness
      WHERE readiness.property_id = property.id),
     FALSE
   ) AS "onlineCardReady",

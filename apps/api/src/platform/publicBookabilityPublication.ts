@@ -413,7 +413,7 @@ export const PROJECT_PUBLIC_BOOKABILITY_PROFILE = `
     FROM hotel_catalog.property_public_profile_read_model profile
     LEFT JOIN booking.booking_settings settings ON settings.property_id = profile.property_id
     LEFT JOIN finance.payment_settings finance ON finance.property_id = profile.property_id
-    LEFT JOIN finance.online_card_readiness online_card
+    LEFT JOIN finance.online_card_readiness_by_provider online_card
       ON online_card.property_id = profile.property_id
     LEFT JOIN hotel_catalog.property_locations location ON location.property_id = profile.property_id
     LEFT JOIN LATERAL (

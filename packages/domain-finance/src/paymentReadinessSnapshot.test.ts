@@ -144,6 +144,53 @@ describe("Finance payment readiness derivation", () => {
     );
   });
 
+  it("reads vayada Payment as ready only with payouts on, its own binding and Vayada's approval (VAY-2442)", () => {
+    const executionEvidence = {
+      contractVersion: "finance-online-card-execution-evidence.v1",
+      providerAccountId,
+      providerCapabilityRevision: 4,
+      propertyReadinessRevision: 8,
+      revokedAt: null,
+    };
+    // Vayada's own Stripe account: no Stripe verification fields on the hotel's side.
+    const vayada = {
+      ...onlineCardEvidence().providerAccount!,
+      provider: "vayada",
+      detailsSubmitted: false,
+      cardPaymentsStatus: null,
+    };
+    expect(
+      resolveFinanceOnlineCardReadiness(
+        onlineCardEvidence({ providerAccount: vayada, executionEvidence }),
+      ),
+    ).toBe("ready");
+    expect(resolveFinanceOnlineCardReadiness(onlineCardEvidence({ providerAccount: vayada }))).toBe(
+      "execution_unavailable",
+    );
+    for (const lost of [
+      { payoutsEnabled: false },
+      { providerBindingActive: false },
+      { chargesEnabled: false },
+      { capabilities: [] },
+      { provider: "xendit" },
+      { provider: "paypal" },
+    ])
+      expect(
+        resolveFinanceOnlineCardReadiness(
+          onlineCardEvidence({ providerAccount: { ...vayada, ...lost }, executionEvidence }),
+        ),
+      ).toBe("provider_capability_lost");
+    // Stripe still needs its own verification.
+    expect(
+      resolveFinanceOnlineCardReadiness(
+        onlineCardEvidence({
+          providerAccount: { ...onlineCardEvidence().providerAccount!, detailsSubmitted: false },
+          executionEvidence,
+        }),
+      ),
+    ).toBe("provider_capability_lost");
+  });
+
   it("rejects non-property and placeholder provider bindings", () => {
     const executionEvidence = {
       contractVersion: "finance-online-card-execution-evidence.v1",

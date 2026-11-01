@@ -1439,7 +1439,7 @@ describe("Booking Web public bootstrap parity", () => {
       "hotel_catalog.property_policy_summaries",
     );
     expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
-      "finance.online_card_readiness",
+      "finance.online_card_readiness_by_provider",
     );
     expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
       "upper(trim(fs.default_currency)) = upper(trim(bs.default_currency))",
