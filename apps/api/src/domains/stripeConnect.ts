@@ -50,11 +50,18 @@ export function createStripeConnectProvider(config: {
       }
       const error = object(payload["error"]);
       const message = text(error["message"]) ?? `Stripe failed (${response.status}).`;
-      // A definite refusal of the account's country (country_unsupported, country_code_invalid
-      // or a country param error), not an outage: retrying the same country can't succeed.
+      // VAY-2424: Stripe refusing a new account's country (country_unsupported,
+      // country_code_invalid, a country param error, or a refusal naming the country) is
+      // definite, not an outage. A key reused with other parameters is not such a refusal.
+      const country = path === "/accounts" ? fields.find(([key]) => key === "country")?.[1] : null;
       if (
         response.status === 400 &&
-        (text(error["param"]) === "country" || /^country_/.test(text(error["code"]) ?? ""))
+        country &&
+        text(error["type"]) !== "idempotency_error" &&
+        (text(error["param"]) === "country" ||
+          /^country_/.test(text(error["code"]) ?? "") ||
+          /\bcountr(y|ies)\b/i.test(message) ||
+          new RegExp(`\\b${country}\\b`).test(message))
       ) {
         throw new StripeConnectCountryUnsupportedError(message);
       }

@@ -877,8 +877,7 @@ describe("finance route contracts", () => {
       ok: false,
       statusCode: 400,
       code: "property_country_missing",
-      message:
-        "The hotel's address has no country. Add it under Location & surroundings, then connect Stripe.",
+      message: "The hotel's address has no country. Add it to the address, then connect Stripe.",
     });
     expect(provider.createAccountCount).toBe(0);
     expect(
@@ -900,7 +899,7 @@ describe("finance route contracts", () => {
       ok: false,
       statusCode: 400,
       code: "provider_country_unsupported",
-      message: "Stripe Connect isn't available for hotels in ID.",
+      message: "Stripe Connect isn't available in the hotel's country (ID).",
     });
     expect(provider.compensationCount).toBe(0);
     expect(
@@ -909,13 +908,40 @@ describe("finance route contracts", () => {
       ),
     ).toBe(false);
 
-    // The hotel fixes its address; the setup wizard's stable key asks Stripe again.
+    // The hotel fixes its address; the setup wizard's stable key asks Stripe again, under a
+    // Stripe key of its own (Stripe refuses one key with other parameters).
     target.countryCode = "AT";
     await expect(repository.createStripeProviderAccount!(command)).resolves.toMatchObject({
       ok: true,
       status: "created",
     });
     expect(provider.accountCountries).toEqual(["ID", "AT"]);
+    expect(provider.accountIdempotencyKeys[0]).toMatch(/:country:ID:v1$/);
+    expect(provider.accountIdempotencyKeys[1]).toMatch(/:country:AT:v1$/);
+  });
+
+  it("finishes an unconfirmed creation in the country it first asked for (VAY-2424)", async () => {
+    const provider = fakeStripeConnectProvider({ failCreateAttempts: 1 });
+    const target = targetStripeProviderAccountPool({ countryCode: "DE" });
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+    const command = stripePropertyTargetCommand({ idempotencyKey: "finance-stripe-country-retry" });
+
+    await expect(repository.createStripeProviderAccount!(command)).resolves.toMatchObject({
+      ok: false,
+      code: "provider_unavailable",
+    });
+    // Stripe may have opened the German account; the same key must find it, not open another.
+    target.countryCode = "AT";
+    await expect(repository.createStripeProviderAccount!(command)).resolves.toMatchObject({
+      ok: true,
+      status: "created",
+    });
+    expect(provider.accountCountries).toEqual(["DE", "DE"]);
+    expect([...new Set(provider.accountIdempotencyKeys)]).toHaveLength(1);
   });
 
   it("reclaims a stale in-progress Stripe creation with the same provider key", async () => {
@@ -3271,7 +3297,7 @@ function targetStripeProviderAccountPool(
       state.idempotency = {
         status: "in_progress",
         requestFingerprintHash: String(values?.[2]),
-        idempotencyMetadata: {},
+        idempotencyMetadata: JSON.parse(String(values?.[8] ?? "{}")) as Record<string, unknown>,
         lastSeenAt: new Date().toISOString(),
       };
       return {

@@ -397,7 +397,9 @@ The account opens in the hotel's address country
 (VAY-2424); a `country` in the body is ignored. Without an address country the
 command answers 400 `property_country_missing` before calling Stripe. When
 Stripe refuses that country it answers 400 `provider_country_unsupported`, and
-the same key may ask again once the address is fixed.
+the same key may ask again once the address is fixed: Stripe's own idempotency
+key names the country, so the corrected country gets a fresh one. A creation
+whose outcome Stripe never confirmed retries in the country it first asked for.
 
 ```ts
 type CreateStripePropertyAccountRequest = {

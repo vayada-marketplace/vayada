@@ -137,7 +137,13 @@ describe("Stripe Connect provider", () => {
     const answers: Array<{ status: number; error: Record<string, string> }> = [
       { status: 400, error: { code: "country_unsupported", message: "Not in ID." } },
       { status: 400, error: { param: "country", message: "Invalid country." } },
+      // A refusal that names the country without a code or param.
+      { status: 400, error: { message: "Connected accounts in ID cannot be created." } },
       { status: 400, error: { param: "email", message: "Invalid email." } },
+      {
+        status: 400,
+        error: { type: "idempotency_error", message: "Keys are for one country request." },
+      },
       { status: 500, error: { message: "Stripe is down." } },
     ];
     const provider = createStripeConnectProvider({
@@ -161,9 +167,12 @@ describe("Stripe Connect provider", () => {
 
     await expect(create()).rejects.toThrow(StripeConnectCountryUnsupportedError);
     await expect(create()).rejects.toThrow(StripeConnectCountryUnsupportedError);
+    await expect(create()).rejects.toThrow(StripeConnectCountryUnsupportedError);
     const email = await create().catch((error: unknown) => error);
     expect(email).not.toBeInstanceOf(StripeConnectCountryUnsupportedError);
     expect(email).toMatchObject({ message: "Invalid email." });
+    const reusedKey = await create().catch((error: unknown) => error);
+    expect(reusedKey).not.toBeInstanceOf(StripeConnectCountryUnsupportedError);
     const outage = await create().catch((error: unknown) => error);
     expect(outage).not.toBeInstanceOf(StripeConnectCountryUnsupportedError);
   });
