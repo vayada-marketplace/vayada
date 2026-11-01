@@ -271,7 +271,7 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
   };
   catalog({ rooms, roomSorting });
   expect((await getReplacementCatalog("hotel")).roomSorting).toEqual(roomSorting);
-  catalog({ rooms, roomSorting: { ...roomSorting, defaultOption: "capacity" } });
+  catalog({ rooms, roomSorting: { ...roomSorting, options: ["cheapest"] } });
   expect((await getReplacementCatalog("hotel")).roomSorting).toBeNull();
 });
 

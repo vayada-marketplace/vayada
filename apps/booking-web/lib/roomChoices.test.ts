@@ -6,7 +6,14 @@ import en from "../messages/en.json";
 import es from "../messages/es.json";
 import fr from "../messages/fr.json";
 import id from "../messages/id.json";
-import { choiceKeys, choiceSaving, choiceText, hotelToday, type SavingChoice } from "./roomChoices";
+import {
+  choiceKeys,
+  choiceSaving,
+  choiceText,
+  hotelToday,
+  roomSaving,
+  type SavingChoice,
+} from "./roomChoices";
 import type { PricingOffer } from "@/services/api/replacementOffers";
 
 function translator(locale: string, messages: unknown) {
@@ -255,5 +262,56 @@ describe("choiceSaving", () => {
     const shown = [choice("room_only", true, 100), choice("room_only", false, null)];
     expect(choiceSaving(shown[0]!, shown, shown)).toBeUndefined();
     expect(choiceSaving(shown[1]!, shown, shown)).toBeUndefined();
+  });
+});
+
+// VAY-2449 "Best deal first": the biggest saving the room's card shows.
+describe("roomSaving", () => {
+  const rate = (
+    key: string,
+    mealPlan: PricingOffer["mealPlan"],
+    cancellation: PricingOffer["cancellation"],
+  ): PricingOffer => ({ publicOfferKey: key, currency: "EUR", mealPlan, cancellation });
+  const priced = (key: string, totalMinor: string) => ({
+    publicOfferKey: key,
+    status: "priced" as const,
+    totalMinor,
+    currency: "EUR",
+    promoApplied: false,
+  });
+  const offers = [
+    rate("free", "room_only", free(3)),
+    rate("none", "room_only", { kind: "non_refundable" }),
+    rate("breakfast", "breakfast", { kind: "non_refundable" }),
+  ];
+
+  it("is the biggest saving of a no-refund rate on its meal's refundable rate", () => {
+    const prices = [priced("free", "20000"), priced("none", "17000"), priced("breakfast", "15000")];
+    expect(roomSaving(offers, prices, stay, t, now)).toBe(15);
+  });
+
+  it("compares with a passed free cancellation's price, which no longer has a saving itself", () => {
+    // Free until 30 days before arrival: passed on 14 Oct for a stay from 6 Nov.
+    const passed = [
+      rate("passed", "room_only", free(30)),
+      rate("none", "room_only", { kind: "non_refundable" }),
+    ];
+    expect(
+      roomSaving(passed, [priced("passed", "20000"), priced("none", "18000")], stay, t, now),
+    ).toBe(10);
+  });
+
+  it("is 0 without prices, or without a saving", () => {
+    expect(roomSaving(offers, null, stay, t, now)).toBe(0);
+    expect(roomSaving(offers.slice(0, 1), [priced("free", "20000")], stay, t, now)).toBe(0);
+    expect(
+      roomSaving(
+        offers,
+        [{ publicOfferKey: "free", status: "unpriced" }, priced("none", "17000")],
+        stay,
+        t,
+        now,
+      ),
+    ).toBe(0);
   });
 });

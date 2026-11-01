@@ -30,15 +30,23 @@ export const DEFAULT_ROOM_SORTING: RoomSorting = {
 const isSortKey = (value: unknown): value is RoomSortKey =>
   ROOM_SORT_KEYS.includes(value as RoomSortKey);
 
-/** The catalogue's `roomSorting`, or null (the defaults) when it is missing or doesn't read. */
+/** The catalogue's `roomSorting`, read leniently like next-api reads what it saved: options this page doesn't
+ * know are left out, missing switches take the defaults, and a default it can't show is the first option
+ * left. Null (the defaults) when it is missing or no option is left. */
 export function catalogRoomSorting(raw: unknown): RoomSorting | null {
-  if (!raw || typeof raw !== "object") return null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const { enabled, hideWithOneRoom, options, defaultOption } = raw as Record<string, unknown>;
-  if (typeof enabled !== "boolean" || typeof hideWithOneRoom !== "boolean") return null;
-  if (!Array.isArray(options) || !options.length || !options.every(isSortKey)) return null;
-  if (new Set(options).size !== options.length) return null;
-  if (!isSortKey(defaultOption) || !options.includes(defaultOption)) return null;
-  return { enabled, hideWithOneRoom, options, defaultOption };
+  const known = Array.isArray(options) ? [...new Set(options.filter(isSortKey))] : [];
+  if (!known.length) return null;
+  return {
+    enabled: typeof enabled === "boolean" ? enabled : DEFAULT_ROOM_SORTING.enabled,
+    hideWithOneRoom:
+      typeof hideWithOneRoom === "boolean" ? hideWithOneRoom : DEFAULT_ROOM_SORTING.hideWithOneRoom,
+    options: known,
+    defaultOption: known.includes(defaultOption as RoomSortKey)
+      ? (defaultOption as RoomSortKey)
+      : known[0]!,
+  };
 }
 
 /** The menu for the rooms on the page: the order they're in (the guest's pick while it is one of the

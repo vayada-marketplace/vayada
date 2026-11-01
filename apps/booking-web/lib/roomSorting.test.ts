@@ -23,17 +23,31 @@ describe("catalogRoomSorting", () => {
     });
   });
 
-  it("takes the defaults (null) for one that doesn't read", () => {
+  it("reads a later shape leniently, keeping what the hotel chose", () => {
+    expect(
+      catalogRoomSorting({
+        enabled: false,
+        future: 1,
+        options: ["cheapest", "priceLow", "priceLow", "capacity"],
+        defaultOption: "cheapest",
+      }),
+    ).toEqual({
+      enabled: false,
+      hideWithOneRoom: true,
+      options: ["priceLow", "capacity"],
+      defaultOption: "priceLow",
+    });
+  });
+
+  it("takes the defaults (null) when it is missing or no option is left", () => {
     for (const raw of [
       undefined,
       null,
       "on",
-      { ...custom, enabled: "yes" },
-      { ...custom, hideWithOneRoom: undefined },
+      [],
+      {},
       { ...custom, options: [] },
-      { ...custom, options: ["priceLow", "priceLow"] },
-      { ...custom, options: [...custom.options, "cheapest"] },
-      { ...custom, defaultOption: "roomSize" },
+      { ...custom, options: ["x"] },
     ])
       expect(catalogRoomSorting(raw), JSON.stringify(raw)).toBeNull();
   });

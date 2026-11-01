@@ -15,7 +15,7 @@ import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from 
 import { trackEvent } from "@/services/api/tracking";
 import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { hotelService } from "@/services/api/hotel";
-import { choiceKeys, choiceSaving, choiceText, type SavingChoice } from "@/lib/roomChoices";
+import { roomSaving } from "@/lib/roomChoices";
 import {
   DEFAULT_ROOM_SORTING,
   sortMenu,
@@ -411,8 +411,14 @@ function HomePageContent() {
   const sortOption = menu.order;
   const roomPrices = (room: PricingRoom) =>
     stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
+  // The prices a card shows: "Book for X + pick a 2nd room" prices a room too small for the whole
+  // party for the adults it takes (VAY-2393), and the sort follows them.
+  const shownPrices = (room: PricingRoom) => {
+    const prices = roomPrices(room);
+    return (!pickMode && adults > 1 ? prices?.part?.offers : undefined) ?? prices?.offers ?? null;
+  };
   const cheapest = (room: PricingRoom) => {
-    const totals = (roomPrices(room)?.offers ?? []).flatMap((offer) =>
+    const totals = (shownPrices(room) ?? []).flatMap((offer) =>
       offer.status === "priced" ? [quoteMoneyAmount(offer.totalMinor, offer.currency)] : [],
     );
     return totals.length ? Math.min(...totals) : null;
@@ -421,45 +427,6 @@ function HomePageContent() {
   const byPrice = (a: PricingRoom, b: PricingRoom, direction: 1 | -1) => {
     const [x, y] = [cheapest(a), cheapest(b)];
     return x === null || y === null ? Number(x === null) - Number(y === null) : (x - y) * direction;
-  };
-  // VAY-2449 "Best deal first": the biggest saving the room's card shows (VAY-2392's "-10%"), from the
-  // same choices: priced for this stay, a passed free cancellation hidden behind its meal's other choice.
-  const bestSaving = (room: PricingRoom) => {
-    const prices = roomPrices(room);
-    if (!prices) return 0;
-    const now = new Date(serverNow());
-    const stay = { checkIn, timezone: hotel.timezone, formatDate: (date: string) => date };
-    const keys = choiceKeys(room.offers, stay, now);
-    const all = room.offers.map((offer, index) => {
-      const text = choiceText(keys[index]!, stay, t, now);
-      const price = prices.offers.find((p) => p.publicOfferKey === offer.publicOfferKey);
-      return {
-        mealPlan: offer.mealPlan,
-        refundable: text.refundable,
-        cancellationPassed: text.cancellationPassed,
-        amount:
-          price?.status === "priced" ? quoteMoneyAmount(price.totalMinor, price.currency) : null,
-        unavailable: price?.status !== "priced" && price?.status !== "unpriced",
-      };
-    });
-    const shown: SavingChoice[] = all
-      .filter(
-        (choice) =>
-          !choice.cancellationPassed ||
-          !all.some(
-            (other) =>
-              other !== choice &&
-              !other.cancellationPassed &&
-              !other.unavailable &&
-              other.mealPlan === choice.mealPlan,
-          ),
-      )
-      .sort((a, b) =>
-        a.amount === null || b.amount === null
-          ? Number(a.amount === null) - Number(b.amount === null)
-          : a.amount - b.amount,
-      );
-    return Math.max(0, ...shown.map((choice) => choiceSaving(choice, shown, all) ?? 0));
   };
   // The group's other rooms (by number) that took a room type, for the room being chosen; all
   // of them while every room is chosen.
@@ -487,6 +454,22 @@ function HomePageContent() {
       return 3;
     return prices.roomCount === null ? 2 : 0;
   };
+  // VAY-2449 "Best deal first": the biggest saving each card shows, worked out once per render.
+  const savings =
+    sortOption === "bestDeal"
+      ? new Map(
+          (rooms ?? []).map((room) => [
+            room.roomTypeId,
+            roomSaving(
+              room.offers,
+              shownPrices(room),
+              { checkIn, timezone: hotel.timezone },
+              t,
+              new Date(serverNow()),
+            ),
+          ]),
+        )
+      : null;
   const shownRooms = [...(rooms ?? [])].sort(
     (a, b) =>
       pickOrder(a) - pickOrder(b) ||
@@ -499,7 +482,7 @@ function HomePageContent() {
             : sortOption === "capacity"
               ? (b.occupancy?.maxGuests ?? 0) - (a.occupancy?.maxGuests ?? 0)
               : sortOption === "bestDeal"
-                ? bestSaving(b) - bestSaving(a)
+                ? (savings?.get(b.roomTypeId) ?? 0) - (savings?.get(a.roomTypeId) ?? 0)
                 : 0),
   );
   // Rooms in several places (VAY-2324, VAY-2325): the cards say where each one is, and the guest can see them on
