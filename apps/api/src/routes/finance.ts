@@ -474,7 +474,7 @@ export async function registerFinanceRoutes(
         setupIncompletePaymentSettings(propertyId, new Date().toISOString());
       return {
         ...toFinancePaymentSettingsResponse(settings),
-        vayadaPayment: { available: options.repository.vayadaPaymentAvailable === true },
+        vayadaPayment: vayadaPaymentChoice(options.repository),
       } satisfies FinancePaymentSettingsResponse;
     },
   );
@@ -533,7 +533,7 @@ export async function registerFinanceRoutes(
 
       return {
         ...toFinancePaymentSettingsResponse(result.settings),
-        vayadaPayment: { available: options.repository.vayadaPaymentAvailable === true },
+        vayadaPayment: vayadaPaymentChoice(options.repository),
         commandMeta: result.commandMeta,
       } satisfies FinancePaymentSettingsPatchResponse;
     },
@@ -1193,6 +1193,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
   afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
   /** VAY-2442: VAYADA_PAYMENT_ENABLED. Off: vayada Payment can't be chosen or approved. */
   vayadaPaymentEnabled?: boolean;
+  /** VAY-2442: VAYADA_PAYMENT_FEE_PERCENT, shown to hotels choosing vayada Payment. */
+  vayadaPaymentFeePercent?: number;
 }): FinancePropertyReadRepository {
   const pool: FinancePropertySettingsReadPool =
     config.pool ??
@@ -1260,6 +1262,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
   return {
     ...onlineCardEvidenceWrites,
     vayadaPaymentAvailable: config.vayadaPaymentEnabled === true,
+    vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
     async getPaymentSettings(propertyId) {
       const row = await loadPaymentSettingsRow(pool, propertyId);
       return row ? toFinancePaymentSettingsReadModel(row) : null;
@@ -6724,4 +6727,15 @@ function invalidQuery(
     category: "validation",
     message,
   };
+}
+
+/** VAY-2442: whether a hotel can choose vayada Payment, and its fee then. */
+function vayadaPaymentChoice(repository: {
+  vayadaPaymentAvailable?: boolean;
+  vayadaPaymentFeePercent?: number;
+}): { available: boolean; feePercent?: number } {
+  const available = repository.vayadaPaymentAvailable === true;
+  return available && repository.vayadaPaymentFeePercent !== undefined
+    ? { available, feePercent: repository.vayadaPaymentFeePercent }
+    : { available };
 }
