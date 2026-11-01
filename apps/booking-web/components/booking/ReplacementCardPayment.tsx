@@ -30,6 +30,7 @@ export default function ReplacementCardPayment(props: {
     <StripeProvider
       clientSecret={props.required.payment.clientSecret}
       stripeAccountId={props.required.payment.stripeAccountId}
+      publishableKey={props.required.payment.publishableKey}
     >
       <CardForm {...props} />
     </StripeProvider>

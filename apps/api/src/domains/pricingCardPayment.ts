@@ -14,6 +14,7 @@ import {
   stripeAmountMinor,
   stripeApplicationFeeMinor,
 } from "./stripeMoney.js";
+import { isVayadaPaymentAccountRef } from "./vayadaPaymentStripe.js";
 
 type Current = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
 type Finance = NonNullable<Awaited<ReturnType<typeof lockFinancePricingAcceptanceTerms>>>;
@@ -74,7 +75,12 @@ export function pricingCardPaymentIdempotencyKey(propertyId: string, requestId: 
 /** After the card acceptance is stored (booking `pending_payment`): create the PaymentIntent for the amount due now on the
  * hotel's connected Stripe account and record it as `requires_action`. The Stripe call runs
  * inside the caller's transaction, as the legacy checkout does; a rollback leaves at most an
- * unconfirmed intent, and a retry (same request, same booking id) gets the same intent back. */
+ * unconfirmed intent, and a retry (same request, same booking id) gets the same intent back.
+ *
+ * vayada Payment (VAY-2442): a hotel bound as vayada:<property> is charged on Vayada's own Stripe
+ * account (the provider routes it) with no application fee; Vayada's fee is the plan's fee plus
+ * the vayada Payment fee, recorded on the payment and kept back from the hotel's payout. New
+ * charges need `vayada.enabled` (VAYADA_PAYMENT_ENABLED with its Stripe account). */
 export async function startPricingCardPayment(
   client: PoolClient,
   provider: StripeBookingPaymentProvider,
@@ -87,6 +93,7 @@ export async function startPricingCardPayment(
     requestId: string;
     occurredAt: string;
   },
+  vayada?: { enabled: boolean; feePercent: number },
 ): Promise<StripeBookingPaymentIntent> {
   const scope = await lockPublicPricingAuthority(client, input.slug);
   const quote = input.current.quote;
@@ -99,28 +106,35 @@ export async function startPricingCardPayment(
     return fail();
   const account = (
     await client.query(
-      `SELECT account.id,account.provider_account_id
+      `SELECT account.id,account.provider,account.provider_account_id
       FROM finance.payment_settings settings
       JOIN finance.payment_provider_accounts account
         ON account.id=settings.provider_account_id AND account.property_id=settings.property_id
       WHERE settings.property_id=$1 AND settings.payments_enabled
-        AND 'card'=ANY(settings.accepted_methods) AND account.provider='stripe'
+        AND 'card'=ANY(settings.accepted_methods)
+        AND (account.provider='stripe' OR (account.provider='vayada'
+          AND account.provider_account_id='vayada:'||account.property_id::text
+          AND account.status='active' AND account.charges_enabled AND account.payouts_enabled))
       FOR SHARE OF settings,account`,
       [scope.propertyId],
     )
   ).rows[0];
+  // vayada Payment: Vayada's own account takes any charge, so the hotel's side (payouts on, i.e.
+  // a saved payout account) is checked here, not left to Stripe as for a connected account.
+  const vayadaCharge =
+    account?.provider === "vayada" && isVayadaPaymentAccountRef(account.provider_account_id);
   if (
     !account ||
     typeof account.provider_account_id !== "string" ||
-    !account.provider_account_id.startsWith("acct_")
+    (vayadaCharge ? vayada?.enabled !== true : !account.provider_account_id.startsWith("acct_"))
   )
     return fail();
   const currency = quote.stay.currency;
   const amount = pricingMinorDecimal(quote.evidence.dueNowMinor, currency);
-  let amountMinor: number, feeMinor: number;
+  let amountMinor: number, planFeeMinor: number;
   try {
     amountMinor = stripeAmountMinor(amount, currency);
-    feeMinor = stripeApplicationFeeMinor(
+    planFeeMinor = stripeApplicationFeeMinor(
       amountMinor,
       input.finance.billingPlanSnapshot,
       input.finance.commissionTermsSnapshot.bookingEngineFeePercent,
@@ -128,6 +142,13 @@ export async function startPricingCardPayment(
   } catch {
     return fail();
   }
+  const vayadaFeePercent = vayadaCharge ? vayada!.feePercent : 0;
+  const vayadaFeeMinor = Math.round((amountMinor * vayadaFeePercent) / 100);
+  // Connect: Vayada's fee is Stripe's application fee. vayada Payment: the whole fee stays with
+  // Vayada, whose own account takes the charge, and the hotel is paid the rest.
+  const feeMinor = planFeeMinor + vayadaFeeMinor;
+  if (!Number.isSafeInteger(vayadaFeeMinor) || vayadaFeeMinor < 0 || feeMinor > amountMinor)
+    return fail();
   const idempotencyKey = pricingCardPaymentIdempotencyKey(scope.propertyId, input.requestId);
   // A request only authorises the card; the hotel's acceptance captures it.
   const captureMethod = quote.acceptanceMode === "request" ? "manual" : "automatic";
@@ -136,7 +157,7 @@ export async function startPricingCardPayment(
     bookingReference: input.publicReference,
     providerAccountRef: account.provider_account_id,
     amountMinor,
-    applicationFeeAmountMinor: feeMinor,
+    applicationFeeAmountMinor: vayadaCharge ? 0 : feeMinor,
     currency,
     captureMethod,
     idempotencyKey,
@@ -165,7 +186,11 @@ export async function startPricingCardPayment(
       stripeAmountDecimal(amountMinor - feeMinor, currency),
       currency,
       intent.paymentIntentId,
-      { contractVersion: "stripe-direct-charge.v1", status: "pending", currency },
+      {
+        contractVersion: vayadaCharge ? "vayada-payment-charge.v1" : "stripe-direct-charge.v1",
+        status: "pending",
+        currency,
+      },
       {
         providerStatus: intent.status,
         captureMethod,
@@ -177,9 +202,18 @@ export async function startPricingCardPayment(
           input.finance.billingPlanSnapshot === "commission"
             ? input.finance.commissionTermsSnapshot.bookingEngineFeePercent
             : 0,
-        chargeType: "direct",
-        applicationFeeAmount: stripeAmountDecimal(feeMinor, currency),
+        chargeType: vayadaCharge ? "vayada_payment" : "direct",
+        applicationFeeAmount: stripeAmountDecimal(vayadaCharge ? 0 : feeMinor, currency),
         applicationFeeCurrency: currency,
+        ...(vayadaCharge
+          ? {
+              platformFeeAmount: stripeAmountDecimal(planFeeMinor, currency),
+              vayadaPaymentFeePercent: vayadaFeePercent,
+              vayadaPaymentFeeAmount: stripeAmountDecimal(vayadaFeeMinor, currency),
+              // Only live-mode money is ever paid out to a hotel.
+              livemode: intent.livemode === true,
+            }
+          : {}),
         reconciliationStatus: "pending",
       },
       input.occurredAt,
@@ -285,12 +319,27 @@ export async function readPricingCardReplay(
     bookingId: replay.bookingId,
     bookingReference: replay.bookingReference,
     replayed: true as const,
-    payment: {
-      provider: "stripe" as const,
+    payment: pricingCardPaymentTarget(intent, {
       clientSecret: intent.clientSecret,
-      stripeAccountId: row.account,
-      paymentIntentId: row.intent,
-      expiresAt: row.deadline,
-    },
+      paymentIntentId: row.intent as string,
+      expiresAt: row.deadline as string,
+    }),
   };
+}
+
+/** What the booking page needs to take the payment: the hotel's connected account, or (vayada
+ * Payment, VAY-2442) no account and the publishable key of Vayada's own Stripe account. A Connect
+ * payment keeps exactly the shape booking pages already parse. */
+export function pricingCardPaymentTarget<T extends object>(
+  intent: Pick<StripeBookingPaymentIntent, "providerAccountRef" | "publishableKey">,
+  payment: T,
+) {
+  return isVayadaPaymentAccountRef(intent.providerAccountRef) && intent.publishableKey
+    ? {
+        provider: "stripe" as const,
+        ...payment,
+        stripeAccountId: null,
+        publishableKey: intent.publishableKey,
+      }
+    : { provider: "stripe" as const, ...payment, stripeAccountId: intent.providerAccountRef };
 }

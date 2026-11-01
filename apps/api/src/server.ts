@@ -224,6 +224,7 @@ import { createFinanceSubscriptionService } from "./domains/financeSubscriptionS
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createStripeFinanceSubscriptionProvider } from "./domains/stripeFinanceSubscriptions.js";
 import { createStripeBookingPaymentProvider } from "./domains/stripeBookingPayments.js";
+import { routeVayadaPaymentStripe } from "./domains/vayadaPaymentStripe.js";
 import { createStripeConnectProvider } from "./domains/stripeConnect.js";
 import { createPgBookingSetupLifecycleStatusRepository } from "./domains/bookingSetupLifecycleStatusRepository.js";
 import { createPropertySetupHotelCatalogStateProvider } from "./platform/propertySetupHotelCatalogState.js";
@@ -501,8 +502,20 @@ const bookingDashboardMetricsReadPort =
     ? createTargetBookingDashboardMetricsReadPort({ connectionString: targetDatabaseUrl })
     : undefined;
 
+// VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account
+// (test mode only); every other card payment goes through Stripe Connect as before.
 const stripeBookingPaymentProvider = config.stripeSubscriptions.secretKey
-  ? createStripeBookingPaymentProvider({ secretKey: config.stripeSubscriptions.secretKey })
+  ? routeVayadaPaymentStripe(
+      createStripeBookingPaymentProvider({ secretKey: config.stripeSubscriptions.secretKey }),
+      config.vayadaPaymentStripe
+        ? {
+            provider: createStripeBookingPaymentProvider({
+              secretKey: config.vayadaPaymentStripe.secretKey,
+            }),
+            publishableKey: config.vayadaPaymentStripe.publishableKey,
+          }
+        : undefined,
+    )
   : undefined;
 
 const bankTransferKms =
@@ -534,6 +547,10 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   externalChanges: externalBookingChanges,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
+  vayadaPayment: {
+    enabled: config.vayadaPaymentEnabled && config.vayadaPaymentStripe !== undefined,
+    feePercent: config.vayadaPaymentFeePercent,
+  },
   replacementPricingDepositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled,
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   replacementPricingManualPaymentAcceptanceEnabled:

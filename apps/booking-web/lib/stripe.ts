@@ -4,14 +4,21 @@ import { loadStripe } from "@stripe/stripe-js/pure";
 
 const stripeInstances = new Map<string, ReturnType<typeof loadStripe>>();
 
-export default function stripeForAccount(stripeAccountId?: string | null) {
-  const key = stripeAccountId || "platform";
+/** Stripe.js for a hotel's connected account, or (vayada Payment, VAY-2442) for the Stripe
+ * account whose publishable key the server sent with the payment. */
+export default function stripeForAccount(
+  stripeAccountId?: string | null,
+  publishableKey?: string | null,
+) {
+  const key = publishableKey ? `key:${publishableKey}` : stripeAccountId || "platform";
   const existing = stripeInstances.get(key);
   if (existing) return existing;
-  const stripe = loadStripe(
-    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
-    stripeAccountId ? { stripeAccount: stripeAccountId } : undefined,
-  );
+  const stripe = publishableKey
+    ? loadStripe(publishableKey)
+    : loadStripe(
+        process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
+        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined,
+      );
   stripeInstances.set(key, stripe);
   return stripe;
 }

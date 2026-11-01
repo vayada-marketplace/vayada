@@ -71,7 +71,10 @@ export type PricingCardPaymentRequired = Readonly<{
   payment: Readonly<{
     provider: "stripe";
     clientSecret: string;
-    stripeAccountId: string;
+    /** The hotel's connected account; null for vayada Payment, which charges on the Stripe
+     * account of `publishableKey` (VAY-2442). */
+    stripeAccountId: string | null;
+    publishableKey?: string;
     paymentIntentId: string;
     expiresAt: string;
   }>;
@@ -104,22 +107,27 @@ function parseCardPaymentRequired(
   )
     return null;
   const v = value as Record<string, unknown>;
-  const payment = v.payment;
+  const keys = ["provider", "clientSecret", "stripeAccountId", "paymentIntentId", "expiresAt"];
+  const payment =
+    exact(v.payment, keys) || exact(v.payment, [...keys, "publishableKey"]) ? v.payment : null;
+  if (!payment) return null;
+  // A hotel's connected account, or vayada Payment (VAY-2442): no account and the test-mode
+  // publishable key of the Stripe account that takes the payment.
+  const connect =
+    !("publishableKey" in payment) &&
+    typeof payment.stripeAccountId === "string" &&
+    /^acct_[A-Za-z0-9]+$/.test(payment.stripeAccountId);
+  const vayada =
+    payment.stripeAccountId === null &&
+    typeof payment.publishableKey === "string" &&
+    /^pk_test_[A-Za-z0-9]+$/.test(payment.publishableKey);
   if (
     !uuid(v.bookingId) ||
     !bookingReference(v.bookingReference) ||
-    !exact(payment, [
-      "provider",
-      "clientSecret",
-      "stripeAccountId",
-      "paymentIntentId",
-      "expiresAt",
-    ]) ||
+    !(connect || vayada) ||
     payment.provider !== "stripe" ||
     typeof payment.clientSecret !== "string" ||
     !/^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(payment.clientSecret) ||
-    typeof payment.stripeAccountId !== "string" ||
-    !/^acct_[A-Za-z0-9]+$/.test(payment.stripeAccountId) ||
     typeof payment.paymentIntentId !== "string" ||
     !payment.clientSecret.startsWith(`${payment.paymentIntentId}_secret_`) ||
     !iso(payment.expiresAt)
@@ -133,7 +141,8 @@ function parseCardPaymentRequired(
     payment: {
       provider: "stripe",
       clientSecret: payment.clientSecret,
-      stripeAccountId: payment.stripeAccountId,
+      stripeAccountId: connect ? (payment.stripeAccountId as string) : null,
+      ...(vayada ? { publishableKey: payment.publishableKey as string } : {}),
       paymentIntentId: payment.paymentIntentId,
       expiresAt: payment.expiresAt,
     },

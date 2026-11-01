@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { stripeCallAccountRef } from "./vayadaPaymentStripe.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 import { stripeAmountMinor } from "./stripeMoney.js";
 
@@ -99,7 +100,7 @@ export function createFinanceHostBookingPayments(
     )
       throw conflict();
     if (!input.apply) return "authorization_void";
-    const account = payment.chargeType === "direct" ? payment.accountRef : null;
+    const account = stripeCallAccountRef(payment.chargeType, payment.accountRef);
     const assertBinding = (intent: Awaited<ReturnType<typeof provider.retrievePaymentIntent>>) => {
       if (
         intent.paymentIntentId !== payment.intentId ||

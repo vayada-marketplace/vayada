@@ -316,6 +316,40 @@ it("returns a card payment step and confirms it with the same request key", asyn
   ).rejects.toThrow("confirmation could not be verified");
 });
 
+it("takes a vayada Payment card step: no connected account, the test-mode key it is paid with (VAY-2442)", async () => {
+  const card = { ...quote, paymentMethod: "card", dueNowMinor: "20600", dueLaterMinor: "0" };
+  const payment = {
+    provider: "stripe",
+    clientSecret: "pi_123_secret_456",
+    stripeAccountId: null,
+    publishableKey: "pk_test_vayada123",
+    paymentIntentId: "pi_123",
+    expiresAt: "2026-09-14T12:31:00.000Z",
+  };
+  const required = {
+    kind: "payment_required",
+    bookingId: fresh.bookingId,
+    bookingReference: fresh.bookingReference,
+    acceptanceId: fresh.acceptanceId,
+    acceptedAt: fresh.acceptedAt,
+    payment,
+  };
+  fetcher.mockResolvedValueOnce(new Response(JSON.stringify(required)));
+  await expect(
+    acceptPricingQuote("hotel", card as PublicBookingQuote, disclosure, guest),
+  ).resolves.toMatchObject({ kind: "payment_required", payment });
+  for (const invalid of [
+    { ...payment, publishableKey: "pk_live_vayada123" },
+    { ...payment, stripeAccountId: "acct_789" },
+    { ...payment, publishableKey: undefined },
+  ]) {
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...required, payment: invalid })));
+    await expect(
+      acceptPricingQuote("hotel", card as PublicBookingQuote, disclosure, guest),
+    ).rejects.toThrow("confirmation could not be verified");
+  }
+});
+
 it("reads a card request's authorisation as a request waiting for the hotel", async () => {
   fetcher.mockResolvedValueOnce(
     new Response(

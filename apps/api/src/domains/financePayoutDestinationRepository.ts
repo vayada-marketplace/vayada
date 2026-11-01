@@ -5,6 +5,10 @@ import type {
   PayoutDestinationDetails,
 } from "./financePayoutDestinationCodec.js";
 import { recordBankTransferAudit } from "./financeBankTransferRepository.js";
+import {
+  applyFinanceOnlineCardReadinessLoss,
+  loadFinanceOnlineCardReadinessState,
+} from "./financeOnlineCardReadinessTransition.js";
 
 type Codec = Pick<ReturnType<typeof createPayoutDestinationCodec>, "encrypt">;
 export type PayoutDestinationSummary = {
@@ -139,7 +143,21 @@ export function createPayoutDestinationRepository(
             [id],
           );
         }
+        const cardBefore = await loadFinanceOnlineCardReadinessState(client, command.propertyId);
         await syncVayadaProviderAccount(client, command.propertyId, command.action === "replace");
+        // Removing the account turns payouts off, so a card-ready hotel stops taking card at once:
+        // the readiness-loss event, and card off its published booking page (VAY-2442 P3).
+        await applyFinanceOnlineCardReadinessLoss(client, {
+          propertyId: command.propertyId,
+          previous: cardBefore,
+          context: {
+            occurredAt: new Date().toISOString(),
+            actorType: "user",
+            actorUserId: command.actorId,
+            correlationId: command.commandId,
+            causationId: `payout-destination:${command.commandId}`,
+          },
+        });
         const summary = (await read(command.propertyId, client))!;
         await recordBankTransferAudit(client, {
           propertyId: command.propertyId,
@@ -187,7 +205,6 @@ async function syncVayadaProviderAccount(
   propertyId: string,
   payoutsEnabled: boolean,
 ) {
-  const reference = `vayada:${propertyId}`;
   const existing = (
     await client.query<{ id: string }>(
       `SELECT id::text FROM finance.payment_provider_accounts
@@ -199,12 +216,14 @@ async function syncVayadaProviderAccount(
     )
   ).rows[0];
   if (existing) {
+    // Built from the stored id, so it reads like the readiness view's 'vayada:'||property_id.
     await client.query(
       `UPDATE finance.payment_provider_accounts
-       SET provider_account_id=$2, payouts_enabled=$3, updated_at=now()
+       SET provider_account_id='vayada:'||property_id::text, payouts_enabled=$2, updated_at=now()
        WHERE id=$1::uuid
-         AND (provider_account_id IS DISTINCT FROM $2 OR payouts_enabled IS DISTINCT FROM $3)`,
-      [existing.id, reference, payoutsEnabled],
+         AND (provider_account_id IS DISTINCT FROM 'vayada:'||property_id::text
+           OR payouts_enabled IS DISTINCT FROM $2)`,
+      [existing.id, payoutsEnabled],
     );
     return;
   }
@@ -213,11 +232,11 @@ async function syncVayadaProviderAccount(
        property_id, account_scope, provider, provider_account_id, status, onboarding_status,
        charges_enabled, payouts_enabled, default_currency, capabilities, card_capability_revision,
        account_metadata)
-     SELECT $1::uuid, 'property', 'vayada', $2, 'active', 'completed', TRUE, $3,
+     SELECT $1::uuid, 'property', 'vayada', 'vayada:'||$1::uuid::text, 'active', 'completed', TRUE, $2,
        COALESCE(
          (SELECT default_currency FROM finance.payment_settings WHERE property_id=$1::uuid),
          (SELECT currency FROM pms.property_pricing_settings WHERE property_id=$1::uuid)),
        ARRAY['card_payments']::text[], 1, '{"source":"payout_destination"}'::jsonb`,
-    [propertyId, reference, payoutsEnabled],
+    [propertyId, payoutsEnabled],
   );
 }

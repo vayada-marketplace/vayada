@@ -19,6 +19,8 @@ import {
 } from "./pricingCardPaymentCompletion.js";
 import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { createStripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { stripeAmountDecimal, stripeAmountMinor } from "./stripeMoney.js";
+import { routeVayadaPaymentStripe } from "./vayadaPaymentStripe.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
 import { calculateReplacementFixedCharges } from "./replacementFixedCharges.js";
@@ -408,6 +410,150 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           )
         ).rows[0].n,
       ).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("charges a vayada Payment hotel on Vayada's own Stripe account and owes it the rest (VAY-2442)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    try {
+      // The hotel saved a payout account (P1): its provider account is bound as vayada:<property>.
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const connect = {
+        createPaymentIntent: vi.fn(),
+        retrievePaymentIntent: vi.fn(),
+        cancelPaymentIntent: vi.fn(),
+      };
+      const own = { createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent: vi.fn() };
+      const provider = routeVayadaPaymentStripe(connect as never, {
+        provider: own as never,
+        publishableKey: "pk_test_writer",
+      });
+
+      // While VAYADA_PAYMENT_ENABLED is off, nothing is charged and nothing is kept.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, {
+          provider,
+          vayada: { enabled: false, feePercent: 6 },
+        }),
+      ).rejects.toMatchObject({ code: "conflict" });
+      expect(createPaymentIntent).not.toHaveBeenCalled();
+      expect((await snapshot(fixture.observer, fixture)).bookings).toBe(0);
+
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { enabled: true, feePercent: 6 },
+      });
+      expect(result).toMatchObject({
+        kind: "payment_required",
+        payment: {
+          provider: "stripe",
+          stripeAccountId: null,
+          publishableKey: "pk_test_writer",
+          paymentIntentId: "pi_writer_test",
+        },
+      });
+      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ providerAccountRef: null, applicationFeeAmountMinor: 0 }),
+      );
+      for (const fn of Object.values(connect)) expect(fn).not.toHaveBeenCalled();
+      const payment = (
+        await fixture.observer.query(
+          `SELECT id,amount::text,fee_amount::text,net_amount::text,payment_metadata AS meta
+           FROM finance.payments WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      const percent = Number(fixture.f.finance.commissionTermsSnapshot.bookingEngineFeePercent);
+      const planFee = Math.round((amountMinor * percent) / 100);
+      const vayadaFee = Math.round((amountMinor * 6) / 100);
+      const currency = fixture.f.current.quote.stay.currency;
+      expect(stripeAmountMinor(payment.fee_amount, currency)).toBe(planFee + vayadaFee);
+      expect(stripeAmountMinor(payment.net_amount, currency)).toBe(
+        amountMinor - planFee - vayadaFee,
+      );
+      expect(payment.meta).toMatchObject({
+        chargeType: "vayada_payment",
+        applicationFeeAmount: stripeAmountDecimal(0, currency),
+        vayadaPaymentFeePercent: 6,
+        vayadaPaymentFeeAmount: stripeAmountDecimal(vayadaFee, currency),
+        platformFeeAmount: stripeAmountDecimal(planFee, currency),
+      });
+
+      // A replay answers with the same payment, still on Vayada's account.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, {
+          provider,
+          vayada: { enabled: true, feePercent: 6 },
+        }),
+      ).resolves.toMatchObject({
+        replayed: true,
+        payment: { stripeAccountId: null, publishableKey: "pk_test_writer" },
+      });
+      expect(retrievePaymentIntent).toHaveBeenLastCalledWith("pi_writer_test", null);
+
+      const reference = (result as { bookingReference: string }).bookingReference;
+      const intent = await createPaymentIntent({ amountMinor, currency });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: reference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      const ledger = (
+        await fixture.observer.query(
+          `SELECT entry_kind,currency,gross_minor::int AS gross,fee_minor::int AS fee,net_minor::int AS net,livemode,
+             payment_id::text,stay_check_out::text = (SELECT check_out::text FROM booking.guest_bookings
+               WHERE property_id=$1) AS check_out,source_key
+           FROM finance.hotel_payout_ledger WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(ledger).toEqual([
+        {
+          entry_kind: "charge",
+          currency,
+          gross: amountMinor,
+          fee: planFee + vayadaFee,
+          net: amountMinor - planFee - vayadaFee,
+          payment_id: payment.id,
+          // The fake intent says nothing about livemode: never counted as real money.
+          livemode: false,
+          check_out: true,
+          source_key: `charge:${payment.id}`,
+        },
+      ]);
+      // The ledger is append-only, and a charge counts once.
+      await expect(
+        fixture.observer.query(
+          "UPDATE finance.hotel_payout_ledger SET net_minor=0 WHERE property_id=$1",
+          [fixture.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "55000" });
+      await expect(
+        fixture.observer.query(
+          `INSERT INTO finance.hotel_payout_ledger (property_id,entry_kind,currency,gross_minor,fee_minor,
+             net_minor,guest_booking_id,payment_id,stay_check_out,livemode,source_key,occurred_at)
+           SELECT property_id,entry_kind,currency,gross_minor,fee_minor,net_minor,guest_booking_id,
+             payment_id,stay_check_out,livemode,'charge-again',now() FROM finance.hotel_payout_ledger
+           WHERE property_id=$1`,
+          [fixture.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
     } finally {
       await fixture.close();
     }
@@ -1755,19 +1901,41 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   });
 
   // An authorised pricing-v2 card request, as the guest's confirm call leaves it.
-  async function authorisedCardRequest() {
+  /** `vayada`: the hotel is on vayada Payment (VAY-2442), so its payment runs on Vayada's own
+   * Stripe account through the router, and `connect` must never be called. */
+  async function authorisedCardRequest(vayada = false) {
     const card = await cardFixture(undefined, undefined, "request");
     const capturePaymentIntent = vi.fn();
-    const provider = {
+    const own = {
       createPaymentIntent: card.createPaymentIntent,
       retrievePaymentIntent: card.retrievePaymentIntent,
       cancelPaymentIntent: card.cancelPaymentIntent,
       capturePaymentIntent,
-    } as never;
+    };
+    const connect = {
+      createPaymentIntent: vi.fn(),
+      retrievePaymentIntent: vi.fn(),
+      cancelPaymentIntent: vi.fn(),
+      capturePaymentIntent: vi.fn(),
+    };
+    if (vayada)
+      await card.fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text WHERE property_id=$1`,
+        [card.fixture.propertyId],
+      );
+    const provider = (
+      vayada
+        ? routeVayadaPaymentStripe(connect as never, {
+            provider: own as never,
+            publishableKey: "pk_test_writer",
+          })
+        : own
+    ) as never;
     const accepted = (await writePricingAcceptance(
       card.fixture.pool,
       card.fixture.input,
-      { provider },
+      { provider, ...(vayada ? { vayada: { enabled: true, feePercent: 6 } } : {}) },
       true,
     )) as { bookingId: string; bookingReference: string };
     const intent = {
@@ -1800,6 +1968,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     return {
       ...card,
       provider,
+      connect,
       capturePaymentIntent,
       accepted,
       intent,
@@ -1873,101 +2042,127 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
-  it("voids the hold and releases the rooms when the hotel declines a card request", async () => {
-    const card = await authorisedCardRequest();
-    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
-    const released: unknown[] = [];
-    const actions = createBookingHostActions({
-      pool: hostPool,
-      guards: {
-        ...targetBookingHostActionGuards,
-        payment: createFinanceHostBookingPayments(card.provider),
-      },
-      inventory: {
-        reserve: async () => null,
-        async release({ reservation }) {
-          released.push(reservation);
+  it.each([
+    ["", false],
+    [" (vayada Payment, on Vayada's own Stripe account, VAY-2442)", true],
+  ])(
+    "voids the hold and releases the rooms when the hotel declines a card request%s",
+    async (_, vayada) => {
+      const card = await authorisedCardRequest(vayada);
+      const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+      const released: unknown[] = [];
+      const actions = createBookingHostActions({
+        pool: hostPool,
+        guards: {
+          ...targetBookingHostActionGuards,
+          payment: createFinanceHostBookingPayments(card.provider),
         },
-      },
-    });
-    try {
-      card.cancelPaymentIntent.mockResolvedValue({ ...card.intent, status: "canceled" });
-      const scope = {
-        propertyId: card.fixture.propertyId,
-        bookingId: card.accepted.bookingId,
-        actorUserId: card.hotelUser,
-      };
-      const preview = await actions.preview(scope, { action: "reject", reason: "Fully booked" });
-      await expect(actions.apply(scope, preview.previewId, "decline-card")).resolves.toEqual({
-        bookingId: card.accepted.bookingId,
-        lifecycleStatus: "declined",
-      });
-      expect(card.cancelPaymentIntent).toHaveBeenCalledOnce();
-      expect(card.capturePaymentIntent).not.toHaveBeenCalled();
-      expect(released).toHaveLength(1);
-      expect(await card.status()).toEqual({
-        lifecycle_status: "declined",
-        payment_status: "failed",
-        payment: "canceled",
-      });
-    } finally {
-      await actions.close();
-      await hostPool.end().catch(() => undefined);
-      await card.fixture.close();
-    }
-  });
-
-  it("cancels the hold and releases the rooms when the hotel lets a card request expire", async () => {
-    const card = await authorisedCardRequest();
-    const sweepPool = new pg.Pool({ connectionString: url, max: 2 });
-    const released: unknown[] = [];
-    const store = createPgBookingLifecycleStore({
-      connectionString: url!,
-      pool: sweepPool,
-      stripePaymentProvider: card.provider,
-      inventoryReservationPort: {
-        reserve: async () => null,
-        async release({ reservation }) {
-          released.push(reservation);
+        inventory: {
+          reserve: async () => null,
+          async release({ reservation }) {
+            released.push(reservation);
+          },
         },
-      },
-    });
-    try {
-      await card.fixture.observer.query(
-        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
-        [card.fixture.propertyId],
-      );
-      card.cancelPaymentIntent.mockResolvedValue({ ...card.intent, status: "canceled" });
-      const deadline = Date.parse(card.authorized.hostResponseDeadlineAt);
-      const sweep = (now: number) =>
-        runBookingLifecycleSchedulerJobs(store, {
-          now: new Date(now),
-          run: ["pendingBookingExpiry"],
+      });
+      try {
+        card.cancelPaymentIntent.mockResolvedValue({ ...card.intent, status: "canceled" });
+        const scope = {
+          propertyId: card.fixture.propertyId,
+          bookingId: card.accepted.bookingId,
+          actorUserId: card.hotelUser,
+        };
+        const preview = await actions.preview(scope, { action: "reject", reason: "Fully booked" });
+        await expect(actions.apply(scope, preview.previewId, "decline-card")).resolves.toEqual({
+          bookingId: card.accepted.bookingId,
+          lifecycleStatus: "declined",
         });
-      await sweep(deadline - 60_000);
-      expect(card.cancelPaymentIntent).not.toHaveBeenCalled();
-      const run = await sweep(deadline + 1_000);
-      expect(run.failed).toBe(0);
-      expect(card.cancelPaymentIntent).toHaveBeenCalledOnce();
-      expect(released).toHaveLength(1);
-      expect(await card.status()).toMatchObject({
-        lifecycle_status: "expired",
-        payment: "canceled",
+        expect(card.cancelPaymentIntent).toHaveBeenCalledOnce();
+        if (vayada)
+          expect(card.cancelPaymentIntent).toHaveBeenCalledWith(
+            card.intent.paymentIntentId,
+            null,
+            expect.any(String),
+          );
+        for (const fn of Object.values(card.connect)) expect(fn).not.toHaveBeenCalled();
+        expect(card.capturePaymentIntent).not.toHaveBeenCalled();
+        expect(released).toHaveLength(1);
+        expect(await card.status()).toEqual({
+          lifecycle_status: "declined",
+          payment_status: "failed",
+          payment: "canceled",
+        });
+      } finally {
+        await actions.close();
+        await hostPool.end().catch(() => undefined);
+        await card.fixture.close();
+      }
+    },
+  );
+
+  it.each([
+    ["", false],
+    [" (vayada Payment, on Vayada's own Stripe account, VAY-2442)", true],
+  ])(
+    "cancels the hold and releases the rooms when the hotel lets a card request expire%s",
+    async (_, vayada) => {
+      const card = await authorisedCardRequest(vayada);
+      const sweepPool = new pg.Pool({ connectionString: url, max: 2 });
+      const released: unknown[] = [];
+      const store = createPgBookingLifecycleStore({
+        connectionString: url!,
+        pool: sweepPool,
+        stripePaymentProvider: card.provider,
+        inventoryReservationPort: {
+          reserve: async () => null,
+          async release({ reservation }) {
+            released.push(reservation);
+          },
+        },
       });
-      const jobs = (
+      try {
         await card.fixture.observer.query(
-          "SELECT job_type FROM platform.jobs WHERE property_id=$1",
+          "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
           [card.fixture.propertyId],
-        )
-      ).rows.map((row) => row.job_type);
-      expect(jobs).toContain("email.booking-expired");
-      expect(card.capturePaymentIntent).not.toHaveBeenCalled();
-    } finally {
-      await store.close();
-      await sweepPool.end().catch(() => undefined);
-      await card.fixture.close();
-    }
-  });
+        );
+        card.cancelPaymentIntent.mockResolvedValue({ ...card.intent, status: "canceled" });
+        const deadline = Date.parse(card.authorized.hostResponseDeadlineAt);
+        const sweep = (now: number) =>
+          runBookingLifecycleSchedulerJobs(store, {
+            now: new Date(now),
+            run: ["pendingBookingExpiry"],
+          });
+        await sweep(deadline - 60_000);
+        expect(card.cancelPaymentIntent).not.toHaveBeenCalled();
+        const run = await sweep(deadline + 1_000);
+        expect(run.failed).toBe(0);
+        expect(card.cancelPaymentIntent).toHaveBeenCalledOnce();
+        if (vayada)
+          expect(card.cancelPaymentIntent).toHaveBeenCalledWith(
+            card.intent.paymentIntentId,
+            null,
+            expect.any(String),
+          );
+        for (const fn of Object.values(card.connect)) expect(fn).not.toHaveBeenCalled();
+        expect(released).toHaveLength(1);
+        expect(await card.status()).toMatchObject({
+          lifecycle_status: "expired",
+          payment: "canceled",
+        });
+        const jobs = (
+          await card.fixture.observer.query(
+            "SELECT job_type FROM platform.jobs WHERE property_id=$1",
+            [card.fixture.propertyId],
+          )
+        ).rows.map((row) => row.job_type);
+        expect(jobs).toContain("email.booking-expired");
+        expect(card.capturePaymentIntent).not.toHaveBeenCalled();
+      } finally {
+        await store.close();
+        await sweepPool.end().catch(() => undefined);
+        await card.fixture.close();
+      }
+    },
+  );
 
   it("confirms a card request Stripe captured outside the hotel's accept", async () => {
     const card = await authorisedCardRequest();

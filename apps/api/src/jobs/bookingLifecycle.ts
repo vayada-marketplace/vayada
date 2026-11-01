@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { stripeCallAccountRef } from "../domains/vayadaPaymentStripe.js";
 import pg from "pg";
 
 import type { StripeBookingPaymentProvider } from "../domains/stripeBookingPayments.js";
@@ -840,7 +841,7 @@ function assertLifecycleStripeBinding(
 }
 
 function stripeAccountRef(candidate: BookingLifecycleCandidate): string | null {
-  return candidate.chargeType === "direct" ? (candidate.providerAccountRef ?? null) : null;
+  return stripeCallAccountRef(candidate.chargeType, candidate.providerAccountRef);
 }
 
 async function updateBookingLifecycleStatus(
