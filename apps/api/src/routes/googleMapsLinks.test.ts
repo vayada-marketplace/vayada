@@ -21,14 +21,19 @@ import { registerGoogleMapsLinksRoutes } from "./googleMapsLinks.js";
 const LONG = "https://www.google.com/maps/place/6.03,80.21/data=!3d6.0275!4d80.2172";
 
 function context(
-  overrides: { kind?: string; membershipStatus?: string; actorStatus?: string } = {},
+  overrides: {
+    kind?: string;
+    membershipStatus?: string;
+    actorStatus?: string;
+    organizationStatus?: string;
+  } = {},
 ) {
   return {
     actor: { internalUserId: "user-1", status: overrides.actorStatus ?? "active" },
     selectedOrganization: {
       organizationId: "org-1",
       kind: overrides.kind ?? "hotel_group",
-      status: "active",
+      status: overrides.organizationStatus ?? "active",
     },
     membership: {
       membershipId: "m-1",
@@ -42,11 +47,13 @@ async function call(
   payload: unknown,
   resolve: (url: unknown) => Promise<ShortLinkResolution> = async () => ({ ok: true, url: LONG }),
   limit = 20,
+  total = 300,
 ) {
   const app = Fastify();
   await registerGoogleMapsLinksRoutes(app, {
     resolve,
     rateLimit: createShortLinkRateLimit({ now: () => 0, limit }),
+    totalLimit: createShortLinkRateLimit({ now: () => 0, limit: total }),
   });
   const response = await app.inject({
     method: "POST",
@@ -82,6 +89,7 @@ describe("POST /api/maps-links/resolve (VAY-2444)", () => {
       { kind: "platform" },
       { membershipStatus: "suspended" },
       { actorStatus: "disabled" },
+      { organizationStatus: "suspended" },
     ]) {
       auth.context = context(overrides);
       const response = await call({ url: "x" }, resolve);
@@ -103,7 +111,10 @@ describe("POST /api/maps-links/resolve (VAY-2444)", () => {
     }
   });
 
-  it("limits each person to its share of resolutions", async () => {
+  it("limits each person, and everyone together, to their share of resolutions", async () => {
+    expect((await call({ url: "https://maps.app.goo.gl/abc" }, undefined, 20, 0)).statusCode).toBe(
+      429,
+    );
     const response = await call({ url: "https://maps.app.goo.gl/abc" }, undefined, 0);
     expect(response.statusCode).toBe(429);
     expect(response.json()).toEqual({ code: "rate_limited" });

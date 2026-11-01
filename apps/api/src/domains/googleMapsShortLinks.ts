@@ -3,15 +3,16 @@
  * A browser can't read a cross-origin redirect, so the API follows it for the host. This is a trust boundary:
  * - only https://maps.app.goo.gl/<code> and https://goo.gl/maps/<code> are ever fetched, with no credentials;
  * - each hop is read from its Location header only (the body is never read or returned), at most three hops;
- * - the answer is the first https Google Maps link reached (also from Google's consent page's `continue`), or none.
+ * - the answer is the first https Google Maps link on google.com reached (also from Google's consent page's
+ *   `continue`), or none; Google refusing us (429, 5xx, its /sorry/ page) is "unavailable", not "unresolved".
  */
 
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 5_000;
 const MAX_LINK_LENGTH = 2_048;
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
-// google.com, google.lk, google.co.uk, google.com.au, with www. or maps. in front.
-const GOOGLE_HOST = /^(?:www\.|maps\.)?google\.(?:[a-z]{2,3}|co\.[a-z]{2}|com\.[a-z]{2})$/;
+// Where a share link lands: google.com only (a country domain or look-alike is refused, the host copies the link).
+const GOOGLE_HOST = /^(?:www\.|maps\.)?google\.com$/;
 
 export type ShortLinkResolution =
   | { ok: true; url: string }
@@ -60,9 +61,9 @@ export function googleMapsLink(url: URL): URL | null {
   if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
   if (!GOOGLE_HOST.test(url.hostname)) return null;
   const maps =
-    url.hostname.startsWith("maps.") ||
     url.pathname === "/maps" ||
-    url.pathname.startsWith("/maps/");
+    url.pathname.startsWith("/maps/") ||
+    (url.hostname === "maps.google.com" && url.pathname === "/");
   return maps && url.href.length <= MAX_LINK_LENGTH * 2 ? url : null;
 }
 
@@ -86,6 +87,8 @@ export async function resolveGoogleMapsShortLink(
       return { ok: false, code: "unavailable" };
     }
     await response.body?.cancel().catch(() => undefined);
+    if (response.status === 429 || response.status >= 500)
+      return { ok: false, code: "unavailable" };
     const location =
       response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
     if (!location) return { ok: false, code: "unresolved" };
@@ -95,6 +98,9 @@ export async function resolveGoogleMapsShortLink(
     } catch {
       return { ok: false, code: "unresolved" };
     }
+    // Google's "unusual traffic" page: it is refusing our server, not the link.
+    if (GOOGLE_HOST.test(next.hostname) && next.pathname.startsWith("/sorry"))
+      return { ok: false, code: "unavailable" };
     const link = googleMapsLink(next);
     if (link) return { ok: true, url: link.href };
     // Only another short link is followed; nothing else is ever fetched.

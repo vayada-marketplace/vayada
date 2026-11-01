@@ -65,8 +65,8 @@ describe("Google Maps short links (VAY-2444)", () => {
 
   it("knows a Google Maps link, also behind Google's consent page", () => {
     expect(googleMapsLink(new URL(LONG))?.href).toBe(LONG);
-    expect(googleMapsLink(new URL("https://maps.google.lk/?q=6.03,80.21"))).not.toBeNull();
-    expect(googleMapsLink(new URL("https://www.google.co.uk/maps/@51.5,-0.1,12z"))).not.toBeNull();
+    expect(googleMapsLink(new URL("https://maps.google.com/?q=6.03,80.21"))).not.toBeNull();
+    expect(googleMapsLink(new URL("https://google.com/maps/@51.5,-0.1,12z"))).not.toBeNull();
     expect(
       googleMapsLink(
         new URL(`https://consent.google.com/ml?continue=${encodeURIComponent(LONG)}&gl=DE`),
@@ -79,6 +79,16 @@ describe("Google Maps short links (VAY-2444)", () => {
       "https://www.google.com.evil.test/maps/@1,2",
       "https://accounts.google.com/maps",
       "https://consent.google.com/ml?continue=https://evil.test/maps",
+      "https://consent.google.com/ml?continue=http://www.google.com/maps/@1,2,3z",
+      `https://consent.google.com/ml?continue=${encodeURIComponent("https://maps.app.goo.gl/abc")}`,
+      // Country domains and look-alikes Google doesn't own, and non-map pages.
+      "https://www.google.co.uk/maps/@51.5,-0.1,12z",
+      "https://www.google.xyz/maps/@1,2,3z",
+      "https://www.google.com.de/maps/@1,2,3z",
+      "https://maps.google.co.de/?q=1,2",
+      "https://maps.google.com/url?q=https://evil.test",
+      "https://www.google.com/sorry/index",
+      "https://xn--ggle-0nda.com/maps/@1,2,3z",
     ])
       expect(googleMapsLink(new URL(refused)), refused).toBeNull();
   });
@@ -125,6 +135,55 @@ describe("Google Maps short links (VAY-2444)", () => {
       code: "unresolved",
     });
     expect(loop.requested).toHaveLength(3);
+  });
+
+  it("follows a relative redirect back to a short link, but never one that leaves it", async () => {
+    const relative = fakeFetch({
+      "https://maps.app.goo.gl/a": { status: 302, location: "/b" },
+      "https://maps.app.goo.gl/b": { status: 302, location: LONG },
+    });
+    expect(await resolveGoogleMapsShortLink("https://maps.app.goo.gl/a", relative.request)).toEqual(
+      { ok: true, url: LONG },
+    );
+    for (const location of [
+      "//evil.test/maps/@1,2,3z",
+      "https://maps.app.goo.gl@evil.test/x",
+      "https://maps.app.goo.gl\\@evil.test/x",
+      "https://maps.app.goo.gl./abc",
+      "https://142.250.0.1/maps/@1,2,3z",
+      "javascript:alert(1)",
+      "data:text/html,<b>x</b>",
+      "http://maps.app.goo.gl:443/abc",
+    ]) {
+      const fake = fakeFetch({ "https://maps.app.goo.gl/a": { status: 302, location } });
+      const result = await resolveGoogleMapsShortLink("https://maps.app.goo.gl/a", fake.request);
+      expect(result, location).toEqual({ ok: false, code: "unresolved" });
+      expect(fake.requested, location).toEqual(["https://maps.app.goo.gl/a"]);
+    }
+  });
+
+  it("only reads a redirect's Location, and tells Google refusing us apart", async () => {
+    const okWithLocation = fakeFetch({
+      "https://maps.app.goo.gl/a": { status: 200, location: LONG },
+    });
+    expect(
+      await resolveGoogleMapsShortLink("https://maps.app.goo.gl/a", okWithLocation.request),
+    ).toEqual({ ok: false, code: "unresolved" });
+    const noLocation = fakeFetch({ "https://maps.app.goo.gl/a": { status: 302 } });
+    expect(
+      await resolveGoogleMapsShortLink("https://maps.app.goo.gl/a", noLocation.request),
+    ).toEqual({ ok: false, code: "unresolved" });
+    for (const answer of [
+      { status: 429 },
+      { status: 503 },
+      { status: 302, location: "https://www.google.com/sorry/index?continue=x" },
+    ]) {
+      const fake = fakeFetch({ "https://maps.app.goo.gl/a": answer });
+      expect(
+        await resolveGoogleMapsShortLink("https://maps.app.goo.gl/a", fake.request),
+        JSON.stringify(answer),
+      ).toEqual({ ok: false, code: "unavailable" });
+    }
   });
 
   it("says why a link didn't resolve", async () => {
