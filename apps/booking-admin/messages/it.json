@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "Modifica in Posizione e dintorni",
   "settings.locationMap.title": "Mappa della posizione sulla tua pagina di prenotazione",
   "settings.locationMap.description": "Mostra agli ospiti una mappa di dove si trovano le tue camere, sotto l'elenco delle camere.",
-  "settings.locationMap.off": "Disattivata: gli ospiti non vedono nessuna mappa. Le modifiche appaiono subito sulla tua pagina di prenotazione.",
+  "settings.locationMap.off": "Disattivata: nessuna mappa sotto l'elenco delle camere. Una camera può comunque mostrare dove si trova nei suoi dettagli, da Rooms & Rates → camera → Posizione. Le modifiche appaiono subito sulla tua pagina di prenotazione.",
   "settings.locationMap.needsSetup": "Completa la configurazione del motore di prenotazione per attivare la mappa.",
   "settings.locationMap.loadFailed": "Non è stato possibile caricare l'impostazione della mappa.",
   "settings.locationMap.retry": "Riprova",

@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "Bewerken in Locatie & omgeving",
   "settings.locationMap.title": "Locatiekaart op je boekingspagina",
   "settings.locationMap.description": "Toont gasten onder de kamerlijst een kaart van waar je kamers liggen.",
-  "settings.locationMap.off": "Uit: gasten zien geen kaart. Wijzigingen staan meteen op je boekingspagina.",
+  "settings.locationMap.off": "Uit: geen kaart onder je kamerlijst. Een kamer kan in zijn details nog steeds laten zien waar hij ligt, in te stellen bij Rooms & Rates → kamer → Locatie. Wijzigingen staan meteen op je boekingspagina.",
   "settings.locationMap.needsSetup": "Rond de inrichting van je boekingsmachine af om de kaart aan te zetten.",
   "settings.locationMap.loadFailed": "De instelling van de locatiekaart kon niet worden geladen.",
   "settings.locationMap.retry": "Opnieuw proberen",

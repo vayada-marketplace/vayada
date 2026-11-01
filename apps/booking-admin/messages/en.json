@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "Edit in Location & surroundings",
   "settings.locationMap.title": "Location map on your booking page",
   "settings.locationMap.description": "Shows guests a map of where your rooms are, below the room list.",
-  "settings.locationMap.off": "Off: guests see no map. Changes show on your booking page right away.",
+  "settings.locationMap.off": "Off: no map below your room list. A room can still show where it is in its details, set in Rooms & Rates → room → Location. Changes show on your booking page right away.",
   "settings.locationMap.needsSetup": "Finish setting up your booking engine to turn the map on.",
   "settings.locationMap.loadFailed": "The location map setting couldn't load.",
   "settings.locationMap.retry": "Try again",

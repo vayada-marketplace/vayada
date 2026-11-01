@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "Ubah di Lokasi & sekitar",
   "settings.locationMap.title": "Peta lokasi di halaman pemesanan Anda",
   "settings.locationMap.description": "Menampilkan peta lokasi kamar Anda kepada tamu, di bawah daftar kamar.",
-  "settings.locationMap.off": "Nonaktif: tamu tidak melihat peta. Perubahan langsung terlihat di halaman pemesanan Anda.",
+  "settings.locationMap.off": "Nonaktif: tidak ada peta di bawah daftar kamar Anda. Kamar tetap bisa menunjukkan lokasinya di detailnya, diatur di Rooms & Rates → kamar → Lokasi. Perubahan langsung terlihat di halaman pemesanan Anda.",
   "settings.locationMap.needsSetup": "Selesaikan penyiapan mesin pemesanan Anda untuk mengaktifkan peta.",
   "settings.locationMap.loadFailed": "Pengaturan peta lokasi tidak dapat dimuat.",
   "settings.locationMap.retry": "Coba lagi",

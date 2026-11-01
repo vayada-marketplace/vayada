@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "Modifier dans Emplacement et alentours",
   "settings.locationMap.title": "Carte de localisation sur votre page de réservation",
   "settings.locationMap.description": "Montre aux clients une carte de l'emplacement de vos chambres, sous la liste des chambres.",
-  "settings.locationMap.off": "Désactivée : les clients ne voient aucune carte. Les changements apparaissent tout de suite sur votre page de réservation.",
+  "settings.locationMap.off": "Désactivée : pas de carte sous votre liste de chambres. Une chambre peut toujours montrer où elle se trouve dans ses détails, à régler dans Rooms & Rates → chambre → Emplacement. Les changements apparaissent tout de suite sur votre page de réservation.",
   "settings.locationMap.needsSetup": "Terminez la configuration de votre moteur de réservation pour activer la carte.",
   "settings.locationMap.loadFailed": "Le réglage de la carte de localisation n'a pas pu être chargé.",
   "settings.locationMap.retry": "Réessayer",

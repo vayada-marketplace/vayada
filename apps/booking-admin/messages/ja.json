@@ -620,7 +620,7 @@
   "settings.property.addressEditInLocation": "「所在地と周辺」で編集",
   "settings.locationMap.title": "予約ページの所在地マップ",
   "settings.locationMap.description": "客室一覧の下に、客室の場所を示す地図をゲストに表示します。",
-  "settings.locationMap.off": "オフ：ゲストには地図が表示されません。変更はすぐに予約ページに反映されます。",
+  "settings.locationMap.off": "オフ：客室一覧の下に地図は表示されません。客室の詳細には、Rooms & Rates → 客室 → 所在地の設定に応じて場所を表示できます。変更はすぐに予約ページに反映されます。",
   "settings.locationMap.needsSetup": "地図をオンにするには、予約エンジンの設定を完了してください。",
   "settings.locationMap.loadFailed": "所在地マップの設定を読み込めませんでした。",
   "settings.locationMap.retry": "再試行",

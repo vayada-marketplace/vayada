@@ -6405,6 +6405,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       // VAY-2126: the location map is off by default. Switched on (read live), rooms with their own pin carry it;
       // a room pin doesn't make saved prices stale (VAY-2129).
       expect(offers).not.toHaveProperty("locationMap");
+      expect(offers).not.toHaveProperty("detailsMap");
       expect(offers?.rooms.some((room) => "location" in room || "atProperty" in room)).toBe(false);
       await pool.query(
         `UPDATE pms.room_types SET room_attributes = room_attributes || $2::jsonb
@@ -6419,12 +6420,38 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         ],
       );
       expect(await catalog.read(scope.propertyId)).toEqual(offers);
-      // This fixture has no booking settings: add a row with the switch on, then remove it again.
+      // This fixture has no booking settings: add a row with the switch off, turn it on, then remove it again.
+      const setLocationMap = (enabled: boolean) =>
+        pool.query(
+          "UPDATE booking.booking_settings SET location_map_enabled = $2 WHERE property_id = $1",
+          [scope.propertyId, enabled],
+        );
       await pool.query(
-        "INSERT INTO booking.booking_settings (property_id, location_map_enabled) VALUES ($1, TRUE)",
+        "INSERT INTO booking.booking_settings (property_id, location_map_enabled) VALUES ($1, FALSE)",
         [scope.propertyId],
       );
+      // VAY-2445: with the switch off there is no location map, but a room's own "Show map in room details"
+      // still works: the rooms carry their places and the property's place comes as `detailsMap`.
+      const unlisted = await catalog.read(scope.propertyId);
+      expect(unlisted).not.toHaveProperty("locationMap");
+      expect(unlisted?.detailsMap).toHaveProperty("property");
+      expect(
+        Object.fromEntries(
+          (unlisted?.rooms ?? []).map((room) => [
+            room.name,
+            { showMapInDetails: room.showMapInDetails, location: room.location ?? null },
+          ]),
+        ),
+      ).toEqual({
+        "Terms room": {
+          showMapInDetails: true,
+          location: { latitude: 48.15634, longitude: 11.58242, address: "Leopoldstraße 12" },
+        },
+        "Second room": { showMapInDetails: true, location: null },
+      });
+      await setLocationMap(true);
       const mapped = await catalog.read(scope.propertyId);
+      expect(mapped?.detailsMap).toEqual(mapped?.locationMap);
       expect(mapped?.locationMap).toHaveProperty("property");
       const placesOf = async () =>
         Object.fromEntries(
@@ -6466,6 +6493,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         showMapInDetails: false,
         location: { latitude: 48.16, longitude: 11.58, approximate: true, area: "Schwabing" },
       });
+      // With the location map off, a room that hides its details map sends no place at all (VAY-2445).
+      await setLocationMap(false);
+      expect((await placesOf())["Terms room"]).toEqual({
+        atProperty: false,
+        showMapInDetails: false,
+        location: null,
+      });
+      await setLocationMap(true);
       // "Same as property" keeps the room's own place saved but no longer shows it.
       await setTermsRoom({ locationSource: "property" });
       expect((await placesOf())["Terms room"]).toEqual({
