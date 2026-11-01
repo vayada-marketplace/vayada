@@ -90,6 +90,8 @@ export interface FinancePaymentSettingsPatchResponse {
 
 export interface FinancePaymentSettingsResponse {
   bankDestination?: SavedBankTransferDestination | null;
+  /** VAY-2442: whether the hotel can choose vayada Payment yet, and its fee then. */
+  vayadaPayment?: { available: boolean; feePercent?: number };
   contractVersion: string;
   propertyId: string;
   paymentSettings: {
