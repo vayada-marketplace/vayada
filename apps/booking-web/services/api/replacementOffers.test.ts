@@ -227,6 +227,7 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
   expect(await getReplacementCatalog("hotel")).toEqual({
     locationMap: { property: { latitude: 48.14, longitude: 11.58, approximate: true } },
     detailsMap: null,
+    roomSorting: null,
     rooms: [
       {
         ...rooms[0],
@@ -241,12 +242,14 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
     rooms,
     locationMap: { property: null },
     detailsMap: null,
+    roomSorting: null,
   });
   catalog({ rooms });
   expect(await getReplacementCatalog("hotel")).toEqual({
     rooms,
     locationMap: null,
     detailsMap: null,
+    roomSorting: null,
   });
   // VAY-2445: the property's place for the rooms' own details maps, sent while the location map is off.
   catalog({
@@ -257,7 +260,19 @@ it("reads the location map and each room's pin, dropping a pin out of range (VAY
     rooms,
     locationMap: null,
     detailsMap: { property: { latitude: 6.03, longitude: 80.21, approximate: false } },
+    roomSorting: null,
   });
+  // VAY-2449: the hotel's own Room Sorting, once it saved one; one that doesn't read is the defaults.
+  const roomSorting = {
+    enabled: true,
+    hideWithOneRoom: false,
+    options: ["priceLow", "recommended", "bestDeal"],
+    defaultOption: "bestDeal",
+  };
+  catalog({ rooms, roomSorting });
+  expect((await getReplacementCatalog("hotel")).roomSorting).toEqual(roomSorting);
+  catalog({ rooms, roomSorting: { ...roomSorting, defaultOption: "capacity" } });
+  expect((await getReplacementCatalog("hotel")).roomSorting).toBeNull();
 });
 
 it("reads where each room is: at the property, or an area without its street (VAY-2321)", async () => {

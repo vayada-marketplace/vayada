@@ -15,6 +15,14 @@ import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from 
 import { trackEvent } from "@/services/api/tracking";
 import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { hotelService } from "@/services/api/hotel";
+import { choiceKeys, choiceSaving, choiceText, type SavingChoice } from "@/lib/roomChoices";
+import {
+  DEFAULT_ROOM_SORTING,
+  sortMenu,
+  type RoomSortKey,
+  type RoomSorting,
+} from "@/lib/roomSorting";
+import { serverNow } from "@/lib/serverClock";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
 import RoomTabs, { RoomsHelp, type RoomsProgressRoom } from "@/components/booking/RoomsProgress";
@@ -45,6 +53,16 @@ import {
   type CatalogLocationMap,
   type PricingRoom,
 } from "@/services/api/replacementOffers";
+
+// VAY-2449: the sort menu's options, as the hotel's Room Sorting lists them.
+const SORT_LABELS: Record<RoomSortKey, string> = {
+  recommended: "recommended",
+  priceLow: "priceLowHigh",
+  priceHigh: "priceHighLow",
+  roomSize: "roomSize",
+  capacity: "capacity",
+  bestDeal: "bestDeal",
+};
 
 interface AppliedPromo {
   code: string;
@@ -210,6 +228,8 @@ function HomePageContent() {
   const [locationMap, setLocationMap] = useState<CatalogLocationMap | null>(null);
   // The property's place for the rooms' own "Show map in room details", sent with the switch off too (VAY-2445).
   const [detailsMap, setDetailsMap] = useState<CatalogLocationMap | null>(null);
+  // The hotel's Room Sorting (VAY-2449), read live with the catalog; null: the defaults.
+  const [roomSorting, setRoomSorting] = useState<RoomSorting | null>(null);
   // A map pin's "View details" opens that room card's details: one counter per room.
   const [detailsRequests, setDetailsRequests] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -220,6 +240,7 @@ function HomePageContent() {
         setRooms(value.rooms);
         setLocationMap(value.locationMap);
         setDetailsMap(value.detailsMap);
+        setRoomSorting(value.roomSorting);
       })
       .catch(() => {
         if (!controller.signal.aborted) setRoomsFailed(true);
@@ -384,7 +405,10 @@ function HomePageContent() {
     setLastGuestsAndDates(guestsAndDates);
     setChanging(null);
   }
-  const [sortOption, setSortOption] = useState("recommended");
+  // VAY-2449: the hotel's options, order and default; the guest's pick while it is one of them.
+  const [sortPick, setSortPick] = useState<RoomSortKey | null>(null);
+  const menu = sortMenu(roomSorting ?? DEFAULT_ROOM_SORTING, rooms?.length ?? 0, sortPick);
+  const sortOption = menu.order;
   const roomPrices = (room: PricingRoom) =>
     stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
   const cheapest = (room: PricingRoom) => {
@@ -397,6 +421,45 @@ function HomePageContent() {
   const byPrice = (a: PricingRoom, b: PricingRoom, direction: 1 | -1) => {
     const [x, y] = [cheapest(a), cheapest(b)];
     return x === null || y === null ? Number(x === null) - Number(y === null) : (x - y) * direction;
+  };
+  // VAY-2449 "Best deal first": the biggest saving the room's card shows (VAY-2392's "-10%"), from the
+  // same choices: priced for this stay, a passed free cancellation hidden behind its meal's other choice.
+  const bestSaving = (room: PricingRoom) => {
+    const prices = roomPrices(room);
+    if (!prices) return 0;
+    const now = new Date(serverNow());
+    const stay = { checkIn, timezone: hotel.timezone, formatDate: (date: string) => date };
+    const keys = choiceKeys(room.offers, stay, now);
+    const all = room.offers.map((offer, index) => {
+      const text = choiceText(keys[index]!, stay, t, now);
+      const price = prices.offers.find((p) => p.publicOfferKey === offer.publicOfferKey);
+      return {
+        mealPlan: offer.mealPlan,
+        refundable: text.refundable,
+        cancellationPassed: text.cancellationPassed,
+        amount:
+          price?.status === "priced" ? quoteMoneyAmount(price.totalMinor, price.currency) : null,
+        unavailable: price?.status !== "priced" && price?.status !== "unpriced",
+      };
+    });
+    const shown: SavingChoice[] = all
+      .filter(
+        (choice) =>
+          !choice.cancellationPassed ||
+          !all.some(
+            (other) =>
+              other !== choice &&
+              !other.cancellationPassed &&
+              !other.unavailable &&
+              other.mealPlan === choice.mealPlan,
+          ),
+      )
+      .sort((a, b) =>
+        a.amount === null || b.amount === null
+          ? Number(a.amount === null) - Number(b.amount === null)
+          : a.amount - b.amount,
+      );
+    return Math.max(0, ...shown.map((choice) => choiceSaving(choice, shown, all) ?? 0));
   };
   // The group's other rooms (by number) that took a room type, for the room being chosen; all
   // of them while every room is chosen.
@@ -433,7 +496,11 @@ function HomePageContent() {
           ? byPrice(a, b, -1)
           : sortOption === "roomSize"
             ? (b.size?.value ?? 0) - (a.size?.value ?? 0)
-            : 0),
+            : sortOption === "capacity"
+              ? (b.occupancy?.maxGuests ?? 0) - (a.occupancy?.maxGuests ?? 0)
+              : sortOption === "bestDeal"
+                ? bestSaving(b) - bestSaving(a)
+                : 0),
   );
   // Rooms in several places (VAY-2324, VAY-2325): the cards say where each one is, and the guest can see them on
   // a map next to the list (or full screen on a phone), which replaces the Location section below.
@@ -641,13 +708,14 @@ function HomePageContent() {
         <select
           id="room-sort"
           value={sortOption}
-          onChange={(event) => setSortOption(event.target.value)}
+          onChange={(event) => setSortPick(event.target.value as RoomSortKey)}
           className="min-h-[44px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-white pl-4 pr-10 text-sm font-medium text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         >
-          <option value="recommended">{t("recommended")}</option>
-          <option value="priceLow">{t("priceLowHigh")}</option>
-          <option value="priceHigh">{t("priceHighLow")}</option>
-          <option value="roomSize">{t("roomSize")}</option>
+          {menu.options.map((option) => (
+            <option key={option} value={option}>
+              {t(SORT_LABELS[option])}
+            </option>
+          ))}
         </select>
         <svg
           className="pointer-events-none absolute right-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-700"
@@ -1124,7 +1192,7 @@ function HomePageContent() {
                 )
               }
               heading={heading}
-              toolbar={sortControl}
+              toolbar={menu.options.length ? sortControl : null}
               notices={notices}
               renderCard={roomCard}
             />

@@ -6,6 +6,7 @@ import {
   type PublicBookingQuoteRequest,
   type PublicOfferCancellation,
 } from "@vayada/domain-booking/replacement-pricing";
+import { catalogRoomSorting, type RoomSorting } from "@/lib/roomSorting";
 import { bookingWebPublic } from "./client";
 
 export const mealLabels = {
@@ -143,8 +144,9 @@ export type CatalogLocationMap = {
   property: { latitude: number; longitude: number; approximate: boolean } | null;
 };
 
-/** The catalog's rooms, the location map while the hotel shows it, and the property's place for the rooms'
- * own details maps, sent whether the location map is on or not (VAY-2445). */
+/** The catalog's rooms, the location map while the hotel shows it, the property's place for the rooms' own
+ * details maps, sent whether the location map is on or not (VAY-2445), and the hotel's own Room Sorting once
+ * it saved one (VAY-2449; null: the defaults). */
 export async function getReplacementCatalog(
   slug: string,
   signal?: AbortSignal,
@@ -152,6 +154,7 @@ export async function getReplacementCatalog(
   rooms: PricingRoom[];
   locationMap: CatalogLocationMap | null;
   detailsMap: CatalogLocationMap | null;
+  roomSorting: RoomSorting | null;
 }> {
   const raw = await bookingWebPublic.get<unknown>(
     `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
@@ -215,6 +218,7 @@ export async function getReplacementCatalog(
     rooms,
     locationMap: catalogLocationMap(raw.locationMap),
     detailsMap: catalogLocationMap(raw.detailsMap),
+    roomSorting: catalogRoomSorting(raw.roomSorting),
   };
 }
 

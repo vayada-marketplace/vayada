@@ -6,7 +6,7 @@ import en from "../messages/en.json";
 import es from "../messages/es.json";
 import fr from "../messages/fr.json";
 import id from "../messages/id.json";
-import { choiceKeys, choiceText, hotelToday } from "./roomChoices";
+import { choiceKeys, choiceSaving, choiceText, hotelToday, type SavingChoice } from "./roomChoices";
 import type { PricingOffer } from "@/services/api/replacementOffers";
 
 function translator(locale: string, messages: unknown) {
@@ -223,5 +223,37 @@ describe("room choices", () => {
     expect(freeCancellationUntil("2026-03-02", 3)).toBe("2026-02-27");
     expect(hotelToday("Pacific/Auckland", new Date("2026-10-14T12:30:00Z"))).toBe("2026-10-15");
     expect(hotelToday("America/Los_Angeles", new Date("2026-10-14T05:00:00Z"))).toBe("2026-10-13");
+  });
+});
+
+// VAY-2392's "-10%" on a no-refund rate, also VAY-2449's "Best deal first".
+describe("choiceSaving", () => {
+  const choice = (
+    mealPlan: string,
+    refundable: boolean | null,
+    amount: number | null,
+    cancellationPassed = false,
+  ): SavingChoice => ({ mealPlan, refundable, cancellationPassed, amount });
+
+  it("saves on the same meal's cheapest refundable choice shown", () => {
+    const noRefund = choice("room_only", false, 90);
+    const shown = [noRefund, choice("room_only", true, 100), choice("room_only", true, 120)];
+    expect(choiceSaving(noRefund, shown, shown)).toBe(10);
+    // Another meal or an unpriced refundable choice isn't compared.
+    const other = [noRefund, choice("breakfast", true, 100), choice("room_only", true, null)];
+    expect(choiceSaving(noRefund, other, other)).toBeUndefined();
+  });
+
+  it("falls back to a hidden choice whose free cancellation passed, never on that one itself", () => {
+    const noRefund = choice("room_only", false, 80);
+    const passed = choice("room_only", false, 100, true);
+    expect(choiceSaving(noRefund, [noRefund], [noRefund, passed])).toBe(20);
+    expect(choiceSaving(passed, [passed], [noRefund, passed])).toBeUndefined();
+  });
+
+  it("has none for a refundable or unpriced choice", () => {
+    const shown = [choice("room_only", true, 100), choice("room_only", false, null)];
+    expect(choiceSaving(shown[0]!, shown, shown)).toBeUndefined();
+    expect(choiceSaving(shown[1]!, shown, shown)).toBeUndefined();
   });
 });

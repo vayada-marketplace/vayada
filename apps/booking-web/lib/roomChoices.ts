@@ -151,3 +151,31 @@ export function choiceText(
     cancellationPassed,
   };
 }
+
+/** A room's choice for its saving (VAY-2392): its meal, its rate icon, whether its free cancellation has
+ * passed, and its price for the stay (null when not priced). */
+export type SavingChoice = {
+  mealPlan: string;
+  refundable: boolean | null;
+  cancellationPassed: boolean;
+  amount: number | null;
+};
+
+/** A no-refund choice's saving in percent on the same meal's cheapest refundable choice shown (`shown` in
+ * price order), else on one whose free cancellation has passed and is hidden (`all`), as Timo's prototype
+ * shows; never on the passed choice itself. The room card's "-10%", and VAY-2449's "Best deal first". */
+export function choiceSaving(
+  choice: SavingChoice,
+  shown: readonly SavingChoice[],
+  all: readonly SavingChoice[],
+): number | undefined {
+  if (choice.refundable !== false || choice.cancellationPassed) return undefined;
+  const sameMeal = (other: SavingChoice) =>
+    other.mealPlan === choice.mealPlan && other.amount !== null;
+  const base =
+    shown.find((other) => other.refundable === true && sameMeal(other)) ??
+    all.find((other) => other.cancellationPassed && sameMeal(other));
+  return choice.amount !== null && base?.amount
+    ? Math.round((1 - choice.amount / base.amount) * 100)
+    : undefined;
+}
