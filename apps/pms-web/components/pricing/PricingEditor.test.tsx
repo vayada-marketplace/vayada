@@ -739,6 +739,17 @@ it("adds and clears an independent date price without changing fallback or other
     expect(() => changeDatePrice(room, "flex", date, amount)).toThrow();
   expect(() => changeDatePrice(added, "flex", "2028-02-29", "200")).toThrow("Clear the existing");
 });
+it("shows an IDR price without .00 and saves one typed with thousands separators (VAY-2425)", async () => {
+  const idrRoom = { ...snapshot.rooms[0], currency: "IDR", children: { ...snapshot.rooms[0].children, bands: [{ ...snapshot.rooms[0].children.bands[0], nightlyMinor: "0" }] },
+    offers: [{ ...snapshot.rooms[0].offers[0], meal: { kind: "room_only" as const, charge: { kind: "room" as const, amountMinor: "0" } },
+      price: { kind: "independent" as const, calendar: { base: { mode: "flat" as const, amountMinor: "50000000" }, months: [], seasons: [], weekdays: [], dates: [] } } }] };
+  client.read.mockResolvedValue({ ...snapshot, currency: "IDR", rooms: [idrRoom], revision: 1, sources, stale: false });
+  await mount();
+  expect(input().props.value).toBe("500000");
+  await act(async () => input().props.onChange({ target: { value: "750.000" } }));
+  await click("Save and publish");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "75000000" } } });
+});
 it("keeps IDR date prices in whole rupiah (VAY-2085)", () => {
   const room = { ...snapshot.rooms[0], currency: "IDR" };
   expect(() => changeDatePrice(room, "flex", "2028-02-29", "150000.25")).toThrow("whole rupiah");
@@ -4277,7 +4288,8 @@ it("shows the USD room's prices in IDR on its own page, US$49.99 as IDR 50, and 
     client.read.mockResolvedValue({ ...snapshot, currency: "USD", rooms: [usdRoom, { ...family, currency: "USD" }], revision: 1, sources, stale: false });
     await mountOn("room"); await act(async () => {});
     expect(JSON.stringify(view.toJSON())).toContain("Your currency changed to IDR.");
-    expect(input().props.value).toBe("50.00");
+    // Whole rupiah in the field, without ".00" (VAY-2425 PR 2).
+    expect(input().props.value).toBe("50");
     await click("Save and publish");
     expect(saved.snapshot.currency).toBe("IDR");
     expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.currency])).toEqual([["room", "IDR"]]);

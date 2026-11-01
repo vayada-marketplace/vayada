@@ -10,12 +10,9 @@ import {
   PencilSquareIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
-import {
-  pricingCurrencyScale,
-  type PricingConfiguration,
-} from "@vayada/domain-pms/replacement-pricing";
+import { type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { baseAmounts, decimalAmount, errorText } from "./pricingAmounts";
+import { amountInput, baseAmounts, errorText } from "./pricingAmounts";
 import {
   moveToSeason,
   nightPrices,
@@ -89,8 +86,7 @@ export function NightPanel({
     single = dates.length === 1,
     date = dates[0];
   const main = mainOffer(room),
-    template = recurringTemplate(main),
-    scale = pricingCurrencyScale(room.currency) ?? 2;
+    template = recurringTemplate(main);
   const rules = dates.map((day) => nightRules(room, day));
   const allClosed = rules.every((value) => value.stopSell);
   const stayOwned = main.restrictions.kind === "own";
@@ -501,7 +497,7 @@ export function NightPanel({
                 kind: "price",
                 values: fields.map((_, index) => {
                   const current = own && baseAmounts(own)[index]?.[1];
-                  return current ? decimalAmount(current, scale) : "";
+                  return current ? amountInput(current, room.currency) : "";
                 }),
               })
             }

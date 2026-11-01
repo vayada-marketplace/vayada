@@ -2,11 +2,12 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  pricingCurrencyScale,
+  pricingAmountStep,
   type PricingConfiguration,
+  pricingCurrencyScale,
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { decimalAmount, errorText, parseMinorInput } from "./pricingAmounts";
+import { amountInput, errorText, parseMinorInput } from "./pricingAmounts";
 import {
   defaultDiscount,
   setBreakfastAmount,
@@ -27,9 +28,14 @@ const basisPoints = (offer: SimpleRoom["nonRefundable"]) =>
     ? -offer.price.adjustment.basisPoints
     : null;
 /** A typed amount in minor units, or null while it doesn't parse. */
-const typedMinor = (text: string, scale: number) => {
+const typedMinor = (text: string, currency: string) => {
   try {
-    return parseMinorInput(text.trim(), scale);
+    return parseMinorInput(
+      text.trim(),
+      pricingCurrencyScale(currency)!,
+      false,
+      pricingAmountStep(currency),
+    );
   } catch {
     return null;
   }
@@ -66,7 +72,6 @@ export function StepExtras({
   preview?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const scale = pricingCurrencyScale(room.currency)!;
   const { nonRefundable, breakfast, mainTerms } = simple;
   const charge = breakfast && breakfast.meal.kind !== "room_only" ? breakfast.meal.charge : null;
   const savedDiscount = basisPoints(nonRefundable);
@@ -78,7 +83,9 @@ export function StepExtras({
   const [discount, setDiscountText] = useState(
     savedDiscount === null ? defaultDiscount : String(savedDiscount / 100),
   );
-  const [amount, setAmount] = useState(savedMinor === null ? "" : decimalAmount(savedMinor, scale));
+  const [amount, setAmount] = useState(
+    savedMinor === null ? "" : amountInput(savedMinor, room.currency),
+  );
   const savedText = breakfast?.meal.description ?? "";
   const [mealText, setMealText] = useState(savedText);
   // Per guest (adult) or per room: breakfast's charge, or what turning it on uses.
@@ -98,9 +105,11 @@ export function StepExtras({
   useEffect(() => {
     if (savedMinor !== null)
       setAmount((typed) =>
-        typedMinor(typed, scale) === savedMinor ? typed : decimalAmount(savedMinor, scale),
+        typedMinor(typed, room.currency) === savedMinor
+          ? typed
+          : amountInput(savedMinor, room.currency),
       );
-  }, [savedMinor, scale]);
+  }, [savedMinor, room.currency]);
   useEffect(
     () => setMealText((typed) => (typed.trim() === savedText ? typed : savedText)),
     [savedText],
@@ -161,7 +170,7 @@ export function StepExtras({
       clear(kind);
       if (kind === "non_refundable")
         setDiscountText(savedDiscount === null ? defaultDiscount : String(savedDiscount / 100));
-      else if (savedMinor !== null) setAmount(decimalAmount(savedMinor, scale));
+      else if (savedMinor !== null) setAmount(amountInput(savedMinor, room.currency));
       return onRemove(offer.id);
     }
     if (kind === "breakfast" && !amount.trim())
@@ -190,7 +199,8 @@ export function StepExtras({
     if (disabled || next === basis) return;
     if (!breakfast || savedMinor === null) return setBasis(next);
     // A typed price that doesn't parse yet gives way to the saved one.
-    const value = typedMinor(amount, scale) === null ? decimalAmount(savedMinor, scale) : amount;
+    const value =
+      typedMinor(amount, room.currency) === null ? amountInput(savedMinor, room.currency) : amount;
     try {
       onChange(
         changeMealPlan(room, breakfast.id, {
@@ -250,7 +260,7 @@ export function StepExtras({
   // Just breakfast is step "Meal plans" of "Pricing setup" (VAY-2280, the CEO's design in VAY-2305): its switch, its
   // price a night per guest or for the room, what guests read, and what it adds for the sample guests.
   if (only === "breakfast") {
-    const minor = typedMinor(amount, scale) ?? savedMinor,
+    const minor = typedMinor(amount, room.currency) ?? savedMinor,
       symbol = currencySymbol(room.currency),
       who = room.capacity.children > 0 ? "adult" : "guest";
     const each = minor === null ? null : money(minor, room.currency);

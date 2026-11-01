@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import {
-  pricingCurrencyScale,
+  pricingAmountStep,
   type PricingConfiguration,
+  pricingCurrencyScale,
 } from "@vayada/domain-pms/replacement-pricing";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
-import { baseAmounts, decimalAmount, errorText, PricingError } from "./pricingAmounts";
+import { amountInput, baseAmounts, errorText, PricingError } from "./pricingAmounts";
 import { changeSeasonPrice } from "./PricingSeasons";
 import { IncludedPricing, includedInput, type IncludedInput } from "./IncludedPricing";
 import { recurringTemplate } from "./recurringPricingInputs";
@@ -65,11 +66,13 @@ export function SeasonWindow({
     [through, setThrough] = useState(split(season?.through ?? prefill?.through));
   const [values, setValues] = useState<string[]>(
     season
-      ? baseAmounts(season.price).map(([, minor]) => decimalAmount(minor, scale))
+      ? baseAmounts(season.price).map(([, minor]) => amountInput(minor, room.currency))
       : (prefill?.values ?? []),
   );
   const [included, setIncluded] = useState<IncludedInput | null>(
-    template?.mode === "included_guests" ? includedInput(template, scale) : null,
+    template?.mode === "included_guests"
+      ? includedInput(template, scale, pricingAmountStep(room.currency))
+      : null,
   );
   const [error, setError] = useState("");
   if (!calendar || !template) return null;

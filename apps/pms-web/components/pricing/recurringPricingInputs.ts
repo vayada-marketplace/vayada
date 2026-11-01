@@ -4,8 +4,8 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import {
+  amountInput,
   baseAmounts,
-  decimalAmount,
   parseMinorInput,
   PricingError,
   type Translate,
@@ -46,5 +46,5 @@ export const recurringAdjustments = (
   t: Translate,
 ) =>
   price.mode === "included_guests"
-    ? ` ${t("pricing.recurring.includedAdjustments", { count: price.baseGuests, adjustments: price.adjustments.map((value, index) => t("pricing.recurring.adjustment", { count: index + 1, amount: value.kind === "percentage" ? `${value.basisPoints / 100}%` : `${value.deltaMinor.startsWith("-") ? "−" : "+"}${decimalAmount(value.deltaMinor.replace(/^-/, ""), scale)} ${currency}` })).join("; ") })}`
+    ? ` ${t("pricing.recurring.includedAdjustments", { count: price.baseGuests, adjustments: price.adjustments.map((value, index) => t("pricing.recurring.adjustment", { count: index + 1, amount: value.kind === "percentage" ? `${value.basisPoints / 100}%` : `${value.deltaMinor.startsWith("-") ? "−" : "+"}${amountInput(value.deltaMinor.replace(/^-/, ""), currency)} ${currency}` })).join("; ") })}`
     : "";

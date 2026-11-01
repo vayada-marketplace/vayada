@@ -2,13 +2,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MinusIcon, PlusIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import {
-  pricingCurrencyScale,
-  type PricingConfiguration,
-} from "@vayada/domain-pms/replacement-pricing";
+import { type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
-import { baseAmounts, decimalAmount, errorText } from "./pricingAmounts";
+import { amountInput, baseAmounts, errorText } from "./pricingAmounts";
 import { changeSeasonPrice } from "./PricingSeasons";
 import { seasonGroups, seasonTones, type SeasonGroup } from "./priceCalendarModel";
 import { recurringTemplate } from "./recurringPricingInputs";
@@ -122,8 +119,7 @@ export function StepSeasons({
   }, [pending]);
   if (offer.price.kind !== "independent") return null;
   const calendar = offer.price.calendar,
-    base = calendar.base,
-    scale = pricingCurrencyScale(room.currency)!;
+    base = calendar.base;
   const groups = seasonGroups(offer),
     symbol = currencySymbol(room.currency);
   const template = recurringTemplate(offer);
@@ -369,7 +365,10 @@ export function StepSeasons({
   const childValue =
     childTyped ??
     (band
-      ? { age: String(room.children.adultFromAge), price: decimalAmount(band.nightlyMinor, scale) }
+      ? {
+          age: String(room.children.adultFromAge),
+          price: amountInput(band.nightlyMinor, room.currency),
+        }
       : null);
   const commitChild = () => {
     if (!childTyped || disabled) return;
@@ -585,7 +584,7 @@ export function StepSeasons({
                 )}
                 {amountField(
                   `${label} ${name}`,
-                  inputs[`${roomIndex}:${offerIndex}:${ai}`] ?? decimalAmount(minor, scale),
+                  inputs[`${roomIndex}:${offerIndex}:${ai}`] ?? amountInput(minor, room.currency),
                   (value) => onInput(`${roomIndex}:${offerIndex}:${ai}`, value),
                 )}
               </div>
@@ -595,7 +594,9 @@ export function StepSeasons({
         {groups.map((group) => {
           const values =
             typed[group.key] ??
-            baseAmounts(group.seasons[0].price).map(([, minor]) => decimalAmount(minor, scale));
+            baseAmounts(group.seasons[0].price).map(([, minor]) =>
+              amountInput(minor, room.currency),
+            );
           const nights = group.seasons.reduce(
             (sum, season) => sum + days(season.from, season.through),
             0,
@@ -792,7 +793,7 @@ export function StepSeasons({
                   name: editing.prefill.name,
                   tier: editing.prefill.tier,
                   values: baseAmounts(editing.prefill.seasons[0].price).map(([, minor]) =>
-                    decimalAmount(minor, scale),
+                    amountInput(minor, room.currency),
                   ),
                 }
           }

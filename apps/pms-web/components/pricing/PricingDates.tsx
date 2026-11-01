@@ -8,8 +8,8 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import {
+  amountInput,
   baseAmounts,
-  decimalAmount,
   errorText,
   parseMinorInput,
   PricingError,
@@ -175,7 +175,9 @@ export function PricingDates({
       : null;
   const activeIncluded =
     included ??
-    (!editing && template?.mode === "included_guests" ? includedInput(template, scale) : null);
+    (!editing && template?.mode === "included_guests"
+      ? includedInput(template, scale, pricingAmountStep(room.currency))
+      : null);
   const fields = template
     ? baseAmounts(
         activeIncluded && template.mode === "included_guests"
@@ -197,7 +199,10 @@ export function PricingDates({
             <span>
               {entry.date}:{" "}
               {baseAmounts(entry.price, t)
-                .map(([name, minor]) => `${name} ${decimalAmount(minor, scale)} ${room.currency}`)
+                .map(
+                  ([name, minor]) =>
+                    `${name} ${amountInput(minor, room.currency)} ${room.currency}`,
+                )
                 .join("; ")}
               {recurringAdjustments(entry.price, room.currency, scale, t)}
             </span>
@@ -209,12 +214,14 @@ export function PricingDates({
               onClick={() => {
                 if (disabled || pending) return;
                 setIncluded(
-                  entry.price.mode === "included_guests" ? includedInput(entry.price, scale) : null,
+                  entry.price.mode === "included_guests"
+                    ? includedInput(entry.price, scale, pricingAmountStep(room.currency))
+                    : null,
                 );
                 setEditing(true);
                 setDate(entry.date);
                 setAmounts(
-                  baseAmounts(entry.price).map(([, minor]) => decimalAmount(minor, scale)),
+                  baseAmounts(entry.price).map(([, minor]) => amountInput(minor, room.currency)),
                 );
                 setError("");
                 onPending(true);

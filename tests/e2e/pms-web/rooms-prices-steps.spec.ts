@@ -908,6 +908,46 @@ test("sets the first price in IDR after the Owner changed from USD, and keeps ID
   await assertHealthy();
 });
 
+test("shows IDR prices in whole rupiah and saves one typed with thousands separators (VAY-2425)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/payment-settings`, (route) =>
+    route.fulfill({
+      json: {
+        paymentSettings: {
+          payAtPropertyEnabled: true,
+          onlineCardPayment: false,
+          defaultCurrency: "IDR",
+        },
+        cancellationPolicy: { freeCancellationDays: 7, partialRefundPct: 50 },
+      },
+    }),
+  );
+  const idrRoom = structuredClone(designRoom(3));
+  idrRoom.currency = "IDR";
+  idrRoom.offers[0].price.calendar.base = flat("150000000");
+  const pricing = await mockPricing(page, { ...publicationOf(3, [idrRoom]), currency: "IDR" });
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const standard = () =>
+    main(page)
+      .getByRole("table", { name: "Prices and seasons" })
+      .locator('input[inputmode="decimal"]')
+      .first();
+  // Rp 1,500,000 stored: the field shows whole rupiah, not "1500000.00".
+  await expect(standard()).toHaveValue("1500000");
+  await standard().fill("1.750.000");
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  expect(pricing.publishes[0].snapshot.rooms[0].offers[0].price.calendar.base).toEqual(
+    flat("175000000"),
+  );
+  await page.reload();
+  await expect(standard()).toHaveValue("1750000");
+  await assertHealthy();
+});
+
 test("adds the switches and a season to a first price before saving it (VAY-2188)", async ({
   page,
 }, testInfo) => {

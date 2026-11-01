@@ -7,7 +7,7 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
+import { amountInput, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
 import { PricingSection } from "./PricingSection";
 import * as ui from "./pricingStyles";
 
@@ -109,7 +109,7 @@ export function PricingMealCharges({
             <p>
               {t("pricing.mealCharges.amount", {
                 charge: labels[index],
-                amount: decimalAmount(minor, scale),
+                amount: amountInput(minor, room.currency),
                 currency: room.currency,
               })}
             </p>
@@ -139,7 +139,7 @@ export function PricingMealCharges({
           disabled={disabled}
           onClick={() => {
             if (disabled) return;
-            setEntry(values.map((minor) => decimalAmount(minor, scale)));
+            setEntry(values.map((minor) => amountInput(minor, room.currency)));
             setError("");
             onPending(true);
           }}

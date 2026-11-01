@@ -7,7 +7,7 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { baseAmounts, decimalAmount, errorText, PricingError } from "./pricingAmounts";
+import { amountInput, baseAmounts, errorText, PricingError } from "./pricingAmounts";
 
 import { recurringTemplate, recurringPrice, recurringAdjustments } from "./recurringPricingInputs";
 import { PricingSection } from "./PricingSection";
@@ -100,7 +100,9 @@ export function PricingMonths({
     scale = pricingCurrencyScale(room.currency)!;
   const activeIncluded =
     included ??
-    (!editing && template?.mode === "included_guests" ? includedInput(template, scale) : null);
+    (!editing && template?.mode === "included_guests"
+      ? includedInput(template, scale, pricingAmountStep(room.currency))
+      : null);
   const pending = !!included || !!month || values.some(Boolean);
   const reset = () => {
     setMonth("");
@@ -136,7 +138,10 @@ export function PricingMonths({
             <span>
               {t(`pricing.month.${entry.month}`)}:{" "}
               {baseAmounts(entry.price, t)
-                .map(([name, minor]) => `${name} ${decimalAmount(minor, scale)} ${room.currency}`)
+                .map(
+                  ([name, minor]) =>
+                    `${name} ${amountInput(minor, room.currency)} ${room.currency}`,
+                )
                 .join("; ")}
               .{recurringAdjustments(entry.price, room.currency, scale, t)}
             </span>
@@ -151,11 +156,15 @@ export function PricingMonths({
               onClick={() => {
                 if (disabled || pending) return;
                 setIncluded(
-                  entry.price.mode === "included_guests" ? includedInput(entry.price, scale) : null,
+                  entry.price.mode === "included_guests"
+                    ? includedInput(entry.price, scale, pricingAmountStep(room.currency))
+                    : null,
                 );
                 setEditing(true);
                 setMonth(String(entry.month));
-                setValues(baseAmounts(entry.price).map(([, minor]) => decimalAmount(minor, scale)));
+                setValues(
+                  baseAmounts(entry.price).map(([, minor]) => amountInput(minor, room.currency)),
+                );
                 setError("");
                 onPending(true);
               }}

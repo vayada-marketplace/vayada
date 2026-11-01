@@ -1,8 +1,8 @@
 "use client";
 import { useState } from "react";
-import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { parsePricingConfiguration, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { decimalAmount, errorText, parseAdjustmentInput, PricingError } from "./pricingAmounts";
+import { amountInput, decimalAmount, errorText, parseAdjustmentInput, PricingError } from "./pricingAmounts";
 import { PricingSection } from "./PricingSection";
 import * as ui from "./pricingStyles";
 
@@ -25,7 +25,7 @@ export function PricingLinkedAdjustment({ room, offer, names, label, disabled, o
   if (offer.price.kind !== "linked") return null;
   const { adjustment, parentId } = offer.price;
   const minor = adjustment.kind === "fixed" ? adjustment.deltaMinor : String(adjustment.basisPoints);
-  const value = `${minor.startsWith("-") ? "-" : ""}${decimalAmount(minor.replace(/^-/, ""), adjustment.kind === "fixed" ? pricingCurrencyScale(room.currency)! : 2)}`;
+  const value = `${minor.startsWith("-") ? "-" : ""}${adjustment.kind === "fixed" ? amountInput(minor.replace(/^-/, ""), room.currency) : decimalAmount(minor.replace(/^-/, ""), 2)}`;
   const cancel = () => { setEntry(null); setError(""); onPending(false); };
   return <PricingSection title={t("pricing.linkedAdjustment.section")} label={t("pricing.linkedAdjustment.title", { label })} keepOpen={!!entry}>
     <p className="mt-2">{t("pricing.linkedAdjustment.current", { parent: names?.[parentId] ?? t("pricing.offerNumber", { number: room.offers.findIndex((candidate) => candidate.id === parentId) + 1 }), adjustment: `${value}${adjustment.kind === "percentage" ? "%" : ` ${room.currency}`}` })}</p>

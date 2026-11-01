@@ -7,7 +7,7 @@ import {
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { baseAmounts, decimalAmount, errorText, PricingError } from "./pricingAmounts";
+import { amountInput, baseAmounts, errorText, PricingError } from "./pricingAmounts";
 import { recurringTemplate, recurringPrice, recurringAdjustments } from "./recurringPricingInputs";
 import { PricingSection } from "./PricingSection";
 import * as ui from "./pricingStyles";
@@ -123,7 +123,9 @@ export function PricingSeasons({
     scale = pricingCurrencyScale(room.currency)!;
   const activeIncluded =
     included ??
-    (!editing && template?.mode === "included_guests" ? includedInput(template, scale) : null);
+    (!editing && template?.mode === "included_guests"
+      ? includedInput(template, scale, pricingAmountStep(room.currency))
+      : null);
   const pending =
     !!included || !!editing || Object.values(entry).some(Boolean) || values.some(Boolean);
   const reset = () => {
@@ -160,7 +162,10 @@ export function PricingSeasons({
               {season.name}
               {season.tier && ` (${season.tier})`} · {season.from}–{season.through}:{" "}
               {baseAmounts(season.price, t)
-                .map(([name, minor]) => `${name} ${decimalAmount(minor, scale)} ${room.currency}`)
+                .map(
+                  ([name, minor]) =>
+                    `${name} ${amountInput(minor, room.currency)} ${room.currency}`,
+                )
                 .join("; ")}
               .{recurringAdjustments(season.price, room.currency, scale, t)}
             </span>
@@ -177,7 +182,7 @@ export function PricingSeasons({
                 if (disabled || pending) return;
                 setIncluded(
                   season.price.mode === "included_guests"
-                    ? includedInput(season.price, scale)
+                    ? includedInput(season.price, scale, pricingAmountStep(room.currency))
                     : null,
                 );
                 const selected = {
@@ -189,7 +194,7 @@ export function PricingSeasons({
                 setEditing(selected);
                 setEntry(selected);
                 setValues(
-                  baseAmounts(season.price).map(([, minor]) => decimalAmount(minor, scale)),
+                  baseAmounts(season.price).map(([, minor]) => amountInput(minor, room.currency)),
                 );
                 setError("");
                 onPending(true);

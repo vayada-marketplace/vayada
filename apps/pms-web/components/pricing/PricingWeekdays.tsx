@@ -1,8 +1,8 @@
 "use client";
 import { useState } from "react";
-import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { parsePricingConfiguration, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import { decimalAmount, errorText, parseAdjustmentInput, PricingError } from "./pricingAmounts";
+import { amountInput, decimalAmount, errorText, parseAdjustmentInput, PricingError } from "./pricingAmounts";
 import { PricingSection } from "./PricingSection";
 import * as ui from "./pricingStyles";
 
@@ -42,11 +42,11 @@ export function PricingWeekdays({ room, offer, label, disabled, onChange, onPend
   return <PricingSection title={t("pricing.weekdays.section")} label={t("pricing.weekdays.summary", { label })} keepOpen={pending}>
     <p className={ui.help}>{t("pricing.weekdays.intro")}</p>
     <ul className="space-y-1.5">{offer.price.calendar.weekdays.map(({ day, adjustment }) => <li key={day} className={ui.entry}>
-      <span>{t(`pricing.weekday.${day}`)}: {adjustment.kind === "percentage" ? `${adjustment.basisPoints / 100}%` : `${adjustment.deltaMinor.startsWith("-") ? "−" : "+"}${decimalAmount(adjustment.deltaMinor.replace(/^-/, ""), pricingCurrencyScale(room.currency)!)} ${room.currency}`}</span>
+      <span>{t(`pricing.weekday.${day}`)}: {adjustment.kind === "percentage" ? `${adjustment.basisPoints / 100}%` : `${adjustment.deltaMinor.startsWith("-") ? "−" : "+"}${amountInput(adjustment.deltaMinor.replace(/^-/, ""), room.currency)} ${room.currency}`}</span>
       <button type="button" className={ui.secondaryButton} disabled={disabled || pending} aria-label={t("pricing.weekdays.editAria", { day: t(`pricing.weekday.${day}`), label })} onClick={() => {
         if (disabled || pending) return;
         const minor = adjustment.kind === "fixed" ? adjustment.deltaMinor : String(adjustment.basisPoints);
-        setEditing(true); update({ day: String(day), kind: adjustment.kind, value: `${minor.startsWith("-") ? "-" : ""}${decimalAmount(minor.replace(/^-/, ""), adjustment.kind === "fixed" ? pricingCurrencyScale(room.currency)! : 2)}` });
+        setEditing(true); update({ day: String(day), kind: adjustment.kind, value: `${minor.startsWith("-") ? "-" : ""}${adjustment.kind === "fixed" ? amountInput(minor.replace(/^-/, ""), room.currency) : decimalAmount(minor.replace(/^-/, ""), 2)}` });
       }}>{t("pricing.weekdays.edit")}</button>
       <button type="button" className={ui.secondaryButton} disabled={disabled || pending} aria-label={t("pricing.weekdays.clearAria", { day: t(`pricing.weekday.${day}`), label })} onClick={() => apply(String(day), null)}>{t("pricing.weekdays.clear")}</button>
     </li>)}</ul>

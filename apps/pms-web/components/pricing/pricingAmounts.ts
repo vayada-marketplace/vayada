@@ -13,9 +13,14 @@ import {
   decimalAmount,
   parseMinorInput,
   PricingError as SetupPricingError,
+  signedAmountText,
 } from "@vayada/product-onboarding/pricingSetupAmounts";
 
 export { decimalAmount, parseMinorInput };
+/** A stored amount as a price field shows it: "100.50", and a whole-unit currency without the zero fraction, "500000"
+ * for IDR (VAY-2425). */
+export const amountInput = (minor: string, currency: string) =>
+  decimalAmount(minor, pricingCurrencyScale(currency) ?? 2, pricingAmountStep(currency));
 
 export type MessageKey = keyof typeof en & keyof typeof import("@/messages/de.json");
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -103,7 +108,7 @@ export function editedSnapshot(
         const base = offer.price.calendar.base,
           values = baseAmounts(base).map(([, minor], ai) =>
             parseMinorInput(
-              inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale),
+              inputs[`${ri}:${oi}:${ai}`] ?? amountInput(minor, snapshot.currency),
               scale,
               false,
               pricingAmountStep(snapshot.currency),
@@ -127,7 +132,16 @@ export function editedSnapshot(
 }
 
 export function parseAdjustmentInput(input: { kind: string; value: string }, currency: string) {
-  if (!["fixed", "percentage"].includes(input.kind) || !/^[+-]?\d+(?:\.\d+)?$/.test(input.value))
+  // A fixed amount may carry thousands separators in a whole-unit currency (VAY-2425).
+  const fixed = input.kind === "fixed";
+  if (
+    !["fixed", "percentage"].includes(input.kind) ||
+    !signedAmountText(
+      input.value,
+      fixed ? pricingCurrencyScale(currency)! : 2,
+      fixed ? pricingAmountStep(currency) : 1,
+    )
+  )
     throw new PricingError("pricing.error.adjustmentInvalid");
   const unsigned =
     input.kind === "fixed"
