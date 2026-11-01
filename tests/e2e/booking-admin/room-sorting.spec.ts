@@ -167,11 +167,13 @@ test("keeps the last option shown, and dims the options while sorting is off", a
     await option(key).getByRole("checkbox").uncheck();
   await expect(page.getByText("1 of 6 shown to guests")).toBeVisible();
   await expect(option("recommended").getByRole("checkbox")).toBeDisabled();
-  await expect(page.getByTestId("room-sorting-preview")).toContainText(
-    "No sort menu: guests see the rooms in your order.",
+  const preview = page.getByTestId("room-sorting-preview");
+  await expect(preview).toContainText(
+    "No sort menu: guests see the rooms sorted by “Recommended”.",
   );
 
   await page.getByRole("switch", { name: "Room Sorting" }).click();
+  await expect(preview).toContainText("No sort menu: guests see the rooms in your order.");
   await expect(
     page.getByRole("switch", { name: "Hide when there is only one room" }),
   ).toBeDisabled();
