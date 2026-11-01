@@ -3,7 +3,8 @@ import {
   pricingOfferNameKeys,
   type PricingOfferNameKey,
 } from "@vayada/domain-booking/replacement-pricing";
-import type { PricingOffer } from "@/services/api/replacementOffers";
+import { quoteMoneyAmount, type PricingOffer } from "@/services/api/replacementOffers";
+import type { StayOfferPrice } from "@/services/api/stayPrices";
 
 /** The parts of a choice's plain name, shared with the PMS (VAY-2188): its meal, how it cancels,
  * free cancellation's deadline in days and, for two choices that would read the same in one
@@ -150,4 +151,76 @@ export function choiceText(
           : null,
     cancellationPassed,
   };
+}
+
+/** A room's choice for its saving (VAY-2392): its meal, its rate icon, whether its free cancellation has
+ * passed, and its price for the stay (null when not priced). */
+export type SavingChoice = {
+  mealPlan: string;
+  refundable: boolean | null;
+  cancellationPassed: boolean;
+  amount: number | null;
+};
+
+/** A no-refund choice's saving in percent on the same meal's cheapest refundable choice shown (`shown` in
+ * price order), else on one whose free cancellation has passed and is hidden (`all`), as Timo's prototype
+ * shows; never on the passed choice itself. The room card's "-10%", and VAY-2449's "Best deal first". */
+export function choiceSaving(
+  choice: SavingChoice,
+  shown: readonly SavingChoice[],
+  all: readonly SavingChoice[],
+): number | undefined {
+  if (choice.refundable !== false || choice.cancellationPassed) return undefined;
+  const sameMeal = (other: SavingChoice) =>
+    other.mealPlan === choice.mealPlan && other.amount !== null;
+  const base =
+    shown.find((other) => other.refundable === true && sameMeal(other)) ??
+    all.find((other) => other.cancellationPassed && sameMeal(other));
+  return choice.amount !== null && base?.amount
+    ? Math.round((1 - choice.amount / base.amount) * 100)
+    : undefined;
+}
+
+/** VAY-2449 "Best deal first": the biggest saving a room's card shows (its "-10%"), from its offers' prices for
+ * the stay. As the card: a choice whose free cancellation has passed is hidden while another choice of its
+ * meal is offered, and the shown choices are compared cheapest first. 0 without prices or a saving. */
+export function roomSaving(
+  offers: readonly PricingOffer[],
+  prices: readonly StayOfferPrice[] | null,
+  stay: { checkIn: string; timezone?: string },
+  t: Translate,
+  now = new Date(),
+): number {
+  if (!prices) return 0;
+  const keys = choiceKeys(offers, stay, now);
+  const all = offers.map((offer, index) => {
+    const text = choiceText(keys[index]!, { ...stay, formatDate: (date) => date }, t, now);
+    const price = prices.find((p) => p.publicOfferKey === offer.publicOfferKey);
+    return {
+      mealPlan: offer.mealPlan,
+      refundable: text.refundable,
+      cancellationPassed: text.cancellationPassed,
+      amount:
+        price?.status === "priced" ? quoteMoneyAmount(price.totalMinor, price.currency) : null,
+      unavailable: price?.status !== "priced" && price?.status !== "unpriced",
+    };
+  });
+  const shown = all
+    .filter(
+      (choice) =>
+        !choice.cancellationPassed ||
+        !all.some(
+          (other) =>
+            other !== choice &&
+            !other.cancellationPassed &&
+            !other.unavailable &&
+            other.mealPlan === choice.mealPlan,
+        ),
+    )
+    .sort((a, b) =>
+      a.amount === null || b.amount === null
+        ? Number(a.amount === null) - Number(b.amount === null)
+        : a.amount - b.amount,
+    );
+  return Math.max(0, ...shown.map((choice) => choiceSaving(choice, shown, all) ?? 0));
 }

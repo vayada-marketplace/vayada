@@ -15,6 +15,14 @@ import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from 
 import { trackEvent } from "@/services/api/tracking";
 import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { hotelService } from "@/services/api/hotel";
+import { roomSaving } from "@/lib/roomChoices";
+import {
+  DEFAULT_ROOM_SORTING,
+  sortMenu,
+  type RoomSortKey,
+  type RoomSorting,
+} from "@/lib/roomSorting";
+import { serverNow } from "@/lib/serverClock";
 import { useStayPrices } from "@/lib/hooks/useStayPrices";
 import RoomCard from "@/components/booking/RoomCard";
 import RoomTabs, { RoomsHelp, type RoomsProgressRoom } from "@/components/booking/RoomsProgress";
@@ -45,6 +53,16 @@ import {
   type CatalogLocationMap,
   type PricingRoom,
 } from "@/services/api/replacementOffers";
+
+// VAY-2449: the sort menu's options, as the hotel's Room Sorting lists them.
+const SORT_LABELS: Record<RoomSortKey, string> = {
+  recommended: "recommended",
+  priceLow: "priceLowHigh",
+  priceHigh: "priceHighLow",
+  roomSize: "roomSize",
+  capacity: "capacity",
+  bestDeal: "bestDeal",
+};
 
 interface AppliedPromo {
   code: string;
@@ -210,6 +228,8 @@ function HomePageContent() {
   const [locationMap, setLocationMap] = useState<CatalogLocationMap | null>(null);
   // The property's place for the rooms' own "Show map in room details", sent with the switch off too (VAY-2445).
   const [detailsMap, setDetailsMap] = useState<CatalogLocationMap | null>(null);
+  // The hotel's Room Sorting (VAY-2449), read live with the catalog; null: the defaults.
+  const [roomSorting, setRoomSorting] = useState<RoomSorting | null>(null);
   // A map pin's "View details" opens that room card's details: one counter per room.
   const [detailsRequests, setDetailsRequests] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -220,6 +240,7 @@ function HomePageContent() {
         setRooms(value.rooms);
         setLocationMap(value.locationMap);
         setDetailsMap(value.detailsMap);
+        setRoomSorting(value.roomSorting);
       })
       .catch(() => {
         if (!controller.signal.aborted) setRoomsFailed(true);
@@ -384,11 +405,20 @@ function HomePageContent() {
     setLastGuestsAndDates(guestsAndDates);
     setChanging(null);
   }
-  const [sortOption, setSortOption] = useState("recommended");
+  // VAY-2449: the hotel's options, order and default; the guest's pick while it is one of them.
+  const [sortPick, setSortPick] = useState<RoomSortKey | null>(null);
+  const menu = sortMenu(roomSorting ?? DEFAULT_ROOM_SORTING, rooms?.length ?? 0, sortPick);
+  const sortOption = menu.order;
   const roomPrices = (room: PricingRoom) =>
     stay.prices?.rooms.find(({ roomTypeId }) => roomTypeId === room.roomTypeId) ?? null;
+  // The prices a card shows: "Book for X + pick a 2nd room" prices a room too small for the whole
+  // party for the adults it takes (VAY-2393), and the sort follows them.
+  const shownPrices = (room: PricingRoom) => {
+    const prices = roomPrices(room);
+    return (!pickMode && adults > 1 ? prices?.part?.offers : undefined) ?? prices?.offers ?? null;
+  };
   const cheapest = (room: PricingRoom) => {
-    const totals = (roomPrices(room)?.offers ?? []).flatMap((offer) =>
+    const totals = (shownPrices(room) ?? []).flatMap((offer) =>
       offer.status === "priced" ? [quoteMoneyAmount(offer.totalMinor, offer.currency)] : [],
     );
     return totals.length ? Math.min(...totals) : null;
@@ -424,6 +454,22 @@ function HomePageContent() {
       return 3;
     return prices.roomCount === null ? 2 : 0;
   };
+  // VAY-2449 "Best deal first": the biggest saving each card shows, worked out once per render.
+  const savings =
+    sortOption === "bestDeal"
+      ? new Map(
+          (rooms ?? []).map((room) => [
+            room.roomTypeId,
+            roomSaving(
+              room.offers,
+              shownPrices(room),
+              { checkIn, timezone: hotel.timezone },
+              t,
+              new Date(serverNow()),
+            ),
+          ]),
+        )
+      : null;
   const shownRooms = [...(rooms ?? [])].sort(
     (a, b) =>
       pickOrder(a) - pickOrder(b) ||
@@ -433,7 +479,11 @@ function HomePageContent() {
           ? byPrice(a, b, -1)
           : sortOption === "roomSize"
             ? (b.size?.value ?? 0) - (a.size?.value ?? 0)
-            : 0),
+            : sortOption === "capacity"
+              ? (b.occupancy?.maxGuests ?? 0) - (a.occupancy?.maxGuests ?? 0)
+              : sortOption === "bestDeal"
+                ? (savings?.get(b.roomTypeId) ?? 0) - (savings?.get(a.roomTypeId) ?? 0)
+                : 0),
   );
   // Rooms in several places (VAY-2324, VAY-2325): the cards say where each one is, and the guest can see them on
   // a map next to the list (or full screen on a phone), which replaces the Location section below.
@@ -641,13 +691,14 @@ function HomePageContent() {
         <select
           id="room-sort"
           value={sortOption}
-          onChange={(event) => setSortOption(event.target.value)}
+          onChange={(event) => setSortPick(event.target.value as RoomSortKey)}
           className="min-h-[44px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-white pl-4 pr-10 text-sm font-medium text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         >
-          <option value="recommended">{t("recommended")}</option>
-          <option value="priceLow">{t("priceLowHigh")}</option>
-          <option value="priceHigh">{t("priceHighLow")}</option>
-          <option value="roomSize">{t("roomSize")}</option>
+          {menu.options.map((option) => (
+            <option key={option} value={option}>
+              {t(SORT_LABELS[option])}
+            </option>
+          ))}
         </select>
         <svg
           className="pointer-events-none absolute right-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-700"
@@ -1124,7 +1175,7 @@ function HomePageContent() {
                 )
               }
               heading={heading}
-              toolbar={sortControl}
+              toolbar={menu.options.length ? sortControl : null}
               notices={notices}
               renderCard={roomCard}
             />

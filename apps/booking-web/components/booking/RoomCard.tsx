@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useLocale, useTranslations } from "next-intl";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
-import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import { choiceKeys, choiceSaving, choiceText, type SavingChoice } from "@/lib/roomChoices";
 import { combinable, type RoomGuests } from "@/lib/roomPicker";
 import { serverNow } from "@/lib/serverClock";
 import { resolveLocale } from "@/lib/utils";
@@ -238,20 +238,15 @@ export default function RoomCard({
     const approx = approximate(value, currency);
     return { label: approx ?? exact, paid: approx ? exact : null };
   };
-  // A no-refund rate's saving on the same meal's cheapest refundable rate, else on one whose free
-  // cancellation has passed and is hidden (VAY-2392, as Timo's prototype shows); never on the
-  // passed rate itself.
-  const discount = (choice: (typeof shown)[number]) => {
-    if (choice.text.refundable !== false || choice.text.cancellationPassed) return undefined;
-    const sameMeal = (other: (typeof shown)[number]) =>
-      other.offer.mealPlan === choice.offer.mealPlan && !!other.priced;
-    const refundable =
-      shown.find((other) => other.text.refundable === true && sameMeal(other)) ??
-      all.find((other) => other.text.cancellationPassed && sameMeal(other));
-    const own = amount(choice),
-      base = refundable ? amount(refundable) : null;
-    return own !== null && base ? Math.round((1 - own / base) * 100) : undefined;
-  };
+  // A no-refund rate's saving (VAY-2392, shared with "Best deal first", VAY-2449).
+  const saving = (choice: (typeof all)[number]): SavingChoice => ({
+    mealPlan: choice.offer.mealPlan,
+    refundable: choice.text.refundable,
+    cancellationPassed: choice.text.cancellationPassed,
+    amount: amount(choice),
+  });
+  const discount = (choice: (typeof shown)[number]) =>
+    choiceSaving(saving(choice), shown.map(saving), all.map(saving));
 
   // The choices and "Select This Rate", on the card and again in "View Details".
   // In "View details", acting closes the details first, so the page's own feedback shows.
