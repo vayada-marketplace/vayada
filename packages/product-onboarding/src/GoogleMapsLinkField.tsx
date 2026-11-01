@@ -72,12 +72,14 @@ export default function GoogleMapsLinkField({
     setResult(undefined);
     setResolving(true);
     timer.current = setTimeout(() => {
-      void resolveShortLink(link.trim()).then((long) => {
-        if (request !== latest.current) return;
-        setResolving(false);
-        const pin = long ? parseGoogleMapsLink(long) : null;
-        place(pin && typeof pin === "object" ? pin : "short_link");
-      });
+      void resolveShortLink(link.trim())
+        .catch(() => null)
+        .then((long) => {
+          if (request !== latest.current) return;
+          setResolving(false);
+          const pin = long ? parseGoogleMapsLink(long) : null;
+          place(pin && typeof pin === "object" ? pin : "short_link");
+        });
     }, RESOLVE_DELAY_MS);
   }
 

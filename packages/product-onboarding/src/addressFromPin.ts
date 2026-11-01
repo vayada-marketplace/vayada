@@ -5,7 +5,11 @@ type GeocoderComponent = { long_name: string; short_name: string; types: string[
 type GeocodingLibrary = {
   Geocoder: new () => {
     geocode: (request: { location: { lat: number; lng: number } }) => Promise<{
-      results: { address_components?: GeocoderComponent[]; types?: string[] }[];
+      results: {
+        address_components?: GeocoderComponent[];
+        formatted_address?: string;
+        types?: string[];
+      }[];
     }>;
   };
 };
@@ -27,15 +31,25 @@ export async function addressFromPin(
       withParts.find((result) => result.types?.some((type) => ADDRESS_TYPES.includes(type))) ??
       withParts[0];
     if (!best) return null;
+    const components = best.address_components!;
     const address = addressFromGooglePlace({
-      addressComponents: best.address_components!.map((component) => ({
+      addressComponents: components.map((component) => ({
         longText: component.long_name,
         shortText: component.short_name,
         types: component.types,
       })),
     });
+    // The street as Google writes it for the country ("45 Galle Rd", "Leopoldstraße 12"): the first part of the
+    // formatted address, when that part names the street; otherwise the parts in German order.
+    const route = components.find((component) => component.types.includes("route"));
+    const firstPart = best.formatted_address?.split(",")[0]?.trim() ?? "";
+    const streetAddress =
+      route && (firstPart.includes(route.long_name) || firstPart.includes(route.short_name))
+        ? firstPart
+        : address.streetAddress;
     return {
       ...address,
+      streetAddress,
       latitude: pin.lat,
       longitude: pin.lng,
       location: { latitude: pin.lat, longitude: pin.lng },

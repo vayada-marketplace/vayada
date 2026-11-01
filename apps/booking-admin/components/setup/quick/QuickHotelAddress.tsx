@@ -31,7 +31,14 @@ import type { QuickHotelDraft } from "./quickHotelDraft";
 
 type AddressDraft = Pick<
   QuickHotelDraft,
-  "streetAddress" | "postalCode" | "city" | "countryCode" | "latitude" | "longitude" | "timezone"
+  | "streetAddress"
+  | "postalCode"
+  | "city"
+  | "countryCode"
+  | "latitude"
+  | "longitude"
+  | "timezone"
+  | "pinFromLink"
 >;
 
 export type QuickHotelAddressProps = {
@@ -111,10 +118,21 @@ export function QuickHotelAddress({
   const [changingCurrency, setChangingCurrency] = useState(false);
   const timezones = useMemo(() => availableTimezones(), []);
   const timezoneFollowsAddress = useRef(!draft.timezone);
-  // A pin from a pasted link is the owner's: typing the address afterwards keeps it (VAY-2444).
-  const pinFromLink = useRef(false);
+  // The address lookup for a pasted link's pin (VAY-2444): only the latest counts, and any other choice drops it.
   const linkLookup = useRef(0);
   const [lookingUp, setLookingUp] = useState(false);
+  // Where focus goes once a link's lookup ends, as the link field it came from goes away.
+  const [focusAfterLink, setFocusAfterLink] = useState(false);
+  const cancelLinkLookup = () => {
+    linkLookup.current += 1;
+    setLookingUp(false);
+  };
+  useEffect(
+    () => () => {
+      linkLookup.current += 1;
+    },
+    [],
+  );
 
   // A complete address without a pin is looked up to place the first pin: a typed one, and a picked one
   // that Google only knows as an area (a street without a number, a postcode or a town), which the
@@ -154,7 +172,7 @@ export function QuickHotelAddress({
         ? timezoneForCoordinates(address.latitude, address.longitude)
         : defaultTimezoneForCountry(address.countryCode);
     timezoneFollowsAddress.current = true;
-    pinFromLink.current = false;
+    cancelLinkLookup();
     onChange({
       streetAddress: address.streetAddress,
       postalCode: address.postalCode,
@@ -163,13 +181,15 @@ export function QuickHotelAddress({
       latitude: address.latitude,
       longitude: address.longitude,
       timezone,
+      pinFromLink: false,
     });
     setMode(address.streetAddress && address.city ? "summary" : "manual");
   };
 
   const editTyped = (patch: Partial<AddressDraft>) => {
     addressRevision.current += 1;
-    if (pinFromLink.current) return onChange(patch);
+    cancelLinkLookup();
+    if (draft.pinFromLink) return onChange(patch);
     onChange({
       ...patch,
       latitude: null,
@@ -180,21 +200,26 @@ export function QuickHotelAddress({
     });
   };
 
-  /** A pasted link's pin, then the address Google gives it; without one, the owner types it next to the pin. */
+  /** A pasted link's pin, then the address Google gives it; without one, the owner types it next to the pin. The
+   * previous address no longer describes the place, as in the room editor. */
   const placeFromLink = (pin: MapsLinkPin) => {
     if (!key) return;
     const request = (linkLookup.current += 1);
-    pinFromLink.current = true;
     timezoneFollowsAddress.current = true;
     onChange({
       latitude: pin.latitude,
       longitude: pin.longitude,
       timezone: timezoneForCoordinates(pin.latitude, pin.longitude),
+      streetAddress: "",
+      postalCode: "",
+      city: "",
+      pinFromLink: true,
     });
     setLookingUp(true);
     void addressFromPin(key, { lat: pin.latitude, lng: pin.longitude }).then((address) => {
       if (request !== linkLookup.current) return;
       setLookingUp(false);
+      setFocusAfterLink(true);
       if (address?.city && address.countryCode) {
         onChange({
           streetAddress: address.streetAddress,
@@ -205,14 +230,15 @@ export function QuickHotelAddress({
         setMode(address.streetAddress ? "summary" : "manual");
         return;
       }
-      const country = countryForCoordinates(pin.latitude, pin.longitude);
-      if (country && !draft.countryCode) onChange({ countryCode: country });
+      // The country the pin's time zone belongs to, or none for the owner to choose.
+      onChange({ countryCode: countryForCoordinates(pin.latitude, pin.longitude) });
       setMode("manual");
     });
   };
 
   const pick = ({ lat, lng }: { lat: number; lng: number }) => {
     addressRevision.current += 1;
+    setAdjusting(false);
     onChange({
       latitude: lat,
       longitude: lng,
@@ -220,10 +246,15 @@ export function QuickHotelAddress({
     });
   };
 
-  const switchLink = (label: string, next: "search" | "link" | "manual") => (
+  const switchLink = (label: string, next: "search" | "link" | "manual", autoFocus = false) => (
     <button
       type="button"
-      onClick={() => setMode(next)}
+      autoFocus={autoFocus}
+      onClick={() => {
+        cancelLinkLookup();
+        setFocusAfterLink(false);
+        setMode(next);
+      }}
       className="rounded text-[13px] font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600"
     >
       {label}
@@ -277,7 +308,10 @@ export function QuickHotelAddress({
               link: LINK_CLASS,
             }}
             onPin={placeFromLink}
-            onClose={() => setMode("search")}
+            onClose={() => {
+              cancelLinkLookup();
+              setMode("search");
+            }}
             resolveShortLink={resolveShortLink}
           />
           {error ? <QuickSetupFieldError message={error} /> : null}
@@ -297,7 +331,7 @@ export function QuickHotelAddress({
                 *
               </span>
             </p>
-            {switchLink("Change", key ? "search" : "manual")}
+            {switchLink("Change", key ? "search" : "manual", focusAfterLink)}
           </div>
           <p
             className={`${QUICK_SETUP_INPUT} mt-2 flex items-center gap-2 border-gray-300 !h-auto min-h-11 py-2.5`}
@@ -323,7 +357,11 @@ export function QuickHotelAddress({
             label="Street and number"
             required
             value={draft.streetAddress}
-            inputProps={{ autoComplete: "address-line1", maxLength: 200 }}
+            inputProps={{
+              autoComplete: "address-line1",
+              maxLength: 200,
+              autoFocus: focusAfterLink,
+            }}
             onChange={(streetAddress) => editTyped({ streetAddress })}
           />
           <div className="grid gap-4 lg:grid-cols-2">
@@ -375,16 +413,13 @@ export function QuickHotelAddress({
       {key && (complete || hasPin(draft)) ? (
         <div className="flex flex-col gap-3">
           <div>
+            {/* Without a pin, the map itself says to click where the entrance is. */}
             {hasPin(draft) ? (
               <p className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-green-700">
                 <CheckCircleIcon className="h-4 w-4" aria-hidden="true" />
                 Pin placed on the map
               </p>
-            ) : (
-              <p className="mb-2 text-[13px] text-gray-500">
-                Click the map where your entrance is.
-              </p>
-            )}
+            ) : null}
             <div className="relative h-[240px] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 lg:h-[300px]">
               {mapFailed ? (
                 <div className="flex h-full items-center justify-center text-sm font-medium text-slate-500">
@@ -409,14 +444,16 @@ export function QuickHotelAddress({
             ) : null}
           </div>
           {hasPin(draft) ? (
-            <GuestsWillSeeCard
-              label="Guests will see"
-              name={hotelName.trim() || "Your hotel"}
-              address={
-                formattedAddress(draft) ||
-                (lookingUp ? "Looking up the address…" : "Add the address above.")
-              }
-            />
+            <div aria-live="polite">
+              <GuestsWillSeeCard
+                label="Guests will see"
+                name={hotelName.trim() || "Your hotel"}
+                address={
+                  formattedAddress(draft) ||
+                  (lookingUp ? "Looking up the address…" : "Add the address above.")
+                }
+              />
+            </div>
           ) : null}
         </div>
       ) : null}

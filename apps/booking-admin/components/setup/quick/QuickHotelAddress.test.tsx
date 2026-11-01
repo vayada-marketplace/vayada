@@ -114,8 +114,13 @@ function render(overrides: Partial<QuickHotelAddressProps> = {}) {
 
 const byTestId = (renderer: ReactTestRenderer, id: string) =>
   renderer.root.findAll((node) => node.props["data-testid"] === id);
+// A button's own text (icons beside it don't count).
 const buttonNamed = (renderer: ReactTestRenderer, name: string) =>
-  renderer.root.find((node) => node.type === "button" && node.children.join("") === name);
+  renderer.root.find(
+    (node) =>
+      node.type === "button" &&
+      node.children.filter((child) => typeof child === "string").join("") === name,
+  );
 const text = (renderer: ReactTestRenderer) => JSON.stringify(renderer.toJSON());
 
 describe("QuickHotelAddress (VAY-2247 'Where it is')", () => {
@@ -126,7 +131,7 @@ describe("QuickHotelAddress (VAY-2247 'Where it is')", () => {
     expect(text(renderer)).toContain("Set from your address");
     expect(text(renderer)).toContain("Set from your country");
     await act(async () => byTestId(renderer, "pick")[0]!.props.onClick());
-    expect(onChange).toHaveBeenCalledWith(PICKED);
+    expect(onChange).toHaveBeenCalledWith({ ...PICKED, pinFromLink: false });
     renderer.unmount();
   });
 
@@ -308,7 +313,16 @@ describe("QuickHotelAddress (VAY-2247 'Where it is')", () => {
         },
       }),
     );
-    expect(changes[0]).toEqual({ latitude: 5.9762, longitude: 80.7063, timezone: "Asia/Colombo" });
+    // The pin and time zone at once; the previous address no longer describes the place.
+    expect(changes[0]).toEqual({
+      latitude: 5.9762,
+      longitude: 80.7063,
+      timezone: "Asia/Colombo",
+      streetAddress: "",
+      postalCode: "",
+      city: "",
+      pinFromLink: true,
+    });
     expect(reverse.addressFromPin).toHaveBeenCalledWith("key", { lat: 5.9762, lng: 80.7063 });
     expect(changes[1]).toEqual({
       streetAddress: "4th Lane",
@@ -354,6 +368,34 @@ describe("QuickHotelAddress (VAY-2247 'Where it is')", () => {
     expect(renderer.root.findByType("select").props.value).toBe("LK");
     await act(async () => inputs[0]!.props.onChange({ target: { value: "4th Lane" } }));
     expect(byTestId(renderer, "map")[0]!.props["data-position"]).toBe("5.9762,80.7063");
+    renderer.unmount();
+  });
+
+  it("drops a link's address lookup once the owner picks another way", async () => {
+    let answer!: (value: unknown) => void;
+    reverse.addressFromPin.mockImplementationOnce(
+      () => new Promise((resolve) => (answer = resolve)),
+    );
+    const changes: unknown[] = [];
+    const { renderer } = render({ onChange: (patch) => changes.push(patch) });
+    await act(async () => buttonNamed(renderer, "Paste a Google Maps link").props.onClick());
+    await act(async () =>
+      renderer.root
+        .findByProps({ id: "quick-hotel-maps-link" })
+        .props.onChange({ target: { value: "https://maps.google.com/?q=5.9762,80.7063" } }),
+    );
+    await act(async () => buttonNamed(renderer, "Search an address instead").props.onClick());
+    await act(async () => byTestId(renderer, "pick")[0]!.props.onClick());
+    const before = changes.length;
+    await act(async () =>
+      answer({ streetAddress: "4th Lane", postalCode: "", city: "Dikwella", countryCode: "LK" }),
+    );
+    // The late answer doesn't overwrite the picked address.
+    expect(changes).toHaveLength(before);
+    expect(changes.at(-1)).toMatchObject({
+      streetAddress: "Sendlinger Straße 12",
+      pinFromLink: false,
+    });
     renderer.unmount();
   });
 

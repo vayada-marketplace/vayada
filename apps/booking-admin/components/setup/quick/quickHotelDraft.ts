@@ -16,6 +16,8 @@ export type QuickHotelDraft = {
   phone: string;
   /** Another currency than the country's; "" follows the country. */
   currency: string;
+  /** The pin came from a pasted Google Maps link (VAY-2444): typing the address keeps it. */
+  pinFromLink?: boolean;
 };
 
 export type QuickHotelField = "displayName" | "propertyType" | "address" | "contactEmail" | "phone";

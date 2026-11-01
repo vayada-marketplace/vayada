@@ -90,8 +90,9 @@ test("a pasted Google Maps link sets the pin, the address, the time zone and the
   await expect(page.getByRole("group", { name: "Map type" })).toBeVisible();
   await expect(page.getByText("Guests will see")).toBeVisible();
   await expect(page.getByText("Asia/Colombo")).toBeVisible();
-  // The currency is set (from the country, unless the hotel chose one before).
-  await expect(page.getByText("Set from your country")).toHaveCount(0);
+  // The currency follows the country (this hotel never chose another).
+  await expect(page.getByText(/^LKR/)).toBeVisible();
+  await expect(page.getByText("From Sri Lanka · used for every price")).toBeVisible();
   expect(
     await page.evaluate(
       () => (window as unknown as { vayadaE2eGeocodeQueries: string[] }).vayadaE2eGeocodeQueries,

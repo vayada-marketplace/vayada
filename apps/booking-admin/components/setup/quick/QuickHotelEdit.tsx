@@ -103,9 +103,10 @@ export function QuickHotelEdit({
   // Whether the screen differs from the hotel as loaded (or last saved) with any looked-up pin: Save & exit,
   // or Back from the first screen, without an edit leaves without a write, and typing a value back to what it
   // was counts as no edit.
+  // Where a pin came from (a pasted link, VAY-2444) isn't saved, so it isn't an edit by itself.
   const dirty =
     logo !== null ||
-    JSON.stringify(draft) !==
+    JSON.stringify({ ...draft, pinFromLink: undefined }) !==
       JSON.stringify({
         ...quickHotelDraftFromProfile(loaded.profile.profile, loaded.savedCurrency),
         ...lookedUpPin,
