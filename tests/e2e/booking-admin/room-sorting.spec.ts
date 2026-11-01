@@ -22,7 +22,7 @@ const defaults = {
   defaultOption: "recommended",
 };
 
-async function setup(page: Page, { canSave = true, getStatus = 200 } = {}) {
+async function setup(page: Page, { canSave = true, getStatus = 200, putStatus = 200 } = {}) {
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
   const state = { sorting: structuredClone(defaults), saves: [] as unknown[] };
@@ -34,6 +34,12 @@ async function setup(page: Page, { canSave = true, getStatus = 200 } = {}) {
     if (method === "PUT") {
       const body = route.request().postDataJSON() as typeof defaults;
       state.saves.push(body);
+      if (putStatus !== 200)
+        return route.fulfill({
+          status: putStatus,
+          headers,
+          json: { code: "booking_settings_missing" },
+        });
       state.sorting = body;
       return route.fulfill({ headers, json: { sorting: body } });
     }
@@ -47,8 +53,7 @@ async function setup(page: Page, { canSave = true, getStatus = 200 } = {}) {
   return state;
 }
 
-const optionNames = (page: Page) =>
-  page.locator('[data-testid^="room-sort-option-"] label > span:first-child').allTextContents();
+const optionNames = (page: Page) => page.getByTestId("room-sort-name").allTextContents();
 
 test("opens from Settings and saves the hotel's own sort menu", async ({ page }, testInfo) => {
   const state = await setup(page);
@@ -84,11 +89,11 @@ test("opens from Settings and saves the hotel's own sort menu", async ({ page },
   await expect(page.getByText("5 of 6 shown to guests")).toBeVisible();
   await page.getByRole("radio", { name: "Set Best deal first as default" }).check();
   await expect(option("bestDeal")).toContainText("Default");
-  const handle = page.getByRole("button", { name: /^Move Best deal first/ });
-  await handle.focus();
-  for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowUp");
-  await expect(handle).toBeFocused();
+  const up = page.getByRole("button", { name: "Move Best deal first up" });
+  for (let i = 0; i < 5; i++) await up.click();
   expect((await optionNames(page))[0]).toBe("Best deal first");
+  await expect(up).toBeDisabled();
+  await expect(page.getByText("Best deal first moved to position 1 of 6")).toBeAttached();
   // Hiding the default moves it to the first option still shown.
   await option("bestDeal").getByRole("checkbox").uncheck();
   await expect(option("recommended")).toContainText("Default");
@@ -135,6 +140,25 @@ test("opens from Settings and saves the hotel's own sort menu", async ({ page },
   expect(state.saves).toHaveLength(1);
 });
 
+test("reorders by dragging a row's handle", async ({ page }) => {
+  await setup(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/settings/room-sorting");
+  await page
+    .getByTestId("room-sort-handle-roomSize")
+    .dragTo(page.getByTestId("room-sort-option-recommended"));
+  await expect
+    .poll(() => optionNames(page))
+    .toEqual([
+      "Room size: Largest first",
+      "Recommended",
+      "Price: Low to High",
+      "Price: High to Low",
+      "Capacity: Most guests first",
+      "Best deal first",
+    ]);
+});
+
 test("keeps the last option shown, and dims the options while sorting is off", async ({ page }) => {
   await setup(page);
   await page.goto("/settings/room-sorting");
@@ -160,15 +184,46 @@ test("works on a phone with 44px targets", async ({ page }, testInfo) => {
   await page.goto("/settings/room-sorting");
   await expect(page.getByText("4 of 6 shown to guests")).toBeVisible();
   for (const target of [
-    page.getByRole("button", { name: /^Move Recommended/ }),
-    page.getByTestId("room-sort-option-recommended").locator("label").last(),
+    page.getByTestId("room-sort-option-priceLow").locator("label").last(),
+    page.getByRole("button", { name: "Save Sorting" }),
+    page.getByRole("button", { name: "Reset to defaults" }),
+    page.getByRole("button", { name: "One room" }),
   ]) {
     const box = (await target.boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(44);
   }
-  const main = page.getByRole("main");
-  expect(await main.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  // On a phone the default sits below the option's name, never squeezing it.
+  const [name, radio] = await Promise.all([
+    page.getByTestId("room-sort-option-priceLow").getByTestId("room-sort-name").boundingBox(),
+    page.getByRole("radio", { name: "Set Price: Low to High as default" }).boundingBox(),
+  ]);
+  expect(radio!.y).toBeGreaterThan(name!.y + name!.height);
+  // No sideways scrolling: name anything that sticks out.
+  const overflow = await page.getByRole("main").evaluate((main) => {
+    const right = main.getBoundingClientRect().right;
+    return Array.from(main.querySelectorAll("*"))
+      .filter((el) => el.getBoundingClientRect().right > right + 1)
+      .slice(0, 5)
+      .map((el) => `${el.tagName}.${el.getAttribute("class") ?? ""}`.slice(0, 120));
+  });
+  expect(overflow).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath("room-sorting-390.png"), fullPage: true });
+});
+
+test("keeps the edits when a save fails, and stops offering Save without booking settings", async ({
+  page,
+}) => {
+  const state = await setup(page, { putStatus: 409 });
+  await page.goto("/settings/room-sorting");
+  await page.getByTestId("room-sort-option-capacity").getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Save Sorting" }).click();
+  await expect(page.getByText("We couldn't save the sorting. Please try again.")).toBeVisible();
+  await expect(page.getByText("5 of 6 shown to guests")).toBeVisible();
+  await expect(
+    page.getByText("Set up the booking engine before choosing how guests sort rooms."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save Sorting" })).toBeDisabled();
+  expect(state.saves).toHaveLength(1);
 });
 
 test("says when the hotel can't save yet, and when the member can't manage it", async ({
