@@ -136,9 +136,10 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
 
-    // Navigate to the checkout page path; mock any room/payment redirects.
+    // Navigate to the checkout page with a room card's choice (VAY-2446: without one, /book
+    // opens the hotel page).
     const response = await page.goto(
-      "/en/book?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible",
+      `/en/book?checkIn=2026-09-12&checkOut=2026-09-15&adults=2&offer=pricing-offer.v2:${"a".repeat(64)}`,
     );
 
     const status = response?.status() ?? 0;
@@ -158,20 +159,19 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     await assertHealthy();
   });
 
-  test("retired payment page redirects to the noindex booking page", async ({ page }, testInfo) => {
+  test("retired payment page redirects to the hotel page", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
 
     // The retired step answers a server redirect (no indexable page of its own) ...
     const redirect = await page.request.get("/en/payment", { maxRedirects: 0 });
     expect(redirect.status(), "Payment must answer a server redirect").toBe(308);
-    expect(new URL(redirect.headers()["location"]!).pathname).toBe("/book");
+    expect(new URL(redirect.headers()["location"]!).pathname).toBe("/");
 
-    // ... to the room-and-price page, which must not be indexed either.
+    // ... to the hotel's public page, where rooms are chosen (VAY-2446).
     const response = await page.goto("/en/payment");
     expect(response?.status() ?? 0, "Redirect target must return 200").toBe(200);
-    const robots = await getMetaRobots(page);
-    expect(robots, "Redirect target must have noindex robots meta").toContain("noindex");
+    await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
 
     await assertHealthy();
   });
@@ -212,20 +212,19 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     expect(noindexPaths.some((p) => p.includes("addons"))).toBe(true);
   });
 
-  test("retired addons page redirects to the noindex booking page", async ({ page }, testInfo) => {
+  test("retired addons page redirects to the hotel page", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
 
     // The retired step answers a server redirect (no indexable page of its own) ...
     const redirect = await page.request.get("/en/addons", { maxRedirects: 0 });
     expect(redirect.status(), "Addons must answer a server redirect").toBe(308);
-    expect(new URL(redirect.headers()["location"]!).pathname).toBe("/book");
+    expect(new URL(redirect.headers()["location"]!).pathname).toBe("/");
 
-    // ... to the room-and-price page, which must not be indexed either.
+    // ... to the hotel's public page, where rooms are chosen (VAY-2446).
     const response = await page.goto("/en/addons");
     expect(response?.status() ?? 0, "Redirect target must return 200").toBe(200);
-    const robots = await getMetaRobots(page);
-    expect(robots, "Redirect target must have noindex robots meta").toContain("noindex");
+    await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
 
     await assertHealthy();
   });

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import middleware, { config } from "./middleware";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import middleware from "./middleware";
 import { bookingWebPublicApi } from "./services/api/bookingWebPublic";
 
 vi.mock("next-intl/middleware", async () => {
@@ -52,22 +52,22 @@ describe("Booking Web retired booking pages", () => {
     return middleware(new NextRequest(`https://${host}${path}`, { headers }));
   }
 
-  it("permanently redirects the retired pages to /book, keeping only what /book reads", async () => {
+  it("permanently redirects the retired pages to the hotel page, keeping only the stay", async () => {
     const response = await visit(
       "/en/rooms?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&ref=FRIEND&room=alpine&rateType=flexible",
     );
     expect(response.status).toBe(308);
     expect(response.headers.get("location")).toBe(
-      `https://${host}/book?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20`,
+      `https://${host}/?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20`,
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(bookingWebPublicApi.resolveHost).not.toHaveBeenCalled();
   });
 
   it("keeps a non-default locale and accepts unprefixed and trailing-slash paths", async () => {
-    expect((await visit("/de/payment")).headers.get("location")).toBe(`https://${host}/de/book`);
-    expect((await visit("/addons/")).headers.get("location")).toBe(`https://${host}/book`);
-    expect((await visit("/payment?checkIn=")).headers.get("location")).toBe(`https://${host}/book`);
+    expect((await visit("/de/payment")).headers.get("location")).toBe(`https://${host}/de`);
+    expect((await visit("/addons/")).headers.get("location")).toBe(`https://${host}/`);
+    expect((await visit("/payment?checkIn=")).headers.get("location")).toBe(`https://${host}/`);
   });
 
   it("redirects on the browser-facing host when the proxy reports an internal origin", async () => {
@@ -77,7 +77,7 @@ describe("Booking Web retired booking pages", () => {
       }),
     );
     expect(response.status).toBe(308);
-    expect(response.headers.get("location")).toBe(`https://${host}/fr/book?checkIn=2026-11-12`);
+    expect(response.headers.get("location")).toBe(`https://${host}/fr?checkIn=2026-11-12`);
   });
 
   it("never redirects to a forwarded host Booking does not serve", async () => {
@@ -115,7 +115,7 @@ describe("Booking Web retired booking pages", () => {
       }),
     );
     expect(response.status).toBe(308);
-    expect(response.headers.get("location")).toBe("https://book.alpenrose.example/book");
+    expect(response.headers.get("location")).toBe("https://book.alpenrose.example/");
   });
 
   it("leaves other pages and unknown locales alone", async () => {

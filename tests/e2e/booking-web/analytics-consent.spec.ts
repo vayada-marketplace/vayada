@@ -44,7 +44,7 @@ test("accepts, reopens from the footer and withdraws optional analytics without 
   await choices.click();
   await page.getByRole("button", { name: "Reject analytics", exact: true }).click();
   await page.reload();
-  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Optional analytics", exact: true })).toBeHidden();
   expect(events).toEqual([]);
   expect(await identifiers()).toEqual([]);
@@ -61,7 +61,7 @@ test("accepts, reopens from the footer and withdraws optional analytics without 
   expect(await identifiers()).toEqual([]);
   const count = events.length;
   await page.reload();
-  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
   expect(events.length).toBe(count);
   expect(await identifiers()).toEqual([]);
 });
@@ -91,7 +91,7 @@ test("asks again when the saved choice was made under the earlier consent text",
     page.getByRole("heading", { name: "Optional analytics", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Analytics is on.", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
   expect(
     await page.evaluate(() =>
       Object.keys(sessionStorage).filter((key) => key.startsWith("vayada_")),

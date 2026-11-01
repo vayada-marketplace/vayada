@@ -153,7 +153,9 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("room-card-garden").getByText("Only 2 left")).toBeVisible();
     // A room without photos shows a quiet placeholder instead.
     await expect(page.getByTestId("room-card-garden").locator("img")).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+    // VAY-2446: rooms are chosen on the cards only; the old room form's link is gone.
+    await expect(page.getByText("Booking more than one room?")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath(`room-cards-${width}.png`), fullPage: true });
 
     // VAY-2320: the cards are priced for one room with the whole party.
@@ -397,44 +399,132 @@ test("says why a room whose one choice can't be booked is not available (VAY-231
   await assertHealthy();
 });
 
-test("fills in /book from a room card, with plain option names", async ({ page }, testInfo) => {
+// VAY-2446: one room with a child. The room card's choice opens /book on the child's age, in the
+// room it was chosen for (the old room form is gone), and goes on from there.
+test("asks a child's age for a room card's choice, then goes on", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
+  await page.addInitScript(
+    ({ slug, version }) =>
+      localStorage.setItem(
+        `vayada_booking_analytics:${slug}`,
+        JSON.stringify({ version, analytics: false }),
+      ),
+    { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+  );
   await mockBookingApis(page);
   await mockRooms(page);
-  // A group of three in rooms for two: the card sends two rooms of its choice. With a child
-  // whose age isn't known yet, /book opens at the room form (VAY-2195) to ask for it.
-  await page.goto(
-    `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=3&children=1&offer=${key("a")}&rooms=2`,
+  await mockStayPrices(page, {
+    deluxe: { [key("a")]: "29800", [key("b")]: "26800", [key("c")]: "33800" },
+    family: { [key("d")]: "43800" },
+    garden: { [key("e")]: "35800" },
+  });
+  await mockAnyPrice(page);
+  await page.goto("/?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=1");
+  await page.getByTestId("select-rate-family").click();
+  await expect(page).toHaveURL(
+    /\/(en\/)?book\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=1&offer=/,
   );
 
-  const first = page.getByRole("group", { name: "Room 1" });
-  const second = page.getByRole("group", { name: "Room 2" });
-  await expect(first.getByLabel("Room and meal option")).toHaveValue(key("a"));
-  await expect(second.getByLabel("Room and meal option")).toHaveValue(key("a"));
-  await expect(first.getByRole("spinbutton", { name: /Adults/ })).toHaveValue("2");
-  await expect(second.getByRole("spinbutton", { name: /Adults/ })).toHaveValue("1");
-  await expect(first.locator(`option[value="${key("a")}"]`)).toHaveText(
-    "Deluxe Double Room — Free cancellation",
+  await expect(page.getByRole("heading", { name: "Who's staying in each room" })).toBeVisible();
+  await expect(page.getByText("Choose rooms and get a price")).toHaveCount(0);
+  const room = page.getByTestId("room-guests-1");
+  await expect(room).toContainText("Family Room");
+  await expect(room).toContainText("2 Adults, 1 Child");
+  await expect(page.getByTestId("room-guests-2")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Change rooms/ })).toHaveAttribute(
+    "href",
+    /^\/(en\/)?\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=1$/,
   );
-  await expect(first.locator(`option[value="${key("c")}"]`)).toHaveText(
-    "Deluxe Double Room — Breakfast included",
+  const next = page.getByRole("button", { name: "Continue", exact: true });
+  await expect(next).toBeDisabled();
+  const priced = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/bookings/quote") &&
+      request.postDataJSON().selection.rooms[0].guests.childAgesAtCheckIn[0] === 5,
   );
-  await expect(first.locator(`option[value="${key("e")}"]`)).toHaveText(
-    "Garden Suite — Non-refundable",
-  );
+  await room.getByLabel("Child 1: age at check-in").selectOption("5");
+  const { selection } = (await priced).postDataJSON();
+  expect(selection.rooms).toEqual([
+    expect.objectContaining({
+      publicOfferKey: key("d"),
+      guests: { adults: 2, childAgesAtCheckIn: [5] },
+    }),
+  ]);
+  await expect(next).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath("room-card-child-age.png"), fullPage: true });
+  await next.click();
+  await expect(page).toHaveURL(/[?&]step=(extras|details)/);
   await assertHealthy();
 });
 
-test("lets the guest choose again when the card's choice is no longer offered", async ({
+test("places a room card's children in the rooms with the fewest adults", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockRooms(page);
+  // A group of three in two Family Rooms (the card's "2×"): the child sleeps with the one adult.
+  await page.goto(
+    `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=3&children=1&offer=${key("d")}&rooms=2`,
+  );
+  const first = page.getByTestId("room-guests-1");
+  const second = page.getByTestId("room-guests-2");
+  await expect(first).toContainText("Family Room");
+  await expect(first).toContainText("2 Adults");
+  await expect(first.getByLabel("Child 1: age at check-in")).toHaveCount(0);
+  await expect(second).toContainText("1 Adult, 1 Child");
+  await expect(second.getByLabel("Child 1: age at check-in")).toHaveValue("");
+  // Both rooms fit their guests: no "sleeps up to" problem to fix.
+  await expect(first.getByRole("alert")).toHaveCount(0);
+  await expect(second.getByRole("alert")).toHaveCount(0);
+  await assertHealthy();
+});
+
+test("sends the guest back to the room cards when the card's choice is no longer offered", async ({
   page,
 }) => {
   await mockBookingApis(page);
   await mockRooms(page);
   await page.goto(`/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&offer=${key("f")}`);
-  const room = page.getByRole("group", { name: "Room 1" });
-  await expect(room.locator(`option[value="${key("a")}"]`)).toHaveCount(1);
-  await expect(room.getByLabel("Room and meal option")).toHaveValue("");
-  await expect(page.getByRole("group", { name: "Room 2" })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/(en\/)?\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2$/);
+  await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+});
+
+// VAY-2446: /book only continues a choice made on the hotel page; the old room form's address
+// (with no choice) and the retired booking pages open the hotel page with the stay.
+test("opens the hotel page for /book without a room choice", async ({ page }) => {
+  await mockBookingApis(page);
+  await mockRooms(page);
+  await page.goto(
+    "/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=1&promoCode=SUMMER20",
+  );
+  await expect(page).toHaveURL(
+    /\/(en\/)?\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=1&promoCode=SUMMER20$/,
+  );
+  await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+  await page.goto("/rooms?checkIn=2026-11-06&checkOut=2026-11-08&adults=2");
+  await expect(page).toHaveURL(/\/(en\/)?\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2$/);
+  await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+  // A card's choice for dates that can't be booked (check-out first) is no stay to continue.
+  await page.goto(`/book?checkIn=2026-11-08&checkOut=2026-11-06&adults=2&offer=${key("a")}`);
+  await expect(page).toHaveURL(/\/(en\/)?\?checkIn=2026-11-08&checkOut=2026-11-06&adults=2$/);
+});
+
+test("says when the rooms can't be shown, and loads them again", async ({ page }) => {
+  await mockBookingApis(page);
+  await mockRooms(page);
+  let failing = true;
+  await page.route("**/pricing-offers", (route) =>
+    failing ? route.fulfill({ status: 503, json: {} }) : route.fallback(),
+  );
+  await page.goto(STAY);
+  const notice = page.getByTestId("rooms-unavailable");
+  await expect(notice).toContainText("We can't show our rooms right now.");
+  await expect(page.getByText("Choose rooms and get a price")).toHaveCount(0);
+  failing = false;
+  await notice.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+  await expect(notice).toHaveCount(0);
 });
 
 test("shows a room's details with its choices, as the old page did", async ({ page }, testInfo) => {

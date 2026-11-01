@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import HotelHeroImage from "@/components/booking/HotelHeroImage";
-import { Link, useRouter } from "@/i18n/navigation";
+import { useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import DatePickerCalendar from "@/components/booking/DatePickerCalendar";
@@ -195,17 +195,17 @@ function HomePageContent() {
   const nights = calculateNights(checkIn, checkOut);
   const hasAddons = useAddons().addons.length > 0;
 
-  // The legacy availability search is retired (VAY-1543 C.2): rooms, availability and
-  // prices come from the room-and-price page, which starts from the stay chosen here.
+  // The legacy availability search is retired (VAY-1543 C.2): the room cards below hand the
+  // stay chosen here and their room's choice to /book (VAY-2190, VAY-2446).
   const bookParams = new URLSearchParams({ checkIn, checkOut, adults: String(adults) });
   if (effectiveChildren > 0) bookParams.set("children", String(effectiveChildren));
   if (appliedPromo) bookParams.set("promoCode", appliedPromo.code);
-  const bookTarget = `/book?${bookParams}`;
 
-  // Room cards (VAY-2190): the public catalog's rooms, priced for the stay above. Without the
-  // catalog the page keeps the plain "Choose rooms and get a price" entry.
+  // Room cards (VAY-2190): the public catalog's rooms, priced for the stay above. Rooms are only
+  // chosen here (VAY-2446): without the catalog the page says so and can load it again.
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [roomsFailed, setRoomsFailed] = useState(false);
+  const [catalogLoad, setCatalogLoad] = useState(0);
   // The hotel's location map (VAY-2126), read live with the catalog; null while its switch is off.
   const [locationMap, setLocationMap] = useState<CatalogLocationMap | null>(null);
   // The property's place for the rooms' own "Show map in room details", sent with the switch off too (VAY-2445).
@@ -225,7 +225,12 @@ function HomePageContent() {
         if (!controller.signal.aborted) setRoomsFailed(true);
       });
     return () => controller.abort();
-  }, [slug]);
+  }, [slug, catalogLoad]);
+  const reloadCatalog = () => {
+    setRooms(null);
+    setRoomsFailed(false);
+    setCatalogLoad((value) => value + 1);
+  };
   // One room is chosen like before; with two or more the guest chooses room by room, each card
   // priced and sized for the room being chosen (VAY-2320). VAY-2393: a group starts in one room
   // even when no place fits it all; the page offers the fewest rooms it needs instead.
@@ -1051,10 +1056,9 @@ function HomePageContent() {
               setCalendarOpen(false);
               setGuestsOpen(false);
               setPromoOpen(false);
-              // The cards already show this stay; without them, go straight to /book.
-              if (rooms?.length)
-                document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
-              else router.push(bookTarget);
+              // The cards already show this stay; without them, try loading them again.
+              if (roomsFailed) reloadCatalog();
+              document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
             }}
             className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2"
           >
@@ -1124,26 +1128,25 @@ function HomePageContent() {
               notices={notices}
               renderCard={roomCard}
             />
-            {/* A group picks room by room above; the old room form is only the one-room fallback. */}
-            {!pickMode && (
-              <p className="mt-8 text-center text-gray-600">
-                {t("severalRooms")}{" "}
-                <Link href={bookTarget} className="font-semibold text-primary-600 underline">
-                  {t("chooseRoomsAndPrice")}
-                </Link>
-              </p>
-            )}
           </>
         ) : (
           <>
             <div className="mb-9">{heading}</div>
-            {/* Without room cards, rooms and prices live on the room-and-price page. */}
-            <Link
-              href={bookTarget}
-              className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
+            {/* VAY-2446: no room cards (the catalog failed, or no room is bookable right now). */}
+            <div
+              role="alert"
+              data-testid="rooms-unavailable"
+              className="mb-6 flex flex-col gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between"
             >
-              {t("chooseRoomsAndPrice")}
-            </Link>
+              <p>{t("roomsUnavailable")}</p>
+              <button
+                type="button"
+                onClick={reloadCatalog}
+                className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-white hover:bg-primary-700"
+              >
+                {t("retryPrices")}
+              </button>
+            </div>
           </>
         )}
       </div>

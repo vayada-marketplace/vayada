@@ -7,8 +7,8 @@ import BookPageClient from "./BookPageClient";
  * whether the client component renders a meta tag.
  */
 export const metadata: Metadata = {
-  title: "Choose Rooms | Price Your Stay",
-  description: "Choose rooms and guests to check your stay price.",
+  title: "Book Your Stay",
+  description: "Your extras, details and payment for the rooms you chose.",
   robots: {
     index: false,
     follow: false,

@@ -10,18 +10,17 @@ test("sets no cookie before or after the privacy choice", async ({ page, context
   await expect(
     page.getByRole("heading", { name: "Optional analytics", exact: true }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Choose rooms and get a price" }).click();
-  await expect(page).toHaveURL(/\/(en\/)?book\?/);
-  await expect(page.getByRole("button", { name: "Add room", exact: true })).toBeVisible();
-  // A retired booking page's permanent redirect drops the old referral code too (VAY-2302).
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
+  // A retired booking page's permanent redirect (to the hotel page since VAY-2446) drops the old
+  // referral code too (VAY-2302).
   await page.goto("/rooms?ref=PARTNER-2223&checkIn=2026-09-12&checkOut=2026-09-15");
-  await expect(page).toHaveURL(/\/(en\/)?book\?.*checkIn=2026-09-12/);
-  expect(new URL(page.url()).searchParams.has("ref")).toBe(false);
+  await expect(page).toHaveURL(/\/(en\/)?\?checkIn=2026-09-12&checkOut=2026-09-15$/);
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
   expect(await context.cookies()).toEqual([]);
 
   // The prompt opens again on this full page load: no choice was made yet.
   await page.getByRole("button", { name: "Allow analytics", exact: true }).click();
   await page.reload();
-  await expect(page.getByRole("button", { name: "Add room", exact: true })).toBeVisible();
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
   expect(await context.cookies()).toEqual([]);
 });

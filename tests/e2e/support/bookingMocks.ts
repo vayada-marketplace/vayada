@@ -206,7 +206,7 @@ const addons = [
 // `legacyPricingRequests`.
 const REMOVED_PRICING_ROUTE = { status: 404 };
 
-/** A one-room catalogue so the room-and-price page renders its form. */
+/** A one-room catalogue: the hotel page's one room card ("suite"), and /book's choice for it. */
 export async function mockPricingCatalogue(page: Page) {
   await page.route("**/pricing-offers", (route) =>
     route.fulfill({

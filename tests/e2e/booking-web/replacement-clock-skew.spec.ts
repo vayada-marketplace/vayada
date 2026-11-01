@@ -89,12 +89,9 @@ for (const [label, skewMs] of [
       }),
     );
 
-    await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
-    await expect(page.getByRole("heading", { name: "Choose rooms and get a price" })).toBeVisible();
-    await page.getByRole("button", { name: "Add room", exact: true }).click();
-    const room = page.getByRole("group", { name: "Room 1", exact: true });
-    await room.getByLabel("Room and meal option").selectOption(offerKey);
-    await room.getByLabel(/Adults/).fill("2");
+    await page.goto(
+      `/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03&adults=2&offer=${offerKey}`,
+    );
     await continueToPayment(page, { method: "pay_at_property" });
     await expect(orderTotal(page)).toHaveText("€180");
 

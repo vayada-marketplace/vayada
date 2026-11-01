@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 
-// Stay dates only: availability, minimum and maximum stays are priced on the
-// room-and-price page (/book). The retired public calendar is no longer consulted
+// Stay dates only: availability, minimum and maximum stays are priced by the room
+// cards and /book. The retired public calendar is no longer consulted
 // (VAY-1543 C.2), so every future date stays selectable here.
 
 interface DatePickerCalendarProps {

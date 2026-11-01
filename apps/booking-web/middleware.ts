@@ -47,10 +47,10 @@ function isLocalHost(hostname: string): boolean {
 }
 
 // The room list, add-on and payment pages of the retired booking flow (VAY-1543 C.2)
-// answer a real permanent redirect to the room-and-price page, so crawlers and other
-// clients without JavaScript see it too. Only what /book reads carries over.
+// answer a real permanent redirect to the hotel page, where rooms are chosen (VAY-2446),
+// so crawlers and other clients without JavaScript see it too. Only the stay carries over.
 const retiredBookingPagePath = /^(?:\/([^/]+))?\/(?:rooms|addons|payment)\/?$/;
-const bookPageParams = ["checkIn", "checkOut", "adults", "children", "promoCode"];
+const stayParams = ["checkIn", "checkOut", "adults", "children", "promoCode"];
 
 async function retiredBookingPageRedirect(request: NextRequest): Promise<NextResponse | null> {
   const match = retiredBookingPagePath.exec(request.nextUrl.pathname);
@@ -64,13 +64,13 @@ async function retiredBookingPageRedirect(request: NextRequest): Promise<NextRes
   let target: URL;
   try {
     target = new URL(
-      locale && locale !== routing.defaultLocale ? `/${locale}/book` : "/book",
+      locale && locale !== routing.defaultLocale ? `/${locale}` : "/",
       `${origin.protocol}//${origin.host}`,
     );
   } catch {
     return null; // A malformed host header: no redirect, the page simply does not exist.
   }
-  for (const key of bookPageParams) {
+  for (const key of stayParams) {
     const value = request.nextUrl.searchParams.get(key);
     if (value) target.searchParams.set(key, value);
   }

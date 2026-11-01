@@ -122,12 +122,9 @@ async function openQuote(page: Page, termsText: string) {
     }),
   );
 
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
-  await page.getByRole("button", { name: "Add room", exact: true }).click();
-  const room = page.getByRole("group", { name: "Room 1", exact: true });
-  await room.getByLabel("Room and meal option").selectOption(offerKey);
-  await room.getByLabel(/Adults/).fill("2");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.goto(
+    `/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03&adults=2&offer=${offerKey}`,
+  );
   await expect(page.getByRole("heading", { name: "Who’s staying?" })).toBeVisible();
 }
 

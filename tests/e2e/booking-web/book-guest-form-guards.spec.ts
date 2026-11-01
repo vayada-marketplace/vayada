@@ -183,12 +183,10 @@ async function openDetails(page: Page, { rulesStatus = 200 } = {}) {
         }),
   );
 
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-12-01&checkOut=2026-12-03`);
-  await page.getByRole("button", { name: "Add room", exact: true }).click();
-  const room = page.getByRole("group", { name: "Room 1", exact: true });
-  await room.getByLabel("Room and meal option").selectOption(offerKey);
-  await room.getByLabel(/Adults/).fill("2");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  // A room card's choice (VAY-2446): /book opens on the details.
+  await page.goto(
+    `/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-12-01&checkOut=2026-12-03&adults=2&offer=${offerKey}`,
+  );
   await expect(page).toHaveURL(/[?&]step=details/);
   await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
 }
