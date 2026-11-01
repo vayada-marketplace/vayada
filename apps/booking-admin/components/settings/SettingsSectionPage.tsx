@@ -6,7 +6,7 @@ import {
   type SavedBankTransferDestination,
   type BankTransferSaveAttempt,
 } from "@vayada/product-onboarding/bankTransferDestination";
-import { apiClient, omitHotelContext } from "@/services/api/client";
+import { ApiErrorResponse, apiClient, omitHotelContext } from "@/services/api/client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import { canManageOwnerFinance, getStaffSelfAccess } from "@/services/api/staffSelfAccessClient";
@@ -28,6 +28,11 @@ import {
   type FinancePaymentSettingsResponse,
 } from "@/services/api/financePaymentSettingsClient";
 import { paymentSaveError } from "@/components/settings/paymentSaveError";
+import {
+  CardNotReadyBanner,
+  type CardNotReadyReason,
+} from "@/components/settings/CardNotReadyBanner";
+import { createReplacementPricingClient } from "@vayada/product-onboarding/replacementPricingClient";
 import {
   PaymentWindowsCard,
   paymentWindowsPlan,
@@ -362,6 +367,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [paymentsSaveStatus, setPaymentsSaveStatus] = useState<PaymentsSaveStatus | null>(null);
   const paymentsSaveRunning = useRef(false);
   const paymentWindows = usePaymentWindows(activeSection === "payments" ? billingPropertyId : null);
+  // VAY-2424: why guests can't use Credit card yet once Stripe is connected (null: ready, or
+  // unknown because the read failed).
+  const [cardNotReady, setCardNotReady] = useState<CardNotReadyReason | null>(null);
   const [savedPropertyName, setSavedPropertyName] = useState("");
   // Null until the public profile loads, so a failed read can never save over the text.
   const [savedDescription, setSavedDescription] = useState<string | null>(null);
@@ -696,6 +704,56 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       stripeRefreshAbort.current = null;
     };
   }, [billingPropertyId, refreshStripeOnboarding]);
+
+  // VAY-2424: Credit card as saved (the payments form's saved state).
+  const cardSaved = paymentBaseline?.onlineCard ?? false;
+  // VAY-2424: with Stripe connected, what else still stops guests paying by card (the PMS rate
+  // screens' card readiness). Read again after every save; a failed read shows no banner.
+  useEffect(() => {
+    setCardNotReady(null);
+    if (activeSection !== "payments" || !billingPropertyId || !cardSaved || !stripeOnboarded)
+      return;
+    let current = true;
+    // The PMS rate screens' read, on this page's API client like its other payment calls.
+    Promise.resolve()
+      .then(() =>
+        createReplacementPricingClient(billingPropertyId, {
+          http: apiClient,
+          requestOptions: omitHotelContext,
+          // No read (or no access) is unknown here, not "switched off": no banner.
+          isNotFound: () => false,
+          conflict: (detail) => new ApiErrorResponse(409, { code: "stale", detail }),
+        }).cardReadiness(),
+      )
+      .then(
+        ({ card }) => {
+          // The page already shows this Stripe account as connected: something on the account
+          // itself still stops it (e.g. Stripe's card capability), not a missing account.
+          if (current)
+            setCardNotReady(
+              card.ready
+                ? null
+                : card.reason === "not_connected"
+                  ? "account_not_ready"
+                  : card.reason,
+            );
+        },
+        () => {},
+      );
+    return () => {
+      current = false;
+    };
+  }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, offeredMethods]);
+  // A missing or unfinished account is the page's own knowledge: Finance's readiness can't tell a
+  // missing account from a pending approval. Nothing is said while a Stripe check runs.
+  const cardNotReadyReason: CardNotReadyReason | null =
+    !cardSaved || refreshingStripe
+      ? null
+      : stripeOnboarded
+        ? cardNotReady
+        : stripeAccountId
+          ? "setup_incomplete"
+          : "not_connected";
 
   const handleAcceptanceToggle = async () => {
     const hotelId = readBookingHotelId(settings);
@@ -1920,6 +1978,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           {ownerFinance === false && (
             <OwnerOnlyNote>{t("settings.ownerOnly.payouts")}</OwnerOnlyNote>
           )}
+          {paymentSettingsLoaded && cardNotReadyReason && (
+            <CardNotReadyBanner reason={cardNotReadyReason} providerSectionId="payment-provider" />
+          )}
           {localizationLoadError && localizationRetryCard}
           {/* Payment Methods */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
@@ -1944,7 +2005,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                   : "pointer-events-none opacity-60"
               }`}
             >
-              {/* Online Card Payment */}
+              {/* Credit card */}
               <button
                 onClick={() => updateSetting("online_card_payment", !settings.online_card_payment)}
                 className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
@@ -2552,7 +2613,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       )}
 
       {activeSection === "payments" && (
-        <section className="mt-4 space-y-4">
+        <section id="payment-provider" className="mt-4 scroll-mt-4 space-y-4">
           {!stripeAccountId &&
           (stripeAccountCreationBlocked || !paymentSettingsLoaded) &&
           paymentError ? (

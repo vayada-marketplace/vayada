@@ -84,7 +84,9 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   await page.goto("/settings/payments");
   const card = page.getByRole("region", { name: "When guests can pay each way" });
   await expect(card).toBeVisible();
-  await expect(card.getByText("Not offered to guests: Online Card")).toBeVisible();
+  // VAY-2424: a way to pay guests aren't offered has no row, and no "Not offered" line either.
+  await expect(card.getByText(/^Not offered to guests/)).toHaveCount(0);
+  await expect(card.getByText("Credit card", { exact: true })).toHaveCount(0);
   await expect(card.getByText("Fixed rule: guests have 48 hours to pay")).toBeVisible();
   // One save bar for the whole page (VAY-2424): nothing to save yet.
   await expect(card.getByRole("button", { name: /save/i })).toHaveCount(0);
@@ -134,10 +136,10 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   await expect(card.getByLabel("Hours for Pay at Hotel")).toHaveValue("48");
   await expect(save).toBeDisabled();
 
-  // The card shows what guests are offered: switching Online Card on above changes nothing here
+  // The card shows what guests are offered: switching Credit card on above changes nothing here
   // until it is saved with Stripe connected.
-  await page.getByRole("button", { name: /^Online Card/ }).click();
-  await expect(card.getByText("Not offered to guests: Online Card")).toBeVisible();
+  await page.getByRole("button", { name: /^Credit card/ }).click();
+  await expect(card.getByText("Credit card", { exact: true })).toHaveCount(0);
   await expect(card.getByText(/have no way to pay\.$/)).toHaveCount(1);
 
   await page.setViewportSize({ width: 390, height: 844 });
