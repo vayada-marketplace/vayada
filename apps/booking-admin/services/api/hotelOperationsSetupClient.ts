@@ -144,8 +144,8 @@ export const hotelOperationsSetupApi = {
     return targetApiClient.post<StripeProviderAccountResponse>(
       endpoint,
       input.providerAccountId
-        // Stripe returns the owner to this app's /setup (API surface added in VAY-2262 #3385).
-        ? { commandId, idempotencyKey: commandId, returnSurface: "booking_admin_setup" }
+        ? // Stripe returns the owner to this app's /setup (API surface added in VAY-2262 #3385).
+          { commandId, idempotencyKey: commandId, returnSurface: "booking_admin_setup" }
         : {
             commandId,
             idempotencyKey: commandId,

@@ -3475,12 +3475,12 @@ async function loadPropertyCountryCode(
   propertyId: string,
 ): Promise<string | null> {
   const result = await client.query<{ countryCode: string | null }>(
-    `SELECT upper(btrim(country_code)) AS "countryCode"
+    `SELECT country_code AS "countryCode"
      FROM hotel_catalog.property_locations
      WHERE property_id = $1::uuid`,
     [propertyId],
   );
-  const country = result.rows[0]?.countryCode ?? "";
+  const country = (result.rows[0]?.countryCode ?? "").trim().toUpperCase();
   return /^[A-Z]{2}$/.test(country) ? country : null;
 }
 
