@@ -4,11 +4,20 @@ import { SettingsBreadcrumb as SharedSettingsBreadcrumb } from "@vayada/settings
 import { useTranslation } from "@/lib/i18n";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 
-/** Page shell for a Settings card: a breadcrumb back to the card grid and the page title. */
-export function SettingsSubPage({ title, children }: { title: string; children: React.ReactNode }) {
+/** Page shell for a Settings card: a breadcrumb back to the card grid and the page title. `wide` leaves room
+ * for a preview next to the form (Room Sorting, VAY-2449). */
+export function SettingsSubPage({
+  title,
+  children,
+  wide = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
   return (
     <PageLayout>
-      <div className="max-w-3xl">
+      <div className={wide ? "max-w-6xl" : "max-w-3xl"}>
         <PageHeader breadcrumb={<SettingsBreadcrumb current={title} />} title={title} />
         {children}
       </div>
