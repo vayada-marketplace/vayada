@@ -43,6 +43,7 @@
     "./GooglePlacesAddressField": "./src/GooglePlacesAddressField.tsx",
     "./GoogleAddressMap": "./src/GoogleAddressMap.tsx",
     "./googleMaps": "./src/googleMaps.ts",
+    "./mapsLinkApi": "./src/mapsLinkApi.ts",
     "./TimezoneField": "./src/TimezoneField.tsx",
     "./timezones": "./src/timezones.ts",
     "./HotelSetupChecklistCard": "./src/HotelSetupChecklistCard.tsx",
