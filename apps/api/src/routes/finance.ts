@@ -59,6 +59,7 @@ import {
   type AcceptFinanceOnlineCardExecutionEvidenceCommand,
   type RevokeFinanceOnlineCardExecutionEvidenceCommand,
   StripeConnectAccountNotFoundError,
+  StripeConnectCountryUnsupportedError,
   type StripeConnectProviderAccountSnapshot,
   type FinanceXenditBankValidationCommand,
   type FinanceXenditBankValidationResponse,
@@ -368,6 +369,8 @@ type FinanceCommandError = {
   statusCode: 400 | 404 | 409 | 429 | 500 | 501 | 502;
   code:
     | "invalid_command"
+    | "property_country_missing"
+    | "provider_country_unsupported"
     | "property_not_found"
     | "property_currency_conflict"
     | "invoice_not_found"
@@ -386,11 +389,12 @@ type FinanceCommandError = {
   message: string;
 };
 
+/** A `country` that older pages still send is ignored: the account opens in the hotel's address
+ * country (VAY-2424). */
 type StripeProviderAccountBody = {
   commandId?: unknown;
   idempotencyKey?: unknown;
   email?: unknown;
-  country?: unknown;
   returnSurface?: unknown;
 };
 
@@ -2277,12 +2281,29 @@ async function createStripeProviderAccountInClient(
     });
   }
 
+  // VAY-2424: the account opens in the hotel's address country; the hotel doesn't pick one. A
+  // creation Stripe may have finished asks again in the country it first asked for, so Stripe
+  // returns that account even if the address changed since.
+  const country =
+    (retryingUnconfirmedCreation || reclaimingStaleCreation
+      ? reservedProviderAccountCountry(existingIdempotency)
+      : null) ?? (await loadPropertyCountryCode(client, owner.propertyId));
+  if (!country) {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: "property_country_missing",
+      message: "The hotel's address has no country. Add it to the address, then connect Stripe.",
+    };
+  }
+
   const idempotencyError = await reserveProviderAccountIdempotency(
     client,
     command,
     "stripe_provider_account_create",
     keyHash,
     fingerprint,
+    country,
   );
   if (idempotencyError) return idempotencyError;
 
@@ -2291,11 +2312,31 @@ async function createStripeProviderAccountInClient(
     providerAccount = await provider.createAccount({
       owner,
       email: command.payload.email,
-      country: command.payload.country,
-      idempotencyKey: stripeProviderIdempotencyKey(owner, keyHash, "account"),
+      country,
+      idempotencyKey: stripeProviderIdempotencyKey(owner, keyHash, "account", country),
       returnSurface: command.payload.returnSurface,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof StripeConnectCountryUnsupportedError) {
+      // Nothing was created. The same key may ask again once the hotel's country is fixed.
+      await markProviderAccountIdempotencyFailed(
+        client,
+        command,
+        "stripe_provider_account_create",
+        keyHash,
+        {
+          compensationStatus: "not_attempted",
+          errorCode: "provider_country_unsupported",
+          retryable: true,
+        },
+      );
+      return {
+        ok: false,
+        statusCode: 400,
+        code: "provider_country_unsupported",
+        message: `Stripe Connect isn't available in the hotel's country (${country}).`,
+      };
+    }
     await markProviderAccountIdempotencyFailed(
       client,
       command,
@@ -2327,7 +2368,12 @@ async function createStripeProviderAccountInClient(
         if (winner) return { kind: "existing" as const, account: winner };
       }
 
-      const storedAccount = await insertStripeProviderAccount(client, command, providerAccount);
+      const storedAccount = await insertStripeProviderAccount(
+        client,
+        command,
+        country,
+        providerAccount,
+      );
       if (!storedAccount.inserted) {
         return { kind: "same_provider_account" as const, account: storedAccount.account };
       }
@@ -3350,6 +3396,7 @@ async function loadStripeProviderAccountById(
 async function insertStripeProviderAccount(
   client: FinancePropertySettingsWriteClient,
   command: CreateStripeProviderAccountCommand,
+  country: string,
   providerAccount: { providerAccountRef: string; onboardingUrl: string },
 ): Promise<StripeProviderAccountInsert> {
   const owner = financeProviderAccountOwner(command);
@@ -3412,7 +3459,7 @@ async function insertStripeProviderAccount(
       null,
       "property",
       providerAccount.providerAccountRef,
-      command.payload.country,
+      country,
       JSON.stringify(accountMetadata),
       command.audit.requestedAt,
     ],
@@ -3425,6 +3472,21 @@ async function insertStripeProviderAccount(
     throw new StripeProviderAccountOwnerConflictError();
   }
   return { account: existing, inserted: false };
+}
+
+/** The hotel's address country, upper-case ISO 3166-1 alpha-2, or null when it has none. */
+async function loadPropertyCountryCode(
+  client: FinanceQueryExecutor,
+  propertyId: string,
+): Promise<string | null> {
+  const result = await client.query<{ countryCode: string | null }>(
+    `SELECT country_code AS "countryCode"
+     FROM hotel_catalog.property_locations
+     WHERE property_id = $1::uuid`,
+    [propertyId],
+  );
+  const country = (result.rows[0]?.countryCode ?? "").trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(country) ? country : null;
 }
 
 async function loadStripeProviderAccountByRef(
@@ -3573,6 +3635,8 @@ async function reserveProviderAccountIdempotency(
   operation: "stripe_provider_account_create" | "stripe_onboarding_link_issue",
   keyHash: string,
   fingerprint: string,
+  /** The country a new Stripe account is asked for (VAY-2424), kept for retries. */
+  country?: string,
 ): Promise<Extract<FinanceProviderAccountCommandResult, { ok: false }> | null> {
   const owner = financeProviderAccountOwner(command);
   const result = await client.query<{
@@ -3618,8 +3682,10 @@ async function reserveProviderAccountIdempotency(
          (
            platform.idempotency_keys.status = 'failed'
            AND platform.idempotency_keys.idempotency_metadata ->> 'retryable' = 'true'
-           AND platform.idempotency_keys.idempotency_metadata ->> 'errorCode' =
-             'provider_account_create_unconfirmed'
+           AND platform.idempotency_keys.idempotency_metadata ->> 'errorCode' IN (
+             'provider_account_create_unconfirmed',
+             'provider_country_unsupported'
+           )
          )
          OR (
            EXCLUDED.operation = 'stripe_provider_account_create'
@@ -3642,6 +3708,7 @@ async function reserveProviderAccountIdempotency(
         commandId: command.commandId,
         owner,
         provider: "stripe",
+        ...(country ? { country } : {}),
       }),
       STRIPE_PROVIDER_ACCOUNT_CREATE_LEASE_MS,
     ],
@@ -3844,6 +3911,13 @@ function replayProviderAccountCommand(
   }
   const metadata = plainRecord(existing.idempotencyMetadata);
   if (retryableUnconfirmedProviderAccountCreation(existing, fingerprint)) return null;
+  if (
+    existing.status === "failed" &&
+    metadata?.retryable === true &&
+    metadata.errorCode === "provider_country_unsupported"
+  ) {
+    return null;
+  }
   if (existing.status !== "completed") {
     return providerAccountCommandConflict(
       existing.status === "in_progress"
@@ -3993,9 +4067,19 @@ function stripeProviderIdempotencyKey(
   owner: Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"],
   keyHash: string,
   purpose: "account" | "onboarding-link" | "compensate",
+  country?: string,
 ): string {
   const ownerKey = `property:${owner.propertyId}`;
-  return `finance.stripe-connect.${purpose}:${ownerKey}:key:${keyHash}:v1`;
+  // VAY-2424: an account key names its country. Stripe refuses one key with other parameters,
+  // so after a refused country the corrected address must ask under a key of its own.
+  const countryKey = country ? `:country:${country}` : "";
+  return `finance.stripe-connect.${purpose}:${ownerKey}:key:${keyHash}${countryKey}:v1`;
+}
+
+/** The country a reserved Stripe account creation asked for, when it stored one (VAY-2424). */
+function reservedProviderAccountCountry(existing: FinanceIdempotencyRow | null): string | null {
+  const country = plainRecord(existing?.idempotencyMetadata)?.country;
+  return typeof country === "string" && /^[A-Z]{2}$/.test(country) ? country : null;
 }
 
 async function enqueueXenditPayoutReconciliationInClient(
@@ -5482,7 +5566,6 @@ function toStripePropertyAccountCommand(
     audit: financeCommandAudit(request, "Create or replay property Stripe Connect account"),
     payload: {
       email: base.email,
-      country: base.country,
       returnSurface: base.returnSurface,
     },
   };
@@ -5540,25 +5623,22 @@ function parseStripeProviderAccountBody(body: StripeProviderAccountBody):
       commandId: string;
       idempotencyKey: string;
       email: string;
-      country: string;
       returnSurface?: StripeConnectReturnSurface;
     }
   | FinanceValidationError {
   const commandId = nonEmptyString(body.commandId);
   const idempotencyKey = nonEmptyString(body.idempotencyKey);
   const email = emailBodyString(body.email);
-  const country = countryBodyString(body.country);
-  if (!commandId || !idempotencyKey || !email || !country) {
+  if (!commandId || !idempotencyKey || !email) {
     return invalidQuery(
       "invalid_body",
-      "Stripe provider-account command requires commandId, idempotencyKey, email, and country.",
+      "Stripe provider-account command requires commandId, idempotencyKey, and email.",
     );
   }
   return {
     commandId,
     idempotencyKey,
     email,
-    country,
     returnSurface: parseStripeReturnSurface(body.returnSurface),
   };
 }
@@ -5602,12 +5682,6 @@ function emailBodyString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const email = value.trim().toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
-}
-
-function countryBodyString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const country = value.trim().toUpperCase();
-  return /^[A-Z]{2}$/.test(country) ? country : undefined;
 }
 
 function toXenditBankValidationCommand(

@@ -284,11 +284,11 @@ export async function createFinanceStripeProviderAccount(
   input: {
     propertyId: string;
     email: string;
-    country: string;
     commandPrefix?: string;
   },
   client: FinanceProviderAccountApiClient = apiClient,
 ): Promise<FinanceStripeProviderAccountResponse> {
+  // No country: the API opens the account in the hotel's address country (VAY-2424).
   const commandId = newFinanceCommandId(input.commandPrefix ?? "finance-stripe-account");
   try {
     return await client.post<FinanceStripeProviderAccountResponse>(
@@ -297,7 +297,6 @@ export async function createFinanceStripeProviderAccount(
         commandId,
         idempotencyKey: commandId,
         email: input.email,
-        country: input.country,
         returnSurface: "booking_admin",
       },
       omitHotelContext,

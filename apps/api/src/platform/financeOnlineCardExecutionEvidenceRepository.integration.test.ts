@@ -73,6 +73,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
               ($3::uuid, $4, 'VAY-1345 Other Hotel')`,
       [propertyId, publicId, otherPropertyId, `vay-1345-${otherPropertyId}`],
     );
+    // Stripe accounts open in the hotel's address country (VAY-2424).
+    await pool.query(
+      `INSERT INTO hotel_catalog.property_locations (property_id, country_code)
+       VALUES ($1::uuid, 'DE'), ($2::uuid, 'DE')`,
+      [propertyId, otherPropertyId],
+    );
     await pool.query(
       `INSERT INTO pms.property_pricing_settings
          (property_id, currency, pricing_currency_revision)
@@ -711,7 +717,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
         },
         payload: {
           email: "compensation-retry@example.test",
-          country: "DE",
           returnSurface: "booking_admin_setup",
         },
       });
@@ -793,7 +798,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       },
       payload: {
         email: "foreign-ref@example.test",
-        country: "DE",
         returnSurface: "booking_admin_setup",
       },
     });
@@ -863,7 +867,6 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       },
       payload: {
         email: `concurrent-${suffix}@example.test`,
-        country: "DE",
         returnSurface: "booking_admin_setup" as const,
       },
     });

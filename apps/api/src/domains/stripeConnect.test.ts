@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { StripeConnectAccountNotFoundError } from "@vayada/domain-finance";
+import {
+  StripeConnectAccountNotFoundError,
+  StripeConnectCountryUnsupportedError,
+} from "@vayada/domain-finance";
 
 import { createStripeConnectProvider } from "./stripeConnect.js";
 
@@ -128,6 +131,50 @@ describe("Stripe Connect provider", () => {
         idempotencyKey: "connect-property-1-compensate",
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("tells a refused account country apart from other Stripe failures (VAY-2424)", async () => {
+    const answers: Array<{ status: number; error: Record<string, string> }> = [
+      { status: 400, error: { code: "country_unsupported", message: "Not in ID." } },
+      { status: 400, error: { param: "country", message: "Invalid country." } },
+      // A refusal that names the country without a code or param.
+      { status: 400, error: { message: "Connected accounts in ID cannot be created." } },
+      { status: 400, error: { param: "email", message: "Invalid email." } },
+      {
+        status: 400,
+        error: { type: "idempotency_error", message: "Keys are for one country request." },
+      },
+      { status: 500, error: { message: "Stripe is down." } },
+    ];
+    const provider = createStripeConnectProvider({
+      secretKey: "sk_test",
+      returnBaseUrls: { bookingAdmin: "https://admin.booking.test" },
+      fetch: async () => {
+        const answer = answers.shift()!;
+        return new Response(JSON.stringify({ error: answer.error }), {
+          status: answer.status,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    const create = () =>
+      provider.createAccount({
+        owner: { ownerScope: "property", propertyId: "property-1", organizationId: "org-1" },
+        email: "owner@example.test",
+        country: "ID",
+        idempotencyKey: "connect-property-1",
+      });
+
+    await expect(create()).rejects.toThrow(StripeConnectCountryUnsupportedError);
+    await expect(create()).rejects.toThrow(StripeConnectCountryUnsupportedError);
+    await expect(create()).rejects.toThrow(StripeConnectCountryUnsupportedError);
+    const email = await create().catch((error: unknown) => error);
+    expect(email).not.toBeInstanceOf(StripeConnectCountryUnsupportedError);
+    expect(email).toMatchObject({ message: "Invalid email." });
+    const reusedKey = await create().catch((error: unknown) => error);
+    expect(reusedKey).not.toBeInstanceOf(StripeConnectCountryUnsupportedError);
+    const outage = await create().catch((error: unknown) => error);
+    expect(outage).not.toBeInstanceOf(StripeConnectCountryUnsupportedError);
   });
 
   it("aborts stalled Stripe requests at the configured deadline", async () => {

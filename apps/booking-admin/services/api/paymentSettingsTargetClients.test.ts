@@ -156,7 +156,6 @@ describe("payment settings target clients", () => {
       {
         propertyId: " property/with space ",
         email: "owner@example.com",
-        country: "AT",
         commandPrefix: "stripe-account-test",
       },
       client,
@@ -175,7 +174,6 @@ describe("payment settings target clients", () => {
         endpoint: "/api/finance/properties/property%2Fwith%20space/provider-accounts/stripe",
         body: {
           email: "owner@example.com",
-          country: "AT",
           returnSurface: "booking_admin",
         },
         options: omitHotelContext,
@@ -186,6 +184,8 @@ describe("payment settings target clients", () => {
         options: omitHotelContext,
       },
     ]);
+    // The API takes the account's country from the hotel's address (VAY-2424).
+    expect(calls[0]!.body).not.toHaveProperty("country");
     expect(calls[0]!.body).toMatchObject({
       commandId: expect.stringMatching(/^stripe-account-test-/),
       idempotencyKey: expect.stringMatching(/^stripe-account-test-/),

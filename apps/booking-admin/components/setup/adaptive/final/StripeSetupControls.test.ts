@@ -115,27 +115,41 @@ it("reuses an existing account and offers only a validated hosted link", async (
   });
   expect(mocks.start).toHaveBeenCalledWith(
     propertyId,
-    expect.objectContaining({ providerAccountId: propertyId, country: "" }),
+    expect.objectContaining({ providerAccountId: propertyId }),
   );
+  expect(mocks.start.mock.calls[0][1]).not.toHaveProperty("country");
   expect(h.view.root.findByType("a").props.href).toBe("https://connect.stripe.com/setup/example");
   h.view.root.findByType("a").props.onClick();
   expect(mocks.mark).toHaveBeenCalledWith(propertyId, browser.localStorage);
   expect(browser.localStorage.setItem).toHaveBeenCalled();
   h.view.unmount();
 });
-it("requires explicit country for a new account and rejects external provider links", async () => {
+it("needs only an email for a new account and rejects external provider links", async () => {
   mocks.providerAccountId.mockResolvedValue(null);
   const h = await render();
+  // VAY-2424: no country field; the API opens the account in the hotel's address country.
+  expect(h.view.root.findAllByType("input")).toHaveLength(1);
+  await act(async () =>
+    h.view.root.findAllByType("input")[0].props.onChange({ target: { value: "not-an-email" } }),
+  );
   await act(async () => {
     await h.view.root.findAllByType("button")[0].props.onClick();
   });
   expect(mocks.start).not.toHaveBeenCalled();
+  expect(JSON.stringify(h.view.toJSON())).toContain("Enter your Stripe account email.");
   await act(async () =>
-    h.view.root.findAllByType("input")[1].props.onChange({ target: { value: "de" } }),
+    h.view.root
+      .findAllByType("input")[0]
+      .props.onChange({ target: { value: "owner@example.test" } }),
   );
   mocks.start.mockResolvedValue({ onboardingUrl: "https://example.test/redirect" });
   await act(async () => {
     await h.view.root.findAllByType("button")[0].props.onClick();
+  });
+  expect(mocks.start).toHaveBeenCalledWith(propertyId, {
+    email: "owner@example.test",
+    providerAccountId: null,
+    linkAttemptId: expect.any(String),
   });
   expect(h.view.root.findAllByType("a")).toHaveLength(0);
   expect(JSON.stringify(h.view.toJSON())).toContain("invalid onboarding link");

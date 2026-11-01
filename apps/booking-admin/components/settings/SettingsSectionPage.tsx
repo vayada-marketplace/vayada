@@ -53,7 +53,6 @@ import {
   type SameDayBookingSettings,
 } from "@/services/settings";
 import { ToggleSwitch, FeedbackAlert, SaveButton } from "@/components/ui";
-import { CountrySelect } from "@/components/settings/CountrySelect";
 import LocalizationTab from "@/components/booking-flow/LocalizationTab";
 import {
   localizationWriteSettled,
@@ -317,7 +316,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [connectEmail] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("userEmail") || "" : "",
   );
-  const [connectCountry, setConnectCountry] = useState("AT");
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [issuingStripeOnboardingLink, setIssuingStripeOnboardingLink] = useState(false);
   const stripeOnboardingLinkPending = useRef(false);
@@ -763,7 +761,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           return createFinanceStripeProviderAccount({
             propertyId,
             email: connectEmail,
-            country: connectCountry,
             commandPrefix: `settings-stripe-account-${hotelId}`,
           });
         },
@@ -784,10 +781,17 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       }
     } catch (err: unknown) {
       stripeTab.close();
+      // The account opens in the hotel's address country (VAY-2424): say when it has none or
+      // Stripe doesn't take it.
+      const code = err instanceof FinancePaymentSettingsClientError ? err.code : "";
       const msg =
         err instanceof TypeError
           ? "settings.billing.errorPaymentServerUnreachable"
-          : "settings.billing.errorAccountCreate";
+          : code === "property_country_missing"
+            ? "settings.billing.errorStripeCountryMissing"
+            : code === "provider_country_unsupported"
+              ? "settings.billing.errorStripeCountryUnsupported"
+              : "settings.billing.errorAccountCreate";
       setPaymentError(msg);
     } finally {
       setCreatingAccount(false);
@@ -2759,12 +2763,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                             {t("settings.billing.stripeBlurb")}
                           </p>
                         </div>
-                      </div>
-                      <div className="max-w-xs">
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                          {t("settings.billing.countryLabel")}
-                        </label>
-                        <CountrySelect value={connectCountry} onChange={setConnectCountry} t={t} />
                       </div>
                       <button
                         onClick={handleCreateStripeAccount}
