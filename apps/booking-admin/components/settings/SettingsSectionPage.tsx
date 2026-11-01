@@ -2857,62 +2857,65 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               </div>
             </>
           )}
-          {/* VAY-2424: one save bar for the whole page (methods, bank details, booking windows). */}
-          <div
-            className="sticky bottom-0 z-10 rounded-lg border border-gray-200 bg-white p-3 shadow-sm md:px-5"
-            data-testid="payments-save-bar"
-          >
-            {paymentsSaveStatus && paymentsSaveStatus.kind !== "saved" && !savingPayment && (
-              <div role="alert" className="mb-3">
-                <FeedbackAlert
-                  type="error"
-                  message={
-                    paymentsSaveStatus.kind === "failed"
-                      ? paymentsSaveFailureText(paymentsSaveStatus, t)
-                      : t(paymentsSaveStatus.message, paymentsSaveStatus.params)
-                  }
-                  action={
-                    paymentsSaveStatus.kind === "failed" && paymentsSaveStatus.retry
-                      ? {
-                          label: t("settings.paymentsSave.tryAgain"),
-                          onClick: () => void handleSave(),
-                        }
-                      : undefined
-                  }
-                />
-              </div>
-            )}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p
-                role="status"
-                className={`text-[13px] font-medium ${paymentsChanged ? "text-amber-700" : "text-gray-500"}`}
+        </section>
+      )}
+      {/* VAY-2424: one save bar for the whole page (methods, bank details, booking windows), at
+          page level so it sticks to the bottom of the screen anywhere on the page. */}
+      {activeSection === "payments" && (
+        <div
+          className="sticky bottom-0 z-10 mt-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm md:px-5"
+          data-testid="payments-save-bar"
+        >
+          {paymentsSaveStatus && paymentsSaveStatus.kind !== "saved" && !savingPayment && (
+            <div role="alert" className="mb-3">
+              <FeedbackAlert
+                type="error"
+                message={
+                  paymentsSaveStatus.kind === "failed"
+                    ? paymentsSaveFailureText(paymentsSaveStatus, t)
+                    : t(paymentsSaveStatus.message, paymentsSaveStatus.params)
+                }
+                action={
+                  paymentsSaveStatus.kind === "failed" && paymentsSaveStatus.retry
+                    ? {
+                        label: t("settings.paymentsSave.tryAgain"),
+                        onClick: () => void handleSave(),
+                      }
+                    : undefined
+                }
+              />
+            </div>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p
+              role="status"
+              className={`text-[13px] font-medium ${paymentsChanged ? "text-amber-700" : "text-gray-500"}`}
+            >
+              {paymentsChanged
+                ? t("settings.paymentsSave.unsaved")
+                : paymentsSaveStatus?.kind === "saved"
+                  ? t("settings.billing.paymentSettingsSaved")
+                  : t("settings.paymentsSave.noChanges")}
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={discardPayments}
+                disabled={!paymentsChanged || savingPayment}
+                className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
               >
-                {paymentsChanged
-                  ? t("settings.paymentsSave.unsaved")
-                  : paymentsSaveStatus?.kind === "saved"
-                    ? t("settings.billing.paymentSettingsSaved")
-                    : t("settings.paymentsSave.noChanges")}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={discardPayments}
-                  disabled={!paymentsChanged || savingPayment}
-                  className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                >
-                  {t("settings.paymentsSave.discard")}
-                </button>
-                <SaveButton
-                  onClick={handleSave}
-                  saving={savingPayment}
-                  disabled={!paymentsReady || !paymentsChanged}
-                >
-                  {t("settings.paymentsSave.saveChanges")}
-                </SaveButton>
-              </div>
+                {t("settings.paymentsSave.discard")}
+              </button>
+              <SaveButton
+                onClick={handleSave}
+                saving={savingPayment}
+                disabled={!paymentsReady || !paymentsChanged}
+              >
+                {t("settings.paymentsSave.saveChanges")}
+              </SaveButton>
             </div>
           </div>
-        </section>
+        </div>
       )}
     </SettingsSubPage>
   );
