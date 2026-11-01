@@ -19,6 +19,8 @@ import {
 } from "./pricingCardPaymentCompletion.js";
 import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { createStripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { stripeAmountDecimal, stripeAmountMinor } from "./stripeMoney.js";
+import { routeVayadaPaymentStripe } from "./vayadaPaymentStripe.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
 import { calculateReplacementFixedCharges } from "./replacementFixedCharges.js";
@@ -408,6 +410,148 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           )
         ).rows[0].n,
       ).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("charges a vayada Payment hotel on Vayada's own Stripe account and owes it the rest (VAY-2442)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    try {
+      // The hotel saved a payout account (P1): its provider account is bound as vayada:<property>.
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const connect = {
+        createPaymentIntent: vi.fn(),
+        retrievePaymentIntent: vi.fn(),
+        cancelPaymentIntent: vi.fn(),
+      };
+      const own = { createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent: vi.fn() };
+      const provider = routeVayadaPaymentStripe(connect as never, {
+        provider: own as never,
+        publishableKey: "pk_test_writer",
+      });
+
+      // While VAYADA_PAYMENT_ENABLED is off, nothing is charged and nothing is kept.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, {
+          provider,
+          vayada: { enabled: false, feePercent: 6 },
+        }),
+      ).rejects.toMatchObject({ code: "conflict" });
+      expect(createPaymentIntent).not.toHaveBeenCalled();
+      expect((await snapshot(fixture.observer, fixture)).bookings).toBe(0);
+
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { enabled: true, feePercent: 6 },
+      });
+      expect(result).toMatchObject({
+        kind: "payment_required",
+        payment: {
+          provider: "stripe",
+          stripeAccountId: null,
+          publishableKey: "pk_test_writer",
+          paymentIntentId: "pi_writer_test",
+        },
+      });
+      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ providerAccountRef: null, applicationFeeAmountMinor: 0 }),
+      );
+      for (const fn of Object.values(connect)) expect(fn).not.toHaveBeenCalled();
+      const payment = (
+        await fixture.observer.query(
+          `SELECT id,amount::text,fee_amount::text,net_amount::text,payment_metadata AS meta
+           FROM finance.payments WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      const percent = Number(fixture.f.finance.commissionTermsSnapshot.bookingEngineFeePercent);
+      const planFee = Math.round((amountMinor * percent) / 100);
+      const vayadaFee = Math.round((amountMinor * 6) / 100);
+      const currency = fixture.f.current.quote.stay.currency;
+      expect(stripeAmountMinor(payment.fee_amount, currency)).toBe(planFee + vayadaFee);
+      expect(stripeAmountMinor(payment.net_amount, currency)).toBe(
+        amountMinor - planFee - vayadaFee,
+      );
+      expect(payment.meta).toMatchObject({
+        chargeType: "vayada_payment",
+        applicationFeeAmount: stripeAmountDecimal(0, currency),
+        vayadaPaymentFeePercent: 6,
+        vayadaPaymentFeeAmount: stripeAmountDecimal(vayadaFee, currency),
+        platformFeeAmount: stripeAmountDecimal(planFee, currency),
+      });
+
+      // A replay answers with the same payment, still on Vayada's account.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, {
+          provider,
+          vayada: { enabled: true, feePercent: 6 },
+        }),
+      ).resolves.toMatchObject({
+        replayed: true,
+        payment: { stripeAccountId: null, publishableKey: "pk_test_writer" },
+      });
+      expect(retrievePaymentIntent).toHaveBeenLastCalledWith("pi_writer_test", null);
+
+      const reference = (result as { bookingReference: string }).bookingReference;
+      const intent = await createPaymentIntent({ amountMinor, currency });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: reference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      const ledger = (
+        await fixture.observer.query(
+          `SELECT entry_kind,currency,gross_minor::int AS gross,fee_minor::int AS fee,net_minor::int AS net,
+             payment_id::text,stay_check_out::text = (SELECT check_out::text FROM booking.guest_bookings
+               WHERE property_id=$1) AS check_out,source_key
+           FROM finance.hotel_payout_ledger WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(ledger).toEqual([
+        {
+          entry_kind: "charge",
+          currency,
+          gross: amountMinor,
+          fee: planFee + vayadaFee,
+          net: amountMinor - planFee - vayadaFee,
+          payment_id: payment.id,
+          check_out: true,
+          source_key: `charge:${payment.id}`,
+        },
+      ]);
+      // The ledger is append-only, and a charge counts once.
+      await expect(
+        fixture.observer.query(
+          "UPDATE finance.hotel_payout_ledger SET net_minor=0 WHERE property_id=$1",
+          [fixture.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "55000" });
+      await expect(
+        fixture.observer.query(
+          `INSERT INTO finance.hotel_payout_ledger (property_id,entry_kind,currency,gross_minor,fee_minor,
+             net_minor,guest_booking_id,payment_id,stay_check_out,source_key,occurred_at)
+           SELECT property_id,entry_kind,currency,gross_minor,fee_minor,net_minor,guest_booking_id,
+             payment_id,stay_check_out,'charge-again',now() FROM finance.hotel_payout_ledger
+           WHERE property_id=$1`,
+          [fixture.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
     } finally {
       await fixture.close();
     }

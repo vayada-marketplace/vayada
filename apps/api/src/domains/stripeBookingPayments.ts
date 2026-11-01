@@ -14,6 +14,9 @@ export type StripeBookingPaymentIntent = {
   propertyId: string | null;
   bookingReference: string | null;
   providerAccountRef: string | null;
+  /** vayada Payment (VAY-2442): the publishable key of Vayada's own Stripe account, which the
+   * booking page loads Stripe.js with instead of the hotel's connected account. */
+  publishableKey?: string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
   /** From the expanded latest charge (retrieve/capture), for reconciliation (VAY-2205). */
@@ -47,7 +50,8 @@ export type StripeBookingPaymentProvider = {
   createPaymentIntent(input: {
     propertyId: string;
     bookingReference: string;
-    providerAccountRef: string;
+    /** A hotel's connected account, or null for a charge on the key's own account (VAY-2442). */
+    providerAccountRef: string | null;
     amountMinor: number;
     applicationFeeAmountMinor: number;
     currency: string;
@@ -72,7 +76,7 @@ export type StripeBookingPaymentProvider = {
    * `vayada_source=pricing_v2`, so the legacy Connect webhook leaves it alone. */
   createRefund(input: {
     paymentIntentId: string;
-    providerAccountRef: string;
+    providerAccountRef: string | null;
     amountMinor: number;
     /** Whether the charge carries Vayada's application fee. Stripe refuses
      * `refund_application_fee` on a charge without one (a fixed-plan hotel's), refund and all. */
@@ -83,8 +87,11 @@ export type StripeBookingPaymentProvider = {
     idempotencyKey: string;
   }): Promise<StripeBookingRefund>;
   /** Every refund of a payment, newest first: a retry looks here before it asks again. */
-  listRefunds(paymentIntentId: string, providerAccountRef: string): Promise<StripeBookingRefund[]>;
-  retrieveRefund(refundId: string, providerAccountRef: string): Promise<StripeBookingRefund>;
+  listRefunds(
+    paymentIntentId: string,
+    providerAccountRef: string | null,
+  ): Promise<StripeBookingRefund[]>;
+  retrieveRefund(refundId: string, providerAccountRef: string | null): Promise<StripeBookingRefund>;
 };
 
 const REFUND_TIMEOUT_MS = STRIPE_REQUEST_TIMEOUT_MS;

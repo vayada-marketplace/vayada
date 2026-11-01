@@ -70,6 +70,7 @@ import {
 } from "@vayada/domain-distribution";
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { isVayadaPaymentAccountRef } from "../domains/vayadaPaymentStripe.js";
 import { createHash, randomBytes } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
@@ -1336,6 +1337,9 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingCardAcceptanceEnabled?: boolean;
   /** Card quotes that leave the rest to pay at the property: deposits (VAY-2205). */
   replacementPricingDepositAcceptanceEnabled?: boolean;
+  /** VAY-2442: new vayada Payment charges (VAYADA_PAYMENT_ENABLED with its Stripe account) and
+   * Vayada's fee in percent. Off: hotels on vayada Payment can't start a card payment. */
+  vayadaPayment?: { enabled: boolean; feePercent: number };
   /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
   replacementPricingRequestAcceptanceEnabled?: boolean;
   /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
@@ -1825,6 +1829,7 @@ export function createTargetBookingWebCheckoutAdapter(
             ? {
                 provider: config.stripePaymentProvider,
                 deposits: config.replacementPricingDepositAcceptanceEnabled === true,
+                vayada: config.vayadaPayment,
               }
             : undefined;
         const result = await writePricingAcceptance(
@@ -3211,7 +3216,9 @@ export async function createTargetCardPayment(
     !config.stripePaymentProvider ||
     checkoutConfig?.onlineCardReady !== true ||
     !checkoutConfig.providerAccountId ||
-    !checkoutConfig.providerAccountRef
+    !checkoutConfig.providerAccountRef ||
+    // vayada Payment (VAY-2442) charges only through the pricing-v2 checkout.
+    isVayadaPaymentAccountRef(checkoutConfig.providerAccountRef)
   ) {
     throw createHttpError(503, "This property has not finished Stripe Connect setup.");
   }

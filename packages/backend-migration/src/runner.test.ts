@@ -1352,6 +1352,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "folio_payment_references",
         "folio_revisions",
         "folios",
+        "hotel_payout_ledger",
         "online_card_execution_evidence",
         "online_card_readiness",
         "ota_commission_evidence",

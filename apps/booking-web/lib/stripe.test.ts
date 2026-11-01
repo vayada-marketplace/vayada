@@ -19,4 +19,11 @@ describe("Stripe.js account scope", () => {
       stripeAccount: "acct_property_1288",
     });
   });
+
+  it("loads Stripe.js with vayada Payment's own key, without a connected account (VAY-2442)", () => {
+    const first = stripeForAccount(null, "pk_test_vayada2442");
+    expect(stripeForAccount(null, "pk_test_vayada2442")).toBe(first);
+    expect(loadStripe).toHaveBeenCalledTimes(1);
+    expect(loadStripe).toHaveBeenCalledWith("pk_test_vayada2442");
+  });
 });

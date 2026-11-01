@@ -192,6 +192,12 @@ export type ApiConfig = {
   /** VAY-2442: vayada Payment (guest card payments on Vayada's own Stripe account, paid out to
    * the hotel's bank). Off by default; no real money until Flamur switches it on. */
   vayadaPaymentEnabled: boolean;
+  /** VAY-2442: the Stripe account vayada Payment charges guests on, separate from the Connect
+   * platform. Test mode only: live keys are refused until a payments lawyer and Stripe agree. */
+  vayadaPaymentStripe?: { secretKey: string; publishableKey: string };
+  /** VAY-2442: Vayada's vayada Payment fee, in percent of each card payment, on top of the plan's
+   * fee and kept on refunds. Default 6 (Flamur, 2026-10-31). */
+  vayadaPaymentFeePercent: number;
   /** Browser origins allowed on the identity privacy routes. */
   identityPrivacyAllowedOrigins: string[];
   /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
@@ -440,6 +446,31 @@ export function replacementPricingManualPaymentMethods(
       : []),
     ...(config.replacementPricingPaypalAcceptanceEnabled ? (["paypal"] as const) : []),
   ];
+}
+
+function loadVayadaPaymentStripe(env: NodeJS.ProcessEnv): ApiConfig["vayadaPaymentStripe"] {
+  const secretKey = readOptionalEnv(env, "VAYADA_PAYMENT_STRIPE_SECRET_KEY");
+  const publishableKey = readOptionalEnv(env, "VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY");
+  if (!secretKey && !publishableKey) return undefined;
+  if (
+    !secretKey ||
+    !publishableKey ||
+    !/^(sk|rk)_test_[A-Za-z0-9]+$/.test(secretKey) ||
+    !/^pk_test_[A-Za-z0-9]+$/.test(publishableKey)
+  )
+    throw new Error(
+      "VAYADA_PAYMENT_STRIPE_SECRET_KEY and VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY must both be Stripe test-mode keys",
+    );
+  return { secretKey, publishableKey };
+}
+
+function readVayadaPaymentFeePercent(env: NodeJS.ProcessEnv): number {
+  const value = readOptionalEnv(env, "VAYADA_PAYMENT_FEE_PERCENT");
+  if (value === undefined) return 6;
+  const percent = Number(value);
+  if (!/^\d+(\.\d{1,2})?$/.test(value) || percent > 50)
+    throw new Error("VAYADA_PAYMENT_FEE_PERCENT must be a percentage from 0 to 50");
+  return percent;
 }
 
 function loadBankTransferKms(env: NodeJS.ProcessEnv): ApiConfig["financeBankTransferKms"] {
@@ -1293,6 +1324,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     vayadaPaymentEnabled: readBooleanEnv(env, "VAYADA_PAYMENT_ENABLED"),
+    vayadaPaymentStripe: loadVayadaPaymentStripe(env),
+    vayadaPaymentFeePercent: readVayadaPaymentFeePercent(env),
     identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),
     // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
     contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [

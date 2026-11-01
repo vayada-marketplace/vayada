@@ -12,6 +12,7 @@ import { QuoteRoomsSoldOutError } from "./pmsInventoryReservationLifecycleReposi
 import {
   pricingCardQuoteSupported,
   pricingCardBookingId,
+  pricingCardPaymentTarget,
   readPricingCardReplay,
   startPricingCardPayment,
 } from "./pricingCardPayment.js";
@@ -66,7 +67,12 @@ export async function writePricingAcceptance(
   /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED);
    * those leaving the rest to pay at the property also need `deposits`
    * (REPLACEMENT_PRICING_DEPOSIT_ACCEPTANCE_ENABLED, VAY-2205). */
-  cardPayments?: { provider: StripeBookingPaymentProvider; deposits?: boolean },
+  cardPayments?: {
+    provider: StripeBookingPaymentProvider;
+    deposits?: boolean;
+    /** VAY-2442: new vayada Payment charges and Vayada's fee in percent. */
+    vayada?: { enabled: boolean; feePercent: number };
+  },
   /** Request-mode pay-at-property quotes (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED). */
   requests = false,
   /** Bank-transfer and PayPal quotes (REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED). Bank
@@ -207,28 +213,31 @@ export async function writePricingAcceptance(
       // booking `pending_payment`. Revenue, notifications and the PMS job follow the
       // confirmed Stripe payment.
       const accepted = await storePricingAcceptance(client, input.slug, prepared, lifecycle, null);
-      const intent = await startPricingCardPayment(client, cardPayments.provider, {
-        slug: input.slug,
-        current: prepared.current,
-        finance: prepared.finance,
-        bookingId,
-        publicReference,
-        requestId: prepared.command.requestId,
-        occurredAt: lifecycle.occurredAt,
-      });
+      const intent = await startPricingCardPayment(
+        client,
+        cardPayments.provider,
+        {
+          slug: input.slug,
+          current: prepared.current,
+          finance: prepared.finance,
+          bookingId,
+          publicReference,
+          requestId: prepared.command.requestId,
+          occurredAt: lifecycle.occurredAt,
+        },
+        cardPayments.vayada,
+      );
       await finishPricingAcceptance(client, input.slug, prepared.current, prepared.finance);
       await client.query("COMMIT");
       return {
         kind: "payment_required" as const,
         ...accepted,
         bookingReference: publicReference,
-        payment: {
-          provider: "stripe" as const,
+        payment: pricingCardPaymentTarget(intent, {
           clientSecret: intent.clientSecret,
-          stripeAccountId: intent.providerAccountRef,
           paymentIntentId: intent.paymentIntentId,
           expiresAt: lifecycle.paymentDeadlineAt,
-        },
+        }),
       };
     }
     if (prepared.current.quote.acceptanceMode === "request") {

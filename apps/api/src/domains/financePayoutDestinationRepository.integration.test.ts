@@ -14,8 +14,9 @@ if (url && !new URL(url).pathname.endsWith("_test")) throw new Error("Unsafe tes
 const propertyId = randomUUID(),
   chosen = randomUUID(),
   stripeHotel = randomUUID(),
+  upper = randomUUID(),
   actorId = randomUUID();
-const properties = [propertyId, chosen, stripeHotel];
+const properties = [propertyId, chosen, stripeHotel, upper];
 const details: PayoutDestinationDetails = {
   accountHolder: "PT Sensitive Holder",
   accountNumber: "0123456789",
@@ -260,6 +261,25 @@ it.skipIf(!url)(
       provider: "vayada",
       payoutsEnabled: true,
     });
+  },
+);
+
+it.skipIf(!url)(
+  "binds vayada:<property> from the stored id, whatever case the request used",
+  async () => {
+    await repository.execute({
+      propertyId: upper.toUpperCase(),
+      actorId,
+      commandId: randomUUID(),
+      expectedVersion: 0,
+      action: "replace",
+      countryCode: "LK",
+      details,
+    });
+    // The readiness view and the charge compare against 'vayada:'||property_id (VAY-2442 P3).
+    expect(await vayadaAccounts(upper)).toEqual([
+      expect.objectContaining({ provider_account_id: `vayada:${upper}`, payouts_enabled: true }),
+    ]);
   },
 );
 
