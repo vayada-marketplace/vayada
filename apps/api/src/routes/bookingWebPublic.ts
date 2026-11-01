@@ -70,7 +70,7 @@ import {
 } from "@vayada/domain-distribution";
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { isVayadaPaymentAccountRef } from "../domains/vayadaPaymentStripe.js";
+import { isVayadaPaymentAccountRef, stripeCallAccountRef } from "../domains/vayadaPaymentStripe.js";
 import { createHash, randomBytes } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
@@ -1997,7 +1997,7 @@ export function createTargetBookingWebCheckoutAdapter(
         if (!authorizationComplete || !payment.cardBrand || !payment.cardLast4) {
           const intent = await config.stripePaymentProvider!.retrievePaymentIntent(
             payment.providerPaymentIntentId,
-            payment.chargeType === "direct" ? payment.providerAccountRef : null,
+            stripeCallAccountRef(payment.chargeType, payment.providerAccountRef),
           );
           assertStripePaymentReady(
             booking,
@@ -2150,7 +2150,7 @@ export function createTargetBookingWebCheckoutAdapter(
           const payment = await loadTargetCardPayment(pool, booking);
           const intent = await config.stripePaymentProvider.retrievePaymentIntent(
             payment.providerPaymentIntentId,
-            payment.chargeType === "direct" ? payment.providerAccountRef : null,
+            stripeCallAccountRef(payment.chargeType, payment.providerAccountRef),
           );
           const acceptanceMode = targetAcceptanceMode(
             objectValue(booking.bookingMetadata)["acceptanceMode"],

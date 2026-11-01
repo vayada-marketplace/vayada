@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../config.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
-import { isVayadaPaymentAccountRef, routeVayadaPaymentStripe } from "./vayadaPaymentStripe.js";
+import {
+  isVayadaPaymentAccountRef,
+  routeVayadaPaymentStripe,
+  stripeCallAccountRef,
+} from "./vayadaPaymentStripe.js";
 
 const ref = "vayada:24420000-0000-4000-8000-000000000001";
 
@@ -115,6 +119,15 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
     expect(isVayadaPaymentAccountRef(ref)).toBe(true);
     expect(isVayadaPaymentAccountRef("acct_hotel")).toBe(false);
     expect(isVayadaPaymentAccountRef(null)).toBe(false);
+  });
+
+  it("reads a stored payment's own account for vayada Payment too, not the platform's", () => {
+    // Host decline, the request deadline sweep and the guest's booking lookup call Stripe with it.
+    expect(stripeCallAccountRef("vayada_payment", ref)).toBe(ref);
+    expect(stripeCallAccountRef("direct", "acct_hotel")).toBe("acct_hotel");
+    expect(stripeCallAccountRef("destination", "acct_hotel")).toBeNull();
+    expect(stripeCallAccountRef(undefined, "acct_hotel")).toBeNull();
+    expect(stripeCallAccountRef("direct", null)).toBeNull();
   });
 
   it("accepts only Stripe test-mode keys and a fee from 0 to 50 percent", () => {

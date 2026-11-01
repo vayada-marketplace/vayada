@@ -106,19 +106,23 @@ export async function startPricingCardPayment(
     return fail();
   const account = (
     await client.query(
-      `SELECT account.id,account.provider_account_id
+      `SELECT account.id,account.provider,account.provider_account_id
       FROM finance.payment_settings settings
       JOIN finance.payment_provider_accounts account
         ON account.id=settings.provider_account_id AND account.property_id=settings.property_id
       WHERE settings.property_id=$1 AND settings.payments_enabled
         AND 'card'=ANY(settings.accepted_methods)
         AND (account.provider='stripe' OR (account.provider='vayada'
-          AND account.provider_account_id='vayada:'||account.property_id::text))
+          AND account.provider_account_id='vayada:'||account.property_id::text
+          AND account.status='active' AND account.charges_enabled AND account.payouts_enabled))
       FOR SHARE OF settings,account`,
       [scope.propertyId],
     )
   ).rows[0];
-  const vayadaCharge = isVayadaPaymentAccountRef(account?.provider_account_id);
+  // vayada Payment: Vayada's own account takes any charge, so the hotel's side (payouts on, i.e.
+  // a saved payout account) is checked here, not left to Stripe as for a connected account.
+  const vayadaCharge =
+    account?.provider === "vayada" && isVayadaPaymentAccountRef(account.provider_account_id);
   if (
     !account ||
     typeof account.provider_account_id !== "string" ||
@@ -206,6 +210,8 @@ export async function startPricingCardPayment(
               platformFeeAmount: stripeAmountDecimal(planFeeMinor, currency),
               vayadaPaymentFeePercent: vayadaFeePercent,
               vayadaPaymentFeeAmount: stripeAmountDecimal(vayadaFeeMinor, currency),
+              // Only live-mode money is ever paid out to a hotel.
+              livemode: intent.livemode === true,
             }
           : {}),
         reconciliationStatus: "pending",

@@ -15,6 +15,8 @@ export async function recordVayadaPaymentCharge(
     amount: string;
     feeAmount: string;
     stayCheckOut: string;
+    /** From the Stripe payment: test-mode money is recorded but never paid out. */
+    livemode: boolean;
     occurredAt: string;
   },
 ): Promise<void> {
@@ -24,8 +26,10 @@ export async function recordVayadaPaymentCharge(
     throw new Error("vayada Payment charge is invalid for the payout ledger.");
   await client.query(
     `INSERT INTO finance.hotel_payout_ledger (property_id, entry_kind, currency, gross_minor,
-       fee_minor, net_minor, guest_booking_id, payment_id, stay_check_out, source_key, occurred_at)
-     VALUES ($1::uuid, 'charge', $2, $3, $4, $5, $6::uuid, $7::uuid, $8::date, $9, $10::timestamptz)`,
+       fee_minor, net_minor, guest_booking_id, payment_id, stay_check_out, livemode, source_key,
+       occurred_at)
+     VALUES ($1::uuid, 'charge', $2, $3, $4, $5, $6::uuid, $7::uuid, $8::date, $9, $10,
+       $11::timestamptz)`,
     [
       input.propertyId,
       input.currency.trim().toUpperCase(),
@@ -35,6 +39,7 @@ export async function recordVayadaPaymentCharge(
       input.guestBookingId,
       input.paymentId,
       input.stayCheckOut,
+      input.livemode,
       `charge:${input.paymentId}`,
       input.occurredAt,
     ],

@@ -33,6 +33,7 @@ const CARD_ROW_SELECT = `SELECT a.*,b.lifecycle_status,b.payment_status,b.expect
     b.check_out::text AS stay_check_out,
     p.id AS payment_id,p.status AS payment_row_status,p.amount::text AS payment_amount,
     p.fee_amount::text AS payment_fee_amount,p.payment_metadata->>'chargeType' AS payment_charge_type,
+    COALESCE(p.payment_metadata->>'livemode' = 'true', FALSE) AS payment_livemode,
     p.currency AS payment_currency,p.provider_payment_intent_id,acct.provider_account_id AS account_ref,
     q.payload AS quote_record
   FROM booking.pricing_quote_acceptances a
@@ -289,6 +290,7 @@ async function applyCardPayment(
       amount: row.payment_amount,
       feeAmount: row.payment_fee_amount,
       stayCheckOut: row.stay_check_out,
+      livemode: row.payment_livemode === true,
       occurredAt,
     });
   const prior = await client.query(

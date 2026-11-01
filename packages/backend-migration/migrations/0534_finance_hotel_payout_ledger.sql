@@ -17,6 +17,8 @@ CREATE TABLE finance.hotel_payout_ledger (
   payment_id UUID,
   -- The stay's check-out date: payouts cover stays that checked out by the cut-off.
   stay_check_out DATE,
+  -- Stripe's livemode for the money behind the row: test-mode rows are never paid out.
+  livemode BOOLEAN NOT NULL,
   source_key TEXT NOT NULL UNIQUE CHECK (length(source_key) BETWEEN 1 AND 200),
   occurred_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -35,3 +37,6 @@ CREATE INDEX hotel_payout_ledger_balance
 CREATE TRIGGER hotel_payout_ledger_append_only
   BEFORE UPDATE OR DELETE ON finance.hotel_payout_ledger
   FOR EACH ROW EXECUTE FUNCTION platform.prevent_append_only_mutation();
+CREATE TRIGGER hotel_payout_ledger_no_truncate
+  BEFORE TRUNCATE ON finance.hotel_payout_ledger
+  FOR EACH STATEMENT EXECUTE FUNCTION platform.prevent_append_only_mutation();

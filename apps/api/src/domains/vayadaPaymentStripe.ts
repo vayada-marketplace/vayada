@@ -10,6 +10,16 @@ export function isVayadaPaymentAccountRef(ref: string | null | undefined): ref i
   return typeof ref === "string" && ref.startsWith("vayada:");
 }
 
+/** The account a stored card payment's Stripe calls go to: a Connect direct charge's connected
+ * account, or vayada Payment's vayada:<property> (the router sends it to Vayada's own account).
+ * A charge of any other type ran on the platform account itself (null). */
+export function stripeCallAccountRef(
+  chargeType: unknown,
+  ref: string | null | undefined,
+): string | null {
+  return chargeType === "direct" || chargeType === "vayada_payment" ? (ref ?? null) : null;
+}
+
 export type VayadaPaymentStripe = {
   /** A provider on Vayada's own (test-mode) Stripe account; called without a connected account. */
   provider: StripeBookingPaymentProvider;

@@ -1,4 +1,5 @@
 import { formatBookingPriceMinorUnits } from "@vayada/domain-booking";
+import { stripeCallAccountRef } from "./vayadaPaymentStripe.js";
 import {
   calculateReplacementRoomStay,
   PMS_ROOM_TYPE_DUPLICATION_COPIED_FACTS,
@@ -6008,13 +6009,13 @@ async function captureAcceptedRequestCardBooking(
   }
   let intent = await config.stripePaymentProvider.retrievePaymentIntent(
     booking.providerPaymentIntentId,
-    booking.chargeType === "direct" ? booking.providerAccountRef : null,
+    stripeCallAccountRef(booking.chargeType, booking.providerAccountRef),
   );
   assertAcceptedRequestCardIntent(booking, intent);
   if (intent.status === "requires_capture") {
     intent = await config.stripePaymentProvider.capturePaymentIntent(
       booking.providerPaymentIntentId,
-      booking.chargeType === "direct" ? booking.providerAccountRef : null,
+      stripeCallAccountRef(booking.chargeType, booking.providerAccountRef),
       `pms-booking-capture:${command.propertyId}:${command.guestBookingId}:${sha256(command.idempotencyKey)}`,
     );
     assertAcceptedRequestCardIntent(booking, intent);
