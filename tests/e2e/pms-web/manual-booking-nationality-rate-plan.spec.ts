@@ -307,9 +307,9 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await dialog.getByLabel("Guest 2 first name").fill("Grace");
   await dialog.getByLabel("Guest 2 last name").fill("Hopper");
   await dialog.getByRole("button", { name: "Same as Guest 1" }).click();
-  await expect(dialog.getByRole("button", { name: "Guest 2 nationality" })).toContainText(
-    "Germany",
-  );
+  await expect(
+    dialog.getByRole("button", { name: "Guest 2 nationality", exact: true }),
+  ).toContainText("Germany");
   await expect(page.getByText("Total €300")).toBeVisible();
   await createBooking.click();
   await expect.poll(() => createBody).not.toBeNull();

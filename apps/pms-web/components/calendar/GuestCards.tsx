@@ -6,6 +6,7 @@ import { useTranslation } from "@/lib/i18n";
 
 /** What staff type on a guest card other than the lead guest's; a child's age belongs to its stay. */
 export type GuestDraft = { firstName: string; lastName: string; countryCode: string };
+export const EMPTY_GUEST: GuestDraft = { firstName: "", lastName: "", countryCode: "" };
 
 /** One card per guest the stays count: room by room, adults before children. The lead guest is room
  * 1's first adult, so check-in, which fills rooms in booking order, seats named guests the same way. */
@@ -106,7 +107,7 @@ export default function GuestCards({
             {stays.length > 1 && <p className="text-xs font-medium text-gray-700">{stay.label}</p>}
             {stayIndex === 0 && leadCard}
             {cards.map((slot) => {
-              const draft = drafts[slot.id] ?? { firstName: "", lastName: "", countryCode: "" };
+              const draft = drafts[slot.id] ?? EMPTY_GUEST;
               const started = Boolean(
                 draft.firstName.trim() || draft.lastName.trim() || draft.countryCode,
               );
@@ -135,9 +136,7 @@ export default function GuestCards({
                       <button
                         type="button"
                         aria-label={t("calendar.targetManualBooking.clearGuest", { number })}
-                        onClick={() =>
-                          onDraft(slot.id, { firstName: "", lastName: "", countryCode: "" })
-                        }
+                        onClick={() => onDraft(slot.id, EMPTY_GUEST)}
                         className="-my-3 min-h-11 px-2 text-xs font-medium text-gray-600 hover:text-gray-900"
                       >
                         {t("calendar.targetManualBooking.clear")}

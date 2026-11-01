@@ -16,6 +16,7 @@ import { useTranslation } from "@/lib/i18n";
 import CountryPicker, { NATIONALITY_PICKER_OPTIONS } from "@/components/CountryPicker";
 import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
 import GuestCards, {
+  EMPTY_GUEST,
   guestMissingName,
   guestNamed,
   guestSlots,
@@ -924,13 +925,7 @@ export default function TargetManualBookingModal({
                 onDraft={(id, patch) =>
                   setGuestDrafts((current) => ({
                     ...current,
-                    [id]: {
-                      firstName: "",
-                      lastName: "",
-                      countryCode: "",
-                      ...current[id],
-                      ...patch,
-                    },
+                    [id]: { ...(current[id] ?? EMPTY_GUEST), ...patch },
                   }))
                 }
                 leadCountry={countryCode}
