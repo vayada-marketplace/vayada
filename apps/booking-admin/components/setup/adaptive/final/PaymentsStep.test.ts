@@ -498,7 +498,7 @@ it("shows a currency load failure with a retry", async () => {
 it("keeps the step as it is while bank transfer and PayPal are off (VAY-2139)", async () => {
   mocks.manual.mockRejectedValueOnce(new Error("unavailable"));
   const h = await harness();
-  expect(h.text()).not.toContain("Bank transfer or PayPal");
+  expect(h.text()).not.toContain("Bank transfer bookings need your manual confirmation");
   expect(h.button("Save selection").props.disabled).toBe(true);
   expect(h.button("Save and continue").props.disabled).toBe(true);
   h.view.unmount();
@@ -508,8 +508,10 @@ it("sends the hotel to Booking Engine payment settings for bank transfer and Pay
   mocks.handoff.mockResolvedValue("https://admin.booking.vayada.com/handoff#code");
   vi.stubGlobal("window", { location: { assign: mocks.assign } });
   const h = await harness();
-  expect(h.text()).toContain("Bank transfer or PayPal");
-  expect(h.text()).toContain("Bank transfer and PayPal bookings need your manual confirmation");
+  expect(h.text()).toContain("Add your bank details in Booking Engine settings");
+  expect(h.text()).toContain("Bank transfer bookings need your manual confirmation");
+  // PayPal stays off on the booking page for now, so the step doesn't offer it (VAY-2139).
+  expect(h.text()).not.toContain("PayPal");
   expect(h.text()).toContain("Not set up");
   // Not counted yet: nothing to save or continue with.
   expect(h.button("Save selection").props.disabled).toBe(true);
@@ -563,7 +565,7 @@ it("lets a hotel switch to bank transfer only and continue once it counts (VAY-2
     { expectedPaymentMethodsRevision: 1, expectedPricingCurrencyRevision: 1, selectedMethods: [] },
     { allowNoMethods: true },
   );
-  expect(saved.text()).toContain("Guests pay you by bank transfer or PayPal.");
+  expect(saved.text()).toContain("Guests pay you by bank transfer.");
   saved.view.unmount();
 
   mocks.load.mockResolvedValue(snapshot([], 2));

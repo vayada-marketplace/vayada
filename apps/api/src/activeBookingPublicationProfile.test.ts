@@ -48,7 +48,10 @@ describe("active immutable Booking publication profile reads", () => {
       finance: { onlinePayment: false, payAtProperty: false, readyPaymentMethods: ["paypal"] },
     });
     let paypalEmail = "pay@hotel.example";
-    const read = (manualPayments?: boolean) =>
+    const read = (
+      manualPayments?: boolean,
+      manualMethods: readonly ("bank_transfer" | "paypal")[] = ["bank_transfer", "paypal"],
+    ) =>
       createActiveBookingPublicationProfileRepository({
         connectionString: "postgresql://unused",
         pool: pool(async (text) =>
@@ -65,10 +68,13 @@ describe("active immutable Booking publication profile reads", () => {
               : [{ propertyId: manualProfile.hotel.propertyId, publicContent }],
         ),
         manualPayments,
+        manualMethods,
       }).findProfileBySlug(manualProfile.hotel.slug);
     await expect(read(true)).resolves.toMatchObject({
       hotel: { propertyId: manualProfile.hotel.propertyId },
     });
+    // VAY-2139: with PayPal's own switch off, a PayPal-only page is hidden.
+    await expect(read(true, ["bank_transfer"])).resolves.toBeNull();
     // Turning their acceptance off takes the page down again.
     await expect(read()).resolves.toBeNull();
     await expect(read(false)).resolves.toBeNull();

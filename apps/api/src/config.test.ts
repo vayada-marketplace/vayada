@@ -4,6 +4,7 @@ import {
   channexClaimedAriScope,
   channexClaimedScope,
   loadConfig,
+  replacementPricingManualPaymentMethods,
   stripeSubscriptionRuntimeEnabled,
 } from "./config.js";
 
@@ -898,6 +899,41 @@ describe("api config", () => {
       loadConfig({ REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED: "true" })
         .replacementPricingManualPaymentAcceptanceEnabled,
     ).toBe(true);
+  });
+
+  it("keeps PayPal out of manual payment acceptance unless explicitly enabled (VAY-2139)", () => {
+    expect(loadConfig({}).replacementPricingPaypalAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingPaypalAcceptanceEnabled,
+    ).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingPaypalAcceptanceEnabled,
+    ).toBe(true);
+  });
+
+  it("lists the manual payment methods the booking page takes (VAY-2139)", () => {
+    const kms = { currentKeyArn: "key", allowedKeyArns: ["key"], region: "eu-west-1" };
+    const methods = (
+      manual: boolean,
+      paypal: boolean,
+      bankBinding = true,
+      financeSource: "target" | "legacy" = "target",
+    ) =>
+      replacementPricingManualPaymentMethods({
+        replacementPricingManualPaymentAcceptanceEnabled: manual,
+        replacementPricingPaypalAcceptanceEnabled: paypal,
+        financeSource,
+        financeBankTransferKms: bankBinding ? kms : undefined,
+      });
+    expect(methods(false, true)).toEqual([]);
+    expect(methods(true, false)).toEqual(["bank_transfer"]);
+    expect(methods(true, true)).toEqual(["bank_transfer", "paypal"]);
+    // Without the bank-details binding there is no bank transfer to take.
+    expect(methods(true, false, false)).toEqual([]);
+    expect(methods(true, true, false)).toEqual(["paypal"]);
+    expect(methods(true, false, true, "legacy")).toEqual([]);
   });
 
   it("keeps the hotel first run (VAY-2247) unmounted unless explicitly enabled", () => {

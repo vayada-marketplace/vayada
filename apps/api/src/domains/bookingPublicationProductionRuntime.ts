@@ -6,6 +6,7 @@ import {
   type BookingPublicationCommandPort,
   type BookingPublicationOperation,
   type BookingDesignReadinessPort,
+  type ManualPricingPaymentMethod,
   type ReadyBookingPublicationEvidence,
 } from "@vayada/domain-booking";
 import { createBookingPublicationBuilder } from "@vayada/domain-distribution/booking-publication-builder";
@@ -223,6 +224,8 @@ export function createBookingPublicationProductionRuntime(config: {
   finance: FinancePaymentReadinessReadPort;
   /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
   manualPayments?: FinanceManualPaymentReadinessReadPort;
+  /** Which of the two the booking page takes now (replacementPricingManualPaymentMethods). */
+  manualMethods?: readonly ManualPricingPaymentMethod[];
   financeScope?: FinancePaymentReadinessScopePort;
   /** Receives one line per readiness check an owner could not answer (IDs and codes only). */
   warn?: (fields: Record<string, unknown>, message: string) => void;
@@ -287,6 +290,7 @@ export function createBookingPublicationProductionRuntime(config: {
   const projection = createPgDistributionBookingPublicationProjection({
     connectionString: config.connectionString,
     manualPayments,
+    manualMethods: config.manualMethods,
   });
   const attempts = createPgBookingPublicationAttemptStatusRepository({
     connectionString: config.connectionString,

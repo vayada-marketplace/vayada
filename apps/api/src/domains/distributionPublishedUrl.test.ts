@@ -78,13 +78,21 @@ it("withholds a bank-transfer or PayPal page while the hotel can't be paid that 
     connect: async () => ({ query, release: vi.fn() }),
     end: async () => {},
   } as unknown as DistributionBookingPublicationPool;
-  const repository = createPgDistributionBookingPublicationProjection({
-    connectionString: "postgresql://unused",
-    pool,
-    manualPayments: true,
-  });
+  const projection = (manualMethods?: readonly ("bank_transfer" | "paypal")[]) =>
+    createPgDistributionBookingPublicationProjection({
+      connectionString: "postgresql://unused",
+      pool,
+      manualPayments: true,
+      manualMethods,
+    });
+  const repository = projection(["bank_transfer", "paypal"]);
   const published = () => repository.getPublishedUrl(manualProfile.hotel.propertyId, "revision");
   expect(await published()).toBe(new URL(manualProfile.hotel.canonicalUrl).toString());
+  // VAY-2139: with PayPal's own switch off (or no list at all), a PayPal-only page is hidden.
+  for (const methods of [["bank_transfer"] as const, undefined])
+    expect(
+      await projection(methods).getPublishedUrl(manualProfile.hotel.propertyId, "revision"),
+    ).toBeNull();
   paypalEmail = "";
   expect(await published()).toBeNull();
 });
@@ -106,6 +114,7 @@ it("keeps a page that also takes card or pay at property up without a Finance re
     connectionString: "postgresql://unused",
     pool,
     manualPayments: true,
+    manualMethods: ["bank_transfer"],
   });
   expect(await repository.getPublishedUrl(profile.hotel.propertyId, "revision")).toBe(
     new URL(profile.hotel.canonicalUrl).toString(),

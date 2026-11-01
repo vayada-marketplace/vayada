@@ -287,7 +287,7 @@ export function QuickPayStep({
                 onClick={() => setCardInterest(true)}
               />
               <p className="text-[13px] text-gray-500">
-                Bank transfer and PayPal live in Booking Engine settings.
+                Bank transfer lives in Booking Engine settings.
               </p>
             </section>
 

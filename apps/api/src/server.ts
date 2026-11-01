@@ -79,6 +79,7 @@ import {
   channexClaimedScope,
   channexConnectionOnlyScope,
   loadConfig,
+  replacementPricingManualPaymentMethods,
   stripeSubscriptionRuntimeEnabled,
 } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
@@ -424,9 +425,13 @@ const propertyLaunchSettingsRepository = {
 
 // Checkout and pricing read the same pages as the public site: setup publications once it serves
 // them, legacy bookability profiles until then (VAY-2134).
+// Bank transfer and PayPal (VAY-2139): the methods the booking page takes, PayPal only with its own
+// switch. Readiness, the publication gate and published pages all use this one list.
+const manualPaymentMethods = replacementPricingManualPaymentMethods(config);
 configureActiveBookingPublicationGate({
   servesPublications: config.publicHotelProfileSource === "active_publication",
   manualPayments: config.replacementPricingManualPaymentAcceptanceEnabled === true,
+  manualMethods: manualPaymentMethods,
 });
 
 const publicBookabilityPublisher =
@@ -530,6 +535,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   replacementPricingManualPaymentAcceptanceEnabled:
     config.replacementPricingManualPaymentAcceptanceEnabled,
+  replacementPricingPaypalAcceptanceEnabled: config.replacementPricingPaypalAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -1476,9 +1482,13 @@ const bookingGuestPolicyApplication = pmsRoomPublicationRuntime
       currentOwnerEvidence: bookingGuestPolicyCurrentOwnerEvidence,
     })
   : undefined;
-// Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139).
+// Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139),
+// and only the ones the booking page takes.
 const financeManualPaymentReadiness = config.replacementPricingManualPaymentAcceptanceEnabled
-  ? createFinanceManualPaymentReadinessReader({ pool: propertySetupOwnerPool })
+  ? createFinanceManualPaymentReadinessReader({
+      pool: propertySetupOwnerPool,
+      methods: manualPaymentMethods,
+    })
   : undefined;
 const bookingPublicationRuntime = (() => {
   const dependenciesMissing =
@@ -1507,6 +1517,7 @@ const bookingPublicationRuntime = (() => {
     inventory: pmsOperatingCalendarRuntime.inventory,
     finance: financePaymentReadinessReadModel,
     manualPayments: financeManualPaymentReadiness,
+    manualMethods: manualPaymentMethods,
     financeScope: financePaymentReadinessReadModel,
     // Called per request, after `app` below exists.
     warn: (fields, message) => app.log.warn(fields, message),

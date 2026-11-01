@@ -212,6 +212,9 @@ export type ApiConfig = {
    * the hotel confirms receipt. Off until acceptance, payment confirmation, decline and expiry
    * handle these bookings (VAY-2139). */
   replacementPricingManualPaymentAcceptanceEnabled: boolean;
+  /** PayPal among those manual methods. Off by default, so turning manual payments on offers only
+   * bank transfer (Flamur, 2026-10-31). Needs manual payment acceptance too. */
+  replacementPricingPaypalAcceptanceEnabled: boolean;
   /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
   hotelFirstRunEnabled: boolean;
   bookingHostBase?: string;
@@ -413,6 +416,28 @@ function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string
 
 const KMS_KEY_ARN =
   /^arn:(aws(?:-[a-z]+)?):kms:([a-z0-9-]+):(\d{12}):key\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
+
+/** The bank-transfer and PayPal methods the booking page takes (VAY-2139): none while manual
+ * payment acceptance is off, PayPal only with its own switch, and bank transfer only with the
+ * bank-details binding (Finance on target with the bank-transfer KMS settings, as server.ts builds
+ * it). Launch readiness, the publication gate and the published pages all use this list. */
+export function replacementPricingManualPaymentMethods(
+  config: Pick<
+    ApiConfig,
+    | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingPaypalAcceptanceEnabled"
+    | "financeSource"
+    | "financeBankTransferKms"
+  >,
+): ("bank_transfer" | "paypal")[] {
+  if (!config.replacementPricingManualPaymentAcceptanceEnabled) return [];
+  return [
+    ...(config.financeSource === "target" && config.financeBankTransferKms
+      ? (["bank_transfer"] as const)
+      : []),
+    ...(config.replacementPricingPaypalAcceptanceEnabled ? (["paypal"] as const) : []),
+  ];
+}
 
 function loadBankTransferKms(env: NodeJS.ProcessEnv): ApiConfig["financeBankTransferKms"] {
   const currentKeyArn = readOptionalEnv(env, "FINANCE_BANK_TRANSFER_KMS_CURRENT_KEY_ARN");
@@ -1299,6 +1324,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     replacementPricingManualPaymentAcceptanceEnabled: readBooleanEnv(
       env,
       "REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED",
+    ),
+    replacementPricingPaypalAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED",
     ),
     hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),

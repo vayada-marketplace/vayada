@@ -268,8 +268,8 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
     .filter(({ field }) => Array.isArray(fields) && fields.includes(field))
     .map(({ method }) => method);
   const matchesSaved = !!snapshot && matchesSelection(snapshot, selection);
-  // A hotel paid only by bank transfer or PayPal selects neither method here (VAY-2139). It can
-  // save that empty choice, and continue once the server counts its bank transfer or PayPal.
+  // A hotel paid only by bank transfer selects neither method here (VAY-2139). It can save that
+  // empty choice, and continue once the server counts its bank transfer (PayPal stays off for now).
   const manualReady = manual.acceptanceEnabled && manual.readyMethods.length > 0;
   // The server also blocks the step on the plan alone; a started Fixed checkout may continue.
   const paymentsDone =
@@ -285,7 +285,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
     setNotice("");
     await draft.commit(async () => {
       if (!manualContinue)
-        throw new Error("Add your bank details or PayPal email in Booking Engine Settings first.");
+        throw new Error("Add your bank details in Booking Engine Settings first.");
     }, true);
   }
   async function openPaymentSettings() {
@@ -367,7 +367,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
         value.bookingPaymentReady
           ? "Payment selection saved."
           : none
-            ? "Payment selection saved. Guests pay you by bank transfer or PayPal."
+            ? "Payment selection saved. Guests pay you by bank transfer."
             : "Payment selection saved. No selected method is ready yet.",
       );
       if (advance && !value.bookingPaymentReady)
@@ -447,14 +447,13 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
       </fieldset>
       {manual.acceptanceEnabled && (
         <AdaptiveStepCard>
-          <h2 className="text-lg font-semibold">Bank transfer or PayPal</h2>
+          <h2 className="text-lg font-semibold">Bank transfer</h2>
           <p className="mt-3 text-sm text-gray-600">
-            Guests pay you directly. Add your bank details or PayPal email in Booking Engine
-            settings &gt; Payments.
+            Guests pay you directly. Add your bank details in Booking Engine settings &gt; Payments.
           </p>
           <p className="mt-2 text-sm text-gray-600">
-            Bank transfer and PayPal bookings need your manual confirmation: you mark each payment
-            as received in the PMS.
+            Bank transfer bookings need your manual confirmation: you mark each payment as received
+            in the PMS.
           </p>
           <p className="mt-4 text-sm font-semibold">
             {manual.readyMethods.length

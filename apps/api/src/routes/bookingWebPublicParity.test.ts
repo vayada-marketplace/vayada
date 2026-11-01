@@ -1250,30 +1250,63 @@ describe("Booking Web public bootstrap parity", () => {
     await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.not.toHaveProperty(
       "manualPaymentEarliestArrival",
     );
+    const manualConfig = {
+      externalChanges: externalBookingChanges,
+      connectionString: "postgres://unused",
+      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+      pool: pool as never,
+      replacementPricingManualPaymentAcceptanceEnabled: true,
+      bankTransfers: {} as never,
+    };
     await expect(
       createTargetBookingWebCheckoutAdapter({
-        externalChanges: externalBookingChanges,
-        connectionString: "postgres://unused",
-        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
-        pool: pool as never,
-        replacementPricingManualPaymentAcceptanceEnabled: true,
-        bankTransfers: {} as never,
+        ...manualConfig,
+        replacementPricingPaypalAcceptanceEnabled: true,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({
       bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
       // 12:00 in Vienna; check-in at 15:00 on the 14th is 51 h away, enough for both windows.
       manualPaymentEarliestArrival: { bank_transfer: "2026-10-14", paypal: "2026-10-14" },
     });
+    // VAY-2139: without PayPal's own switch, manual payments are bank transfer only.
+    const bankOnly =
+      await createTargetBookingWebCheckoutAdapter(manualConfig).getCheckoutConfig(
+        "hotel-alpenrose",
+      );
+    expect(bankOnly).toMatchObject({
+      bookingPagePaymentMethods: ["pay_at_property", "bank_transfer"],
+    });
+    expect(
+      (bankOnly as { manualPaymentEarliestArrival?: unknown }).manualPaymentEarliestArrival,
+    ).toEqual({ bank_transfer: "2026-10-14" });
     // Without the bank-details binding bank transfer can't be accepted, so it isn't offered.
     await expect(
       createTargetBookingWebCheckoutAdapter({
-        externalChanges: externalBookingChanges,
-        connectionString: "postgres://unused",
-        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
-        pool: pool as never,
-        replacementPricingManualPaymentAcceptanceEnabled: true,
+        ...manualConfig,
+        bankTransfers: undefined,
+        replacementPricingPaypalAcceptanceEnabled: true,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property", "paypal"] });
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...manualConfig,
+        bankTransfers: undefined,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property"] });
+    // Quotes take PayPal only with its own switch too. Past the method check, the empty selection
+    // is the next thing refused, so that message shows the method got through.
+    const quote = (paymentMethod: string, paypal = false) =>
+      createTargetBookingWebCheckoutAdapter({
+        ...manualConfig,
+        replacementPricingPaypalAcceptanceEnabled: paypal,
+      }).quoteBooking(
+        "hotel-alpenrose",
+        { version: "public-booking-quote-request.v1", selection: {}, paymentMethod } as never,
+        { idempotencyKey: "vay2139-quote" } as never,
+      );
+    await expect(quote("paypal")).rejects.toThrow("Invalid quote request.");
+    await expect(quote("bank_transfer")).rejects.toThrow("Invalid quote selection.");
+    await expect(quote("paypal", true)).rejects.toThrow("Invalid quote selection.");
     // VAY-2301: card is offered only when Finance's card readiness is complete AND card
     // acceptance is on with a payment provider; neither alone offers it.
     const cardConfig = {
@@ -1326,10 +1359,21 @@ describe("Booking Web public bootstrap parity", () => {
       createTargetBookingWebCheckoutAdapter({
         ...cardConfig,
         replacementPricingManualPaymentAcceptanceEnabled: true,
+        replacementPricingPaypalAcceptanceEnabled: true,
         bankTransfers: {} as never,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({
       bookingPagePaymentMethods: ["card", "pay_at_property", "bank_transfer", "paypal"],
+    });
+    // PayPal's own switch off: card hotels add bank transfer only (VAY-2139).
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        ...cardConfig,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+        bankTransfers: {} as never,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({
+      bookingPagePaymentMethods: ["card", "pay_at_property", "bank_transfer"],
     });
     // A hotel that doesn't take payment at the property never has it offered.
     payAtProperty = false;
@@ -1358,9 +1402,11 @@ describe("Booking Web public bootstrap parity", () => {
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         pool: pool as never,
         replacementPricingManualPaymentAcceptanceEnabled: true,
+        replacementPricingPaypalAcceptanceEnabled: true,
         bankTransfers: {} as never,
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({
+      // PayPal keeps its own payment window: no booking window applies to it.
       bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
       paymentMethodArrivalWindows: {
         pay_at_property: { through: "2026-10-13" },

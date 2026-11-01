@@ -9,6 +9,7 @@ import type {
   OnboardingLifecycleJsonObject,
   ReadyProductReadinessEvidence,
 } from "@vayada/domain-hotels";
+import type { ManualPricingPaymentMethod } from "@vayada/domain-booking";
 import { parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import { manualPublishedPagePayable } from "./financeManualPaymentReadiness.js";
 import type { BookingPublicContent } from "@vayada/domain-distribution/booking-publication";
@@ -126,8 +127,10 @@ export function createPgDistributionBookingPublicationProjection(config: {
   max?: number;
   pool?: DistributionBookingPublicationPool;
   randomId?: () => string;
-  /** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139). */
+  /** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139), for the
+   * manual methods the booking page takes now (replacementPricingManualPaymentMethods). */
   manualPayments?: boolean;
+  manualMethods?: readonly ManualPricingPaymentMethod[];
 }): DistributionBookingPublicationProjectionPort &
   Pick<BookingContentLifecyclePort, "appendRevision" | "activate" | "getActive"> & {
     getPublishedUrl(propertyId: string, revisionId: string): Promise<string | null>;
@@ -212,7 +215,12 @@ export function createPgDistributionBookingPublicationProjection(config: {
         // A bank-transfer or PayPal page counts only while the hotel can still be paid that way.
         if (
           config.manualPayments === true &&
-          !(await manualPublishedPagePayable(client, propertyId, content.payments.readyMethods))
+          !(await manualPublishedPagePayable(
+            client,
+            propertyId,
+            content.payments.readyMethods,
+            config.manualMethods ?? [],
+          ))
         )
           return null;
         const url = new URL(content.profile.hotel.canonicalUrl);
