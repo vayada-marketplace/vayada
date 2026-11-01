@@ -1409,9 +1409,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     expect(order).toEqual(["save"]);
     expect(accountCreates).toBe(1);
-    await expect(
-      page.getByText("Could not save payment settings. Please try again."),
-    ).toBeVisible();
+    await expect(page.getByText("Not saved: Payment methods.")).toBeVisible();
     await expect(page).toHaveURL(/\/settings\/payments$/);
 
     // The hotel's address has no country, or Stripe doesn't take it: say so (VAY-2424).
@@ -1740,15 +1738,23 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });
+  // VAY-2424: one Save for the page, offered once something changed.
+  const savePayments = page.getByRole("button", { name: "Save changes", exact: true });
+  await expect(savePayments).toBeDisabled();
+  await expect(page.getByText("No unsaved changes", { exact: true })).toBeVisible();
+  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
+  await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
   const response = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" && response.url().endsWith("/payment-settings"),
   );
-  // One Save covers payment methods, bank details and the provider.
-  const savePayments = page.getByRole("button", { name: "Save Changes", exact: true });
   await savePayments.click();
   await response;
-  expect(write).toMatchObject({ paymentSettings: { acceptedMethods: ["bank_transfer"] } });
+  expect(write).toMatchObject({
+    paymentSettings: {
+      acceptedMethods: ["pay_at_property", "cash", "manual_card", "bank_transfer"],
+    },
+  });
   expect(write?.paymentSettings).not.toHaveProperty("paymentProvider");
   await transfer.getByPlaceholder("e.g. HSBC Bank").fill("Partial replacement");
   await savePayments.click();
@@ -1812,7 +1818,15 @@ async function mockPaymentWrites(
 }
 
 const savePaymentsButton = (page: Page) =>
-  page.getByRole("button", { name: "Save Changes", exact: true });
+  page.getByRole("button", { name: "Save changes", exact: true });
+
+/** Switches PayPal on with an email: a change that leaves Pay at Hotel as it is. */
+async function turnOnPayPal(page: Page) {
+  await paymentMethodTiles(page)
+    .getByRole("button", { name: /^PayPal/ })
+    .click();
+  await page.getByPlaceholder("payments@yourproperty.com").fill("pay@alpenrose.test");
+}
 
 test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
@@ -1831,22 +1845,25 @@ test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ pag
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });
-  await savePaymentsButton(page).click();
-  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
-  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property"] }]);
+  // Untouched, there is nothing to save (VAY-2424).
+  await expect(savePaymentsButton(page)).toBeDisabled();
 
   // Off and on again still shows Cash and Card, so nothing changed.
   await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
   await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
+  await expect(savePaymentsButton(page)).toBeDisabled();
+
+  // Saving another change sends setup's plain Pay at Hotel back unchanged.
+  await turnOnPayPal(page);
   await savePaymentsButton(page).click();
-  await expect.poll(() => writes.length).toBe(2);
-  expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property"] });
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "paypal"] }]);
 
   // A changed choice is sent as shown.
   await page.getByRole("button", { name: "Card", exact: true }).click();
   await savePaymentsButton(page).click();
-  await expect.poll(() => writes.length).toBe(3);
-  expect(writes[2]).toEqual({ acceptedMethods: ["pay_at_property", "cash"] });
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property", "cash", "paypal"] });
   await assertHealthy();
 });
 
@@ -1938,11 +1955,12 @@ test("re-sends Cash and Card once when Finance needs the Pay at Hotel choice", a
   );
   await page.goto("/settings/payments");
   await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await turnOnPayPal(page);
   await savePaymentsButton(page).click();
   await expect(page.getByText("Payment settings saved").first()).toBeVisible();
   expect(writes).toEqual([
-    { acceptedMethods: ["pay_at_property"] },
-    { acceptedMethods: ["pay_at_property", "cash", "manual_card"] },
+    { acceptedMethods: ["pay_at_property", "paypal"] },
+    { acceptedMethods: ["pay_at_property", "cash", "manual_card", "paypal"] },
   ]);
 });
 
@@ -2015,17 +2033,16 @@ test("says what went wrong when payments don't save, and offers Try again", asyn
   );
   await page.goto("/settings/payments");
   await expect(page.getByText("Cash only", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Card", exact: true }).click();
   await savePaymentsButton(page).click();
   const banner = page.getByRole("alert").filter({ hasText: "Your hotel's currency changed." });
   await expect(banner).toHaveText(
-    "Your hotel's currency changed. Reload the page, then save again.",
+    "Not saved: Payment methods. Your hotel's currency changed. Reload the page, then save again.",
   );
   await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
 
   await savePaymentsButton(page).click();
-  await expect(
-    page.getByText("Could not save payment settings. Please try again.").first(),
-  ).toBeVisible();
+  await expect(page.getByText("Not saved: Payment methods.", { exact: true })).toBeVisible();
   await testInfo.attach("settings-payments-save-error", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
@@ -2034,6 +2051,96 @@ test("says what went wrong when payments don't save, and offers Try again", asyn
   await expect(page.getByText("Payment settings saved").first()).toBeVisible();
   expect(writes).toHaveLength(3);
   await expect(page.getByText("Failed to save", { exact: true })).toHaveCount(0);
+});
+
+// VAY-2424: one Save for the page. A failure stops the rest, says what saved and what didn't,
+// and Try again sends only what is still unsaved.
+test("saves bank details first and says what saved when the methods don't", async ({
+  page,
+}, testInfo) => {
+  // The 503 below is on purpose, so no page health watch (as in the Try again test above).
+  const writes = await mockPaymentWrites(
+    page,
+    ["pay_at_property", "cash", "manual_card"],
+    [
+      {
+        status: 503,
+        json: {
+          statusCode: 503,
+          code: "write_model_unavailable",
+          category: "write_model",
+          message: "Finance is unavailable.",
+        },
+      },
+    ],
+  );
+  const order: string[] = [];
+  await page.route(
+    `**/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/bank-transfer-destination`,
+    async (route) => {
+      if (route.request().method() === "GET") return route.fulfill({ json: { destination: null } });
+      order.push("bank");
+      await route.fulfill({
+        json: {
+          destination: {
+            id: BOOKING_ADMIN_PROPERTY_ID,
+            revision: 1,
+            version: 1,
+            enabled: true,
+            deleted: false,
+            maskedAccount: "•••• 1819",
+          },
+        },
+      });
+    },
+  );
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && request.url().endsWith("/payment-settings"))
+      order.push("methods");
+  });
+  await page.goto("/settings/payments");
+  const save = savePaymentsButton(page);
+  await expect(save).toBeDisabled();
+  await paymentMethodTiles(page)
+    .getByRole("button", { name: /^Bank Transfer/ })
+    .click();
+  // Checked before anything is sent: bank transfer needs the bank details.
+  await save.click();
+  await expect(
+    page.getByText(
+      "Enter the complete bank details, or leave all fields empty to keep the saved account.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(order).toEqual([]);
+
+  await page.getByPlaceholder("e.g. Sunrise Beach Resort Ltd").fill("Alpenrose GmbH");
+  await page.getByPlaceholder("e.g. 1234567890").fill("60161331926819");
+  await page.getByPlaceholder("e.g. HSBC Bank").fill("HSBC Bank");
+  await save.click();
+  await expect(
+    page.getByText("Saved: Bank details. Not saved: Payment methods.", { exact: true }),
+  ).toBeVisible();
+  expect(order).toEqual(["bank", "methods"]);
+  await page.screenshot({ path: testInfo.outputPath("vay2424-payments-partial-save.png") });
+  // The bank details are saved; the methods are still unsaved.
+  await expect(page.getByPlaceholder("e.g. HSBC Bank")).toHaveValue("");
+  await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("Payment settings saved", { exact: true })).toBeVisible();
+  expect(order).toEqual(["bank", "methods", "methods"]);
+  expect(writes.at(-1)).toEqual({
+    acceptedMethods: ["pay_at_property", "cash", "manual_card", "bank_transfer"],
+  });
+  await expect(save).toBeDisabled();
+
+  // Discard puts unsaved choices back.
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
+  await expect(page.getByText("Card only", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await expect(save).toBeDisabled();
 });
 
 // VAY-2401: billing, payout accounts and the bank account guests pay into are the owner's.

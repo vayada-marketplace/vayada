@@ -198,6 +198,15 @@ test.describe("booking-admin localization settings cutover", () => {
     ]);
     expect(legacyWrites).toEqual([]);
 
+    // Payments saves what changed (VAY-2424): offer Pay at Hotel too, then save the page.
+    const savePayments = async () => {
+      await page
+        .locator('fieldset[aria-labelledby="payment-methods-heading"]')
+        .getByText("Pay at Hotel", { exact: true })
+        .click();
+      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    };
+
     // Settings pages are separate routes; move between them the way a host does.
     const openSettingsPage = async (card: string) => {
       await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link").click();
@@ -209,7 +218,7 @@ test.describe("booking-admin localization settings cutover", () => {
     };
 
     await page.goto("/settings/payments");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await savePayments();
     await expect.poll(() => financeWrites.length).toBe(1);
     expect(financeWrites[0]).toMatchObject({
       paymentSettings: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"] },
@@ -226,7 +235,7 @@ test.describe("booking-admin localization settings cutover", () => {
 
     // A Localization currency write in flight doesn't hold Payments up: it saves Finance's.
     await openSettingsPage("Payments");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await savePayments();
     await expect.poll(() => financeWrites.length).toBe(2);
     expect(financeWrites[1]).toMatchObject({
       paymentSettings: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"] },
@@ -246,7 +255,7 @@ test.describe("booking-admin localization settings cutover", () => {
     ).toBeVisible();
 
     await openSettingsPage("Payments");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await savePayments();
     await expect.poll(() => financeWrites.length).toBe(3);
     expect(financeWrites[2]).toMatchObject({
       paymentSettings: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"] },

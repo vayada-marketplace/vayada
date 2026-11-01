@@ -64,6 +64,12 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
       }),
   );
   const writes: unknown[] = [];
+  // VAY-2424: the windows save with the page; untouched methods send no settings write.
+  const settingsWrites: unknown[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && request.url().endsWith("/payment-settings"))
+      settingsWrites.push(request.postDataJSON());
+  });
   await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_WINDOWS_PATH}`, async (route) => {
     const body =
       route.request().method() === "PUT"
@@ -80,7 +86,9 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   await expect(card).toBeVisible();
   await expect(card.getByText("Not offered to guests: Online Card")).toBeVisible();
   await expect(card.getByText("Fixed rule: guests have 48 hours to pay")).toBeVisible();
-  const save = card.getByRole("button", { name: "Save booking windows" });
+  // One save bar for the whole page (VAY-2424): nothing to save yet.
+  await expect(card.getByRole("button", { name: /save/i })).toHaveCount(0);
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
   await expect(save).toBeDisabled();
 
   await card.getByLabel("When Pay at Hotel is offered").selectOption("within");
@@ -92,7 +100,12 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   await card.getByLabel("When Bank Transfer is offered").selectOption("at_least");
   await card.getByLabel("Days for Bank Transfer").fill("2");
   await expect(card.getByText(/^Bank transfer needs at least 3 days/)).toBeVisible();
-  await expect(save).toBeDisabled();
+  // Everything is checked before anything is sent.
+  await save.click();
+  await expect(
+    page.getByText("Fix the booking windows marked in red, then save.", { exact: true }),
+  ).toBeVisible();
+  expect(writes).toEqual([]);
   await card.getByLabel("Days for Bank Transfer").fill("7");
   await expect(card.getByText(/^Bank transfer needs at least 3 days/)).toHaveCount(0);
 
@@ -102,7 +115,7 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   await expect(card.getByTestId("payment-windows-strip").getByText("No way to pay")).toBeVisible();
 
   await save.click();
-  await expect(card.getByText("Booking windows saved.")).toBeVisible();
+  await expect(page.getByText("Payment settings saved", { exact: true })).toBeVisible();
   expect(writes).toEqual([
     {
       windows: {
@@ -111,6 +124,14 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
       },
     },
   ]);
+  expect(settingsWrites).toEqual([]);
+  await expect(save).toBeDisabled();
+
+  // Discard puts an unsaved edit back to what was saved.
+  await card.getByLabel("When Pay at Hotel is offered").selectOption("any");
+  await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
+  await expect(card.getByLabel("Hours for Pay at Hotel")).toHaveValue("48");
   await expect(save).toBeDisabled();
 
   // The card shows what guests are offered: switching Online Card on above changes nothing here
