@@ -300,12 +300,17 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await phone.fill("089 1234567");
   await expect(dialog.getByText(/^Saved as \+49 /)).toBeVisible();
 
-  // Additional guests are booking-level cards, up to the rooms' places (VAY-2365).
-  await dialog.getByRole("button", { name: "+ Add guest" }).click();
+  // One card per guest from the room's adults and children; other guests give a name and
+  // nationality, and "Same as Guest 1" copies the lead's (VAY-2417).
+  await expect(dialog.getByLabel("Guest 2 first name")).toHaveCount(0);
+  await dialog.getByLabel("Room 1 adults").fill("2");
   await dialog.getByLabel("Guest 2 first name").fill("Grace");
   await dialog.getByLabel("Guest 2 last name").fill("Hopper");
-  await dialog.getByText("Guest 2 · Grace Hopper").click();
-  await expect(dialog.getByLabel("Guest 2 first name")).toBeHidden();
+  await dialog.getByRole("button", { name: "Same as Guest 1" }).click();
+  await expect(dialog.getByRole("button", { name: "Guest 2 nationality" })).toContainText(
+    "Germany",
+  );
+  await expect(page.getByText("Total €300")).toBeVisible();
   await createBooking.click();
   await expect.poll(() => createBody).not.toBeNull();
   expect(createBody).toMatchObject({
@@ -316,7 +321,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
       phoneE164: "+49891234567",
     },
     additionalGuests: [
-      { firstName: "Grace", lastName: "Hopper", email: null, phoneE164: null, countryCode: null },
+      { firstName: "Grace", lastName: "Hopper", email: null, phoneE164: null, countryCode: "DE" },
     ],
     stays: [
       {

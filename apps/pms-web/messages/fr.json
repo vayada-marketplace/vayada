@@ -1096,8 +1096,6 @@
   "settings.checkIn.removeCheck": "Retirer {label}",
   "settings.checkIn.addCheck": "Ajouter une vérification",
   "calendar.targetManualBooking.roomCapacity": "Voyageurs max. : {count}",
-  "calendar.targetManualBooking.guestTally": "Voyageurs : {count} sur {capacity}",
-  "calendar.targetManualBooking.capacityReached": "Capacité maximale atteinte pour les chambres sélectionnées. Ajoutez une chambre pour ajouter d'autres voyageurs.",
   "calendar.targetManualBooking.guestsOverCapacity": "{count} voyageurs, c'est plus que les {capacity} autorisés par les chambres sélectionnées. Retirez un voyageur ou ajoutez une chambre.",
   "calendar.targetManualBooking.guestsOverCapacityServer": "Les chambres sélectionnées n'ont pas assez de place pour tous les voyageurs indiqués. Retirez un voyageur ou ajoutez une chambre.",
   "bookings.extras.title": "Extras demandés par le client",
