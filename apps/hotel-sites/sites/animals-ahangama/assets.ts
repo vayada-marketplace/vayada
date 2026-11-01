@@ -14,6 +14,18 @@ import tiger from "./placeholder/tiger.jpg";
 
 export const photos = { hero, tiger, leopard, giraffe, elephant, restaurant, beach };
 
+// The export carries no gallery photos, so the eight slides borrow the ones above for now.
+export const galleryPhotos = {
+  pool: hero,
+  cowork: leopard,
+  play: giraffe,
+  lounge: tiger,
+  restaurant,
+  bar: restaurant,
+  slowMoments: elephant,
+  evenings: beach,
+};
+
 export const brandFont = localFont({
   src: "./placeholder/jost.woff2",
   weight: "300 500",
