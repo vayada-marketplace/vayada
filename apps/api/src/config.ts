@@ -194,7 +194,7 @@ export type ApiConfig = {
   vayadaPaymentEnabled: boolean;
   /** VAY-2442: the Stripe account vayada Payment charges guests on, separate from the Connect
    * platform. Test mode only: live keys are refused until a payments lawyer and Stripe agree. */
-  vayadaPaymentStripe?: { secretKey: string; publishableKey: string };
+  vayadaPaymentStripe?: { secretKey: string; publishableKey: string; webhookSecret?: string };
   /** VAY-2442: Vayada's vayada Payment fee, in percent of each card payment, on top of the plan's
    * fee and kept on refunds. Default 6 (Flamur, 2026-10-31). */
   vayadaPaymentFeePercent: number;
@@ -451,7 +451,10 @@ export function replacementPricingManualPaymentMethods(
 function loadVayadaPaymentStripe(env: NodeJS.ProcessEnv): ApiConfig["vayadaPaymentStripe"] {
   const secretKey = readOptionalEnv(env, "VAYADA_PAYMENT_STRIPE_SECRET_KEY");
   const publishableKey = readOptionalEnv(env, "VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY");
-  if (!secretKey && !publishableKey) return undefined;
+  const webhookSecret = readOptionalEnv(env, "VAYADA_PAYMENT_STRIPE_WEBHOOK_SECRET");
+  if (!secretKey && !publishableKey && !webhookSecret) return undefined;
+  if (webhookSecret !== undefined && !/^whsec_[A-Za-z0-9]+$/.test(webhookSecret))
+    throw new Error("VAYADA_PAYMENT_STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret");
   if (
     !secretKey ||
     !publishableKey ||
@@ -461,7 +464,7 @@ function loadVayadaPaymentStripe(env: NodeJS.ProcessEnv): ApiConfig["vayadaPayme
     throw new Error(
       "VAYADA_PAYMENT_STRIPE_SECRET_KEY and VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY must both be Stripe test-mode keys",
     );
-  return { secretKey, publishableKey };
+  return { secretKey, publishableKey, ...(webhookSecret ? { webhookSecret } : {}) };
 }
 
 function readVayadaPaymentFeePercent(env: NodeJS.ProcessEnv): number {

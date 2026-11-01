@@ -225,6 +225,7 @@ import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionS
 import { createStripeFinanceSubscriptionProvider } from "./domains/stripeFinanceSubscriptions.js";
 import { createStripeBookingPaymentProvider } from "./domains/stripeBookingPayments.js";
 import { routeVayadaPaymentStripe } from "./domains/vayadaPaymentStripe.js";
+import { handleVayadaPaymentWebhookEvent } from "./domains/vayadaPaymentWebhookEvents.js";
 import { createStripeConnectProvider } from "./domains/stripeConnect.js";
 import { createPgBookingSetupLifecycleStatusRepository } from "./domains/bookingSetupLifecycleStatusRepository.js";
 import { createPropertySetupHotelCatalogStateProvider } from "./platform/propertySetupHotelCatalogState.js";
@@ -502,6 +503,14 @@ const bookingDashboardMetricsReadPort =
     ? createTargetBookingDashboardMetricsReadPort({ connectionString: targetDatabaseUrl })
     : undefined;
 
+// VAY-2442: events from vayada Payment's own Stripe account (test mode only), with its secret.
+const vayadaPaymentWebhookPool = config.vayadaPaymentStripe?.webhookSecret
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2 })
+  : undefined;
+const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
+  ? (event: Record<string, unknown>) =>
+      handleVayadaPaymentWebhookEvent(vayadaPaymentWebhookPool, event, app.log)
+  : undefined;
 // VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account
 // (test mode only); every other card payment goes through Stripe Connect as before.
 const stripeBookingPaymentProvider = config.stripeSubscriptions.secretKey
@@ -2173,6 +2182,10 @@ const app = buildApp({
   financePayoutDestination: payoutDestinationRepository
     ? { repository: payoutDestinationRepository }
     : undefined,
+  vayadaPaymentWebhooks:
+    handleVayadaPaymentWebhook && config.vayadaPaymentStripe?.webhookSecret
+      ? { secret: config.vayadaPaymentStripe.webhookSecret, handle: handleVayadaPaymentWebhook }
+      : undefined,
   // VAY-2348: booking windows per payment method, on the ordinary API login (finance).
   financePaymentWindows: config.auth
     ? {
@@ -2501,6 +2514,7 @@ app.addHook("onClose", async () => {
     financeFolioRuntime?.close(),
     bankTransferRepository?.close(),
     payoutDestinationRepository?.close(),
+    vayadaPaymentWebhookPool?.end(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
     bookingDesignMediaAdapter?.close?.(),

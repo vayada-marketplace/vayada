@@ -79,7 +79,8 @@ export function createFinanceHostBookingPayments(
       input.action === "cancel" &&
       payment.status === "paid" &&
       payment.method === "card" &&
-      payment.chargeType === "direct" &&
+      // vayada Payment (VAY-2442) refunds on Vayada's own account the same way.
+      (payment.chargeType === "direct" || payment.chargeType === "vayada_payment") &&
       payment.activePaymentId === payment.id &&
       (payment.bookingPaid === "paid" || payment.bookingPaid === "partially_paid") &&
       payment.pricingCard &&
