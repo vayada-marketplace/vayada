@@ -1969,7 +1969,7 @@ test("saves bank details first and says what saved when the methods don't", asyn
   expect(order).toEqual([]);
 
   await page.getByPlaceholder("e.g. Sunrise Beach Resort Ltd").fill("Alpenrose GmbH");
-  await page.getByPlaceholder("e.g. GB29 NWBK 6016 1331 9268 19").fill("GB29NWBK60161331926819");
+  await page.getByPlaceholder("e.g. 1234567890").fill("60161331926819");
   await page.getByPlaceholder("e.g. HSBC Bank").fill("HSBC Bank");
   await save.click();
   await expect(
