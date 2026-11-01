@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import middleware, { config } from "./middleware";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import middleware from "./middleware";
 import { bookingWebPublicApi } from "./services/api/bookingWebPublic";
 
 vi.mock("next-intl/middleware", async () => {
