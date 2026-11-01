@@ -2144,7 +2144,10 @@ test("saves bank details first and says what saved when the methods don't", asyn
 });
 
 // VAY-2424: Credit card on, but guests can't use it yet: say so at the top, and why.
-function cardPaymentSettings(connected: boolean, acceptedMethods = ["card", "pay_at_property"]) {
+function cardPaymentSettings(
+  connected: boolean | "pending",
+  acceptedMethods = ["card", "pay_at_property"],
+) {
   return {
     contractVersion: "finance-route-contracts.v1",
     propertyId: BOOKING_ADMIN_PROPERTY_ID,
@@ -2161,11 +2164,11 @@ function cardPaymentSettings(connected: boolean, acceptedMethods = ["card", "pay
           ? "f7000000-0000-4000-8000-000000000424"
           : `settings-choice:${BOOKING_ADMIN_PROPERTY_ID}:stripe`,
         provider: "stripe",
-        status: connected ? "active" : "not_configured",
-        onboardingStatus: connected ? "completed" : "not_started",
-        chargesEnabled: connected,
-        payoutsEnabled: connected,
-        capabilities: connected ? ["card_payments", "transfers"] : [],
+        status: connected === true ? "active" : connected ? "setup_incomplete" : "not_configured",
+        onboardingStatus: connected === true ? "completed" : connected ? "invited" : "not_started",
+        chargesEnabled: connected === true,
+        payoutsEnabled: connected === true,
+        capabilities: connected === true ? ["card_payments", "transfers"] : [],
       },
     },
   };
@@ -2214,21 +2217,41 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   ).toBeInViewport();
   expect(readinessReads).toEqual([]);
 
+  // An account whose setup isn't finished is not "no account".
+  settings = cardPaymentSettings("pending");
+  await page.goto("/settings/payments");
+  await expect(banner).toContainText("The account for card payments isn't fully set up yet.");
+  await expect(banner.getByRole("link", { name: "Finish setup" })).toBeVisible();
+  expect(readinessReads).toEqual([]);
+
   // Connected: card readiness says what else is missing.
   settings = cardPaymentSettings(true);
   await page.goto("/settings/payments");
   await expect(banner).toContainText("Vayada still has to approve card payments for your hotel.");
   await expect(banner.getByRole("link")).toHaveCount(0);
+  // Readiness can't tell an account it doesn't accept from a missing one; the page shows it.
+  readiness = { ready: false, reason: "not_connected" };
+  await page.reload();
+  await expect(banner).toContainText("The connected account can't take card payments yet.");
+  await expect(banner.getByRole("link")).toHaveCount(0);
 
   readiness = { ready: true, reason: null };
+  const readyRead = page.waitForResponse((response) =>
+    response.url().endsWith("/pricing-v2/card-readiness"),
+  );
   await page.reload();
+  await readyRead;
   await expect(page.getByRole("button", { name: "View Stripe Dashboard" })).toBeVisible();
   await expect(banner).toHaveCount(0);
 
   // Credit card off: nothing to warn about.
   settings = cardPaymentSettings(false, ["pay_at_property"]);
   await page.reload();
-  await expect(paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true })).toBeVisible();
+  await expect(page.locator('fieldset[aria-labelledby="payment-methods-heading"]')).toHaveAttribute(
+    "aria-disabled",
+    "false",
+  );
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
   await expect(banner).toHaveCount(0);
   await assertHealthy();
 });

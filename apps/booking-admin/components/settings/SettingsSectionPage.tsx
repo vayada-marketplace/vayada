@@ -727,7 +727,16 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       )
       .then(
         ({ card }) => {
-          if (current) setCardNotReady(card.ready ? null : card.reason);
+          // The page already shows this Stripe account as connected: something on the account
+          // itself still stops it (e.g. Stripe's card capability), not a missing account.
+          if (current)
+            setCardNotReady(
+              card.ready
+                ? null
+                : card.reason === "not_connected"
+                  ? "account_not_ready"
+                  : card.reason,
+            );
         },
         () => {},
       );
@@ -735,13 +744,16 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       current = false;
     };
   }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, offeredMethods]);
-  // No account that can take cards is the page's own knowledge: Finance's readiness can't tell a
-  // missing account from a pending approval.
-  const cardNotReadyReason: CardNotReadyReason | null = !cardSaved
-    ? null
-    : !stripeOnboarded
-      ? "not_connected"
-      : cardNotReady;
+  // A missing or unfinished account is the page's own knowledge: Finance's readiness can't tell a
+  // missing account from a pending approval. Nothing is said while a Stripe check runs.
+  const cardNotReadyReason: CardNotReadyReason | null =
+    !cardSaved || refreshingStripe
+      ? null
+      : stripeOnboarded
+        ? cardNotReady
+        : stripeAccountId
+          ? "setup_incomplete"
+          : "not_connected";
 
   const handleAcceptanceToggle = async () => {
     const hotelId = readBookingHotelId(settings);
@@ -2601,7 +2613,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       )}
 
       {activeSection === "payments" && (
-        <section className="mt-4 space-y-4">
+        <section id="payment-provider" className="mt-4 scroll-mt-4 space-y-4">
           {!stripeAccountId &&
           (stripeAccountCreationBlocked || !paymentSettingsLoaded) &&
           paymentError ? (
@@ -2630,10 +2642,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             </SettingsCard>
           ) : (
             <>
-              <div
-                id="payment-provider"
-                className="scroll-mt-4 bg-white rounded-lg border border-gray-200 p-4 md:p-5"
-              >
+              <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <h2 className="text-sm font-semibold text-gray-900">
                   {t("settings.billing.paymentProvider")}
                 </h2>
