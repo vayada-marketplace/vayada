@@ -105,6 +105,8 @@ export interface DesignSettings {
   show_contact_button: boolean;
   show_language_selector: boolean;
   show_currency_selector: boolean;
+  /** Absent until the API knows the switch (VAY-2447); Save sends it only once it is reported. */
+  show_gallery_button?: boolean;
   hero_image: string;
   hero_heading: string;
   hero_subtext: string;
@@ -120,6 +122,7 @@ type BookingDesignSettings = {
   showContactButton: boolean;
   showLanguageSelector: boolean;
   showCurrencySelector: boolean;
+  showGalleryButton?: boolean;
   heroImage: string;
   heroHeading: string;
   heroSubtext: string;
@@ -136,6 +139,9 @@ function toDesignSettings(branding: BookingDesignSettings): DesignSettings {
     show_contact_button: branding.showContactButton,
     show_language_selector: branding.showLanguageSelector,
     show_currency_selector: branding.showCurrencySelector,
+    ...(typeof branding.showGalleryButton === "boolean"
+      ? { show_gallery_button: branding.showGalleryButton }
+      : {}),
     hero_image: branding.heroImage,
     hero_heading: branding.heroHeading,
     hero_subtext: branding.heroSubtext,
@@ -150,6 +156,7 @@ function toBrandingDesignUpdate(data: DesignSettingsUpdate): BookingDesignSettin
     showContactButton: data.show_contact_button,
     showLanguageSelector: data.show_language_selector,
     showCurrencySelector: data.show_currency_selector,
+    showGalleryButton: data.show_gallery_button,
     heroImage: data.hero_image,
     heroHeading: data.hero_heading,
     heroSubtext: data.hero_subtext,

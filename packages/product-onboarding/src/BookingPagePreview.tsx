@@ -1,6 +1,11 @@
 "use client";
 
-import { CalendarDaysIcon, CheckIcon, UserGroupIcon } from "@heroicons/react/24/outline";
+import {
+  CalendarDaysIcon,
+  CheckIcon,
+  Squares2X2Icon,
+  UserGroupIcon,
+} from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 
 export function BookingPagePreview({
@@ -17,6 +22,7 @@ export function BookingPagePreview({
   primaryColor,
   propertyName,
   showContactButton = true,
+  showGalleryButton = false,
   showLanguageSelector = true,
   showCurrencySelector = true,
   supportedLanguages,
@@ -36,6 +42,8 @@ export function BookingPagePreview({
   primaryColor: string;
   propertyName: string;
   showContactButton?: boolean;
+  /** The live page's white Gallery pill (VAY-2414); callers pass it only with two photos or more. */
+  showGalleryButton?: boolean;
   showLanguageSelector?: boolean;
   showCurrencySelector?: boolean;
   supportedLanguages?: readonly string[];
@@ -98,6 +106,12 @@ export function BookingPagePreview({
               </span>
             )}
             <div className="flex items-center gap-1.5">
+              {showGalleryButton && (
+                <span className="flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[9px] font-semibold text-[#1F2427]">
+                  <Squares2X2Icon className="h-2.5 w-2.5" aria-hidden="true" />
+                  {t("bookingPreview.gallery")}
+                </span>
+              )}
               {showContactButton && (
                 <span
                   className="rounded-full px-2.5 py-1 text-[9px] font-semibold text-white"
@@ -253,6 +267,7 @@ export const bookingPreviewMessages = {
   "bookingPreview.bookingPageHeroPreview": "Booking page hero preview",
   "bookingPreview.yourHotel": "Your Hotel",
   "bookingPreview.contact": "Contact",
+  "bookingPreview.gallery": "Gallery",
   "bookingPreview.yourHotelName": "Your Hotel Name",
   "bookingPreview.yourHotelTaglineWillAppearHere": "Your hotel tagline will appear here.",
   "bookingPreview.yourStay": "Your stay",

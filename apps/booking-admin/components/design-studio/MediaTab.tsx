@@ -46,6 +46,10 @@ interface MediaTabProps {
   showCurrencySelector: boolean;
   setShowCurrencySelector: (value: boolean) => void;
   currencySelectorAvailable: boolean;
+  /** null while the API doesn't report the switch yet; the row stays hidden then. */
+  showGalleryButton?: boolean | null;
+  setShowGalleryButton?: (value: boolean) => void;
+  galleryButtonAvailable?: boolean;
   resetContent: () => void;
   galleryImages: PropertyGalleryImage[];
   galleryAtCapacity: boolean;
@@ -88,6 +92,9 @@ export default function MediaTab({
   showCurrencySelector,
   setShowCurrencySelector,
   currencySelectorAvailable,
+  showGalleryButton = null,
+  setShowGalleryButton,
+  galleryButtonAvailable = false,
   resetContent,
   galleryImages,
   galleryAtCapacity,
@@ -460,6 +467,15 @@ export default function MediaTab({
             onChange={() => setShowContactButton(!showContactButton)}
             label={t("admin.contactButton")}
           />
+          {showGalleryButton !== null && setShowGalleryButton && (
+            <ToggleSwitch
+              enabled={galleryButtonAvailable && showGalleryButton}
+              onChange={() => setShowGalleryButton(!showGalleryButton)}
+              label={t("admin.galleryButton")}
+              description={t("admin.hiddenAutomaticallyWhenOnlyOneImageIsInTheGallery")}
+              disabled={!galleryButtonAvailable}
+            />
+          )}
           <ToggleSwitch
             enabled={languageSelectorAvailable && showLanguageSelector}
             onChange={() => setShowLanguageSelector(!showLanguageSelector)}

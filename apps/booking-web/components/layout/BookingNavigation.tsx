@@ -224,7 +224,8 @@ function Dropdown({
 // --- Main Navigation ---
 /**
  * Sits over a hero photo by default; `solid` puts it on its own white bar (the booking page).
- * `showGallery` puts the hotel's photo gallery first in the actions (the hotel page, VAY-2414).
+ * `showGallery` puts the hotel's photo gallery first in the actions (the hotel page, VAY-2414),
+ * unless Design Studio switched the Gallery button off (VAY-2447).
  */
 export default function BookingNavigation({
   solid = false,
@@ -247,7 +248,9 @@ export default function BookingNavigation({
     showContactButton: true,
     showLanguageSelector: true,
     showCurrencySelector: true,
+    showGalleryButton: true,
   };
+  const galleryButton = showGallery && header.showGalleryButton !== false;
 
   const availableLanguages = useMemo(() => {
     const codes = new Set<string>(hotel?.supportedLanguages ?? []);
@@ -333,7 +336,7 @@ export default function BookingNavigation({
 
             {/* Right - Actions (always visible on mobile, full nav on desktop) */}
             <div className="hidden md:flex items-center gap-2">
-              {showGallery && <PropertyGallery hotelName={hotel.name} images={hotel.images} />}
+              {galleryButton && <PropertyGallery hotelName={hotel.name} images={hotel.images} />}
 
               {/* Contact */}
               {header.showContactButton && (
@@ -421,7 +424,7 @@ export default function BookingNavigation({
 
             {/* Mobile inline actions */}
             <div className="md:hidden flex shrink-0 items-center gap-1.5 ml-auto">
-              {showGallery && (
+              {galleryButton && (
                 <PropertyGallery hotelName={hotel.name} images={hotel.images} compact />
               )}
               {header.showContactButton && (

@@ -340,6 +340,7 @@ describe("target public hotel profile security", () => {
       showReferAGuestButton: false,
       showLanguageSelector: true,
       showCurrencySelector: true,
+      showGalleryButton: true,
     });
     expect(queries[0]?.text).toContain('booking_header_logo.public_cdn_url AS "bookingHeaderLogo"');
     expect(queries[0]?.text).toContain("booking_branding.header_logo_media_object_id");
@@ -404,6 +405,7 @@ describe("target public hotel profile security", () => {
       showReferAGuestButton: false,
       showLanguageSelector: true,
       showCurrencySelector: true,
+      showGalleryButton: true,
     });
     expect(findForbiddenPublicBookabilityKeys(response.json())).toEqual([]);
     await app.close();
