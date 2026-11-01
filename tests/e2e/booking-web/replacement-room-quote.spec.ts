@@ -121,23 +121,19 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
     };
     return route.fulfill({ json: issuedQuote });
   });
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
-  await expect(page.getByRole("heading", { name: "Choose rooms and get a price" })).toBeVisible();
-  await page.getByRole("button", { name: "Add room", exact: true }).click();
-  await page.getByRole("button", { name: "Add room", exact: true }).click();
-  const first = page.getByRole("group", { name: "Room 1", exact: true });
-  const second = page.getByRole("group", { name: "Room 2", exact: true });
-  await first.getByLabel("Room and meal option").selectOption(firstKey);
-  await first.getByLabel(/Adults/).fill("2");
-  await first.getByRole("button", { name: "Add child to room 1" }).click();
-  await second.getByLabel("Room and meal option").selectOption(secondKey);
-  await second.getByLabel(/Adults/).fill("1");
-  await page.getByLabel("Promo code (optional)").fill("SAVE10");
+  // VAY-2446: a group chose its two rooms on the hotel page (VAY-2320); /book asks the child's
+  // age in its room before pricing.
+  await page.goto(
+    `/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03&adults=3&children=1&rooms=2&promoCode=SAVE10&pick=2-1-${firstKey}&pick=1-0-${secondKey}`,
+  );
+  await expect(page.getByRole("heading", { name: "Who's staying in each room" })).toBeVisible();
+  const first = page.getByTestId("room-guests-1");
+  await expect(page.getByTestId("room-guests-2")).toContainText("1 Adult");
   const next = page.getByRole("button", { name: "Continue", exact: true });
   await expect(next).toBeDisabled();
   expect(requests).toBe(0);
   await expect(
-    first.getByLabel("Child 1: age at check-in").getByRole("option", { name: "17", exact: true }),
+    first.getByLabel("Child 1: age at check-in").getByRole("option", { name: "15", exact: true }),
   ).toHaveCount(1);
   await first.getByLabel("Child 1: age at check-in").selectOption("0");
   await next.click();
@@ -255,7 +251,9 @@ test("retries unavailable catalogue without inventing a room option", async ({
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { version: "public-pricing-offers.v1", rooms: [] } }),
   );
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}`);
+  await page.goto(
+    `/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03&adults=2&offer=${firstKey}`,
+  );
   await expect(page.getByRole("button", { name: "Retry room options" })).toBeVisible();
   unavailable = false;
   await page.getByRole("button", { name: "Retry room options" }).click();
@@ -327,11 +325,9 @@ test("keeps the charged currency first when the guest views prices in another cu
   await nav.getByRole("button", { name: "$ US Dollar" }).click();
   await expect(nav.getByRole("button", { name: "USD", exact: true })).toBeVisible();
 
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
-  await page.getByRole("button", { name: "Add room", exact: true }).click();
-  const room = page.getByRole("group", { name: "Room 1", exact: true });
-  await room.getByLabel("Room and meal option").selectOption(firstKey);
-  await room.getByLabel(/Adults/).fill("2");
+  await page.goto(
+    `/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03&adults=2&offer=${firstKey}`,
+  );
   await continueToPayment(page, { method: "pay_at_property" });
 
   await expect(orderTotal(page)).toHaveText("€315 (≈ US$347)");

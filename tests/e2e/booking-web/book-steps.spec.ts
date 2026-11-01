@@ -920,16 +920,16 @@ for (const [why, rules] of [
   });
 }
 
-test("says on the room form when no way to pay fits the chosen room", async ({ page }) => {
+// VAY-2446: a child's age is still to give, so /book opens on the rooms step: it says so there too.
+test("says on the rooms step when no way to pay fits the chosen room", async ({ page }) => {
   const { prices } = await mockFlow(page, {
     methods: ["pay_at_property"],
     offerPaymentMethods: ["card"],
   });
-  await page.goto("/book?checkIn=2026-11-06&checkOut=2026-11-08");
-  await page.getByRole("button", { name: "Add room", exact: true }).click();
-  const room = page.getByRole("group", { name: "Room 1", exact: true });
-  await room.getByLabel("Room and meal option").selectOption(offerKey);
-  await room.getByLabel(/Adults/).fill("2");
+  await page.goto(
+    `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&children=1&offer=${offerKey}`,
+  );
+  await expect(page.getByTestId("room-guests-1")).toBeVisible();
   await expect(
     page.getByRole("alert").filter({
       hasText:

@@ -23,6 +23,7 @@ import {
   roomGuests,
   savePickDraft,
   saveRoomUndo,
+  splitParty,
 } from "@/lib/roomPicker";
 import Toast, { type ToastMessage } from "@/components/booking/Toast";
 import RoomGuestsStep from "@/components/booking/RoomGuestsStep";
@@ -111,7 +112,6 @@ import {
   type RoomChoice,
 } from "@/services/api/replacementOffers";
 
-const field = "block w-full rounded-lg border border-gray-300 p-3 mt-1 text-gray-900 bg-white";
 const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
 const newRoom = (): RoomChoice => ({
   selectionId: crypto.randomUUID(),
@@ -185,19 +185,36 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const handedOver = useRef(false);
   const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
   const [guest, setGuest] = useState<GuestDetails>(emptyGuest);
-  // VAY-2320: a group chose its rooms on the hotel page; the rooms step then says who sleeps
-  // where, and "Change rooms" goes back to its search there.
+  // VAY-2320: a group chose its rooms on the hotel page (its own Extras features follow).
   const [fromPicks, setFromPicks] = useState(false);
+  // The hotel page's search for this stay: the rooms step's "Change rooms" and Back go there.
   const [homeSearch, setHomeSearch] = useState("");
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const picks = decodePicks(params.getAll("pick"));
+    const adults = Number(params.get("adults"));
+    const offer = params.get("offer") ?? "";
+    const home = new URLSearchParams();
+    // A group's rooms are chosen again room by room (VAY-2320); a room card's party in one.
+    for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
+      if (params.get(name)) home.set(name, params.get(name)!);
+    if (picks && params.get("rooms")) home.set("rooms", params.get("rooms")!);
+    // VAY-2446: /book only continues a choice made on the hotel page, a room card's or a group's.
+    // The old room form is gone: without one, the guest chooses on the hotel page.
+    const choiceMade =
+      !!picks ||
+      (/^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) &&
+        Number.isInteger(adults) &&
+        adults >= 1 &&
+        adults <= 99);
+    if (!choiceMade) {
+      router.replace(`/?${home}`);
+      return;
+    }
     // VAY-2195: a refresh or Back keeps what this tab chose for the same hand-off.
     const handOff = bookEntry(window.location.search);
     setEntry(handOff);
-    setFromPicks(decodePicks(params.getAll("pick")) !== null);
-    const home = new URLSearchParams();
-    for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode", "rooms"])
-      if (params.get(name)) home.set(name, params.get(name)!);
+    setFromPicks(!!picks);
     setHomeSearch(home.toString());
     // VAY-2393: a room changed or removed on the Extras step keeps this tab's choices.
     const carry = readStayCarryOver(slug, {
@@ -226,12 +243,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       setGuest(carry.guest);
       setPayment(carry.payment);
     }
-    // The hotel page hands over its party as a first room the guest can adjust or split;
-    // child ages stay blank until chosen. A room card also hands over its choice and the rooms
-    // the party needs (VAY-2190): adults spread evenly, children in the first room.
-    // VAY-2320: a group chose each room on the hotel page: its rate and its guests. VAY-2393: a
-    // room keeps its children's ages from before a change while it has as many children.
-    const picks = decodePicks(params.getAll("pick"));
+    // A room card hands over its choice and the rooms the party needs (VAY-2190); child ages
+    // stay blank until chosen. VAY-2320: a group chose each room on the hotel page: its rate and
+    // its guests. VAY-2393: a room keeps its children's ages from before a change while it has
+    // as many children.
     if (picks) {
       setChoices(
         picks.map((pick, index) => ({
@@ -246,25 +261,23 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       );
       return;
     }
-    const adults = Number(params.get("adults"));
-    if (Number.isInteger(adults) && adults >= 1 && adults <= 99) {
-      const children = Math.trunc(Number(params.get("children")) || 0);
-      const childCount = Math.min(Math.max(children, 0), 99 - adults);
-      const offer = params.get("offer") ?? "";
-      const roomCount = Math.min(
-        Math.max(Math.trunc(Number(params.get("rooms")) || 1), 1),
-        adults,
-        9,
-      );
-      setChoices(
-        Array.from({ length: roomCount }, (_, index) => ({
-          ...newRoom(),
-          publicOfferKey: /^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) ? offer : "",
-          adults: String(Math.floor(adults / roomCount) + (index < adults % roomCount ? 1 : 0)),
-          childAges: index === 0 ? Array(childCount).fill("") : [],
-        })),
-      );
-    }
+    const children = Math.trunc(Number(params.get("children")) || 0);
+    const childCount = Math.min(Math.max(children, 0), 99 - adults);
+    const roomCount = Math.min(
+      Math.max(Math.trunc(Number(params.get("rooms")) || 1), 1),
+      adults,
+      9,
+    );
+    // VAY-2446: adults spread evenly, and the children in the rooms with the fewest adults, as a
+    // group's rooms are (the room form that moved them is gone).
+    setChoices(
+      splitParty(adults, childCount, roomCount).map((room) => ({
+        ...newRoom(),
+        publicOfferKey: offer,
+        adults: String(room.adults),
+        childAges: Array(room.children).fill(""),
+      })),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [pagePayment, setPagePayment] = useState<BookingPagePayment>({
@@ -408,11 +421,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setExtras(null);
     setFallback(0);
   };
-  // A group's room that breaks its limits (VAY-2320) is fixed on the rooms step before pricing.
+  // A room that breaks its limits (VAY-2320) is fixed on the rooms step before pricing.
   const roomOf = (choice: RoomChoice) =>
     rooms?.find((room) => room.offers.some((o) => o.publicOfferKey === choice.publicOfferKey));
   const guestProblems =
-    fromPicks && !!rooms && choices.some((choice) => !!roomGuestProblem(roomOf(choice), choice));
+    !!rooms && choices.some((choice) => !!roomGuestProblem(roomOf(choice), choice));
   const { quote, error, errorStatus, errorCode, loading, submit } = useReplacementQuote(
     slug,
     noWayToPay || guestProblems ? null : request,
@@ -452,11 +465,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // A new quote is the only change that matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quote?.quoteId]);
-
-  const update = (id: string, patch: Partial<RoomChoice>) =>
-    changeChoices((current) =>
-      current.map((choice) => (choice.selectionId === id ? { ...choice, ...patch } : choice)),
-    );
 
   // VAY-2195: the booking steps, `step` in the URL. A step only opens once the steps before it
   // are complete; until the catalogues are in, a later step waits.
@@ -553,16 +561,22 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   useEffect(() => {
     if (!settled || handedOver.current) return;
     handedOver.current = true;
-    const params = new URLSearchParams(window.location.search);
-    if (wanted === "rooms" && (params.get("offer") || params.has("pick")))
-      if (roomsComplete && !guestProblems) {
-        viewed.current = "rooms";
-        passMissingExtras();
-        go(steps[1] ?? "payment", true);
-      }
+    if (wanted === "rooms" && roomsComplete && !guestProblems) {
+      viewed.current = "rooms";
+      passMissingExtras();
+      go(steps[1] ?? "payment", true);
+    }
     // Only the first settled render decides.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled]);
+  // VAY-2446: a choice the hotel no longer offers is made again on the hotel page's room cards
+  // (the room form that offered the others is gone).
+  const notOffered = !!rooms?.length && choices.some((choice) => !roomOf(choice));
+  useEffect(() => {
+    if (notOffered && !attemptOpen) router.replace(`/?${homeSearch}`);
+    // router changes identity on navigation; the choice decides.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notOffered]);
   // Each step the guest is shown, once per arrival, after the page knows which one it is.
   useEffect(() => {
     if (!settled || viewed.current === step) return;
@@ -596,24 +610,15 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     payment,
     guest,
   ]);
-  // After the rooms, the price follows every change; a refused way to pay moves to the next one.
+  // The price follows every change, on the rooms step too (each room's price, VAY-2320); a
+  // refused way to pay moves to the next one.
   useEffect(() => {
-    // A group's rooms step shows each room's price (VAY-2320).
-    if (
-      (step === "rooms" && !fromPicks) ||
-      !request ||
-      noWayToPay ||
-      guestProblems ||
-      quote ||
-      loading ||
-      error
-    )
-      return;
+    if (!request || noWayToPay || guestProblems || quote || loading || error) return;
     const timer = setTimeout(submit, 400);
     return () => clearTimeout(timer);
     // submit belongs to this request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(request), step, noWayToPay, guestProblems, fromPicks, quote, loading, error]);
+  }, [JSON.stringify(request), step, noWayToPay, guestProblems, quote, loading, error]);
   // Only a refusal of this price moves on; a failed request can be tried again.
   const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
   useEffect(() => {
@@ -672,17 +677,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     trackEvent(slug, "booking_error", { step, reason: "price_refused" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noWayToPay, settled, step]);
-  // A room card's hand-off goes back to the cards; the room form goes back to itself.
-  const backToRooms = () => {
-    const params = new URLSearchParams(window.location.search);
-    // A group's rooms are chosen again on the hotel page, the others kept (VAY-2320).
-    if (fromPicks) return router.push(`/?${homeSearch}`);
-    if (!params.get("offer")) return goBack("rooms");
-    const home = new URLSearchParams();
-    for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
-      if (params.get(name)) home.set(name, params.get(name)!);
-    router.push(`/?${home}`);
-  };
+  // Back to the room cards for this stay; a group's other rooms stay chosen there (VAY-2320).
+  const backToRooms = () => router.push(`/?${homeSearch}`);
   // VAY-2347: deadlines are worded on the hotel's calendar day by the server's clock, never in the
   // guest's device's zone; the price's guest rules name the zone the server books in.
   const hotelZone = guestRulesQuote.disclosure?.propertyTimeZone ?? (hotel?.timezone || "Etc/UTC");
@@ -1226,7 +1222,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       </Notice>
     ) : null;
   const titles: Record<BookStep, string> = {
-    rooms: fromPicks ? tGroup("title") : "Choose rooms and get a price",
+    rooms: tGroup("title"),
     extras: "Enhance Your Stay",
     details: tDetails("title"),
     payment: tReview("title"),
@@ -1260,7 +1256,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           : undefined
       }
     >
-      <div className={step === "rooms" && !fromPicks ? "max-w-3xl space-y-6" : "space-y-6"}>
+      <div className="space-y-6">
         {step !== "rooms" && !settled ? (
           <p role="status">Loading your booking…</p>
         ) : step !== "rooms" ? null : catalogError ? (
@@ -1274,7 +1270,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           <p role="status">Loading room options…</p>
         ) : rooms.length === 0 ? (
           <p role="status">Room options are currently unavailable.</p>
-        ) : fromPicks ? (
+        ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-6">
               <RoomGuestsStep
@@ -1323,196 +1319,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               )}
             </div>
           </div>
-        ) : (
-          <form
-            className="space-y-6"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!roomsComplete || !settled) return;
-              trackEvent(slug, "rate_selected", { entry: "rooms_form" });
-              passMissingExtras();
-              go(next);
-            }}
-          >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label>
-                Check-in
-                <input
-                  className={field}
-                  type="date"
-                  required
-                  value={checkIn}
-                  onChange={(event) => setCheckIn(event.target.value)}
-                />
-              </label>
-              <label>
-                Check-out
-                <input
-                  className={field}
-                  type="date"
-                  required
-                  value={checkOut}
-                  onChange={(event) => setCheckOut(event.target.value)}
-                />
-              </label>
-            </div>
-            {choices.map((choice, index) => (
-              <fieldset
-                key={choice.selectionId}
-                className="rounded-xl border border-gray-200 p-5 space-y-4"
-              >
-                <legend className="font-semibold px-2">Room {index + 1}</legend>
-                <label className="block">
-                  Room and meal option
-                  <select
-                    className={field}
-                    required
-                    value={choice.publicOfferKey}
-                    onChange={(event) =>
-                      update(choice.selectionId, { publicOfferKey: event.target.value })
-                    }
-                  >
-                    <option value="">Choose an option</option>
-                    {rooms.map((room) => {
-                      // The plain names the room cards use: "Deluxe Double Room — Non-refundable".
-                      const keys = choiceKeys(
-                        room.offers,
-                        { checkIn, timezone: hotelZone },
-                        hotelNow,
-                      );
-                      return (
-                        <optgroup key={room.roomTypeId} label={room.name}>
-                          {room.offers.map((offer, offerIndex) => (
-                            <option key={offer.publicOfferKey} value={offer.publicOfferKey}>
-                              {room.name} —{" "}
-                              {
-                                choiceText(
-                                  keys[offerIndex]!,
-                                  {
-                                    checkIn,
-                                    timezone: hotelZone,
-                                    formatDate: (date) => date,
-                                  },
-                                  t,
-                                  hotelNow,
-                                ).name
-                              }
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
-                  </select>
-                </label>
-                <label className="block">
-                  Adults (ages 18+)
-                  <input
-                    className={field}
-                    type="number"
-                    min={1}
-                    max={99}
-                    step={1}
-                    required
-                    value={choice.adults}
-                    onChange={(event) => update(choice.selectionId, { adults: event.target.value })}
-                  />
-                </label>
-                {choice.childAges.map((age, child) => (
-                  <div className="flex items-end gap-3" key={child}>
-                    <label className="flex-1">
-                      Child {child + 1}: age at check-in
-                      <select
-                        className={field}
-                        required
-                        value={age}
-                        onChange={(event) =>
-                          update(choice.selectionId, {
-                            childAges: choice.childAges.map((value, position) =>
-                              position === child ? event.target.value : value,
-                            ),
-                          })
-                        }
-                      >
-                        <option value="">Choose age</option>
-                        {Array.from({ length: 18 }, (_, value) => (
-                          <option key={value} value={value}>
-                            {value === 0 ? "Under 1" : value}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="p-3 underline"
-                      aria-label={`Remove child ${child + 1} from room ${index + 1}`}
-                      onClick={() =>
-                        update(choice.selectionId, {
-                          childAges: choice.childAges.filter((_, position) => position !== child),
-                        })
-                      }
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-                <div className="flex flex-wrap gap-4">
-                  <button
-                    type="button"
-                    className="underline"
-                    disabled={choice.childAges.length + Number(choice.adults || 1) >= 99}
-                    onClick={() =>
-                      update(choice.selectionId, { childAges: [...choice.childAges, ""] })
-                    }
-                  >
-                    Add child to room {index + 1}
-                  </button>
-                  <button
-                    type="button"
-                    className="underline"
-                    onClick={() =>
-                      changeChoices((current) =>
-                        current.filter((room) => room.selectionId !== choice.selectionId),
-                      )
-                    }
-                  >
-                    Remove room {index + 1}
-                  </button>
-                </div>
-              </fieldset>
-            ))}
-            <button
-              type="button"
-              className={button}
-              disabled={choices.length >= 99}
-              onClick={() => changeChoices((current) => [...current, newRoom()])}
-            >
-              Add room
-            </button>
-            {promoCodesEnabled && (
-              <label className="block">
-                Promo code (optional)
-                <input
-                  className={field}
-                  value={promoCode}
-                  maxLength={200}
-                  onChange={(event) => setPromoCode(event.target.value)}
-                />
-              </label>
-            )}
-            <p className="text-sm text-gray-600">
-              We’ll check the price for your choices next. All rooms must use the same currency.
-            </p>
-            {/* VAY-2309: said here too, where the rooms can be changed. */}
-            {noWayToPay && <Notice tone="red" title={noWayToPayTitle} />}
-            <button className={button} type="submit" disabled={!roomsComplete || !settled}>
-              Continue
-            </button>
-            {!roomsComplete && (
-              <p className="text-sm text-gray-600">
-                Choose dates, at least one room, adults and every child’s age.
-              </p>
-            )}
-          </form>
         )}
         {settled && step === "extras" && (
           <CheckoutColumns

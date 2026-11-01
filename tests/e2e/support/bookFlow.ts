@@ -1,12 +1,12 @@
 import { expect, type Page } from "@playwright/test";
 
-/** VAY-2195: /book is a series of steps. From a filled room form, through the extras (when the
- * hotel offers any) and the guest's details, to the payment step, choosing how to pay there. */
+/** VAY-2195: /book is a series of steps. From a room card's choice (VAY-2446: /book opens past
+ * the rooms), through the extras (when the hotel offers any) and the guest's details, to the
+ * payment step, choosing how to pay there. */
 export async function continueToPayment(
   page: Page,
   { method, extras = false }: { method?: string; extras?: boolean } = {},
 ) {
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
   // VAY-2391: "Continue without extras" until one is added.
   if (extras)
     await page.getByRole("button", { name: /^Continue (to your details|without extras)$/ }).click();

@@ -57,10 +57,9 @@ for (const fontPairing of [
     expect(fontFiles.length).toBeGreaterThan(0);
     for (const file of fontFiles) expect(new URL(file).origin).toBe(new URL(baseURL!).origin);
 
-    // /book's room step, with no choice made yet: still nothing from Google or Stripe.
-    await page.getByRole("link", { name: "Choose rooms and get a price" }).click();
-    await expect(page).toHaveURL(/\/(en\/)?book\?/);
-    await expect(page.getByRole("button", { name: "Add room", exact: true })).toBeVisible();
+    // /book with a room card's choice, before any price: still nothing from Google or Stripe.
+    await page.goto(`/book?checkIn=2026-09-12&checkOut=2026-09-15&adults=2&offer=${offerKey}`);
+    await expect(page.getByRole("button", { name: "Retry room options" })).toBeVisible();
     // Nothing to wait for when all is well: give a late script tag a moment to show up.
     await page.waitForTimeout(1500);
     expect(outside).toEqual([]);
@@ -124,12 +123,7 @@ test("loads Stripe.js only once the card form shows", async ({ page, baseURL }) 
   );
   const outside = otherOrigins(page, baseURL);
 
-  await page.goto("/en/book?checkIn=2026-12-01&checkOut=2026-12-03");
-  await page.getByRole("button", { name: "Add room", exact: true }).click();
-  const room = page.getByRole("group", { name: "Room 1", exact: true });
-  await room.getByLabel("Room and meal option").selectOption(offerKey);
-  await room.getByLabel(/Adults/).fill("2");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.goto(`/en/book?checkIn=2026-12-01&checkOut=2026-12-03&adults=2&offer=${offerKey}`);
   await expect(page).toHaveURL(/[?&]step=details/);
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to review" }).click();

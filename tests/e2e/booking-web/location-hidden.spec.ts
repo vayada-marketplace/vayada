@@ -18,8 +18,8 @@ for (const viewport of [
     });
 
     await page.goto("/");
-    const choose = page.getByRole("link", { name: "Choose rooms and get a price" });
-    await expect(choose).toBeVisible();
+    // No room cards here (no catalogue): the page says so, right above the footer.
+    await expect(page.getByTestId("rooms-unavailable")).toBeVisible();
     await expect(page.getByRole("region", { name: "Location" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Explore our surroundings" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Location", exact: true })).toHaveCount(0);

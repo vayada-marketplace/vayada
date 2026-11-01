@@ -136,9 +136,10 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
 
-    // Navigate to the checkout page path; mock any room/payment redirects.
+    // Navigate to the checkout page with a room card's choice (VAY-2446: without one, /book
+    // opens the hotel page).
     const response = await page.goto(
-      "/en/book?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible",
+      `/en/book?checkIn=2026-09-12&checkOut=2026-09-15&adults=2&offer=pricing-offer.v2:${"a".repeat(64)}`,
     );
 
     const status = response?.status() ?? 0;

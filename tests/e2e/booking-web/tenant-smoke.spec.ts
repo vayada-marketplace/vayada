@@ -33,7 +33,7 @@ test.describe("booking-web tenant smoke", () => {
     await expect(guestSelector.getByText("Ages 0-17", { exact: true })).toBeVisible();
     await guestSelector.getByRole("button", { name: "Done" }).click();
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+    await expect(page.getByTestId("rooms-unavailable")).toBeVisible();
     const nav = page.locator("nav");
     await nav.getByRole("button", { name: "Contact", exact: true }).click();
     await expect(nav.getByText("Phone", { exact: true })).toBeVisible();
@@ -200,9 +200,13 @@ test.describe("booking-web tenant smoke", () => {
       route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
     );
 
-    await page.goto("/book?checkIn=2026-09-12&checkOut=2026-09-15");
+    // A room card's choice: /book stays (VAY-2446: without one it opens the hotel page).
+    await page.goto(
+      `/book?checkIn=2026-09-12&checkOut=2026-09-15&adults=2&offer=pricing-offer.v2:${"a".repeat(64)}`,
+    );
 
-    await expect(page).toHaveTitle(/Choose Rooms \| Price Your Stay/);
+    await expect(page).toHaveTitle(/Book Your Stay/);
+    await expect(page.getByText("Room options are currently unavailable.")).toBeVisible();
     await expect(
       page.locator('script[type="application/ld+json"]#booking-web-public-structured-data'),
     ).toHaveCount(0);
