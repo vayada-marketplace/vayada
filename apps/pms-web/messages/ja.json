@@ -1096,8 +1096,6 @@
   "settings.checkIn.removeCheck": "{label}を削除",
   "settings.checkIn.addCheck": "確認項目を追加",
   "calendar.targetManualBooking.roomCapacity": "最大宿泊人数: {count}名",
-  "calendar.targetManualBooking.guestTally": "宿泊者: {count} / {capacity}名",
-  "calendar.targetManualBooking.capacityReached": "選択した部屋の定員に達しました。宿泊者を追加するには部屋を追加してください。",
   "calendar.targetManualBooking.guestsOverCapacity": "{count}名は、選択した部屋の定員（{capacity}名）を超えています。宿泊者を削除するか、部屋を追加してください。",
   "calendar.targetManualBooking.guestsOverCapacityServer": "選択した部屋には、入力した全員が宿泊できません。宿泊者を削除するか、部屋を追加してください。",
   "bookings.extras.title": "ゲストからのエクストラのリクエスト",

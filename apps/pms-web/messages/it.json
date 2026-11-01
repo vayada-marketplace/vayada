@@ -1096,8 +1096,6 @@
   "settings.checkIn.removeCheck": "Rimuovi {label}",
   "settings.checkIn.addCheck": "Aggiungi controllo",
   "calendar.targetManualBooking.roomCapacity": "Ospiti max.: {count}",
-  "calendar.targetManualBooking.guestTally": "Ospiti: {count} su {capacity}",
-  "calendar.targetManualBooking.capacityReached": "Capacità massima raggiunta per le camere selezionate. Aggiungi un'altra camera per aggiungere altri ospiti.",
   "calendar.targetManualBooking.guestsOverCapacity": "{count} ospiti sono più dei {capacity} consentiti dalle camere selezionate. Rimuovi un ospite o aggiungi una camera.",
   "calendar.targetManualBooking.guestsOverCapacityServer": "Le camere selezionate non hanno posto per tutti gli ospiti indicati. Rimuovi un ospite o aggiungi una camera.",
   "bookings.extras.title": "Extra richiesti dall'ospite",
