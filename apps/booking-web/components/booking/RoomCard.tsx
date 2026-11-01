@@ -87,7 +87,7 @@ export default function RoomCard({
   bookPart?: { guests: number; onBook: (publicOfferKey: string, adults: number) => void };
   /** VAY-2393, back to one room: the rate of the place the group kept ("Your choice"). */
   chosen?: string | null;
-  /** The hotel's location map while it shows one, for the details' "Where you'll stay" (VAY-2323). */
+  /** The property's place for the details' "Where you'll stay" (VAY-2323), by the room's own switch (VAY-2445). */
   place?: GuestPlace | null;
   /** Where the room is next to the main house, while its rooms are in several places (VAY-2324). */
   locationLine?: { text: string; mainHouse: boolean } | null;

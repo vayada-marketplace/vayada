@@ -26,7 +26,7 @@ type CoreLibrary = {
   Point: new (x: number, y: number) => unknown;
 };
 
-/** The hotel's location map as the room catalog sends it (VAY-2126), with the hotel's name and locality. */
+/** The property's place as the room catalog sends it (VAY-2126, VAY-2445), with the hotel's name and locality. */
 export type GuestPlace = {
   name: string;
   locality: string;

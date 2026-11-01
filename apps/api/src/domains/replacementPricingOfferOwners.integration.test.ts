@@ -6508,6 +6508,41 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         showMapInDetails: false,
         location: null,
       });
+      // A separate room on the property's own spot never shows the pin the property's visibility hides
+      // (VAY-2445): its details map works without the hotel's switch now.
+      await setTermsRoom({
+        locationSource: "custom",
+        locationPrecision: "exact",
+        showMapInDetails: true,
+        latitude: 48.1394,
+        longitude: 11.5835,
+      });
+      const setPropertyPin = (shown: boolean) =>
+        pool.query(
+          `UPDATE hotel_catalog.property_locations
+           SET latitude = 48.1394, longitude = 11.5835, geo_public = $2, map_display_mode = $3
+           WHERE property_id = $1`,
+          [scope.propertyId, shown, shown ? "exact" : "hidden"],
+        );
+      await setPropertyPin(false);
+      for (const enabled of [true, false]) {
+        await setLocationMap(enabled);
+        expect((await placesOf())["Terms room"]).toEqual({
+          atProperty: false,
+          showMapInDetails: true,
+          location: null,
+        });
+      }
+      await setPropertyPin(true);
+      expect((await placesOf())["Terms room"]).toMatchObject({
+        location: { latitude: 48.1394, longitude: 11.5835 },
+      });
+      await pool.query(
+        `UPDATE hotel_catalog.property_locations
+         SET latitude = NULL, longitude = NULL, geo_public = FALSE, map_display_mode = 'hidden'
+         WHERE property_id = $1`,
+        [scope.propertyId],
+      );
       await pool.query("DELETE FROM booking.booking_settings WHERE property_id = $1", [
         scope.propertyId,
       ]);

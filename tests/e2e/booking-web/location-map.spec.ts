@@ -560,11 +560,13 @@ test.describe("booking page location map", () => {
     });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
-    // No map below the list or next to it: those follow the hotel's switch.
-    await expect(page.getByTestId("rooms-location-map")).toHaveCount(0);
-    await expect(page.getByTestId("accommodations-map")).toHaveCount(0);
     const cards = page.getByRole("button", { name: "View Details", exact: true });
     await expect(cards).toHaveCount(4);
+    // With the rooms loaded: no map below the list or next to it, and no place lines on the cards. Those
+    // follow the hotel's switch.
+    await expect(page.getByTestId("rooms-location-map")).toHaveCount(0);
+    await expect(page.getByTestId("accommodations-map")).toHaveCount(0);
+    await expect(page.getByText(/Main house|Own location|from the main house/)).toHaveCount(0);
 
     // A place of its own, exact: street, distance, Directions; Google only after "Show map".
     await cards.nth(0).click();
