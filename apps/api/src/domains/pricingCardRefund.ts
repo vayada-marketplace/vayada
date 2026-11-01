@@ -659,13 +659,18 @@ export async function applyCardRefundMoney(
       }),
     ],
   );
-  // A part refund leaves the stay paid, or partly paid when a deposit was taken (VAY-2205).
+  // A part refund leaves the stay paid, or partly paid when a deposit was taken (VAY-2205); so does
+  // a full one while another payment of the stay still stands (a dashboard refund, VAY-2442).
   const bookingStatus = (
     await client.query(
       `UPDATE booking.guest_bookings
-       SET payment_status=CASE WHEN $3 THEN 'refunded' ELSE payment_status END,updated_at=clock_timestamp()
+       SET payment_status=CASE WHEN $3 AND NOT EXISTS (
+           SELECT 1 FROM finance.payments other
+           WHERE other.guest_booking_id=$1 AND other.property_id=$2 AND other.id<>$4
+             AND other.payment_kind<>'refund' AND other.status IN ('paid','partially_refunded')
+         ) THEN 'refunded' ELSE payment_status END,updated_at=clock_timestamp()
        WHERE id=$1 AND property_id=$2 RETURNING payment_status`,
-      [input.guestBookingId, input.propertyId, status === "refunded"],
+      [input.guestBookingId, input.propertyId, status === "refunded", input.paymentId],
     )
   ).rows[0]?.payment_status;
   // PMS lists read the summary; a stay without one has nothing to update.
@@ -681,9 +686,7 @@ export async function applyCardRefundMoney(
       paymentId: input.paymentId,
       sourceKey: input.ledgerSourceKey,
       currency: input.currency,
-      paymentAmount: payment.amount,
       platformFeeAmount: requiredPlatformFee(payment.platform_fee_amount),
-      refundAmount: input.amount,
       livemode: payment.livemode === true,
     });
   return status;
