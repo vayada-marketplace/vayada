@@ -9,7 +9,7 @@ import { BookingAddon } from "../bookings";
 import { orderRoomsByRoomType } from "../../lib/roomOrdering";
 
 // prettier-ignore
-type ManualAddonApi = { addOns: Array<{ addonItemId: string; name: string; description: string; price: string; currency: string; category: string; pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night"; }> };
+type ManualAddonApi = { addOns: Array<{ addonItemId: string; name: string; description: string; price: string; currency: string; category: string; pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night"; maxGuests: number | null; maxQuantity: number; }> };
 
 export interface CalendarRoomType {
   id: string;
@@ -337,6 +337,8 @@ export const calendarService = {
       category: addon.category,
       perPerson: addon.pricingModel === "per_guest" || addon.pricingModel === "per_guest_night",
       perNight: addon.pricingModel === "per_night" || addon.pricingModel === "per_guest_night",
+      maxGuests: addon.maxGuests,
+      maxQuantity: addon.maxQuantity,
     }));
   },
 

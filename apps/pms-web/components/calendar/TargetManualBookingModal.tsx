@@ -12,6 +12,15 @@ import {
 } from "@/services/api/pmsManualBookingClient";
 import { CalendarRoom, CalendarRoomType, calendarService } from "@/services/calendar";
 import type { BookingAddon } from "@/services/bookings";
+import {
+  addonHasQuantity,
+  addonMaxQuantity,
+  addonSelection,
+  isTransfer,
+  partyOf,
+  type AddonChoice,
+  type AddonLine,
+} from "@/lib/manualBookingAddons";
 import { useTranslation } from "@/lib/i18n";
 import CountryPicker, { NATIONALITY_PICKER_OPTIONS } from "@/components/CountryPicker";
 import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
@@ -156,9 +165,6 @@ function previewErrorDetails(
   return detail.stay ? { ...detail, retryable: false } : { message: fallback, retryable: true };
 }
 
-// prettier-ignore
-function addonSelection(addon: BookingAddon, packageCount: number, stays: StayDraft[]) { const dates = new Set<string>(); for (const stay of stays) for (let date = stay.checkIn; date < stay.checkOut; date = addDay(date)) dates.add(date); const serviceDates = Array.from(dates).sort(), occupancy = (date: string) => stays.filter((stay) => stay.checkIn <= date && date < stay.checkOut).reduce((sum, stay) => sum + stay.adults + stay.children, 0), serviceUnits = addon.perNight ? serviceDates.map((serviceDate) => ({ serviceDate, guestCount: addon.perPerson ? occupancy(serviceDate) : null })) : [{ serviceDate: null, guestCount: addon.perPerson ? stays.reduce((sum, stay) => sum + stay.adults + stay.children, 0) : null }]; return { addonId: addon.id, packageCount, serviceUnits }; }
-
 export default function TargetManualBookingModal({
   roomTypes,
   rooms,
@@ -172,7 +178,7 @@ export default function TargetManualBookingModal({
   const { t } = useTranslation();
   const firstRoom = rooms.find((room) => room.id === initialRoomId) ?? rooms[0];
   // prettier-ignore
-  const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonPackages, setAddonPackages] = useState<Record<string, number>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
+  const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonChoices, setAddonChoices] = useState<Record<string, AddonChoice>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
   const [phoneCountry, setPhoneCountry] = useState("");
   const [propertyCountry, setPropertyCountry] = useState("");
   const nationalityId = useId();
@@ -279,8 +285,8 @@ export default function TargetManualBookingModal({
       };
     });
     // prettier-ignore
-    return mapped.some((stay) => !stay) ? null : { stays: mapped as PmsManualBookingPreviewInput["stays"], addOns: addons.filter((addon) => addonPackages[addon.id]).map((addon) => addonSelection(addon, addonPackages[addon.id]!, stays)) };
-  }, [addonPackages, addons, conflicts, roomTypes, rooms, stays]);
+    return mapped.some((stay) => !stay) ? null : { stays: mapped as PmsManualBookingPreviewInput["stays"], addOns: addons.flatMap((addon) => addonSelection(addon, addonChoices[addon.id], stays) ?? []) };
+  }, [addonChoices, addons, conflicts, roomTypes, rooms, stays]);
   const previewKey = previewInput ? JSON.stringify(previewInput) : null;
   const preview = previewEvidence?.key === previewKey ? previewEvidence.result : null;
   // Capacity is the busiest night: everyone named fits on the night the most rooms are booked, so a
@@ -393,8 +399,61 @@ export default function TargetManualBookingModal({
     setPreviewEvidence(null);
     setFocusTarget(`${focus}:roomId`);
   }
-  // prettier-ignore
-  function updateAddon(addonId: string, packageCount: number) { setPreviewEvidence(null); setAddonPackages((current) => { const next = { ...current }; if (packageCount > 0) next[addonId] = packageCount; else delete next[addonId]; return next; }); }
+  const party = partyOf(stays);
+  /** How an extra's amount follows the party, e.g. "2 guests × 3 nights" (VAY-2417). */
+  function addonDetail(addon: BookingAddon, line: AddonLine): string[] {
+    // prettier-ignore
+    const guests = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonGuestOne") : t("calendar.targetManualBooking.addonGuests", { count }),
+      nights = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonNightOne") : t("calendar.targetManualBooking.addonNights", { count }),
+      trips = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonTripOne") : t("calendar.targetManualBooking.addonTrips", { count }),
+      vehicles = (count: number) => count === 1 ? t("calendar.targetManualBooking.addonVehicleOne") : t("calendar.targetManualBooking.addonVehicles", { count });
+    const units = line.serviceUnits.length;
+    const counts = line.serviceUnits.map((unit) => unit.guestCount ?? 0);
+    const per = isTransfer(addon) ? trips(units) : addon.perNight ? nights(units) : null;
+    if (addon.perPerson)
+      return counts.every((count) => count === counts[0])
+        ? [guests(counts[0]!), ...(per ? [per] : [])]
+        : [
+            addon.perNight
+              ? t("calendar.targetManualBooking.addonGuestNights", {
+                  count: counts.reduce((sum, count) => sum + count, 0),
+                })
+              : guests(counts.reduce((sum, count) => sum + count, 0)),
+          ];
+    const amount = addonHasQuantity(addon)
+      ? line.packageCount > 1
+        ? String(line.packageCount)
+        : null
+      : vehicles(line.packageCount);
+    return [amount, per].filter((part): part is string => Boolean(part));
+  }
+  // aria-disabled, not disabled: a button that disables itself at the limit would drop focus.
+  function stepButton(addon: BookingAddon, next: AddonChoice, more: boolean, atLimit: boolean) {
+    return (
+      <button
+        type="button"
+        aria-label={
+          more
+            ? t("calendar.targetManualBooking.addonMore", { addon: addon.name })
+            : t("calendar.targetManualBooking.addonFewer", { addon: addon.name })
+        }
+        aria-disabled={atLimit}
+        onClick={() => !atLimit && chooseAddon(addon.id, next)}
+        className="size-11 rounded-lg border border-gray-300 text-base aria-disabled:opacity-40"
+      >
+        {more ? "+" : "−"}
+      </button>
+    );
+  }
+  function chooseAddon(addonId: string, choice: AddonChoice | null) {
+    setPreviewEvidence(null);
+    setAddonChoices((current) => {
+      const next = { ...current };
+      if (choice) next[addonId] = choice;
+      else delete next[addonId];
+      return next;
+    });
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -1091,45 +1150,130 @@ export default function TargetManualBookingModal({
                   </p>
                 )}{" "}
                 {addons.map((addon) => {
-                  const selected = Boolean(addonPackages[addon.id]),
+                  const choice = addonChoices[addon.id],
+                    line = addonSelection(addon, choice, stays),
+                    transfer = isTransfer(addon),
+                    max = addonMaxQuantity(addon),
                     serverAddon = preview?.addOns.find((item) => item.addonId === addon.id);
+                  // Quantities follow the party (VAY-2417): a stepper only where neither the
+                  // guests nor the vehicles decide and the extra allows more than 1.
+                  const stepper = addonHasQuantity(addon) && max > 1 ? line : null;
+                  const detail = line ? addonDetail(addon, line) : [];
                   return (
                     <div
                       key={addon.id}
-                      className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                      data-addon
+                      className="rounded-lg border border-gray-200 px-3 py-1 text-sm"
                     >
-                      {" "}
-                      <label className="flex min-w-0 flex-1 items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={(event) => updateAddon(addon.id, event.target.checked ? 1 : 0)}
-                        />
-                        <span className="truncate">{addon.name}</span>
-                      </label>{" "}
-                      {selected && (
-                        <label className="flex items-center gap-2 text-xs">
-                          {t("calendar.targetManualBooking.packages")}{" "}
-                          <input
-                            aria-label={t("calendar.targetManualBooking.addonPackages", {
+                      <div className="flex flex-wrap items-center gap-3">
+                        {/* A minimum width for the name wraps the stepper below it on a phone. */}
+                        {transfer ? (
+                          <span className="min-w-[10rem] flex-1 truncate py-2">{addon.name}</span>
+                        ) : (
+                          <label className="flex min-h-11 min-w-[10rem] flex-1 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(choice)}
+                              onChange={(event) =>
+                                chooseAddon(
+                                  addon.id,
+                                  event.target.checked
+                                    ? { quantity: 1, pickup: false, dropOff: false }
+                                    : null,
+                                )
+                              }
+                            />
+                            <span className="truncate">{addon.name}</span>
+                          </label>
+                        )}
+                        {stepper && choice && (
+                          <div
+                            role="group"
+                            aria-label={t("calendar.targetManualBooking.addonQuantity", {
                               addon: addon.name,
                             })}
-                            type="number"
-                            min={1}
-                            max={99}
-                            value={addonPackages[addon.id]}
-                            onChange={(event) =>
-                              updateAddon(addon.id, Math.max(1, Number(event.target.value) || 1))
-                            }
-                            className="w-16 rounded border border-gray-300 px-2 py-1"
-                          />
-                        </label>
-                      )}{" "}
-                      <strong className="w-20 text-right">
-                        {serverAddon
-                          ? money(serverAddon.total.amountDecimal, preview!.currency)
-                          : "—"}
-                      </strong>{" "}
+                            className="flex items-center gap-1 text-xs"
+                          >
+                            {stepButton(
+                              addon,
+                              { ...choice, quantity: stepper.packageCount - 1 },
+                              false,
+                              stepper.packageCount <= 1,
+                            )}
+                            <span
+                              aria-live="polite"
+                              className="w-6 text-center text-sm tabular-nums"
+                            >
+                              {stepper.packageCount}
+                            </span>
+                            {stepButton(
+                              addon,
+                              { ...choice, quantity: stepper.packageCount + 1 },
+                              true,
+                              stepper.packageCount >= max,
+                            )}
+                            <span className="text-gray-500">
+                              {t("calendar.targetManualBooking.addonMax", { count: max })}
+                            </span>
+                          </div>
+                        )}
+                        <strong className="ml-auto w-20 text-right">
+                          {serverAddon
+                            ? money(serverAddon.total.amountDecimal, preview!.currency)
+                            : "—"}
+                        </strong>
+                      </div>
+                      {transfer && (
+                        <div
+                          role="group"
+                          aria-label={addon.name}
+                          className="flex flex-wrap gap-x-4 text-xs"
+                        >
+                          {(["pickup", "dropOff"] as const).map((trip) => {
+                            const date = trip === "pickup" ? party.arrival : party.departure;
+                            return (
+                              <label key={trip} className="flex min-h-11 items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(choice?.[trip])}
+                                  disabled={!date}
+                                  onChange={(event) => {
+                                    const next = {
+                                      quantity: choice?.quantity ?? 1,
+                                      pickup: choice?.pickup ?? false,
+                                      dropOff: choice?.dropOff ?? false,
+                                      [trip]: event.target.checked,
+                                    };
+                                    chooseAddon(
+                                      addon.id,
+                                      next.pickup || next.dropOff ? next : null,
+                                    );
+                                  }}
+                                />
+                                {trip === "pickup"
+                                  ? t("calendar.targetManualBooking.addonPickup", {
+                                      date: date ?? "—",
+                                    })
+                                  : t("calendar.targetManualBooking.addonDropOff", {
+                                      date: date ?? "—",
+                                    })}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {detail.length > 0 && (
+                        <p className="pb-1 text-xs text-gray-500">
+                          {[
+                            serverAddon
+                              ? money(serverAddon.unitPrice.amountDecimal, preview!.currency)
+                              : null,
+                            ...detail,
+                          ]
+                            .filter(Boolean)
+                            .join(" × ")}
+                        </p>
+                      )}
                     </div>
                   );
                 })}{" "}
