@@ -15,6 +15,20 @@ import {
 } from "../auth/sessionStore";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.booking.localhost";
+
+// VAY-2423: a full navigation aborts the page's reads as it goes ("TypeError: Failed to fetch"). The page is going
+// away, so that isn't a failure to report, and the page's own catches would log the same read again: once the page
+// is being left, such a read never settles instead. A page restored from the back/forward cache reads as before.
+let pageLeaving = false;
+export function followPageLeaving(target: Pick<EventTarget, "addEventListener">) {
+  target.addEventListener("pagehide", () => {
+    pageLeaving = true;
+  });
+  target.addEventListener("pageshow", () => {
+    pageLeaving = false;
+  });
+}
+if (typeof window !== "undefined") followPageLeaving(window);
 const OMIT_HOTEL_CONTEXT_HEADER = "X-Vayada-Omit-Hotel-Context";
 
 const defaultSessionRecoveryHandlers: ApiSessionRecoveryHandlers = {
@@ -201,6 +215,7 @@ export class ApiClient {
       if (error instanceof SyntaxError && error.message.includes("JSON")) {
         return undefined as T;
       }
+      if (pageLeaving && error instanceof TypeError) return new Promise<T>(() => undefined);
       console.error("API request failed:", error);
       throw error;
     }
