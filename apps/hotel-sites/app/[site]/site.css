@@ -1,11 +1,6 @@
 /* The hotel website template (VAY-2422), from Timo's "Homepage" design. Colours come from the
-   site's content as --site-* variables on <body>; the font from its assets as --site-font. */
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+   site's content as --site-* variables on <body>; the font from its assets as --site-font.
+   Boxes stay content-box like the design's: its sections' max-widths exclude their padding. */
 
 html {
   scroll-behavior: smooth;
@@ -317,14 +312,26 @@ img {
   text-transform: uppercase;
 }
 
+/* Four across as designed, two on a tablet, one on a phone: never three and a stretched fourth. */
 .room-cards {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 28px;
 }
 
+@media (max-width: 1059px) {
+  .room-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 599px) {
+  .room-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 .room-card {
-  flex: 1 1 220px;
   text-decoration: none;
   display: flex;
   flex-direction: column;
@@ -470,8 +477,10 @@ img {
   padding-bottom: 8px;
 }
 
+/* The design's 136px thumbnails; they give a little before the row has to scroll. */
 .gallery-thumbs button {
-  flex: 0 0 136px;
+  flex: 0 1 136px;
+  min-width: 112px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -481,12 +490,15 @@ img {
   border-bottom: 2px solid transparent;
   font: inherit;
   cursor: pointer;
-  opacity: 0.72;
 }
 
 .gallery-thumbs button[aria-pressed="true"] {
-  opacity: 1;
   border-bottom-color: var(--site-ink);
+}
+
+/* The design dims the whole thumbnail; dimming only the photo keeps its label readable. */
+.gallery-thumbs button[aria-pressed="false"] img {
+  opacity: 0.72;
 }
 
 /* The row scrolls, which would clip a ring drawn outside the button. */
@@ -664,4 +676,13 @@ img {
 
 .feature .text-link {
   align-self: flex-start;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

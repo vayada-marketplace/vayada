@@ -9,7 +9,7 @@ export function EatAndDrink({ eat }: { eat: HotelSite["eat"] }) {
         <p className="eyebrow">{eat.eyebrow}</p>
         <h2>
           {eat.headline.map((line, index) => (
-            <span key={line}>
+            <span key={index}>
               {index > 0 && <br />}
               {line}
             </span>

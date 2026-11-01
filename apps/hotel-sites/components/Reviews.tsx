@@ -10,7 +10,7 @@ export function Reviews({ reviews }: { reviews: NonNullable<HotelSite["reviews"]
           {reviews.items.map((review) => (
             <figure key={`${review.author}-${review.source}`}>
               <p role="img" aria-label={`${review.rating} out of 5 stars`} className="stars">
-                {"★".repeat(review.rating)}
+                {"★".repeat(review.rating) + "☆".repeat(5 - review.rating)}
               </p>
               <blockquote>{review.text}</blockquote>
               <figcaption>

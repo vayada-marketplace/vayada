@@ -13,10 +13,11 @@ export function RoomCards({ site }: { site: HotelSite }) {
         <div className="room-cards">
           {site.rooms.items.map((room) => (
             <a key={room.id} href={`#${room.id}`} className="room-card">
+              {/* The details row below describes the same photo. */}
               <Image
                 src={room.image.src}
-                alt={room.image.alt}
-                sizes="(max-width: 600px) 100vw, 280px"
+                alt=""
+                sizes="(max-width: 599px) 100vw, (max-width: 1059px) 50vw, 280px"
               />
               <span className="room-card-name">{room.name}</span>
               <span className={room.comingSoon ? "room-card-summary soon" : "room-card-summary"}>
@@ -36,7 +37,10 @@ export function RoomCards({ site }: { site: HotelSite }) {
 /** The rooms' details, photo and text alternating sides. */
 export function RoomDetails({ site }: { site: HotelSite }) {
   return (
-    <section className="room-details">
+    <section className="room-details" aria-labelledby="room-details-heading">
+      <h2 id="room-details-heading" className="visually-hidden">
+        {site.rooms.detailsHeading}
+      </h2>
       {site.rooms.items.map((room, index) => (
         <Split key={room.id} id={room.id} image={room.image} flipped={index % 2 === 1}>
           <h3>{room.name}</h3>

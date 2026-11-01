@@ -63,7 +63,7 @@ export default async function SitePage({ params }: Props) {
         <Intro site={site} />
         <RoomCards site={site} />
         <Gallery gallery={site.gallery} />
-        {site.reviews && <Reviews reviews={site.reviews} />}
+        {!!site.reviews?.items.length && <Reviews reviews={site.reviews} />}
         <RoomDetails site={site} />
         <EatAndDrink eat={site.eat} />
         <Location site={site} />

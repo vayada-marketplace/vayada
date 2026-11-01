@@ -20,12 +20,15 @@ export type SiteRoom = {
 
 /** A real guest review, quoted from Google or Booking.com with the guest's first name. */
 export type SiteReview = {
-  rating: number;
+  /** Stars out of five (a Booking.com score out of ten needs converting). */
+  rating: 1 | 2 | 3 | 4 | 5;
   text: string;
   author: string;
   origin: string;
-  source: string;
+  source: "Google" | "Booking.com";
 };
+
+export type SiteSlide = { label: string; title: string; text: string; image: SiteImage };
 
 /** Two-line headings keep the design's line break. */
 type Lines = string[];
@@ -58,11 +61,12 @@ export type HotelSite = {
   nav: { label: string; href: string }[];
   hero: { image: SiteImage; headline: string; subline: string; cta: string };
   intro: { eyebrow: string; headline: string; tagline: string; text: string };
-  rooms: { heading: string; items: SiteRoom[] };
+  /** `detailsHeading` names the details rows for screen readers; it isn't shown. */
+  rooms: { heading: string; detailsHeading: string; items: SiteRoom[] };
   gallery: {
     eyebrow: string;
     headline: Lines;
-    slides: { label: string; title: string; text: string; image: SiteImage }[];
+    slides: [SiteSlide, ...SiteSlide[]];
   };
   /** Off (null) until the hotel's real reviews are in: never shown with invented ones. */
   reviews: { heading: string; items: SiteReview[]; moreUrl: string | null } | null;

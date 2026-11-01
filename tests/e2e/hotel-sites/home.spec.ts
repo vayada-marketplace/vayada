@@ -121,25 +121,19 @@ test("switches the gallery's big slide from its thumbnails", async ({ page }) =>
   await expect(
     gallery.getByRole("heading", { level: 3, name: /^sloth mode activated\.$/i }),
   ).toBeVisible();
-  await expect(gallery.getByRole("button", { name: "Show Pool" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  const thumb = (name: string) => gallery.getByRole("button", { name: new RegExp(name, "i") });
+  await expect(thumb("^01 pool$")).toHaveAttribute("aria-pressed", "true");
+  await expect(gallery.getByRole("img", { name: "Pool" })).toBeVisible();
 
-  await gallery.getByRole("button", { name: "Show Evenings" }).click();
+  await thumb("^08 evenings$").click();
   await expect(gallery.getByText("08 / 08")).toBeVisible();
   // Slides 02–08 keep the design's placeholder copy until the client's arrives.
   await expect(
     gallery.getByRole("heading", { level: 3, name: /^\[evenings headline\]$/i }),
   ).toBeVisible();
-  await expect(gallery.getByRole("button", { name: "Show Evenings" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(gallery.getByRole("button", { name: "Show Pool" })).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  );
+  await expect(gallery.getByRole("img", { name: "Evenings" })).toBeVisible();
+  await expect(thumb("^08 evenings$")).toHaveAttribute("aria-pressed", "true");
+  await expect(thumb("^01 pool$")).toHaveAttribute("aria-pressed", "false");
 });
 
 test("shows no reviews until real ones are in, and no link the hotel hasn't given", async ({
@@ -160,31 +154,35 @@ test("shows no reviews until real ones are in, and no link the hotel hasn't give
   }
 });
 
-test("puts photo and text side by side on a laptop and stacks them on a phone", async ({
-  page,
-}) => {
+test("lays the rooms and gallery out for laptop, tablet and phone", async ({ page }) => {
   const box = async (selector: string) => (await page.locator(selector).boundingBox())!;
+  const cardRows = async () =>
+    new Set(
+      await page
+        .locator("#stay a")
+        .evaluateAll((cards) => cards.map((card) => Math.round(card.getBoundingClientRect().top))),
+    ).size;
+
+  // Laptop (1440, the design's width): the four cards in one row, all eight thumbnails in view,
+  // Tiger's photo left of its text and Leopard's right of it.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  // Laptop: Tiger's photo left of its text, Leopard's right of it; the four cards in one row.
+  expect(await cardRows()).toBe(1);
+  const thumbs = page.locator(".gallery-thumbs");
+  expect(await thumbs.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
   expect((await box("#tiger img")).x).toBeLessThan((await box("#tiger h3")).x);
   expect((await box("#leopard img")).x).toBeGreaterThan((await box("#leopard h3")).x);
-  const cardTops = await page
-    .locator(".room-card")
-    .evaluateAll((cards) => cards.map((card) => Math.round(card.getBoundingClientRect().top)));
-  expect(new Set(cardTops).size).toBe(1);
 
+  // Tablet: two cards a row, never three and a stretched fourth.
+  await page.setViewportSize({ width: 1024, height: 900 });
+  expect(await cardRows()).toBe(2);
+
+  // Phone: one card a row, and every photo above its text.
   await page.setViewportSize({ width: 390, height: 844 });
+  expect(await cardRows()).toBe(4);
   for (const id of ["tiger", "leopard", "giraffe", "elephant"]) {
     const image = await box(`#${id} img`);
     expect(image.y + image.height).toBeLessThanOrEqual((await box(`#${id} h3`)).y);
-  }
-  const cards = await page.locator(".room-card").all();
-  for (let index = 1; index < cards.length; index += 1) {
-    const [above, below] = [
-      (await cards[index - 1]!.boundingBox())!,
-      (await cards[index]!.boundingBox())!,
-    ];
-    expect(below.y).toBeGreaterThanOrEqual(above.y + above.height);
   }
 });
 

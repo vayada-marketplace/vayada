@@ -50,6 +50,7 @@ export const animalsAhangama: HotelSite = {
   // Tiger, Leopard and Giraffe, so "View rooms" opens the whole list.
   rooms: {
     heading: "Stay with us.",
+    detailsHeading: "Our rooms",
     items: [
       {
         id: "tiger",
