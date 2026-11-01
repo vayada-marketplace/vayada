@@ -77,6 +77,10 @@ describe("Payments one save (VAY-2424)", () => {
   it("reads typed bank details, the format alone not counting as an edit", () => {
     expect(bankDetailsEdited({ payout_account_type: "iban" })).toBe(false);
     expect(bankDetailsEdited({ payout_swift: " DEUT " })).toBe(true);
+    // An IBAN typed, then the account number format chosen: nothing would be sent.
+    expect(
+      bankDetailsEdited({ payout_account_type: "account_number", payout_iban: "DE89 3704" }),
+    ).toBe(false);
     expect(
       bankDetailsOf({
         payout_account_type: "account_number",

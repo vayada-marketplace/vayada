@@ -111,15 +111,13 @@ export function bankDetailsOf(settings: BankFields): DirectTransferDetails {
   };
 }
 
-/** Something typed into the bank detail inputs (the account format alone isn't an edit). */
+/** Something typed into the bank details a save would send: the account format alone isn't an
+ * edit, nor is the number of the format not chosen. */
 export function bankDetailsEdited(settings: BankFields): boolean {
-  return [
-    settings.payout_account_holder,
-    settings.payout_iban,
-    settings.payout_account_number,
-    settings.payout_bank_name,
-    settings.payout_swift,
-  ].some((value) => !!value?.trim());
+  const details = bankDetailsOf(settings);
+  return [details.accountHolder, details.accountNumber, details.bankName, details.bicSwift].some(
+    (value) => !!value.trim(),
+  );
 }
 
 /** The parts of the page saved one after another, each by its own endpoint. */

@@ -362,6 +362,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   // puts the form back; the windows card's state lives here for the same Save.
   const [paymentBaseline, setPaymentBaseline] = useState<PaymentsForm | null>(null);
   const [paymentsSaveStatus, setPaymentsSaveStatus] = useState<PaymentsSaveStatus | null>(null);
+  const paymentsSaveRunning = useRef(false);
   const paymentWindows = usePaymentWindows(activeSection === "payments" ? billingPropertyId : null);
   const [savedPropertyName, setSavedPropertyName] = useState("");
   // Null until the public profile loads, so a failed read can never save over the text.
@@ -496,6 +497,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     setPaymentSettingsLoaded(false);
     setPaymentCurrency(null);
     setOfferedMethods(null);
+    setPaymentBaseline(null);
+    setPaymentsSaveStatus(null);
     setBillingPlanLoading(true);
     setAcceptanceLoading(true);
     setAcceptanceMode(null);
@@ -907,6 +910,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
    * everything is saved (Stripe Connect continues from there).
    */
   const savePayments = async (): Promise<string | null> => {
+    // One save at a time (Save and Connect Stripe both run it).
+    if (paymentsSaveRunning.current) return null;
     setPaymentsSaveStatus(null);
     setPaymentError("");
     setPaymentSuccess("");
@@ -917,7 +922,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     if (!paymentsReady || !paymentCurrency || !paymentBaseline) {
       return refuse("admin.paymentSettingsDidNotLoadRefreshBeforeSavingPayments");
     }
+    // Only a change to the methods sends the provider; windows and bank details still save.
     if (
+      paymentMethodsChanged &&
       settings.online_card_payment &&
       (paymentProvider === "xendit" || paymentProvider === "vayada")
     ) {
@@ -946,10 +953,14 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         commandPrefix: `settings-payment-settings-${hotelId}`,
       });
     const bankDetails = bankDetailsOf(settings);
+    // The owner-only bank account is touched only when bank transfer or its details changed.
+    const bankChanged =
+      (settings.bank_transfer ?? false) !== paymentBaseline.bankTransfer || bankDetailsChanged;
     const windowsToSave = windowsPlan?.changed ? windowsPlan.next : null;
     // 1. Check everything first.
     if (windowsPlan?.invalid) return refuse("settings.paymentsSave.fixWindows");
     if (
+      bankChanged &&
       bankTransferDetailsIncomplete({
         enabled: settings.bank_transfer ?? false,
         details: bankDetails,
@@ -966,26 +977,32 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       }
     }
 
-    // 2. Save what changed, in order.
+    // 2. Save what changed, in order. A reload meanwhile (another hotel, a Stripe check) brings
+    // the server's state; what this save learned is then not applied over it.
+    paymentsSaveRunning.current = true;
     setSavingPayment(true);
+    const loadVersion = paymentSettingsLoadVersion.current;
+    const current = () => loadVersion === paymentSettingsLoadVersion.current;
     const saved: PaymentsPart[] = [];
     let part: PaymentsPart = "bank";
     try {
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
-      const destination = await saveBankTransferDestination(
-        {
-          get: (path) => apiClient.get(path, omitHotelContext),
-          put: (path, body) => apiClient.put(path, body, omitHotelContext),
-        },
-        {
-          propertyId: propertyLink.propertyId,
-          enabled: settings.bank_transfer ?? false,
-          saved: bankDestination,
-          attempt: bankSaveAttempt.current,
-          details: bankDetails,
-        },
-      );
-      if (destination !== bankDestination) {
+      const destination = bankChanged
+        ? await saveBankTransferDestination(
+            {
+              get: (path) => apiClient.get(path, omitHotelContext),
+              put: (path, body) => apiClient.put(path, body, omitHotelContext),
+            },
+            {
+              propertyId: propertyLink.propertyId,
+              enabled: settings.bank_transfer ?? false,
+              saved: bankDestination,
+              attempt: bankSaveAttempt.current,
+              details: bankDetails,
+            },
+          )
+        : bankDestination;
+      if (destination !== bankDestination && current()) {
         saved.push("bank");
         setBankDestination(destination ?? null);
         setSettings((previous) => ({
@@ -1015,6 +1032,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           await save(false);
         }
         saved.push("methods");
+        if (!current()) return null;
         setPaymentBaseline(paymentsForm);
         setPlainPayAtHotel(keptPlain);
         setOfferedMethods({
@@ -1038,8 +1056,10 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           windows: windowsToSave,
         });
         saved.push("windows");
+        if (!current()) return null;
         paymentWindows.apply(response.windows);
       }
+      if (!current()) return null;
       setPaymentsSaveStatus({ kind: "saved" });
       return propertyLink.propertyId;
     } catch (error) {
@@ -1056,6 +1076,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       });
       return null;
     } finally {
+      paymentsSaveRunning.current = false;
       setSavingPayment(false);
     }
   };
