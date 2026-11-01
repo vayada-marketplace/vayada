@@ -29,7 +29,20 @@ const minor = (value: unknown) =>
  * idempotent, and a dispute phase writes one ledger row. Anything that can't be applied but
  * involves money is logged (ids only) for a person; a thrown error makes Stripe retry. */
 export async function handleVayadaPaymentWebhookEvent(
-  pool: Pick<pg.Pool, "connect" | "query">,
+  pool: Pick<pg.Pool, "connect">,
+  event: StripeEvent,
+  log: Log,
+): Promise<VayadaPaymentWebhookResult> {
+  const client = await pool.connect();
+  try {
+    return await handle(client, event, log);
+  } finally {
+    client.release();
+  }
+}
+
+async function handle(
+  client: pg.PoolClient,
   event: StripeEvent,
   log: Log,
 ): Promise<VayadaPaymentWebhookResult> {
@@ -37,13 +50,12 @@ export async function handleVayadaPaymentWebhookEvent(
   const object = record(event.data?.object);
   if (type === "payment_intent.succeeded" || type === "payment_intent.amount_capturable_updated") {
     const paymentIntentId = text(object["id"]);
-    const payment = paymentIntentId ? await findPayment(pool, paymentIntentId) : null;
+    const payment = paymentIntentId ? await findPayment(client, paymentIntentId) : null;
     if (!payment) return "ignored";
     const succeeded = type === "payment_intent.succeeded";
     const amountMinor = minor(succeeded ? object["amount_received"] : object["amount_capturable"]);
     const currency = text(object["currency"]);
     if (amountMinor === null || !currency) throw new Error("Stripe sent an invalid PaymentIntent.");
-    const client = await pool.connect();
     try {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
       const input = { paymentIntentId: paymentIntentId!, amountMinor, currency };
@@ -53,23 +65,22 @@ export async function handleVayadaPaymentWebhookEvent(
       return "handled";
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
-      // The booking can no longer take this payment (expired, cancelled): a person must look.
-      if (error instanceof PricingCardPaymentError && error.code === "unavailable") {
+      if (!(error instanceof PricingCardPaymentError && error.code === "unavailable")) throw error;
+      // A late or repeated event for a payment that's already settled, refunded or cancelled
+      // needs nothing. Money held or taken for a booking that can't take it needs a person.
+      const status = (await findPayment(client, paymentIntentId!))?.status;
+      if (status === "requires_action" || status === "authorized")
         log.warn(
           { propertyId: payment.propertyId, paymentId: payment.id, eventId: text(event.id), type },
-          "vayada Payment: Stripe reports money for a booking that can't take it; refund the guest",
+          "vayada Payment: Stripe reports money for a booking that can't take it; check it in Stripe",
         );
-        return "ignored";
-      }
-      throw error;
-    } finally {
-      client.release();
+      return "ignored";
     }
   }
   if (type === "charge.dispute.funds_withdrawn" || type === "charge.dispute.funds_reinstated") {
     const disputeId = text(object["id"]);
     const paymentIntentId = text(object["payment_intent"]);
-    const payment = paymentIntentId ? await findPayment(pool, paymentIntentId) : null;
+    const payment = paymentIntentId ? await findPayment(client, paymentIntentId) : null;
     if (!disputeId || !payment) return "ignored";
     const amountMinor = minor(object["amount"]);
     if (amountMinor === null || text(object["currency"])?.toUpperCase() !== payment.currency)
@@ -85,13 +96,13 @@ export async function handleVayadaPaymentWebhookEvent(
     const charged = withdrawn ? Math.max(fee, 0) : Math.max(-fee, 0);
     const stripeFeeMinor = transaction
       ? stayCurrencyFee(transaction, charged, payment.currency)
-      : 0;
+      : null;
     if (stripeFeeMinor === null)
       log.warn(
-        { propertyId: payment.propertyId, paymentId: payment.id, disputeId },
-        "vayada Payment: dispute fee not in the stay's currency; add it to the hotel's balance by hand",
+        { propertyId: payment.propertyId, paymentId: payment.id, disputeId, type },
+        "vayada Payment: dispute fee unknown in the stay's currency; adjust the hotel's balance by hand",
       );
-    await recordVayadaPaymentDispute(pool as Pick<pg.PoolClient, "query">, {
+    const recorded = await recordVayadaPaymentDispute(client, {
       propertyId: payment.propertyId,
       guestBookingId: payment.guestBookingId,
       paymentId: payment.id,
@@ -102,11 +113,19 @@ export async function handleVayadaPaymentWebhookEvent(
       stripeFeeMinor: stripeFeeMinor ?? 0,
       livemode: event.livemode === true,
     });
+    if (recorded === "no_charge") {
+      // The hotel was never credited this payment, so it can't owe the dispute.
+      log.warn(
+        { propertyId: payment.propertyId, paymentId: payment.id, disputeId, type },
+        "vayada Payment: dispute on a payment the hotel was never credited; Vayada handles it",
+      );
+      return "ignored";
+    }
     return "handled";
   }
   if (type === "charge.dispute.created" || type === "charge.dispute.closed") {
     const paymentIntentId = text(object["payment_intent"]);
-    const payment = paymentIntentId ? await findPayment(pool, paymentIntentId) : null;
+    const payment = paymentIntentId ? await findPayment(client, paymentIntentId) : null;
     if (!payment) return "ignored";
     // Vayada answers disputes on its own account, with the hotel's information (terms §5).
     log.warn(
@@ -127,11 +146,11 @@ export async function handleVayadaPaymentWebhookEvent(
 }
 
 /** The vayada Payment charge behind a PaymentIntent of Vayada's own account, if any. */
-async function findPayment(pool: Pick<pg.Pool, "query">, paymentIntentId: string) {
+async function findPayment(client: Pick<pg.PoolClient, "query">, paymentIntentId: string) {
   const row = (
-    await pool.query(
+    await client.query(
       `SELECT id::text,property_id::text AS "propertyId",guest_booking_id::text AS "guestBookingId",
-         trim(currency) AS currency
+         trim(currency) AS currency,status
        FROM finance.payments
        WHERE provider_payment_intent_id=$1 AND payment_method='card'
          AND payment_kind IN ('full','deposit')
@@ -140,7 +159,13 @@ async function findPayment(pool: Pick<pg.Pool, "query">, paymentIntentId: string
     )
   ).rows;
   return row.length === 1
-    ? (row[0] as { id: string; propertyId: string; guestBookingId: string; currency: string })
+    ? (row[0] as {
+        id: string;
+        propertyId: string;
+        guestBookingId: string;
+        currency: string;
+        status: string;
+      })
     : null;
 }
 

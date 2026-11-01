@@ -615,6 +615,20 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           )
         ).rows;
 
+      // A dispute before the hotel was ever credited the payment takes nothing from it.
+      await expect(
+        event("charge.dispute.funds_withdrawn", {
+          id: "dp_before_credit",
+          amount: amountMinor,
+          currency: currency.toLowerCase(),
+          payment_intent: "pi_writer_test",
+          balance_transactions: [
+            { amount: -amountMinor, fee: 1500, currency: currency.toLowerCase() },
+          ],
+        }),
+      ).resolves.toBe("ignored");
+      expect(await ledger()).toEqual([]);
+
       // The guest closed the tab after paying: the webhook confirms the booking, once.
       const succeeded = {
         id: "pi_writer_test",
@@ -722,13 +736,21 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       );
       const balance = (
         await fixture.observer.query(
-          "SELECT sum(net_minor)::int AS owed FROM finance.hotel_payout_ledger WHERE property_id=$1",
+          `SELECT sum(net_minor)::int AS owed,count(DISTINCT stay_check_out)::int AS windows,
+             bool_and(stay_check_out IS NOT NULL) AS dated
+           FROM finance.hotel_payout_ledger WHERE property_id=$1`,
           [fixture.propertyId],
         )
-      ).rows[0].owed;
+      ).rows[0];
+      // Refunds and disputes net in the charge's payout window.
+      expect(balance).toMatchObject({ windows: 1, dated: true });
+      // A late copy of the payment event after the refund needs nothing and alarms nobody.
+      log.warn.mockClear();
+      await event("payment_intent.succeeded", succeeded);
+      expect(log.warn).not.toHaveBeenCalled();
       // Fully refunded and the dispute lost then won: the hotel owes the vayada Payment fee and
       // Stripe's dispute fee.
-      expect(balance).toBe(-vayadaFee - 1500);
+      expect(balance.owed).toBe(-vayadaFee - 1500);
     } finally {
       await fixture.close();
     }

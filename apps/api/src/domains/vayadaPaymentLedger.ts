@@ -71,7 +71,7 @@ export async function recordVayadaPaymentRefund(
   if (paid <= 0n || refund <= 0n || refund > paid || planFee > paid)
     throw new Error("vayada Payment refund is invalid for the payout ledger.");
   const planFeeBack = (planFee * refund * 2n + paid) / (2n * paid);
-  await insertEntry(client, {
+  const result = await insertEntry(client, {
     propertyId: input.propertyId,
     kind: "refund",
     currency: input.currency,
@@ -83,6 +83,9 @@ export async function recordVayadaPaymentRefund(
     sourceKey: `refund:${input.refundCommandId}`,
     onConflict: "fail",
   });
+  // A refunded vayada payment was paid, so its charge row exists; anything else needs a person.
+  if (result === "no_charge")
+    throw new Error("vayada Payment refund has no charge in the payout ledger.");
 }
 
 /** A guest's card dispute on a vayada Payment charge moved money (VAY-2442). Withdrawn: the
@@ -103,7 +106,7 @@ export async function recordVayadaPaymentDispute(
     stripeFeeMinor: number;
     livemode: boolean;
   },
-): Promise<"recorded" | "already_recorded"> {
+): Promise<"recorded" | "already_recorded" | "no_charge"> {
   if (
     !Number.isSafeInteger(input.amountMinor) ||
     input.amountMinor <= 0 ||
@@ -128,6 +131,9 @@ export async function recordVayadaPaymentDispute(
   });
 }
 
+/** Refunds and disputes net against the charge they belong to: same stay check-out (the payout
+ * window), same currency. Without that charge the hotel was never credited the money, so
+ * nothing is taken from it: "no_charge". */
 async function insertEntry(
   client: Pick<pg.PoolClient, "query">,
   entry: {
@@ -142,21 +148,35 @@ async function insertEntry(
     sourceKey: string;
     onConflict: "fail" | "ignore";
   },
-): Promise<"recorded" | "already_recorded"> {
+): Promise<"recorded" | "already_recorded" | "no_charge"> {
+  const currency = entry.currency.trim().toUpperCase();
+  const charge = (
+    await client.query<{ checkOut: string; currency: string }>(
+      `SELECT stay_check_out::text AS "checkOut", trim(currency) AS currency
+       FROM finance.hotel_payout_ledger
+       WHERE payment_id=$1::uuid AND property_id=$2::uuid AND entry_kind='charge'`,
+      [entry.paymentId, entry.propertyId],
+    )
+  ).rows[0];
+  if (!charge) return "no_charge";
+  if (charge.currency !== currency)
+    throw new Error("vayada Payment ledger entry is in another currency than its charge.");
   const inserted = await client.query(
     `INSERT INTO finance.hotel_payout_ledger (property_id, entry_kind, currency, gross_minor,
-       fee_minor, net_minor, guest_booking_id, payment_id, livemode, source_key, occurred_at)
-     VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8::uuid, $9, $10, clock_timestamp())
+       fee_minor, net_minor, guest_booking_id, payment_id, stay_check_out, livemode, source_key,
+       occurred_at)
+     VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8::uuid, $9::date, $10, $11, clock_timestamp())
      ${entry.onConflict === "ignore" ? "ON CONFLICT (source_key) DO NOTHING" : ""}`,
     [
       entry.propertyId,
       entry.kind,
-      entry.currency.trim().toUpperCase(),
+      currency,
       entry.gross.toString(),
       entry.fee.toString(),
       (entry.gross - entry.fee).toString(),
       entry.guestBookingId,
       entry.paymentId,
+      charge.checkOut,
       entry.livemode,
       entry.sourceKey,
     ],

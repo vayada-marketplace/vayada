@@ -641,7 +641,7 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
       refundCommandId: command.id,
       currency: command.currency,
       paymentAmount: payment.amount,
-      platformFeeAmount: payment.platform_fee_amount ?? "0.00",
+      platformFeeAmount: requiredPlatformFee(payment.platform_fee_amount),
       refundAmount: command.amount,
       livemode: payment.livemode === true,
     });
@@ -653,6 +653,13 @@ async function settleRefund(client: PoolClient, command: Command, refund: Stripe
   );
   await audit(client, command, "finance.card_refund", refund);
   return "succeeded" as const;
+}
+
+/** Every vayada Payment charge records the plan's fee (P3): a missing one is an error, never 0. */
+function requiredPlatformFee(value: unknown): string {
+  if (typeof value !== "string" || !/^\d+\.\d{2}$/.test(value))
+    throw new Error("vayada Payment charge has no recorded plan fee.");
+  return value;
 }
 
 /** A guest who isn't refunded needs a person: the log line carries ids only, no guest data. */

@@ -505,7 +505,7 @@ const bookingDashboardMetricsReadPort =
 
 // VAY-2442: events from vayada Payment's own Stripe account (test mode only), with its secret.
 const vayadaPaymentWebhookPool = config.vayadaPaymentStripe?.webhookSecret
-  ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2 })
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
   : undefined;
 const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
   ? (event: Record<string, unknown>) =>
