@@ -554,8 +554,6 @@ describe("target manual booking fields", () => {
     const field = (label: string) => view.root.findByProps({ "aria-label": label });
     const type = (label: string, value: string) =>
       act(() => field(label).props.onChange({ target: { value } }));
-    const button = (label: string) =>
-      view.root.findAllByType("button").find((item) => item.children.join("") === label)!;
     const headings = () =>
       view.root
         .findAllByProps({ "data-guest-card": true })
