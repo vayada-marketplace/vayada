@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "Füllen Sie alle Felder aus, die nicht als optional markiert sind. Die Kontonummer braucht mindestens 6 Zeichen.",
   "settings.billing.vayadaPayout.saveError": "Das Bankkonto konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.",
   "settings.billing.vayadaPayout.retry": "Erneut versuchen",
-  "settings.billing.vayadaPayout.changeNote": "Auszahlungen gehen ab der nächsten Auszahlung auf das neue Konto.",
+  "settings.billing.vayadaPayout.changeNote": "Vayada prüft das neue Konto vor der nächsten Auszahlung. Kartenzahlungen laufen weiter.",
   "settings.billing.vayadaPayout.conflict": "Das Bankkonto wurde inzwischen geändert. Laden Sie die Seite neu.",
   "settings.billing.vayadaPayout.loadError": "Das Bankkonto konnte nicht geladen werden. Laden Sie die Seite neu.",
   "settings.billing.providerStripe": "Stripe Connect",

@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "请填写所有未标注为可选的字段。账号至少需要 6 位。",
   "settings.billing.vayadaPayout.saveError": "无法保存银行账户。请重试。",
   "settings.billing.vayadaPayout.retry": "重试",
-  "settings.billing.vayadaPayout.changeNote": "从下一笔付款起，款项将支付到新账户。",
+  "settings.billing.vayadaPayout.changeNote": "Vayada 会在下一笔付款前核实新账户。银行卡付款不受影响。",
   "settings.billing.vayadaPayout.conflict": "银行账户已被他人更改。请重新加载页面。",
   "settings.billing.vayadaPayout.loadError": "无法加载银行账户。请重新加载页面。",
   "settings.billing.providerStripe": "条纹连接",

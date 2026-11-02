@@ -30,7 +30,8 @@ type Message = { type: "success" | "error"; key: string };
 
 /** vayada Payment (VAY-2442 P6): how it works and the bank account Vayada pays the hotel out to.
  * The account saves on its own (owner only), apart from the page's Save: adding it is what lets
- * Vayada check the account and switch card payments on; removing it withdraws that approval. */
+ * Vayada check the account and switch card payments on; removing it withdraws that approval.
+ * Replacing it keeps card payments on; Vayada checks the new account before the next payout. */
 export function VayadaPayoutAccountPanel({
   propertyId,
   feePercent,

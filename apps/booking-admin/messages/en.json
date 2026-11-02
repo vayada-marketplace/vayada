@@ -821,7 +821,7 @@
   "settings.billing.vayadaPayout.invalid": "Fill in every field that isn't marked optional. The account number needs at least 6 characters.",
   "settings.billing.vayadaPayout.saveError": "The bank account couldn't be saved. Try again.",
   "settings.billing.vayadaPayout.retry": "Try again",
-  "settings.billing.vayadaPayout.changeNote": "Payouts go to the new account from the next payout on.",
+  "settings.billing.vayadaPayout.changeNote": "Vayada checks the new account before the next payout. Card payments keep working.",
   "settings.billing.vayadaPayout.conflict": "The bank account was changed meanwhile. Reload the page.",
   "settings.billing.vayadaPayout.loadError": "The bank account couldn't be loaded. Reload the page.",
   "settings.billing.providerStripe": "Stripe Connect",

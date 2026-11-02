@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "Remplissez tous les champs qui ne sont pas marqués comme facultatifs. Le numéro de compte doit comporter au moins 6 caractères.",
   "settings.billing.vayadaPayout.saveError": "Le compte bancaire n'a pas pu être enregistré. Réessayez.",
   "settings.billing.vayadaPayout.retry": "Réessayer",
-  "settings.billing.vayadaPayout.changeNote": "Les versements iront sur le nouveau compte à partir du prochain versement.",
+  "settings.billing.vayadaPayout.changeNote": "Vayada vérifie le nouveau compte avant le prochain versement. Les paiements par carte continuent de fonctionner.",
   "settings.billing.vayadaPayout.conflict": "Le compte bancaire a été modifié entre-temps. Rechargez la page.",
   "settings.billing.vayadaPayout.loadError": "Le compte bancaire n'a pas pu être chargé. Rechargez la page.",
   "settings.billing.providerStripe": "Bande Connecter",

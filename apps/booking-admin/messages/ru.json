@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "Заполните все поля, кроме необязательных. Номер счёта должен содержать не менее 6 символов.",
   "settings.billing.vayadaPayout.saveError": "Не удалось сохранить банковский счёт. Попробуйте ещё раз.",
   "settings.billing.vayadaPayout.retry": "Повторить",
-  "settings.billing.vayadaPayout.changeNote": "Выплаты будут поступать на новый счёт начиная со следующей выплаты.",
+  "settings.billing.vayadaPayout.changeNote": "Vayada проверит новый счёт перед следующей выплатой. Оплата картой продолжает работать.",
   "settings.billing.vayadaPayout.conflict": "Банковский счёт тем временем изменился. Обновите страницу.",
   "settings.billing.vayadaPayout.loadError": "Не удалось загрузить банковский счёт. Обновите страницу.",
   "settings.billing.providerStripe": "Полоса подключения",

@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "Vul alle velden in die niet als optioneel zijn gemarkeerd. Het rekeningnummer heeft minstens 6 tekens nodig.",
   "settings.billing.vayadaPayout.saveError": "De bankrekening kon niet worden opgeslagen. Probeer het opnieuw.",
   "settings.billing.vayadaPayout.retry": "Opnieuw proberen",
-  "settings.billing.vayadaPayout.changeNote": "Uitbetalingen gaan vanaf de volgende uitbetaling naar de nieuwe rekening.",
+  "settings.billing.vayadaPayout.changeNote": "Vayada controleert de nieuwe rekening vóór de volgende uitbetaling. Kaartbetalingen blijven werken.",
   "settings.billing.vayadaPayout.conflict": "De bankrekening is intussen gewijzigd. Laad de pagina opnieuw.",
   "settings.billing.vayadaPayout.loadError": "De bankrekening kon niet worden geladen. Laad de pagina opnieuw.",
   "settings.billing.providerStripe": "Streep verbinding",

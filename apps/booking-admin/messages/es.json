@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "Rellena todos los campos que no estén marcados como opcionales. El número de cuenta necesita al menos 6 caracteres.",
   "settings.billing.vayadaPayout.saveError": "No se pudo guardar la cuenta bancaria. Inténtalo de nuevo.",
   "settings.billing.vayadaPayout.retry": "Reintentar",
-  "settings.billing.vayadaPayout.changeNote": "Los pagos irán a la nueva cuenta a partir del próximo pago.",
+  "settings.billing.vayadaPayout.changeNote": "Vayada revisa la nueva cuenta antes del próximo pago. Los pagos con tarjeta siguen funcionando.",
   "settings.billing.vayadaPayout.conflict": "La cuenta bancaria ha cambiado mientras tanto. Vuelve a cargar la página.",
   "settings.billing.vayadaPayout.loadError": "No se pudo cargar la cuenta bancaria. Vuelve a cargar la página.",
   "settings.billing.providerStripe": "Conexión de rayas",

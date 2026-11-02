@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "任意と記載されていない項目をすべて入力してください。口座番号は6文字以上必要です。",
   "settings.billing.vayadaPayout.saveError": "銀行口座を保存できませんでした。もう一度お試しください。",
   "settings.billing.vayadaPayout.retry": "再試行",
-  "settings.billing.vayadaPayout.changeNote": "次回のお支払いから新しい口座にお支払いします。",
+  "settings.billing.vayadaPayout.changeNote": "次回のお支払いの前に、Vayadaが新しい口座を確認します。カード決済はそのままご利用いただけます。",
   "settings.billing.vayadaPayout.conflict": "その間に銀行口座が変更されました。ページを再読み込みしてください。",
   "settings.billing.vayadaPayout.loadError": "銀行口座を読み込めませんでした。ページを再読み込みしてください。",
   "settings.billing.providerStripe": "ストライプコネクト",

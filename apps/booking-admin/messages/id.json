@@ -819,7 +819,7 @@
   "settings.billing.vayadaPayout.invalid": "Isi semua kolom yang tidak ditandai opsional. Nomor rekening minimal 6 karakter.",
   "settings.billing.vayadaPayout.saveError": "Rekening bank tidak dapat disimpan. Coba lagi.",
   "settings.billing.vayadaPayout.retry": "Coba lagi",
-  "settings.billing.vayadaPayout.changeNote": "Pembayaran masuk ke rekening baru mulai pembayaran berikutnya.",
+  "settings.billing.vayadaPayout.changeNote": "Vayada memeriksa rekening baru sebelum pembayaran berikutnya. Pembayaran kartu tetap berjalan.",
   "settings.billing.vayadaPayout.conflict": "Rekening bank telah diubah sementara itu. Muat ulang halaman.",
   "settings.billing.vayadaPayout.loadError": "Rekening bank tidak dapat dimuat. Muat ulang halaman.",
   "settings.billing.providerStripe": "Sambungan Garis",

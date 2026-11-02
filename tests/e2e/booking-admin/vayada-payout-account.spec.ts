@@ -55,7 +55,9 @@ test("an owner adds the bank account vayada Payment pays out to, and removes it 
   // Sri Lankan banks use a branch code instead.
   await page.getByRole("button", { name: "Change", exact: true }).click();
   await expect(
-    page.getByText("Payouts go to the new account from the next payout on."),
+    page.getByText(
+      "Vayada checks the new account before the next payout. Card payments keep working.",
+    ),
   ).toBeVisible();
   await page.getByLabel("Country of the bank").selectOption("LK");
   await expect(page.getByLabel("Branch code")).toBeVisible();
