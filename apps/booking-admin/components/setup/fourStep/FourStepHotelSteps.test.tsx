@@ -38,7 +38,7 @@ const SAVED: CanonicalRoomAuthoringState = {
     bathrooms: 2,
     bathroomType: "private",
     size: { value: 85, unit: "sqm" },
-  } as CanonicalRoomAuthoringState["facts"],
+  } as unknown as CanonicalRoomAuthoringState["facts"],
   activeUnitCount: 2,
   photos: [],
   amenityKeys: [],
