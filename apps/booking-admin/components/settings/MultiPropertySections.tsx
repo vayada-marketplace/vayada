@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDownIcon, ChevronUpIcon, EllipsisVerticalIcon } from "@heroicons/react/24/outline";
 import {
   ACCOUNT_BOOKING_PAGE_FILTERS,
@@ -12,12 +12,15 @@ import { SHARED_PROPERTY_TYPE_OPTIONS } from "@vayada/domain-hotels";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import {
   contactValue,
+  controlFree,
   filterSplit,
   includeAllReady,
   moveIncluded,
   orderedProperties,
   propertyStatus,
   setIncluded,
+  validEmail,
+  validWhatsapp,
   type AccountBookingPageDraft,
   type DraftProblem,
   type PropertyStatus,
@@ -76,7 +79,7 @@ function Section({
       className="flex scroll-mt-6 flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-4 sm:p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-[1_1_16rem]">
+        <div className="min-w-0 flex-1">
           <h2 id={`mp-${id}-title`} className="text-[17px] font-semibold text-gray-900">
             {title}
           </h2>
@@ -113,34 +116,39 @@ function Switches({
   );
 }
 
+/** A labelled control; the hint and any error describe it. `row`: it shares a line with others. */
 function Field({
   label,
   hint,
   error,
+  row = false,
   children,
 }: {
   label: string;
   hint?: string;
   error?: string | null;
-  children: (describedBy: string | undefined) => React.ReactNode;
+  row?: boolean;
+  children: (control: { id: string; describedBy: string | undefined }) => React.ReactNode;
 }) {
   const id = useId();
   const describedBy = [hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(" ");
   return (
-    <label className="flex min-w-0 flex-[1_1_16rem] flex-col gap-1.5 text-[14px] font-semibold text-gray-900">
-      {label}
+    <div className={`flex min-w-0 flex-col gap-1.5 text-[14px] ${row ? "flex-[1_1_16rem]" : ""}`}>
+      <label htmlFor={id} className="font-semibold text-gray-900">
+        {label}
+      </label>
       {hint && (
-        <span id={`${id}-hint`} className="font-normal text-gray-500">
+        <span id={`${id}-hint`} className="text-gray-500">
           {hint}
         </span>
       )}
-      {children(describedBy || undefined)}
+      {children({ id, describedBy: describedBy || undefined })}
       {error && (
-        <span id={`${id}-error`} className="font-normal text-red-700">
+        <span id={`${id}-error`} className="text-red-700">
           {error}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 
@@ -205,15 +213,16 @@ export function PageSection({
         hint={t("settings.multiProperty.page.titleHint")}
         error={titleError}
       >
-        {(describedBy) => (
+        {({ id, describedBy }) => (
           <input
+            id={id}
             type="text"
             value={page.title}
             maxLength={120}
             disabled={disabled}
             aria-invalid={!!titleError}
             aria-describedby={describedBy}
-            onChange={(event) => setPage({ title: event.target.value })}
+            onChange={(event) => setPage({ title: controlFree(event.target.value) })}
             className={inputClass}
           />
         )}
@@ -227,16 +236,15 @@ export function PageSection({
             : null
         }
       >
-        {(describedBy) => (
+        {({ id, describedBy }) => (
           <textarea
+            id={id}
             rows={2}
             value={page.description}
             disabled={disabled}
             aria-describedby={describedBy}
             // One line: guests and link previews show it as one.
-            onChange={(event) =>
-              setPage({ description: event.target.value.replace(/\s*\n\s*/g, " ") })
-            }
+            onChange={(event) => setPage({ description: controlFree(event.target.value) })}
             className={`${inputClass} resize-y py-2.5`}
           />
         )}
@@ -246,7 +254,7 @@ export function PageSection({
         hint={t("settings.multiProperty.page.linkHint")}
         error={problems.has("invalidSlug") ? t("settings.multiProperty.error.invalidSlug") : null}
       >
-        {(describedBy) => (
+        {({ id, describedBy }) => (
           <span className="flex flex-wrap items-stretch gap-2">
             <span className="flex min-h-[44px] min-w-0 flex-[1_1_16rem] items-stretch overflow-hidden rounded-lg border border-gray-300 font-normal focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500/30">
               {address.before.replace(/^https?:\/\//, "") && (
@@ -255,6 +263,7 @@ export function PageSection({
                 </span>
               )}
               <input
+                id={id}
                 type="text"
                 value={draft.slug}
                 disabled={disabled}
@@ -275,18 +284,24 @@ export function PageSection({
               disabled={!address.url}
               onClick={() => {
                 if (!address.url) return;
-                void copyText(address.url).then(() => setCopied(true));
+                copyText(address.url).then(
+                  () => {
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 3000);
+                  },
+                  () => setCopied(false),
+                );
               }}
               className="min-h-[44px] shrink-0 rounded-full border border-gray-300 bg-white px-4 text-[14px] font-semibold text-gray-900 hover:border-gray-500 disabled:opacity-50"
             >
               {t("settings.multiProperty.page.copy")}
             </button>
+            <span role="status" className="self-center text-[13px] font-medium text-green-700">
+              {copied ? t("settings.multiProperty.page.copied") : ""}
+            </span>
           </span>
         )}
       </Field>
-      <p className="sr-only" aria-live="polite">
-        {copied ? t("settings.multiProperty.page.copied") : ""}
-      </p>
     </Section>
   );
 }
@@ -304,7 +319,19 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
     label: t(`settings.multiProperty.header.${key}`),
     description: t(`settings.multiProperty.header.${key}Hint`),
     enabled: header[key],
-    toggle: () => setHeader({ [key]: !header[key] }),
+    toggle: () =>
+      setHeader(
+        key === "contact" && header.contact
+          ? // Hidden fields can't hold what next-api refuses: keep only valid values.
+            {
+              contact: false,
+              contactEmail: validEmail(header.contactEmail) ? header.contactEmail : null,
+              contactWhatsapp: validWhatsapp(header.contactWhatsapp)
+                ? header.contactWhatsapp
+                : null,
+            }
+          : { [key]: !header[key] },
+      ),
   }));
   return (
     <Section
@@ -333,9 +360,10 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
         </div>
       </div>
       <div className="flex flex-wrap gap-4">
-        <Field label={t("settings.multiProperty.header.topLeft")}>
-          {() => (
+        <Field label={t("settings.multiProperty.header.topLeft")} row>
+          {({ id }) => (
             <select
+              id={id}
               value={header.topLeft}
               disabled={disabled}
               onChange={(event) => setHeader({ topLeft: event.target.value as "name" | "logo" })}
@@ -350,9 +378,10 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
             </select>
           )}
         </Field>
-        <Field label={t("settings.multiProperty.header.design")}>
-          {() => (
+        <Field label={t("settings.multiProperty.header.design")} row>
+          {({ id }) => (
             <select
+              id={id}
               value={header.designPropertyId ?? ""}
               disabled={disabled}
               onChange={(event) => setHeader({ designPropertyId: event.target.value || null })}
@@ -372,6 +401,7 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
       {header.contact && (
         <div className="flex flex-wrap gap-4">
           <Field
+            row
             label={t("settings.multiProperty.header.contactEmail")}
             error={
               problems.has("invalidEmail")
@@ -381,8 +411,9 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
                   : null
             }
           >
-            {(describedBy) => (
+            {({ id, describedBy }) => (
               <input
+                id={id}
                 type="email"
                 value={header.contactEmail ?? ""}
                 disabled={disabled}
@@ -397,6 +428,7 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
             )}
           </Field>
           <Field
+            row
             label={t("settings.multiProperty.header.whatsapp")}
             hint={t("settings.multiProperty.header.whatsappHint")}
             error={
@@ -405,8 +437,9 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
                 : null
             }
           >
-            {(describedBy) => (
+            {({ id, describedBy }) => (
               <input
+                id={id}
                 type="tel"
                 value={header.contactWhatsapp ?? ""}
                 disabled={disabled}
@@ -429,11 +462,26 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
 export function PropertiesSection({ t, draft, setDraft, summary, disabled }: SectionProps) {
   const [announcement, setAnnouncement] = useState("");
   const [dragging, setDragging] = useState<string | null>(null);
+  const list = useRef<HTMLUListElement>(null);
+  // The Move button pressed last: its row moves, so focus follows it there (or to the other button
+  // once that end of the list disables it).
+  const pressed = useRef<{ propertyId: string; step: -1 | 1 } | null>(null);
   const rows = orderedProperties(summary.properties, draft.propertyIds);
   const total = draft.propertyIds.length;
-  const move = (property: AccountBookingPageProperty, to: number) => {
+  useEffect(() => {
+    const last = pressed.current;
+    if (!last || !list.current) return;
+    pressed.current = null;
+    const button = (step: number) =>
+      list.current?.querySelector<HTMLButtonElement>(
+        `[data-move="${last.propertyId}:${step}"]:not(:disabled)`,
+      );
+    (button(last.step) ?? button(-last.step))?.focus();
+  }, [draft.propertyIds]);
+  const move = (property: AccountBookingPageProperty, to: number, step?: -1 | 1) => {
     const propertyIds = moveIncluded(draft.propertyIds, property.propertyId, to);
     if (propertyIds.join() === draft.propertyIds.join()) return;
+    if (step) pressed.current = { propertyId: property.propertyId, step };
     setDraft({ ...draft, propertyIds });
     setAnnouncement(
       t("settings.multiProperty.properties.moved", {
@@ -478,13 +526,16 @@ export function PropertiesSection({ t, draft, setDraft, summary, disabled }: Sec
       <p className="sr-only" aria-live="polite">
         {announcement}
       </p>
-      <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
+      <ul
+        ref={list}
+        className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200"
+      >
         {rows.map((property) => {
           const index = draft.propertyIds.indexOf(property.propertyId);
           const included = index >= 0;
           const status = propertyStatus(property, included);
-          // A stay that isn't ready can't join; one included earlier can still leave.
-          const locked = disabled || (!included && !property.ready);
+          // A stay that isn't ready can't join; one included in the saved page can leave and come back.
+          const locked = disabled || (!included && !property.ready && !property.included);
           return (
             <li
               key={property.propertyId}
@@ -530,10 +581,11 @@ export function PropertiesSection({ t, draft, setDraft, summary, disabled }: Sec
                     <button
                       key={step}
                       type="button"
+                      data-move={`${property.propertyId}:${step}`}
                       aria-label={t(label, { name: property.name })}
                       disabled={!included || disabled || index + step < 0 || index + step >= total}
-                      onClick={() => move(property, index + step)}
-                      className="flex h-[22px] w-8 items-center justify-center rounded text-gray-400 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-30"
+                      onClick={() => move(property, index + step, step)}
+                      className="flex h-6 w-8 items-center justify-center rounded text-gray-400 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-30"
                     >
                       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>

@@ -1,6 +1,7 @@
 import {
-  parseAccountBookingPageSettings,
+  defaultAccountBookingPageSettings,
   parseAccountBookingPageSlug,
+  readAccountBookingPageSettings,
   type AccountBookingPageSettings,
   type AccountBookingPageUpdate,
 } from "@vayada/domain-booking/account-booking-page";
@@ -46,10 +47,17 @@ function parseProperty(v: unknown): AccountBookingPageProperty | null {
     typeof v.name !== "string" ||
     typeof v.ready !== "boolean" ||
     typeof v.included !== "boolean" ||
-    !Array.isArray(v.missing) ||
-    !v.missing.every((item) => MISSING.has(item as string))
+    !Array.isArray(v.missing)
   )
     return null;
+  // A reason this Booking Admin doesn't know yet (next-api may ship first) reads as "not set up".
+  const known = v.missing.filter(
+    (item): item is AccountBookingPageMissing => typeof item === "string" && MISSING.has(item),
+  );
+  const missing =
+    known.length < v.missing.length && !known.includes("setup")
+      ? ["setup" as const, ...known]
+      : known;
   const photoUrl = text(v.photoUrl);
   return {
     propertyId: v.propertyId,
@@ -60,23 +68,27 @@ function parseProperty(v: unknown): AccountBookingPageProperty | null {
     photoUrl: photoUrl?.startsWith("https://") ? photoUrl : null,
     units: typeof v.units === "number" && Number.isInteger(v.units) && v.units > 0 ? v.units : 0,
     ready: v.ready,
-    missing: v.missing as AccountBookingPageMissing[],
+    missing,
     included: v.included,
   };
 }
 
-/** The summary next-api sends, checked with the same rules it saves by. */
+/** The summary next-api sends. Settings are read as next-api reads stored ones (unknown keys dropped,
+ * a broken field back to its default), so a newer next-api never locks Booking Admin out; saving is
+ * still checked strictly. */
 export function parseAccountBookingPageSummary(v: unknown): AccountBookingPageSummary | null {
   if (!record(v) || !record(v.page) || typeof v.saved !== "boolean") return null;
   if (typeof v.canSave !== "boolean" || !Array.isArray(v.properties)) return null;
   const { page } = v;
-  const settings = parseAccountBookingPageSettings(page.settings);
-  const defaults = parseAccountBookingPageSettings(v.defaults);
+  if (!record(page.settings) || !record(v.defaults)) return null;
+  const defaults = readAccountBookingPageSettings(
+    v.defaults,
+    defaultAccountBookingPageSettings(""),
+  );
+  const settings = readAccountBookingPageSettings(page.settings, defaults);
   const slug = parseAccountBookingPageSlug(page.slug);
   const properties = v.properties.map(parseProperty);
   if (
-    !settings ||
-    !defaults ||
     !slug ||
     typeof page.live !== "boolean" ||
     typeof page.revision !== "number" ||

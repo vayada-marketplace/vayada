@@ -47,20 +47,27 @@ describe("account booking page client", () => {
     expect(parsed?.properties[0]).toMatchObject({ photoUrl: null, units: 0 });
   });
 
-  it("refuses a summary its own rules wouldn't save", () => {
+  it("reads settings as next-api reads stored ones, so a newer next-api can't lock it out", () => {
+    const parsed = parseAccountBookingPageSummary({
+      ...summary,
+      page: {
+        ...summary.page,
+        settings: { ...defaults, layout: { allowed: ["grid"], default: "grid" }, newSection: {} },
+      },
+      properties: [{ ...summary.properties[0], ready: false, missing: ["prices", "type"] }],
+    });
+    expect(parsed?.page.settings).toEqual(defaults);
+    expect(parsed?.properties[0]?.missing).toEqual(["setup", "type"]);
+  });
+
+  it("refuses a summary it can't read at all", () => {
     for (const broken of [
       null,
       { ...summary, saved: "yes" },
       { ...summary, page: { ...summary.page, slug: "The Travel Ubud" } },
-      {
-        ...summary,
-        page: {
-          ...summary.page,
-          settings: { ...defaults, layout: { allowed: ["map"], default: "map" } },
-        },
-      },
-      { ...summary, defaults: {} },
-      { ...summary, properties: [{ ...summary.properties[0], missing: ["photos"] }] },
+      { ...summary, defaults: "none" },
+      { ...summary, page: { ...summary.page, settings: null } },
+      { ...summary, properties: [{ ...summary.properties[0], missing: "photos" }] },
       { ...summary, properties: "none" },
     ])
       expect(parseAccountBookingPageSummary(broken), JSON.stringify(broken)).toBeNull();

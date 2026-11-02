@@ -22,7 +22,7 @@ export type AccountBookingPageProperty = {
   name: string;
   propertyType: string | null;
   area: string | null;
-  /** The stay's own booking page hero image, else its first room photo (Booking Admin's list). */
+  /** The published booking page's hero image, else its first room photo (Booking Admin's list). */
   photoUrl: string | null;
   /** Rooms or villas in the PMS, retired ones left out. */
   units: number;
@@ -323,11 +323,11 @@ async function propertyRows(client: Queryable, organizationId: string): Promise<
             property.property_type AS "propertyType", location.area,
             property.lifecycle_status = 'active' AS active,
             (location.latitude IS NOT NULL AND location.longitude IS NOT NULL) AS located,
-            COALESCE(
-              CASE WHEN settings.hero_image_url LIKE 'https://%' THEN settings.hero_image_url END,
-              CASE WHEN revision.public_content #>> '{rooms,0,images,0,url}' LIKE 'https://%'
-                THEN revision.public_content #>> '{rooms,0,images,0,url}' END
-            ) AS "photoUrl",
+            (SELECT photo FROM unnest(ARRAY[
+               revision.public_content #>> '{profile,hotel,branding,heroImage}',
+               revision.public_content #>> '{rooms,0,images,0,url}'
+             ]) WITH ORDINALITY AS candidate(photo, rank)
+             WHERE photo LIKE 'https://%' ORDER BY rank LIMIT 1) AS "photoUrl",
             (SELECT count(*)::int FROM pms.rooms room
              WHERE room.property_id = property.id AND room.status <> 'retired') AS units,
             revision.public_content AS "publicContent",
@@ -335,7 +335,6 @@ async function propertyRows(client: Queryable, organizationId: string): Promise<
             included.position
      FROM hotel_catalog.properties property
      LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
-     LEFT JOIN booking.booking_settings settings ON settings.property_id = property.id
      LEFT JOIN distribution.active_public_booking_revision active
        ON active.property_id = property.id
      LEFT JOIN distribution.public_booking_content_revisions revision

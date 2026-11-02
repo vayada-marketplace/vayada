@@ -76,6 +76,7 @@ async function setup(
     route.fulfill({ contentType: "image/png", body: PNG }),
   );
   const mock: Mock = { summary, saves: [] };
+  let refused = false;
   // The API is another origin: the browser asks first (OPTIONS) and needs CORS headers.
   await page.route(`**${ACCOUNT_BOOKING_PAGE_PATH}`, async (route) => {
     const method = route.request().method();
@@ -84,7 +85,8 @@ async function setup(
     if (method === "PUT") {
       const body = route.request().postDataJSON() as AccountBookingPageUpdate;
       mock.saves.push(body);
-      if (putError) {
+      if (putError && !refused) {
+        refused = true;
         if (afterConflict) mock.summary = afterConflict;
         return route.fulfill({
           status: putError.status,
@@ -108,6 +110,16 @@ async function setup(
 
 const row = (page: Page, propertyId: string) =>
   page.getByTestId(`multi-property-row-${propertyId}`);
+
+/** Booking Admin scrolls inside <main>, so a full-page screenshot shows only the viewport: grow the
+ * viewport to the page's height for the shot. */
+async function fullShot(page: Page, path: string) {
+  const viewport = page.viewportSize()!;
+  const height = await page.locator("main").evaluate((main) => main.scrollHeight);
+  await page.setViewportSize({ width: viewport.width, height: height + 80 });
+  await page.screenshot({ path, animations: "disabled" });
+  await page.setViewportSize(viewport);
+}
 
 test("opens from Settings, edits every section and saves the page", async ({ page }, testInfo) => {
   const mock = await setup(page);
@@ -157,7 +169,7 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
   // Header
   await page.getByRole("switch", { name: "Contact button" }).click();
   await page.getByLabel("Contact email").fill("stay@travelubud.example");
-  await page.getByRole("textbox", { name: /^WhatsApp/ }).fill("+62 812 3456 7890");
+  await page.getByRole("textbox", { name: "WhatsApp" }).fill("+62 812 3456 7890");
   await page.getByLabel("Design").selectOption({ label: "Copy from Mandala's Villa" });
 
   // Properties: leave one out, take every ready one back, then move it up one place.
@@ -165,8 +177,11 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
   await expect(page.getByText("2 of 6 properties included")).toBeVisible();
   await expect(row(page, escape).getByTestId("multi-property-status-pill")).toHaveText("Hidden");
   await page.getByRole("button", { name: "Include all ready" }).click();
-  await page.getByRole("button", { name: "Move The Escape Villa Ubud up" }).click();
+  const up = page.getByRole("button", { name: "Move The Escape Villa Ubud up" });
+  await up.click();
   await expect(page.getByText("The Escape Villa Ubud moved to position 2 of 3")).toBeAttached();
+  // Focus moves with the row, so the keyboard can keep moving it.
+  await expect(up).toBeFocused();
 
   // Layout & map, Results & sorting, Filters, Stay page
   await page.getByRole("checkbox", { name: /^Map/ }).uncheck();
@@ -183,7 +198,11 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
     "Shown to guests: Property type · Area · Price per night · Private pool · Breakfast included",
   );
   await page.getByRole("switch", { name: "Other stays nearby" }).click();
-  await page.screenshot({ path: testInfo.outputPath("multi-property-1440.png"), fullPage: true });
+  await expect(page.getByRole("switch", { name: "Other stays nearby" })).toHaveAttribute(
+    "aria-checked",
+    "false",
+  );
+  await fullShot(page, testInfo.outputPath("multi-property-1440.png"));
 
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Changes saved", { exact: true })).toBeVisible();
@@ -252,16 +271,22 @@ test("fits a phone and warns about included stays without a map location", async
   await expect(page.getByTestId("multi-property-map-warning")).toHaveText(
     "No map location yet: The Mansion. They are hidden from all maps until a location is set.",
   );
-  // Already included, so it can still be left out.
-  await expect(page.getByRole("switch", { name: "Include The Mansion" })).toBeEnabled();
   await expect(row(page, mansion).getByTestId("multi-property-status-pill")).toHaveText(
     "No location",
   );
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
+  // Included in the saved page, so it can leave and come back while it isn't ready.
+  const include = page.getByRole("switch", { name: "Include The Mansion" });
+  await include.click();
+  await expect(include).toHaveAttribute("aria-checked", "false");
+  await expect(include).toBeEnabled();
+  await include.click();
+  await expect(include).toHaveAttribute("aria-checked", "true");
+  // Booking Admin scrolls inside <main>: nothing may make it scroll sideways.
+  const overflow = await page
+    .locator("main")
+    .evaluate((main) => main.scrollWidth - main.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
-  await page.screenshot({ path: testInfo.outputPath("multi-property-390.png"), fullPage: true });
+  await fullShot(page, testInfo.outputPath("multi-property-390.png"));
 });
 
 test("loads the latest version when someone else saved meanwhile", async ({ page }) => {
@@ -289,7 +314,12 @@ test("loads the latest version when someone else saved meanwhile", async ({ page
     page.getByText("Someone else saved this page meanwhile. We loaded their version"),
   ).toBeVisible();
   await expect(page.getByLabel("Page title")).toHaveValue("Changed elsewhere");
-  expect(mock.saves.map((save) => save.revision)).toEqual([3]);
+  await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
+  // The next save is made on the version just loaded.
+  await page.getByLabel("Page title").fill("My edit again");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Changes saved", { exact: true })).toBeVisible();
+  expect(mock.saves.map((save) => save.revision)).toEqual([3, 4]);
 });
 
 test("says what is wrong before saving, and when the link is taken", async ({ page }) => {
@@ -325,6 +355,11 @@ test("explains missing access, and one-property accounts get no card", async ({ 
     ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Save changes" })).toHaveCount(0);
+  await page.goto("/settings");
+  await expect(page.getByRole("main").getByRole("link", { name: /^Room Sorting/ })).toBeVisible();
+  await expect(
+    page.getByRole("main").getByRole("link", { name: /^Multi-property booking engine/ }),
+  ).toHaveCount(0);
 
   // As the shared mocks answer: a one-property account, so Settings shows no card.
   await page.unroute(`**${ACCOUNT_BOOKING_PAGE_PATH}`);

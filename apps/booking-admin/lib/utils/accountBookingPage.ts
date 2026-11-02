@@ -116,6 +116,16 @@ export type DraftProblem =
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const WHATSAPP = /^\+[1-9][0-9]{7,14}$/;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]+/g;
+
+export const validEmail = (value: string | null) =>
+  value !== null && value.length <= 254 && EMAIL.test(value);
+export const validWhatsapp = (value: string | null) => value !== null && WHATSAPP.test(value);
+
+/** Page title and description are one line: tabs, line breaks and other control characters become
+ * a space, as next-api refuses them. */
+export const controlFree = (value: string) => value.replace(CONTROL_CHARACTERS, " ");
 
 /** What would stop next-api from saving the draft, field by field (the same rules it checks). */
 export function draftProblems(draft: AccountBookingPageDraft): Set<DraftProblem> {
@@ -126,9 +136,9 @@ export function draftProblems(draft: AccountBookingPageDraft): Set<DraftProblem>
   if (title.length > 100) problems.add("titleTooLong");
   if (page.description.trim().length > 300) problems.add("descriptionTooLong");
   if (!parseAccountBookingPageSlug(draft.slug)) problems.add("invalidSlug");
-  if (header.contactEmail !== null && !EMAIL.test(header.contactEmail))
+  if (header.contactEmail !== null && !validEmail(header.contactEmail))
     problems.add("invalidEmail");
-  if (header.contactWhatsapp !== null && !WHATSAPP.test(header.contactWhatsapp))
+  if (header.contactWhatsapp !== null && !validWhatsapp(header.contactWhatsapp))
     problems.add("invalidWhatsapp");
   if (header.contact && !header.contactEmail && !header.contactWhatsapp)
     problems.add("contactNeeded");

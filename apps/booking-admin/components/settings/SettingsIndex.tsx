@@ -124,7 +124,8 @@ export function SettingsIndex({
     const controller = new AbortController();
     client
       .load(controller.signal)
-      .then((summary) => setMultiProperty(summary.properties.length >= 2))
+      // Two or more active properties, or a page saved earlier (it can always be switched off).
+      .then((summary) => setMultiProperty(summary.saved || summary.canSave))
       .catch(() => undefined);
     return () => controller.abort();
   }, [client]);

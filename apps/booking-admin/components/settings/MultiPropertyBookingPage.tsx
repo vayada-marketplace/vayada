@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseAccountBookingPageUpdate } from "@vayada/domain-booking/account-booking-page";
-import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { SettingsBreadcrumb } from "@/components/settings/SettingsSubPage";
 import {
   FiltersSection,
@@ -72,7 +72,10 @@ const normalized = (draft: AccountBookingPageDraft): AccountBookingPageDraft => 
  */
 export function MultiPropertyBookingPage({
   client = accountBookingPageClient,
-  copyText = (value: string) => navigator.clipboard.writeText(value),
+  copyText = (value: string) =>
+    navigator.clipboard
+      ? navigator.clipboard.writeText(value)
+      : Promise.reject(new Error("No clipboard")),
 }: {
   client?: typeof accountBookingPageClient;
   copyText?: (value: string) => Promise<void>;
@@ -119,13 +122,23 @@ export function MultiPropertyBookingPage({
   }, [load]);
 
   const title = t("settings.cards.multiProperty.title");
+  // As PageHeader, but the save note and button may wrap: in longer languages they don't fit
+  // next to each other on a phone.
   const header = (actions?: React.ReactNode) => (
-    <PageHeader
-      breadcrumb={<SettingsBreadcrumb current={title} />}
-      title={title}
-      subtitle={t("settings.multiProperty.intro")}
-      actions={actions}
-    />
+    <div className="page-header">
+      <div className="mb-2">
+        <SettingsBreadcrumb current={title} />
+      </div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-[1_1_14rem]">
+          <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">{title}</h1>
+          <p className="mt-[var(--page-subtitle-gap)] text-[13px] text-gray-500">
+            {t("settings.multiProperty.intro")}
+          </p>
+        </div>
+        {actions}
+      </div>
+    </div>
   );
 
   if (state !== "ready" || !summary || !draft)
@@ -241,7 +254,7 @@ export function MultiPropertyBookingPage({
     <PageLayout>
       <div className="max-w-[880px] pb-16">
         {header(
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-2">
             <span
               data-testid="multi-property-save-note"
               className="text-[13px] text-gray-500"

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AccountBookingPageProperty } from "@/services/api/accountBookingPageClient";
 import {
   contactValue,
+  controlFree,
   draftProblems,
   filterSplit,
   includeAllReady,
@@ -10,6 +11,8 @@ import {
   orderedProperties,
   propertyStatus,
   setIncluded,
+  validEmail,
+  validWhatsapp,
   type AccountBookingPageDraft,
 } from "./accountBookingPage";
 
@@ -121,6 +124,20 @@ describe("agency booking page form rules", () => {
     contact.settings.header.contactEmail = "stay@travelubud.example";
     contact.settings.header.contactWhatsapp = "+6281234567890";
     expect(draftProblems(contact)).toEqual(new Set());
+  });
+
+  it("keeps title and description on one line, as next-api requires", () => {
+    expect(controlFree("The\tTravel\r\nUbud")).toBe("The Travel Ubud");
+    expect(controlFree("Ubud")).toBe("Ubud");
+  });
+
+  it("checks contacts as next-api does", () => {
+    expect(validEmail("stay@travelubud.example")).toBe(true);
+    for (const value of [null, "stay@", "stay @x.y", `${"a".repeat(250)}@x.yz`])
+      expect(validEmail(value), String(value)).toBe(false);
+    expect(validWhatsapp("+6281234567890")).toBe(true);
+    for (const value of [null, "6281234567890", "+0812345678", "+62 812"])
+      expect(validWhatsapp(value), String(value)).toBe(false);
   });
 
   it("keeps typed contacts tidy: trimmed, numbers without spaces, empty as none", () => {
