@@ -3,6 +3,9 @@ import {
   CHANNEX_MANAGEMENT_WORKER_ROLE,
 } from "../jobs/channexManagementWorkerPrivileges.js";
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
+import { createPublicPricingDisplayPool } from "./publicPricingDisplayPool.js";
+import { createPublicPricingStayPrices } from "./publicPricingStayPrices.js";
+import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { createTargetPmsInventoryPublicOfferProjection } from "./pmsInventoryPublicOfferProjection.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "../platform/publicBookabilityPublication.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
@@ -6796,6 +6799,142 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(
       offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.paymentSchedule)),
     ).toEqual([{ kind: "full" }, { kind: "full" }, { kind: "full" }]);
+  });
+  /** VAY-2458: a stay guests can book, set up as VAY-2123 above, with free rooms for 40 days. */
+  async function bookableStay() {
+    const f = await publicFixture(false, undefined, undefined, payable, false, true),
+      id = f.scope.propertyId;
+    const publisher = createTargetPublicBookabilityPublicationCommandPort({
+      connectionString: url!,
+      pool,
+    });
+    await publisher.publish({ propertyId: id });
+    await pool.query(
+      `INSERT INTO pms.inventory_days(property_id,room_type_id,stay_date,total_count,available_count)
+      SELECT $1::uuid,room.id,(now() AT TIME ZONE 'Etc/UTC')::date + day,2,2
+      FROM pms.room_types room CROSS JOIN generate_series(0,40) day WHERE room.property_id=$1::uuid`,
+      [id],
+    );
+    await f.publishPrices();
+    await createTargetPmsInventoryPublicOfferProjection({
+      connectionString: url!,
+      pool,
+      refreshPublicBookability: async ({ propertyId }) => {
+        await publisher.publish({ propertyId });
+      },
+    }).projectPending({ propertyId: id });
+    await publishBookingPage(f.scope);
+    return f;
+  }
+  const localDay = async (days: number) =>
+    (
+      await pool.query("SELECT ((now() AT TIME ZONE 'Etc/UTC')::date + $1::int)::text AS day", [
+        days,
+      ])
+    ).rows[0].day as string;
+  it("shows display prices equal to the stay page's without its locks (VAY-2458)", async () => {
+    const f = await bookableStay(),
+      id = f.scope.propertyId;
+    await pool.query(
+      `INSERT INTO booking.promo_definitions(property_id,code,discount_type,discount_value,max_uses,min_booking_value)
+      VALUES($1,'SAVE','percentage',10,100,NULL)`,
+      [id],
+    );
+    const display = createPublicPricingDisplayPool({ connectionString: url!, max: 2 });
+    try {
+      const binding = createPublicPricingStayPrices(pool, createPublicPricingOfferCatalog(pool));
+      const shown = createPublicPricingStayPrices(
+        display,
+        createPublicPricingOfferCatalog(display),
+      );
+      const [checkIn, checkOut] = [await localDay(5), await localDay(7)];
+      const queries = [
+        { checkIn, checkOut, adults: 2, children: 0, promoCode: null },
+        { checkIn, checkOut, adults: 2, children: 0, promoCode: "SAVE" },
+        {
+          checkIn,
+          checkOut,
+          adults: 3,
+          children: 0,
+          promoCode: null,
+          room: { adults: 1, children: 0 },
+        },
+        { checkIn, checkOut, adults: 4, children: 0, promoCode: null },
+      ];
+      const expected = [];
+      for (const query of queries) {
+        const read = await binding.read(id, query);
+        expect(read).not.toBeNull();
+        expect(await shown.read(id, query)).toEqual(read);
+        expected.push(read);
+      }
+      expect(
+        expected[0]!.rooms
+          .flatMap((room) => room.offers)
+          .filter((offer) => offer.status === "priced"),
+      ).not.toHaveLength(0);
+
+      // A quote of the account holds its locks; the display read doesn't wait for them.
+      const holder = await pool.connect();
+      try {
+        await holder.query("BEGIN");
+        expect(await lockPublicPricingAuthority(holder, id)).toEqual({
+          propertyId: id,
+          organizationId: f.scope.organizationId,
+        });
+        expect(await shown.read(id, queries[0]!)).toEqual(expected[0]);
+      } finally {
+        await holder.query("ROLLBACK");
+        holder.release();
+      }
+
+      // Nor does a quote wait for display reads: the account's locks stay free throughout.
+      const probe = await pool.connect();
+      let probes = 0,
+        reading = true;
+      const watching = (async () => {
+        while (reading) {
+          await probe.query("BEGIN");
+          try {
+            await probe.query("SET LOCAL lock_timeout = '20ms'");
+            expect(await lockPublicPricingAuthority(probe, id)).not.toBeNull();
+            probes++;
+          } finally {
+            await probe.query("ROLLBACK");
+          }
+        }
+      })();
+      try {
+        for (const query of queries) await shown.read(id, query);
+      } finally {
+        reading = false;
+        await watching.finally(() => probe.release());
+      }
+      expect(probes).toBeGreaterThan(0);
+
+      // The display pool can't write, and a lock clause the rewrite missed fails rather than locks.
+      await expect(
+        display.query("UPDATE identity.organizations SET name=name WHERE id=$1", [
+          f.scope.organizationId,
+        ]),
+      ).rejects.toMatchObject({ code: "25006" });
+      const raw = new pg.Pool({
+        connectionString: url,
+        max: 1,
+        options: "-c default_transaction_read_only=on",
+      });
+      try {
+        await expect(
+          raw.query("SELECT 1 FROM identity.organizations WHERE id=$1 for share", [
+            f.scope.organizationId,
+          ]),
+        ).rejects.toMatchObject({ code: "25006" });
+      } finally {
+        await raw.end();
+      }
+    } finally {
+      await display.end();
+    }
   });
   /** "Save prices" for the next revision, with its Finance evidence and charge declaration. */
   async function savePrices(
