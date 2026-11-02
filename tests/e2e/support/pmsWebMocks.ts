@@ -295,6 +295,11 @@ export const PMS_WEB_OWNER_PERMISSIONS = [
   "pms.settings.read",
 ];
 
+/** The PMS's read of the guest rules' times (VAY-2455): `null` while the property has none. */
+export function pmsWebStayTimes(times: { checkInTime: string; checkOutTime: string } | null) {
+  return { propertyId: PMS_WEB_PROPERTY_ID, times };
+}
+
 /** A guest-rules answer (VAY-2455): the hotel first run's choices, with a spec's own times or other choices. */
 export function pmsWebGuestRules(choices: Record<string, unknown> = {}) {
   return {
@@ -333,14 +338,20 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
     .route("**/api/finance/properties/*/financials/access", (route) =>
       route.fulfill({ status: 204 }),
     );
-  // The booking page's guest rules, whose check-in and check-out times the dashboard, the booking, the calendar and
-  // the check-in show (VAY-2455): none yet, so no time. A context route, so a spec's own page.route wins.
+  // The booking page's guest rules (Settings edits them) and their check-in and check-out times, which the
+  // dashboard, the booking, the calendar and the check-in show (VAY-2455): none yet, so no time. Context routes, so
+  // a spec's own page.route wins.
   await page
     .context()
     .route(`**/api/booking/properties/${PMS_WEB_PROPERTY_ID}/guest-rules`, (route) =>
       route.request().method() === "GET"
         ? route.fulfill({ json: { current: null } })
         : route.fallback(),
+    );
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guest-stay-times`, (route) =>
+      route.fulfill({ json: pmsWebStayTimes(null) }),
     );
   // The room Location box loads Google Maps when the dev server has a key (CI's is a fake, VAY-2126): never the
   // real script. A context route, so a spec's own mockGoogleMaps(page, ...) wins.

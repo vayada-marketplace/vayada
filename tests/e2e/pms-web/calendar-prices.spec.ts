@@ -5,7 +5,7 @@ import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
   PMS_WEB_PROPERTY_ID,
-  pmsWebGuestRules,
+  pmsWebStayTimes,
   pmsWebReservation,
   pmsWebRoomType,
 } from "../support/pmsWebMocks";
@@ -328,8 +328,8 @@ test.describe("PMS calendar prices", () => {
     await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-blocks*`, (route) =>
       route.fulfill({ json: list([block]) }),
     );
-    await page.route(`**/api/booking/properties/${PMS_WEB_PROPERTY_ID}/guest-rules`, (route) =>
-      route.fulfill({ json: pmsWebGuestRules({ checkInTime: "14:30" }) }),
+    await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guest-stay-times`, (route) =>
+      route.fulfill({ json: pmsWebStayTimes({ checkInTime: "14:30", checkOutTime: "11:00" }) }),
     );
     await page.goto("/calendar");
 

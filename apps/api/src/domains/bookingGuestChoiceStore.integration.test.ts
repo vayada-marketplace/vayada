@@ -8,6 +8,7 @@ import {
   createBookingGuestChoiceStore,
   lockCurrentGuestChoiceRevision,
 } from "./bookingGuestChoiceStore.js";
+import { createPgPmsGuestStayTimesRepository } from "../routes/pmsGuestStayTimes.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("confirmed guest rules without pricing", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
@@ -73,6 +74,21 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
       },
     };
   }
+  it("gives the PMS team the saved check-in and check-out times, never another account's (VAY-2455)", async () => {
+    const f = await fixture();
+    const times = createPgPmsGuestStayTimesRepository({ connectionString: url!, max: 1 });
+    try {
+      expect(await times.find(f.scope.propertyId, f.scope.organizationId)).toBeNull();
+      await f.store.save(f.scope, f.command);
+      expect(await times.find(f.scope.propertyId, f.scope.organizationId)).toEqual({
+        checkInTime: "15:00",
+        checkOutTime: "11:00",
+      });
+      expect(await times.find(f.scope.propertyId, randomUUID())).toBeNull();
+    } finally {
+      await times.close?.();
+    }
+  });
   it("creates without rates, edits with revision checks and replays the original confirmed revision", async () => {
     const f = await fixture();
     expect(await f.store.read(f.scope)).toBeNull();

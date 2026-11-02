@@ -3,18 +3,17 @@ import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ load: vi.fn(), canRead: true }));
-vi.mock("@/services/settings/guestRules", () => ({ guestRulesService: { load: mocks.load } }));
+vi.mock("@/services/settings/guestStayTimes", () => ({
+  guestStayTimesService: { load: mocks.load },
+}));
 vi.mock("./PmsAccessContext", () => ({
   useHasPmsPermission: (permission: string) =>
-    permission === "booking.settings.manage" && mocks.canRead,
+    permission === "pms.reservation.read" && mocks.canRead,
 }));
 
 import { forgetGuestStayTimes, useGuestStayTimes, type GuestStayTimes } from "./useGuestStayTimes";
 
-const rules = (checkInTime: string, checkOutTime: string) => ({
-  revision: "6d1c3a52-5b5e-4c3f-9a51-1f3f8d1b2c4e",
-  choices: { checkInTime, checkOutTime },
-});
+const rules = (checkInTime: string, checkOutTime: string) => ({ checkInTime, checkOutTime });
 
 async function readTimes() {
   let times: GuestStayTimes | null | undefined;
@@ -61,7 +60,7 @@ describe("useGuestStayTimes", () => {
     expect(mocks.load).toHaveBeenCalledTimes(3);
   });
 
-  it("never asks for them without booking.settings.manage, which the API requires", async () => {
+  it("never asks for them without pms.reservation.read, which the API requires", async () => {
     mocks.canRead = false;
     await expect(readTimes()).resolves.toBeNull();
     expect(mocks.load).not.toHaveBeenCalled();
