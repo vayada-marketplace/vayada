@@ -152,6 +152,48 @@ describe("target manual-booking preview", () => {
     ]);
   });
 
+  it("prices every published plan of each stay's room, so staff can compare them (VAY-2417)", async () => {
+    app = await testApp({ reads: [] });
+    const preview = (await request(app, command())).json();
+    const eur = (amountDecimal: string) => ({ amountDecimal, currency: "EUR" });
+    // Non-refundable is 10% below Flexible; the custom stay and the overridden one get both too.
+    expect(preview.stays.map((stay: any) => stay.ratePlanTotals)).toEqual([
+      [
+        { ratePlanId: "flex", total: eur("200.00") },
+        { ratePlanId: "nr", total: eur("180.00") },
+      ],
+      [
+        { ratePlanId: "flex", total: eur("260.00") },
+        { ratePlanId: "nr", total: eur("234.00") },
+      ],
+      [
+        { ratePlanId: "flex", total: eur("310.00") },
+        { ratePlanId: "nr", total: eur("279.00") },
+      ],
+    ]);
+
+    // A plan the dates can't take, or a child without an age, has no total; the preview stands.
+    app = await testApp({ reads: [], minStay: 3 });
+    const body = command();
+    body.stays = [
+      body.stays[1],
+      { ...body.stays[1], position: 2, roomId: roomIds[0], children: 1 },
+    ];
+    body.addOns = [];
+    const restricted = await request(app, body);
+    expect(restricted.statusCode).toBe(200);
+    expect(restricted.json().stays.map((stay: any) => stay.ratePlanTotals)).toEqual([
+      [
+        { ratePlanId: "flex", total: null },
+        { ratePlanId: "nr", total: null },
+      ],
+      [
+        { ratePlanId: "flex", total: null },
+        { ratePlanId: "nr", total: null },
+      ],
+    ]);
+  });
+
   it("refuses a create priced from another revision before any other price outcome", async () => {
     // A restricted stay would otherwise answer rate_restricted; the republish wins.
     const body = command();

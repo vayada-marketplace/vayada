@@ -375,6 +375,18 @@ export default function TargetManualBookingModal({
       current.map((stay, position) => (position === index ? { ...stay, ...patch } : stay)),
     );
   }
+  function setGuests(index: number, kind: "adults" | "children", value: number) {
+    const stay = stays[index]!;
+    updateStay(
+      index,
+      kind === "adults"
+        ? { adults: value }
+        : {
+            children: value,
+            childAges: Array.from({ length: value }, (_, child) => stay.childAges[child] ?? ""),
+          },
+    );
+  }
   function changeRoom(index: number, roomId: string) {
     const room = rooms.find((item) => item.id === roomId),
       roomType = roomTypes.find((item) => item.id === room?.roomTypeId);
@@ -692,24 +704,32 @@ export default function TargetManualBookingModal({
                     conflict = conflicts.has(index),
                     noPlanConfigured = Boolean(roomType && roomType.ratePlans.length === 0),
                     serverError = stayError?.key === stay.key ? stayError : null,
-                    serverStay = preview?.stays.find((item) => item.position === index + 1);
+                    serverStay = preview?.stays.find((item) => item.position === index + 1),
+                    nights = Math.round(
+                      (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000,
+                    ),
+                    full = Boolean(
+                      roomType?.maxOccupancy &&
+                      stay.adults + stay.children >= roomType.maxOccupancy,
+                    );
                   return (
                     <section
                       key={stay.key}
                       data-stay
                       aria-labelledby={`stay-title-${stay.key}`}
-                      className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 sm:p-4"
+                      className={
+                        stays.length > 1
+                          ? "space-y-4 rounded-xl border border-gray-200 p-4"
+                          : "space-y-4"
+                      }
                     >
-                      {" "}
-                      <div className="mb-3 flex items-center justify-between">
-                        {" "}
+                      <div className="flex items-center justify-between">
                         <h4
                           id={`stay-title-${stay.key}`}
                           className="text-sm font-semibold text-gray-900"
                         >
-                          {t("calendar.roomColumn")}
-                          {index + 1}
-                        </h4>{" "}
+                          {t("calendar.roomColumn")} {index + 1}
+                        </h4>
                         {stays.length > 1 && (
                           <button
                             type="button"
@@ -717,237 +737,401 @@ export default function TargetManualBookingModal({
                             aria-label={t("calendar.targetManualBooking.removeRoom", {
                               number: index + 1,
                             })}
-                            className="text-xs font-medium text-red-600 hover:text-red-700"
+                            className="-my-3 min-h-11 px-2 text-xs font-medium text-red-600 hover:text-red-700"
                           >
                             {t("calendar.targetManualBooking.remove")}
                           </button>
-                        )}{" "}
+                        )}
                       </div>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        {" "}
-                        <label className={`${labelClass} sm:col-span-2`}>
-                          {" "}
-                          {t("calendar.newBookingModal.roomLabel")} *{" "}
-                          <select
-                            ref={(node) => {
-                              if (node) controls.current.set(`${stay.key}:roomId`, node);
-                            }}
-                            aria-label={t("calendar.targetManualBooking.roomField", {
-                              number: index + 1,
-                            })}
-                            aria-invalid={conflict || serverError?.field === "roomId"}
-                            aria-describedby={
-                              [
-                                conflict
-                                  ? `stay-conflict-${stay.key}`
-                                  : serverError?.field === "roomId"
-                                    ? `stay-server-${stay.key}`
-                                    : null,
-                                roomType?.maxOccupancy ? `stay-capacity-${stay.key}` : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" ") || undefined
-                            }
-                            value={stay.roomId}
-                            onChange={(event) => changeRoom(index, event.target.value)}
-                            className={inputClass}
-                            required
+                      <label className={labelClass}>
+                        <span>{t("calendar.newBookingModal.roomLabel")} *</span>
+                        <select
+                          ref={(node) => {
+                            if (node) controls.current.set(`${stay.key}:roomId`, node);
+                          }}
+                          aria-label={t("calendar.targetManualBooking.roomField", {
+                            number: index + 1,
+                          })}
+                          aria-invalid={conflict || serverError?.field === "roomId"}
+                          aria-describedby={
+                            [
+                              conflict
+                                ? `stay-conflict-${stay.key}`
+                                : serverError?.field === "roomId"
+                                  ? `stay-server-${stay.key}`
+                                  : null,
+                              roomType?.maxOccupancy ? `stay-capacity-${stay.key}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" ") || undefined
+                          }
+                          value={stay.roomId}
+                          onChange={(event) => changeRoom(index, event.target.value)}
+                          className={inputClass}
+                          required
+                        >
+                          {roomTypes.map((type) => (
+                            <optgroup key={type.id} label={type.name}>
+                              {rooms
+                                .filter((item) => item.roomTypeId === type.id)
+                                .map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    #{item.roomNumber} — {type.name}
+                                  </option>
+                                ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                        {!!roomType?.maxOccupancy && (
+                          <span
+                            id={`stay-capacity-${stay.key}`}
+                            className="block font-normal text-gray-600"
                           >
-                            {" "}
-                            {roomTypes.map((type) => (
-                              <optgroup key={type.id} label={type.name}>
-                                {" "}
-                                {rooms
-                                  .filter((item) => item.roomTypeId === type.id)
-                                  .map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      #{item.roomNumber} — {type.name}
-                                    </option>
-                                  ))}{" "}
-                              </optgroup>
-                            ))}{" "}
-                          </select>{" "}
-                          {!!roomType?.maxOccupancy && (
-                            <span
-                              id={`stay-capacity-${stay.key}`}
-                              className="block font-normal text-gray-500"
-                            >
-                              {t("calendar.targetManualBooking.roomCapacity", {
-                                count: roomType.maxOccupancy,
+                            {roomType.name} ·{" "}
+                            {t("calendar.targetManualBooking.roomCapacity", {
+                              count: roomType.maxOccupancy,
+                            })}
+                          </span>
+                        )}
+                      </label>
+                      {/* One field for the stay's dates, as in the design (VAY-2417). */}
+                      <div
+                        role="group"
+                        aria-labelledby={`stay-dates-${stay.key}`}
+                        className="space-y-1.5"
+                      >
+                        <span
+                          id={`stay-dates-${stay.key}`}
+                          className="block text-[13px] font-medium text-gray-700"
+                        >
+                          {t("calendar.targetManualBooking.dates")} *
+                        </span>
+                        <div
+                          className={`flex flex-wrap items-center gap-x-3 rounded-lg border bg-white px-3.5 focus-within:border-transparent focus-within:ring-2 focus-within:ring-primary-500 ${serverError?.field === "checkIn" ? "border-red-500" : "border-gray-300"}`}
+                        >
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            className="size-[18px] shrink-0 text-gray-600"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <rect x="3" y="5" width="18" height="16" rx="2" />
+                            <path d="M3 10h18M8 3v4M16 3v4" />
+                          </svg>
+                          <label className="flex min-h-12 flex-col justify-center text-[11px] leading-tight text-gray-600">
+                            {t("calendar.newBookingModal.checkInLabel")}
+                            <input
+                              ref={(node) => {
+                                if (node) controls.current.set(`${stay.key}:checkIn`, node);
+                              }}
+                              aria-label={t("calendar.targetManualBooking.checkInField", {
+                                number: index + 1,
                               })}
+                              aria-invalid={serverError?.field === "checkIn"}
+                              aria-describedby={
+                                serverError?.field === "checkIn"
+                                  ? `stay-server-${stay.key}`
+                                  : undefined
+                              }
+                              type="date"
+                              value={stay.checkIn}
+                              onChange={(event) => {
+                                const checkIn = event.target.value;
+                                updateStay(index, {
+                                  checkIn,
+                                  ...(!stay.checkOut || stay.checkOut <= checkIn
+                                    ? { checkOut: addDay(checkIn) }
+                                    : {}),
+                                });
+                              }}
+                              className="bg-transparent p-0 text-sm font-medium text-gray-900 focus:outline-none"
+                              required
+                            />
+                          </label>
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            className="size-4 shrink-0 text-gray-500"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path d="M5 12h14M13 6l6 6-6 6" />
+                          </svg>
+                          <label className="flex min-h-12 flex-col justify-center text-[11px] leading-tight text-gray-600">
+                            {t("calendar.newBookingModal.checkOutLabel")}
+                            <input
+                              aria-label={t("calendar.targetManualBooking.checkOutField", {
+                                number: index + 1,
+                              })}
+                              type="date"
+                              min={addDay(stay.checkIn) || undefined}
+                              value={stay.checkOut}
+                              onChange={(event) =>
+                                updateStay(index, { checkOut: event.target.value })
+                              }
+                              className="bg-transparent p-0 text-sm font-medium text-gray-900 focus:outline-none"
+                              required
+                            />
+                          </label>
+                          {nights > 0 && (
+                            <span className="my-2 ml-auto rounded-full bg-gray-100 px-2.5 py-1 text-[13px] font-medium text-gray-700">
+                              {nights === 1
+                                ? t("calendar.targetManualBooking.addonNightOne")
+                                : t("calendar.targetManualBooking.addonNights", {
+                                    count: nights,
+                                  })}
                             </span>
                           )}
-                        </label>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="grid grid-cols-2 gap-4">
+                          {(["adults", "children"] as const).map((kind) => {
+                            const value = kind === "adults" ? stay.adults : stay.children,
+                              atMin = value <= (kind === "adults" ? 1 : 0),
+                              number = index + 1;
+                            return (
+                              <div key={kind} className="min-w-0 space-y-1.5">
+                                <span
+                                  id={`stay-${kind}-${stay.key}`}
+                                  className="block text-[13px] font-medium text-gray-700"
+                                >
+                                  {kind === "adults"
+                                    ? t("calendar.newBookingModal.adultsLabel")
+                                    : t("calendar.newBookingModal.childrenLabel")}
+                                  {kind === "children" && (
+                                    <span className="font-normal text-gray-600">
+                                      {" · "}
+                                      {t("calendar.targetManualBooking.under18")}
+                                    </span>
+                                  )}
+                                </span>
+                                {/* aria-disabled, not disabled: a button that disables itself at
+                                    the limit would drop focus. */}
+                                <div
+                                  role="group"
+                                  aria-label={
+                                    kind === "adults"
+                                      ? t("calendar.targetManualBooking.adultsField", { number })
+                                      : t("calendar.targetManualBooking.childrenField", { number })
+                                  }
+                                  aria-describedby={
+                                    occupancyExceeded
+                                      ? `stay-occupancy-${stay.key}`
+                                      : kind === "adults" && serverError?.field === "adults"
+                                        ? `stay-server-${stay.key}`
+                                        : `stay-guests-${stay.key}`
+                                  }
+                                  className={`flex h-11 items-center overflow-hidden rounded-lg border bg-white ${occupancyExceeded ? "border-red-500" : "border-gray-300"}`}
+                                >
+                                  <button
+                                    type="button"
+                                    ref={(node) => {
+                                      if (node && kind === "adults")
+                                        controls.current.set(`${stay.key}:adults`, node);
+                                    }}
+                                    aria-label={
+                                      kind === "adults"
+                                        ? t("calendar.targetManualBooking.fewerAdults", { number })
+                                        : t("calendar.targetManualBooking.fewerChildren", {
+                                            number,
+                                          })
+                                    }
+                                    aria-disabled={atMin}
+                                    onClick={() => !atMin && setGuests(index, kind, value - 1)}
+                                    className="flex h-full w-12 items-center justify-center text-gray-900 hover:bg-gray-50 aria-disabled:cursor-not-allowed aria-disabled:bg-gray-50 aria-disabled:text-gray-400"
+                                  >
+                                    <svg
+                                      aria-hidden="true"
+                                      viewBox="0 0 24 24"
+                                      className="size-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth={2.2}
+                                    >
+                                      <path d="M5 12h14" />
+                                    </svg>
+                                  </button>
+                                  <span
+                                    aria-live="polite"
+                                    className="flex-1 text-center text-[15px] font-semibold tabular-nums text-gray-900"
+                                  >
+                                    {value}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    aria-label={
+                                      kind === "adults"
+                                        ? t("calendar.targetManualBooking.moreAdults", { number })
+                                        : t("calendar.targetManualBooking.moreChildren", { number })
+                                    }
+                                    aria-disabled={full}
+                                    onClick={() => !full && setGuests(index, kind, value + 1)}
+                                    className="flex h-full w-12 items-center justify-center text-gray-900 hover:bg-gray-50 aria-disabled:cursor-not-allowed aria-disabled:bg-gray-50 aria-disabled:text-gray-400"
+                                  >
+                                    <svg
+                                      aria-hidden="true"
+                                      viewBox="0 0 24 24"
+                                      className="size-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth={2.2}
+                                    >
+                                      <path d="M12 5v14M5 12h14" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {!!roomType?.maxOccupancy && !occupancyExceeded && (
+                          <p
+                            id={`stay-guests-${stay.key}`}
+                            className={`text-[13px] ${full ? "text-amber-800" : "text-gray-600"}`}
+                          >
+                            {full
+                              ? t("calendar.targetManualBooking.roomFull", {
+                                  capacity: roomType.maxOccupancy,
+                                })
+                              : t("calendar.targetManualBooking.guestsOfCapacity", {
+                                  count: stay.adults + stay.children,
+                                  capacity: roomType.maxOccupancy,
+                                })}
+                          </p>
+                        )}
+                      </div>
+                      {/* Plans as cards with each one's total for this stay (VAY-2417). */}
+                      <fieldset
+                        aria-label={t("calendar.targetManualBooking.ratePlanField", {
+                          number: index + 1,
+                        })}
+                        aria-describedby={
+                          serverError?.field === "ratePlanId"
+                            ? `stay-server-${stay.key}`
+                            : noPlanConfigured
+                              ? `stay-no-plan-${stay.key}`
+                              : undefined
+                        }
+                        className="space-y-2"
+                      >
+                        <legend className="text-[13px] font-medium text-gray-700">
+                          {t("calendar.targetManualBooking.ratePlan")} *
+                        </legend>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {[
+                            ...(roomType?.ratePlans ?? []),
+                            { id: "custom", name: t("calendar.targetManualBooking.customRate") },
+                          ].map((plan) => {
+                            const selected = stay.ratePlanId === plan.id,
+                              total = selected
+                                ? (serverStay?.appliedTotal ?? null)
+                                : serverStay?.ratePlanTotals?.find(
+                                    (item) => item.ratePlanId === plan.id,
+                                  )?.total,
+                              uniform =
+                                selected &&
+                                !!serverStay?.nightly.length &&
+                                serverStay.nightly.every(
+                                  (night) =>
+                                    night.applied.amountDecimal ===
+                                    serverStay.nightly[0]!.applied.amountDecimal,
+                                );
+                            return (
+                              <label
+                                key={plan.id}
+                                className="flex cursor-pointer flex-col gap-1 rounded-xl border border-gray-300 bg-white p-3.5 has-[:checked]:border-primary-600 has-[:checked]:bg-primary-50/60 has-[:checked]:ring-1 has-[:checked]:ring-primary-600"
+                              >
+                                <span className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold text-gray-900">
+                                    {plan.name}
+                                  </span>
+                                  <input
+                                    type="radio"
+                                    ref={(node) => {
+                                      if (node && selected)
+                                        controls.current.set(`${stay.key}:ratePlanId`, node);
+                                    }}
+                                    name={`ratePlan-${stay.key}`}
+                                    value={plan.id}
+                                    checked={selected}
+                                    aria-invalid={selected && serverError?.field === "ratePlanId"}
+                                    onChange={() =>
+                                      updateStay(index, { ratePlanId: plan.id, nightlyRate: "" })
+                                    }
+                                    className="size-[18px] shrink-0 accent-primary-600"
+                                  />
+                                </span>
+                                {total && preview && nights > 0 ? (
+                                  <span className="flex flex-wrap items-baseline gap-x-1.5">
+                                    <span className="text-lg font-bold tabular-nums text-gray-900">
+                                      {money(total.amountDecimal, preview.currency)}
+                                    </span>
+                                    <span className="text-[13px] text-gray-600">
+                                      {t(
+                                        uniform || nights === 1
+                                          ? "calendar.targetManualBooking.perNight"
+                                          : "calendar.targetManualBooking.perNightAverage",
+                                        {
+                                          amount: money(
+                                            (Number(total.amountDecimal) / nights).toFixed(2),
+                                            preview.currency,
+                                          ),
+                                        },
+                                      )}
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[13px] text-gray-600">
+                                    {plan.id === "custom" && !selected
+                                      ? t("calendar.targetManualBooking.customRateHint")
+                                      : total === null && !selected
+                                        ? stay.childAges.some((age) => childAge(age) === null)
+                                          ? t("calendar.targetManualBooking.planNeedsAges")
+                                          : t("calendar.targetManualBooking.planUnavailable")
+                                        : selected && previewState === "loading"
+                                          ? t("calendar.targetManualBooking.calculating")
+                                          : "—"}
+                                  </span>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
+                      {stay.ratePlanId === "custom" && (
                         <label className={labelClass}>
-                          {" "}
-                          {t("calendar.newBookingModal.checkInLabel")} *{" "}
+                          <span>{t("calendar.targetManualBooking.customNightlyRate")}</span>
                           <input
                             ref={(node) => {
-                              if (node) controls.current.set(`${stay.key}:checkIn`, node);
+                              if (node) controls.current.set(`${stay.key}:nightlyRate`, node);
                             }}
-                            aria-label={t("calendar.targetManualBooking.checkInField", {
+                            aria-label={t("calendar.targetManualBooking.nightlyRateField", {
                               number: index + 1,
                             })}
-                            aria-invalid={serverError?.field === "checkIn"}
+                            aria-invalid={serverError?.field === "nightlyRate"}
                             aria-describedby={
-                              serverError?.field === "checkIn"
+                              serverError?.field === "nightlyRate"
                                 ? `stay-server-${stay.key}`
                                 : undefined
                             }
-                            type="date"
-                            value={stay.checkIn}
-                            onChange={(event) => {
-                              const checkIn = event.target.value;
-                              updateStay(index, {
-                                checkIn,
-                                ...(!stay.checkOut || stay.checkOut <= checkIn
-                                  ? { checkOut: addDay(checkIn) }
-                                  : {}),
-                              });
-                            }}
-                            className={inputClass}
-                            required
-                          />{" "}
-                        </label>{" "}
-                        <label className={labelClass}>
-                          {" "}
-                          {t("calendar.newBookingModal.checkOutLabel")} *{" "}
-                          <input
-                            aria-label={t("calendar.targetManualBooking.checkOutField", {
-                              number: index + 1,
-                            })}
-                            type="date"
-                            min={addDay(stay.checkIn) || undefined}
-                            value={stay.checkOut}
-                            onChange={(event) =>
-                              updateStay(index, { checkOut: event.target.value })
-                            }
-                            className={inputClass}
-                            required
-                          />{" "}
-                        </label>
-                        <label className={labelClass}>
-                          {t("calendar.newBookingModal.adultsLabel")}
-                          <input
-                            ref={(node) => {
-                              if (node) controls.current.set(`${stay.key}:adults`, node);
-                            }}
-                            aria-label={t("calendar.targetManualBooking.adultsField", {
-                              number: index + 1,
-                            })}
-                            type="number"
-                            min={1}
-                            max={Math.max(1, (roomType?.maxOccupancy ?? 1) - stay.children)}
-                            value={stay.adults}
-                            aria-invalid={occupancyExceeded || serverError?.field === "adults"}
-                            aria-describedby={
-                              occupancyExceeded
-                                ? `stay-occupancy-${stay.key}`
-                                : serverError?.field === "adults"
-                                  ? `stay-server-${stay.key}`
-                                  : undefined
-                            }
-                            onChange={(event) =>
-                              updateStay(index, { adults: Number(event.target.value) })
-                            }
-                            className={inputClass}
-                          />{" "}
-                        </label>{" "}
-                        <label className={labelClass}>
-                          {t("calendar.newBookingModal.childrenLabel")}
-                          <input
-                            aria-label={t("calendar.targetManualBooking.childrenField", {
-                              number: index + 1,
-                            })}
                             type="number"
                             min={0}
-                            max={Math.max(0, (roomType?.maxOccupancy ?? 1) - stay.adults)}
-                            value={stay.children}
-                            aria-invalid={occupancyExceeded}
-                            aria-describedby={
-                              occupancyExceeded ? `stay-occupancy-${stay.key}` : undefined
-                            }
-                            onChange={(event) => {
-                              const children = Number(event.target.value);
-                              updateStay(index, {
-                                children,
-                                childAges: Array.from(
-                                  {
-                                    length: Number.isInteger(children) ? Math.max(0, children) : 0,
-                                  },
-                                  (_, child) => stay.childAges[child] ?? "",
-                                ),
-                              });
-                            }}
-                            className={inputClass}
-                          />{" "}
-                        </label>
-                        <label className={labelClass}>
-                          {" "}
-                          {t("calendar.targetManualBooking.ratePlan")} *{" "}
-                          <select
-                            ref={(node) => {
-                              if (node) controls.current.set(`${stay.key}:ratePlanId`, node);
-                            }}
-                            aria-label={t("calendar.targetManualBooking.ratePlanField", {
-                              number: index + 1,
-                            })}
-                            aria-invalid={serverError?.field === "ratePlanId"}
-                            aria-describedby={
-                              serverError?.field === "ratePlanId"
-                                ? `stay-server-${stay.key}`
-                                : noPlanConfigured
-                                  ? `stay-no-plan-${stay.key}`
-                                  : undefined
-                            }
-                            value={stay.ratePlanId}
+                            step="0.01"
+                            value={stay.nightlyRate}
                             onChange={(event) =>
-                              updateStay(index, { ratePlanId: event.target.value, nightlyRate: "" })
+                              updateStay(index, { nightlyRate: event.target.value })
                             }
+                            required
                             className={inputClass}
-                          >
-                            {" "}
-                            {roomType?.ratePlans.map((plan) => (
-                              <option key={plan.id} value={plan.id}>
-                                {plan.name}
-                              </option>
-                            ))}{" "}
-                            <option value="custom">
-                              {t("calendar.targetManualBooking.customRate")}
-                            </option>{" "}
-                          </select>{" "}
-                        </label>{" "}
-                        {stay.ratePlanId === "custom" && (
-                          <label className={labelClass}>
-                            {t("calendar.targetManualBooking.customNightlyRate")}{" "}
-                            <input
-                              ref={(node) => {
-                                if (node) controls.current.set(`${stay.key}:nightlyRate`, node);
-                              }}
-                              aria-label={t("calendar.targetManualBooking.nightlyRateField", {
-                                number: index + 1,
-                              })}
-                              aria-invalid={serverError?.field === "nightlyRate"}
-                              aria-describedby={
-                                serverError?.field === "nightlyRate"
-                                  ? `stay-server-${stay.key}`
-                                  : undefined
-                              }
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={stay.nightlyRate}
-                              onChange={(event) =>
-                                updateStay(index, { nightlyRate: event.target.value })
-                              }
-                              required
-                              className={inputClass}
-                            />
-                          </label>
-                        )}
-                      </div>
+                          />
+                        </label>
+                      )}
                       {noPlanConfigured && (
-                        <p id={`stay-no-plan-${stay.key}`} className="mt-2 text-xs text-gray-600">
+                        <p id={`stay-no-plan-${stay.key}`} className="text-xs text-gray-600">
                           {t("calendar.targetManualBooking.noRatePlanConfigured")}
                         </p>
                       )}
@@ -955,73 +1139,59 @@ export default function TargetManualBookingModal({
                         <p
                           id={`stay-occupancy-${stay.key}`}
                           role="alert"
-                          className="mt-2 text-xs text-red-700"
+                          className="text-xs text-red-700"
                         >
                           {t("calendar.targetManualBooking.occupancyExceeded", {
                             count: roomType?.maxOccupancy ?? 0,
                           })}
                         </p>
-                      )}{" "}
+                      )}
                       {conflict && (
                         <p
                           id={`stay-conflict-${stay.key}`}
                           role="alert"
-                          className="mt-2 text-xs text-red-700"
+                          className="text-xs text-red-700"
                         >
                           {t("calendar.targetManualBooking.roomOverlap")}
                         </p>
-                      )}{" "}
+                      )}
                       {serverError && (
                         <p
                           id={`stay-server-${stay.key}`}
                           role="alert"
-                          className="mt-2 text-xs text-red-700"
+                          className="text-xs text-red-700"
                         >
                           {serverError.message}
                         </p>
                       )}
-                      <div
-                        aria-live="polite"
-                        className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs"
-                      >
-                        {" "}
-                        <div className="flex justify-between">
-                          {stay.ratePlanId !== "custom" && (
-                            <span>
-                              {t("calendar.targetManualBooking.standard")}{" "}
-                              {serverStay?.standardTotal
-                                ? money(serverStay.standardTotal.amountDecimal, preview!.currency)
-                                : "—"}
+                      {serverStay?.nightly.length ? (
+                        <details className="rounded-lg border border-gray-200 px-3.5">
+                          <summary className="flex min-h-11 cursor-pointer items-center text-[13px] font-medium text-gray-700">
+                            <span aria-live="polite">
+                              {t("calendar.targetManualBooking.nightlyBreakdown", {
+                                total: money(
+                                  serverStay.appliedTotal.amountDecimal,
+                                  preview!.currency,
+                                ),
+                              })}
                             </span>
-                          )}
-                          <strong className="ml-auto">
-                            {stay.ratePlanId === "custom"
-                              ? t("calendar.targetManualBooking.custom")
-                              : t("calendar.targetManualBooking.applied")}{" "}
-                            {serverStay
-                              ? money(serverStay.appliedTotal.amountDecimal, preview!.currency)
-                              : previewState === "loading"
-                                ? t("calendar.targetManualBooking.calculating")
-                                : "—"}
-                          </strong>
-                        </div>{" "}
-                        {serverStay?.nightly.length ? (
-                          <ul className="mt-2 space-y-1 border-t border-gray-100 pt-2 text-gray-600">
-                            {" "}
+                          </summary>
+                          <ul className="space-y-2 pb-3.5 pt-1 text-[13px] tabular-nums text-gray-700">
                             {serverStay.nightly.map((night) => (
-                              <li key={night.serviceDate} className="flex justify-between">
-                                <span>{night.serviceDate}</span>
+                              <li key={night.serviceDate} className="flex justify-between gap-3">
+                                <span>{day(night.serviceDate)}</span>
                                 <span>
-                                  {night.standard
+                                  {night.standard &&
+                                  night.standard.amountDecimal !== night.applied.amountDecimal
                                     ? `${money(night.standard.amountDecimal, preview!.currency)} → `
                                     : ""}
                                   {money(night.applied.amountDecimal, preview!.currency)}
                                 </span>
                               </li>
-                            ))}{" "}
+                            ))}
                           </ul>
-                        ) : null}{" "}
-                      </div>
+                        </details>
+                      ) : null}
                     </section>
                   );
                 })}{" "}

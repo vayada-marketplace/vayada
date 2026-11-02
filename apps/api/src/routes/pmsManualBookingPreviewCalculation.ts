@@ -145,6 +145,8 @@ export async function calculateManualBookingPreview(
       position: stay.position,
       roomId: stay.roomId,
       ratePlanId: stay.ratePlanId,
+      // What each published plan would cost for this stay, so staff can compare (VAY-2417).
+      ratePlanTotals: publication ? planTotals(scope, stay, room.roomTypeId, publication) : [],
       nightly: stay.dates.map((serviceDate, position) => ({
         serviceDate,
         standard: standards ? money(standards[position]!, currency!) : null,
@@ -203,20 +205,9 @@ function publishedNights(
   const configuration = publication.rooms.find((room) => room.roomTypeId === roomTypeId);
   if (!configuration?.offers.some((offer) => offer.id === stay.ratePlanId))
     fail(404, "rate_plan_not_found", "ratePlanId", stay.position);
-  const ages = stay.childAgesAtCheckIn ?? [];
-  if (ages.length !== stay.children)
+  if ((stay.childAgesAtCheckIn ?? []).length !== stay.children)
     fail(422, "child_ages_required", "childAgesAtCheckIn", stay.position);
-  const terms = publication.terms.filter((item) => item.roomTypeId === roomTypeId);
-  const priced = calculateReplacementRoomStay(configuration, {
-    propertyId: scope.propertyId,
-    roomTypeId,
-    offerId: stay.ratePlanId,
-    expectedRevision: publication.revision,
-    expectedTermsRevisions: Object.fromEntries(terms.map((item) => [item.offerId, item.revision])),
-    checkIn: stay.checkIn,
-    checkOut: stay.checkOut,
-    guests: { adults: stay.adults, childAgesAtCheckIn: ages },
-  });
+  const priced = priceOffer(scope, stay, configuration, publication, stay.ratePlanId);
   if (priced.kind !== "priced") {
     if (priced.reason === "invalid_guests") fail(422, "occupancy_exceeded", "stays", stay.position);
     if (priced.reason === "restriction") fail(422, "rate_restricted", "checkIn", stay.position);
@@ -229,6 +220,62 @@ function publishedNights(
   return stay.dates.map((date) => {
     const night = nights.get(date);
     return night === undefined ? invalid() : cents(night, publication.currency, stay.position);
+  });
+}
+
+/** Each published offer of the room type priced for the stay; null where it can't be booked
+ * (closed dates, minimum stay, no price, a child's age missing). Never refuses the preview. */
+function planTotals(
+  scope: { propertyId: string },
+  stay: PricedManualBookingStay,
+  roomTypeId: string,
+  publication: ManualBookingPricingPublication,
+): { ratePlanId: string; total: ManualBookingMoney | null }[] {
+  const configuration = publication.rooms.find((room) => room.roomTypeId === roomTypeId);
+  return (configuration?.offers ?? []).map((offer) => {
+    const priced =
+      (stay.childAgesAtCheckIn ?? []).length === stay.children
+        ? priceOffer(scope, stay, configuration!, publication, offer.id)
+        : null;
+    const nights =
+      priced?.kind === "priced"
+        ? new Map(priced.nights.map((night) => [night.date, night.totalMinor]))
+        : null;
+    let total: bigint | null = nights ? 0n : null;
+    for (const date of stay.dates) {
+      const night = nights?.get(date);
+      const amount =
+        night === undefined ? null : publishedMinorToCents(night, publication.currency);
+      if (total === null || amount === null) {
+        total = null;
+        break;
+      }
+      total += amount;
+    }
+    return {
+      ratePlanId: offer.id,
+      total: total === null ? null : money(total, publication.currency),
+    };
+  });
+}
+
+function priceOffer(
+  scope: { propertyId: string },
+  stay: PricedManualBookingStay,
+  configuration: PricingConfiguration,
+  publication: ManualBookingPricingPublication,
+  offerId: string,
+) {
+  const terms = publication.terms.filter((item) => item.roomTypeId === configuration.roomTypeId);
+  return calculateReplacementRoomStay(configuration, {
+    propertyId: scope.propertyId,
+    roomTypeId: configuration.roomTypeId,
+    offerId,
+    expectedRevision: publication.revision,
+    expectedTermsRevisions: Object.fromEntries(terms.map((item) => [item.offerId, item.revision])),
+    checkIn: stay.checkIn,
+    checkOut: stay.checkOut,
+    guests: { adults: stay.adults, childAgesAtCheckIn: stay.childAgesAtCheckIn ?? [] },
   });
 }
 
