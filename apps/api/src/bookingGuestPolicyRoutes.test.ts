@@ -86,6 +86,46 @@ describe("protected Booking guest-policy routes", () => {
       expect((await app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(status);
     }
   });
+  it("republishes a live booking page as the saving user after a guest-rule save only (VAY-2455)", async () => {
+    const store = {
+      read: vi.fn(async () => null),
+      save: vi.fn(async () => ({ revision: propertyId, replayed: false })),
+    };
+    const terms = { read: vi.fn(), save: vi.fn(async () => ({ termsText: null })) };
+    const bookingPublicationRefresh = { refresh: vi.fn(async () => null) };
+    app = await routeApp(
+      routeApplication(revisionFixture(), compositionFixture(), firstVisitReadiness(), []),
+      {},
+      store,
+      terms,
+      { bookingPublicationRefresh },
+    );
+    const url = `/properties/${propertyId}/guest-rules`;
+    const headers = { authorization: "Bearer valid-token", "idempotency-key": "rules-save" };
+    const payload = { expectedRevision: null, confirmed: true, choices };
+    await app.inject({ method: "GET", url, headers });
+    store.save.mockRejectedValueOnce(new Error("guest_choices_stale"));
+    expect((await app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(409);
+    await app.inject({
+      method: "PUT",
+      url: `/properties/${propertyId}/guest-terms`,
+      headers,
+      payload: { termsText: null, expectedTermsText: null },
+    });
+    expect(bookingPublicationRefresh.refresh).not.toHaveBeenCalled();
+    expect((await app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(200);
+    await vi.waitFor(() =>
+      expect(bookingPublicationRefresh.refresh).toHaveBeenCalledWith({
+        organizationId,
+        propertyId,
+        actorUserId,
+        idempotencyKey: "request-1",
+        audit: expect.objectContaining({ requestId: "request-1" }),
+        onlyIfLive: true,
+      }),
+    );
+    expect(bookingPublicationRefresh.refresh).toHaveBeenCalledTimes(1);
+  });
   it("routes guest-term reads/writes with authenticated scope and rejects other fields", async () => {
     const store = { read: vi.fn(async () => null), save: vi.fn() };
     const terms = {
@@ -489,6 +529,7 @@ async function routeApp(
   auth: AuthOptions = {},
   guestStore?: BookingGuestChoiceRoutesOptions["store"],
   termsStore?: BookingGuestChoiceRoutesOptions["termsStore"],
+  refresh: Pick<BookingGuestChoiceRoutesOptions, "bookingPublicationRefresh"> = {},
 ) {
   const app = Fastify({ logger: false });
   app.decorateRequest("authContext", null);
@@ -535,6 +576,7 @@ async function routeApp(
       store: guestStore,
       termsStore: termsStore ?? { read: vi.fn(), save: vi.fn() },
       propertyAccessRepository: propertyAccessRepository(auth.propertyScope),
+      ...refresh,
     });
   return app;
 }

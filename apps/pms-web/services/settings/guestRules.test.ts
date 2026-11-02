@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), resolvePropertyId: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), resolvePropertyId: vi.fn() }));
 vi.mock("../api/pmsOperationsClient", () => ({
-  pmsOperationsClient: { get: mocks.get },
+  pmsOperationsClient: { get: mocks.get, put: mocks.put },
   pmsOperationsRequestOptions: { cache: "no-store" },
 }));
 vi.mock("../api/pmsPropertyClient", () => ({
   resolveSelectedPmsPropertyId: mocks.resolvePropertyId,
 }));
 
-import { guestRulesService } from "./guestRules";
+import { guestRulesSaveError, guestRulesService } from "./guestRules";
 
 const PROPERTY = "f6853000-0000-4000-8000-000000000001";
 const REVISION = "6d1c3a52-5b5e-4c3f-9a51-1f3f8d1b2c4e";
@@ -40,9 +40,45 @@ describe("guest rules service", () => {
     });
   });
 
-  it("answers null while the property has none", async () => {
+  it("answers null while the property has none, and reads a named property as is", async () => {
     mocks.get.mockResolvedValue({ current: null });
-    await expect(guestRulesService.load()).resolves.toBeNull();
+    await expect(guestRulesService.load(undefined, "property-2")).resolves.toBeNull();
+    expect(mocks.get).toHaveBeenCalledWith(
+      "/api/booking/properties/property-2/guest-rules",
+      expect.anything(),
+    );
+    expect(mocks.resolvePropertyId).not.toHaveBeenCalled();
+  });
+
+  it("saves confirmed choices over the expected revision, once per idempotency key", async () => {
+    const saved = "7e2d4b63-6c6f-4d4a-8b62-2a4a9e2c3d5f";
+    mocks.put.mockResolvedValue({ revision: saved, replayed: false });
+    await expect(
+      guestRulesService.save(PROPERTY, REVISION, choices as never, "arrival-times:1"),
+    ).resolves.toBe(saved);
+    expect(mocks.put).toHaveBeenCalledWith(
+      `/api/booking/properties/${PROPERTY}/guest-rules`,
+      { expectedRevision: REVISION, confirmed: true, choices },
+      { cache: "no-store", headers: { "Idempotency-Key": "arrival-times:1" } },
+    );
+    mocks.put.mockResolvedValue({});
+    await expect(
+      guestRulesService.save(PROPERTY, null, choices as never, "arrival-times:2"),
+    ).rejects.toThrow("could not be confirmed");
+  });
+
+  it("explains each refusal the API answers with a code", () => {
+    const refusal = (code: string) =>
+      Object.assign(new Error("API Error: 409"), { data: { code } });
+    expect(guestRulesSaveError(refusal("guest_choices_stale"))).toContain(
+      "Another user changed these settings",
+    );
+    expect(guestRulesSaveError(refusal("guest_choices_denied"))).toContain(
+      "no longer have permission",
+    );
+    expect(guestRulesSaveError(new TypeError("Failed to fetch"))).toBe(
+      "Arrival times could not be saved. Please try again.",
+    );
   });
 
   it("refuses a malformed answer instead of showing made-up times", async () => {

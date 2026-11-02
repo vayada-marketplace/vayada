@@ -1,14 +1,23 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import type {
-  BookingGuestPolicyChoices,
-  BookingGuestPolicyComposition,
-  BookingGuestPolicySetupAggregate,
+import {
+  BOOKING_GUEST_POLICY_NEW_DRAFT_DEFAULTS,
+  BOOKING_GUEST_POLICY_SUPPORTED_LANGUAGES,
+  bookingArrivalTimeErrors,
+  parseBookingGuestPolicyChoices,
+  type BookingGuestPolicyChoices,
 } from "@vayada/domain-booking";
 import { SettingsCard } from "@vayada/settings-ui";
+import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { arrivalTimesService } from "@/services/settings/arrivalTimes";
+import {
+  guestRulesSaveError,
+  guestRulesService,
+  type GuestRules,
+} from "@/services/settings/guestRules";
 import { useTranslation } from "@/lib/i18n";
+import { forgetGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { humanizeApiError } from "./constants";
 
@@ -29,16 +38,36 @@ type ArrivalDraft = Omit<
   checkOutTime: string | null;
 };
 
+const EMPTY_DRAFT: ArrivalDraft = {
+  defaultGuestLanguage: null,
+  childrenEnabled: null,
+  adultAgeThreshold: null,
+  ...BOOKING_GUEST_POLICY_NEW_DRAFT_DEFAULTS,
+  checkInTime: null,
+  checkOutTime: null,
+};
+
+/** A property without guest rules yet starts from the PMS guest policy it saved before VAY-2455, else from its
+ * catalog times (the old policy's draft), else from nothing chosen. */
+async function firstDraft(signal: AbortSignal): Promise<ArrivalDraft> {
+  try {
+    const setup = await arrivalTimesService.load(signal);
+    return { ...(setup.current?.bundle.choices ?? setup.draft ?? EMPTY_DRAFT) };
+  } catch {
+    return EMPTY_DRAFT;
+  }
+}
+
+/** The check-in and check-out times and guest policies guests see on the booking page: the guest rules, which the
+ * hotel's first run and Booking Admin's setup also save (VAY-2455). */
 export function ArrivalTimesSection() {
   const { t } = useTranslation();
-  const [setup, setSetup] = useState<BookingGuestPolicySetupAggregate | null>(null);
+  const [rules, setRules] = useState<GuestRules | null>(null);
   const [choices, setChoices] = useState<ArrivalDraft | null>(null);
-  const [preview, setPreview] = useState<Extract<
-    BookingGuestPolicyComposition,
-    { outcome: "ready" }
-  > | null>(null);
+  const [review, setReview] = useState<BookingGuestPolicyChoices | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [key, setKey] = useState("");
+  const [propertyId, setPropertyId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -48,17 +77,21 @@ export function ArrivalTimesSection() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    setSetup(null);
+    setRules(null);
     setChoices(null);
     setError("");
     setLoadError(null);
-    void arrivalTimesService
-      .load(controller.signal)
-      .then((value) => {
+    void (async () => {
+      const id = await resolveSelectedPmsPropertyId("loading arrival times");
+      const value = await guestRulesService.load(controller.signal, id);
+      return { id, value, draft: value ? value.choices : await firstDraft(controller.signal) };
+    })()
+      .then(({ id, value, draft }) => {
         if (controller.signal.aborted) return;
-        setSetup(value);
-        setChoices(value.current?.bundle.choices ?? value.draft);
-        setPreview(null);
+        setPropertyId(id);
+        setRules(value);
+        setChoices(draft);
+        setReview(null);
         setConfirmed(false);
       })
       .catch((cause) => {
@@ -74,53 +107,46 @@ export function ArrivalTimesSection() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!setup || !choices) return;
-    setSaving(true);
+    if (!choices) return;
     setError("");
-    try {
-      if (!preview) {
-        if (
-          !choices.defaultGuestLanguage ||
-          choices.childrenEnabled === null ||
-          !choices.checkInTime ||
-          !choices.checkOutTime
-        ) {
-          setError(
-            "Choose a guest language, child policy and both required times before reviewing.",
-          );
-          return;
-        }
-        const result = await arrivalTimesService.preview(
-          setup.propertyId,
-          choices as BookingGuestPolicyChoices,
-        );
-        if (result.outcome !== "ready") {
-          setError(
-            "Guest policies are not ready. Review your property timezone, rooms and rates in setup before saving.",
-          );
-          return;
-        }
-        setPreview(result);
-        setKey(`arrival-times:${crypto.randomUUID()}`);
-      } else if (confirmed) {
-        await arrivalTimesService.save(setup, preview, key);
-        setSaved(true);
-        setReload((value) => value + 1);
+    if (!review) {
+      if (
+        !choices.defaultGuestLanguage ||
+        choices.childrenEnabled === null ||
+        !choices.checkInTime ||
+        !choices.checkOutTime
+      ) {
+        setError("Choose a guest language, child policy and both required times before reviewing.");
+        return;
       }
+      const parsed = parseBookingGuestPolicyChoices(choices);
+      if (!parsed) {
+        setError(
+          bookingArrivalTimeErrors(choices)[0] ??
+            "Choose an adult age from 1 to 21 when children are welcome.",
+        );
+        return;
+      }
+      setReview(parsed);
+      setKey(`arrival-times:${crypto.randomUUID()}`);
+      return;
+    }
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      await guestRulesService.save(propertyId, rules?.revision ?? null, review, key);
+      forgetGuestStayTimes();
+      setSaved(true);
+      setReload((value) => value + 1);
     } catch (cause) {
-      setError(
-        humanizeApiError(
-          cause,
-          "Arrival times could not be saved. Reload if another user changed the policy.",
-        ),
-      );
+      setError(guestRulesSaveError(cause));
     } finally {
       setSaving(false);
     }
   };
   const updateChoices = (patch: Partial<ArrivalDraft>) => {
     setChoices((current) => (current ? { ...current, ...patch } : current));
-    setPreview(null);
+    setReview(null);
     setConfirmed(false);
     setSaved(false);
   };
@@ -140,7 +166,7 @@ export function ArrivalTimesSection() {
           )}
           {saved && (
             <p className="text-sm text-green-700" role="status">
-              Arrival times saved. Guests see them on your booking page within a minute.
+              Arrival times saved. A live booking page shows them within a minute.
             </p>
           )}
           {!choices ? (
@@ -150,15 +176,10 @@ export function ArrivalTimesSection() {
           ) : (
             <form onSubmit={submit} className="space-y-4">
               <p className="text-xs text-gray-500">
-                Times use your property timezone
-                {preview
-                  ? ` (${preview.bundle.propertyTimeZone})`
-                  : setup?.current
-                    ? ` (${setup.current.bundle.propertyTimeZone})`
-                    : ""}
-                . Leave optional times empty for check-in from a time or check-out by a time.
+                Times use your property timezone. Leave optional times empty for check-in from a
+                time or check-out by a time.
               </p>
-              {!setup?.current && (
+              {!rules && (
                 <fieldset disabled={saving} className="space-y-3 text-sm">
                   <legend className="mb-2 font-medium">Confirm your initial guest policy</legend>
                   <p>
@@ -179,7 +200,7 @@ export function ArrivalTimesSection() {
                       className="ml-2 rounded border p-2"
                     >
                       <option value="">Choose a language</option>
-                      {setup?.supportedLanguages.map((language) => (
+                      {BOOKING_GUEST_POLICY_SUPPORTED_LANGUAGES.map((language) => (
                         <option key={language} value={language}>
                           {language}
                         </option>
@@ -261,7 +282,7 @@ export function ArrivalTimesSection() {
                           delete next[field];
                         else next[field] = event.target.value;
                         setChoices(next);
-                        setPreview(null);
+                        setReview(null);
                         setConfirmed(false);
                         setSaved(false);
                       }}
@@ -269,45 +290,14 @@ export function ArrivalTimesSection() {
                   </label>
                 ))}
               </div>
-              {preview && (
+              {review && (
                 <div className="space-y-2 rounded-lg bg-gray-50 p-3 text-sm">
                   <p>
-                    Check-in: {preview.bundle.choices.checkInTime}
-                    {preview.bundle.choices.checkInUntil
-                      ? `–${preview.bundle.choices.checkInUntil}`
-                      : " onwards"}
-                    . Check-out:{" "}
-                    {preview.bundle.choices.checkOutFrom
-                      ? `${preview.bundle.choices.checkOutFrom}–`
-                      : "by "}
-                    {preview.bundle.choices.checkOutTime}.
+                    Check-in: {review.checkInTime}
+                    {review.checkInUntil ? `–${review.checkInUntil}` : " onwards"}. Check-out:{" "}
+                    {review.checkOutFrom ? `${review.checkOutFrom}–` : "by "}
+                    {review.checkOutTime}.
                   </p>
-                  {preview.bundle.rates.map((rate) => (
-                    <p key={rate.roomTypeId}>
-                      Flexible cancellation: {rate.flexible.freeCancellationDeadlineDays} days
-                      before arrival at {rate.flexible.cutoff.localTime} (
-                      {rate.flexible.cutoff.timeZone}). After that deadline or for a no-show, the
-                      full booking amount applies.
-                    </p>
-                  ))}
-                  {preview.bundle.rates
-                    .filter((rate) => rate.nonRefundable)
-                    .map((rate) => (
-                      <p key={`nonref-${rate.roomTypeId}`}>
-                        Non-refundable rate: full prepayment, no refund, and the full booking amount
-                        for a no-show.
-                      </p>
-                    ))}
-                  {preview.bundle.rates
-                    .filter((rate) => rate.additionalGuest)
-                    .map((rate) => (
-                      <p key={`additional-${rate.roomTypeId}`}>
-                        Additional guests: {rate.additionalGuest!.amountDecimal}{" "}
-                        {rate.additionalGuest!.currency}, with{" "}
-                        {rate.additionalGuest!.includedGuestsPerRoom} guests included per room (
-                        {rate.additionalGuest!.countedGuestTypes.join(" and ")}).
-                      </p>
-                    ))}
                   <label className="flex items-start gap-2">
                     <input
                       type="checkbox"
@@ -315,16 +305,16 @@ export function ArrivalTimesSection() {
                       onChange={(event) => setConfirmed(event.target.checked)}
                       disabled={saving}
                     />
-                    I have reviewed how these policies and guest charges will appear to guests.
+                    I have reviewed how these times and guest policies will appear to guests.
                   </label>
                 </div>
               )}
               <div className="flex gap-3">
                 <button
-                  disabled={saving || Boolean(preview && !confirmed)}
+                  disabled={saving || Boolean(review && !confirmed)}
                   className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                 >
-                  {saving ? "Saving…" : preview ? "Save arrival times" : "Review policy"}
+                  {saving ? "Saving…" : review ? "Save arrival times" : "Review policy"}
                 </button>
                 <button
                   type="button"
