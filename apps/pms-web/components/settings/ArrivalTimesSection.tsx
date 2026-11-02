@@ -1,343 +1,243 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import {
-  BOOKING_GUEST_POLICY_NEW_DRAFT_DEFAULTS,
-  BOOKING_GUEST_POLICY_SUPPORTED_LANGUAGES,
-  bookingArrivalTimeErrors,
-  parseBookingGuestPolicyChoices,
-  type BookingGuestPolicyChoices,
-} from "@vayada/domain-booking";
+import { useEffect, useRef, useState } from "react";
+import type { BookingGuestPolicyChoices } from "@vayada/domain-booking";
 import { SettingsCard } from "@vayada/settings-ui";
-import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+import {
+  getPmsPropertyFacts,
+  resolveSelectedPmsPropertyId,
+} from "@/services/api/pmsPropertyClient";
 import { arrivalTimesService } from "@/services/settings/arrivalTimes";
 import {
-  guestRulesSaveError,
+  guestRulesRefusal,
   guestRulesService,
   type GuestRules,
+  type GuestRulesRefusal,
 } from "@/services/settings/guestRules";
 import { useTranslation } from "@/lib/i18n";
-import { forgetGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
+import { forgetGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { humanizeApiError } from "./constants";
+import {
+  adultAge,
+  checkForm,
+  choicesFromForm,
+  formFromChoices,
+  isDirty,
+  saveStatus,
+  type ArrivalDraft,
+  type ArrivalForm,
+} from "./arrivalTimes/arrivalTimesForm";
+import { timeZoneLabel } from "./arrivalTimes/arrivalTimesText";
+import { BookingPagePreview } from "./arrivalTimes/BookingPagePreview";
+import { BookingFormCard, GuestsCard } from "./arrivalTimes/GuestsCard";
+import { ReviewDialog, SaveBar, SetupBanner } from "./arrivalTimes/ReviewAndSave";
+import { TimesCard } from "./arrivalTimes/TimesCard";
 
-const fields = [
-  ["checkInTime", "Guests can check in from", true],
-  ["checkInUntil", "Check-in until (optional)", false],
-  ["checkOutFrom", "Check-out from (optional)", false],
-  ["checkOutTime", "Guests must check out by", true],
-] as const;
-
-type ArrivalDraft = Omit<
-  BookingGuestPolicyChoices,
-  "defaultGuestLanguage" | "childrenEnabled" | "checkInTime" | "checkOutTime"
-> & {
-  defaultGuestLanguage: BookingGuestPolicyChoices["defaultGuestLanguage"] | null;
-  childrenEnabled: boolean | null;
-  checkInTime: string | null;
-  checkOutTime: string | null;
+type Loaded = {
+  propertyId: string;
+  /** Null while the property has no guest rules: its first save confirms its guest policy. */
+  rules: GuestRules | null;
+  saved: ArrivalForm;
+  /** The property's name, town and time zone; null when its profile can't be read. */
+  facts: { name: string; city: string; timeZone: string } | null;
 };
 
-const EMPTY_DRAFT: ArrivalDraft = {
-  defaultGuestLanguage: null,
-  childrenEnabled: null,
-  adultAgeThreshold: null,
-  ...BOOKING_GUEST_POLICY_NEW_DRAFT_DEFAULTS,
-  checkInTime: null,
-  checkOutTime: null,
-};
-
-/** A property without guest rules yet starts from the PMS guest policy it saved before VAY-2455, else from its
- * catalog times (the old policy's draft), else from nothing chosen. */
+/** A property without guest rules starts from the PMS guest policy it saved before VAY-2455, else from that policy's
+ * catalog times, else from nothing chosen. */
 async function firstDraft(signal: AbortSignal): Promise<ArrivalDraft> {
   try {
     const setup = await arrivalTimesService.load(signal);
-    return { ...(setup.current?.bundle.choices ?? setup.draft ?? EMPTY_DRAFT) };
+    return setup.current?.bundle.choices ?? setup.draft ?? {};
   } catch {
-    return EMPTY_DRAFT;
+    return {};
   }
 }
 
-/** The check-in and check-out times and guest policies guests see on the booking page: the guest rules, which the
- * hotel's first run and Booking Admin's setup also save (VAY-2455). */
+/** Settings → Property → Check-in & check-out (VAY-2455, Timo's redesign): the guest rules the booking page shows —
+ * arrival and departure times, who can stay and the booking form — reviewed in a dialog and saved in one go. */
 export function ArrivalTimesSection() {
-  const { t } = useTranslation();
-  const [rules, setRules] = useState<GuestRules | null>(null);
-  const [choices, setChoices] = useState<ArrivalDraft | null>(null);
-  const [review, setReview] = useState<BookingGuestPolicyChoices | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-  const [key, setKey] = useState("");
-  const [propertyId, setPropertyId] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const { t, locale } = useTranslation();
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [form, setForm] = useState<ArrivalForm | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
-  const [saved, setSaved] = useState(false);
   const [reload, setReload] = useState(0);
+  const [review, setReview] = useState<BookingGuestPolicyChoices | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<GuestRulesRefusal | "failed" | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  // One key per reviewed set of choices: a retry after a lost answer replays the save instead of repeating it.
+  const attempt = useRef<{ choices: string; key: string } | null>(null);
+  // The dialog gives focus back to "Review & save", which a save disables: keyboard users land on the status.
+  const statusRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (justSaved) statusRef.current?.focus();
+  }, [justSaved]);
+
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setRules(null);
-    setChoices(null);
-    setError("");
+    const { signal } = controller;
+    setLoaded(null);
+    setForm(null);
     setLoadError(null);
     void (async () => {
-      const id = await resolveSelectedPmsPropertyId("loading arrival times");
-      const value = await guestRulesService.load(controller.signal, id);
-      return { id, value, draft: value ? value.choices : await firstDraft(controller.signal) };
-    })()
-      .then(({ id, value, draft }) => {
-        if (controller.signal.aborted) return;
-        setPropertyId(id);
-        setRules(value);
-        setChoices(draft);
-        setReview(null);
-        setConfirmed(false);
-      })
-      .catch((cause) => {
-        if (controller.signal.aborted) return;
-        setLoadError(cause);
-        setError(humanizeApiError(cause, "Arrival times could not be loaded."));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
+      const propertyId = await resolveSelectedPmsPropertyId("loading arrival times");
+      const [rules, facts] = await Promise.all([
+        guestRulesService.load(signal, propertyId),
+        getPmsPropertyFacts(propertyId, signal).catch(() => null),
+      ]);
+      const saved = formFromChoices(rules ? rules.choices : await firstDraft(signal));
+      return { propertyId, rules, saved, facts };
+    })().then(
+      (value) => {
+        if (signal.aborted) return;
+        setLoaded(value);
+        setForm(value.saved);
+      },
+      (cause) => {
+        if (!signal.aborted) setLoadError(cause);
+      },
+    );
     return () => controller.abort();
   }, [reload]);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!choices) return;
-    setError("");
-    if (!review) {
-      if (
-        !choices.defaultGuestLanguage ||
-        choices.childrenEnabled === null ||
-        !choices.checkInTime ||
-        !choices.checkOutTime
-      ) {
-        setError("Choose a guest language, child policy and both required times before reviewing.");
-        return;
-      }
-      const parsed = parseBookingGuestPolicyChoices(choices);
-      if (!parsed) {
-        setError(
-          bookingArrivalTimeErrors(choices)[0] ??
-            "Choose an adult age from 1 to 21 when children are welcome.",
-        );
-        return;
-      }
-      setReview(parsed);
-      setKey(`arrival-times:${crypto.randomUUID()}`);
+  const reloadSaved = () => {
+    attempt.current = null;
+    setRefusal(null);
+    setJustSaved(false);
+    setReload((value) => value + 1);
+  };
+
+  if (!loaded || !form)
+    return (
+      <SettingsCard>
+        {loadError ? (
+          <div className="space-y-2">
+            <p role="alert" className="text-sm text-red-700">
+              {localizedErrorText(
+                loadError,
+                humanizeApiError(loadError, t("settings.arrivalTimes.loadError")),
+                t,
+              )}
+            </p>
+            <button type="button" onClick={reloadSaved} className="text-sm font-medium underline">
+              {t("settings.arrivalTimes.retry")}
+            </button>
+          </div>
+        ) : (
+          <p role="status" className="text-sm text-gray-600">
+            {t("settings.arrivalTimes.loading")}
+          </p>
+        )}
+      </SettingsCard>
+    );
+
+  const check = checkForm(form);
+  const dirty = isDirty(form, loaded.saved);
+  const status = saveStatus(check, dirty, loaded.rules !== null, justSaved);
+  const change = (patch: Partial<ArrivalForm>) => {
+    setForm((current) => current && { ...current, ...patch });
+    setJustSaved(false);
+    setRefusal(null);
+  };
+  const openReview = () => {
+    const choices = choicesFromForm(form, adultAge(loaded.saved.adultAge));
+    if (!choices) {
+      setRefusal("invalid_guest_choices");
       return;
     }
-    if (!confirmed) return;
+    const text = JSON.stringify(choices);
+    if (attempt.current?.choices !== text)
+      attempt.current = { choices: text, key: `arrival-times:${crypto.randomUUID()}` };
+    setRefusal(null);
+    setReview(choices);
+  };
+  const confirmSave = async () => {
+    if (!review || !attempt.current) return;
     setSaving(true);
     try {
-      await guestRulesService.save(propertyId, rules?.revision ?? null, review, key);
+      const revision = await guestRulesService.save(
+        loaded.propertyId,
+        loaded.rules?.revision ?? null,
+        review,
+        attempt.current.key,
+      );
+      attempt.current = null;
+      // The dashboard, the booking and the check-in show the new times next.
       forgetGuestStayTimes();
-      setSaved(true);
-      setReload((value) => value + 1);
+      const saved = formFromChoices(review);
+      setLoaded({ ...loaded, rules: { revision, choices: review }, saved });
+      setForm(saved);
+      setJustSaved(true);
     } catch (cause) {
-      setError(guestRulesSaveError(cause));
+      const code = guestRulesRefusal(cause);
+      // A refusal is final; only an unanswered save may be retried under the same key.
+      if (code) attempt.current = null;
+      setRefusal(code ?? "failed");
     } finally {
       setSaving(false);
+      setReview(null);
     }
   };
-  const updateChoices = (patch: Partial<ArrivalDraft>) => {
-    setChoices((current) => (current ? { ...current, ...patch } : current));
-    setReview(null);
-    setConfirmed(false);
-    setSaved(false);
+  const refusalText = {
+    guest_choices_stale: t("settings.arrivalTimes.saveError.stale"),
+    guest_choices_idempotency_conflict: t("settings.arrivalTimes.saveError.conflict"),
+    guest_choices_denied: t("settings.arrivalTimes.saveError.denied"),
+    invalid_guest_choices: t("settings.arrivalTimes.saveError.invalid"),
+    failed: t("settings.arrivalTimes.saveError.failed"),
   };
 
   return (
-    <SettingsCard>
-      {loading ? (
-        <p className="text-sm" role="status">
-          Loading arrival times…
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {error && (
-            <p className="text-sm text-red-700" role="alert">
-              {localizedErrorText(loadError, error, t)}
-            </p>
-          )}
-          {saved && (
-            <p className="text-sm text-green-700" role="status">
-              Arrival times saved. A live booking page shows them within a minute.
-            </p>
-          )}
-          {!choices ? (
-            <p className="text-sm">
-              Arrival times are unavailable. Retry loading your property settings.
-            </p>
-          ) : (
-            <form onSubmit={submit} className="space-y-4">
-              <p className="text-xs text-gray-500">
-                Times use your property timezone. Leave optional times empty for check-in from a
-                time or check-out by a time.
-              </p>
-              {!rules && (
-                <fieldset disabled={saving} className="space-y-3 text-sm">
-                  <legend className="mb-2 font-medium">Confirm your initial guest policy</legend>
-                  <p>
-                    Existing arrival times are prefilled when available. Choose the remaining guest
-                    policies before saving.
-                  </p>
-                  <label className="block">
-                    Default guest language
-                    <select
-                      required
-                      value={choices.defaultGuestLanguage ?? ""}
-                      onChange={(event) =>
-                        updateChoices({
-                          defaultGuestLanguage: event.target
-                            .value as BookingGuestPolicyChoices["defaultGuestLanguage"],
-                        })
-                      }
-                      className="ml-2 rounded border p-2"
-                    >
-                      <option value="">Choose a language</option>
-                      {BOOKING_GUEST_POLICY_SUPPORTED_LANGUAGES.map((language) => (
-                        <option key={language} value={language}>
-                          {language}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block">
-                    Are children welcome?
-                    <select
-                      required
-                      value={
-                        choices.childrenEnabled === null ? "" : String(choices.childrenEnabled)
-                      }
-                      onChange={(event) =>
-                        updateChoices({ childrenEnabled: event.target.value === "true" })
-                      }
-                      className="ml-2 rounded border p-2"
-                    >
-                      <option value="">Choose a child policy</option>
-                      <option value="true">Yes</option>
-                      <option value="false">No</option>
-                    </select>
-                  </label>
-                  {choices.childrenEnabled && (
-                    <label className="block">
-                      Adult age threshold
-                      <input
-                        type="number"
-                        min={1}
-                        max={21}
-                        required
-                        value={choices.adultAgeThreshold ?? ""}
-                        onChange={(event) =>
-                          updateChoices({
-                            adultAgeThreshold: event.target.value
-                              ? Number(event.target.value)
-                              : null,
-                          })
-                        }
-                        className="ml-2 w-20 rounded border p-2"
-                      />
-                    </label>
-                  )}
-                  {(
-                    [
-                      ["phoneRequired", "Require phone number"],
-                      ["arrivalTimeEnabled", "Ask for arrival time"],
-                      ["specialRequestsEnabled", "Allow special requests"],
-                    ] as const
-                  ).map(([field, label]) => (
-                    <label key={field} className="block">
-                      <input
-                        type="checkbox"
-                        checked={choices[field]}
-                        onChange={(event) => updateChoices({ [field]: event.target.checked })}
-                        className="mr-2"
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </fieldset>
-              )}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {fields.map(([field, label, required]) => (
-                  <label key={field} className="text-sm">
-                    {label}
-                    <input
-                      type="time"
-                      required={required}
-                      disabled={saving}
-                      value={choices[field] ?? ""}
-                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2"
-                      onChange={(event) => {
-                        const next = { ...choices };
-                        if (
-                          (field === "checkInUntil" || field === "checkOutFrom") &&
-                          !event.target.value
-                        )
-                          delete next[field];
-                        else next[field] = event.target.value;
-                        setChoices(next);
-                        setReview(null);
-                        setConfirmed(false);
-                        setSaved(false);
-                      }}
-                    />
-                  </label>
-                ))}
-              </div>
-              {review && (
-                <div className="space-y-2 rounded-lg bg-gray-50 p-3 text-sm">
-                  <p>
-                    Check-in: {review.checkInTime}
-                    {review.checkInUntil ? `–${review.checkInUntil}` : " onwards"}. Check-out:{" "}
-                    {review.checkOutFrom ? `${review.checkOutFrom}–` : "by "}
-                    {review.checkOutTime}.
-                  </p>
-                  <label className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      checked={confirmed}
-                      onChange={(event) => setConfirmed(event.target.checked)}
-                      disabled={saving}
-                    />
-                    I have reviewed how these times and guest policies will appear to guests.
-                  </label>
-                </div>
-              )}
-              <div className="flex gap-3">
-                <button
-                  disabled={saving || Boolean(review && !confirmed)}
-                  className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {saving ? "Saving…" : review ? "Save arrival times" : "Review policy"}
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  className="text-sm underline"
-                  onClick={() => setReload((value) => value + 1)}
-                >
-                  Reload saved values
-                </button>
-              </div>
-            </form>
-          )}
-          {!choices && (
-            <button
-              type="button"
-              onClick={() => setReload((value) => value + 1)}
-              className="text-sm underline"
-            >
-              Retry
-            </button>
-          )}
-        </div>
+    <div className="space-y-6">
+      {!loaded.rules && (
+        <SetupBanner
+          check={check}
+          prefilled={Boolean(loaded.saved.checkInTime || loaded.saved.checkOutTime)}
+        />
       )}
-    </SettingsCard>
+      <div className="flex flex-wrap items-start gap-6">
+        <div className="flex min-w-0 flex-[999_1_540px] flex-col gap-5">
+          <TimesCard
+            form={form}
+            check={check}
+            timeZone={timeZoneLabel(loaded.facts?.timeZone ?? "", locale)}
+            onChange={change}
+          />
+          <GuestsCard form={form} check={check} onChange={change} />
+          <BookingFormCard form={form} onChange={change} />
+          {refusal && (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              <span>{refusalText[refusal]}</span>
+              {/* A refused save, or one whose answer was lost, may have left other values saved. */}
+              {refusal !== "guest_choices_denied" && refusal !== "invalid_guest_choices" && (
+                <button type="button" onClick={reloadSaved} className="font-medium underline">
+                  {t("settings.arrivalTimes.reload")}
+                </button>
+              )}
+            </div>
+          )}
+          <SaveBar
+            status={status}
+            missing={check.missing}
+            dirty={dirty}
+            statusRef={statusRef}
+            onDiscard={() => change(loaded.saved)}
+            onReview={openReview}
+          />
+        </div>
+        <BookingPagePreview form={form} check={check} hotel={loaded.facts} />
+      </div>
+      {review && (
+        <ReviewDialog
+          choices={review}
+          saving={saving}
+          onBack={() => setReview(null)}
+          onConfirm={confirmSave}
+        />
+      )}
+    </div>
   );
 }
