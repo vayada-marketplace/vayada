@@ -44,11 +44,13 @@ async function call(
   service: Partial<Service>,
   payload?: unknown,
   id = propertyId,
+  goLive = true,
 ) {
   const app = Fastify();
   await registerHotelSetupChecklistRoutes(app, {
     createService: () => service as Service,
     propertyAccessRepository: {} as never,
+    goLive,
   });
   const response = await app.inject({
     method,
@@ -131,6 +133,23 @@ describe("hotel setup checklist routes (VAY-2247 wave 2)", () => {
     expect(setViewer).toHaveBeenCalledWith(actor, { dismissed: true }, "v2");
     policy.context = context({ sessionId: null });
     expect((await call("GET", "/v2", { readGoLive })).statusCode).toBe(403);
+    // Without HOTEL_GO_LIVE_CHECKLIST_ENABLED there is no v2: the dashboards keep today's card.
+    policy.context = context();
+    expect(
+      (await call("GET", "/v2", { readGoLive }, undefined, propertyId, false)).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await call(
+          "GET",
+          "",
+          { read: vi.fn(async () => checklist as never) },
+          undefined,
+          propertyId,
+          false,
+        )
+      ).statusCode,
+    ).toBe(200);
   });
 
   it("needs a signed-in session on a hotel group and a property in scope", async () => {

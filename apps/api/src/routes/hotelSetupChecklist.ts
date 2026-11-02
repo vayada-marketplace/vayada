@@ -22,7 +22,8 @@ import { enforceRoutePolicy } from "./policy.js";
  *   GET  /api/hotel-setup/properties/:propertyId/checklist
  *   POST /api/hotel-setup/properties/:propertyId/checklist/acknowledgements  { item }   ("Looks good")
  *   PUT  /api/hotel-setup/properties/:propertyId/checklist/viewer  { hidden?, dismissed? }
- * VAY-2451: the same three under /checklist/v2 answer with the four-step setup's go-live list.
+ * VAY-2451: the same three under /checklist/v2 answer with the four-step setup's go-live list, mounted
+ * only with `goLive` (HOTEL_GO_LIVE_CHECKLIST_ENABLED): a 404 there tells the dashboards to keep v1's card.
  * For anyone who may manage the hotel's setup, on a property in their scope, with their own session:
  * "Looks good" is for the whole hotel, Hide for now and Dismiss only for the signed-in person.
  */
@@ -32,6 +33,8 @@ export type HotelSetupChecklistRouteOptions = {
     context: RequestContext,
   ): Pick<HotelSetupChecklistService, "read" | "readGoLive" | "acknowledge" | "setViewer">;
   propertyAccessRepository: PropertyAccessRepository;
+  /** Mount /checklist/v2 too. */
+  goLive?: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -105,10 +108,11 @@ export async function registerHotelSetupChecklistRoutes(
       ? reply.status(200).send(checklist)
       : reply.status(404).send({ code: "property_not_found" });
 
-  for (const [path, view] of [
+  const views = [
     ["/properties/:propertyId/checklist", "v1"],
     ["/properties/:propertyId/checklist/v2", "v2"],
-  ] as const) {
+  ] as const;
+  for (const [path, view] of views.filter(([, view]) => view === "v1" || options.goLive)) {
     app.get(path, async (request, reply) => {
       const member = await checklistActor(request, reply, options.propertyAccessRepository);
       if (!member) return reply;
