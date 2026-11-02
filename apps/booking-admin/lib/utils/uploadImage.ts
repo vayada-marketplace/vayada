@@ -37,7 +37,7 @@ type UploadSessionResponse = {
 type FinalizeResponse = {
   mediaObjects: Array<{
     mediaId: string;
-    variants: Array<{ publicCdnUrl: string | null; storageKey: string }>;
+    variants: Array<{ publicCdnUrl: string | null; storageKey: string; variantName?: string }>;
   }>;
 };
 
@@ -288,8 +288,14 @@ async function uploadImageRecords(
   const finalizedBody = (await finalized.json()) as FinalizeResponse;
   return finalizedBody.mediaObjects.map((mediaObject) => {
     if (!mediaObject.mediaId) throw new Error("Platform media did not return a media object ID");
-    const publicUrl = mediaObject.variants.find((variant) =>
+    const https = mediaObject.variants.filter((variant) =>
       variant.publicCdnUrl?.startsWith("https://"),
+    );
+    // The agency page serves its header image's "large" variant; preview that one too (VAY-2457).
+    const publicUrl = (
+      (purpose === "booking.account_page.header_image" &&
+        https.find((variant) => variant.variantName === "large")) ||
+      https[0]
     )?.publicCdnUrl;
     if (!publicUrl) throw new Error("Platform media did not return a public HTTPS image URL");
     return { mediaObjectId: mediaObject.mediaId, publicUrl };

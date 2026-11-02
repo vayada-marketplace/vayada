@@ -92,6 +92,8 @@ export function MultiPropertyBookingPage({
   const [draft, setDraft] = useState<AccountBookingPageDraft | null>(null);
   const [baseline, setBaseline] = useState("");
   const [saving, setSaving] = useState(false);
+  // An upload landing during a save would be lost when the saved page comes back: Save waits.
+  const [uploading, setUploading] = useState(false);
   const [showProblems, setShowProblems] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
@@ -198,10 +200,12 @@ export function MultiPropertyBookingPage({
     if (saving) return;
     setFeedback(null);
     const { headerImage, ...value } = normalized(draft);
+    // Only a changed image is sent, so a save without one works with a next-api that predates it.
+    const image = headerImage?.mediaId ?? null;
     const update = parseAccountBookingPageUpdate({
       revision: summary.page.revision,
       ...value,
-      headerImageMediaId: headerImage?.mediaId ?? null,
+      ...(image !== (summary.page.headerImage?.mediaId ?? null) && { headerImageMediaId: image }),
     });
     if (problems.size || !update) {
       setShowProblems(true);
@@ -250,6 +254,8 @@ export function MultiPropertyBookingPage({
     // For changes that land later (an upload): applied to the draft as it is then.
     updateDraft: (change) => setDraft((current) => (current ? change(current) : current)),
     uploadHeaderImage,
+    uploading,
+    setUploading,
     summary,
     problems: showProblems ? problems : new Set(),
     disabled: saving,
@@ -284,7 +290,7 @@ export function MultiPropertyBookingPage({
             <button
               type="button"
               onClick={() => void save()}
-              disabled={saving || blocked}
+              disabled={saving || blocked || uploading}
               className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full bg-primary-500 px-5 text-[14px] font-semibold text-white transition-colors hover:bg-primary-600 disabled:opacity-50"
             >
               {saving && (

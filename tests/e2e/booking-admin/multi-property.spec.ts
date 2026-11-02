@@ -217,7 +217,6 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
       slug: "thetravelubud",
       live: true,
       propertyIds: [mandala, escape, mertha],
-      headerImageMediaId: null,
       settings: {
         page: {
           title: "The Travel Ubud Villas",
@@ -316,6 +315,11 @@ test("uploads the agency's own header image, saves it and can remove it", async 
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Changes saved", { exact: true })).toBeVisible();
   expect(mock.saves.at(-1)).toMatchObject({ headerImageMediaId: HERO_ID });
+  // A save that doesn't change the image doesn't send it (a next-api without the image still saves).
+  await page.getByLabel("Page title").fill("The Travel Ubud Stays");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
+  expect(mock.saves.at(-1)).not.toHaveProperty("headerImageMediaId");
   await header.scrollIntoViewIfNeeded();
   await header.screenshot({ path: testInfo.outputPath("multi-property-header-1440.png") });
   await page.setViewportSize({ width: 390, height: 844 });

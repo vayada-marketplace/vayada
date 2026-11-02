@@ -1763,9 +1763,20 @@ describe("platform media upload routes", () => {
         };
       },
     };
+    const bookingEngine: ProductEntitlement = {
+      product: "booking",
+      key: "booking-engine",
+      status: "active",
+      resource: {
+        product: "booking",
+        resourceType: "booking_hotel",
+        resourceId: "booking_hotel_alpenrose",
+      },
+    };
     const options = {
       permissions: ["booking.settings.manage" as PermissionKey],
       resources,
+      entitlements: [bookingEngine],
       targetResolver: accountTarget,
       enabledPurposes: ["booking.account_page.header_image" as const],
     };
@@ -1825,9 +1836,12 @@ describe("platform media upload routes", () => {
       },
     });
 
-    // A member with only some properties, without the permission, or without the hotel link: refused.
+    // A member with only some properties, without the permission, without the hotel link, or
+    // without an active booking engine: refused.
     for (const refused of [
       { ...options, propertyAccessMode: "assigned" as const },
+      { ...options, entitlements: [] },
+      { ...options, entitlements: [{ ...bookingEngine, status: "suspended" as const }] },
       { ...options, permissions: ["booking.settings.read" as PermissionKey] },
       { ...options, resources: [] },
     ])

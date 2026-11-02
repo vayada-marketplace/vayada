@@ -323,6 +323,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     );
     await admin.query("DELETE FROM platform.media_objects WHERE id = $1::uuid", [own]);
     expect(await repository.read(organizationId)).toMatchObject({ page: { headerImage: null } });
+    expect(
+      (
+        await admin.query(
+          "SELECT header_image_media_object_id FROM booking.account_booking_pages WHERE organization_id = $1",
+          [organizationId],
+        )
+      ).rows,
+    ).toEqual([{ header_image_media_object_id: null }]);
   });
 
   // Public pricing locks the account row FOR UPDATE in short transactions. Reading never waits for it;

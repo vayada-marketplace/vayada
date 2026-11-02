@@ -44,6 +44,9 @@ export type SectionProps = {
   /** For changes that land later (an upload): applied to the draft as it is then. */
   updateDraft: (change: (current: AccountBookingPageDraft) => AccountBookingPageDraft) => void;
   uploadHeaderImage: (file: File) => Promise<UploadedImage>;
+  /** Kept by the page: Save waits for an upload. */
+  uploading: boolean;
+  setUploading: (uploading: boolean) => void;
   summary: AccountBookingPageSummary;
   /** Shown once the member tried to save. */
   problems: Set<DraftProblem>;
@@ -320,13 +323,15 @@ export function HeaderSection({
   setDraft,
   updateDraft,
   uploadHeaderImage,
+  uploading,
+  setUploading,
   summary,
   problems,
   disabled,
 }: SectionProps) {
-  const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const uploadButton = useRef<HTMLButtonElement>(null);
   const own = draft.headerImage;
   const upload = async (file: File) => {
     setUploadError(null);
@@ -397,6 +402,7 @@ export function HeaderSection({
           </strong>
           <span
             data-testid="multi-property-header-image-note"
+            aria-live="polite"
             className="text-[13px] text-gray-500"
           >
             {t(
@@ -422,6 +428,7 @@ export function HeaderSection({
           />
           <div className="mt-1 flex flex-wrap gap-2">
             <button
+              ref={uploadButton}
               type="button"
               disabled={disabled || uploading}
               onClick={() => fileInput.current?.click()}
@@ -442,7 +449,11 @@ export function HeaderSection({
               <button
                 type="button"
                 disabled={disabled || uploading}
-                onClick={() => updateDraft((current) => ({ ...current, headerImage: null }))}
+                onClick={() => {
+                  updateDraft((current) => ({ ...current, headerImage: null }));
+                  // This button goes away: keep the keyboard on the image's controls.
+                  uploadButton.current?.focus();
+                }}
                 className="min-h-[44px] px-2 text-[14px] font-semibold text-gray-700 underline underline-offset-2 hover:text-gray-900 disabled:opacity-50"
               >
                 {t("settings.multiProperty.header.remove")}

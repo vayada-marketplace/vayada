@@ -2045,6 +2045,7 @@ function authorizeMediaResource(
       : { ok: false, message: "Selected organization cannot upload PMS Inbox attachments." };
   }
   if (policy.purpose === "booking.account_page.header_image") {
+    // As the page's settings: the booking engine must be active (here for the named hotel).
     const context = enforceRoutePolicy(request, {
       permission: permissionForResource(policy),
       resource: {
@@ -2052,6 +2053,15 @@ function authorizeMediaResource(
         resourceType: resource.resourceType,
         resourceId: resource.resourceId,
         allowedRelationships: policy.allowedRelationships,
+      },
+      entitlement: {
+        product: "booking",
+        key: "booking-engine",
+        resource: {
+          product: "booking",
+          resourceType: "booking_hotel",
+          resourceId: resource.resourceId,
+        },
       },
     });
     // The page speaks for every stay: as its settings, only agency members with every property.
