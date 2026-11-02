@@ -26,6 +26,9 @@ function buildAuthenticatedApp(options: {
   repository: PmsGuestStayTimesRepository;
   permissions?: PermissionKey[];
   relationship?: ResourceRelationship;
+  /** The property the member's account is linked to, and the one its PMS entitlement is for. */
+  linkedPropertyId?: string;
+  entitledPropertyId?: string;
 }) {
   const relationship = options.relationship ?? "front_desk";
   const identityRepository: IdentityRepository = {
@@ -49,18 +52,19 @@ function buildAuthenticatedApp(options: {
       };
     },
     async findLinkedResources() {
+      const linked = options.linkedPropertyId ?? propertyId;
       return [
         {
           product: "pms",
           resourceType: "pms_property",
-          resourceId: propertyId,
+          resourceId: linked,
           relationship,
           status: "active",
         },
         {
           product: "hotel_catalog",
           resourceType: "property",
-          resourceId: propertyId,
+          resourceId: linked,
           relationship,
           status: "active",
         },
@@ -69,6 +73,7 @@ function buildAuthenticatedApp(options: {
   };
   return buildApp({
     logger: false,
+    pmsOperationsAllowedOrigins: ["https://pms.test"],
     pmsGuestStayTimesRepository: options.repository,
     auth: {
       verifier: createFakeVerifier(
@@ -98,7 +103,11 @@ function buildAuthenticatedApp(options: {
               product: "pms",
               key: "property-management",
               status: "active",
-              resource: { product: "pms", resourceType: "pms_property", resourceId: propertyId },
+              resource: {
+                product: "pms",
+                resourceType: "pms_property",
+                resourceId: options.entitledPropertyId ?? propertyId,
+              },
             },
           ];
         },
@@ -156,6 +165,37 @@ describe("PMS guest stay times (VAY-2455)", () => {
     });
     expect(malformed.statusCode).toBe(400);
     expect(find).not.toHaveBeenCalled();
+  });
+
+  it("never reads another property's times, one without the PMS, or for a foreign site", async () => {
+    const otherProperty = "24550000-0000-4000-8000-000000000002";
+    for (const access of [
+      { linkedPropertyId: otherProperty },
+      { entitledPropertyId: otherProperty },
+    ]) {
+      const find = vi.fn(async () => null);
+      app = buildAuthenticatedApp({ repository: { find }, ...access });
+      expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
+      expect(find).not.toHaveBeenCalled();
+      await app.close();
+    }
+    const find = vi.fn(async () => null);
+    app = buildAuthenticatedApp({ repository: { find } });
+    const foreign = await app.inject({
+      method: "GET",
+      url,
+      headers: { ...headers, origin: "https://evil.test" },
+    });
+    expect(foreign.statusCode).toBe(403);
+    expect(foreign.json()).toEqual({ code: "origin_not_allowed" });
+    const pms = await app.inject({
+      method: "GET",
+      url,
+      headers: { ...headers, origin: "https://pms.test" },
+    });
+    expect(pms.statusCode).toBe(200);
+    expect(pms.headers["access-control-allow-origin"]).toBe("https://pms.test");
+    expect(find).toHaveBeenCalledTimes(1);
   });
 
   it("says the times are unavailable when they can't be read", async () => {

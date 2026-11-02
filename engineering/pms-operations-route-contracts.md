@@ -381,6 +381,12 @@ VAY-2373/2374 add the step-by-step check-in's data, outside `pmsOperations.ts`:
 - `GET/PUT /api/pms/properties/:propertyId/check-in-settings` (`routes/pmsCheckinSettings.ts`,
   `pms.checkin_settings`, migration 0517): Settings → Check-in. Anyone who checks guests in reads it;
   owners and operators with `pms.settings.manage` change it. No row means the defaults.
+- `GET /api/pms/properties/:propertyId/guest-stay-times` (`routes/pmsGuestStayTimes.ts`, VAY-2455):
+  `{ propertyId, times: { checkInTime, checkOutTime } | null }`, the current guest rules' times
+  (`booking.guest_choice_heads`), which the booking page shows. Read only, for members holding
+  `pms.reservation.read` (the front desk too), as the booking, dashboard, check-in and calendar show
+  them. A plain read without the guest rules' lock; changing them stays with the guest-rules PUT
+  (`booking.settings.manage`).
 - `POST .../reservations/:guestBookingId/mark-paid` takes an optional `settlementMethod` (`cash`,
   `manual_card`, `bank_transfer`, `other`): how staff took the money at the desk, recorded on the
   Finance payment instead of the booking's own method. Nothing is charged online.
