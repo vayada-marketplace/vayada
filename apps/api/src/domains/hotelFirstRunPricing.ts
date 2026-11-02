@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import { firstRunPricing, type FirstRunFreeCancellationDays } from "@vayada/domain-booking";
+import {
+  FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT,
+  firstRunPricing,
+  type FirstRunFreeCancellationDays,
+} from "@vayada/domain-booking";
 import type { PricingCapacity } from "@vayada/domain-pms";
 
 import {
@@ -35,16 +39,34 @@ export type HotelFirstRunPricingPorts = Readonly<{
   >;
 }>;
 
-export type HotelFirstRunPricingInput = Readonly<{
-  roomTypeId: string;
-  capacity: PricingCapacity;
-  currency: string;
-  pricePerNight: string;
-  /** The tick under the price; the declaration is the hotel's own and is never assumed. */
-  pricesIncludeMandatoryCharges: boolean;
-  /** The owner's cancellation choice (1.12b); 3 when not given. */
-  freeCancellationDays?: FirstRunFreeCancellationDays;
-}>;
+export type HotelFirstRunPricingInput = Readonly<
+  {
+    roomTypeId: string;
+    capacity: PricingCapacity;
+    currency: string;
+    /** The owner's cancellation choice (1.12b); 3 when not given. */
+    freeCancellationDays?: FirstRunFreeCancellationDays;
+  } & (
+    | {
+        pricePerNight: string;
+        /** The tick under the price; the owner's own declaration, never assumed. */
+        pricesIncludeMandatoryCharges: boolean;
+        placeholder?: false;
+      }
+    | {
+        /**
+         * VAY-2451: the new setup asks for no price. The room gets FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT, and
+         * the system makes the taxes declaration for that price only (recorded as made by the first run); any
+         * real price needs the owner's own declaration in Prices. Its publish carries the placeholder step in
+         * its request id, which keeps the booking page from being published until real prices replace it.
+         */
+        placeholder: true;
+      }
+  )
+>;
+
+/** The request-id step of the placeholder price's publish (VAY-2451); the old first run used "pricing_publish". */
+export const FIRST_RUN_PLACEHOLDER_PUBLISH_STEP = "pricing_placeholder_publish";
 
 /** A stable UUID (v4 layout) from the parts, for draft and offer ids the pricing store requires to be UUIDs. */
 export function firstRunUuid(...parts: unknown[]): string {
@@ -61,7 +83,8 @@ export async function runFirstRunPricing(
   actor: HotelFirstRunActor,
   input: HotelFirstRunPricingInput,
 ): Promise<HotelFirstRunStepOutcome> {
-  if (!input.pricesIncludeMandatoryCharges) return fail("mandatory_charges_declaration_required");
+  if (!input.placeholder && !input.pricesIncludeMandatoryCharges)
+    return fail("mandatory_charges_declaration_required");
   try {
     return await publish(ports.pricing, actor.propertyId, input);
   } catch (error) {
@@ -85,7 +108,15 @@ async function publish(
     return fail("first_run_pricing_currency_mismatch");
   const baseRevision = current?.revision ?? 0;
   const offerId = firstRunUuid(propertyId, "first_run_offer", input.roomTypeId);
-  const built = firstRunPricing({ propertyId, offerId, ...input });
+  const built = firstRunPricing({
+    propertyId,
+    offerId,
+    roomTypeId: input.roomTypeId,
+    capacity: input.capacity,
+    currency: input.currency,
+    pricePerNight: input.placeholder ? FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT : input.pricePerNight,
+    freeCancellationDays: input.freeCancellationDays,
+  });
   if (!built) return fail("first_run_price_invalid");
   // The terms are part of the draft: a retry with another cancellation choice stages a new draft rather
   // than replaying the first one's terms request with different terms.
@@ -139,7 +170,7 @@ async function publish(
       expectedDraftRevision: review.revision,
       claimedFingerprint: review.fingerprint,
       declaration: review.declaration,
-      declaredVia: "save_prices",
+      declaredVia: input.placeholder ? "first_run_placeholder" : "save_prices",
       requestId: key("pricing_charges"),
     });
     snapshot = {
@@ -161,7 +192,7 @@ async function publish(
     ...effective,
     snapshot,
     draft: { id: draftId, revision: draftRevision },
-    requestId: key("pricing_publish"),
+    requestId: key(input.placeholder ? FIRST_RUN_PLACEHOLDER_PUBLISH_STEP : "pricing_publish"),
   });
   return Object.freeze({ ok: true, wrote: true });
 }

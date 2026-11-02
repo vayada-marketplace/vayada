@@ -115,6 +115,11 @@ function service(
         options.busy ? "busy" : work(),
     },
     activation,
+    roomRead: {
+      listRoomTypeFacts: vi.fn(async () => [
+        { roomTypeId, facts: { occupancy: { maxGuests: 3, maxAdults: 3, maxChildren: 2 } } },
+      ]),
+    },
   } as unknown as HotelFirstRunPorts;
   return { first: createHotelFirstRunService(ports), plans, activation };
 }
@@ -217,7 +222,6 @@ describe("hotel first run (VAY-2247)", () => {
 
   it.each([
     ["an invalid room", [{ ...classicDouble, maxGuests: 0 }]],
-    ["no room type", []],
     [
       "two room types with the same name",
       [classicDouble, { ...classicDouble, name: "classic double" }],
@@ -277,6 +281,47 @@ describe("hotel first run (VAY-2247)", () => {
       "twin",
     );
     expect(steps.pricing.mock.calls.map((call) => call[2].freeCancellationDays)).toEqual([14, 14]);
+  });
+});
+
+describe("the four-step setup's first run (VAY-2451)", () => {
+  const fourStep = { ...request, rooms: [], pricesIncludeMandatoryCharges: false };
+
+  it("gives the room type the setup made the placeholder price, sized to its own guests", async () => {
+    const result = await service().first.run(actor, fourStep, null);
+    expect(result).toMatchObject({ ok: true });
+    expect(steps.rooms).toHaveBeenCalledWith(expect.anything(), actor, [], "double");
+    expect(steps.pricing).toHaveBeenCalledTimes(1);
+    expect(steps.pricing).toHaveBeenCalledWith(expect.anything(), actor, {
+      roomTypeId,
+      capacity: { total: 3, adults: 3, children: 2 },
+      currency: "EUR",
+      freeCancellationDays: 3,
+      placeholder: true,
+    });
+    expect(steps.calendar).toHaveBeenCalled();
+  });
+
+  it("finishes without a room: no price, no calendar, and the hotel still goes live", async () => {
+    const done = service({ facts: { ...facts, firstRunRoomTypeIds: [], roomTypes: [] } });
+    const result = await done.first.run(actor, fourStep, null);
+    expect(result).toMatchObject({
+      ok: true,
+      ran: ["currency", "rooms", "payments", "guest_rules", "plan"],
+    });
+    expect(steps.pricing).not.toHaveBeenCalled();
+    expect(steps.calendar).not.toHaveBeenCalled();
+    expect(done.plans.selectCommissionPlan).toHaveBeenCalled();
+    expect(done.activation.activateWhenComplete).toHaveBeenCalledWith(actor);
+  });
+
+  it("leaves the owner's own room types to them", async () => {
+    await service({ facts: { ...facts, firstRunRoomTypeIds: [] } }).first.run(
+      actor,
+      fourStep,
+      null,
+    );
+    expect(steps.pricing).not.toHaveBeenCalled();
   });
 });
 

@@ -32,7 +32,11 @@ import {
   createHotelFirstRunRuntime,
 } from "./domains/hotelFirstRunRuntime.js";
 import type { HotelFirstRunRequest } from "./domains/hotelFirstRunService.js";
-import type { HotelFirstRunActor } from "./domains/hotelFirstRunSteps.js";
+import {
+  runFirstRunRooms,
+  type HotelFirstRunActor,
+  type HotelFirstRunSetupPorts,
+} from "./domains/hotelFirstRunSteps.js";
 import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
 import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
@@ -325,6 +329,18 @@ describe.skipIf(!url)(
       const termsStore = createBookingGuestTermsStore(pool, (client) =>
         createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
       );
+      const roomCommands = closing(
+        createPgPmsRoomFactsCommandRepository({
+          connectionString: cs,
+          vocabularyValidator: createPmsRoomFactsVocabularyValidationPort(),
+        }),
+      );
+      const units = closing(
+        createPgPmsPhysicalRoomUnitReconcileRepository({ connectionString: cs }),
+      );
+      const labels = closing(
+        createPgPmsPhysicalRoomOperationalLabelRepository({ connectionString: cs }),
+      );
       const createService = createHotelFirstRunRuntime({
         lockPool: createDedicatedLockConnections(cs),
         pricingPool: pool,
@@ -342,16 +358,9 @@ describe.skipIf(!url)(
           }),
         ),
         roomRead: roomFacts,
-        roomFacts: closing(
-          createPgPmsRoomFactsCommandRepository({
-            connectionString: cs,
-            vocabularyValidator: createPmsRoomFactsVocabularyValidationPort(),
-          }),
-        ),
-        units: closing(createPgPmsPhysicalRoomUnitReconcileRepository({ connectionString: cs })),
-        labels: closing(
-          createPgPmsPhysicalRoomOperationalLabelRepository({ connectionString: cs }),
-        ),
+        roomFacts: roomCommands,
+        units,
+        labels,
         paymentRead: financeRead,
         payments: {
           replacePaymentMethods: (command) =>
@@ -449,6 +458,18 @@ describe.skipIf(!url)(
         organizationId,
         actor,
         service: () => createService(context),
+        /** VAY-2451: a room type made the way the four-step setup makes it, under the first run's draft id. */
+        setupRoom: (name: string, numberOfRooms: number, maxGuests: number) =>
+          runFirstRunRooms(
+            {
+              roomRead: roomFacts,
+              roomFacts: roomCommands,
+              units,
+              labels,
+            } as unknown as HotelFirstRunSetupPorts,
+            actor,
+            [{ name, numberOfRooms, maxGuests, pricePerNight: "1" }],
+          ),
         ports: {
           pricingRead,
           roomFacts,
@@ -825,6 +846,107 @@ describe.skipIf(!url)(
       } finally {
         await h.close();
       }
+    });
+
+    describe("the four-step setup (VAY-2451)", () => {
+      const fourStep: HotelFirstRunRequest = {
+        ...request,
+        rooms: [],
+        pricesIncludeMandatoryCharges: false,
+      };
+      const pricingHead = async (h: Awaited<ReturnType<typeof hotel>>) =>
+        (
+          await h.admin.query<{ request_id: string }>(
+            `SELECT revision.request_id FROM pms.pricing_v2_heads head
+             JOIN pms.pricing_v2_revisions revision
+               ON revision.property_id = head.property_id AND revision.revision = head.revision
+             WHERE head.property_id = $1`,
+            [h.propertyId],
+          )
+        ).rows[0]?.request_id ?? null;
+
+      it("prices the room type the setup made with the placeholder, declared by the first run", async () => {
+        const h = await hotel();
+        try {
+          expect(await h.setupRoom("Pool Villa", 2, 4)).toMatchObject({ ok: true, wrote: true });
+          const result = await h.service().run(h.actor, fourStep, h.email);
+          expect(result, JSON.stringify(result)).toMatchObject({
+            ok: true,
+            ran: ["currency", "payments", "pricing", "calendar", "guest_rules", "plan"],
+          });
+          if (!result.ok) return;
+          expect(new Set(result.state.steps.map((step) => step.state))).toEqual(new Set(["done"]));
+
+          // 100 a night in the hotel's currency (LKR, two decimals), sized to the villa's own guests.
+          const prices = await h.pricing().read(h.propertyId);
+          expect(prices?.currency).toBe("LKR");
+          expect(prices?.rooms).toHaveLength(1);
+          expect(JSON.stringify(prices?.rooms[0])).toContain('"amountMinor":"10000"');
+          expect(prices?.rooms[0]?.capacity).toEqual({ total: 4, adults: 4, children: 3 });
+          // The publish carries the placeholder marker, and the audit says the first run declared the taxes.
+          expect(await pricingHead(h)).toMatch(/^first-run:v1:pricing_placeholder_publish:/);
+          const declared = await h.admin.query(
+            `SELECT audit_metadata FROM platform.product_audit_events
+             WHERE property_id = $1 AND action = 'pricing.v2.charges.confirmed'`,
+            [h.propertyId],
+          );
+          expect(declared.rows).toEqual([
+            { audit_metadata: { declaredVia: "first_run_placeholder" } },
+          ]);
+          // Commission, as nobody picked a plan; the hotel is live (its page is not published yet).
+          const plan = await h.admin.query(
+            `SELECT plan_key FROM finance.billing_entitlements
+             WHERE property_id = $1 AND product = 'booking' AND entitlement_key = 'direct-booking-finance'`,
+            [h.propertyId],
+          );
+          expect(plan.rows.map((row) => row.plan_key)).toEqual(["commission"]);
+          const lifecycle = await h.admin.query(
+            "SELECT lifecycle_status FROM hotel_catalog.properties WHERE id = $1",
+            [h.propertyId],
+          );
+          expect(lifecycle.rows[0]?.lifecycle_status).toBe("active");
+
+          // A second run leaves the placeholder alone.
+          expect(await h.service().run(h.actor, fourStep, h.email)).toMatchObject({
+            ok: true,
+            ran: [],
+          });
+        } finally {
+          await h.close();
+        }
+      });
+
+      it("finishes without a room: no price and no calendar until the hotel has a room type", async () => {
+        const h = await hotel();
+        try {
+          const result = await h.service().run(h.actor, fourStep, h.email);
+          expect(result, JSON.stringify(result)).toMatchObject({
+            ok: true,
+            ran: ["currency", "payments", "guest_rules", "plan"],
+          });
+          if (!result.ok) return;
+          expect(result.state.steps.map((step) => `${step.id}:${step.state}`)).toEqual([
+            "currency:done",
+            "rooms:todo",
+            "payments:done",
+            "pricing:todo",
+            "calendar:todo",
+            "guest_rules:done",
+            "plan:done",
+          ]);
+          expect(await pricingHead(h)).toBeNull();
+          expect(
+            await h.ports.operatingCalendar.getCurrentOperatingCalendarConfiguration(h.propertyId),
+          ).toBeNull();
+          // Setup is done (how guests pay and the plan); the room is what the go-live list asks for.
+          expect(await h.service().readSetupProgress(h.actor)).toEqual({
+            firstRoom: false,
+            guestPayment: true,
+          });
+        } finally {
+          await h.close();
+        }
+      });
     });
 
     it("keeps a hotel with only its basics being set up on old-setup saves until it has a description and a photo", async () => {
