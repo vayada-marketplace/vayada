@@ -81,6 +81,7 @@ import {
   loadConfig,
   replacementPricingManualPaymentMethods,
   stripeSubscriptionRuntimeEnabled,
+  vayadaPaymentOpenFor,
 } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
@@ -504,6 +505,8 @@ const bookingDashboardMetricsReadPort =
     ? createTargetBookingDashboardMetricsReadPort({ connectionString: targetDatabaseUrl })
     : undefined;
 
+// VAY-2442: the hotels vayada Payment is on for (the switch, its Stripe keys and the hotel list).
+const vayadaPaymentOpen = vayadaPaymentOpenFor(config);
 // VAY-2442: events from vayada Payment's own Stripe account (test mode only), with its secret.
 const vayadaPaymentWebhookPool = config.vayadaPaymentStripe?.webhookSecret
   ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
@@ -558,7 +561,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
   vayadaPayment: {
-    enabled: config.vayadaPaymentEnabled && config.vayadaPaymentStripe !== undefined,
+    open: vayadaPaymentOpen,
     feePercent: config.vayadaPaymentFeePercent,
   },
   replacementPricingDepositAcceptanceEnabled: config.replacementPricingDepositAcceptanceEnabled,
@@ -747,7 +750,7 @@ const financeRepository =
         connectionString: targetDatabaseUrl,
         stripeConnectProvider,
         afterPaymentChange,
-        vayadaPaymentEnabled: config.vayadaPaymentEnabled,
+        vayadaPaymentOpen,
       })
     : undefined;
 
@@ -2193,7 +2196,7 @@ const app = buildApp({
   financeRepository,
   financeBankTransfer: bankTransferRepository ? { repository: bankTransferRepository } : undefined,
   financePayoutDestination: payoutDestinationRepository
-    ? { repository: payoutDestinationRepository }
+    ? { repository: payoutDestinationRepository, open: vayadaPaymentOpen }
     : undefined,
   vayadaPaymentWebhooks:
     handleVayadaPaymentWebhook && config.vayadaPaymentStripe?.webhookSecret

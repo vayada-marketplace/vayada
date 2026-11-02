@@ -474,7 +474,9 @@ export async function registerFinanceRoutes(
         setupIncompletePaymentSettings(propertyId, new Date().toISOString());
       return {
         ...toFinancePaymentSettingsResponse(settings),
-        vayadaPayment: { available: options.repository.vayadaPaymentAvailable === true },
+        vayadaPayment: {
+          available: options.repository.vayadaPaymentAvailable?.(propertyId) === true,
+        },
       } satisfies FinancePaymentSettingsResponse;
     },
   );
@@ -508,10 +510,10 @@ export async function registerFinanceRoutes(
         reply.code(parsed.statusCode);
         return parsed;
       }
-      // VAY-2442: nobody chooses vayada Payment before VAYADA_PAYMENT_ENABLED is on.
+      // VAY-2442: a hotel chooses vayada Payment only once it is switched on for that hotel.
       if (
         parsed.payload.paymentProvider === "vayada" &&
-        options.repository.vayadaPaymentAvailable !== true
+        options.repository.vayadaPaymentAvailable?.(propertyId) !== true
       ) {
         reply.code(409);
         return {
@@ -533,7 +535,9 @@ export async function registerFinanceRoutes(
 
       return {
         ...toFinancePaymentSettingsResponse(result.settings),
-        vayadaPayment: { available: options.repository.vayadaPaymentAvailable === true },
+        vayadaPayment: {
+          available: options.repository.vayadaPaymentAvailable?.(propertyId) === true,
+        },
         commandMeta: result.commandMeta,
       } satisfies FinancePaymentSettingsPatchResponse;
     },
@@ -1191,8 +1195,9 @@ export function createTargetFinancePropertySettingsRepository(config: {
   stripeConnectProvider?: FinanceStripeConnectProvider;
   /** VAY-2304: runs after a payment write has committed, to re-publish the hotel's prices. */
   afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
-  /** VAY-2442: VAYADA_PAYMENT_ENABLED. Off: vayada Payment can't be chosen or approved. */
-  vayadaPaymentEnabled?: boolean;
+  /** VAY-2442: whether a hotel gets vayada Payment (VAYADA_PAYMENT_ENABLED and the hotel list).
+   * Missing or false: that hotel can't choose vayada Payment and Vayada can't approve it. */
+  vayadaPaymentOpen?: (propertyId: string) => boolean;
 }): FinancePropertyReadRepository {
   const pool: FinancePropertySettingsReadPool =
     config.pool ??
@@ -1214,7 +1219,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
             };
           },
         },
-        { vayadaPaymentEnabled: config.vayadaPaymentEnabled },
+        { vayadaPaymentOpen: config.vayadaPaymentOpen },
       )
     : null;
   const afterPaymentChange = async <T extends { ok: boolean }>(
@@ -1259,7 +1264,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
 
   return {
     ...onlineCardEvidenceWrites,
-    vayadaPaymentAvailable: config.vayadaPaymentEnabled === true,
+    vayadaPaymentAvailable: (propertyId: string) => config.vayadaPaymentOpen?.(propertyId) === true,
     async getPaymentSettings(propertyId) {
       const row = await loadPaymentSettingsRow(pool, propertyId);
       return row ? toFinancePaymentSettingsReadModel(row) : null;

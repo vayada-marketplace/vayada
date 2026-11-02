@@ -215,7 +215,8 @@ export type FinancePaymentSettingsResponse = {
   contractVersion: FinanceContractVersion;
   propertyId: FinancePropertyId;
   paymentSettings: Omit<FinancePaymentSettingsReadModel, "propertyId" | "updatedAt">;
-  /** VAY-2442: whether hotels can choose vayada Payment yet (VAYADA_PAYMENT_ENABLED). */
+  /** VAY-2442: whether this hotel can choose vayada Payment yet (VAYADA_PAYMENT_ENABLED and the
+   * hotel on VAYADA_PAYMENT_PROPERTY_IDS). */
   vayadaPayment?: { available: boolean };
 };
 
@@ -1040,8 +1041,9 @@ export type FinancePropertyReadRepository = FinancePropertySettingsReadRepositor
   Partial<FinancePropertyOperationsReadRepository> &
   Partial<FinancePlatformOnlineCardExecutionEvidenceRepository> &
   Partial<FinancePropertyCommandRepository> & {
-    /** VAY-2442: vayada Payment can be chosen and approved (VAYADA_PAYMENT_ENABLED). */
-    readonly vayadaPaymentAvailable?: boolean;
+    /** VAY-2442: whether this hotel can choose vayada Payment and Vayada can approve it
+     * (VAYADA_PAYMENT_ENABLED and the hotel on VAYADA_PAYMENT_PROPERTY_IDS). */
+    readonly vayadaPaymentAvailable?: (propertyId: string) => boolean;
   };
 
 export function toFinancePaymentSettingsResponse(

@@ -298,12 +298,21 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
     }
   });
 
-  it("lets Vayada approve a bound vayada Payment account only while the switch is on", async () => {
+  it("lets Vayada approve a bound vayada Payment account only while it is on for the hotel", async () => {
     const off = createFinanceOnlineCardExecutionEvidenceRepository(pool);
     const on = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
-      vayadaPaymentEnabled: true,
+      vayadaPaymentOpen: () => true,
     });
     const propertyId = ids.vayadaNoApproval!;
+    // On, but only for other hotels (VAYADA_PAYMENT_PROPERTY_IDS): no approval for this one.
+    const otherHotels = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
+      vayadaPaymentOpen: (id) => id !== propertyId,
+    });
+    expect(await otherHotels.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
+      ok: false,
+      statusCode: 409,
+      code: "provider_capability_unavailable",
+    });
     // Off: Vayada sees the account (so it can still withdraw an approval) but can't approve it.
     expect(await off.readOnlineCardExecutionState(propertyId)).toMatchObject({
       providerAccount: { ready: true, cardCapabilityRevision: 3 },

@@ -15,6 +15,7 @@ import {
   pricingCardPaymentTarget,
   readPricingCardReplay,
   startPricingCardPayment,
+  type VayadaPaymentCharges,
 } from "./pricingCardPayment.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 import { authorizePricingCardRequest } from "./pricingCardPaymentCompletion.js";
@@ -70,8 +71,8 @@ export async function writePricingAcceptance(
   cardPayments?: {
     provider: StripeBookingPaymentProvider;
     deposits?: boolean;
-    /** VAY-2442: new vayada Payment charges and Vayada's fee in percent. */
-    vayada?: { enabled: boolean; feePercent: number };
+    /** VAY-2442: which hotels may start vayada Payment charges, and Vayada's fee in percent. */
+    vayada?: VayadaPaymentCharges;
   },
   /** Request-mode pay-at-property quotes (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED). */
   requests = false,

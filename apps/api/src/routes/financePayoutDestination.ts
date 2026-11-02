@@ -30,12 +30,15 @@ const path = "/finance/properties/:propertyId/payout-destination";
 type Repository = Pick<ReturnType<typeof createPayoutDestinationRepository>, "read" | "execute">;
 
 /** The bank account vayada Payment pays a hotel out to (VAY-2442). Registered only while
- * VAYADA_PAYMENT_ENABLED is on. Anyone with finance read access sees it masked; only the owner
+ * VAYADA_PAYMENT_ENABLED is on, and answers only for the hotels on VAYADA_PAYMENT_PROPERTY_IDS
+ * (`open`). Anyone with finance read access sees it masked; only the owner
  * (finance.billing.manage, VAY-2401) can add, replace or remove it. */
 export async function registerFinancePayoutDestinationRoutes(
   app: FastifyInstance,
   options: {
     repository: Repository;
+    /** Whether vayada Payment is on for the hotel; for any other hotel the route is not there. */
+    open: (propertyId: string) => boolean;
     propertyAccessRepository?: FinanceRoutesOptions["propertyAccessRepository"];
     publicBookabilityPublisher?: FinanceRoutesOptions["publicBookabilityPublisher"];
   },
@@ -68,6 +71,8 @@ export async function registerFinancePayoutDestinationRoutes(
         const propertyId = request.params.propertyId;
         if (!z.uuid().safeParse(propertyId).success)
           return reply.code(400).send({ code: "invalid_request" });
+        if (!options.open(propertyId))
+          return reply.code(404).send({ code: "vayada_payment_unavailable" });
         try {
           if (method === "GET")
             return { destination: masked(await options.repository.read(propertyId), propertyId) };

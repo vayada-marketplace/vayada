@@ -65,11 +65,11 @@ const OUTBOX_DESTINATION = "booking.payment-source";
 
 export function createFinanceOnlineCardExecutionEvidenceRepository(
   pool: FinanceOnlineCardEvidencePool,
-  /** VAY-2442: Vayada approves vayada Payment accounts only while VAYADA_PAYMENT_ENABLED is on.
-   * Reads and revokes always see them, so an approval can still be withdrawn after switching off. */
-  options: { vayadaPaymentEnabled?: boolean } = {},
+  /** VAY-2442: Vayada approves a hotel's vayada Payment account only while vayada Payment is on
+   * for that hotel (VAYADA_PAYMENT_ENABLED and the hotel list). Reads and revokes always see
+   * them, so an approval can still be withdrawn after switching off. */
+  options: { vayadaPaymentOpen?: (propertyId: string) => boolean } = {},
 ): FinancePlatformOnlineCardExecutionEvidenceRepository {
-  const vayada = options.vayadaPaymentEnabled === true;
   return {
     async readOnlineCardExecutionState(propertyId) {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(propertyId))
@@ -84,6 +84,7 @@ export function createFinanceOnlineCardExecutionEvidenceRepository(
     },
     async acceptOnlineCardExecutionEvidence(command) {
       if (!validAcceptCommand(command)) return invalidCommand();
+      const vayada = options.vayadaPaymentOpen?.(command.propertyId) === true;
       return transaction(pool, (client) => accept(client, command, vayada));
     },
     async revokeOnlineCardExecutionEvidence(command) {

@@ -17,6 +17,7 @@ import {
 } from "../domains/publicPricingStayPrices.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
+import type { VayadaPaymentCharges } from "../domains/pricingCardPayment.js";
 import {
   paymentWindowArrivalRange,
   readPaymentMethodWindows,
@@ -1337,9 +1338,10 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingCardAcceptanceEnabled?: boolean;
   /** Card quotes that leave the rest to pay at the property: deposits (VAY-2205). */
   replacementPricingDepositAcceptanceEnabled?: boolean;
-  /** VAY-2442: new vayada Payment charges (VAYADA_PAYMENT_ENABLED with its Stripe account) and
-   * Vayada's fee in percent. Off: hotels on vayada Payment can't start a card payment. */
-  vayadaPayment?: { enabled: boolean; feePercent: number };
+  /** VAY-2442: which hotels may start vayada Payment charges (VAYADA_PAYMENT_ENABLED with its
+   * Stripe account, and the hotel list) and Vayada's fee in percent. A hotel on vayada Payment
+   * that isn't open can't start a card payment. */
+  vayadaPayment?: VayadaPaymentCharges;
   /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
   replacementPricingRequestAcceptanceEnabled?: boolean;
   /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
