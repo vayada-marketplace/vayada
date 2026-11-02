@@ -202,8 +202,12 @@ export async function paymentRepublishFixture(
       },
     ],
   });
-  /** A hotel's "Save prices": prepare, draft, declare the charges, attach, publish. */
-  async function save(baseRevision: number, amountMinor = "10000") {
+  /** A hotel's "Save prices": prepare, draft, declare the charges, attach, publish (with `requestId`). */
+  async function save(
+    baseRevision: number,
+    amountMinor = "10000",
+    requestId: string = randomUUID(),
+  ) {
     const prepared = await commands.prepare(propertyId, prices(baseRevision + 1, amountMinor));
     const draftId = randomUUID();
     const draft = { draftId, expectedDraftRevision: 0, baseRevision, ...prepared };
@@ -226,7 +230,7 @@ export async function paymentRepublishFixture(
     await commands.saveDraft(propertyId, { ...draft, expectedDraftRevision: 1, snapshot });
     return () =>
       commands.publish(propertyId, {
-        requestId: randomUUID(),
+        requestId,
         expectedRevision: baseRevision,
         sources: prepared.sources,
         snapshot,

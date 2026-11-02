@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createHotelSetupChecklistService,
+  type HotelGoLiveFactsRow,
   type HotelSetupChecklistFactsRow,
 } from "./hotelSetupChecklistService.js";
 
@@ -34,10 +35,23 @@ const LIVE: HotelSetupChecklistFactsRow = {
   viewer: { hidden: false, dismissed: false },
 };
 
+/** VAY-2451: a hotel that finished the four-step setup with its room, on the placeholder price. */
+const GO_LIVE: HotelGoLiveFactsRow = {
+  propertyDetails: true,
+  bookingPublished: false,
+  propertyPhotos: false,
+  bookingRules: "default",
+  onlineCardReady: false,
+  roomTypes: [{ name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 1, priced: true }],
+  placeholderPrices: true,
+  viewer: { hidden: false, dismissed: false },
+};
+
 function service(
   done: readonly string[],
   facts: HotelSetupChecklistFactsRow | null = LIVE,
   onlineCardsOffered = false,
+  goLive: HotelGoLiveFactsRow | null = GO_LIVE,
 ) {
   const store = {
     acknowledge: vi.fn(async () => undefined),
@@ -48,6 +62,7 @@ function service(
     checklist: createHotelSetupChecklistService({
       firstRun: { readSetupProgress: vi.fn(async () => progress(done)) },
       facts: { read: vi.fn(async () => facts) },
+      goLiveFacts: { read: vi.fn(async () => goLive) },
       store,
       onlineCardsOffered,
     }),
@@ -71,10 +86,12 @@ describe("hotel setup checklist service (VAY-2247 wave 2)", () => {
     const checklist = createHotelSetupChecklistService({
       firstRun: { readSetupProgress: timed(progress(ALL)) },
       facts: { read: timed(LIVE) },
+      goLiveFacts: { read: timed(GO_LIVE) },
       store: { acknowledge: vi.fn(), setViewer: vi.fn() },
       onlineCardsOffered: false,
     });
     expect(await checklist.read(actor)).toMatchObject({ done: 4 });
+    expect(await checklist.readGoLive(actor)).toMatchObject({ phase: "go_live" });
     expect(most).toBe(1);
   });
 
@@ -117,5 +134,33 @@ describe("hotel setup checklist service (VAY-2247 wave 2)", () => {
 
   it("has no checklist for a hotel that isn't there", async () => {
     expect(await service(ALL, null).checklist.read(actor)).toBeNull();
+    expect(await service(ALL, LIVE, false, null).checklist.readGoLive(actor)).toBeNull();
+  });
+
+  it("VAY-2451: the go-live list is past setup once how guests pay and the plan are saved", async () => {
+    expect(await service(ALL).checklist.readGoLive(actor)).toMatchObject({
+      contractVersion: "hotel-setup-checklist.v2",
+      phase: "go_live",
+      setup: { done: 4, total: 4, next: null },
+      canPublish: false,
+      placeholderPrices: true,
+      firstRoomType: { name: "Pool Villa" },
+    });
+    expect((await service(["currency"]).checklist.readGoLive(actor))?.setup).toEqual({
+      done: 3,
+      total: 4,
+      next: "payments",
+    });
+  });
+
+  it("VAY-2451: Looks good and Hide for now answer with the go-live list when asked", async () => {
+    const { checklist, store } = service(ALL);
+    expect(await checklist.acknowledge(actor, "guest_terms", "v2")).toMatchObject({
+      contractVersion: "hotel-setup-checklist.v2",
+    });
+    expect(store.acknowledge).toHaveBeenCalledWith(actor, "guest_terms");
+    expect(await checklist.setViewer(actor, { hidden: true }, "v2")).toMatchObject({
+      contractVersion: "hotel-setup-checklist.v2",
+    });
   });
 });

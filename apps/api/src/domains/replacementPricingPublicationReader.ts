@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
+import { isFirstRunPlaceholderPricingRequestId } from "./hotelFirstRunPricing.js";
 import { readPricingPublicationFreshness } from "./pricingPublicationFreshness.js";
 import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 
@@ -12,9 +13,25 @@ export function createReplacementPricingPublicationReader(pool: Pool) {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
         const owner = await lockCurrentPricingPublication(client, scope);
         const rooms = owner && mapReplacementPublicOffers(owner);
+        // VAY-2451: the first run's placeholder price, read with the revision it belongs to.
+        const placeholder =
+          owner &&
+          isFirstRunPlaceholderPricingRequestId(
+            (
+              await client.query(
+                "SELECT request_id FROM pms.pricing_v2_revisions WHERE property_id=$1 AND revision=$2",
+                [owner.scope.propertyId, owner.publication.revision],
+              )
+            ).rows[0]?.request_id,
+          );
         await client.query("COMMIT");
         return owner && rooms
-          ? { scope: owner.scope, sourceRevision: owner.pmsSourceRevision, rooms }
+          ? {
+              scope: owner.scope,
+              sourceRevision: owner.pmsSourceRevision,
+              rooms,
+              placeholder: Boolean(placeholder),
+            }
           : null;
       } catch (error) {
         await client.query("ROLLBACK");
