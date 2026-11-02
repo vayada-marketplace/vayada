@@ -25,6 +25,8 @@ export type QuickAboutYouStepProps = {
   initialPhone?: string | null;
   /** The group was invited by Vayada: its plan and products are already set up. */
   invited?: boolean;
+  /** The header's step; null in the four-step setup (VAY-2451), where About you comes before the steps. */
+  step?: number | null;
   onSubmit: (input: SharedAccountDetailsInput) => Promise<void>;
   onSaveAndExit: () => void;
 };
@@ -53,6 +55,7 @@ export function QuickAboutYouStep({
   initialName,
   initialPhone,
   invited = false,
+  step = 1,
   onSubmit,
   onSaveAndExit,
 }: QuickAboutYouStepProps) {
@@ -98,7 +101,7 @@ export function QuickAboutYouStep({
   }
 
   return (
-    <QuickSetupShell step={1} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
+    <QuickSetupShell step={step} onSaveAndExit={onSaveAndExit} saveAndExitDisabled={submitting}>
       <QuickSetupStepLayout
         title="Hi! Who's setting up the hotel?"
         subtitle="One quick step, then we set up your hotel."

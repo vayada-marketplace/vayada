@@ -145,3 +145,53 @@ describe("saveQuickHotel (VAY-2247 'Your hotel')", () => {
     });
   });
 });
+
+describe("the four-step setup's contacts (VAY-2451)", () => {
+  const currency = quickHotelCurrency("DE", "")!;
+  it("adds WhatsApp (the phone unless another number) and the social links", () => {
+    const same = quickHotelProfileRequest(
+      { ...DRAFT, whatsappSameAsPhone: true, instagram: " https://instagram.com/alpenrose " },
+      currency,
+      "de",
+    );
+    expect(same.contacts).toContainEqual({
+      channelType: "whatsapp",
+      value: "+49 89 1234567",
+      purpose: "general",
+      isPublic: true,
+    });
+    expect(same.initialLaunchSettings).toMatchObject({
+      instagram: "https://instagram.com/alpenrose",
+      facebook: "",
+      tiktok: "",
+      youtube: "",
+    });
+    const other = quickHotelProfileRequest(
+      { ...DRAFT, whatsappSameAsPhone: false, whatsapp: "+49 170 5550100" },
+      currency,
+      "de",
+    );
+    expect(other.contacts.find((contact) => contact.channelType === "whatsapp")?.value).toBe(
+      "+49 170 5550100",
+    );
+    // The 7-step setup asks for neither: its request stays as it was.
+    expect(quickHotelProfileRequest(DRAFT, currency, "de").contacts).toHaveLength(2);
+  });
+
+  it("saves the country's currency too when asked, so the hotel's rooms can be made next", async () => {
+    const d = deps();
+    await saveQuickHotel(
+      {
+        draft: DRAFT,
+        currency,
+        language: "de",
+        logo: null,
+        organization: { selectedTracks: ["hotel_operations"], trackRevision: 1 },
+        draftKey: "draft-1",
+        alwaysSaveCurrency: true,
+      },
+      d,
+    );
+    expect(d.saveCurrency).toHaveBeenCalledWith(PROPERTY, "EUR");
+  });
+});

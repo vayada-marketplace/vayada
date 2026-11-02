@@ -28,6 +28,7 @@ import {
   getAuthWorkosOrganizationId,
 } from "@/services/auth/sessionStore";
 import { AdaptiveRoomAuthoringSetupController } from "./adaptive/rooms/AdaptiveRoomAuthoringSetupController";
+import { FourStepSetupFlow } from "./fourStep/FourStepSetupFlow";
 import { QuickSetupFlow } from "./quick/QuickSetupFlow";
 import type { QuickSetupPage } from "./quick/QuickPropertySetup";
 import { bookingPublicationReviewClient } from "@/services/api/bookingPublicationReviewClient";
@@ -58,11 +59,14 @@ export function SharedHotelSetupPage({
   defaultEntryProduct,
   airbnbImportEnabled = false,
   quickSetupEnabled = false,
+  fourStepSetupEnabled = false,
 }: {
   defaultEntryProduct: SharedHotelSetupEntryProduct;
   airbnbImportEnabled?: boolean;
   /** VAY-2247: the new first run (ONBOARDING_V2); adding a second hotel keeps the wizard for now. */
   quickSetupEnabled?: boolean;
+  /** VAY-2451: the four-step setup in place of the 7-step first run (FOUR_STEP_SETUP_ENABLED). */
+  fourStepSetupEnabled?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -216,6 +220,35 @@ export function SharedHotelSetupPage({
           </button>
         </div>
       </main>
+    );
+  }
+
+  if (quickSetupEnabled && fourStepSetupEnabled && !initialAddProperty) {
+    return (
+      <FourStepSetupFlow
+        account={{
+          email: accountContactEmail ?? "",
+          name: accountName,
+          phone: accountContactPhone,
+        }}
+        saveAccount={async (accountDetails) => {
+          await authService.updateAccountDetails(accountDetails);
+          setAccountName(
+            normalizeSharedAccountName(accountDetails.firstName, accountDetails.lastName),
+          );
+          setAccountContactPhone(accountDetails.phone ?? null);
+        }}
+        setup={sharedHotelSetupApi}
+        saveCurrency={async (propertyId, currency) => {
+          const owners = await onboardingPricingApi.load(propertyId, { cache: "no-store" });
+          await onboardingPricingApi.saveCurrency(propertyId, currency, owners);
+        }}
+        propertyId={initialPropertyId}
+        onPropertyCreated={handlePropertySelected}
+        onSaveAndExit={(propertyId) => handleExit(propertyId)}
+        googleMapsApiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+        storage={quickSetupStorage()}
+      />
     );
   }
 
