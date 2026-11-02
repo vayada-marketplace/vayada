@@ -26,9 +26,10 @@ async function mockGuestRules(page: Page, initial: Record<string, unknown> | nul
   return saves;
 }
 
-/** The whole section: the app scrolls inside its own container, so a tall window shows all of it. */
+/** The whole section: the app scrolls inside its own container, so a tall window shows all of it (taller on a phone,
+ * where the preview stacks below the cards). */
 async function shoot(page: Page, section: Locator, testInfo: TestInfo, name: string, width = 1440) {
-  await page.setViewportSize({ width, height: 2600 });
+  await page.setViewportSize({ width, height: width < 600 ? 4200 : 2600 });
   await section.screenshot({ path: testInfo.outputPath(name) });
 }
 
