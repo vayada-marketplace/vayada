@@ -55,6 +55,9 @@ export function registerPmsPricingCurrencyCommand(
     /** VAY-2390 P5: the Owner's protected change, on its own path and key. */
     path?: string;
     permission?: PermissionKey;
+    /** VAY-2453: the Owner's change may name the currency it showed a hotel without its own
+     * pricing currency; an API without this refuses that body, so it never writes unchecked. */
+    acceptsShownCurrency?: boolean;
   } = {},
 ): void {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
@@ -76,7 +79,18 @@ export function registerPmsPricingCurrencyCommand(
       const scope = requireAuthorizedScope(authorized, request);
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
-      if (!isExactObject(request.body, ["expectedPricingCurrencyRevision", "currency"])) {
+      const shown =
+        options.acceptsShownCurrency === true &&
+        typeof request.body === "object" &&
+        request.body !== null &&
+        Object.hasOwn(request.body, "expectedPricingCurrency");
+      if (
+        !isExactObject(request.body, [
+          "expectedPricingCurrencyRevision",
+          "currency",
+          ...(shown ? ["expectedPricingCurrency"] : []),
+        ])
+      ) {
         return invalidRequest(reply, "The pricing currency body is invalid.");
       }
       const command = parseUpsertPropertyPricingCurrencyCommand({
@@ -86,6 +100,7 @@ export function registerPmsPricingCurrencyCommand(
         audit: commandAudit(scope.context),
         expectedPricingCurrencyRevision: request.body["expectedPricingCurrencyRevision"],
         currency: request.body["currency"],
+        ...(shown ? { expectedPricingCurrency: request.body["expectedPricingCurrency"] } : {}),
       });
       if (!command) return invalidRequest(reply, "The pricing currency body is invalid.");
 
@@ -132,6 +147,7 @@ export async function registerPmsPricingRoutes(
       propertyAccessRepository: options.propertyAccessRepository,
       path: "/properties/:propertyId/pricing-source/currency-change",
       permission: "finance.billing.manage",
+      acceptsShownCurrency: true,
     });
     const changePort = options.currencyChangeCommandPort;
     const propertyAccessRepository = options.propertyAccessRepository;

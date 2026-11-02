@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { PmsPricingCurrencyChangeBlocker } from "@vayada/domain-pms";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
+import { ApiErrorResponse } from "@/services/api/client";
 import {
   pricingCurrencyService,
   type PricingCurrencyState,
@@ -15,15 +16,19 @@ import {
  * shows on open, from a read-only preview; the change checks again in its own transaction, so the
  * reasons can still show after the attempt. */
 export function ChangeCurrencyDialog({
+  shownCurrency,
   onClose,
   onChanged,
 }: {
+  /** The currency the page shows; a hotel without its own pricing currency changes from it. */
+  shownCurrency: string;
   onClose: () => void;
   onChanged: (currency: string) => void;
 }) {
   const { t, locale } = useTranslation();
   const [state, setState] = useState<PricingCurrencyState | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  // Set when loading failed: the status and code to quote to support, or "" when there is none.
+  const [loadFailed, setLoadFailed] = useState<string | null>(null);
   const [next, setNext] = useState("");
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,26 +39,26 @@ export function ChangeCurrencyDialog({
 
   useEffect(() => {
     let live = true;
-    loadWithBlockers().then(
+    loadWithBlockers(shownCurrency).then(
       (loaded) => {
         if (!live) return;
         setState(loaded.state);
         if (loaded.blockers.length) setBlockers(loaded.blockers);
       },
-      () => live && setLoadFailed(true),
+      (cause: unknown) => live && setLoadFailed(errorCode(cause)),
     );
     return () => {
       live = false;
     };
-  }, []);
+  }, [shownCurrency]);
   const load = () => {
-    setLoadFailed(false);
-    loadWithBlockers().then(
+    setLoadFailed(null);
+    loadWithBlockers(shownCurrency).then(
       (loaded) => {
         setState(loaded.state);
         if (loaded.blockers.length) setBlockers(loaded.blockers);
       },
-      () => setLoadFailed(true),
+      (cause: unknown) => setLoadFailed(errorCode(cause)),
     );
   };
 
@@ -75,6 +80,8 @@ export function ChangeCurrencyDialog({
       const outcome = await pricingCurrencyService.change(state, next, key.current);
       if (outcome.kind === "changed") return onChanged(outcome.currency);
       if (outcome.kind === "blocked") return setBlockers(outcome.blockers);
+      // The page's currency itself is stale when the hotel had no pricing currency of its own.
+      if (state.revision === 0) return window.location.reload();
       setError("settings.currencyChange.stale");
       key.current = globalThis.crypto.randomUUID();
       load();
@@ -86,6 +93,7 @@ export function ChangeCurrencyDialog({
   }
 
   if (blockers) {
+    const setupOnly = blockers.every(({ code }) => code === "hotel_setup_incomplete");
     return (
       <Modal
         ariaLabel={t("settings.currencyChange.blockedTitle")}
@@ -106,10 +114,12 @@ export function ChangeCurrencyDialog({
           {t("settings.currencyChange.blockedTitle")}
         </h2>
         <p className="mt-2 text-sm text-gray-600">
-          {t("settings.currencyChange.blockedIntro", { from })}
+          {setupOnly
+            ? t("settings.currencyChange.setupIntro")
+            : t("settings.currencyChange.blockedIntro", { from })}
         </p>
         <ul className="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-200">
-          {blockerItems(blockers).map((item) => (
+          {blockerItems(blockers, state?.propertyId).map((item) => (
             <li key={item.title} className="flex gap-3 p-4">
               <span
                 aria-hidden="true"
@@ -124,10 +134,10 @@ export function ChangeCurrencyDialog({
                 <p className="mt-0.5 text-gray-600">{t(item.body, { from })}</p>
                 {item.link && (
                   <Link
-                    href={item.link}
+                    href={item.link.href}
                     className="mt-1 inline-block text-primary-600 hover:underline"
                   >
-                    {t("settings.currencyChange.blockedBookingsLink")}
+                    {t(item.link.label)}
                   </Link>
                 )}
               </div>
@@ -169,12 +179,17 @@ export function ChangeCurrencyDialog({
     >
       <h2 className="text-lg font-semibold text-gray-900">{t("settings.currencyChange.title")}</h2>
       <p className="mt-2 text-sm text-gray-600">{t("settings.currencyChange.intro")}</p>
-      {loadFailed ? (
+      {loadFailed !== null ? (
         <div role="alert" className="mt-4 text-sm text-red-700">
           {t("settings.currencyChange.loadError")}{" "}
           <button type="button" onClick={load} className="font-medium underline">
             {t("common.retry")}
           </button>
+          {loadFailed && (
+            <p className="mt-1 text-xs text-gray-500">
+              {t("settings.currencyChange.loadErrorCode", { code: loadFailed })}
+            </p>
+          )}
         </div>
       ) : !state ? (
         <p role="status" className="mt-4 text-sm text-gray-500">
@@ -240,27 +255,56 @@ export function ChangeCurrencyDialog({
 }
 
 /** A preview that fails leaves the reasons to the change, which checks them anyway. */
-async function loadWithBlockers() {
-  const state = await pricingCurrencyService.load();
+async function loadWithBlockers(shownCurrency: string) {
+  const state = await pricingCurrencyService.load(shownCurrency);
   const blockers = await pricingCurrencyService
     .blockers(state)
     .catch((): PmsPricingCurrencyChangeBlocker[] => []);
   return { state, blockers };
 }
 
-type BlockerItem = { title: string; body: string; count?: number; link?: string };
+/** What support needs from a failed load: the API's status and error code (VAY-2453). */
+function errorCode(cause: unknown): string {
+  if (!(cause instanceof ApiErrorResponse)) return "";
+  return [cause.status, cause.data.code].filter(Boolean).join(" ");
+}
+
+type BlockerItem = {
+  title: string;
+  body: string;
+  count?: number;
+  link?: { href: string; label: string };
+};
 
 /** One line per reason the API gave; older price records share one line. */
-function blockerItems(blockers: readonly PmsPricingCurrencyChangeBlocker[]): BlockerItem[] {
+function blockerItems(
+  blockers: readonly PmsPricingCurrencyChangeBlocker[],
+  propertyId: string | undefined,
+): BlockerItem[] {
   const items: BlockerItem[] = [];
   const codes = new Set(blockers.map(({ code }) => code));
+  // VAY-2453: setup chooses the first currency, and with it switches on Financials.
+  if (codes.has("hotel_setup_incomplete"))
+    items.push({
+      title: "settings.currencyChange.blockedSetupTitle",
+      body: "settings.currencyChange.blockedSetupBody",
+      link: {
+        href: `/setup?${new URLSearchParams({
+          entryProduct: "pms",
+          returnTo: "/settings/property",
+          ...(propertyId ? { propertyId } : {}),
+          step: "payments",
+        }).toString()}`,
+        label: "settings.currencyChange.blockedSetupLink",
+      },
+    });
   const bookings = blockers.find(({ code }) => code === "booking_reference");
   if (bookings)
     items.push({
       title: "settings.currencyChange.blockedBookingsTitle",
       body: "settings.currencyChange.blockedBookingsBody",
       count: bookings.affectedCount ?? 1,
-      link: "/bookings",
+      link: { href: "/bookings", label: "settings.currencyChange.blockedBookingsLink" },
     });
   if (codes.has("channel_connection"))
     items.push({

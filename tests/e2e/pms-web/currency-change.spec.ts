@@ -11,27 +11,31 @@ import {
 // The dialog asks for those reasons when it opens; the change checks them again.
 const SOURCE = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-source`;
 
+const PRICED = {
+  status: 200,
+  json: {
+    contractVersion: "pms-pricing.v1",
+    propertyId: PMS_WEB_PROPERTY_ID,
+    pricingCurrency: {
+      propertyId: PMS_WEB_PROPERTY_ID,
+      currency: "EUR",
+      pricingCurrencyRevision: 3,
+    },
+    flexibleRatePlans: [],
+    capturedAt: "2026-10-28T12:00:00.000Z",
+  },
+};
+// VAY-2453: a hotel set up before it had its own pricing currency; the page shows EUR from Booking.
+const NOT_CONFIGURED = { status: 404, json: { code: "pricing_currency_not_configured" } };
+
 async function mockCurrency(
   page: Page,
   answer: { status: number; json: unknown },
   preview: { status: number; json: unknown } = { status: 200, json: { blockers: [] } },
+  source: { status: number; json: unknown } = PRICED,
 ) {
   const writes: { body: unknown; key: string | undefined }[] = [];
-  await page.route(SOURCE, (route) =>
-    route.fulfill({
-      json: {
-        contractVersion: "pms-pricing.v1",
-        propertyId: PMS_WEB_PROPERTY_ID,
-        pricingCurrency: {
-          propertyId: PMS_WEB_PROPERTY_ID,
-          currency: "EUR",
-          pricingCurrencyRevision: 3,
-        },
-        flexibleRatePlans: [],
-        capturedAt: "2026-10-28T12:00:00.000Z",
-      },
-    }),
-  );
+  await page.route(SOURCE, (route) => route.fulfill(source));
   await page.route(`${SOURCE}/currency-capabilities`, (route) =>
     route.fulfill({
       json: {
@@ -110,6 +114,86 @@ test("lets the Owner change the currency, numbers kept, after typing the code", 
     page.getByRole("status").filter({ hasText: "Your currency is now CHF." }),
   ).toBeVisible();
   await expect(page.locator("#currency").getByText("CHF · Swiss Franc")).toBeVisible();
+});
+
+test("lets the Owner change the currency of a hotel without its own pricing currency yet", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const writes = await mockCurrency(
+    page,
+    {
+      status: 200,
+      json: {
+        contractVersion: "pms-pricing.v1",
+        outcome: "updated",
+        pricingCurrency: {
+          propertyId: PMS_WEB_PROPERTY_ID,
+          currency: "CHF",
+          pricingCurrencyRevision: 2,
+        },
+        acceptedAt: "2026-11-02T12:00:01.000Z",
+      },
+    },
+    undefined,
+    NOT_CONFIGURED,
+  );
+
+  const dialog = await openChange(page);
+  await expect(dialog).toContainText("100 EUR becomes 100 CHF");
+  await dialog.getByLabel("Type CHF to confirm").fill("CHF");
+  await dialog.getByRole("button", { name: "Change to CHF" }).click();
+
+  await expect(dialog).toHaveCount(0);
+  // Revision 0: the API adopts the EUR the page shows, while it still shows it, then changes it.
+  expect(writes.map(({ body }) => body)).toEqual([
+    { expectedPricingCurrencyRevision: 0, currency: "CHF", expectedPricingCurrency: "EUR" },
+  ]);
+  await expect(page.locator("#currency").getByText("CHF · Swiss Franc")).toBeVisible();
+});
+
+test("sends a hotel still in setup to setup, where its first currency is chosen", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const writes = await mockCurrency(
+    page,
+    { status: 409, json: {} },
+    { status: 200, json: { blockers: [{ code: "hotel_setup_incomplete" }] } },
+    NOT_CONFIGURED,
+  );
+
+  await openDialog(page);
+
+  const blocked = page.getByRole("dialog", { name: /You can.t change the currency right now/ });
+  await expect(blocked).toContainText("Your hotel setup isn’t finished yet.");
+  await expect(blocked).toContainText("Choose your currency in hotel setup");
+  await expect(blocked).not.toContainText("Some bookings");
+  await expect(blocked.getByRole("link", { name: "Finish hotel setup" })).toHaveAttribute(
+    "href",
+    `/setup?entryProduct=pms&returnTo=%2Fsettings%2Fproperty&propertyId=${PMS_WEB_PROPERTY_ID}&step=payments`,
+  );
+  await expect(blocked.getByLabel("New currency")).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+});
+
+test("says which error stopped the dialog from loading", async ({ page }) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  await mockCurrency(page, { status: 409, json: {} }, undefined, {
+    status: 500,
+    json: { code: "pms_pricing_port_contract_violation" },
+  });
+
+  await openDialog(page);
+
+  const dialog = page.getByRole("dialog", { name: "Change your property currency" });
+  const alert = dialog.getByRole("alert");
+  await expect(alert).toContainText("We couldn’t load your currency settings.");
+  await expect(alert).toContainText("Error code: 500 pms_pricing_port_contract_violation");
+  await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible();
 });
 
 test("says what blocks a change as the dialog opens, before anything is typed", async ({

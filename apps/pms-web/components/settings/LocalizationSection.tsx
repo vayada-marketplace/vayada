@@ -85,6 +85,7 @@ export function LocalizationSection({
         )}
         {changing && (
           <ChangeCurrencyDialog
+            shownCurrency={currency}
             onClose={() => setChanging(false)}
             onChanged={(next) => {
               setChanging(false);
