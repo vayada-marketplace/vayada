@@ -131,6 +131,7 @@ describe("agency stay prices", () => {
             promoApplied: true,
           },
           pricesComplete: false,
+          nextFree: null,
         },
         {
           propertyId: "id-full",
@@ -139,6 +140,7 @@ describe("agency stay prices", () => {
           roomTypesFree: 0,
           price: null,
           pricesComplete: true,
+          nextFree: null,
         },
         {
           propertyId: "id-small",
@@ -147,6 +149,7 @@ describe("agency stay prices", () => {
           roomTypesFree: 0,
           price: null,
           pricesComplete: true,
+          nextFree: null,
         },
         // "gone" is no longer public, so it isn't shown.
         {
@@ -156,6 +159,7 @@ describe("agency stay prices", () => {
           roomTypesFree: 0,
           price: null,
           pricesComplete: false,
+          nextFree: null,
         },
       ],
     });
@@ -207,6 +211,7 @@ describe("agency stay prices", () => {
         promoApplied: false,
       },
       pricesComplete: true,
+      nextFree: null,
     });
   });
 

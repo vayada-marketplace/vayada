@@ -5,6 +5,7 @@ import {
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
 import { createPublicPricingDisplayPool } from "./publicPricingDisplayPool.js";
 import { createAgencyStayPrices, parseAgencyStayPricesQuery } from "./agencyStayPrices.js";
+import { readFreeWindows } from "./agencyNextFreeDates.js";
 import { readLiveAccountBookingPageStays } from "./accountBookingPages.js";
 import {
   activeBookingPublicationGateConfig,
@@ -6989,9 +6990,21 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         pageStays: (page) => readLiveAccountBookingPageStays(pool, page),
         stayPrices: createPublicPricingStayPrices(display, createPublicPricingOfferCatalog(display))
           .read,
+        freeWindows: (propertyId, dates) => readFreeWindows(display, propertyId, dates),
       });
       const [checkIn, checkOut] = [await localDay(5), await localDay(7)];
       const search = parseAgencyStayPricesQuery({ checkIn, checkOut, adults: "2" })!;
+      // Stay 2 is full on the searched nights and closed the night after: its next free stay of
+      // two nights arrives three days later.
+      await pool.query(
+        `UPDATE pms.inventory_days SET available_count=0
+        WHERE property_id=$1 AND stay_date IN ($2::date,$3::date)`,
+        [ids[1], checkIn, await localDay(6)],
+      );
+      await pool.query(
+        "UPDATE pms.inventory_days SET available_count=0,status='closed' WHERE property_id=$1 AND stay_date=$2::date",
+        [ids[1], checkOut],
+      );
       const owner = await stays[0]!.readPublic();
       const selection = {
         version: "public-pricing-selection.v1",
@@ -7043,7 +7056,19 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
       // In the page's order; never the stay left off, the one not ready or another account's.
       expect(result?.stays.map((stay) => stay.propertyId)).toEqual(ids.slice(0, 13).reverse());
-      expect(result?.stays.every((stay) => stay.status === "available")).toBe(true);
+      expect(
+        result?.stays.filter((stay) => stay.status === "available").map((stay) => stay.propertyId),
+      ).toEqual(
+        ids
+          .slice(0, 13)
+          .reverse()
+          .filter((id) => id !== ids[1]),
+      );
+      expect(result?.stays.find((stay) => stay.propertyId === ids[1])).toMatchObject({
+        status: "unavailable",
+        price: null,
+        nextFree: { checkIn: await localDay(8), checkOut: await localDay(10) },
+      });
       // Measured 0.9s on the CI-sized worker; quotes meanwhile took at most 0.1s.
       expect(took).toBeLessThan(5_000);
       expect(quoteTimes.length).toBeGreaterThan(0);

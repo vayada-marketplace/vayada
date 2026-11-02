@@ -18,6 +18,7 @@ import {
 import { createPublicPricingDisplayPool } from "../domains/publicPricingDisplayPool.js";
 import { createAgencyStayPrices, parseAgencyStayPricesQuery } from "../domains/agencyStayPrices.js";
 import { readLiveAccountBookingPageStays } from "../domains/accountBookingPages.js";
+import { readFreeWindows } from "../domains/agencyNextFreeDates.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
 import type { VayadaPaymentCharges } from "../domains/pricingCardPayment.js";
@@ -1502,6 +1503,7 @@ export function createTargetBookingWebCheckoutAdapter(
       displayPool,
       createPublicPricingOfferCatalog(displayPool, catalogOptions),
     ).read,
+    freeWindows: (propertyId, search) => readFreeWindows(displayPool, propertyId, search),
   });
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(

@@ -67,7 +67,13 @@ export type AgencyStayResult = {
   } | null;
   /** False when some bookable rates weren't priced, so a lower price may exist. */
   pricesComplete: boolean;
+  /** For an unavailable stay: the first later dates of the same length, within 60 days, when it
+   * takes the party; null when there are none (or for any other status). */
+  nextFree: { checkIn: string; checkOut: string } | null;
 };
+
+/** Later windows tried with the stay's own price read before giving up on next free dates. */
+const NEXT_FREE_TRIES = 3;
 
 /**
  * VAY-2458: availability and the lowest price of every stay on a live agency page, for one search.
@@ -79,6 +85,11 @@ export type AgencyStayResult = {
 export function createAgencyStayPrices(options: {
   pageStays: (slug: string) => Promise<AgencyPageStays>;
   stayPrices: (slug: string, query: StayPricesQuery) => Promise<StayPrices | null>;
+  /** Later windows that may take the party (`readFreeWindows`), first first. */
+  freeWindows?: (
+    propertyId: string,
+    search: AgencySearch,
+  ) => Promise<{ checkIn: string; checkOut: string }[]>;
   now?: () => number;
 }) {
   const now = options.now ?? Date.now;
@@ -114,11 +125,13 @@ export function createAgencyStayPrices(options: {
       );
       const stays = await Promise.all(
         page.stays.map(async (stay): Promise<AgencyStayResult | null> => {
+          const priceFor = (dates: AgencySearch) =>
+            dates.rooms
+              ? splitStay(stay.slug, dates, dates.rooms, read)
+              : wholeStay(stay.slug, dates, read);
+          let result;
           try {
-            const result = search.rooms
-              ? await splitStay(stay.slug, search, search.rooms, read)
-              : await wholeStay(stay.slug, search, read);
-            return result && { ...stay, ...withNightly(result, nights) };
+            result = await priceFor(search);
           } catch {
             return {
               ...stay,
@@ -126,8 +139,26 @@ export function createAgencyStayPrices(options: {
               roomTypesFree: 0,
               price: null,
               pricesComplete: false,
+              nextFree: null,
             };
           }
+          if (!result) return null;
+          let nextFree: AgencyStayResult["nextFree"] = null;
+          if (result.status === "unavailable" && options.freeWindows) {
+            try {
+              // The stay's own price read confirms a window, which also knows what the rules
+              // alone don't (rooms out of service, rates guests can't pay).
+              const windows = await options.freeWindows(stay.propertyId, search);
+              for (const window of windows.slice(0, NEXT_FREE_TRIES))
+                if ((await priceFor({ ...search, ...window }))?.status === "available") {
+                  nextFree = window;
+                  break;
+                }
+            } catch {
+              // Without next free dates the card still shows the stay as unavailable.
+            }
+          }
+          return { ...stay, ...withNightly(result, nights), nextFree };
         }),
       );
       return {
@@ -145,7 +176,9 @@ export function createAgencyStayPrices(options: {
 
 type Read = (slug: string, query: StayPricesQuery) => Promise<StayPrices | null>;
 type Priced = { totalMinor: string; currency: string; promoApplied: boolean };
-type Result = Omit<AgencyStayResult, "propertyId" | "slug" | "price"> & { price: Priced | null };
+type Result = Omit<AgencyStayResult, "propertyId" | "slug" | "price" | "nextFree"> & {
+  price: Priced | null;
+};
 
 const bookable = (room: StayPrices["rooms"][number]) =>
   room.availability === "available" && room.offers.some((offer) => offer.status !== "unavailable");
