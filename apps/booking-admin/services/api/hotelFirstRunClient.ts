@@ -25,6 +25,12 @@ export type HotelFirstRunState = Readonly<{
   nextStep: HotelFirstRunStepId | null;
 }>;
 
+/**
+ * VAY-2451: the four-step setup's body. It made its room type itself (or skipped it); the server gives it the
+ * placeholder price and the hotel the Commission plan unless it has one.
+ */
+export type HotelFirstRunFourStepRequest = Readonly<{ guestPayment: "pay_at_property" }>;
+
 export type HotelFirstRunRequest = Readonly<{
   /** The hotel's room types, in order: 1–10 with different names (the server's 1.12). */
   rooms: readonly Readonly<{
@@ -114,7 +120,10 @@ export function createHotelFirstRunClient(http: Http) {
       return state;
     },
 
-    async run(propertyId: string, request: HotelFirstRunRequest): Promise<HotelFirstRunRunResult> {
+    async run(
+      propertyId: string,
+      request: HotelFirstRunRequest | HotelFirstRunFourStepRequest,
+    ): Promise<HotelFirstRunRunResult> {
       let value: unknown;
       try {
         value = await http.post<unknown>(path(propertyId), request);
