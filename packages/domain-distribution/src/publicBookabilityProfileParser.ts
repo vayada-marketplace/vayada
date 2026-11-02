@@ -50,6 +50,8 @@ const contactSchema = z
       (contact.type === "website" ||
         contact.type === "instagram" ||
         contact.type === "facebook" ||
+        contact.type === "tiktok" ||
+        contact.type === "youtube" ||
         contact.type === "x") &&
       !isPublicHttpsUrl(contact.value)
     )

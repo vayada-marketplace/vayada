@@ -42,7 +42,16 @@ export type BookingWebPublicHotelResponse = {
     images: Array<{ url: string; alt: string | null }>;
     amenities: string[];
     publicContacts?: Array<{
-      type: "phone" | "email" | "whatsapp" | "website" | "instagram" | "facebook" | "x";
+      type:
+        | "phone"
+        | "email"
+        | "whatsapp"
+        | "website"
+        | "instagram"
+        | "facebook"
+        | "tiktok"
+        | "youtube"
+        | "x";
       value: string;
     }>;
     policies: {
@@ -178,6 +187,8 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     socialLinks: {
       instagram: safePublicHttpUrl(contacts.instagram),
       facebook: safePublicHttpUrl(contacts.facebook),
+      tiktok: safePublicHttpUrl(contacts.tiktok),
+      youtube: safePublicHttpUrl(contacts.youtube),
     },
     branding: hotel.branding
       ? {

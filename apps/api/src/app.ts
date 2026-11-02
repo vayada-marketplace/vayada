@@ -236,6 +236,10 @@ import {
   type PmsCheckinSettingsRepository,
 } from "./routes/pmsCheckinSettings.js";
 import {
+  registerPmsGuestStayTimesRoutes,
+  type PmsGuestStayTimesRepository,
+} from "./routes/pmsGuestStayTimes.js";
+import {
   registerPmsBookingModuleRoutes,
   type BookingModuleRepository,
 } from "./routes/pmsBookingModules.js";
@@ -319,6 +323,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelFirstRun?: import("./routes/hotelFirstRun.js").HotelFirstRunRouteOptions["createService"];
   /** VAY-2247 wave 2: the setup checklist; mounted with the first run (it reads the first run's state). */
   hotelSetupChecklist?: import("./routes/hotelSetupChecklist.js").HotelSetupChecklistRouteOptions["createService"];
+  /** VAY-2451: also mount the go-live checklist (/checklist/v2); unset or false: only v1. */
+  hotelGoLiveChecklist?: boolean;
   /** VAY-2246: the hotel account's terms and DPA acceptance (GET/POST /api/hotel-account/agreements). */
   hotelAccountAgreements?: import("./routes/hotelAccountAgreements.js").HotelAccountAgreementsRouteOptions["repository"];
   /** VAY-2444: resolve Google Maps short links for signed-in hotel accounts (POST /api/maps-links/resolve). */
@@ -374,6 +380,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsGuestRegistrationRepository?: PmsGuestRegistrationRepository;
   pmsGuestProfileRepository?: PmsGuestProfileRepository;
   pmsCheckinSettingsRepository?: PmsCheckinSettingsRepository;
+  /** The guest rules' check-in and check-out times for the PMS team (VAY-2455). */
+  pmsGuestStayTimesRepository?: PmsGuestStayTimesRepository;
   bookingModuleRepository?: BookingModuleRepository;
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
@@ -695,6 +703,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/hotel-setup",
       createService: options.hotelSetupChecklist,
       propertyAccessRepository: options.auth.propertyAccessRepository,
+      goLive: options.hotelGoLiveChecklist === true,
     });
   }
   if (options.hotelAccountAgreements) {
@@ -1039,6 +1048,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.pmsCheckinSettingsRepository,
       propertyAccessRepository: options.auth.propertyAccessRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (options.pmsGuestStayTimesRepository && options.auth) {
+    app.register(registerPmsGuestStayTimesRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsGuestStayTimesRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins ?? [],
     });
   }
   if (options.bookingModuleRepository && options.auth) {

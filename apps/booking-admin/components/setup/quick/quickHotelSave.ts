@@ -10,6 +10,14 @@ export function quickHotelProfileRequest(
   currency: QuickHotelCurrency,
   language: string,
 ): CreatePropertyProfileRequest {
+  // VAY-2451: WhatsApp is the reception phone unless the owner gave another number.
+  const whatsapp = (
+    draft.whatsappSameAsPhone === undefined
+      ? ""
+      : draft.whatsappSameAsPhone
+        ? draft.phone
+        : (draft.whatsapp ?? "")
+  ).trim();
   return {
     displayName: draft.displayName.trim(),
     propertyType: draft.propertyType,
@@ -33,16 +41,26 @@ export function quickHotelProfileRequest(
         purpose: "general",
         isPublic: true,
       },
+      ...(whatsapp
+        ? [
+            {
+              channelType: "whatsapp" as const,
+              value: whatsapp,
+              purpose: "general" as const,
+              isPublic: true,
+            },
+          ]
+        : []),
     ],
     initialLaunchSettings: {
       defaultCurrency: currency.code,
       supportedCurrencies: [currency.code],
       defaultLanguage: language,
       supportedLanguages: [language],
-      instagram: "",
-      facebook: "",
-      tiktok: "",
-      youtube: "",
+      instagram: draft.instagram?.trim() ?? "",
+      facebook: draft.facebook?.trim() ?? "",
+      tiktok: draft.tiktok?.trim() ?? "",
+      youtube: draft.youtube?.trim() ?? "",
     },
   };
 }
@@ -62,6 +80,8 @@ export type QuickHotelSaveInput = {
   language: string;
   logo: File | null;
   organization: { selectedTracks: readonly SetupTrack[]; trackRevision: number };
+  /** VAY-2451: save the currency even when it is the country's, so the hotel's PMS opens for its rooms. */
+  alwaysSaveCurrency?: boolean;
   /** One key per draft, kept with it, so a retry of the same Continue never creates a second hotel. */
   draftKey: string;
 };
@@ -107,7 +127,7 @@ export async function saveQuickHotel(
       // The logo is optional: the hotel is saved, and the logo can be added in Design Studio.
     }
   }
-  if (!input.currency.fromCountry) {
+  if (!input.currency.fromCountry || input.alwaysSaveCurrency) {
     await deps.saveCurrency(profile.propertyId, input.currency.code);
   }
   return { propertyId: profile.propertyId, logoSaved };

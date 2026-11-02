@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FIRST_RUN_PLACEHOLDER_PUBLISH_STEP,
   firstRunUuid,
   runFirstRunPricing,
   type HotelFirstRunPricingPorts,
@@ -27,13 +28,21 @@ type Draft = {
 };
 
 /** pricing-v2 in memory: records the call order and keeps one draft. */
-function fakePricing(start: { priced?: boolean; draft?: Draft; fail?: string } = {}) {
+function fakePricing(
+  start: { priced?: boolean; otherPriced?: boolean; draft?: Draft; fail?: string } = {},
+) {
   const calls: Array<[string, unknown]> = [];
   let draft: Draft | null = start.draft ?? null;
   const record = (name: string, value?: unknown) => calls.push([name, value]);
   const pricing = {
     read: async () => {
       record("read");
+      if (start.otherPriced)
+        return {
+          revision: 3,
+          currency: "EUR",
+          rooms: [{ roomTypeId: "11111111-1111-4111-8111-111111111111", offers: [{}] }],
+        };
       return start.priced
         ? { revision: 3, currency: "EUR", rooms: [{ roomTypeId, offers: [{}] }] }
         : null;
@@ -148,6 +157,51 @@ describe("first run step 4: the first price (VAY-2247)", () => {
       cause: undefined,
     });
     expect(fake.calls).toEqual([]);
+  });
+
+  it("publishes the placeholder price with the first run's own declaration and its marker (VAY-2451)", async () => {
+    const fake = fakePricing();
+    const placeholder = {
+      roomTypeId,
+      capacity: input.capacity,
+      currency: input.currency,
+      placeholder: true as const,
+    };
+    expect(await runFirstRunPricing(fake.ports, actor, placeholder)).toEqual({
+      ok: true,
+      wrote: true,
+    });
+    // 100 a night in the hotel's currency (EUR here: 10000 cents).
+    const prepared = fake.calls[2]![1] as { rooms: unknown[] };
+    expect(JSON.stringify(prepared.rooms[0])).toContain(
+      '"base":{"mode":"flat","amountMinor":"10000"}',
+    );
+    expect(fake.calls[6]![1]).toMatchObject({ declaredVia: "first_run_placeholder" });
+    expect(fake.calls[8]![1]).toMatchObject({
+      requestId: expect.stringMatching(
+        new RegExp(`^first-run:v1:${FIRST_RUN_PLACEHOLDER_PUBLISH_STEP}:[0-9a-f]{64}$`),
+      ),
+    });
+    // The old first run's own price keeps its request id, so the booking page treats it as real.
+    const owned = fakePricing();
+    await runFirstRunPricing(owned.ports, actor, input);
+    expect(owned.calls[8]![1]).toMatchObject({
+      requestId: expect.stringMatching(/^first-run:v1:pricing_publish:/),
+    });
+  });
+
+  it("never puts the placeholder next to prices the hotel already has (VAY-2451)", async () => {
+    // Another room type is priced: the setup's room waits for the owner's own price.
+    const fake = fakePricing({ otherPriced: true });
+    expect(
+      await runFirstRunPricing(fake.ports, actor, {
+        roomTypeId,
+        capacity: input.capacity,
+        currency: "EUR",
+        placeholder: true,
+      }),
+    ).toEqual({ ok: true, wrote: false });
+    expect(fake.calls.map(([name]) => name)).toEqual(["read"]);
   });
 
   it("stages the owner's cancellation days, in their own draft (1.12b)", async () => {

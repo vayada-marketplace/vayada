@@ -44,6 +44,9 @@ export const PUBLIC_BOOKABILITY_CONTACT_CHANNEL_TYPES = [
   "website",
   "instagram",
   "facebook",
+  // VAY-2451: setup asks for TikTok and YouTube links too, and promises them on the booking page.
+  "tiktok",
+  "youtube",
   "x",
 ] as const;
 

@@ -18,6 +18,14 @@ export type QuickHotelDraft = {
   currency: string;
   /** The pin came from a pasted Google Maps link (VAY-2444): typing the address keeps it. */
   pinFromLink?: boolean;
+  /** VAY-2451 "Location & contact": WhatsApp, the reception phone unless unticked. */
+  whatsappSameAsPhone?: boolean;
+  whatsapp?: string;
+  /** Full links, shown on the booking page. */
+  instagram?: string;
+  facebook?: string;
+  youtube?: string;
+  tiktok?: string;
 };
 
 export type QuickHotelField = "displayName" | "propertyType" | "address" | "contactEmail" | "phone";

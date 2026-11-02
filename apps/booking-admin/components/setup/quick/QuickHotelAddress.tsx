@@ -57,6 +57,11 @@ export type QuickHotelAddressProps = {
   hotelName?: string;
   /** The long link a maps.app.goo.gl share link opens (the API reads it); null without. */
   resolveShortLink?: ((url: string) => Promise<string | null>) | null;
+  /**
+   * VAY-2451 "Location & contact": a small map, "Pin placed · Guests will see …" on one line, and
+   * time zone and currency on one line with one Change, so the step fits one screen.
+   */
+  compact?: boolean;
 };
 
 // The room editor's map and link copy (VAY-2444: the same tool as Rooms & Rates → room → Location).
@@ -105,6 +110,7 @@ export function QuickHotelAddress({
   onCurrencyChange,
   hotelName = "",
   resolveShortLink = null,
+  compact = false,
 }: QuickHotelAddressProps) {
   const key = apiKey?.trim() || null;
   const addressRevision = useRef(0);
@@ -262,7 +268,7 @@ export function QuickHotelAddress({
   );
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className={`flex flex-col ${compact ? "gap-3" : "gap-5"}`}>
       {mode === "search" && key ? (
         <div>
           <p className="text-sm font-semibold text-gray-950">
@@ -286,14 +292,16 @@ export function QuickHotelAddress({
               We place your hotel on the map and pick the time zone and currency for you.
             </p>
           )}
-          <p className="mt-2 flex items-center gap-1.5">
-            <LinkIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
-            {switchLink("Paste a Google Maps link", "link")}
-          </p>
-          <p className="mt-2 flex items-center gap-1.5">
-            <PencilSquareIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
-            {switchLink("Can't find it? Enter the address manually", "manual")}
-          </p>
+          <div className={compact ? "mt-2 flex flex-wrap gap-x-5 gap-y-2" : ""}>
+            <p className={`flex items-center gap-1.5 ${compact ? "" : "mt-2"}`}>
+              <LinkIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
+              {switchLink("Paste a Google Maps link", "link")}
+            </p>
+            <p className={`flex items-center gap-1.5 ${compact ? "" : "mt-2"}`}>
+              <PencilSquareIcon className="h-4 w-4 text-primary-600" aria-hidden="true" />
+              {switchLink("Can't find it? Enter the address manually", "manual")}
+            </p>
+          </div>
         </div>
       ) : null}
 
@@ -414,13 +422,17 @@ export function QuickHotelAddress({
         <div className="flex flex-col gap-3">
           <div>
             {/* Without a pin, the map itself says to click where the entrance is. */}
-            {hasPin(draft) ? (
+            {hasPin(draft) && !compact ? (
               <p className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-green-700">
                 <CheckCircleIcon className="h-4 w-4" aria-hidden="true" />
                 Pin placed on the map
               </p>
             ) : null}
-            <div className="relative h-[240px] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 lg:h-[300px]">
+            <div
+              className={`relative overflow-hidden rounded-xl border border-gray-200 bg-gray-100 ${
+                compact ? "h-24" : "h-[240px] lg:h-[300px]"
+              }`}
+            >
               {mapFailed ? (
                 <div className="flex h-full items-center justify-center text-sm font-medium text-slate-500">
                   Map unavailable
@@ -443,7 +455,20 @@ export function QuickHotelAddress({
               </p>
             ) : null}
           </div>
-          {hasPin(draft) ? (
+          {hasPin(draft) && compact ? (
+            <p aria-live="polite" className="text-[13px] text-gray-600">
+              <span className="mr-1.5 inline-flex items-center gap-1 align-top font-medium text-green-700">
+                <CheckCircleIcon className="h-4 w-4" aria-hidden="true" />
+                Pin placed ·
+              </span>
+              {"Guests will see "}
+              <span className="font-semibold text-gray-950">
+                {formattedAddress(draft) ||
+                  (lookingUp ? "Looking up the address…" : "Add the address above.")}
+              </span>
+            </p>
+          ) : null}
+          {hasPin(draft) && !compact ? (
             <div aria-live="polite">
               <GuestsWillSeeCard
                 label="Guests will see"
@@ -458,50 +483,83 @@ export function QuickHotelAddress({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-2.5">
-        {changingTimezone ? (
-          <div>
-            <p className="text-sm font-semibold text-gray-950">Time zone</p>
-            <div className="mt-2">
-              <TimezoneField
-                value={draft.timezone}
-                options={timezones}
-                onChange={(timezone) => {
-                  timezoneFollowsAddress.current = false;
-                  onChange({ timezone });
-                  setChangingTimezone(false);
+      {compact && !changingTimezone && !changingCurrency ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-gray-600">
+          <span>
+            {"Time zone "}
+            <strong className="font-semibold text-gray-950">
+              {draft.timezone || "set from your address"}
+            </strong>
+          </span>
+          <span>
+            {"Currency "}
+            <strong className="font-semibold text-gray-950">
+              {currency ? currency.label : "set from your country"}
+            </strong>
+          </span>
+          {draft.timezone || currency ? (
+            <span className="text-gray-500">Detected from your address</span>
+          ) : null}
+          {draft.timezone || (currency && onCurrencyChange) ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (draft.timezone) setChangingTimezone(true);
+                if (currency && onCurrencyChange) setChangingCurrency(true);
+              }}
+              aria-label="Change time zone or currency"
+              className="ml-auto rounded px-1 font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600"
+            >
+              Change
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          {changingTimezone ? (
+            <div>
+              <p className="text-sm font-semibold text-gray-950">Time zone</p>
+              <div className="mt-2">
+                <TimezoneField
+                  value={draft.timezone}
+                  options={timezones}
+                  onChange={(timezone) => {
+                    timezoneFollowsAddress.current = false;
+                    onChange({ timezone });
+                    setChangingTimezone(false);
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <AutoLine
+              name="Time zone"
+              value={draft.timezone || "Set from your address"}
+              note={draft.timezone ? "Detected from your address" : null}
+              onChange={draft.timezone ? () => setChangingTimezone(true) : null}
+            />
+          )}
+          {currency && changingCurrency && onCurrencyChange ? (
+            <div>
+              <p className="text-sm font-semibold text-gray-950">Currency</p>
+              <QuickCurrencyPicker
+                value={currency.code}
+                onChange={(code) => {
+                  onCurrencyChange(code);
+                  setChangingCurrency(false);
                 }}
               />
             </div>
-          </div>
-        ) : (
-          <AutoLine
-            name="Time zone"
-            value={draft.timezone || "Set from your address"}
-            note={draft.timezone ? "Detected from your address" : null}
-            onChange={draft.timezone ? () => setChangingTimezone(true) : null}
-          />
-        )}
-        {currency && changingCurrency && onCurrencyChange ? (
-          <div>
-            <p className="text-sm font-semibold text-gray-950">Currency</p>
-            <QuickCurrencyPicker
-              value={currency.code}
-              onChange={(code) => {
-                onCurrencyChange(code);
-                setChangingCurrency(false);
-              }}
+          ) : (
+            <AutoLine
+              name="Currency"
+              value={currency ? currency.label : "Set from your country"}
+              note={currency ? `${currency.note} · used for every price` : null}
+              onChange={currency && onCurrencyChange ? () => setChangingCurrency(true) : null}
             />
-          </div>
-        ) : (
-          <AutoLine
-            name="Currency"
-            value={currency ? currency.label : "Set from your country"}
-            note={currency ? `${currency.note} · used for every price` : null}
-            onChange={currency && onCurrencyChange ? () => setChangingCurrency(true) : null}
-          />
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

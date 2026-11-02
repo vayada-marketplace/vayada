@@ -164,6 +164,7 @@ describe("shared hotel setup status route", () => {
         { value: "aparthotel", label: "Aparthotel" },
         { value: "guesthouse", label: "Guesthouse" },
         { value: "bed_and_breakfast", label: "Bed and breakfast" },
+        { value: "homestay", label: "Homestay" },
         { value: "villa", label: "Villa" },
         { value: "vacation_rental", label: "Vacation rental" },
         { value: "motel", label: "Motel" },

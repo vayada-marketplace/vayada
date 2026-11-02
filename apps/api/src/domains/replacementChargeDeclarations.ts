@@ -48,13 +48,16 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
   return {
     async confirm(context: RequestContext | null, scope: PricingStorageScope, input: {
       draftId: string; expectedDraftRevision: number; claimedFingerprint: string; declaration: typeof declaration; requestId: string;
-      /** The staff member declared by pressing "Save prices" (no separate checkbox); recorded on the audit event. */
-      declaredVia?: "save_prices";
+      /**
+       * Recorded on the audit event: the staff member declared by pressing "Save prices" (no separate checkbox), or
+       * the first run declared for its placeholder price, which the booking page can't go live with (VAY-2451).
+       */
+      declaredVia?: "save_prices" | "first_run_placeholder";
     }): Promise<ReplacementChargeDeclaration> {
       if (!uuid(input.draftId) || !pricingInteger(input.expectedDraftRevision, 1) || input.expectedDraftRevision > 2147483647 ||
           !hashPattern.test(input.claimedFingerprint) || input.declaration !== declaration || typeof input.requestId !== "string" ||
           input.requestId.length < 1 || input.requestId.length > 200 || input.requestId.trim() !== input.requestId ||
-          (input.declaredVia !== undefined && input.declaredVia !== "save_prices")) return fail("invalid");
+          (input.declaredVia !== undefined && input.declaredVia !== "save_prices" && input.declaredVia !== "first_run_placeholder")) return fail("invalid");
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       const command = structuredClone({ ...input, draftId: input.draftId.toLowerCase() }), requestHash = hash({ scope, command });
       const client = await pool.connect();

@@ -19,6 +19,7 @@ import {
   type PricingStorageSnapshot,
   type StoredPricingRevision,
 } from "./replacementPricingSnapshot.js";
+import { isFirstRunPlaceholderPricingRequestId } from "./hotelFirstRunPricing.js";
 
 export type PricingPaymentRepublish = { propertyId: string } & (
   | { outcome: "republished"; from: number; revision: number }
@@ -56,6 +57,23 @@ const canonical = (v: unknown): string =>
       : value,
   );
 const hash = (v: unknown) => createHash("sha256").update(canonical(v)).digest("hex");
+
+/** The first run's placeholder publish this revision is (or copies), without a ":republish:N" suffix. */
+async function placeholderRequestId(
+  client: PoolClient,
+  propertyId: string,
+  revision: number,
+): Promise<string | null> {
+  const requestId: unknown = (
+    await client.query(
+      "SELECT request_id FROM pms.pricing_v2_revisions WHERE property_id=$1 AND revision=$2",
+      [propertyId, revision],
+    )
+  ).rows[0]?.request_id;
+  return isFirstRunPlaceholderPricingRequestId(requestId)
+    ? (requestId as string).split(":republish:")[0]!
+    : null;
+}
 
 /** VAY-2304: after a change to a hotel's payment setup (Vayada card on or off, its payment methods,
  * its Stripe account, or a release that changes the Finance fingerprint), publish its last
@@ -226,7 +244,12 @@ async function republish(client: PoolClient, propertyId: string): Promise<Pricin
     rooms: stored.rooms.map((r) => ({ ...r, revision })),
     ownerReferences: { finance: readiness.evidenceId },
   };
-  const requestId = `pricing.v2.payment-republish:${revision}`;
+  // VAY-2451: a copy of the first run's placeholder prices is still the placeholder, so its request id keeps
+  // the placeholder's own (the booking page stays unpublishable until the owner saves real prices).
+  const placeholder = await placeholderRequestId(client, propertyId, stored.revision);
+  const requestId = placeholder
+    ? `${placeholder}:republish:${revision}`
+    : `pricing.v2.payment-republish:${revision}`;
   const charges = await carryCharges(client, propertyId, stored, copy, sources, requestId);
   if (!charges) return skipped("charges_unavailable");
   const ownerReferences = { finance: readiness.evidenceId, charges };

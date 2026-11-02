@@ -7,12 +7,13 @@ import {
   PMS_WEB_RESERVATION_ID,
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
-  pmsWebGuestRules,
+  pmsWebStayTimes,
   pmsWebReservation,
 } from "../support/pmsWebMocks";
 
 // VAY-2455: the PMS shows the check-in and check-out times guests see on the booking page (its guest rules),
-// not a fixed "from 15:00" and "by 12:00". Staff who can't read the guest rules see the days alone.
+// not a fixed "from 15:00" and "by 12:00". Everyone who reads bookings sees them, the front desk too; others see the
+// days alone.
 
 async function mockBooking(page: Page) {
   // The shared reservations mock never answers one reservation (its glob stops at "/").
@@ -31,13 +32,29 @@ async function mockBooking(page: Page) {
     );
 }
 
-function countGuestRuleReads(page: Page) {
-  const reads = { count: 0 };
+/** Requests to the PMS's read of the times and to the guest rules themselves (Settings only). */
+function countReads(page: Page) {
+  const reads = { stayTimes: 0, guestRules: 0 };
   page.on("request", (request) => {
-    if (request.url().endsWith(`/api/booking/properties/${PMS_WEB_PROPERTY_ID}/guest-rules`))
-      reads.count += 1;
+    const url = request.url();
+    if (url.endsWith(`/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guest-stay-times`))
+      reads.stayTimes += 1;
+    if (url.endsWith(`/api/booking/properties/${PMS_WEB_PROPERTY_ID}/guest-rules`))
+      reads.guestRules += 1;
   });
   return reads;
+}
+
+async function signInAs(page: Page, roleKey: string, permissions: string[]) {
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({ json: { membershipId: `pms-${roleKey}-membership`, roleKey, permissions } }),
+  );
+}
+
+async function mockTimes(page: Page) {
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guest-stay-times`, (route) =>
+    route.fulfill({ json: pmsWebStayTimes({ checkInTime: "14:00", checkOutTime: "10:30" }) }),
+  );
 }
 
 test.describe("PMS check-in and check-out times", () => {
@@ -55,9 +72,7 @@ test.describe("PMS check-in and check-out times", () => {
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
-    await page.route(`**/api/booking/properties/${PMS_WEB_PROPERTY_ID}/guest-rules`, (route) =>
-      route.fulfill({ json: pmsWebGuestRules({ checkInTime: "14:00", checkOutTime: "10:30" }) }),
-    );
+    await mockTimes(page);
 
     await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
     await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
@@ -77,27 +92,41 @@ test.describe("PMS check-in and check-out times", () => {
     await page.screenshot({ path: testInfo.outputPath("dashboard-departure-times.png") });
   });
 
-  test("shows the days without a time to staff who can't read the guest rules", async ({
+  test("shows them to the front desk too, who can't change the guest rules", async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
-    await page.route("**/api/identity/staff/self-access", (route) =>
-      route.fulfill({
-        json: {
-          membershipId: "pms-front-desk-membership",
-          roleKey: "front_desk",
-          permissions: PMS_WEB_OWNER_PERMISSIONS.filter(
-            (permission) => permission !== "booking.settings.manage",
-          ),
-        },
-      }),
+    // No booking.* permission at all, like the Front desk preset.
+    await signInAs(
+      page,
+      "front_desk",
+      PMS_WEB_OWNER_PERMISSIONS.filter((permission) => !permission.startsWith("booking.")),
     );
-    const reads = countGuestRuleReads(page);
+    await mockTimes(page);
+    const reads = countReads(page);
 
     await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
     await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
-    await expect(page.getByText(/^(from|by) \d\d:\d\d$/)).toHaveCount(0);
+    await expect(page.getByText("from 14:00", { exact: true })).toBeVisible();
+    await expect(page.getByText("by 10:30", { exact: true })).toBeVisible();
     await assertHealthy();
+
+    await page.goto("/dashboard");
+    const departures = page.locator('section[aria-labelledby="departures-heading"]');
+    await expect(departures).toContainText("Check-out by 10:30 · ");
+    await page.screenshot({ path: testInfo.outputPath("front-desk-dashboard-times.png") });
+    expect(reads.stayTimes).toBeGreaterThan(0);
+    expect(reads.guestRules).toBe(0);
+  });
+
+  test("shows the days without a time to staff who can't read bookings", async ({ page }) => {
+    await signInAs(
+      page,
+      "housekeeping",
+      PMS_WEB_OWNER_PERMISSIONS.filter((permission) => permission !== "pms.reservation.read"),
+    );
+    await mockTimes(page);
+    const reads = countReads(page);
 
     await page.goto("/dashboard");
     const departures = page.locator('section[aria-labelledby="departures-heading"]');
@@ -107,6 +136,6 @@ test.describe("PMS check-in and check-out times", () => {
     await expect(page.getByRole("dialog").filter({ hasText: "Ada Lovelace" })).toContainText(
       "Today · 2 night(s)",
     );
-    expect(reads.count).toBe(0);
+    expect(reads.stayTimes).toBe(0);
   });
 });

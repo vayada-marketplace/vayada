@@ -1,5 +1,8 @@
 import {
+  buildHotelGoLiveChecklist,
   buildHotelSetupChecklist,
+  type HotelGoLiveChecklist,
+  type HotelGoLiveRoomType,
   type HotelSetupChecklist,
   type HotelSetupChecklistAcknowledgeable,
   type HotelSetupChecklistDefault,
@@ -28,12 +31,28 @@ export type HotelSetupChecklistFactsRow = Readonly<{
   viewer: Readonly<{ hidden: boolean; dismissed: boolean }>;
 }>;
 
+/** VAY-2451: what the go-live list reads in one query, besides whether setup is finished. */
+export type HotelGoLiveFactsRow = Readonly<{
+  propertyDetails: boolean;
+  bookingPublished: boolean;
+  propertyPhotos: boolean;
+  bookingRules: HotelSetupChecklistDefault;
+  onlineCardReady: boolean;
+  roomTypes: readonly HotelGoLiveRoomType[];
+  placeholderPrices: boolean;
+  viewer: Readonly<{ hidden: boolean; dismissed: boolean }>;
+}>;
+
 export type HotelSetupChecklistViewerChange = Readonly<{ hidden?: boolean; dismissed?: boolean }>;
+
+/** v1: the current dashboards' checklist; v2: the go-live list of the four-step setup (VAY-2451). */
+export type HotelSetupChecklistView = "v1" | "v2";
 
 export type HotelSetupChecklistPorts = Readonly<{
   /** Only whether the first room and price, and how guests pay, are done: the first run's light read. */
   firstRun: { readSetupProgress(actor: HotelFirstRunActor): Promise<HotelFirstRunSetupProgress> };
   facts: { read(actor: HotelFirstRunActor): Promise<HotelSetupChecklistFactsRow | null> };
+  goLiveFacts: { read(actor: HotelFirstRunActor): Promise<HotelGoLiveFactsRow | null> };
   store: {
     acknowledge(actor: HotelFirstRunActor, item: HotelSetupChecklistAcknowledgeable): Promise<void>;
     setViewer(actor: HotelFirstRunActor, change: HotelSetupChecklistViewerChange): Promise<void>;
@@ -65,17 +84,42 @@ export function createHotelSetupChecklistService(ports: HotelSetupChecklistPorts
     });
   }
 
+  /** VAY-2451: the go-live list. Setup is finished once how guests pay and the plan are saved. */
+  async function readGoLive(actor: HotelFirstRunActor): Promise<HotelGoLiveChecklist | null> {
+    const facts = await ports.goLiveFacts.read(actor);
+    if (!facts) return null;
+    const { guestPayment } = await ports.firstRun.readSetupProgress(actor);
+    return buildHotelGoLiveChecklist({
+      propertyId: actor.propertyId,
+      setupFinished: guestPayment,
+      onlineCardsOffered: ports.onlineCardsOffered,
+      ...facts,
+    });
+  }
+
+  const readView = (actor: HotelFirstRunActor, view: HotelSetupChecklistView) =>
+    view === "v2" ? readGoLive(actor) : read(actor);
+
   return {
     read,
+    readGoLive,
     /** "Looks good": the hotel keeps setup's default for the item; returns the checklist after it. */
-    async acknowledge(actor: HotelFirstRunActor, item: HotelSetupChecklistAcknowledgeable) {
+    async acknowledge(
+      actor: HotelFirstRunActor,
+      item: HotelSetupChecklistAcknowledgeable,
+      view: HotelSetupChecklistView = "v1",
+    ) {
       await ports.store.acknowledge(actor, item);
-      return read(actor);
+      return readView(actor, view);
     },
     /** The signed-in person's Hide for now (or showing it again) and Dismiss. */
-    async setViewer(actor: HotelFirstRunActor, change: HotelSetupChecklistViewerChange) {
+    async setViewer(
+      actor: HotelFirstRunActor,
+      change: HotelSetupChecklistViewerChange,
+      view: HotelSetupChecklistView = "v1",
+    ) {
       await ports.store.setViewer(actor, change);
-      return read(actor);
+      return readView(actor, view);
     },
   };
 }

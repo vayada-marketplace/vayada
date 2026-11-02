@@ -155,6 +155,8 @@ describe("Booking Web public hotel adapter", () => {
         { type: "website", value: "https://alpenrose.example" },
         { type: "instagram", value: "https://instagram.com/alpenrose" },
         { type: "facebook", value: "https://facebook.com/alpenrose" },
+        { type: "tiktok", value: "https://tiktok.com/@alpenrose" },
+        { type: "youtube", value: "https://youtube.com/@alpenrose" },
       ]),
     );
 
@@ -168,6 +170,8 @@ describe("Booking Web public hotel adapter", () => {
     expect(hotel.socialLinks).toEqual({
       instagram: "https://instagram.com/alpenrose",
       facebook: "https://facebook.com/alpenrose",
+      tiktok: "https://tiktok.com/@alpenrose",
+      youtube: "https://youtube.com/@alpenrose",
     });
   });
 
@@ -189,6 +193,7 @@ describe("Booking Web public hotel adapter", () => {
       publicHotelResponse([
         { type: "website", value: "javascript:alert(1)" },
         { type: "instagram", value: "javascript:alert(2)" },
+        { type: "tiktok", value: "javascript:alert(3)" },
       ]),
     );
 
@@ -199,11 +204,17 @@ describe("Booking Web public hotel adapter", () => {
       whatsapp: undefined,
       website: undefined,
     });
-    expect(empty.socialLinks).toEqual({ instagram: undefined, facebook: undefined });
+    expect(empty.socialLinks).toEqual({
+      instagram: undefined,
+      facebook: undefined,
+      tiktok: undefined,
+      youtube: undefined,
+    });
     expect(omitted.contact).toEqual(empty.contact);
     expect(omitted.socialLinks).toEqual(empty.socialLinks);
     expect(unsafe.contact.website).toBeUndefined();
     expect(unsafe.socialLinks?.instagram).toBeUndefined();
+    expect(unsafe.socialLinks?.tiktok).toBeUndefined();
   });
 
   it("keeps the hero separate from the property gallery", () => {

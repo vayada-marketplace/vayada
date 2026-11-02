@@ -1,4 +1,4 @@
-import { buildHotelSetupChecklist } from "@vayada/domain-hotels";
+import { buildHotelGoLiveChecklist, buildHotelSetupChecklist } from "@vayada/domain-hotels";
 import { describe, expect, it, vi } from "vitest";
 
 import { createHotelSetupChecklistClient } from "./hotelSetupChecklistApi";
@@ -64,5 +64,43 @@ describe("hotel setup checklist client (VAY-2247 wave 2)", () => {
   it("passes on the API's failure while it isn't mounted (404)", async () => {
     const api = { ...http(), get: vi.fn(async () => Promise.reject(new Error("404"))) };
     await expect(createHotelSetupChecklistClient(api).load(PROPERTY)).rejects.toThrow("404");
+  });
+});
+
+const GO_LIVE = buildHotelGoLiveChecklist({
+  propertyId: PROPERTY,
+  propertyDetails: true,
+  setupFinished: true,
+  roomTypes: [{ name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 1, priced: true }],
+  placeholderPrices: true,
+  bookingRules: "default",
+  propertyPhotos: false,
+  bookingPublished: false,
+  onlineCardReady: false,
+  onlineCardsOffered: false,
+  viewer: { hidden: false, dismissed: false },
+});
+
+describe("go-live checklist client (VAY-2451)", () => {
+  it("reads the go-live list, or null while the API doesn't serve it (404)", async () => {
+    const api = http(JSON.parse(JSON.stringify(GO_LIVE)));
+    const client = createHotelSetupChecklistClient(api);
+    expect(await client.loadGoLive(PROPERTY)).toEqual(GO_LIVE);
+    expect(api.get).toHaveBeenCalledWith(`/api/hotel-setup/properties/${PROPERTY}/checklist/v2`, {
+      cache: "no-store",
+    });
+    await client.looksGoodGoLive(PROPERTY, "guest_terms");
+    expect(api.post).toHaveBeenCalledWith(
+      `/api/hotel-setup/properties/${PROPERTY}/checklist/v2/acknowledgements`,
+      { item: "guest_terms" },
+    );
+    const off = http();
+    off.get.mockRejectedValueOnce(Object.assign(new Error("Not found"), { status: 404 }));
+    expect(await createHotelSetupChecklistClient(off).loadGoLive(PROPERTY)).toBeNull();
+    const down = http();
+    down.get.mockRejectedValueOnce(Object.assign(new Error("Down"), { status: 503 }));
+    await expect(createHotelSetupChecklistClient(down).loadGoLive(PROPERTY)).rejects.toThrow(
+      "Down",
+    );
   });
 });

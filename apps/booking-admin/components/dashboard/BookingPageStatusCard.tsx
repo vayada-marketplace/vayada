@@ -27,6 +27,7 @@ import {
   getSelectedBookingHotelId,
   SELECTED_HOTEL_CHANGED_EVENT,
 } from "@/services/api/bookingHotelScope";
+import { PUBLISH_BOOKING_PAGE_EVENT } from "./DashboardSetupChecklist";
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_LIMIT = 15;
@@ -137,6 +138,17 @@ export function BookingPageStatusCard() {
     }, POLL_INTERVAL_MS);
     return () => clearTimeout(timer);
   }, [publishing, polls, refresh]);
+
+  // VAY-2451: the go-live list's Publish asks this card, the one place that publishes.
+  const publishRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    publishRef.current = () => void publish();
+  });
+  useEffect(() => {
+    const onPublish = () => publishRef.current();
+    window.addEventListener(PUBLISH_BOOKING_PAGE_EVENT, onPublish);
+    return () => window.removeEventListener(PUBLISH_BOOKING_PAGE_EVENT, onPublish);
+  }, []);
 
   async function publish() {
     if (active.current || !propertyId) return;

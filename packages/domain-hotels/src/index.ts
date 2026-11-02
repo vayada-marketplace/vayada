@@ -89,6 +89,8 @@ export const SHARED_PROPERTY_TYPE_OPTIONS = [
   { value: "aparthotel", label: "Aparthotel" },
   { value: "guesthouse", label: "Guesthouse" },
   { value: "bed_and_breakfast", label: "Bed and breakfast" },
+  // VAY-2451: a room or rooms in the host's own home.
+  { value: "homestay", label: "Homestay" },
   { value: "villa", label: "Villa" },
   { value: "vacation_rental", label: "Vacation rental" },
   { value: "motel", label: "Motel" },

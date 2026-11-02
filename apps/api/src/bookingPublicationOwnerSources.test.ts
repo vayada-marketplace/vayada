@@ -503,6 +503,26 @@ describe("production Booking publication owner sources", () => {
     });
     await unavailable();
     roomPublication.blockers = [];
+    // VAY-2451: the first run's placeholder price blocks publishing until real prices are saved.
+    getCurrentPricingOffers.mockResolvedValue({ ...offers, placeholder: true });
+    const placeholder = await source.getBookingLaunchEvidence(scope);
+    if (placeholder.outcome !== "evidence") throw new Error("Expected PMS evidence");
+    expect(
+      placeholder.entities
+        .filter((item) => item.groupId === "booking.pricing")
+        .flatMap(({ blockers }) => blockers),
+    ).toEqual([
+      { code: "pricing_rates_placeholder", scope: "launch_configuration", kind: "user_fixable" },
+    ]);
+    await expect(source.getSnapshot(manifestRequest(placeholder.sources))).resolves.toEqual({
+      outcome: "unavailable",
+      owner: "pms",
+    });
+    getCurrentPricingOffers.mockResolvedValue({ ...offers, placeholder: false });
+    await expect(source.getSnapshot(manifestRequest(placeholder.sources))).resolves.toMatchObject({
+      outcome: "snapshot",
+    });
+    getCurrentPricingOffers.mockResolvedValue(offers);
     // VAY-2134: prices the hotel can save again and a calendar it hasn't opened are blockers.
     await expect(source.getBookingLaunchEvidence(scope)).resolves.toMatchObject({
       outcome: "evidence",

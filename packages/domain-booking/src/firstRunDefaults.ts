@@ -86,6 +86,12 @@ export const FIRST_RUN_OPERATING_SCHEDULE: PmsOperatingSchedule = Object.freeze(
 });
 export const FIRST_RUN_MINIMUM_STAY_NIGHTS = 1;
 
+/**
+ * VAY-2451: the price per night of a room type made in the new setup, in the hotel's currency, until the owner
+ * sets real prices in Rooms & Rates › Prices. The booking page can't be published while it is in use.
+ */
+export const FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT = "100";
+
 /** One double bed per room until the owner adds the real beds. */
 export const FIRST_RUN_BEDS: readonly Readonly<{ type: "double"; quantity: 1 }>[] = Object.freeze([
   Object.freeze({ type: "double", quantity: 1 }),
