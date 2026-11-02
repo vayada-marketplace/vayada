@@ -289,6 +289,8 @@ const KEPT_MEDIA_REFERENCE_SQL = `(EXISTS (SELECT 1 FROM hotel_catalog.property_
          OR EXISTS (SELECT 1 FROM finance.expenses ref WHERE ref.receipt_media_id = media.id)
          OR EXISTS (SELECT 1 FROM booking.booking_settings ref
                     WHERE ref.header_logo_media_object_id = media.id)
+         OR EXISTS (SELECT 1 FROM booking.account_booking_pages ref
+                    WHERE ref.header_image_media_object_id = media.id)
          OR EXISTS (SELECT 1 FROM booking.addon_definitions ref
                     WHERE ref.metadata ->> 'mediaObjectId' = media.id::text
                        OR (jsonb_typeof(ref.metadata -> 'photos') = 'array'

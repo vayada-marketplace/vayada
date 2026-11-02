@@ -18,6 +18,7 @@ import { FeedbackAlert } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
 import { draftProblems, type AccountBookingPageDraft } from "@/lib/utils/accountBookingPage";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
+import { uploadSingleImageWithMediaReference, type UploadedImage } from "@/lib/utils/uploadImage";
 import {
   accountBookingPageClient,
   type AccountBookingPageSummary,
@@ -43,6 +44,7 @@ const SAVE_ERRORS: Record<string, string> = {
   property_not_ready: "settings.multiProperty.error.notReady",
   design_property_not_included: "settings.multiProperty.error.designNotIncluded",
   no_ready_property: "settings.multiProperty.error.noReadyProperty",
+  header_image_invalid: "settings.multiProperty.error.headerImageInvalid",
 };
 
 const draftOf = (summary: AccountBookingPageSummary): AccountBookingPageDraft => ({
@@ -50,6 +52,7 @@ const draftOf = (summary: AccountBookingPageSummary): AccountBookingPageDraft =>
   live: summary.page.live,
   settings: structuredClone(summary.page.settings),
   propertyIds: [...summary.page.propertyIds],
+  headerImage: summary.page.headerImage,
 });
 
 /** The draft as it is saved: text trimmed. Unsaved changes are measured on this. */
@@ -76,9 +79,12 @@ export function MultiPropertyBookingPage({
     navigator.clipboard
       ? navigator.clipboard.writeText(value)
       : Promise.reject(new Error("No clipboard")),
+  uploadHeaderImage = (file: File) =>
+    uploadSingleImageWithMediaReference(file, "booking.account_page.header_image"),
 }: {
   client?: typeof accountBookingPageClient;
   copyText?: (value: string) => Promise<void>;
+  uploadHeaderImage?: (file: File) => Promise<UploadedImage>;
 }) {
   const { t } = useTranslation();
   const [state, setState] = useState<"loading" | "failed" | "noAccess" | "ready">("loading");
@@ -86,6 +92,8 @@ export function MultiPropertyBookingPage({
   const [draft, setDraft] = useState<AccountBookingPageDraft | null>(null);
   const [baseline, setBaseline] = useState("");
   const [saving, setSaving] = useState(false);
+  // An upload landing during a save would be lost when the saved page comes back: Save waits.
+  const [uploading, setUploading] = useState(false);
   const [showProblems, setShowProblems] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
@@ -191,8 +199,14 @@ export function MultiPropertyBookingPage({
   const save = async () => {
     if (saving) return;
     setFeedback(null);
-    const value = normalized(draft);
-    const update = parseAccountBookingPageUpdate({ revision: summary.page.revision, ...value });
+    const { headerImage, ...value } = normalized(draft);
+    // Only a changed image is sent, so a save without one works with a next-api that predates it.
+    const image = headerImage?.mediaId ?? null;
+    const update = parseAccountBookingPageUpdate({
+      revision: summary.page.revision,
+      ...value,
+      ...(image !== (summary.page.headerImage?.mediaId ?? null) && { headerImageMediaId: image }),
+    });
     if (problems.size || !update) {
       setShowProblems(true);
       setFeedback({ type: "error", message: t("settings.multiProperty.error.invalid") });
@@ -237,6 +251,11 @@ export function MultiPropertyBookingPage({
     t,
     draft,
     setDraft: (next) => setDraft(next),
+    // For changes that land later (an upload): applied to the draft as it is then.
+    updateDraft: (change) => setDraft((current) => (current ? change(current) : current)),
+    uploadHeaderImage,
+    uploading,
+    setUploading,
     summary,
     problems: showProblems ? problems : new Set(),
     disabled: saving,
@@ -271,7 +290,7 @@ export function MultiPropertyBookingPage({
             <button
               type="button"
               onClick={() => void save()}
-              disabled={saving || blocked}
+              disabled={saving || blocked || uploading}
               className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full bg-primary-500 px-5 text-[14px] font-semibold text-white transition-colors hover:bg-primary-600 disabled:opacity-50"
             >
               {saving && (

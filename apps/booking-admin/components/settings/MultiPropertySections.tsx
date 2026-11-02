@@ -11,6 +11,11 @@ import {
 import { SHARED_PROPERTY_TYPE_OPTIONS } from "@vayada/domain-hotels";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import {
+  HERO_IMAGE_ACCEPT,
+  isAcceptedHeroImage,
+  type UploadedImage,
+} from "@/lib/utils/uploadImage";
+import {
   contactValue,
   controlFree,
   filterSplit,
@@ -36,6 +41,12 @@ export type SectionProps = {
   t: Translate;
   draft: AccountBookingPageDraft;
   setDraft: (next: AccountBookingPageDraft) => void;
+  /** For changes that land later (an upload): applied to the draft as it is then. */
+  updateDraft: (change: (current: AccountBookingPageDraft) => AccountBookingPageDraft) => void;
+  uploadHeaderImage: (file: File) => Promise<UploadedImage>;
+  /** Kept by the page: Save waits for an upload. */
+  uploading: boolean;
+  setUploading: (uploading: boolean) => void;
   summary: AccountBookingPageSummary;
   /** Shown once the member tried to save. */
   problems: Set<DraftProblem>;
@@ -306,7 +317,42 @@ export function PageSection({
   );
 }
 
-export function HeaderSection({ t, draft, setDraft, summary, problems, disabled }: SectionProps) {
+export function HeaderSection({
+  t,
+  draft,
+  setDraft,
+  updateDraft,
+  uploadHeaderImage,
+  uploading,
+  setUploading,
+  summary,
+  problems,
+  disabled,
+}: SectionProps) {
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const uploadButton = useRef<HTMLButtonElement>(null);
+  const own = draft.headerImage;
+  const upload = async (file: File) => {
+    setUploadError(null);
+    // As the server's rules for this image: JPG, PNG or WebP up to 10 MB.
+    if (!isAcceptedHeroImage(file)) {
+      setUploadError(t("settings.multiProperty.header.imageRules"));
+      return;
+    }
+    setUploading(true);
+    try {
+      const uploaded = await uploadHeaderImage(file);
+      updateDraft((current) => ({
+        ...current,
+        headerImage: { mediaId: uploaded.mediaObjectId, url: uploaded.publicUrl },
+      }));
+    } catch {
+      setUploadError(t("settings.multiProperty.header.uploadFailed"));
+    } finally {
+      setUploading(false);
+    }
+  };
   const header = draft.settings.header;
   const setHeader = (change: Partial<AccountBookingPageSettings["header"]>) =>
     setDraft(withSettings(draft, (s) => ({ ...s, header: { ...s.header, ...change } })));
@@ -314,7 +360,7 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
     draft.propertyIds.includes(property.propertyId),
   );
   const design = included.find((property) => property.propertyId === header.designPropertyId);
-  const photo = (design ?? included[0])?.photoUrl ?? null;
+  const photo = own?.url ?? (design ?? included[0])?.photoUrl ?? null;
   const switches = (["gallery", "contact", "language", "currency"] as const).map((key) => ({
     label: t(`settings.multiProperty.header.${key}`),
     description: t(`settings.multiProperty.header.${key}Hint`),
@@ -354,9 +400,71 @@ export function HeaderSection({ t, draft, setDraft, summary, problems, disabled 
           <strong className="text-[14px] text-gray-900">
             {t("settings.multiProperty.header.image")}
           </strong>
-          <span className="text-[13px] text-gray-500">
-            {t("settings.multiProperty.header.imageDefault")}
+          <span
+            data-testid="multi-property-header-image-note"
+            aria-live="polite"
+            className="text-[13px] text-gray-500"
+          >
+            {t(
+              own
+                ? "settings.multiProperty.header.imageOwn"
+                : "settings.multiProperty.header.imageDefault",
+            )}
           </span>
+          <span className="text-[13px] text-gray-500">
+            {t("settings.multiProperty.header.imageRules")}
+          </span>
+          <input
+            ref={fileInput}
+            type="file"
+            accept={HERO_IMAGE_ACCEPT}
+            className="hidden"
+            data-testid="multi-property-header-image-input"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void upload(file);
+            }}
+          />
+          <div className="mt-1 flex flex-wrap gap-2">
+            <button
+              ref={uploadButton}
+              type="button"
+              disabled={disabled || uploading}
+              onClick={() => fileInput.current?.click()}
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-gray-300 bg-white px-4 text-[14px] font-semibold text-gray-900 hover:border-gray-500 disabled:opacity-50"
+            >
+              {uploading && (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+              )}
+              {t(
+                uploading
+                  ? "settings.multiProperty.header.uploading"
+                  : own
+                    ? "settings.multiProperty.header.replace"
+                    : "settings.multiProperty.header.upload",
+              )}
+            </button>
+            {own && (
+              <button
+                type="button"
+                disabled={disabled || uploading}
+                onClick={() => {
+                  updateDraft((current) => ({ ...current, headerImage: null }));
+                  // This button goes away: keep the keyboard on the image's controls.
+                  uploadButton.current?.focus();
+                }}
+                className="min-h-[44px] px-2 text-[14px] font-semibold text-gray-700 underline underline-offset-2 hover:text-gray-900 disabled:opacity-50"
+              >
+                {t("settings.multiProperty.header.remove")}
+              </button>
+            )}
+          </div>
+          {uploadError && (
+            <span role="alert" className="text-[13px] text-red-700">
+              {uploadError}
+            </span>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap gap-4">

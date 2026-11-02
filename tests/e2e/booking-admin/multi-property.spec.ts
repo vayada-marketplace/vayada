@@ -24,6 +24,9 @@ const STAYS: AccountBookingPageMockProperty[] = [
   stay(6, "Astavaka Villa", "villa", null, 0, ["setup"]),
 ];
 const [escape, mandala, mertha, mansion] = STAYS.map((s) => s.propertyId);
+// The agency's own header image as platform media returns it (VAY-2457).
+const HERO_ID = "30000000-0000-4000-8000-00000000000c";
+const HERO_URL = "https://media.example/agency-hero.png";
 // A 1×1 PNG, so the stays' photos load like real ones.
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
@@ -94,10 +97,17 @@ async function setup(
           json: { code: putError.code, message: "refused" },
         });
       }
-      const { revision, ...saved } = body;
+      const { revision, headerImageMediaId, ...saved } = body;
       mock.summary = accountBookingPageSummary("The Travel Ubud", STAYS, {
         ...saved,
         revision: revision + 1,
+        // As next-api: left out, the saved image stays; null removes it.
+        headerImage:
+          headerImageMediaId === undefined
+            ? mock.summary.page.headerImage
+            : headerImageMediaId
+              ? { mediaId: headerImageMediaId, url: HERO_URL }
+              : null,
       });
       return route.fulfill({ headers, json: mock.summary });
     }
@@ -253,6 +263,87 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
   );
   await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
   await expect(page.getByText("3 of 6 properties included")).toBeVisible();
+});
+
+test("uploads the agency's own header image, saves it and can remove it", async ({
+  page,
+}, testInfo) => {
+  const mock = await setup(page);
+  const sessions: Record<string, unknown>[] = [];
+  await page.route("**/api/media/upload-sessions", async (route) => {
+    sessions.push(route.request().postDataJSON());
+    await route.fulfill({
+      json: {
+        uploadSession: { sessionId: "hero-session", status: "signed" },
+        uploadTargets: [
+          {
+            uploadTargetId: "hero-target",
+            uploadUrl: "https://uploads.vayada.localhost/test",
+            method: "PUT",
+            headers: {},
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/api/media/upload-sessions/*/finalize", (route) =>
+    route.fulfill({
+      json: { mediaObjects: [{ mediaId: HERO_ID, variants: [{ publicCdnUrl: HERO_URL }] }] },
+    }),
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/settings/multi-property");
+  const header = page.locator("#mp-header");
+  const note = page.getByTestId("multi-property-header-image-note");
+  const input = page.getByTestId("multi-property-header-image-input");
+  await expect(note).toHaveText(
+    "Until you upload your own, the page shows the main photo of the stay its design comes from.",
+  );
+
+  // A file the server would refuse never starts an upload.
+  await input.setInputFiles({ name: "hero.gif", mimeType: "image/gif", buffer: PNG });
+  await expect(header.getByRole("alert")).toHaveText("JPG, PNG or WebP, up to 10 MB.");
+  expect(sessions).toEqual([]);
+
+  await input.setInputFiles({ name: "hero.png", mimeType: "image/png", buffer: PNG });
+  await expect(note).toHaveText("Shown at the top of the agency page.");
+  await expect(header.getByRole("img", { name: "Current header image" })).toHaveAttribute(
+    "src",
+    HERO_URL,
+  );
+  expect(sessions).toEqual([
+    expect.objectContaining({
+      purpose: "booking.account_page.header_image",
+      visibility: "public",
+      resource: expect.objectContaining({ product: "booking", resourceType: "booking_hotel" }),
+    }),
+  ]);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Changes saved", { exact: true })).toBeVisible();
+  expect(mock.saves.at(-1)).toMatchObject({ headerImageMediaId: HERO_ID });
+  // A save that doesn't change the image doesn't send it (a next-api without the image still saves).
+  await page.getByLabel("Page title").fill("The Travel Ubud Stays");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
+  expect(mock.saves.at(-1)).not.toHaveProperty("headerImageMediaId");
+  await header.scrollIntoViewIfNeeded();
+  await header.screenshot({ path: testInfo.outputPath("multi-property-header-1440.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await header.scrollIntoViewIfNeeded();
+  await header.screenshot({ path: testInfo.outputPath("multi-property-header-390.png") });
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // After a reload the saved image is back; Remove goes back to the stay's photo.
+  await page.reload();
+  await expect(note).toHaveText("Shown at the top of the agency page.");
+  await page.getByRole("button", { name: "Remove image" }).click();
+  await expect(note).toHaveText(
+    "Until you upload your own, the page shows the main photo of the stay its design comes from.",
+  );
+  await expect(page.getByRole("button", { name: "Upload image" })).toBeVisible();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Changes saved", { exact: true })).toBeVisible();
+  expect(mock.saves.at(-1)).toMatchObject({ headerImageMediaId: null });
 });
 
 test("fits a phone and warns about included stays without a map location", async ({

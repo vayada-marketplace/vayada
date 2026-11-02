@@ -477,6 +477,51 @@ describe("PostgreSQL platform media repository", () => {
     ]);
   });
 
+  it("files the agency page's header image under the selected account, never a property (VAY-2457)", async () => {
+    const query = vi.fn(async () => ({ rows: [{ propertyId: PROPERTY_ID }] }));
+    const repository = createPgPlatformMediaRepository({
+      connectionString: "postgresql://target.test/vayada",
+      publicCdnBaseUrl: "https://cdn.example.com",
+      pool: { query, connect: vi.fn(), end: vi.fn() } as never,
+    });
+    const input = (organizationId: string) => ({
+      request: {
+        purpose: "booking.account_page.header_image" as const,
+        visibility: "public" as const,
+        resource: {
+          product: "booking" as const,
+          resourceType: "booking_hotel" as const,
+          resourceId: "booking_hotel_alpenrose",
+        },
+        files: [],
+      },
+      policy: {
+        targetResourceProduct: "booking",
+        targetResourceType: "account_booking_page",
+      } as never,
+      context: { selectedOrganization: { organizationId, kind: "hotel_group" } } as never,
+    });
+    const account = "10000000-0000-4000-8000-0000000000AB";
+    await expect(repository.resolveTarget(input(account))).resolves.toEqual({
+      ok: true,
+      target: {
+        resourceProduct: "booking",
+        resourceType: "account_booking_page",
+        resourceId: account.toLowerCase(),
+      },
+    });
+    // The named booking hotel must still resolve to one of the catalog's properties.
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("property_source_links"), [
+      "booking_hotel_alpenrose",
+    ]);
+    await expect(repository.resolveTarget(input("org_media"))).resolves.toMatchObject({
+      ok: false,
+      statusCode: 403,
+    });
+    query.mockResolvedValueOnce({ rows: [] });
+    await expect(repository.resolveTarget(input(account))).resolves.toMatchObject({ ok: false });
+  });
+
   it.each([
     [
       "property.hero_image",

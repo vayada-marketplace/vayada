@@ -77,6 +77,9 @@ export type AccountBookingPageUpdate = {
   settings: AccountBookingPageSettings;
   /** Included properties in their "Recommended" order (C3). */
   propertyIds: string[];
+  /** The page's own header image (VAY-2457): a platform-media id, null to remove it; left out, the
+   * saved one stays (so an older Booking Admin keeps it). */
+  headerImageMediaId?: string | null;
 };
 
 /** The defaults Timo's mockup starts from: every layout with List first, lowest price first, the badge,
@@ -140,8 +143,12 @@ export function suggestAccountBookingPageSlug(name: string): string {
 
 /** Checks a save strictly: exact keys everywhere, valid values, no duplicate properties. */
 export function parseAccountBookingPageUpdate(value: unknown): AccountBookingPageUpdate | null {
-  if (!exactRecord(value, ["revision", "slug", "live", "settings", "propertyIds"])) return null;
+  const keys = ["revision", "slug", "live", "settings", "propertyIds"];
+  const withImage =
+    isRecord(value) && Object.prototype.hasOwnProperty.call(value, "headerImageMediaId");
+  if (!exactRecord(value, withImage ? [...keys, "headerImageMediaId"] : keys)) return null;
   const { revision, live } = value;
+  const headerImageMediaId = withImage ? field.propertyId(value["headerImageMediaId"]) : null;
   const slug = parseAccountBookingPageSlug(value["slug"]);
   const settings = parseAccountBookingPageSettings(value["settings"]);
   const propertyIds = parsePropertyIds(value["propertyIds"]);
@@ -153,10 +160,18 @@ export function parseAccountBookingPageUpdate(value: unknown): AccountBookingPag
     typeof live !== "boolean" ||
     !slug ||
     !settings ||
-    !propertyIds
+    !propertyIds ||
+    headerImageMediaId === undefined
   )
     return null;
-  return { revision, slug, live, settings, propertyIds };
+  return {
+    revision,
+    slug,
+    live,
+    settings,
+    propertyIds,
+    ...(withImage ? { headerImageMediaId } : {}),
+  };
 }
 
 /** Strict check of the settings object alone. */
