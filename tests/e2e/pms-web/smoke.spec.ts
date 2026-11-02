@@ -1169,7 +1169,10 @@ test.describe("pms-web smoke", () => {
     await expect(dialog.locator("[data-pricing-spinner]")).toBeVisible();
     await expect(createBooking).toBeDisabled();
     releaseFirstPreview();
-    await expect(dialog.getByText("Total €360")).toBeVisible();
+    // The summary column carries the total (VAY-2417).
+    await expect(dialog.getByRole("complementary", { name: "Summary" })).toContainText(
+      /Total\s*€360/,
+    );
     await expect(createBooking).toBeEnabled();
 
     await dialog.getByLabel("Room 1 check-out").fill("2026-09-13");
