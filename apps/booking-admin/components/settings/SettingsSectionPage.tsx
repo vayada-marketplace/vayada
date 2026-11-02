@@ -28,6 +28,7 @@ import {
   type FinancePaymentSettingsResponse,
 } from "@/services/api/financePaymentSettingsClient";
 import { paymentSaveError } from "@/components/settings/paymentSaveError";
+import { VayadaPayoutAccountPanel } from "@/components/settings/VayadaPayoutAccountPanel";
 import {
   CardNotReadyBanner,
   type CardNotReadyReason,
@@ -353,6 +354,14 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [savingPayment, setSavingPayment] = useState(false);
   const bankSaveAttempt = useRef<BankTransferSaveAttempt>({});
   const [bankDestination, setBankDestination] = useState<SavedBankTransferDestination | null>(null);
+  // VAY-2442: vayada Payment can be chosen only while the server says so.
+  const [vayadaPayment, setVayadaPayment] = useState<{
+    available: boolean;
+    feePercent?: number;
+  } | null>(null);
+  // VAY-2442: whether the hotel saved a payout account (the panel tells), and card readiness.
+  const [vayadaPayoutSaved, setVayadaPayoutSaved] = useState<boolean | null>(null);
+  const [vayadaCardReady, setVayadaCardReady] = useState(false);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   // Finance's currency, the PMS pricing currency guests pay in; not Localization's (VAY-2390).
   const [paymentCurrency, setPaymentCurrency] = useState<string | null>(null);
@@ -477,6 +486,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     setPaymentProvider(saved.provider);
     setSettings((prev) => ({ ...prev, ...paymentsFormFields(saved) }));
     setBankDestination(res.bankDestination ?? null);
+    setVayadaPayment(res.vayadaPayment ?? null);
     setPaymentCurrency(ps.defaultCurrency);
     setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
     setOfferedMethods({
@@ -707,11 +717,19 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
 
   // VAY-2424: Credit card as saved (the payments form's saved state).
   const cardSaved = paymentBaseline?.onlineCard ?? false;
+  // VAY-2442: card through vayada Payment as saved: no Stripe account, Finance's readiness tells.
+  const vayadaSaved = cardSaved && paymentBaseline?.provider === "vayada";
   // VAY-2424: with Stripe connected, what else still stops guests paying by card (the PMS rate
   // screens' card readiness). Read again after every save; a failed read shows no banner.
   useEffect(() => {
     setCardNotReady(null);
-    if (activeSection !== "payments" || !billingPropertyId || !cardSaved || !stripeOnboarded)
+    setVayadaCardReady(false);
+    if (
+      activeSection !== "payments" ||
+      !billingPropertyId ||
+      !cardSaved ||
+      (!stripeOnboarded && !vayadaSaved)
+    )
       return;
     let current = true;
     // The PMS rate screens' read, on this page's API client like its other payment calls.
@@ -729,31 +747,42 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         ({ card }) => {
           // The page already shows this Stripe account as connected: something on the account
           // itself still stops it (e.g. Stripe's card capability), not a missing account.
-          if (current)
-            setCardNotReady(
-              card.ready
-                ? null
-                : card.reason === "not_connected"
-                  ? "account_not_ready"
-                  : card.reason,
-            );
+          if (!current) return;
+          // vayada Payment: with its payout account saved (checked below), what's left is Vayada's
+          // approval, which Finance also reports as no account.
+          if (vayadaSaved) setVayadaCardReady(card.ready);
+          setCardNotReady(
+            card.ready
+              ? null
+              : card.reason === "not_connected"
+                ? vayadaSaved
+                  ? "not_approved"
+                  : "account_not_ready"
+                : card.reason,
+          );
         },
         () => {},
       );
     return () => {
       current = false;
     };
-  }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, offeredMethods]);
+  }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, vayadaSaved, offeredMethods]);
   // A missing or unfinished account is the page's own knowledge: Finance's readiness can't tell a
   // missing account from a pending approval. Nothing is said while a Stripe check runs.
   const cardNotReadyReason: CardNotReadyReason | null =
     !cardSaved || refreshingStripe
       ? null
-      : stripeOnboarded
-        ? cardNotReady
-        : stripeAccountId
-          ? "setup_incomplete"
-          : "not_connected";
+      : vayadaSaved
+        ? vayadaPayoutSaved === false
+          ? "payout_account_missing"
+          : vayadaPayoutSaved === null
+            ? null
+            : cardNotReady
+        : stripeOnboarded
+          ? cardNotReady
+          : stripeAccountId
+            ? "setup_incomplete"
+            : "not_connected";
 
   const handleAcceptanceToggle = async () => {
     const hotelId = readBookingHotelId(settings);
@@ -951,9 +980,14 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const paymentMethodsChanged =
     paymentBaseline !== null && !samePaymentsForm(paymentsForm, paymentBaseline);
   const bankDetailsChanged = (settings.bank_transfer ?? false) && bankDetailsEdited(settings);
+  // VAY-2442: card through vayada Payment is offered once Finance says it's ready.
+  const windowMethods =
+    offeredMethods && vayadaSaved && vayadaCardReady && vayadaPayoutSaved === true
+      ? { ...offeredMethods, card: true }
+      : offeredMethods;
   const windowsPlan =
-    offeredMethods && paymentWindows.saved && paymentWindows.drafts
-      ? paymentWindowsPlan(offeredMethods, paymentWindows.saved, paymentWindows.drafts)
+    windowMethods && paymentWindows.saved && paymentWindows.drafts
+      ? paymentWindowsPlan(windowMethods, paymentWindows.saved, paymentWindows.drafts)
       : null;
   const paymentsChanged =
     paymentMethodsChanged || bankDetailsChanged || (windowsPlan?.changed ?? false);
@@ -988,7 +1022,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     if (
       paymentMethodsChanged &&
       settings.online_card_payment &&
-      (paymentProvider === "xendit" || paymentProvider === "vayada")
+      (paymentProvider === "xendit" ||
+        (paymentProvider === "vayada" && vayadaPayment?.available !== true))
     ) {
       return refuse("settings.billing.comingSoon");
     }
@@ -2479,9 +2514,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           </div>
 
           {/* VAY-2348: each way to pay only for guests booking a certain time before arrival. */}
-          {paymentSettingsLoaded && billingPropertyId && offeredMethods && (
+          {paymentSettingsLoaded && billingPropertyId && windowMethods && (
             <PaymentWindowsCard
-              methods={offeredMethods}
+              methods={windowMethods}
               windows={paymentWindows}
               disabled={savingPayment}
             />
@@ -2662,8 +2697,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                   <button
                     type="button"
-                    disabled
-                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left opacity-55 cursor-not-allowed ${
+                    disabled={vayadaPayment?.available !== true}
+                    onClick={() => setPaymentProvider("vayada")}
+                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left disabled:opacity-55 disabled:cursor-not-allowed ${
                       paymentProvider === "vayada"
                         ? "border-primary-500 bg-primary-50/30"
                         : "border-gray-200 hover:border-gray-300"
@@ -2769,7 +2805,14 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
 
                 {/* Provider-specific content: connecting and opening payout accounts (VAY-2401). */}
                 <fieldset disabled={ownerFinance === false} className="min-w-0 disabled:opacity-60">
-                  {paymentProvider === "vayada" ? (
+                  {paymentProvider === "vayada" && vayadaPayment?.available && billingPropertyId ? (
+                    <VayadaPayoutAccountPanel
+                      propertyId={billingPropertyId}
+                      feePercent={vayadaPayment.feePercent ?? null}
+                      canEdit={ownerFinance === true}
+                      onAccountChange={setVayadaPayoutSaved}
+                    />
+                  ) : paymentProvider === "vayada" ? (
                     <div className="space-y-3">
                       <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
                         <p className="text-[13px] text-amber-900 font-medium">

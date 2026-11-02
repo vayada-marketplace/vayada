@@ -1684,7 +1684,11 @@ describe("finance route contracts", () => {
       const available = open(propertyId);
       const repository = paymentSettingsWriteRepository();
       app = buildFinanceApp({
-        repository: { ...repository, vayadaPaymentAvailable: open },
+        repository: {
+          ...repository,
+          vayadaPaymentAvailable: open,
+          vayadaPaymentFeePercent: 6,
+        },
         permissions: financeManagePermissions(),
       });
       const read = await injectJson<Record<string, unknown>>(app, {
@@ -1693,7 +1697,11 @@ describe("finance route contracts", () => {
         headers: { authorization: "Bearer valid-token" },
       });
       expect(read.statusCode).toBe(200);
-      expect(read.body).toMatchObject({ vayadaPayment: { available } });
+      // The fee shows only once hotels can choose vayada Payment (VAY-2442 P6).
+      expect(read.body).toMatchObject({
+        vayadaPayment: available ? { available, feePercent: 6 } : { available },
+      });
+      if (!available) expect(read.body.vayadaPayment).not.toHaveProperty("feePercent");
       const patch = await injectJson<Record<string, unknown>>(app, {
         method: "PATCH",
         url: `/api/finance/properties/${propertyId}/payment-settings`,

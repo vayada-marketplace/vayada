@@ -16,12 +16,30 @@ export type PayoutHotel = {
   /** Owed for stays checking out after the cut-off. */
   upcomingMinor: string;
   destination: PayoutDestination | null;
-  /** Started (taken off the balance) but not marked sent yet: finish or cancel it. */
-  sending: { id: string; amountMinor: string; startedAt: string } | null;
+  /** Started (taken off the balance) but not marked sent yet: finish or cancel it. Its account is
+   * an older one when the hotel replaced the account after the payout started. */
+  sending: { id: string; amountMinor: string; startedAt: string; destinationId: string } | null;
   lastPayout: { id: string; amountMinor: string; paidOn: string; reference: string } | null;
 };
 
-export type PayoutDestination = { id: string; accountLast4: string; countryCode: string };
+/** The hotel's payout account in use. Vayada staff approve each account before any payout goes
+ * to it (P7); a replaced account waits for approval, while card payments keep working. */
+export type PayoutDestination = {
+  id: string;
+  accountLast4: string;
+  countryCode: string;
+  savedAt: string;
+  /** The hotel had an account before this one. */
+  replaced: boolean;
+  approved: boolean;
+  approvedAt: string | null;
+  /** Staff's "Approve bank account", or the hotel's first card approval (its first account). */
+  approvedVia: "payout_account" | "card_approval" | null;
+};
+
+/** A saved account no payout may go to until Vayada staff approve it. */
+export const needsApproval = (destination: PayoutDestination | null) =>
+  destination !== null && !destination.approved;
 
 export type PayoutList = { mode: PayoutMode; cutoff: string; hotels: PayoutHotel[] };
 
@@ -49,6 +67,8 @@ export type Payout = {
   currency: string;
   amountMinor: string;
   cutoff: string;
+  /** The account it was started for. */
+  destinationId: string;
   accountLast4: string;
   startedAt: string;
   reference: string | null;
@@ -94,6 +114,13 @@ export const vayadaPayoutsService = {
     apiClient.post<PayoutBankDetails>(`${hotelPath(propertyId)}/destination/reveal`, {
       destinationId,
     }),
+  /** After checking the account (P7): payouts may go to it from now on. Refused when the hotel
+   * replaced the account since it was shown. */
+  approveBankAccount: (propertyId: string, destinationId: string) =>
+    apiClient.post<{ approved: true; approvedAt: string }>(
+      `${hotelPath(propertyId)}/destination/approve`,
+      { destinationId },
+    ),
   /** Before any money moves: takes exactly what is owed off the hotel's balance. */
   start: (
     propertyId: string,

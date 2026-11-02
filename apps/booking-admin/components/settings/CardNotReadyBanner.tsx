@@ -11,7 +11,9 @@ export type CardNotReadyReason =
   | "account_not_ready"
   | "currency"
   | "not_approved"
-  | "switch_off";
+  | "switch_off"
+  /** VAY-2442: vayada Payment chosen, but no bank account to pay the hotel out to yet. */
+  | "payout_account_missing";
 
 const REASON_TEXT: Record<CardNotReadyReason, string> = {
   not_connected: "settings.billing.cardNotReadyNotConnected",
@@ -20,12 +22,14 @@ const REASON_TEXT: Record<CardNotReadyReason, string> = {
   currency: "settings.billing.cardNotReadyCurrency",
   not_approved: "settings.billing.cardNotReadyNotApproved",
   switch_off: "settings.billing.cardNotReadySwitchOff",
+  payout_account_missing: "settings.billing.cardNotReadyPayoutAccount",
 };
 
 /** The reasons the hotel fixes in the payment provider section, and the link's words. */
 const LINK_TEXT: Partial<Record<CardNotReadyReason, string>> = {
   not_connected: "settings.billing.cardNotReadyLink",
   setup_incomplete: "settings.billing.cardNotReadyFinishLink",
+  payout_account_missing: "settings.billing.cardNotReadyPayoutAccountLink",
 };
 
 /** Booking Admin › Payments: shown at the top while Credit card is on but guests can't use it. */
