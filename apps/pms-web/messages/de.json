@@ -865,7 +865,7 @@
   "calendar.targetManualBooking.roomFull": "Das Zimmer ist voll: höchstens {capacity} Gäste",
   "calendar.targetManualBooking.perNight": "{amount} / Nacht",
   "calendar.targetManualBooking.perNightAverage": "Ø {amount} / Nacht",
-  "calendar.targetManualBooking.planUnavailable": "Für diese Daten nicht buchbar",
+  "calendar.targetManualBooking.planUnavailable": "Für diesen Aufenthalt nicht verfügbar",
   "calendar.targetManualBooking.planNeedsAges": "Alter jedes Kindes eingeben für den Preis",
   "calendar.targetManualBooking.customRateHint": "Eigener Preis pro Nacht",
   "calendar.targetManualBooking.nightlyBreakdown": "Preis pro Nacht · {total}",

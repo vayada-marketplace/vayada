@@ -91,6 +91,14 @@ function defaultRatePlanId(type: CalendarRoomType | undefined): string {
   return plan?.id ?? "custom";
 }
 
+/** A stay's average night, rounded to the currency's own decimals (no "¥3,333.33"). */
+function perNight(totalDecimal: string, nights: number, currency: string): string {
+  const digits =
+    new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions()
+      .maximumFractionDigits ?? 2;
+  return (Number(totalDecimal) / nights).toFixed(digits);
+}
+
 // Server amounts are exact decimals: keep cents when present (a 150.50 custom rate is not €151).
 function money(amountDecimal: string, currency: string): string {
   const amount = Number(amountDecimal);
@@ -942,7 +950,7 @@ export default function TargetManualBookingModal({
                                     }
                                     aria-disabled={atMin}
                                     onClick={() => !atMin && setGuests(index, kind, value - 1)}
-                                    className="flex h-full w-12 items-center justify-center text-gray-900 hover:bg-gray-50 aria-disabled:cursor-not-allowed aria-disabled:bg-gray-50 aria-disabled:text-gray-400"
+                                    className="flex h-full w-12 items-center justify-center text-gray-900 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 aria-disabled:cursor-not-allowed aria-disabled:bg-gray-50 aria-disabled:text-gray-400"
                                   >
                                     <svg
                                       aria-hidden="true"
@@ -970,7 +978,7 @@ export default function TargetManualBookingModal({
                                     }
                                     aria-disabled={full}
                                     onClick={() => !full && setGuests(index, kind, value + 1)}
-                                    className="flex h-full w-12 items-center justify-center text-gray-900 hover:bg-gray-50 aria-disabled:cursor-not-allowed aria-disabled:bg-gray-50 aria-disabled:text-gray-400"
+                                    className="flex h-full w-12 items-center justify-center text-gray-900 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 aria-disabled:cursor-not-allowed aria-disabled:bg-gray-50 aria-disabled:text-gray-400"
                                   >
                                     <svg
                                       aria-hidden="true"
@@ -1078,7 +1086,7 @@ export default function TargetManualBookingModal({
                                           : "calendar.targetManualBooking.perNightAverage",
                                         {
                                           amount: money(
-                                            (Number(total.amountDecimal) / nights).toFixed(2),
+                                            perNight(total.amountDecimal, nights, preview.currency),
                                             preview.currency,
                                           ),
                                         },
@@ -1167,15 +1175,13 @@ export default function TargetManualBookingModal({
                       )}
                       {serverStay?.nightly.length ? (
                         <details className="rounded-lg border border-gray-200 px-3.5">
-                          <summary className="flex min-h-11 cursor-pointer items-center text-[13px] font-medium text-gray-700">
-                            <span aria-live="polite">
-                              {t("calendar.targetManualBooking.nightlyBreakdown", {
-                                total: money(
-                                  serverStay.appliedTotal.amountDecimal,
-                                  preview!.currency,
-                                ),
-                              })}
-                            </span>
+                          <summary className="min-h-11 cursor-pointer py-3 text-[13px] font-medium text-gray-700">
+                            {t("calendar.targetManualBooking.nightlyBreakdown", {
+                              total: money(
+                                serverStay.appliedTotal.amountDecimal,
+                                preview!.currency,
+                              ),
+                            })}
                           </summary>
                           <ul className="space-y-2 pb-3.5 pt-1 text-[13px] tabular-nums text-gray-700">
                             {serverStay.nightly.map((night) => (

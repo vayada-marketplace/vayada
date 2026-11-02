@@ -714,7 +714,7 @@ describe("target manual booking fields", () => {
         .map(textOf);
     expect(cards()).toEqual([
       "Flexible€190avg. €95 / night",
-      "Non-refundableNot bookable for these dates",
+      "Non-refundableNot available for this stay",
       "Custom rateYour own nightly rate",
     ]);
     const stay = textOf(view.root.findByProps({ "data-stay": true }));

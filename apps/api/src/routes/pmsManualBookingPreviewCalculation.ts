@@ -76,6 +76,8 @@ export async function calculateManualBookingPreview(
   scope: { propertyId: string; organizationId: string },
   command: ManualBookingPreviewCommand,
   ports: PmsManualBookingPreviewRoutesOptions,
+  /** The preview prices every published plan for comparison; create, under its locks, doesn't. */
+  options: { planTotals?: boolean } = {},
 ) {
   const { propertyId } = scope;
   const pricedStays: PricedManualBookingStay[] = command.stays.map((stay) => ({
@@ -146,7 +148,10 @@ export async function calculateManualBookingPreview(
       roomId: stay.roomId,
       ratePlanId: stay.ratePlanId,
       // What each published plan would cost for this stay, so staff can compare (VAY-2417).
-      ratePlanTotals: publication ? planTotals(scope, stay, room.roomTypeId, publication) : [],
+      ratePlanTotals:
+        options.planTotals && publication
+          ? planTotals(scope, stay, room.roomTypeId, publication)
+          : [],
       nightly: stay.dates.map((serviceDate, position) => ({
         serviceDate,
         standard: standards ? money(standards[position]!, currency!) : null,

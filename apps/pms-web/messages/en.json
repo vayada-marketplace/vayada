@@ -870,7 +870,7 @@
   "calendar.targetManualBooking.roomFull": "The room is full: at most {capacity} guests",
   "calendar.targetManualBooking.perNight": "{amount} / night",
   "calendar.targetManualBooking.perNightAverage": "avg. {amount} / night",
-  "calendar.targetManualBooking.planUnavailable": "Not bookable for these dates",
+  "calendar.targetManualBooking.planUnavailable": "Not available for this stay",
   "calendar.targetManualBooking.planNeedsAges": "Enter each child's age to price",
   "calendar.targetManualBooking.customRateHint": "Your own nightly rate",
   "calendar.targetManualBooking.nightlyBreakdown": "Nightly breakdown · {total}",

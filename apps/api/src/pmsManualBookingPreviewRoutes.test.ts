@@ -172,25 +172,36 @@ describe("target manual-booking preview", () => {
       ],
     ]);
 
-    // A plan the dates can't take, or a child without an age, has no total; the preview stands.
-    app = await testApp({ reads: [], minStay: 3 });
+    // Create runs the same calculation under its locks and skips them.
+    const created = await calculateManualBookingPreview(
+      { propertyId, organizationId },
+      command(),
+      ports({ reads: [] }),
+    );
+    expect(created.stays.map((stay) => stay.ratePlanTotals)).toEqual([[], [], []]);
+
+    // A custom stay with a child but no age has no plan totals; the preview stands.
+    await app.close();
     const body = command();
-    body.stays = [
-      { ...body.stays[1], position: 1 },
-      { ...body.stays[1], position: 2, roomId: roomIds[0], children: 1 },
-    ];
+    body.stays = [{ ...body.stays[1], position: 1, children: 1 }];
     body.addOns = [];
+    app = await testApp({ reads: [] });
+    const unaged = await request(app, body);
+    expect(unaged.statusCode).toBe(200);
+    expect(unaged.json().stays[0].ratePlanTotals).toEqual([
+      { ratePlanId: "flex", total: null },
+      { ratePlanId: "nr", total: null },
+    ]);
+
+    // Nor do plans the dates can't take (a three-night minimum on a two-night stay).
+    await app.close();
+    body.stays = [{ ...body.stays[0], children: 0 }];
+    app = await testApp({ reads: [], minStay: 3 });
     const restricted = await request(app, body);
     expect(restricted.statusCode).toBe(200);
-    expect(restricted.json().stays.map((stay: any) => stay.ratePlanTotals)).toEqual([
-      [
-        { ratePlanId: "flex", total: null },
-        { ratePlanId: "nr", total: null },
-      ],
-      [
-        { ratePlanId: "flex", total: null },
-        { ratePlanId: "nr", total: null },
-      ],
+    expect(restricted.json().stays[0].ratePlanTotals).toEqual([
+      { ratePlanId: "flex", total: null },
+      { ratePlanId: "nr", total: null },
     ]);
   });
 
