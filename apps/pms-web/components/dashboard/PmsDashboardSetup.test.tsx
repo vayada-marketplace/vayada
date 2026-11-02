@@ -193,7 +193,10 @@ describe("the go-live cards on the PMS dashboard (VAY-2451)", () => {
     });
     const navigate = vi.fn();
     const client = {
-      load: vi.fn(),
+      // Asked at the same time; its answer isn't used once the go-live list answers.
+      load: vi.fn(async () => {
+        throw new Error("today's checklist isn't shown");
+      }),
       looksGood: vi.fn(),
       setViewer: vi.fn(),
       loadGoLive: vi.fn(async () => answer),
@@ -221,7 +224,7 @@ describe("the go-live cards on the PMS dashboard (VAY-2451)", () => {
     expect(text).toContain("Get ready to go live");
     expect(text).toContain("Later, when you're ready");
     expect(text).not.toContain("Your property setup isn't complete.");
-    expect(client.load).not.toHaveBeenCalled();
+    expect(client.load).toHaveBeenCalledWith(PROPERTY);
     await act(async () =>
       renderer!.root
         .find((node) => node.type === "button" && textOf(node) === "Add rates")

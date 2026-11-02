@@ -16,6 +16,7 @@ import {
   GoLiveChecklistCard,
   GoLiveLaterCard,
   GoLiveSetupCard,
+  goLiveSetupStepParam,
   SetupFinishedToast,
 } from "@vayada/product-onboarding/GoLiveChecklistCard";
 import type { HotelSetupChecklistClient } from "@vayada/product-onboarding/hotelSetupChecklistApi";
@@ -55,7 +56,7 @@ export type PmsSetupChecklistState =
 
 type Deps = {
   client: Pick<HotelSetupChecklistClient, "load" | "looksGood" | "setViewer"> &
-    Partial<Pick<HotelSetupChecklistClient, "loadGoLive" | "looksGoodGoLive">>;
+    Partial<Pick<HotelSetupChecklistClient, "loadGoLive" | "looksGoodGoLive" | "setGoLiveViewer">>;
   resolvePropertyId: () => Promise<string>;
   hotelName: () => Promise<string>;
 };
@@ -79,14 +80,18 @@ export function usePmsSetupChecklist(deps: Deps = DEFAULT_DEPS) {
     void (async () => {
       try {
         const propertyId = await deps.resolvePropertyId();
-        const hotelName = await deps.hotelName().catch(() => "");
-        // The go-live list first; when it isn't served (switched off) or fails, today's checklist.
-        const goLive = (await deps.client.loadGoLive?.(propertyId).catch(() => null)) ?? null;
+        // All at once: the go-live list when it's served; otherwise (switched off, failed) today's.
+        const today = deps.client.load(propertyId);
+        today.catch(() => undefined);
+        const [goLive, hotelName] = await Promise.all([
+          deps.client.loadGoLive?.(propertyId).catch(() => null) ?? null,
+          deps.hotelName().catch(() => ""),
+        ]);
         if (goLive) {
           if (active) setState({ kind: "go_live", propertyId, hotelName, checklist: goLive });
           return;
         }
-        const checklist = await deps.client.load(propertyId);
+        const checklist = await today;
         if (active) setState({ kind: "ready", propertyId, hotelName, checklist });
       } catch {
         if (active) setState({ kind: "unavailable" });
@@ -114,10 +119,17 @@ export function usePmsSetupChecklist(deps: Deps = DEFAULT_DEPS) {
     const checklist = await deps.client.looksGoodGoLive(state.propertyId, "guest_terms");
     setState({ ...state, checklist });
   };
+  /** The live card's Dismiss: it stays away (the same viewer flags as today's checklist). */
+  const dismissGoLive = async () => {
+    if (state.kind !== "go_live" || !deps.client.setGoLiveViewer) return;
+    const checklist = await deps.client.setGoLiveViewer(state.propertyId, { dismissed: true });
+    setState({ ...state, checklist });
+  };
 
   return {
     state,
     reviewRules,
+    dismissGoLive,
     looksGood: (item: HotelSetupChecklistAcknowledgeable) =>
       update((propertyId) => deps.client.looksGood(propertyId, item)),
     hide: () => update((propertyId) => deps.client.setViewer(propertyId, { hidden: true })),
@@ -202,6 +214,9 @@ function PmsGoLiveCards({
   const open = (page: { app: "pms" | "booking_admin"; path: string }) =>
     page.app === "pms" ? navigate(page.path) : void openBookingAdmin(page.path, state.propertyId);
   const { checklist } = state;
+  // A live hotel's card goes once dismissed or hidden (also when today's checklist was).
+  if (checklist.phase === "live" && (checklist.viewer.dismissed || checklist.viewer.hidden))
+    return toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} /> : null;
   return (
     <>
       {toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} /> : null}
@@ -213,7 +228,7 @@ function PmsGoLiveCards({
           onOpenStep={(step) =>
             step === "property" || step === "location"
               ? navigate(PMS_GO_LIVE_PAGES.property_details.path)
-              : navigate(`${setupHref(state.propertyId)}&step=${step}`)
+              : navigate(`${setupHref(state.propertyId)}&step=${goLiveSetupStepParam(step)}`)
           }
         />
       ) : (
@@ -230,11 +245,14 @@ function PmsGoLiveCards({
             }}
             // Booking Admin publishes the booking page.
             onPublish={() => void openBookingAdmin("/dashboard", state.propertyId)}
+            onDismiss={() => void setup.dismissGoLive().catch(() => undefined)}
           />
-          <GoLiveLaterCard
-            checklist={checklist}
-            onConnectCards={() => void openBookingAdmin("/settings/payments", state.propertyId)}
-          />
+          <div>
+            <GoLiveLaterCard
+              checklist={checklist}
+              onConnectCards={() => void openBookingAdmin("/settings/payments", state.propertyId)}
+            />
+          </div>
         </div>
       )}
     </>

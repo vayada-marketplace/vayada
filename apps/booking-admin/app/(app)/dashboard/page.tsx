@@ -235,14 +235,9 @@ export default function DashboardPage() {
       {/* Only when the checklist can't say what's left; not while it loads, so it doesn't flash. */}
       <ResumeSetupBanner hidden={setupChecklist.state.kind !== "unavailable"} />
 
-      {/* VAY-2451: with the go-live list, the booking page card sits beside it. */}
-      {setupChecklist.state.kind === "go_live" ? null : <BookingPageStatusCard />}
+      <BookingPageStatusCard />
 
-      <DashboardSetupChecklistCard
-        setup={setupChecklist}
-        hotelName={hotelName}
-        bookingPage={<BookingPageStatusCard />}
-      />
+      <DashboardSetupChecklistCard setup={setupChecklist} hotelName={hotelName} />
 
       {/* Time Range Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-full sm:w-fit">

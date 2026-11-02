@@ -243,7 +243,11 @@ describe("Booking Admin dashboard setup checklist (VAY-2247 wave 2)", () => {
 });
 
 describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
-  const goLive = (setupFinished: boolean, placeholderPrices = true) =>
+  const goLive = (
+    setupFinished: boolean,
+    placeholderPrices = true,
+    extra: Partial<Parameters<typeof buildHotelGoLiveChecklist>[0]> = {},
+  ) =>
     buildHotelGoLiveChecklist({
       propertyId: PROPERTY,
       propertyDetails: true,
@@ -256,15 +260,23 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
       onlineCardReady: false,
       onlineCardsOffered: false,
       viewer: { hidden: false, dismissed: false },
+      ...extra,
     });
 
   async function mountGoLive(answer: ReturnType<typeof goLive>, navigate = vi.fn()) {
     const client = {
-      load: vi.fn(),
+      // Asked at the same time; its answer isn't used once the go-live list answers.
+      load: vi.fn(async () => {
+        throw new Error("today's checklist isn't shown");
+      }),
       looksGood: vi.fn(),
       setViewer: vi.fn(),
       loadGoLive: vi.fn(async () => answer),
       looksGoodGoLive: vi.fn(async () => answer),
+      setGoLiveViewer: vi.fn(async () => ({
+        ...answer,
+        viewer: { hidden: false, dismissed: true },
+      })),
     };
     function Dashboard() {
       const setup = useDashboardSetupChecklist({
@@ -278,7 +290,6 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
             setup={setup}
             hotelName="Lumansa Hiriketiya"
             navigate={navigate}
-            bookingPage={<p>Booking page card</p>}
           />
         </div>
       );
@@ -291,13 +302,12 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
     return { renderer: renderer!, client, navigate };
   }
 
-  it("shows the go-live list and today's checklist isn't read", async () => {
+  it("shows the go-live list in place of today's checklist (both asked at once)", async () => {
     const { renderer, client, navigate } = await mountGoLive(goLive(true));
     const text = textOf(renderer.root);
     expect(text).toContain("Get ready to go live");
-    expect(text).toContain("Booking page card");
     expect(text).not.toContain("Setup ");
-    expect(client.load).not.toHaveBeenCalled();
+    expect(client.load).toHaveBeenCalledWith(PROPERTY);
     // Publish is locked on the placeholder; Review says Looks good, then opens the policies.
     const button = (label: string) =>
       renderer.root.find((node) => node.type === "button" && textOf(node) === label);
@@ -332,6 +342,34 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
         .props.onClick(),
     );
     expect(navigate).toHaveBeenCalledWith(expect.stringContaining(`propertyId=${PROPERTY}`));
+    // The room tile opens setup at its room step, by the id setup links keep.
+    await act(async () =>
+      renderer.root
+        .find((node) => node.type === "button" && textOf(node).startsWith("First room"))
+        .props.onClick(),
+    );
+    expect(navigate).toHaveBeenLastCalledWith(expect.stringContaining("&step=rooms"));
     renderer.unmount();
+  });
+
+  it("lets a live hotel dismiss the card, and leaves it out once dismissed or hidden", async () => {
+    const live = goLive(true, false, { bookingRules: "acknowledged", bookingPublished: true });
+    const { renderer, client } = await mountGoLive(live);
+    expect(textOf(renderer.root)).toContain("Your booking page is live");
+    await act(async () => renderer.root.findByProps({ "aria-label": "Dismiss" }).props.onClick());
+    await act(async () => undefined);
+    expect(client.setGoLiveViewer).toHaveBeenCalledWith(PROPERTY, { dismissed: true });
+    expect(textOf(renderer.root)).not.toContain("Your booking page is live");
+    renderer.unmount();
+
+    const hidden = await mountGoLive(
+      goLive(true, false, {
+        bookingRules: "acknowledged",
+        bookingPublished: true,
+        viewer: { hidden: true, dismissed: false },
+      }),
+    );
+    expect(textOf(hidden.renderer.root)).not.toContain("Your booking page is live");
+    hidden.renderer.unmount();
   });
 });

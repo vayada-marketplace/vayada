@@ -117,19 +117,43 @@ describe("GoLiveChecklistCard (VAY-2451 dashboard state B)", () => {
     expect(textOf(ready.root)).toContain("All set. Guests can book as soon as you publish.");
     ready.unmount();
 
+    const onDismiss = vi.fn();
     const live = create(
       <GoLiveChecklistCard
         checklist={checklist({ placeholderPrices: false, bookingPublished: true })}
-        bookingUrl="lumansa-hiriketiya.booking.vayada.com"
         onOpenItem={vi.fn()}
         onPublish={vi.fn()}
+        onDismiss={onDismiss}
       />,
     );
     const text = textOf(live.root);
     expect(text).toContain("Your booking page is live");
-    expect(text).toContain("lumansa-hiriketiya.booking.vayada.com is taking bookings");
+    expect(text).toContain("Guests can book on your booking page.");
     expect(buttons(live.root)).not.toContain("Publish");
+    act(() => live.root.findByProps({ "aria-label": "Dismiss" }).props.onClick());
+    expect(onDismiss).toHaveBeenCalledOnce();
     live.unmount();
+  });
+});
+
+describe("GoLiveChecklistCard booking rules (VAY-2451)", () => {
+  it("names the defaults only while they are the defaults", () => {
+    for (const [rules, shown, hidden] of [
+      ["default", "Defaults set:", "Cancellation, check-in times and guest rules"],
+      ["changed", "Cancellation, check-in times and guest rules", "Defaults set:"],
+      ["acknowledged", "Cancellation, check-in times and guest rules", "Defaults set:"],
+    ] as const) {
+      const card = create(
+        <GoLiveChecklistCard
+          checklist={checklist({ bookingRules: rules })}
+          onOpenItem={vi.fn()}
+          onPublish={vi.fn()}
+        />,
+      );
+      expect(textOf(card.root)).toContain(shown);
+      expect(textOf(card.root)).not.toContain(hidden);
+      card.unmount();
+    }
   });
 });
 

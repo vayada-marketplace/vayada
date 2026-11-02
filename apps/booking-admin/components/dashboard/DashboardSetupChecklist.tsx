@@ -21,10 +21,11 @@ import {
   GoLiveChecklistCard,
   GoLiveLaterCard,
   GoLiveSetupCard,
+  goLiveSetupStepParam,
   SetupFinishedToast,
 } from "@vayada/product-onboarding/GoLiveChecklistCard";
 import type { HotelSetupChecklistClient } from "@vayada/product-onboarding/hotelSetupChecklistApi";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useTranslation } from "@/lib/i18n";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
@@ -49,7 +50,7 @@ export type DashboardSetupChecklistState =
 
 type Deps = {
   client: Pick<HotelSetupChecklistClient, "load" | "looksGood" | "setViewer"> &
-    Partial<Pick<HotelSetupChecklistClient, "loadGoLive" | "looksGoodGoLive">>;
+    Partial<Pick<HotelSetupChecklistClient, "loadGoLive" | "looksGoodGoLive" | "setGoLiveViewer">>;
   /** The selected hotel's property, or null while the header hasn't stored a selection yet. */
   resolvePropertyId: () => Promise<string | null>;
 };
@@ -80,13 +81,15 @@ export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
         // With several hotels the header may store the selection after the dashboard mounted.
         if (!propertyId || started || !active) return;
         started = true;
-        // The go-live list first; when it isn't served (switched off) or fails, today's checklist.
+        // Both at once: the go-live list when it's served; otherwise (switched off, failed) today's.
+        const today = deps.client.load(propertyId);
+        today.catch(() => undefined);
         const goLive = (await deps.client.loadGoLive?.(propertyId).catch(() => null)) ?? null;
         if (goLive) {
           if (active) setState({ kind: "go_live", propertyId, checklist: goLive });
           return;
         }
-        const checklist = await deps.client.load(propertyId);
+        const checklist = await today;
         if (active) setState({ kind: "ready", propertyId, checklist });
       } catch {
         started = true;
@@ -119,10 +122,17 @@ export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
     const checklist = await deps.client.looksGoodGoLive(state.propertyId, "guest_terms");
     setState({ ...state, checklist });
   };
+  /** The live card's Dismiss: it stays away (the same viewer flags as today's checklist). */
+  const dismissGoLive = async () => {
+    if (state.kind !== "go_live" || !deps.client.setGoLiveViewer) return;
+    const checklist = await deps.client.setGoLiveViewer(state.propertyId, { dismissed: true });
+    setState({ ...state, checklist });
+  };
 
   return {
     state,
     reviewRules,
+    dismissGoLive,
     looksGood: (item: HotelSetupChecklistAcknowledgeable) =>
       update((propertyId) => deps.client.looksGood(propertyId, item)),
     hide: () => update((propertyId) => deps.client.setViewer(propertyId, { hidden: true })),
@@ -202,13 +212,11 @@ function GoLiveCards({
   setup,
   state,
   hotelName,
-  bookingPage,
   navigate,
 }: {
   setup: DashboardSetupChecklist;
   state: Extract<DashboardSetupChecklistState, { kind: "go_live" }>;
   hotelName: string;
-  bookingPage?: ReactNode;
   navigate: (path: string) => void;
 }) {
   const toast = useSetupFinishedToast();
@@ -220,8 +228,11 @@ function GoLiveCards({
       returnProduct: "booking",
       returnTo: "/dashboard",
       propertyId: state.propertyId,
-    })}${step ? `&step=${step}` : ""}`;
+    })}${step ? `&step=${goLiveSetupStepParam(step)}` : ""}`;
   const { checklist } = state;
+  // A live hotel's card goes once dismissed or hidden (also when today's checklist was).
+  if (checklist.phase === "live" && (checklist.viewer.dismissed || checklist.viewer.hidden))
+    return toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} /> : null;
   return (
     <>
       {toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} /> : null}
@@ -250,9 +261,9 @@ function GoLiveCards({
               else open(BOOKING_ADMIN_GO_LIVE_PAGES[item]);
             }}
             onPublish={() => window.dispatchEvent(new Event(PUBLISH_BOOKING_PAGE_EVENT))}
+            onDismiss={() => void setup.dismissGoLive().catch(() => undefined)}
           />
-          <div className="flex flex-col gap-4">
-            {bookingPage}
+          <div>
             <GoLiveLaterCard
               checklist={checklist}
               onConnectCards={() => navigate("/settings/payments")}
@@ -268,28 +279,17 @@ function GoLiveCards({
 export function DashboardSetupChecklistCard({
   setup,
   hotelName,
-  bookingPage,
   navigate = (path: string) => window.location.assign(path),
 }: {
   setup: DashboardSetupChecklist;
   hotelName: string;
-  /** VAY-2451: the booking page card, beside the go-live list (the page leaves it out then). */
-  bookingPage?: ReactNode;
   navigate?: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const messages = useMemo(() => bookingAdminChecklistMessages(t), [t]);
   const { state } = setup;
   if (state.kind === "go_live")
-    return (
-      <GoLiveCards
-        setup={setup}
-        state={state}
-        hotelName={hotelName}
-        bookingPage={bookingPage}
-        navigate={navigate}
-      />
-    );
+    return <GoLiveCards setup={setup} state={state} hotelName={hotelName} navigate={navigate} />;
   if (state.kind !== "ready") return null;
   const open = (item: HotelSetupChecklistItemId) => {
     const page = BOOKING_ADMIN_CHECKLIST_PAGES[item];

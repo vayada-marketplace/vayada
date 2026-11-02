@@ -29,7 +29,14 @@ export type GoLiveChecklistMessages = {
   edit: string;
   items: Record<
     Exclude<HotelGoLiveItemId, "booking_published">,
-    { title: string; doneTitle?: string; description: string; action: string }
+    {
+      title: string;
+      doneTitle?: string;
+      description: string;
+      /** In place of the description once done (e.g. the rules aren't the defaults any more). */
+      doneDescription?: string;
+      action: string;
+    }
   >;
   roomTypesDone: (room: {
     name: string;
@@ -41,7 +48,7 @@ export type GoLiveChecklistMessages = {
   publishTitle: string;
   publishLocked: string;
   publishReady: string;
-  publishLive: (url: string) => string;
+  publishLive: string;
   publish: string;
   live: string;
   laterTitle: string;
@@ -101,6 +108,7 @@ export const GO_LIVE_CHECKLIST_MESSAGES: GoLiveChecklistMessages = {
       title: "Review booking rules",
       description:
         "Defaults set: free cancellation until 3 days before · check-in 15:00, check-out 11:00",
+      doneDescription: "Cancellation, check-in times and guest rules",
       action: "Review",
     },
     property_photos: {
@@ -115,7 +123,7 @@ export const GO_LIVE_CHECKLIST_MESSAGES: GoLiveChecklistMessages = {
   publishTitle: "Publish your booking page",
   publishLocked: "Available once your room types and rates are in",
   publishReady: "All set. Guests can book as soon as you publish.",
-  publishLive: (url) => `${url} is taking bookings`,
+  publishLive: "Guests can book on your booking page.",
   publish: "Publish",
   live: "Live",
   laterTitle: "Later, when you're ready",
@@ -130,6 +138,14 @@ export const GO_LIVE_CHECKLIST_MESSAGES: GoLiveChecklistMessages = {
 };
 
 const STEP_ORDER: readonly HotelGoLiveSetupStep[] = ["property", "location", "room", "payments"];
+
+/**
+ * A setup step as the setup links name it (?step=): the room step is the setup's older "rooms", the one id
+ * the PMS's /setup link keeps (buildSharedHotelSetupRedirectPath drops unknown steps).
+ */
+export function goLiveSetupStepParam(step: HotelGoLiveSetupStep): string {
+  return step === "room" ? "rooms" : step;
+}
 
 const PRIMARY =
   "inline-flex h-10 shrink-0 items-center justify-center rounded-[10px] bg-primary-600 px-4 text-sm font-semibold text-white outline-none hover:bg-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2";
@@ -225,13 +241,14 @@ export function GoLiveSetupCard({
                   }`}
                 >
                   {stepDone ? (
-                    <CheckIcon className="h-3.5 w-3.5 stroke-[3]" aria-label={messages.stepDone} />
+                    // The line under the step says Done.
+                    <CheckIcon className="h-3.5 w-3.5 stroke-[3]" aria-hidden="true" />
                   ) : (
                     index + 1
                   )}
                 </span>
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-semibold text-gray-950">
+                  <span className="block text-sm font-semibold leading-5 text-gray-950">
                     {label}
                   </span>
                   <span
@@ -255,21 +272,21 @@ export function GoLiveSetupCard({
   );
 }
 
-/** State B: setup is finished. Six rows, the first open one with the filled button; Publish last. */
+/**
+ * State B: setup is finished. Six rows, the first open one with the filled button; Publish last. Once live,
+ * the card can be dismissed (the dashboards stop showing it).
+ */
 export function GoLiveChecklistCard({
   checklist,
-  bookingUrl,
   onOpenItem,
   onPublish,
-  publishing = false,
+  onDismiss,
   messages = GO_LIVE_CHECKLIST_MESSAGES,
 }: {
   checklist: HotelGoLiveChecklist;
-  /** The page's address, e.g. "lumansa-hiriketiya.booking.vayada.com". */
-  bookingUrl?: string | null;
   onOpenItem: (item: Exclude<HotelGoLiveItemId, "booking_published">) => void;
   onPublish: () => void;
-  publishing?: boolean;
+  onDismiss?: (() => void) | null;
   messages?: GoLiveChecklistMessages;
 }) {
   const live = checklist.phase === "live";
@@ -287,9 +304,21 @@ export function GoLiveChecklistCard({
         <h2 className="text-lg font-semibold text-gray-950">
           {live ? messages.liveTitle : messages.goLiveTitle}
         </h2>
-        <p className="text-sm font-medium text-gray-600">
-          {messages.doneCount(checklist.done, checklist.total)}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-gray-600">
+            {messages.doneCount(checklist.done, checklist.total)}
+          </p>
+          {live && onDismiss ? (
+            <button
+              type="button"
+              onClick={onDismiss}
+              aria-label={messages.dismiss}
+              className="rounded p-1 text-gray-400 outline-none hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-primary-600"
+            >
+              <XMarkIcon className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
       </div>
       <p className="mt-1 text-sm text-gray-600">
         {live ? messages.liveSubtitle : messages.goLiveSubtitle}
@@ -326,12 +355,13 @@ export function GoLiveChecklistCard({
               ? messages.roomTypesDone(checklist.firstRoomType)
               : id === "rates" && !done && checklist.placeholderPrices
                 ? messages.ratesPlaceholder
-                : words.description;
+                : done && words.doneDescription
+                  ? words.doneDescription
+                  : words.description;
           return (
             <li key={id} className="flex items-center gap-3 py-3">
               <span
-                aria-hidden="true"
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
                   done
                     ? "bg-green-500 text-white"
                     : id === firstOpen
@@ -339,7 +369,12 @@ export function GoLiveChecklistCard({
                       : "border-[1.5px] border-gray-300 bg-white"
                 }`}
               >
-                {done ? <CheckIcon className="h-3.5 w-3.5 stroke-[3]" /> : null}
+                {done ? (
+                  <>
+                    <CheckIcon className="h-3.5 w-3.5 stroke-[3]" aria-hidden="true" />
+                    <span className="sr-only">{`${messages.stepDone}:`}</span>
+                  </>
+                ) : null}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-2">
@@ -389,7 +424,7 @@ export function GoLiveChecklistCard({
             <p className="text-sm font-semibold text-gray-950">{messages.publishTitle}</p>
             <p className="mt-0.5 text-[13px] text-gray-500">
               {live
-                ? messages.publishLive(bookingUrl ?? "")
+                ? messages.publishLive
                 : checklist.canPublish
                   ? messages.publishReady
                   : messages.publishLocked}
@@ -402,7 +437,7 @@ export function GoLiveChecklistCard({
           ) : (
             <button
               type="button"
-              disabled={!checklist.canPublish || publishing}
+              disabled={!checklist.canPublish}
               onClick={onPublish}
               className={`${PRIMARY} disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500`}
             >
@@ -439,7 +474,10 @@ export function GoLiveLaterCard({
             <p className="text-[13px] text-gray-500">{messages.onlineCardsDescription}</p>
           </div>
           {cards === "done" ? (
-            <CheckIcon className="h-5 w-5 text-green-600" aria-label={messages.stepDone} />
+            <span className="relative">
+              <CheckIcon className="h-5 w-5 text-green-600" aria-hidden="true" />
+              <span className="sr-only">{messages.stepDone}</span>
+            </span>
           ) : (
             <button type="button" onClick={onConnectCards} className={SECONDARY}>
               {messages.connect}
