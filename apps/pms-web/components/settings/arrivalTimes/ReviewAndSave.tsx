@@ -1,5 +1,6 @@
 "use client";
 
+import type { Ref } from "react";
 import type { BookingGuestPolicyChoices } from "@vayada/domain-booking";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
@@ -15,7 +16,14 @@ import { checkInLabel, checkOutLabel } from "./arrivalTimesText";
 import { GUEST_LANGUAGE_NAMES } from "./GuestsCard";
 
 /** Shown until the property has guest rules: how many required settings are chosen. */
-export function SetupBanner({ check }: { check: ArrivalFormCheck }) {
+export function SetupBanner({
+  check,
+  prefilled,
+}: {
+  check: ArrivalFormCheck;
+  /** Whether arrival times came from the PMS's earlier guest policy. */
+  prefilled: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-4 rounded-[14px] border border-primary-200 bg-primary-50 px-5 py-[18px]">
@@ -40,7 +48,9 @@ export function SetupBanner({ check }: { check: ArrivalFormCheck }) {
           {t("settings.arrivalTimes.banner.title")}
         </div>
         <div className="mt-0.5 text-sm leading-5 text-gray-700">
-          {t("settings.arrivalTimes.banner.text")}
+          {prefilled
+            ? t("settings.arrivalTimes.banner.text")
+            : t("settings.arrivalTimes.banner.textEmpty")}
         </div>
       </div>
       <div className="flex flex-[0_1_220px] flex-col gap-2">
@@ -74,12 +84,14 @@ export function SaveBar({
   status,
   missing,
   dirty,
+  statusRef,
   onDiscard,
   onReview,
 }: {
   status: ArrivalSaveStatus;
   missing: number;
   dirty: boolean;
+  statusRef?: Ref<HTMLDivElement>;
   onDiscard: () => void;
   onReview: () => void;
 }) {
@@ -97,7 +109,12 @@ export function SaveBar({
   }[status];
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-[14px] border border-gray-200 bg-white px-4 py-3.5 shadow-[0_4px_16px_rgba(16,24,40,0.06)] sm:px-5">
-      <div role="status" className="flex items-center gap-2.5 text-sm text-gray-700">
+      <div
+        ref={statusRef}
+        role="status"
+        tabIndex={-1}
+        className="flex items-center gap-2.5 text-sm text-gray-700"
+      >
         <span className={`h-2 w-2 shrink-0 rounded-full ${DOTS[status]}`} />
         {text}
       </div>

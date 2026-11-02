@@ -167,8 +167,10 @@ test("a property without guest rules confirms its first guest policy, also on a 
   await expect(review).toBeDisabled();
   await shoot(page, section, testInfo, "first-setup-1440.png");
 
-  // A phone: everything stacks, nothing scrolls sideways.
+  // A phone: everything stacks, nothing scrolls sideways. Reloaded at that width, as the sidebar animates away
+  // after a resize.
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
   await expect(section.getByText("Confirm your guest policy")).toBeVisible();
   const overflow = await page.evaluate(() =>
     Array.from(document.querySelectorAll("html, body, main"))

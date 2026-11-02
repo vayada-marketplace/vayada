@@ -155,9 +155,9 @@ export function SwitchRow({
   );
 }
 
-export function FieldAlert({ children }: { children: ReactNode }) {
+export function FieldAlert({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <div role="alert" className="text-[13px] text-red-700">
+    <div id={id} role="alert" className="text-[13px] text-red-700">
       {children}
     </div>
   );

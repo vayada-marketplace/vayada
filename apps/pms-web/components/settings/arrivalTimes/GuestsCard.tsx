@@ -133,7 +133,7 @@ export function GuestsCard({
                   inputMode="numeric"
                   value={form.adultAge}
                   onChange={(event) => onChange({ adultAge: event.target.value })}
-                  aria-describedby={`${id}-age-hint`}
+                  aria-describedby={ageError ? `${id}-age-hint ${id}-age-error` : `${id}-age-hint`}
                   aria-invalid={ageError ? true : undefined}
                   className={`${inputClass(ageError ? "error" : form.adultAge.trim() ? "ok" : "open")} !w-[88px] text-center`}
                 />
@@ -153,7 +153,7 @@ export function GuestsCard({
                 ? t("settings.arrivalTimes.guests.ageHint")
                 : t("settings.arrivalTimes.guests.ageHintChildren", { age })}
             </div>
-            {ageError && <FieldAlert>{fieldError(t, ageError)}</FieldAlert>}
+            {ageError && <FieldAlert id={`${id}-age-error`}>{fieldError(t, ageError)}</FieldAlert>}
           </div>
         )}
       </div>

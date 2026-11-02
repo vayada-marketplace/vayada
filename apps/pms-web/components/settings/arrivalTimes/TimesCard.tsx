@@ -201,11 +201,13 @@ function Window(props: {
           <input
             type="time"
             aria-label={props.boundLabel}
+            aria-invalid={props.error ? true : undefined}
+            aria-describedby={props.error ? `${props.switchId}-error` : undefined}
             value={props.bound}
             onChange={(event) => props.onBound(event.target.value)}
             className={inputClass(props.error ? "error" : "ok")}
           />
-          {props.error && <FieldAlert>{props.error}</FieldAlert>}
+          {props.error && <FieldAlert id={`${props.switchId}-error`}>{props.error}</FieldAlert>}
         </div>
       )}
     </div>

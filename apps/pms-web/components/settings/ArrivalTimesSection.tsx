@@ -19,6 +19,7 @@ import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { forgetGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { humanizeApiError } from "./constants";
 import {
+  adultAge,
   checkForm,
   choicesFromForm,
   formFromChoices,
@@ -65,6 +66,11 @@ export function ArrivalTimesSection() {
   const [justSaved, setJustSaved] = useState(false);
   // One key per reviewed set of choices: a retry after a lost answer replays the save instead of repeating it.
   const attempt = useRef<{ choices: string; key: string } | null>(null);
+  // The dialog gives focus back to "Review & save", which a save disables: keyboard users land on the status.
+  const statusRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (justSaved) statusRef.current?.focus();
+  }, [justSaved]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -136,8 +142,11 @@ export function ArrivalTimesSection() {
     setRefusal(null);
   };
   const openReview = () => {
-    const choices = choicesFromForm(form);
-    if (!choices) return setRefusal("invalid_guest_choices");
+    const choices = choicesFromForm(form, adultAge(loaded.saved.adultAge));
+    if (!choices) {
+      setRefusal("invalid_guest_choices");
+      return;
+    }
     const text = JSON.stringify(choices);
     if (attempt.current?.choices !== text)
       attempt.current = { choices: text, key: `arrival-times:${crypto.randomUUID()}` };
@@ -181,7 +190,12 @@ export function ArrivalTimesSection() {
 
   return (
     <div className="space-y-5">
-      {!loaded.rules && <SetupBanner check={check} />}
+      {!loaded.rules && (
+        <SetupBanner
+          check={check}
+          prefilled={Boolean(loaded.saved.checkInTime || loaded.saved.checkOutTime)}
+        />
+      )}
       <TimesCard
         form={form}
         check={check}
@@ -196,8 +210,8 @@ export function ArrivalTimesSection() {
           className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           <span>{refusalText[refusal]}</span>
-          {(refusal === "guest_choices_stale" ||
-            refusal === "guest_choices_idempotency_conflict") && (
+          {/* A refused save, or one whose answer was lost, may have left other values saved. */}
+          {refusal !== "guest_choices_denied" && refusal !== "invalid_guest_choices" && (
             <button type="button" onClick={reloadSaved} className="font-medium underline">
               {t("settings.arrivalTimes.reload")}
             </button>
@@ -208,6 +222,7 @@ export function ArrivalTimesSection() {
         status={status}
         missing={check.missing}
         dirty={dirty}
+        statusRef={statusRef}
         onDiscard={() => change(loaded.saved)}
         onReview={openReview}
       />

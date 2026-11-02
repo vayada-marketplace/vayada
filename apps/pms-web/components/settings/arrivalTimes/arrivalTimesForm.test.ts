@@ -68,7 +68,13 @@ describe("check-in & check-out form", () => {
       childrenEnabled: false,
       adultAgeThreshold: null,
     });
-    expect(choicesFromForm(form({ children: "no" }))).toMatchObject({ adultAgeThreshold: 12 });
+    // The hidden age is the one the hotel had, never one typed before switching to adults only.
+    expect(choicesFromForm(form({ children: "no", adultAge: "18" }), 12)).toMatchObject({
+      adultAgeThreshold: 12,
+    });
+    expect(choicesFromForm(form({ children: "no", adultAge: "30" }), 12)).toMatchObject({
+      adultAgeThreshold: 12,
+    });
     expect(checkForm(form({ adultAge: "" }))).toMatchObject({ required: 5, missing: 1 });
   });
 

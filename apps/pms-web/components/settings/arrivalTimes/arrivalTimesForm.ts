@@ -99,14 +99,18 @@ export function adultAge(text: string): number | null {
 
 export const ageCounts = (form: ArrivalForm) => form.children !== "no";
 
-/** The guest rules to save, checked as the API checks them; null while anything is open or wrong. An adults-only
- * hotel keeps a valid age it had (the API preserves it), and an optional window is sent only while switched on. */
-export function choicesFromForm(form: ArrivalForm): BookingGuestPolicyChoices | null {
+/** The guest rules to save, checked as the API checks them; null while anything is open or wrong. An optional window
+ * is sent only while switched on. An adults-only hotel's age isn't shown, so it keeps the age it had (`keptAge`,
+ * which the API preserves), never one typed before switching to adults only. */
+export function choicesFromForm(
+  form: ArrivalForm,
+  keptAge: number | null = null,
+): BookingGuestPolicyChoices | null {
   if (!form.language || !form.children) return null;
   return parseBookingGuestPolicyChoices({
     defaultGuestLanguage: form.language,
     childrenEnabled: form.children === "yes",
-    adultAgeThreshold: adultAge(form.adultAge),
+    adultAgeThreshold: form.children === "yes" ? adultAge(form.adultAge) : keptAge,
     phoneRequired: form.phoneRequired,
     arrivalTimeEnabled: form.arrivalTimeEnabled,
     specialRequestsEnabled: form.specialRequestsEnabled,

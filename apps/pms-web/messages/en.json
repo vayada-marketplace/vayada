@@ -1453,6 +1453,7 @@
   "settings.arrivalTimes.required": "Required",
   "settings.arrivalTimes.banner.title": "Confirm your guest policy",
   "settings.arrivalTimes.banner.text": "We prefilled the arrival times we already had. Pick the rest, then review and save.",
+  "settings.arrivalTimes.banner.textEmpty": "Choose your check-in and check-out times and the rest, then review and save.",
   "settings.arrivalTimes.banner.progress": "{done} of {total} required settings done",
   "settings.arrivalTimes.times.title": "Arrival & departure",
   "settings.arrivalTimes.times.subtitle": "The times guests see when they book.",

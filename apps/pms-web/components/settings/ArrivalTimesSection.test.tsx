@@ -128,8 +128,9 @@ describe("Check-in & check-out settings", () => {
     api.save.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await click(view, "Review & save");
     await click(view, "Confirm & save");
+    // Its answer may have been lost after saving: reloading shows what was saved.
     expect(textOf(view.root.findByProps({ role: "alert" }))).toBe(
-      "Check-in and check-out settings could not be saved. Please try again.",
+      "Check-in and check-out settings could not be saved. Please try again.Reload saved values",
     );
     const firstKey = api.save.mock.calls[0]![3];
     api.save.mockRejectedValueOnce({ data: { code: "guest_choices_stale" } });
@@ -150,6 +151,41 @@ describe("Check-in & check-out settings", () => {
     await click(view, "Confirm & save");
     // A refusal is final: the next save gets its own key.
     expect(api.save.mock.calls[2]![3]).not.toBe(firstKey);
+  });
+
+  it("explains a save its user may no longer make, and discards edits back to the saved values", async () => {
+    const view = await render();
+    await setTime(view, 0, "16:00");
+    api.save.mockRejectedValueOnce({ data: { code: "guest_choices_denied" } });
+    await click(view, "Review & save");
+    await click(view, "Confirm & save");
+    expect(textOf(view.root.findByProps({ role: "alert" }))).toBe(
+      "You no longer have permission to change these settings.",
+    );
+    await click(view, "Discard changes");
+    expect(times(view)[0]!.props.value).toBe("15:00");
+    expect(status(view)).toBe("All changes saved");
+    expect(view.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+  });
+
+  it("keeps an adults-only hotel's age, whatever was typed before switching to adults only", async () => {
+    api.load.mockResolvedValue({
+      revision: REVISION,
+      choices: { ...choices, childrenEnabled: true, adultAgeThreshold: 12 },
+    });
+    const view = await render();
+    await act(() =>
+      view.root.findByProps({ type: "number" }).props.onChange({ target: { value: "30" } }),
+    );
+    await act(() => view.root.findByProps({ type: "radio", value: "no" }).props.onChange());
+    await click(view, "Review & save");
+    await click(view, "Confirm & save");
+    expect(api.save).toHaveBeenCalledWith(
+      "property-1",
+      REVISION,
+      { ...choices, childrenEnabled: false, adultAgeThreshold: 12 },
+      expect.any(String),
+    );
   });
 
   it("refuses windows the booking page can't show, but takes midnight as the latest check-in", async () => {
@@ -190,6 +226,7 @@ describe("Check-in & check-out settings", () => {
     });
     const view = await render();
     expect(text(view)).toContain("Confirm your guest policy");
+    expect(text(view)).toContain("We prefilled the arrival times we already had.");
     expect(text(view)).toContain("2 of 5 required settings done");
     expect(status(view)).toBe("Choose 3 more required settings to save");
     expect(times(view).map((input) => input.props.value)).toEqual(["14:00", "12:00"]);
@@ -235,6 +272,10 @@ describe("Check-in & check-out settings", () => {
     await click(view, "Retry");
     expect(times(view).map((input) => input.props.value)).toEqual(["", ""]);
     expect(text(view)).toContain("0 of 5 required settings done");
+    // Nothing was prefilled, so the banner doesn't say so.
+    expect(text(view)).toContain(
+      "Choose your check-in and check-out times and the rest, then review and save.",
+    );
     expect(status(view)).toBe("Choose 5 more required settings to save");
     expect(button(view, "Review & save").props.disabled).toBe(true);
     // Without a time zone, no pill.
