@@ -1,11 +1,17 @@
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vitest";
+import RoomLocationField from "@/components/rooms/RoomLocationField";
 import RoomTypeForm, { RoomTabBar } from "./RoomTypeForm";
 
 vi.mock("@/lib/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("next/link", () => ({ default: "a" }));
 vi.mock("@/components/ImageUpload", () => ({ default: () => null }));
+vi.mock("@/components/rooms/RoomLocationField", () => ({
+  default: function RoomLocationField() {
+    return null;
+  },
+}));
 
 let view: ReactTestRenderer;
 afterEach(() => act(() => view?.unmount()));
@@ -33,7 +39,11 @@ const submit = () => view.root.findAllByProps({ type: "submit" });
 
 it("offers no Prices tab where the page does not own the tab", async () => {
   await mount({ mode: "create" });
-  expect(tabs()).toEqual(["rooms.form.tabDetails", "rooms.form.tabMedia"]);
+  expect(tabs()).toEqual([
+    "rooms.form.tabDetails",
+    "rooms.form.tabMedia",
+    "rooms.form.tabLocation",
+  ]);
   await act(async () =>
     view.root
       .findAllByType("button")
@@ -73,7 +83,12 @@ it("draws the room tabs for the page, and the form's own messages come after its
   await act(async () => {
     view = create(createElement(RoomTabBar, { tab: "prices", onTabChange }));
   });
-  expect(tabs()).toEqual(["rooms.form.tabDetails", "rooms.form.tabPricing", "rooms.form.tabMedia"]);
+  expect(tabs()).toEqual([
+    "rooms.form.tabDetails",
+    "rooms.form.tabPricing",
+    "rooms.form.tabMedia",
+    "rooms.form.tabLocation",
+  ]);
   await act(async () =>
     view.root
       .findAllByType("button")
@@ -86,6 +101,58 @@ it("draws the room tabs for the page, and the form's own messages come after its
   const text = JSON.stringify(view.toJSON());
   for (const message of ["Save failed", "Saved"])
     expect(text.indexOf(message)).toBeGreaterThan(text.indexOf("rooms.form.tabMedia"));
+});
+
+it("keeps the room's place on its own Location tab, saved by the form's one Save (VAY-2452)", async () => {
+  const onChange = vi.fn();
+  const props = {
+    form: { name: "Suite", totalRooms: 2, locationAddress: "Leopoldstraße 12", latitude: 48.15 },
+    onChange,
+    onSubmit: () => undefined,
+    saving: false,
+    propertyPlan: null,
+    mode: "edit" as const,
+    roomTypeId: "room-1",
+    onTabChange: vi.fn(),
+  };
+  await mount({ ...props, tab: "details" });
+  // Room Details ends with the category tag: the place is not on it.
+  expect(view.root.findAllByType(RoomLocationField)).toHaveLength(0);
+  expect(JSON.stringify(view.toJSON())).toContain("rooms.form.roomCategoryTag");
+
+  act(() => view.update(createElement(RoomTypeForm, { ...props, tab: "location" })));
+  const field = view.root.findByType(RoomLocationField);
+  expect(field.props).toMatchObject({
+    roomId: "room-1",
+    roomName: "Suite",
+    value: { locationAddress: "Leopoldstraße 12", latitude: 48.15, longitude: null },
+  });
+  expect(JSON.stringify(view.toJSON())).not.toContain("rooms.form.roomTypeBasics");
+  expect(submit()).toHaveLength(1);
+
+  // An edit lands on the form as it is then, next to edits from the other tabs.
+  act(() => field.props.onChange({ showMapInDetails: false }));
+  const update = onChange.mock.calls.at(-1)![0] as (prev: object) => object;
+  expect(update({ name: "Lake Suite", amenities: ["Safe"] })).toEqual({
+    name: "Lake Suite",
+    amenities: ["Safe"],
+    showMapInDetails: false,
+  });
+  // Save waits while the place holds something it would lose.
+  act(() => field.props.onValidityChange(false));
+  expect(submit()[0].props.disabled).toBe(true);
+  act(() => field.props.onValidityChange(true));
+  expect(submit()[0].props.disabled).toBe(false);
+
+  // Back on the tab after an unsaved choice, the field still learns the room's saved one (none here).
+  expect(field.props.savedSource).toBeUndefined();
+  const chosen = { ...props.form, locationSource: "custom" as const };
+  act(() => view.update(createElement(RoomTypeForm, { ...props, form: chosen, tab: "details" })));
+  act(() => view.update(createElement(RoomTypeForm, { ...props, form: chosen, tab: "location" })));
+  expect(view.root.findByType(RoomLocationField).props).toMatchObject({
+    value: { locationSource: "custom" },
+    savedSource: undefined,
+  });
 });
 
 it("shows the page's note beside the buttons and its text while saving (VAY-2147)", async () => {

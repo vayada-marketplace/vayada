@@ -396,6 +396,7 @@
   "rooms.form.tabDetails": "房间详情",
   "rooms.form.tabPricing": "价格与费率",
   "rooms.form.tabMedia": "图片与设施",
+  "rooms.form.tabLocation": "位置",
   "rooms.form.roomTypeBasics": "房型基本信息",
   "rooms.form.requiredLabel": "必填",
   "rooms.form.roomTypeName": "房型名称",

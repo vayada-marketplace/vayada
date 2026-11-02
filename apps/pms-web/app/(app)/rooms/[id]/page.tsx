@@ -29,15 +29,18 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const pricesFirst = searchParams.get("tab") === "prices";
+  // Links open the Prices tab, or the Location tab (Booking Admin's room without a pin, VAY-2452).
+  const linkedTab = searchParams.get("tab");
+  const firstTab: RoomTab =
+    linkedTab === "prices" || linkedTab === "location" ? linkedTab : "details";
   // The calendar's "Edit prices & rules" opens the Prices tab on one night (VAY-2411).
   const priceDate = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get("date") ?? "")
     ? searchParams.get("date")!
     : undefined;
   // The Prices tab mounts once opened and stays mounted, so switching tabs or saving room details keeps
   // unsaved prices.
-  const [tab, setTab] = useState<RoomTab>(pricesFirst ? "prices" : "details");
-  const [pricesOpened, setPricesOpened] = useState(pricesFirst);
+  const [tab, setTab] = useState<RoomTab>(firstTab);
+  const [pricesOpened, setPricesOpened] = useState(firstTab === "prices");
   const showTab = (next: RoomTab) => {
     setTab(next);
     if (next === "prices") setPricesOpened(true);

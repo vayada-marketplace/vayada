@@ -396,6 +396,7 @@
   "rooms.form.tabDetails": "Details de la chambre",
   "rooms.form.tabPricing": "Tarification",
   "rooms.form.tabMedia": "Images & Equipements",
+  "rooms.form.tabLocation": "Emplacement",
   "rooms.form.roomTypeBasics": "Base du type de chambre",
   "rooms.form.requiredLabel": "Requis",
   "rooms.form.roomTypeName": "Nom du type de chambre",

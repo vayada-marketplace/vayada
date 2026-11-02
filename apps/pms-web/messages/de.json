@@ -896,6 +896,7 @@
   "rooms.form.tabDetails": "Zimmerdetails",
   "rooms.form.tabPricing": "Preise",
   "rooms.form.tabMedia": "Bilder & Ausstattung",
+  "rooms.form.tabLocation": "Standort",
   "rooms.form.roomTypeBasics": "Zimmertyp-Grundlagen",
   "rooms.form.requiredLabel": "Erforderlich",
   "rooms.form.roomTypeName": "Zimmertyp-Name",

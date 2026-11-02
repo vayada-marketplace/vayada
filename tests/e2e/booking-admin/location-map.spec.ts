@@ -121,7 +121,8 @@ test("turns the location map on and shows a pin for each room's place", async ({
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   expect(state.saves).toEqual([{ enabled: true }, { enabled: false }]);
 
-  // The room without a location opens in PMS (through PMS sign-in when there is no handoff).
+  // The room without a location opens in PMS on its Location tab (through PMS sign-in when there is no
+  // handoff, VAY-2452).
   await toggle.click();
   await page.route(/^http:\/\/pms\.localhost:3004\//, (route) =>
     route.fulfill({ contentType: "text/html", body: "<p>PMS</p>" }),
@@ -129,7 +130,7 @@ test("turns the location map on and shows a pin for each room's place", async ({
   await card.getByRole("button", { name: "Add it in Rooms & Rates" }).click();
   await expect
     .poll(() => decodeURIComponent(page.url()))
-    .toContain("/rooms/00000000-0000-4000-8000-000000000005");
+    .toContain("/rooms/00000000-0000-4000-8000-000000000005?tab=location");
 });
 
 test("names the rooms at a hidden property, and tags a place shown as an area (VAY-2321)", async ({

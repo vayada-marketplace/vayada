@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   reload: vi.fn(),
   stale: false,
+  search: "",
 }));
 // Next runs the page on its own React 19; the tests get the workspace's React 18, which has no
 // `use`. React 19's `use` returns an already-resolved promise's value at once, so do that here.
@@ -26,7 +27,7 @@ vi.mock("@/lib/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key 
 vi.mock("next/link", () => ({ default: "a" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(""),
+  useSearchParams: () => new URLSearchParams(mocks.search),
 }));
 vi.mock("@/services/rooms", () => ({
   roomsService: {
@@ -67,6 +68,7 @@ let view: ReactTestRenderer;
 beforeEach(() => {
   mocks.mounts = 0;
   mocks.stale = false;
+  mocks.search = "";
   mocks.update.mockReset();
   mocks.reload.mockReset();
 });
@@ -112,4 +114,29 @@ it("shows the one-click republish when the room page opens on stale prices", asy
     view = create(createElement(EditRoomPage, { params: resolved({ id: "room-1" }) }));
   });
   expect(strip()).toHaveLength(1);
+});
+
+it("opens on the tab a link names: Location for Booking Admin's room without a pin (VAY-2452)", async () => {
+  mocks.search = "tab=location";
+  await act(async () => {
+    view = create(createElement(EditRoomPage, { params: resolved({ id: "room-1" }) }));
+  });
+  expect(mocks.form.tab).toBe("location");
+  expect(mocks.mounts).toBe(0);
+  act(() => view.unmount());
+
+  // Prices still opens, and an unknown tab falls back to Room Details.
+  mocks.search = "tab=prices";
+  await act(async () => {
+    view = create(createElement(EditRoomPage, { params: resolved({ id: "room-1" }) }));
+  });
+  expect(mocks.form.tab).toBe("prices");
+  expect(mocks.mounts).toBe(1);
+  act(() => view.unmount());
+
+  mocks.search = "tab=map";
+  await act(async () => {
+    view = create(createElement(EditRoomPage, { params: resolved({ id: "room-1" }) }));
+  });
+  expect(mocks.form.tab).toBe("details");
 });
