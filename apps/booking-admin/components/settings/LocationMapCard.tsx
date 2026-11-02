@@ -242,7 +242,7 @@ export function LocationMapCard({
                   onClick: () =>
                     void openPms(
                       unpinnedRooms.length === 1
-                        ? `/rooms/${unpinnedRooms[0].roomTypeId}`
+                        ? `/rooms/${unpinnedRooms[0].roomTypeId}?tab=location`
                         : "/rooms",
                     ),
                   label:

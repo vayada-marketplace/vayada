@@ -13,6 +13,8 @@ import { watchPageHealth } from "../support/pageHealth";
 // dragged; without Google the host types them, with a comma or a dot. VAY-2321: "Same as property" (the default)
 // or a "Separate location", shown to guests exactly or as an area, and "Show map in room details".
 const roomTypeId = "22222222-2222-4222-8222-222222222222";
+// The room's own Location tab (VAY-2452), opened the way Booking Admin's link to a room without a pin opens it.
+const locationTab = `/rooms/${roomTypeId}?tab=location`;
 const acceptedAt = "2026-10-22T08:00:00.000Z";
 // The dev server's Maps key: CI's pms-web job and playwright.config.ts start it with this fake key.
 const hasMapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY === "e2e-google-places";
@@ -38,7 +40,7 @@ test.describe("pms-web room location", () => {
     const backend = await mockRoomBackend(page);
     await mockGoogleMaps(page, { places: [leopoldstrasse] });
 
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     const location = page.locator("main");
     await page.getByRole("radio", { name: /Separate location/ }).click();
     await expect(location.getByText("Pick an address to place the pin")).toBeVisible();
@@ -111,7 +113,7 @@ test.describe("pms-web room location", () => {
     await mockRoomBackend(page);
     await mockGoogleMaps(page, { places: [leopoldstrasse], placesUnavailable: true });
 
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     await page.getByRole("radio", { name: /Separate location/ }).click();
     const address = page.getByRole("combobox", { name: "Address" });
     // One failed request is treated as a blip; the second turns search off.
@@ -142,7 +144,7 @@ test.describe("pms-web room location", () => {
     // A rejected key: the script loads, then Google calls gm_authFailure (with no key the map never loads).
     await mockGoogleMaps(page, { authFailure: true });
 
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     await page.getByRole("radio", { name: /Separate location/ }).click();
     await expect(page.getByText("The map couldn't load")).toBeVisible();
     await expect(page.getByRole("combobox", { name: "Address" })).toHaveCount(0);
@@ -187,7 +189,7 @@ test.describe("pms-web room location", () => {
   test("still saves a room stored earlier with half a coordinate pair", async ({ page }) => {
     const backend = await mockRoomBackend(page, { latitude: 48.1565 });
 
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     // Without a whole pin of its own the room is at the property, and an untouched room writes nothing.
     await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveAttribute(
       "aria-checked",
@@ -221,7 +223,7 @@ test.describe("pms-web room location", () => {
       longitude: 11.583,
     });
 
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     // Saved before VAY-2321 with its own pin, away from the property: a separate location.
     await expect(page.getByRole("radio", { name: /Separate location/ })).toHaveAttribute(
       "aria-checked",
@@ -263,7 +265,7 @@ test.describe("pms-web room location", () => {
     page,
   }) => {
     const backend = await mockRoomBackend(page);
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     const location = page.locator("main");
     await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveAttribute(
       "aria-checked",
@@ -308,7 +310,7 @@ test.describe("pms-web room location", () => {
       latitude: 48.1565,
       longitude: 11.583,
     });
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     const same = page.getByRole("radio", { name: /Same as property/ });
     const separate = page.getByRole("radio", { name: /Separate location/ });
     const save = page.getByRole("button", { name: "Save Changes" });
@@ -384,7 +386,7 @@ test.describe("pms-web room location", () => {
       return route.fallback();
     });
 
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     // An unsaved edit elsewhere in the room stays.
     await page.getByRole("switch", { name: "Show map in room details" }).click();
     const edit = page.getByRole("button", { name: "Edit property address" });
@@ -482,7 +484,7 @@ test.describe("pms-web room location", () => {
     test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
     const backend = await mockRoomBackend(page);
     await mockGoogleMaps(page, { places: [leopoldstrasse] });
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     await page.getByRole("radio", { name: /Separate location/ }).click();
     const map = page.getByTestId("google-address-map-canvas");
     // The main property, for reference.
@@ -532,7 +534,7 @@ test.describe("pms-web room location", () => {
     test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
     await mockRoomBackend(page);
     await mockGoogleMaps(page, { places: [leopoldstrasse] });
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     await page.getByRole("radio", { name: /Separate location/ }).click();
     const map = page.getByTestId("google-address-map-canvas");
 
@@ -572,6 +574,68 @@ test.describe("pms-web room location", () => {
     await expect(map).toHaveAttribute("data-marker", propertyPin);
   });
 
+  test("keeps the place on its own Location tab, saved with a Room Details edit by one Save Changes (VAY-2452)", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    const backend = await mockRoomBackend(page, null, { acceptFacts: true });
+    await mockGoogleMaps(page, { places: [] });
+
+    await page.goto(`/rooms/${roomTypeId}`);
+    const main = page.locator("main");
+    const tab = (name: string) => main.getByRole("button", { name, exact: true });
+    await expect(
+      main.getByRole("button", { name: /^(Room Details|Prices|Images & Amenities|Location)$/ }),
+    ).toHaveText(["Room Details", "Prices", "Images & Amenities", "Location"]);
+    // Room Details ends with the category tag.
+    await expect(main.getByText("Room Category Tag")).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveCount(0);
+    const name = page.locator(
+      'xpath=//label[starts-with(normalize-space(.), "Room Type Name")]/../following-sibling::input[1]',
+    );
+    await name.fill("Schwabing Studio");
+
+    await tab("Location").click();
+    await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect(main.getByText("Room Category Tag")).toHaveCount(0);
+    const detailsMap = page.getByRole("switch", { name: "Show map in room details" });
+    await detailsMap.click();
+    await expect(detailsMap).toHaveAttribute("aria-checked", "false");
+
+    // Switching tabs keeps both unsaved edits.
+    await tab("Room Details").click();
+    await expect(name).toHaveValue("Schwabing Studio");
+    await tab("Location").click();
+    await expect(detailsMap).toHaveAttribute("aria-checked", "false");
+
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByText("Room type updated successfully")).toBeVisible();
+    expect(backend.factWrites).toEqual([
+      expect.objectContaining({ facts: expect.objectContaining({ name: "Schwabing Studio" }) }),
+    ]);
+    expect(backend.locationWrites).toEqual([expect.objectContaining({ showMapInDetails: false })]);
+    // The page stays on Location, showing the saved room.
+    await expect(page.getByRole("heading", { name: "Edit: Schwabing Studio" })).toBeVisible();
+    await expect(detailsMap).toHaveAttribute("aria-checked", "false");
+    await assertHealthy();
+
+    // Add room type has the same four tabs, with the place on the last one.
+    await page.goto("/rooms/new");
+    await expect(
+      main.getByRole("button", { name: /^(Room Details|Prices|Images & Amenities|Location)$/ }),
+    ).toHaveText(["Room Details", "Prices", "Images & Amenities", "Location"]);
+    await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveCount(0);
+    await tab("Location").click();
+    await expect(page.getByRole("radio", { name: /Same as property/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect(page.getByRole("switch", { name: "Show map in room details" })).toBeVisible();
+  });
+
   test("lines the map up with the Separate location card, in the cards' two columns (VAY-2445)", async ({
     page,
   }) => {
@@ -579,7 +643,7 @@ test.describe("pms-web room location", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockRoomBackend(page);
     await mockGoogleMaps(page, { places: [leopoldstrasse] });
-    await page.goto(`/rooms/${roomTypeId}`);
+    await page.goto(locationTab);
     const separate = page.getByRole("radio", { name: /Separate location/ });
     await separate.click();
     const map = page.getByTestId("google-address-map-canvas");
@@ -606,6 +670,7 @@ async function paste(field: Locator, text: string) {
 async function mockRoomBackend(
   page: Page,
   location: { locationAddress?: string; latitude?: number; longitude?: number } | null = null,
+  options: { acceptFacts?: boolean } = {},
 ) {
   const state = {
     room: {
@@ -624,6 +689,7 @@ async function mockRoomBackend(
       } as Record<string, unknown>,
     },
     locationWrites: [] as Record<string, unknown>[],
+    factWrites: [] as Record<string, unknown>[],
   };
 
   await mockPmsWebAuthenticatedSession(page);
@@ -656,11 +722,37 @@ async function mockRoomBackend(
       });
     },
   );
-  // Only the location changes, so the room facts are never written.
+  // A location edit alone never writes the room facts; a Room Details edit in the same save does.
   const setupPath = `**/api/pms/setup/properties/${PMS_WEB_PROPERTY_ID}/room-types/${roomTypeId}`;
-  await page.route(setupPath, (route) =>
-    route.fulfill({ status: 500, json: { code: "unexpected_room_facts_write" } }),
-  );
+  await page.route(setupPath, (route) => {
+    if (!options.acceptFacts) {
+      return route.fulfill({ status: 500, json: { code: "unexpected_room_facts_write" } });
+    }
+    const body = route.request().postDataJSON() as {
+      expectedRevision: number;
+      facts: { name: string };
+    };
+    state.factWrites.push(body);
+    const revision = body.expectedRevision + 1;
+    state.room = { ...state.room, name: body.facts.name, version: `room-type-facts-v${revision}` };
+    return route.fulfill({
+      json: {
+        contractVersion: "pms-room-facts.v1",
+        outcome: "updated",
+        roomType: {
+          contractVersion: "pms-room-facts.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          roomTypeId,
+          roomFactsRevision: revision,
+          lifecycle: "active",
+          facts: body.facts,
+          createdAt: acceptedAt,
+          updatedAt: acceptedAt,
+        },
+        acceptedAt,
+      },
+    });
+  });
   await page.route(`${setupPath}/capacity`, (route) =>
     route.fulfill({
       json: {

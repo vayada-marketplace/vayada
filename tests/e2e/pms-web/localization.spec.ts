@@ -67,6 +67,7 @@ test("applies German across settings and room setup", async ({ page }) => {
   await expect(page.getByText("Zimmergröße (m²)")).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Preise", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Standort", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Bilder & Ausstattung" }).click();

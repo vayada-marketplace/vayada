@@ -113,11 +113,13 @@ const clampNumberInput = (raw: string, min: number, max?: number): number => {
   return n;
 };
 
-export type RoomTab = "details" | "prices" | "media";
+export type RoomTab = "details" | "prices" | "media" | "location";
 const ROOM_TABS: { key: RoomTab; labelKey: string }[] = [
   { key: "details", labelKey: "rooms.form.tabDetails" },
   { key: "prices", labelKey: "rooms.form.tabPricing" },
   { key: "media", labelKey: "rooms.form.tabMedia" },
+  // Its own tab, so Room Details stays short and the room's place is easy to find (VAY-2452).
+  { key: "location", labelKey: "rooms.form.tabLocation" },
 ];
 
 const SELECT_ARROW_STYLE = {
@@ -661,26 +663,6 @@ export default function RoomTypeForm({
               ))}
             </select>
           </div>
-
-          {/* Location */}
-          <RoomLocationField
-            roomId={roomTypeId ?? null}
-            roomName={form.name || ""}
-            value={{
-              locationAddress: form.locationAddress || "",
-              latitude: form.latitude ?? null,
-              longitude: form.longitude ?? null,
-              locationSource: form.locationSource,
-              locationPrecision: form.locationPrecision,
-              locationArea: form.locationArea,
-              showMapInDetails: form.showMapInDetails,
-            }}
-            // Functional: a selected address writes its pin after Google answers, onto the form as it is then.
-            onChange={(patch) =>
-              onChange((prev: RoomTypeCreate | RoomTypeUpdate) => ({ ...prev, ...patch }))
-            }
-            onValidityChange={setLocationValid}
-          />
         </div>
       )}
 
@@ -1194,6 +1176,27 @@ export default function RoomTypeForm({
             </p>
           </div>
         </div>
+      )}
+
+      {activeTab === "location" && (
+        <RoomLocationField
+          roomId={roomTypeId ?? null}
+          roomName={form.name || ""}
+          value={{
+            locationAddress: form.locationAddress || "",
+            latitude: form.latitude ?? null,
+            longitude: form.longitude ?? null,
+            locationSource: form.locationSource,
+            locationPrecision: form.locationPrecision,
+            locationArea: form.locationArea,
+            showMapInDetails: form.showMapInDetails,
+          }}
+          // Functional: a selected address writes its pin after Google answers, onto the form as it is then.
+          onChange={(patch) =>
+            onChange((prev: RoomTypeCreate | RoomTypeUpdate) => ({ ...prev, ...patch }))
+          }
+          onValidityChange={setLocationValid}
+        />
       )}
 
       {/* Submit / Cancel — sticky, with its own background so the form scrolls under it (VAY-2184) */}

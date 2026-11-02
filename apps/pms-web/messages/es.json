@@ -400,6 +400,7 @@
   "rooms.form.tabDetails": "Detalles de la habitacion",
   "rooms.form.tabPricing": "Precios y Tarifas",
   "rooms.form.tabMedia": "Imagenes y Servicios",
+  "rooms.form.tabLocation": "Ubicación",
   "rooms.form.roomTypeBasics": "Datos basicos del tipo de habitacion",
   "rooms.form.requiredLabel": "Obligatorio",
   "rooms.form.roomTypeName": "Nombre del tipo de habitacion",

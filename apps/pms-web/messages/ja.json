@@ -396,6 +396,7 @@
   "rooms.form.tabDetails": "客室詳細",
   "rooms.form.tabPricing": "料金設定",
   "rooms.form.tabMedia": "画像・アメニティ",
+  "rooms.form.tabLocation": "所在地",
   "rooms.form.roomTypeBasics": "客室タイプの基本",
   "rooms.form.requiredLabel": "必須",
   "rooms.form.roomTypeName": "客室タイプ名",

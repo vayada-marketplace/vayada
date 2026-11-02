@@ -903,6 +903,7 @@
   "rooms.form.tabDetails": "Room Details",
   "rooms.form.tabPricing": "Prices",
   "rooms.form.tabMedia": "Images & Amenities",
+  "rooms.form.tabLocation": "Location",
   "rooms.form.roomTypeBasics": "Room Type Basics",
   "rooms.form.requiredLabel": "Required",
   "rooms.form.roomTypeName": "Room Type Name",

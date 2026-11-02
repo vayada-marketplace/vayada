@@ -396,6 +396,7 @@
   "rooms.form.tabDetails": "Детали номера",
   "rooms.form.tabPricing": "Цены и тарифы",
   "rooms.form.tabMedia": "Изображения и удобства",
+  "rooms.form.tabLocation": "Расположение",
   "rooms.form.roomTypeBasics": "Основные данные типа номера",
   "rooms.form.requiredLabel": "Обязательно",
   "rooms.form.roomTypeName": "Название типа номера",
