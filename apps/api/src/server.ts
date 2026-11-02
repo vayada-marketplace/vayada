@@ -101,6 +101,7 @@ import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
 import { createPayoutDestinationCodec } from "./domains/financePayoutDestinationCodec.js";
 import { createPayoutDestinationRepository } from "./domains/financePayoutDestinationRepository.js";
+import { createVayadaPaymentPayoutRepository } from "./domains/vayadaPaymentPayouts.js";
 import { createPaymentMethodWindowsRepository } from "./domains/pricingPaymentWindows.js";
 import { createPgFinanceExpenseCategoryRepository } from "./domains/financeExpenseCategoryRepository.js";
 import { createPgFinanceManualExpenseRepository } from "./domains/financeManualExpenseRepository.js";
@@ -728,6 +729,18 @@ const payoutDestinationRepository =
         afterPaymentChange,
       )
     : undefined;
+// VAY-2442 P5: payouts for Vayada staff. Bank details need the same KMS key to be read.
+const vayadaPaymentPayoutRepository = config.vayadaPaymentEnabled
+  ? createVayadaPaymentPayoutRepository(
+      targetDatabaseUrl,
+      bankTransferKms && config.financeBankTransferKms
+        ? createPayoutDestinationCodec({
+            ...config.financeBankTransferKms,
+            kms: { ...bankTransferKms.write, ...bankTransferKms.decrypt },
+          })
+        : undefined,
+    )
+  : undefined;
 const financeRepository =
   config.financeSource === "target"
     ? createTargetFinancePropertySettingsRepository({
@@ -2186,6 +2199,9 @@ const app = buildApp({
     handleVayadaPaymentWebhook && config.vayadaPaymentStripe?.webhookSecret
       ? { secret: config.vayadaPaymentStripe.webhookSecret, handle: handleVayadaPaymentWebhook }
       : undefined,
+  vayadaPaymentPayouts: vayadaPaymentPayoutRepository
+    ? { repository: vayadaPaymentPayoutRepository }
+    : undefined,
   // VAY-2348: booking windows per payment method, on the ordinary API login (finance).
   financePaymentWindows: config.auth
     ? {
@@ -2515,6 +2531,7 @@ app.addHook("onClose", async () => {
     bankTransferRepository?.close(),
     payoutDestinationRepository?.close(),
     vayadaPaymentWebhookPool?.end(),
+    vayadaPaymentPayoutRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
     bookingDesignMediaAdapter?.close?.(),

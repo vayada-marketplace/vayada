@@ -173,6 +173,7 @@ import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
 import { registerVayadaPaymentWebhookRoutes } from "./routes/vayadaPaymentWebhooks.js";
+import { registerVayadaPaymentPayoutRoutes } from "./routes/vayadaPaymentPayouts.js";
 import { registerFinancePaymentWindowsRoutes } from "./routes/financePaymentWindows.js";
 import {
   registerPlatformMediaRoutes,
@@ -466,6 +467,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financePayoutDestination?: Parameters<typeof registerFinancePayoutDestinationRoutes>[1];
   /** VAY-2442: events from vayada Payment's own Stripe account. */
   vayadaPaymentWebhooks?: Parameters<typeof registerVayadaPaymentWebhookRoutes>[1];
+  vayadaPaymentPayouts?: Parameters<typeof registerVayadaPaymentPayoutRoutes>[1];
   financePaymentWindows?: Parameters<typeof registerFinancePaymentWindowsRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
@@ -1138,6 +1140,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       publicBookabilityPublisher: options.publicBookabilityPublisher,
       ...options.financePayoutDestination,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
+  }
+  // VAY-2442 P5: vayada Payment payouts for Vayada staff, only while the switch is on.
+  if (options.vayadaPaymentPayouts) {
+    app.register(registerVayadaPaymentPayoutRoutes, {
+      prefix: "/api",
+      ...options.vayadaPaymentPayouts,
     });
   }
   if (options.financePaymentWindows) {
