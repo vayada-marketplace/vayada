@@ -855,6 +855,13 @@ describe.skipIf(!url)(
         pricesIncludeMandatoryCharges: false,
         plan: null,
       };
+      /** The dashboards' go-live list, read on the ordinary login like the API does. */
+      const goLive = (h: Awaited<ReturnType<typeof hotel>>) =>
+        createHotelSetupChecklistService({
+          firstRun: h.service(),
+          ...createPgHotelSetupChecklistRepository(h.pool),
+          onlineCardsOffered: false,
+        }).readGoLive(h.actor);
       const pricingHead = async (h: Awaited<ReturnType<typeof hotel>>) =>
         (
           await h.admin.query<{ request_id: string }>(
@@ -917,6 +924,14 @@ describe.skipIf(!url)(
           expect(blockerCodes(await h.readiness())).toEqual([
             expect.stringMatching(/:pricing_rates_placeholder$/),
           ]);
+          // ...and the go-live list says so: rates wait on real prices, the room on its photo.
+          expect(await goLive(h)).toMatchObject({
+            phase: "go_live",
+            setup: { done: 4, total: 4, next: null },
+            canPublish: false,
+            placeholderPrices: true,
+            firstRoomType: { name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 0, priced: true },
+          });
           // ...until the owner saves real prices, the way the Prices page does.
           const pricing = h.pricing();
           const current = (await pricing.read(h.propertyId))!;
@@ -972,6 +987,9 @@ describe.skipIf(!url)(
           });
           expect(await pricingHead(h)).not.toMatch(/^first-run:/);
           expect(blockerCodes(await h.readiness())).toEqual([]);
+          const after = await goLive(h);
+          expect(after?.placeholderPrices).toBe(false);
+          expect(after?.items.find((item) => item.id === "rates")?.state).toBe("done");
         } finally {
           await h.close();
         }
@@ -1004,6 +1022,24 @@ describe.skipIf(!url)(
             firstRoom: false,
             guestPayment: true,
           });
+          const checklist = await goLive(h);
+          expect(checklist).toMatchObject({
+            phase: "go_live",
+            setup: { done: 4, total: 4, next: null },
+            canPublish: false,
+            firstRoomType: null,
+            placeholderPrices: false,
+          });
+          expect(Object.fromEntries(checklist!.items.map((item) => [item.id, item.state]))).toEqual(
+            {
+              property_details: "done",
+              room_types: "todo",
+              rates: "todo",
+              booking_rules: "default_in_use",
+              property_photos: "todo",
+              booking_published: "todo",
+            },
+          );
         } finally {
           await h.close();
         }

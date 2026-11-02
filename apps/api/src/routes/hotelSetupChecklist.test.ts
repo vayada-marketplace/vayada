@@ -93,7 +93,7 @@ describe("hotel setup checklist routes (VAY-2247 wave 2)", () => {
     const acknowledge = vi.fn(async () => checklist as never);
     const response = await call("POST", "/acknowledgements", { acknowledge }, { item: "calendar" });
     expect(response.statusCode).toBe(200);
-    expect(acknowledge).toHaveBeenCalledWith(actor, "calendar");
+    expect(acknowledge).toHaveBeenCalledWith(actor, "calendar", "v1");
     for (const invalid of [{ item: "photos" }, { item: "calendar", extra: 1 }, {}, null])
       expect((await call("POST", "/acknowledgements", { acknowledge }, invalid)).statusCode).toBe(
         400,
@@ -104,9 +104,33 @@ describe("hotel setup checklist routes (VAY-2247 wave 2)", () => {
     const setViewer = vi.fn(async () => checklist as never);
     const response = await call("PUT", "/viewer", { setViewer }, { hidden: true });
     expect(response.statusCode).toBe(200);
-    expect(setViewer).toHaveBeenCalledWith(actor, { hidden: true });
+    expect(setViewer).toHaveBeenCalledWith(actor, { hidden: true }, "v1");
     for (const invalid of [{}, { hidden: "yes" }, { hidden: true, other: true }])
       expect((await call("PUT", "/viewer", { setViewer }, invalid)).statusCode).toBe(400);
+  });
+
+  it("VAY-2451: /checklist/v2 answers with the go-live list, with the same Looks good and viewer", async () => {
+    const goLive = { contractVersion: "hotel-setup-checklist.v2", propertyId, phase: "go_live" };
+    const readGoLive = vi.fn(async () => goLive as never);
+    const read = vi.fn();
+    const response = await call("GET", "/v2", { read, readGoLive });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(goLive);
+    expect(readGoLive).toHaveBeenCalledWith(actor);
+    expect(read).not.toHaveBeenCalled();
+    const acknowledge = vi.fn(async () => goLive as never);
+    expect(
+      (await call("POST", "/v2/acknowledgements", { acknowledge }, { item: "guest_terms" }))
+        .statusCode,
+    ).toBe(200);
+    expect(acknowledge).toHaveBeenCalledWith(actor, "guest_terms", "v2");
+    const setViewer = vi.fn(async () => goLive as never);
+    expect((await call("PUT", "/v2/viewer", { setViewer }, { dismissed: true })).statusCode).toBe(
+      200,
+    );
+    expect(setViewer).toHaveBeenCalledWith(actor, { dismissed: true }, "v2");
+    policy.context = context({ sessionId: null });
+    expect((await call("GET", "/v2", { readGoLive })).statusCode).toBe(403);
   });
 
   it("needs a signed-in session on a hotel group and a property in scope", async () => {
