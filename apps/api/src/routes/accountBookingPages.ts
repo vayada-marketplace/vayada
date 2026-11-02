@@ -1,6 +1,7 @@
 import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
 import {
   AuthorizationError,
+  hasActiveEntitlement,
   resolveEffectivePropertyAccess,
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
@@ -27,13 +28,14 @@ const MESSAGES: Record<AccountBookingPageSaveError, [number, string]> = {
   slug_taken: [409, "This address is already taken. Choose another one."],
   account_needs_two_properties: [
     422,
-    "A booking page for all stays needs at least two properties in the account.",
+    "A booking page for all stays needs at least two active properties in the account.",
   ],
   property_not_in_account: [422, "Only properties of this account can be on its booking page."],
   property_not_ready: [
     422,
     "A property can join once it has a published booking page, a property type and a map location.",
   ],
+  design_property_not_included: [422, "Copy the design from one of the included stays."],
   no_ready_property: [422, "Include at least one ready property before turning the page live."],
 };
 
@@ -58,6 +60,16 @@ export async function registerAccountBookingPageRoutes(
           : null;
       if (access?.mode !== "all")
         return reply.status(403).send({ code: "all_properties_access_required" });
+      // Like the hotels' own booking settings: the booking engine must be active, here for at least
+      // one of the account's properties (a suspended one counts as off).
+      const bookingEngine = access.propertyIds.some((propertyId) =>
+        hasActiveEntitlement(context, {
+          product: "booking",
+          key: "booking-engine",
+          resource: { product: "booking", resourceType: "booking_hotel", resourceId: propertyId },
+        }),
+      );
+      if (!bookingEngine) return reply.status(403).send({ code: "booking_engine_not_active" });
       contexts.set(request, context);
     } catch (error) {
       if (error instanceof UnauthorizedError)

@@ -42,7 +42,7 @@ export type AccountBookingPageSummary = {
   defaults: AccountBookingPageSettings;
   /** Every property of the account, by name. */
   properties: AccountBookingPageProperty[];
-  /** Only accounts with two or more properties can save a page. */
+  /** Only accounts with two or more active properties can create a page or turn it live. */
   canSave: boolean;
 };
 
@@ -53,6 +53,7 @@ export type AccountBookingPageSaveError =
   | "account_needs_two_properties"
   | "property_not_in_account"
   | "property_not_ready"
+  | "design_property_not_included"
   | "no_ready_property";
 
 export type AccountBookingPageSaveCommand = {
@@ -101,9 +102,10 @@ type PropertyRow = {
 
 /**
  * The agency booking page (VAY-2456) as Booking Admin reads and saves it. One page per account; the
- * account's properties are its active owner/operator catalog links. Whether a property is ready is read
- * live with the same rule the public page uses for its booking page (`visibleActiveBookingPublication`),
- * so Booking Admin and guests can't disagree. Saving locks only the page row, checks the revision and
+ * account's properties are its active owner/operator catalog links. Whether a property's booking page is
+ * set up is read live with the public site's rule for setup publications (`visibleActiveBookingPublication`,
+ * only while the site serves them); a hotel served only from a legacy profile counts as not set up.
+ * Pricing prerequisites are the guest read's to check (VAY-2458). Saving locks only the page row, checks the revision and
  * replaces the included list; it takes no lock on identity or pricing rows beyond the key-share checks of
  * its foreign keys (the audit row's account), held until its commit right after.
  */
@@ -179,11 +181,16 @@ async function saveLocked(
   const account = await accountRow(client, organizationId);
   if (!account) return { ok: false, error: "account_not_found" };
   const properties = await propertyRows(client, organizationId);
-  if (properties.length < 2) return { ok: false, error: "account_needs_two_properties" };
+  // A new page, or going live, needs two active properties. A saved page can always be kept or
+  // switched off, also after the account shrank.
+  if (activeCount(properties) < 2 && (update.live || !current))
+    return { ok: false, error: "account_needs_two_properties" };
   const byId = new Map(properties.map((row) => [row.propertyId, row]));
-  const designId = update.settings.header.designPropertyId;
-  if (update.propertyIds.some((id) => !byId.has(id)) || (designId && !byId.has(designId)))
+  if (update.propertyIds.some((id) => !byId.has(id)))
     return { ok: false, error: "property_not_in_account" };
+  const designId = update.settings.header.designPropertyId;
+  if (designId && !update.propertyIds.includes(designId))
+    return { ok: false, error: "design_property_not_included" };
   const readiness = await readinessOf(client, properties);
   // A property can only join the page once it is ready. One included earlier stays included while it
   // isn't (guests never see it), so an unrelated save isn't refused.
@@ -229,12 +236,13 @@ async function saveLocked(
       audit.actorUserId,
       audit.correlationId ?? audit.requestId,
       audit.requestId,
+      // Not the settings: they hold the agency's contact email and WhatsApp number, and this log is
+      // append-only.
       JSON.stringify({
         revision,
         slug: update.slug,
         live: update.live,
         propertyIds: update.propertyIds,
-        settings: update.settings,
       }),
     ],
   );
@@ -250,7 +258,6 @@ async function summary(
   const rows = await propertyRows(client, organizationId);
   const readiness = await readinessOf(client, rows);
   const defaults = defaultAccountBookingPageSettings(account.name);
-  const linked = new Set(rows.map((row) => row.propertyId));
   const saved = account.revision !== null;
   const propertyIds = saved
     ? rows
@@ -260,15 +267,16 @@ async function summary(
     : rows.filter((row) => readiness.get(row.propertyId)?.ready).map((row) => row.propertyId);
   const settings = saved ? readAccountBookingPageSettings(account.settings, defaults) : defaults;
   const designId = settings.header.designPropertyId;
+  const included = new Set(propertyIds);
   return {
     saved,
     page: {
       slug: account.slug ?? suggestAccountBookingPageSlug(account.name),
       live: account.live ?? false,
       revision: account.revision ?? 0,
-      // A property that left the account no longer counts as the design source.
+      // A property that left the page (or the account) no longer counts as the design source.
       settings:
-        designId && !linked.has(designId)
+        designId && !included.has(designId)
           ? { ...settings, header: { ...settings.header, designPropertyId: null } }
           : settings,
       propertyIds,
@@ -281,9 +289,9 @@ async function summary(
       area: row.area,
       ready: readiness.get(row.propertyId)!.ready,
       missing: readiness.get(row.propertyId)!.missing,
-      included: row.position !== null,
+      included: included.has(row.propertyId),
     })),
-    canSave: rows.length >= 2,
+    canSave: activeCount(rows) >= 2,
   };
 }
 
@@ -333,6 +341,8 @@ async function propertyRows(client: Queryable, organizationId: string): Promise<
   return result.rows;
 }
 
+const activeCount = (rows: PropertyRow[]) => rows.filter((row) => row.active).length;
+
 async function readinessOf(
   client: Queryable,
   rows: PropertyRow[],
@@ -341,7 +351,7 @@ async function readinessOf(
   const readiness = new Map<string, { ready: boolean; missing: AccountBookingPageMissing[] }>();
   for (const row of rows) {
     const visible =
-      row.active && row.publishedPropertyId
+      gate.servesPublications && row.active && row.publishedPropertyId
         ? await visibleActiveBookingPublication(
             client,
             { propertyId: row.publishedPropertyId, publicContent: row.publicContent },

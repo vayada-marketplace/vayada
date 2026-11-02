@@ -1,4 +1,4 @@
-import type { LinkedResource, PermissionKey } from "@vayada/backend-auth";
+import type { LinkedResource, PermissionKey, ProductEntitlement } from "@vayada/backend-auth";
 import { defaultAccountBookingPageSettings } from "@vayada/domain-booking";
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
@@ -95,6 +95,7 @@ describe("Agency booking page routes", () => {
       ["account_needs_two_properties", 422],
       ["property_not_in_account", 422],
       ["property_not_ready", 422],
+      ["design_property_not_included", 422],
       ["no_ready_property", 422],
     ];
     for (const [error, status] of expected) {
@@ -118,13 +119,15 @@ describe("Agency booking page routes", () => {
     await app.close();
   });
 
-  it("needs a signed-in member with the booking settings permission and access to every property", async () => {
+  it("needs a signed-in member with the booking settings permission, access to every property and the booking engine", async () => {
     const cases: Array<[number, Parameters<typeof routeApp>[1]]> = [
       [401, { signedIn: false }],
       [403, { permissions: ["booking.settings.read" as PermissionKey] }],
       [403, { mode: "assigned" }],
       [403, { accessOrigin: "external_owner" }],
       [403, { kind: "platform" }],
+      [403, { entitlements: [] }],
+      [403, { entitlements: [{ ...entitlement(propertyA), status: "suspended" }] }],
     ];
     for (const [status, options] of cases) {
       const repository = repositoryFake();
@@ -158,6 +161,7 @@ async function routeApp(
     mode?: "all" | "assigned";
     accessOrigin?: "agency" | "external_owner";
     kind?: "hotel_group" | "platform";
+    entitlements?: ProductEntitlement[];
   } = {},
 ) {
   const app = Fastify({ logger: false });
@@ -185,7 +189,7 @@ async function routeApp(
         permissions: [...(options.permissions ?? ["booking.settings.manage"])],
       },
       linkedResources: [link(propertyA), link(propertyB)],
-      entitlements: [],
+      entitlements: options.entitlements ?? [entitlement(propertyB)],
       locale: "en",
       currency: "EUR",
       audit: {
@@ -209,6 +213,15 @@ async function routeApp(
     },
   });
   return app;
+}
+
+function entitlement(propertyId: string): ProductEntitlement {
+  return {
+    product: "booking",
+    key: "booking-engine",
+    status: "active",
+    resource: { product: "booking", resourceType: "booking_hotel", resourceId: propertyId },
+  };
 }
 
 function link(propertyId: string): LinkedResource {

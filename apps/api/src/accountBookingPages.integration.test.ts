@@ -14,6 +14,7 @@ import {
   createPgAccountBookingPagesRepository,
   type AccountBookingPagesRepository,
 } from "./domains/accountBookingPages.js";
+import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
@@ -42,6 +43,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
 
   beforeAll(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
+    // As in production: the public site serves setup publications.
+    configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
     await admin.query(
       "INSERT INTO identity.users (id, email, name, status) VALUES ($1::uuid, $2, 'VAY-2456', 'active')",
       [actorUserId, `vay-2456-${actorUserId}@example.test`],
@@ -53,6 +56,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
   });
 
   afterAll(async () => {
+    configureActiveBookingPublicationGate({ servesPublications: false, manualPayments: false });
     try {
       await repository?.close?.();
       if (fixture) await fixture.drop();
@@ -81,8 +85,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     });
     expect(summary!.properties).toEqual([
       row(stays.astavaka, "Astavaka Villa", "villa", false, ["setup"]),
-      row(stays.escape, "Escape Villa", "villa", true, []),
-      row(stays.mandala, "Mandala Resort", "resort", true, []),
+      row(stays.escape, "Escape Villa", "villa", true, [], true),
+      row(stays.mandala, "Mandala Resort", "resort", true, [], true),
       row(stays.perum, "Perum Bali", null, false, ["type", "location"]),
       row(stays.mansion, "The Mansion", "hotel", false, ["location"]),
       row(stays.uma, "Uma Nature Villa", "villa", false, ["setup"]),
@@ -155,7 +159,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         error,
       });
     await refuse({ propertyIds: [stays.escape, other.stays.foreign] }, "property_not_in_account");
-    await refuse({ settings: customSettings(other.stays.foreign) }, "property_not_in_account");
+    // The design is copied from an included stay: not another account's, nor one left off the page.
+    await refuse({ settings: customSettings(other.stays.foreign) }, "design_property_not_included");
+    await refuse({ settings: customSettings(stays.mandala) }, "design_property_not_included");
     for (const unready of [stays.astavaka, stays.perum, stays.mansion, stays.uma])
       await refuse({ propertyIds: [stays.escape, unready] }, "property_not_ready");
     await refuse({ live: true, propertyIds: [] }, "no_ready_property");
@@ -227,6 +233,37 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     expect(read!.properties.map((p) => p.propertyId)).not.toContain(stays.mandala);
   });
 
+  it("lets a live page be switched off after the account drops below two active stays", async () => {
+    const { organizationId, stays } = await travelUbud();
+    expect(
+      await repository.save(
+        command(organizationId, update(stays, { live: true, propertyIds: [stays.escape] })),
+      ),
+    ).toMatchObject({ ok: true });
+    await admin.query(
+      `UPDATE hotel_catalog.properties SET lifecycle_status = 'retired'
+       WHERE id = ANY($1::uuid[])`,
+      [[stays.mandala, stays.mansion, stays.perum, stays.astavaka, stays.uma]],
+    );
+    expect(await repository.read(organizationId)).toMatchObject({ canSave: false });
+    expect(
+      await repository.save(
+        command(
+          organizationId,
+          update(stays, { revision: 1, live: true, propertyIds: [stays.escape] }),
+        ),
+      ),
+    ).toEqual({ ok: false, error: "account_needs_two_properties" });
+    expect(
+      await repository.save(
+        command(
+          organizationId,
+          update(stays, { revision: 1, live: false, propertyIds: [stays.escape] }),
+        ),
+      ),
+    ).toMatchObject({ ok: true, summary: { page: { live: false, revision: 2 } } });
+  });
+
   // Public pricing locks the account row FOR UPDATE in short transactions. Reading never waits for it;
   // a save only waits at its audit row (a key-share lock on the account), then finishes.
   it("reads while public pricing holds the account row, and saves once it lets go", async () => {
@@ -241,8 +278,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         organizationId,
       ]);
       expect(await repository.read(organizationId)).toMatchObject({ saved: true });
-      const saving = repository.save(command(organizationId, update(stays, { revision: 1 })));
+      let settled = false;
+      const saving = repository
+        .save(command(organizationId, update(stays, { revision: 1 })))
+        .finally(() => (settled = true));
       await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(settled).toBe(false);
       await pricing.query("ROLLBACK");
       expect(await saving).toMatchObject({ ok: true, summary: { page: { revision: 2 } } });
     } finally {
@@ -408,8 +449,9 @@ function row(
   propertyType: string | null,
   ready: boolean,
   missing: string[],
+  included = false,
 ) {
-  return { propertyId, name, propertyType, area: "Ubud", ready, missing, included: false };
+  return { propertyId, name, propertyType, area: "Ubud", ready, missing, included };
 }
 
 function customSettings(designPropertyId: string): AccountBookingPageSettings {
