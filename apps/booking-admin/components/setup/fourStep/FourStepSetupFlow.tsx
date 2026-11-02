@@ -300,7 +300,8 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
     try {
       const saved = await saveQuickHotel(
         {
-          draft,
+          // WhatsApp is the phone until the owner unticks "Same as phone" (the box starts ticked).
+          draft: { ...draft, whatsappSameAsPhone: draft.whatsappSameAsPhone !== false },
           currency,
           language: quickSetupLanguage(typeof navigator === "undefined" ? [] : navigator.languages),
           logo: logo?.file ?? null,
