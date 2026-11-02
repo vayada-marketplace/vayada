@@ -285,7 +285,7 @@ describe("hotel first run (VAY-2247)", () => {
 });
 
 describe("the four-step setup's first run (VAY-2451)", () => {
-  const fourStep = { ...request, rooms: [], pricesIncludeMandatoryCharges: false };
+  const fourStep = { ...request, rooms: [], pricesIncludeMandatoryCharges: false, plan: null };
 
   it("gives the room type the setup made the placeholder price, sized to its own guests", async () => {
     const result = await service().first.run(actor, fourStep, null);
@@ -351,6 +351,32 @@ describe("first run step 7: the plan (VAY-2247)", () => {
       propertyId,
       idempotencyKey: expect.stringMatching(/^first-run:v1:plan:/),
     });
+  });
+
+  it("VAY-2451: without a chosen plan, Commission, unless a Fixed Fee checkout is open", async () => {
+    const none = ports();
+    expect(await runFirstRunPlan(none, actor, { plan: null, customerEmail: null })).toEqual({
+      ok: true,
+      wrote: true,
+    });
+    const checkout = ports({
+      getPlanStatus: vi.fn(async () => ({ plan: null, checkoutPending: true })),
+    });
+    expect(await runFirstRunPlan(checkout, actor, { plan: null, customerEmail: null })).toEqual({
+      ok: true,
+      wrote: false,
+    });
+    expect(checkout.plans.selectCommissionPlan).not.toHaveBeenCalled();
+    // The same key as an owner's own Commission choice: a retry from either replays.
+    const chosen = ports();
+    await runFirstRunPlan(chosen, actor, { plan: "commission", customerEmail: null });
+    expect(
+      (chosen.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock.calls[0]![0]
+        .idempotencyKey,
+    ).toBe(
+      (none.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock.calls[0]![0]
+        .idempotencyKey,
+    );
   });
 
   it("keeps a plan the hotel already has", async () => {

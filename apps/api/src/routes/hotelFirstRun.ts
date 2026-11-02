@@ -141,7 +141,8 @@ export function parseHotelFirstRunRequest(value: unknown): HotelFirstRunRequest 
 /**
  * VAY-2451: the four-step setup sends only `{ guestPayment: "pay_at_property" }`. It made its room type itself
  * (or skipped it) and asks for no price or plan: the first run gives that room type the placeholder price and
- * the hotel the Commission plan unless it has a plan already (changed later in Settings › Billing).
+ * the hotel the Commission plan, unless it has a plan or a Fixed Fee checkout already (changed later in
+ * Settings › Billing).
  */
 function parseFourStepRequest(value: Record<string, unknown>): HotelFirstRunRequest | null {
   if (value.guestPayment !== "pay_at_property") return null;
@@ -149,7 +150,7 @@ function parseFourStepRequest(value: Record<string, unknown>): HotelFirstRunRequ
     rooms: Object.freeze([]),
     pricesIncludeMandatoryCharges: false,
     guestPayment: "pay_at_property",
-    plan: "commission",
+    plan: null,
     freeCancellationDays: FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
     bed: FIRST_RUN_DEFAULT_BED,
   });

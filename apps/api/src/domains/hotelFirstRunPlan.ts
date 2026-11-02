@@ -29,14 +29,19 @@ export type HotelFirstRunPlanOutcome =
 export async function runFirstRunPlan(
   ports: HotelFirstRunPlanPorts,
   actor: HotelFirstRunActor,
-  input: Readonly<{ plan: HotelFirstRunPlanChoice; customerEmail: string | null }>,
+  /** `plan: null` (VAY-2451, the four-step setup asks for none): Commission, unless a Fixed Fee checkout is open. */
+  input: Readonly<{ plan: HotelFirstRunPlanChoice | null; customerEmail: string | null }>,
 ): Promise<HotelFirstRunPlanOutcome> {
   const status = await ports.plans.getPlanStatus(actor.propertyId);
   // A plan the hotel already has is kept, whichever it is.
   if (status.plan) return Object.freeze({ ok: true, wrote: false });
+  // Selecting Commission would expire a Fixed Fee checkout the hotel started; the plan waits for Stripe.
+  if (input.plan === null && status.checkoutPending)
+    return Object.freeze({ ok: true, wrote: false });
+  const plan = input.plan ?? "commission";
   const context = (reason: string) => ({
-    commandId: firstRunUuid(actor.propertyId, "first_run_plan_command", input.plan),
-    idempotencyKey: firstRunIdempotencyKey(actor.propertyId, "plan", input.plan),
+    commandId: firstRunUuid(actor.propertyId, "first_run_plan_command", plan),
+    idempotencyKey: firstRunIdempotencyKey(actor.propertyId, "plan", plan),
     propertyId: actor.propertyId,
     organizationId: actor.organizationId,
     audit: {
@@ -48,7 +53,7 @@ export async function runFirstRunPlan(
     },
   });
 
-  if (input.plan === "commission") {
+  if (plan === "commission") {
     const result = await ports.plans.selectCommissionPlan(
       context("Select Commission Plan (hotel first run)"),
     );

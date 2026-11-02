@@ -150,7 +150,7 @@ describe("hotel first run routes (VAY-2247)", () => {
       rooms: [],
       pricesIncludeMandatoryCharges: false,
       guestPayment: "pay_at_property",
-      plan: "commission",
+      plan: null,
       ...defaults,
     });
   });

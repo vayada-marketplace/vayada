@@ -104,6 +104,9 @@ async function publish(
   ) {
     return Object.freeze({ ok: true, wrote: false });
   }
+  // VAY-2451: the placeholder only ever comes first. A hotel with prices keeps them and its setup room waits
+  // for the owner's own price, so the system's declaration never covers prices the owner set.
+  if (input.placeholder && current) return Object.freeze({ ok: true, wrote: false });
   if (current && current.currency !== input.currency)
     return fail("first_run_pricing_currency_mismatch");
   const baseRevision = current?.revision ?? 0;
@@ -126,6 +129,8 @@ async function publish(
     baseRevision,
     built.configuration,
     built.terms.cancellation,
+    // An owner's own price of 100 must not replay the placeholder's draft (VAY-2451).
+    ...(input.placeholder ? ["placeholder"] : []),
   );
   const draftContext = { draftId, baseRevision };
   const key = (step: string) => firstRunIdempotencyKey(propertyId, step, [draftId]);

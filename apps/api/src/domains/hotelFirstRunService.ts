@@ -52,7 +52,8 @@ export type HotelFirstRunRequest = Readonly<{
   pricesIncludeMandatoryCharges: boolean;
   /** Online card comes later (VAY-2205): the first run only sets up paying at the property. */
   guestPayment: "pay_at_property";
-  plan: HotelFirstRunPlanChoice;
+  /** Null from the four-step setup (VAY-2451): Commission unless the hotel has a plan or a Fixed Fee checkout. */
+  plan: HotelFirstRunPlanChoice | null;
   /** The owner's choices for every room type the first run makes (1.12b): free cancellation and beds. */
   freeCancellationDays: FirstRunFreeCancellationDays;
   bed: FirstRunBedChoice;

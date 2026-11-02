@@ -853,6 +853,7 @@ describe.skipIf(!url)(
         ...request,
         rooms: [],
         pricesIncludeMandatoryCharges: false,
+        plan: null,
       };
       const pricingHead = async (h: Awaited<ReturnType<typeof hotel>>) =>
         (

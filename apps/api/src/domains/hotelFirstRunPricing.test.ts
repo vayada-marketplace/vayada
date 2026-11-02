@@ -182,6 +182,27 @@ describe("first run step 4: the first price (VAY-2247)", () => {
     });
   });
 
+  it("never puts the placeholder next to prices the hotel already has (VAY-2451)", async () => {
+    // Another room type is priced: the setup's room waits for the owner's own price.
+    const fake = fakePricing();
+    const read = fake.ports.pricing.read;
+    fake.ports.pricing.read = async (id: string) =>
+      (await read(id)) ?? {
+        revision: 3,
+        currency: "EUR",
+        rooms: [{ roomTypeId: "11111111-1111-4111-8111-111111111111", offers: [{}] }],
+      };
+    expect(
+      await runFirstRunPricing(fake.ports, actor, {
+        roomTypeId,
+        capacity: input.capacity,
+        currency: "EUR",
+        placeholder: true,
+      }),
+    ).toEqual({ ok: true, wrote: false });
+    expect(fake.calls.map(([name]) => name)).toEqual(["read"]);
+  });
+
   it("stages the owner's cancellation days, in their own draft (1.12b)", async () => {
     const draftOf = async (freeCancellationDays?: 1 | 3 | 7 | 14) => {
       const fake = fakePricing();
