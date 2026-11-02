@@ -42,25 +42,26 @@ export function CardNotReadyBanner({
   providerSectionId: string;
 }) {
   const { t } = useTranslation();
+  // One line, as in Timo's mockup: what's wrong, why, and where to fix it (VAY-2424).
   return (
     <div
       role="status"
       data-testid="card-not-ready-banner"
-      className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3"
+      className="flex flex-wrap items-center gap-3 rounded-[10px] border border-amber-300 bg-amber-50 px-4 py-3.5 text-sm"
     >
-      <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden />
-      <div className="min-w-0 text-[13px]">
-        <p className="font-semibold text-amber-900">{t("settings.billing.cardNotReadyTitle")}</p>
-        <p className="mt-0.5 text-amber-800">{t(REASON_TEXT[reason])}</p>
-        {LINK_TEXT[reason] && (
-          <a
-            href={`#${providerSectionId}`}
-            className="mt-1 inline-block font-semibold text-amber-900 underline underline-offset-2 hover:no-underline"
-          >
-            {t(LINK_TEXT[reason])}
-          </a>
-        )}
-      </div>
+      <ExclamationTriangleIcon className="h-5 w-5 shrink-0 text-amber-700" aria-hidden />
+      <span className="min-w-0 flex-[1_1_300px] text-amber-900">
+        <strong className="font-semibold">{t("settings.billing.cardNotReadyTitle")}</strong>{" "}
+        {t(REASON_TEXT[reason])}
+      </span>
+      {LINK_TEXT[reason] && (
+        <a
+          href={`#${providerSectionId}`}
+          className="font-semibold text-amber-800 underline underline-offset-2 hover:no-underline"
+        >
+          {t(LINK_TEXT[reason])}
+        </a>
+      )}
     </div>
   );
 }

@@ -15,8 +15,10 @@ test("an owner adds the bank account vayada Payment pays out to, and removes it 
   const { writes } = await mockVayadaPayments(page, { available: true });
   await page.goto("/settings/payments");
 
-  const vayada = page.getByRole("button", { name: /vayada Payment/ });
+  const vayada = page.getByRole("radio", { name: /vayada Payment/ });
   await expect(vayada).toBeEnabled();
+  await expect(vayada).toBeChecked();
+  await expect(page.getByTestId("payment-provider-status")).toHaveText("Not connected");
   // Card is on with vayada Payment, but there's nowhere to pay the hotel out to yet.
   await expect(
     page.getByText("There's no bank account for vayada Payment to pay you out to yet."),
@@ -40,6 +42,7 @@ test("an owner adds the bank account vayada Payment pays out to, and removes it 
   await save.click();
   await expect(page.getByText("Bank account saved.")).toBeVisible();
   await expect(page.getByText("Indonesia · account •••• 6789")).toBeVisible();
+  await expect(page.getByTestId("payment-provider-status")).toHaveText("Connected");
   expect(writes[0]).toMatchObject({
     action: "replace",
     expectedVersion: 0,
@@ -85,8 +88,33 @@ test("vayada Payment can't be chosen until it is switched on (VAY-2442)", async 
   );
   await mockVayadaPayments(page, { available: false });
   await page.goto("/settings/payments");
-  await expect(page.getByRole("button", { name: /vayada Payment/ })).toBeDisabled();
+  await expect(page.getByRole("radio", { name: /vayada Payment/ })).toBeDisabled();
+  // Xendit waits for VAY-2443.
+  await expect(page.getByRole("radio", { name: /Xendit/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save bank account" })).toHaveCount(0);
+});
+
+test("a hotel saved on vayada Payment, now switched off, can still move to Stripe by keyboard (VAY-2424)", async ({
+  page,
+}) => {
+  test.skip(
+    !PROD,
+    "Requires a production booking-admin build so the authenticated shell hydrates.",
+  );
+  await mockVayadaPayments(page, { available: false, provider: "vayada" });
+  await page.goto("/settings/payments");
+  const vayada = page.getByRole("radio", { name: /vayada Payment/ });
+  const stripe = page.getByRole("radio", { name: /Stripe Connect/ });
+  await expect(vayada).toBeChecked();
+  // The saved choice stays reachable, so the group stays in the tab order.
+  await expect(vayada).toBeEnabled();
+  await expect(page.getByText("Coming soon", { exact: true })).toBeVisible();
+  await vayada.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(stripe).toBeChecked();
+  await expect(page.getByRole("button", { name: "Connect Stripe account" })).toBeVisible();
+  // Once left, vayada Payment can't be picked again while it is switched off.
+  await expect(vayada).toBeDisabled();
 });
 
 test("a hotel on Stripe chooses vayada Payment and saves it with the page (VAY-2442)", async ({
@@ -101,7 +129,11 @@ test("a hotel on Stripe chooses vayada Payment and saves it with the page (VAY-2
     provider: "stripe",
   });
   await page.goto("/settings/payments");
-  await page.getByRole("button", { name: /vayada Payment/ }).click();
+  await page
+    .locator("label")
+    .filter({ has: page.getByRole("radio", { name: /vayada Payment/ }) })
+    .click();
+  await expect(page.getByRole("radio", { name: /vayada Payment/ })).toBeChecked();
   await expect(page.getByRole("button", { name: "Save bank account" })).toBeVisible();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect.poll(() => settingsWrites.length).toBe(1);

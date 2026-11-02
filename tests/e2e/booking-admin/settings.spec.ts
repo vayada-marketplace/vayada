@@ -33,6 +33,13 @@ const offer = (page: Page, method: string) =>
   page.getByRole("switch", { name: `Offer ${method}`, exact: true });
 const atHotel = (page: Page, choice: "Cash" | "Card") =>
   page.getByRole("checkbox", { name: choice, exact: true });
+// Step 2's provider cards are labels around a radio (VAY-2424).
+const provider = (page: Page, name: RegExp) => page.getByRole("radio", { name });
+const pickProvider = (page: Page, name: RegExp) =>
+  page
+    .locator("label")
+    .filter({ has: provider(page, name) })
+    .click();
 
 test.describe("booking-admin settings no-legacy guard", () => {
   test("loads and saves the shared same-day booking cutoff", async ({ page }, testInfo) => {
@@ -1273,7 +1280,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/settings/payments");
-    const dashboardButton = page.getByRole("button", { name: "View Stripe Dashboard" });
+    const dashboardButton = page.getByRole("button", { name: "Open Stripe dashboard" });
     await expect(dashboardButton).toBeVisible();
     await expect(
       page.getByText(
@@ -1291,7 +1298,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
     stripeConnected = false;
     await page.reload();
     await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "View Stripe Dashboard" })).toHaveCount(0);
+    // Checked once the page has loaded, so the button's absence means something.
+    await expect(page.getByTestId("payment-provider-status")).toHaveText("Not connected");
+    await expect(page.getByRole("button", { name: "Open Stripe dashboard" })).toHaveCount(0);
 
     await assertHealthy();
   });
@@ -1386,11 +1395,11 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/settings/payments");
-    await page.getByRole("button", { name: /Stripe Connect/ }).click();
+    await pickProvider(page, /Stripe Connect/);
     // VAY-2424: no country picker; the API opens the account in the hotel's address country.
     await expect(page.getByText("Country", { exact: true })).toHaveCount(0);
     const firstPopup = page.waitForEvent("popup");
-    await page.getByRole("button", { name: "Connect Payment Account" }).click();
+    await page.getByRole("button", { name: "Connect Stripe account" }).click();
     const onboarding = await firstPopup;
     await onboarding.waitForURL("about:blank#stripe-onboarding");
     expect(order).toEqual(["save", "create"]);
@@ -1398,18 +1407,16 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await onboarding.close();
 
     await page.reload();
-    await expect(page.getByRole("button", { name: /Stripe Connect/ })).toHaveClass(
-      /border-primary-500/,
-    );
-    await expect(page.getByRole("button", { name: "Connect Payment Account" })).toBeVisible();
+    await expect(provider(page, /Stripe Connect/)).toBeChecked();
+    await expect(page.getByRole("button", { name: "Connect Stripe account" })).toBeVisible();
 
     persistedProvider = "vayada";
     failSave = true;
     order.length = 0;
     await page.reload();
-    await page.getByRole("button", { name: /Stripe Connect/ }).click();
+    await pickProvider(page, /Stripe Connect/);
     const failedPopup = page.waitForEvent("popup");
-    await page.getByRole("button", { name: "Connect Payment Account" }).click();
+    await page.getByRole("button", { name: "Connect Stripe account" }).click();
     const closedPopup = await failedPopup;
     await closedPopup.waitForEvent("close");
 
@@ -1432,9 +1439,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
       failSave = false;
       createError = { code, message: "API message" };
       await page.reload();
-      await page.getByRole("button", { name: /Stripe Connect/ }).click();
+      await pickProvider(page, /Stripe Connect/);
       const closingPopup = page.waitForEvent("popup");
-      await page.getByRole("button", { name: "Connect Payment Account" }).click();
+      await page.getByRole("button", { name: "Connect Stripe account" }).click();
       await (await closingPopup).waitForEvent("close");
       await expect(page.getByText(text)).toBeVisible();
     }
@@ -1505,7 +1512,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await page.goto("/settings/payments");
     const popup = page.waitForEvent("popup");
-    await page.getByRole("button", { name: "Complete Onboarding" }).dblclick();
+    await expect(page.getByTestId("payment-provider-status")).toHaveText("Setup not finished");
+    await page.getByRole("button", { name: "Finish setup" }).dblclick();
     const onboarding = await popup;
     await onboarding.waitForURL("about:blank#stripe-relink");
 
@@ -1650,7 +1658,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await initialReadFinished;
     await page.waitForTimeout(100);
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-    await expect(page.getByText("Pending Onboarding", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Setup not finished", { exact: true })).toHaveCount(0);
     const markerKey = stripeOnboardingPropertyKey(BOOKING_ADMIN_PROPERTY_ID);
     await expect
       .poll(() => page.evaluate((key) => window.localStorage.getItem(key), markerKey))
@@ -1673,12 +1681,15 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.goto("/settings?stripe=return");
     await expect(page).toHaveURL(/\/settings\/payments$/);
     await expect(page.getByText("Couldn't refresh Stripe status.")).toBeVisible();
-    await expect(page.getByText("Pending Onboarding", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(/^Stripe account status couldn't be confirmed\./, { exact: false }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "Check Stripe status" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Connect payment account" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Connect Stripe account" })).toHaveCount(0);
+    await expect(page.getByRole("radio")).toHaveCount(0);
     await page.getByRole("button", { name: "Check Stripe status" }).click();
     await expect(page.getByText("Couldn't refresh Stripe status.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Connect payment account" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Connect Stripe account" })).toHaveCount(0);
     expect(forbiddenSetupRequests).toEqual([]);
     await assertNoLegacyCalls();
   });
@@ -1743,8 +1754,8 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
   });
   // VAY-2424: one Save for the page, offered once something changed.
   const savePayments = page.getByRole("button", { name: "Save changes", exact: true });
-  await expect(savePayments).toBeDisabled();
-  await expect(page.getByText("No unsaved changes", { exact: true })).toBeVisible();
+  await expect(savePayments).toHaveCount(0);
+  // VAY-2424: the save bar shows only once something changed.
   await offer(page, "Pay at hotel").click();
   await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
   const response = page.waitForResponse(
@@ -1840,13 +1851,13 @@ test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ pag
     contentType: "image/png",
   });
   // Untouched, there is nothing to save (VAY-2424).
-  await expect(savePaymentsButton(page)).toBeDisabled();
+  await expect(savePaymentsButton(page)).toHaveCount(0);
 
   // Off and on again still shows Cash and Card, so nothing changed.
   await offer(page, "Pay at hotel").click();
   await offer(page, "Pay at hotel").click();
   await expect(atHotel(page, "Card")).toBeChecked();
-  await expect(savePaymentsButton(page)).toBeDisabled();
+  await expect(savePaymentsButton(page)).toHaveCount(0);
 
   // Saving another change sends setup's plain Pay at Hotel back unchanged.
   await turnOnPayPal(page);
@@ -2076,7 +2087,7 @@ test("saves bank details first and says what saved when the methods don't", asyn
   });
   await page.goto("/settings/payments");
   const save = savePaymentsButton(page);
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
   await offer(page, "Bank transfer").click();
   // Checked before anything is sent: bank transfer needs the bank details.
   await save.click();
@@ -2107,7 +2118,8 @@ test("saves bank details first and says what saved when the methods don't", asyn
   expect(writes.at(-1)).toEqual({
     acceptedMethods: ["pay_at_property", "cash", "manual_card", "bank_transfer"],
   });
-  await expect(save).toBeDisabled();
+  // Saved: the bar says so, then goes (VAY-2424).
+  await expect(save).toHaveCount(0);
 
   // Discard puts unsaved choices back.
   await atHotel(page, "Cash").uncheck();
@@ -2115,7 +2127,7 @@ test("saves bank details first and says what saved when the methods don't", asyn
   await page.getByRole("button", { name: "Discard", exact: true }).click();
   await expect(atHotel(page, "Cash")).toBeChecked();
   await expect(atHotel(page, "Card")).toBeChecked();
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
 });
 
 // VAY-2424: Credit card on, but guests can't use it yet: say so at the top, and why.
@@ -2176,7 +2188,9 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   await page.goto("/settings/payments");
   const banner = page.getByTestId("card-not-ready-banner");
   await expect(banner).toContainText("Guests can't pay by card yet.");
-  await expect(banner).toContainText("No account for card payments is connected.");
+  await expect(banner).toContainText(
+    "Credit card is turned on, but no payment account is connected.",
+  );
   await expect(paymentMethods(page).getByText("Credit card", { exact: true })).toBeVisible();
   await expect(
     paymentMethods(page).getByText(
@@ -2192,12 +2206,21 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   ).toBeVisible();
   await expect(page.getByText(/via Stripe|Stripe fees/)).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("vay2424-card-not-connected.png") });
-  await banner.getByRole("link", { name: "Connect an account" }).click();
+  await banner.getByRole("link", { name: "Connect in Step 2" }).click();
   await expect(page).toHaveURL(/#payment-provider$/);
   await expect(
     page.getByRole("heading", { name: "Where you receive card payments", exact: true }),
   ).toBeInViewport();
   expect(readinessReads).toEqual([]);
+  // Step 2 and the warning are about Credit card: switched off (not saved yet), both go.
+  const step2 = page.getByRole("region", { name: "Where you receive card payments" });
+  await expect(step2).toBeVisible();
+  await offer(page, "Credit card").click();
+  await expect(step2).toHaveCount(0);
+  await expect(banner).toHaveCount(0);
+  await offer(page, "Credit card").click();
+  await expect(step2).toBeVisible();
+  await expect(banner).toBeVisible();
 
   // An account whose setup isn't finished is not "no account".
   settings = cardPaymentSettings("pending");
@@ -2223,7 +2246,8 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   );
   await page.reload();
   await readyRead;
-  await expect(page.getByRole("button", { name: "View Stripe Dashboard" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Stripe dashboard" })).toBeVisible();
+  await expect(page.getByTestId("payment-provider-status")).toHaveText("Connected");
   await expect(banner).toHaveCount(0);
   await expect(page.getByText(/^Hidden from guests until/)).toHaveCount(0);
 
