@@ -1754,8 +1754,8 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
   });
   // VAY-2424: one Save for the page, offered once something changed.
   const savePayments = page.getByRole("button", { name: "Save changes", exact: true });
-  await expect(savePayments).toBeDisabled();
-  await expect(page.getByText("No unsaved changes", { exact: true })).toBeVisible();
+  await expect(savePayments).toHaveCount(0);
+  // VAY-2424: the save bar shows only once something changed.
   await offer(page, "Pay at hotel").click();
   await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
   const response = page.waitForResponse(
@@ -1851,13 +1851,13 @@ test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ pag
     contentType: "image/png",
   });
   // Untouched, there is nothing to save (VAY-2424).
-  await expect(savePaymentsButton(page)).toBeDisabled();
+  await expect(savePaymentsButton(page)).toHaveCount(0);
 
   // Off and on again still shows Cash and Card, so nothing changed.
   await offer(page, "Pay at hotel").click();
   await offer(page, "Pay at hotel").click();
   await expect(atHotel(page, "Card")).toBeChecked();
-  await expect(savePaymentsButton(page)).toBeDisabled();
+  await expect(savePaymentsButton(page)).toHaveCount(0);
 
   // Saving another change sends setup's plain Pay at Hotel back unchanged.
   await turnOnPayPal(page);
@@ -2087,7 +2087,7 @@ test("saves bank details first and says what saved when the methods don't", asyn
   });
   await page.goto("/settings/payments");
   const save = savePaymentsButton(page);
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
   await offer(page, "Bank transfer").click();
   // Checked before anything is sent: bank transfer needs the bank details.
   await save.click();
@@ -2118,7 +2118,8 @@ test("saves bank details first and says what saved when the methods don't", asyn
   expect(writes.at(-1)).toEqual({
     acceptedMethods: ["pay_at_property", "cash", "manual_card", "bank_transfer"],
   });
-  await expect(save).toBeDisabled();
+  // Saved: the bar says so, then goes (VAY-2424).
+  await expect(save).toHaveCount(0);
 
   // Discard puts unsaved choices back.
   await atHotel(page, "Cash").uncheck();
@@ -2126,7 +2127,7 @@ test("saves bank details first and says what saved when the methods don't", asyn
   await page.getByRole("button", { name: "Discard", exact: true }).click();
   await expect(atHotel(page, "Cash")).toBeChecked();
   await expect(atHotel(page, "Card")).toBeChecked();
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
 });
 
 // VAY-2424: Credit card on, but guests can't use it yet: say so at the top, and why.
