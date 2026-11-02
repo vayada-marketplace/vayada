@@ -20,7 +20,9 @@ export function liveChecklistFacts(propertyId: string): HotelSetupChecklistFacts
   };
 }
 
-const CHECKLIST_API = /\/api\/hotel-setup\/properties\/[^/]+\/checklist(\/[a-z]+)?$/;
+const CHECKLIST_API = /\/api\/hotel-setup\/properties\/[^/]+\/checklist(\/v2)?(\/[a-z]+)?$/;
+/** VAY-2451: the go-live list (HOTEL_GO_LIVE_CHECKLIST_ENABLED), not served unless a spec says so. */
+const GO_LIVE_PATH = /\/checklist\/v2(\/[a-z]+)?$/;
 
 /**
  * The checklist API as production has it while the server's first run is off: not mounted (404). The
@@ -51,6 +53,9 @@ export async function mockSetupChecklist(
     const headers = corsHeaders(route);
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     const path = new URL(request.url()).pathname;
+    // Today's checklist: the go-live list is switched off (404), as in production.
+    if (GO_LIVE_PATH.test(path))
+      return route.fulfill({ status: 404, headers, json: { error: "Not Found" } });
     if (request.method() !== "GET") {
       const body = request.postDataJSON() as Record<string, unknown>;
       writes.push({ method: request.method(), path, body });

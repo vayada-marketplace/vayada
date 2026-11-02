@@ -13,7 +13,7 @@ const ignoredConsoleErrorPatterns = [
  * mounted while the server's first run is off, VAY-2247). A 404 for any other property or path still fails. */
 const expectedMissingByDefault = [
   /\/api\/pms\/properties\/f6853000-0000-4000-8000-000000000001\/pricing-v2$/,
-  /\/api\/hotel-setup\/properties\/f6853000-0000-4000-8000-000000000001\/checklist$/,
+  /\/api\/hotel-setup\/properties\/f6853000-0000-4000-8000-000000000001\/checklist(\/v2)?$/,
 ];
 
 /** `expectedMissingUrls`: resources whose 404 is a documented "not configured yet" answer. */
