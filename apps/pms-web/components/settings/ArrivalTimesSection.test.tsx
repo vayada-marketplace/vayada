@@ -262,6 +262,36 @@ describe("Check-in & check-out settings", () => {
     expect(status(view)).toBe("Saved. Your booking page updates within a minute.");
   });
 
+  it("previews the booking page as the hotel edits, before anything is saved", async () => {
+    const view = await render();
+    const preview = () => textOf(view.root.find((node) => node.type === "aside"));
+    for (const shown of [
+      "Villa",
+      "Ubud",
+      "From 15:00",
+      "By 11:00",
+      "Adults only",
+      "Phone number *",
+    ])
+      expect(preview()).toContain(shown);
+    expect(preview()).not.toContain("Estimated arrival time");
+    await toggle(view, 2);
+    await toggle(view, 3);
+    await act(() => view.root.findByProps({ type: "radio", value: "yes" }).props.onChange());
+    await act(() =>
+      view.root.findByProps({ type: "number" }).props.onChange({ target: { value: "16" } }),
+    );
+    await setTime(view, 0, "14:00");
+    for (const shown of [
+      "From 14:00",
+      "Welcome · under 16 = child",
+      "Phone number (optional)",
+      "Check-in opens at 14:00",
+    ])
+      expect(preview()).toContain(shown);
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
   it("never saves made-up choices when loading fails or nothing was chosen before", async () => {
     api.load.mockRejectedValueOnce(new Error("offline"));
     api.facts.mockRejectedValue(new Error("no access to the property profile"));

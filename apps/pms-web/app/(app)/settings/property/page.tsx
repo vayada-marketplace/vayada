@@ -121,42 +121,47 @@ export default function PropertySettingsPage() {
     <SettingsSubPage
       title={t("settings.navigation.property")}
       description={t("settings.cards.property.description")}
+      wide
     >
-      <SettingsFeedback error={error} success={success} />
-      {canEditLocation ? (
-        <PropertySection
-          timezone={timezone}
-          setTimezone={setTimezone}
-          country={country}
-          setCountry={setCountry}
-          saving={savingProperty}
-          loadStatus={propertyProfileLoadStatus}
-          loadError={propertyProfileLoadError}
-          onRetry={loadPropertyProfile}
-          onSave={savePropertyDetails}
-        />
-      ) : (
+      {/* Check-in & check-out puts its booking page preview beside the cards (VAY-2455); the other sections keep
+          the reading width. */}
+      <div className="[&>*:not(#arrival-times)]:max-w-3xl">
+        <SettingsFeedback error={error} success={success} />
+        {canEditLocation ? (
+          <PropertySection
+            timezone={timezone}
+            setTimezone={setTimezone}
+            country={country}
+            setCountry={setCountry}
+            saving={savingProperty}
+            loadStatus={propertyProfileLoadStatus}
+            loadError={propertyProfileLoadError}
+            onRetry={loadPropertyProfile}
+            onSave={savePropertyDetails}
+          />
+        ) : (
+          <SettingsSection
+            id="property-details"
+            title={t("settings.property.locationTitle")}
+            description={t("settings.property.locationDescription")}
+          >
+            <SettingsAccessNote access="none" />
+          </SettingsSection>
+        )}
         <SettingsSection
-          id="property-details"
-          title={t("settings.property.locationTitle")}
-          description={t("settings.property.locationDescription")}
+          id="arrival-times"
+          title={t("settings.arrivalTimes.title")}
+          description={t("settings.arrivalTimes.description")}
         >
-          <SettingsAccessNote access="none" />
+          {canEditArrivalTimes ? <ArrivalTimesSection /> : <SettingsAccessNote access="none" />}
         </SettingsSection>
-      )}
-      <SettingsSection
-        id="arrival-times"
-        title={t("settings.arrivalTimes.title")}
-        description={t("settings.arrivalTimes.description")}
-      >
-        {canEditArrivalTimes ? <ArrivalTimesSection /> : <SettingsAccessNote access="none" />}
-      </SettingsSection>
-      <LocalizationSection
-        currency={currency}
-        currencyLoadError={currencyLoadError}
-        currencyLoadStatus={currencyLoadStatus}
-        onCurrencyChanged={setCurrency}
-      />
+        <LocalizationSection
+          currency={currency}
+          currencyLoadError={currencyLoadError}
+          currencyLoadStatus={currencyLoadStatus}
+          onCurrencyChanged={setCurrency}
+        />
+      </div>
     </SettingsSubPage>
   );
 }

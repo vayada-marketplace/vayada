@@ -29,6 +29,7 @@ import {
   type ArrivalForm,
 } from "./arrivalTimes/arrivalTimesForm";
 import { timeZoneLabel } from "./arrivalTimes/arrivalTimesText";
+import { BookingPagePreview } from "./arrivalTimes/BookingPagePreview";
 import { BookingFormCard, GuestsCard } from "./arrivalTimes/GuestsCard";
 import { ReviewDialog, SaveBar, SetupBanner } from "./arrivalTimes/ReviewAndSave";
 import { TimesCard } from "./arrivalTimes/TimesCard";
@@ -38,7 +39,8 @@ type Loaded = {
   /** Null while the property has no guest rules: its first save confirms its guest policy. */
   rules: GuestRules | null;
   saved: ArrivalForm;
-  timeZone: string;
+  /** The property's name, town and time zone; null when its profile can't be read. */
+  facts: { name: string; city: string; timeZone: string } | null;
 };
 
 /** A property without guest rules starts from the PMS guest policy it saved before VAY-2455, else from that policy's
@@ -80,15 +82,12 @@ export function ArrivalTimesSection() {
     setLoadError(null);
     void (async () => {
       const propertyId = await resolveSelectedPmsPropertyId("loading arrival times");
-      const [rules, timeZone] = await Promise.all([
+      const [rules, facts] = await Promise.all([
         guestRulesService.load(signal, propertyId),
-        getPmsPropertyFacts(propertyId, signal).then(
-          (facts) => facts.timeZone,
-          () => "",
-        ),
+        getPmsPropertyFacts(propertyId, signal).catch(() => null),
       ]);
       const saved = formFromChoices(rules ? rules.choices : await firstDraft(signal));
-      return { propertyId, rules, saved, timeZone };
+      return { propertyId, rules, saved, facts };
     })().then(
       (value) => {
         if (signal.aborted) return;
@@ -189,43 +188,48 @@ export function ArrivalTimesSection() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {!loaded.rules && (
         <SetupBanner
           check={check}
           prefilled={Boolean(loaded.saved.checkInTime || loaded.saved.checkOutTime)}
         />
       )}
-      <TimesCard
-        form={form}
-        check={check}
-        timeZone={timeZoneLabel(loaded.timeZone, locale)}
-        onChange={change}
-      />
-      <GuestsCard form={form} check={check} onChange={change} />
-      <BookingFormCard form={form} onChange={change} />
-      {refusal && (
-        <div
-          role="alert"
-          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
-          <span>{refusalText[refusal]}</span>
-          {/* A refused save, or one whose answer was lost, may have left other values saved. */}
-          {refusal !== "guest_choices_denied" && refusal !== "invalid_guest_choices" && (
-            <button type="button" onClick={reloadSaved} className="font-medium underline">
-              {t("settings.arrivalTimes.reload")}
-            </button>
+      <div className="flex flex-wrap items-start gap-6">
+        <div className="flex min-w-0 flex-[999_1_540px] flex-col gap-5">
+          <TimesCard
+            form={form}
+            check={check}
+            timeZone={timeZoneLabel(loaded.facts?.timeZone ?? "", locale)}
+            onChange={change}
+          />
+          <GuestsCard form={form} check={check} onChange={change} />
+          <BookingFormCard form={form} onChange={change} />
+          {refusal && (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              <span>{refusalText[refusal]}</span>
+              {/* A refused save, or one whose answer was lost, may have left other values saved. */}
+              {refusal !== "guest_choices_denied" && refusal !== "invalid_guest_choices" && (
+                <button type="button" onClick={reloadSaved} className="font-medium underline">
+                  {t("settings.arrivalTimes.reload")}
+                </button>
+              )}
+            </div>
           )}
+          <SaveBar
+            status={status}
+            missing={check.missing}
+            dirty={dirty}
+            statusRef={statusRef}
+            onDiscard={() => change(loaded.saved)}
+            onReview={openReview}
+          />
         </div>
-      )}
-      <SaveBar
-        status={status}
-        missing={check.missing}
-        dirty={dirty}
-        statusRef={statusRef}
-        onDiscard={() => change(loaded.saved)}
-        onReview={openReview}
-      />
+        <BookingPagePreview form={form} check={check} hotel={loaded.facts} />
+      </div>
       {review && (
         <ReviewDialog
           choices={review}

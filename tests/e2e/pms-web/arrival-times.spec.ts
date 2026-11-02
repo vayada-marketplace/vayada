@@ -8,7 +8,7 @@ import {
 
 // VAY-2455: Settings → Property → Check-in & check-out, from Timo's redesign. The section edits the guest rules the
 // booking page shows, and saves them after a review. A property without any starts from the guest policy the PMS
-// saved before and must choose what that policy left open.
+// saved before and must choose what that policy left open. A preview shows the booking page as it changes.
 
 const REVISIONS = ["5c0f3a52-5b5e-4c3f-9a51-1f3f8d1b2c4e", "7e2d4b63-6c6f-4d4a-8b62-2a4a9e2c3d5f"];
 type Save = { body: Record<string, unknown>; key: string | undefined };
@@ -26,9 +26,10 @@ async function mockGuestRules(page: Page, initial: Record<string, unknown> | nul
   return saves;
 }
 
-/** The whole section: the app scrolls inside its own container, so a tall window shows all of it. */
+/** The whole section: the app scrolls inside its own container, so a tall window shows all of it (taller on a phone,
+ * where the preview stacks below the cards). */
 async function shoot(page: Page, section: Locator, testInfo: TestInfo, name: string, width = 1440) {
-  await page.setViewportSize({ width, height: 2600 });
+  await page.setViewportSize({ width, height: width < 600 ? 4200 : 2600 });
   await section.screenshot({ path: testInfo.outputPath(name) });
 }
 
@@ -90,6 +91,22 @@ test("a configured hotel changes its times, sees its day at a glance and saves t
   ).toBeVisible();
   await expect(status).toHaveText("You have unsaved changes");
   await expect(discard).toBeEnabled();
+  // The booking page preview follows every edit, beside the cards on a wide screen.
+  const preview = section.getByRole("complementary", { name: "Booking page preview" });
+  for (const shown of [
+    "Alpenrose Munich",
+    "Munich",
+    "16:00 – 23:00",
+    "By 11:00",
+    "Welcome · under 12 = child",
+    "Phone number *",
+    "Special requests",
+  ])
+    await expect(preview).toContainText(shown);
+  await expect(preview).not.toContainText("Estimated arrival time");
+  const previewBox = (await preview.boundingBox())!;
+  const reviewBox = (await review.boundingBox())!;
+  expect(previewBox.x).toBeGreaterThanOrEqual(reviewBox.x + reviewBox.width);
 
   await review.click();
   const dialog = page.getByRole("dialog", { name: "Review guest policy" });
@@ -178,6 +195,11 @@ test("a property without guest rules confirms its first guest policy, also on a 
       .map((element) => element.tagName),
   );
   expect(overflow).toEqual([]);
+  // The preview stacks below the save bar.
+  const previewBox = (await section
+    .getByRole("complementary", { name: "Booking page preview" })
+    .boundingBox())!;
+  expect(previewBox.y).toBeGreaterThan((await review.boundingBox())!.y);
   await shoot(page, section, testInfo, "first-setup-390.png", 390);
   await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -208,6 +230,9 @@ test("a property without guest rules confirms its first guest policy, also on a 
   await expect(dialog).toContainText("Guest languageDeutsch");
   await expect(dialog).toContainText("Adult age threshold18 and older");
   await expect(dialog).toContainText("Arrival timeAsked at booking");
+  await expect(section.getByRole("complementary", { name: "Booking page preview" })).toContainText(
+    "Check-in opens at 14:00",
+  );
   await dialog.getByRole("button", { name: "Confirm & save" }).click();
   await expect(status).toHaveText("Saved. Your booking page updates within a minute.");
   await expect(section.getByText("Confirm your guest policy")).toHaveCount(0);
