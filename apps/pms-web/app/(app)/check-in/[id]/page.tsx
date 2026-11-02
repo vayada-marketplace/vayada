@@ -17,13 +17,13 @@ import {
 } from "@/services/bookings";
 import { calendarService } from "@/services/calendar";
 import { CheckinChecklistStep, CheckinSettings, settingsService } from "@/services/settings";
-import { arrivalTimesService } from "@/services/settings/arrivalTimes";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { bookingAmountDue } from "@/components/bookings/BookingStaySummary";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
 import { DEFAULT_CHECKIN_SETTINGS, withGuestDataFields } from "@/lib/settings/checkinSettings";
+import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { guestDataSettingsService } from "@/services/guests";
 import { bookingChannelLabel, isChannelBooking } from "@/lib/bookings/channelLabel";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
@@ -126,18 +126,14 @@ export default function CheckInPage() {
   const [done, setDone] = useState<CheckinFlag[] | null>(null);
   const [checklistSteps, setChecklistSteps] = useState<CheckinChecklistStep[]>([]);
   const [checklistValues, setChecklistValues] = useState<Record<string, string | boolean>>({});
-  const [checkOutTime, setCheckOutTime] = useState<string | null>(null);
+  // The check-out time guests see on the booking page, for staff who may read it (VAY-2455).
+  const checkOutTime = useGuestStayTimes()?.checkOutTime ?? null;
   // The open guest form's save, and whether it holds details it couldn't save (VAY-2418).
   const guestFlush = useRef<(() => Promise<boolean>) | null>(null);
   const [guestUnsaved, setGuestUnsaved] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    // The property's check-out time, for staff who may read the booking settings.
-    arrivalTimesService
-      .load()
-      .then((setup) => setCheckOutTime(setup.current?.bundle.choices.checkOutTime ?? null))
-      .catch(() => setCheckOutTime(null));
     Promise.all([
       bookingsService.get(id),
       bookingsService.listAdditionalGuests(id),
