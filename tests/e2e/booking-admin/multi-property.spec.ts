@@ -101,7 +101,13 @@ async function setup(
       mock.summary = accountBookingPageSummary("The Travel Ubud", STAYS, {
         ...saved,
         revision: revision + 1,
-        headerImage: headerImageMediaId ? { mediaId: headerImageMediaId, url: HERO_URL } : null,
+        // As next-api: left out, the saved image stays; null removes it.
+        headerImage:
+          headerImageMediaId === undefined
+            ? mock.summary.page.headerImage
+            : headerImageMediaId
+              ? { mediaId: headerImageMediaId, url: HERO_URL }
+              : null,
       });
       return route.fulfill({ headers, json: mock.summary });
     }
