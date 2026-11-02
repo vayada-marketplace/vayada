@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  fourStepSetupStep,
   isPmsSetupContext,
   productHandoffReturnTo,
   setupPathForSelectedProperty,
   setupExitPathForContext,
+  withSetupFinished,
 } from "./SharedHotelSetupPage";
 
 describe("setupPathForSelectedProperty", () => {
@@ -95,6 +97,23 @@ describe("calendar recovery exit", () => {
   it("preserves the ordinary incomplete-setup exit", () => {
     expect(setupExitPathForContext("returnProduct=pms", "property-1")).toBe(
       "/dashboard?setup=incomplete&propertyId=property-1",
+    );
+  });
+});
+
+describe("the four-step setup's links (VAY-2451)", () => {
+  it("reads the step a dashboard tile asks for, including the room step's older id", () => {
+    expect(fourStepSetupStep("rooms")).toBe("room");
+    expect(fourStepSetupStep("room")).toBe("room");
+    expect(fourStepSetupStep("payments")).toBe("payments");
+    expect(fourStepSetupStep("calendar")).toBeNull();
+    expect(fourStepSetupStep(null)).toBeNull();
+  });
+
+  it("marks the exit after Finish setup for the dashboard's toast", () => {
+    expect(withSetupFinished("/dashboard")).toBe("/dashboard?setupFinished=1");
+    expect(withSetupFinished("/dashboard?propertyId=p-1")).toBe(
+      "/dashboard?propertyId=p-1&setupFinished=1",
     );
   });
 });

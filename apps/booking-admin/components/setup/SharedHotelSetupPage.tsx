@@ -484,8 +484,12 @@ export function withSetupFinished(path: string): string {
   return `${path}${path.includes("?") ? "&" : "?"}setupFinished=1`;
 }
 
-/** The four-step setup's step from ?step= (a dashboard tile), or null. */
+/**
+ * The four-step setup's step from ?step= (a dashboard tile), or null. The tiles name the room step "rooms",
+ * the setup's older id, because the PMS's /setup link keeps only those.
+ */
 export function fourStepSetupStep(value: string | null): SetupStepId | null {
+  if (value === "rooms") return "room";
   return value === "property" || value === "location" || value === "room" || value === "payments"
     ? value
     : null;

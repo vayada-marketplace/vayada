@@ -10,8 +10,6 @@ import type { ComponentType, SVGProps } from "react";
 
 import { SetupStepHeading } from "./SetupStepHeading";
 
-export type SetupPaymentChoices = Readonly<{ card: boolean; bank: boolean }>;
-
 const OPTIONS: ReadonlyArray<{
   id: "hotel" | "card" | "bank";
   title: string;
@@ -47,49 +45,41 @@ const OPTIONS: ReadonlyArray<{
 ];
 
 /**
- * VAY-2451 step 4, "How guests pay". Paying at the property stays on in setup: the placeholder price is paid
- * at the property and card payments aren't live yet. Card and bank transfer are the owner's intent, set up
- * after setup (the dashboard's "Later" list, Settings › Payments); setup saves nothing for them.
+ * VAY-2451 step 4, "How guests pay". Paying at the property is what setup turns on: the placeholder price is
+ * paid at the property and card payments aren't live yet. Card payments and bank transfer are shown as what
+ * comes after setup (the dashboard's "Later" list, Settings › Payments); setup saves nothing for them, so
+ * they aren't choices here.
  */
-export function SetupPaymentsStep({
-  choices,
-  onChange,
-}: {
-  choices: SetupPaymentChoices;
-  onChange: (choices: SetupPaymentChoices) => void;
-}) {
+export function SetupPaymentsStep() {
   return (
     <div>
       <SetupStepHeading
         title="How guests pay"
-        subtitle="Pick everything you accept. Most properties start with paying at the property."
+        subtitle="Guests pay at the property to start. Card payments and bank transfer come after setup."
       />
-      <div className="mt-7 flex flex-col gap-3">
+      <ul className="mt-7 flex flex-col gap-3">
         {OPTIONS.map(({ id, title, description, badge, badgeClass, Icon }) => {
-          const checked = id === "hotel" || choices[id];
+          const on = id === "hotel";
           return (
-            <button
+            <li
               key={id}
-              type="button"
-              role="checkbox"
-              aria-checked={checked}
-              aria-disabled={id === "hotel" || undefined}
-              onClick={() => {
-                if (id !== "hotel") onChange({ ...choices, [id]: !choices[id] });
-              }}
-              className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 ${
-                checked
+              className={`flex w-full items-start gap-3 rounded-xl border p-4 ${
+                on
                   ? "border-primary-600 bg-primary-50 ring-1 ring-inset ring-primary-600"
-                  : "border-gray-300 bg-white hover:bg-gray-50"
-              } ${id === "hotel" ? "cursor-default" : ""}`}
+                  : "border-gray-200 bg-white"
+              }`}
             >
               <span
-                aria-hidden="true"
-                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded ${
-                  checked ? "bg-primary-600" : "border-[1.5px] border-gray-400 bg-white"
+                className={`relative mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                  on ? "bg-primary-600" : "border-[1.5px] border-gray-300 bg-white"
                 }`}
               >
-                {checked ? <CheckIcon className="h-3.5 w-3.5 stroke-[3] text-white" /> : null}
+                {on ? (
+                  <>
+                    <CheckIcon className="h-3.5 w-3.5 stroke-[3] text-white" aria-hidden="true" />
+                    <span className="sr-only">On:</span>
+                  </>
+                ) : null}
               </span>
               <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-white text-primary-600 min-[720px]:flex">
                 <Icon className="h-5 w-5" aria-hidden="true" />
@@ -103,10 +93,10 @@ export function SetupPaymentsStep({
               >
                 {badge}
               </span>
-            </button>
+            </li>
           );
         })}
-      </div>
+      </ul>
       <p className="mt-4 text-[13px] text-gray-500">
         You can change this anytime in Settings › Payments.
       </p>

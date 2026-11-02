@@ -46,8 +46,6 @@ export type SetupFrameProps = {
   step: SetupStepId;
   /** The furthest step the owner may open: later ones are locked, earlier ones show a tick. */
   reached: number;
-  /** Every step is done (editing after setup): all show a tick and none is locked. */
-  finished?: boolean;
   /** "Setting up …" in the rail; the step's own name until the owner types one. */
   propertyName: string;
   /** After "Step 3 of 4", e.g. "Room basics, 1 of 3". */
@@ -77,7 +75,6 @@ const SECONDARY =
 export function SetupFrame({
   step,
   reached,
-  finished = false,
   propertyName,
   subStep,
   onPickStep,
@@ -118,8 +115,8 @@ export function SetupFrame({
         <nav aria-label="Setup steps" className="mt-5 flex flex-col gap-1">
           {SETUP_STEPS.map((item, index) => {
             const isCurrent = index === current;
-            const done = !isCurrent && (finished || index < reached);
-            const locked = !finished && index > reached;
+            const done = !isCurrent && index < reached;
+            const locked = index > reached;
             return (
               <button
                 key={item.id}

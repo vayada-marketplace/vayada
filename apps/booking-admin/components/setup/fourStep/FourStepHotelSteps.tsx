@@ -12,7 +12,7 @@ import type { RoomAuthoringClient } from "@/services/api/roomAuthoringClient";
 import type { RoomAuthoringDraft } from "../adaptive/rooms/roomAuthoringState";
 import { currencySymbol } from "../quick/quickHotelCurrency";
 import { SetupFrame, type SetupFooterProps, type SetupStepId } from "./SetupFrame";
-import { SetupPaymentsStep, type SetupPaymentChoices } from "./SetupPaymentsStep";
+import { SetupPaymentsStep } from "./SetupPaymentsStep";
 import { SetupRoomBasics } from "./SetupRoomBasics";
 import { SetupRoomChoice, type SetupRoomChoiceValue } from "./SetupRoomChoice";
 import { newSetupRoom, roomBasicsHint, setupRoomFromSaved, SETUP_ROOM_DRAFT_ID } from "./setupRoom";
@@ -27,10 +27,11 @@ export type FourStepHotelStepsProps = {
   rooms: Pick<RoomAuthoringClient, "loadWorkspace" | "saveRoom">;
   /** The hotel's pricing currency (saved with the hotel at step 2). */
   readCurrency: (propertyId: string) => Promise<string | null>;
-  /** The step the URL asks for (?step=, e.g. a dashboard tile); otherwise where setup stopped. */
+  /**
+   * The step the URL asks for (?step=, a dashboard tile); otherwise where setup stopped. Steps 1 and 2 of a
+   * hotel that exists aren't reopened here (Settings has them), and a finished setup always leaves.
+   */
   initialStep?: SetupStepId | null;
-  /** Steps 1 and 2 of a hotel that exists, edited in place; without it they can't be reopened here. */
-  onEditHotel?: ((step: "property" | "location") => void) | null;
   onSaveAndExit: () => void;
   /** After Finish setup: to the dashboard, which says setup is complete. */
   onFinished: () => void;
@@ -41,6 +42,9 @@ type View =
   | { kind: "unavailable" }
   | { kind: "room"; part: "choose" | "basics" }
   | { kind: "payments" };
+
+/** Steps 1 and 2 are done once the hotel exists; this frame doesn't reopen them. */
+const canPickStep = (step: SetupStepId) => step === "room" || step === "payments";
 
 const finishedSetup = (state: HotelFirstRunState) =>
   state.steps.every(
@@ -71,17 +75,14 @@ export function FourStepHotelSteps({
   rooms,
   readCurrency,
   initialStep = null,
-  onEditHotel,
   onSaveAndExit,
   onFinished,
 }: FourStepHotelStepsProps) {
   const [view, setView] = useState<View>({ kind: "loading" });
   const [name, setName] = useState("Your property");
   const [currency, setCurrency] = useState<string | null>(null);
-  const [finished, setFinished] = useState(false);
   const [room, setRoom] = useState<RoomAuthoringDraft>(newSetupRoom);
   const [choice, setChoice] = useState<SetupRoomChoiceValue>("now");
-  const [payments, setPayments] = useState<SetupPaymentChoices>({ card: false, bank: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -93,21 +94,25 @@ export function FourStepHotelSteps({
       try {
         const profile = await setup.getPropertyProfile(propertyId, { cache: "no-store" });
         const state = await firstRun.read(propertyId);
-        const [saved] = await rooms.loadWorkspace(propertyId, [SETUP_ROOM_DRAFT_ID], {
+        // Every active room type comes back; setup edits only the one it made.
+        const workspace = await rooms.loadWorkspace(propertyId, [SETUP_ROOM_DRAFT_ID], {
           cache: "no-store",
         });
+        const saved = workspace.find((item) => item.draftRoomId === SETUP_ROOM_DRAFT_ID) ?? null;
         const code = await readCurrency(propertyId).catch(() => null);
         if (!active) return;
         setName(profile.profile.displayName || "Your property");
         setCurrency(code);
         if (saved) setRoom(setupRoomFromSaved(saved));
-        const done = finishedSetup(state);
-        setFinished(done);
-        if (done && !initialStep) return onSaveAndExit();
+        // Old links (?step=payments from "Fix in setup") must not run a finished first run again.
+        if (finishedSetup(state)) return onSaveAndExit();
         if (initialStep === "payments") return setView({ kind: "payments" });
         if (initialStep === "room")
           return setView({ kind: "room", part: saved ? "basics" : "choose" });
-        setView(saved ? { kind: "payments" } : { kind: "room", part: "choose" });
+        // A hotel with rooms made elsewhere (Rooms & Rates, an import) needs no first room.
+        setView(
+          saved || workspace.length ? { kind: "payments" } : { kind: "room", part: "choose" },
+        );
       } catch {
         if (active) setView({ kind: "unavailable" });
       }
@@ -124,9 +129,8 @@ export function FourStepHotelSteps({
     setView(next);
   };
   const pick = (step: SetupStepId) => {
-    if (step === "property" || step === "location") onEditHotel?.(step);
-    else if (step === "room") go({ kind: "room", part: room.roomTypeId ? "basics" : "choose" });
-    else go({ kind: "payments" });
+    if (step === "room") go({ kind: "room", part: room.roomTypeId ? "basics" : "choose" });
+    else if (step === "payments") go({ kind: "payments" });
   };
 
   if (view.kind === "loading" || view.kind === "unavailable") {
@@ -158,6 +162,29 @@ export function FourStepHotelSteps({
     );
   }
 
+  /** Saves the room as it stands, then `then`; a failure stays on the screen with its message. */
+  const saveRoomThen = async (then: () => void, draft = room) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setRoom(setupRoomFromSaved(await rooms.saveRoom({ propertyId, room: draft })));
+      then();
+    } catch (caught) {
+      setError(roomError(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+  /**
+   * Leaving the room's parts (Save & exit, Skip for now) keeps the owner's work: a room that exists is saved
+   * as it stands, and Save & exit also creates it once its basics are complete.
+   */
+  const keepRoomThen = (then: () => void, create: boolean) => {
+    const editing = view.kind === "room" && view.part !== "choose";
+    if (!editing || roomBasicsHint(room) || (!room.roomTypeId && !create)) return then();
+    void saveRoomThen(then);
+  };
+
   const frame = (
     step: "room" | "payments",
     footer: SetupFooterProps,
@@ -167,14 +194,13 @@ export function FourStepHotelSteps({
     <SetupFrame
       step={step}
       reached={step === "room" ? 2 : 3}
-      finished={finished}
       propertyName={name}
       subStep={subStep}
       onPickStep={pick}
-      canPickStep={(step) => Boolean(onEditHotel) || (step !== "property" && step !== "location")}
-      onSaveAndExit={onSaveAndExit}
+      canPickStep={canPickStep}
+      onSaveAndExit={() => keepRoomThen(onSaveAndExit, true)}
       saveAndExitDisabled={busy}
-      footer={footer}
+      footer={{ backDisabled: busy, ...footer }}
     >
       {children}
       {error ? (
@@ -184,14 +210,17 @@ export function FourStepHotelSteps({
       ) : null}
     </SetupFrame>
   );
-  const skip = { onSkip: () => go({ kind: "payments" }), skipDisabled: busy };
+  const skip = {
+    onSkip: () => keepRoomThen(() => go({ kind: "payments" }), false),
+    skipDisabled: busy,
+  };
 
   if (view.kind === "room" && view.part === "choose") {
     const symbol = currency ? currencySymbol(currency) : "";
     return frame(
       "room",
       {
-        onBack: onEditHotel ? () => onEditHotel("location") : null,
+        onBack: null,
         primaryLabel: "Continue",
         onPrimary: () =>
           go(choice === "skip" ? { kind: "payments" } : { kind: "room", part: "basics" }),
@@ -207,18 +236,7 @@ export function FourStepHotelSteps({
 
   if (view.kind === "room") {
     const hint = roomBasicsHint(room);
-    const save = async () => {
-      setBusy(true);
-      setError(null);
-      try {
-        setRoom(setupRoomFromSaved(await rooms.saveRoom({ propertyId, room })));
-        go({ kind: "payments" });
-      } catch (caught) {
-        setError(roomError(caught));
-      } finally {
-        setBusy(false);
-      }
-    };
+    const save = () => saveRoomThen(() => go({ kind: "payments" }));
     return frame(
       "room",
       {
@@ -256,6 +274,6 @@ export function FourStepHotelSteps({
       primaryBusy: busy,
       primaryBusyLabel: "Finishing…",
     },
-    <SetupPaymentsStep choices={payments} onChange={setPayments} />,
+    <SetupPaymentsStep />,
   );
 }
