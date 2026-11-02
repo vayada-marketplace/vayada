@@ -30,11 +30,13 @@ import {
 import { AdaptiveRoomAuthoringSetupController } from "./adaptive/rooms/AdaptiveRoomAuthoringSetupController";
 import { FourStepSetupFlow } from "./fourStep/FourStepSetupFlow";
 import type { SetupStepId } from "./fourStep/SetupFrame";
+import { setupRoomLocationUpdate } from "./fourStep/setupRoom";
 import { QuickSetupFlow } from "./quick/QuickSetupFlow";
 import type { QuickSetupPage } from "./quick/QuickPropertySetup";
 import { bookingPublicationReviewClient } from "@/services/api/bookingPublicationReviewClient";
 import { hotelFirstRunApi } from "@/services/api/hotelFirstRunClient";
 import { roomAuthoringApi } from "@/services/api/roomAuthoringClient";
+import { targetApiClient } from "@/services/api/targetClient";
 import { onboardingPricingApi } from "@/services/api/onboardingPricingClient";
 import { productHandoffReturnTo } from "./productHandoffReturnTo";
 
@@ -254,6 +256,13 @@ export function SharedHotelSetupPage({
         storage={quickSetupStorage()}
         firstRun={hotelFirstRunApi}
         rooms={roomAuthoringApi}
+        saveRoomLocation={async (propertyId, roomTypeId, location) => {
+          const commandId = crypto.randomUUID();
+          await targetApiClient.patch(
+            `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}`,
+            setupRoomLocationUpdate(location, commandId),
+          );
+        }}
         readCurrency={async (propertyId) =>
           (await onboardingPricingApi.load(propertyId, { cache: "no-store" })).pricing
             ?.pricingCurrency.currency ?? null

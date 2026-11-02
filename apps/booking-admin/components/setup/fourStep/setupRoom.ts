@@ -11,9 +11,6 @@ import {
  */
 export const SETUP_ROOM_DRAFT_ID = "first-run-room-1";
 
-/** Where the room step stands: the choice, its three parts, or done (it can be sold). */
-export type SetupRoomPart = "choose" | "basics" | "photos" | "amenities";
-
 /** A new room as the mockup starts it: one room, 2 guests (2 adults), one double bed, a private bathroom. */
 export function newSetupRoom(): RoomAuthoringDraft {
   const room = createEmptyRoomDraft(() => SETUP_ROOM_DRAFT_ID);
@@ -71,12 +68,6 @@ export function setupRoomFromSaved(saved: CanonicalRoomAuthoringState): RoomAuth
   };
 }
 
-/** Where a resumed room step opens: the choice without a room, its photos until it has one, else done. */
-export function setupRoomPart(saved: CanonicalRoomAuthoringState | null): SetupRoomPart | "done" {
-  if (!saved) return "choose";
-  return saved.photos.length === 0 ? "photos" : "done";
-}
-
 const whole = (value: string, min: number, max: number) =>
   /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max;
 
@@ -109,4 +100,30 @@ export function withPrivateBathrooms(room: RoomAuthoringDraft, count: number): R
   return count > 0
     ? { ...room, bathroomType: "private", bathrooms: String(count) }
     : { ...room, bathroomType: "shared", bathrooms: "0" };
+}
+
+/** Where guests see the room (VAY-2321's choice in Rooms & Rates): the property's address, or its own. */
+export type SetupRoomLocation = Readonly<{
+  source: "property" | "custom";
+  address: string;
+  showMap: boolean;
+}>;
+
+export const SAME_AS_PROPERTY: SetupRoomLocation = Object.freeze({
+  source: "property",
+  address: "",
+  showMap: true,
+});
+
+/** The room type's location, as Rooms & Rates saves it (the PMS room type update). */
+export function setupRoomLocationUpdate(location: SetupRoomLocation, commandId: string) {
+  return location.source === "property"
+    ? { locationSource: "property", showMapInDetails: true, commandId, idempotencyKey: commandId }
+    : {
+        locationSource: "custom",
+        locationAddress: location.address.trim(),
+        showMapInDetails: location.showMap,
+        commandId,
+        idempotencyKey: commandId,
+      };
 }

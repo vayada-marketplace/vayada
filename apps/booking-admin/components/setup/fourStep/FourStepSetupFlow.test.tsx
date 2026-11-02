@@ -66,6 +66,7 @@ function props(overrides: Partial<FourStepSetupFlowProps> = {}) {
       storage: storage(),
       firstRun: { read: vi.fn(), run: vi.fn() } as never,
       rooms: { loadWorkspace: vi.fn(), saveRoom: vi.fn() } as never,
+      saveRoomLocation: vi.fn(),
       readCurrency: vi.fn(async () => "LKR"),
       onFinished: vi.fn(),
       ...overrides,

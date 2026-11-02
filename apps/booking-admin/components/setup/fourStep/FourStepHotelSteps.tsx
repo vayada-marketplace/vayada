@@ -9,13 +9,25 @@ import {
   type HotelFirstRunState,
 } from "@/services/api/hotelFirstRunClient";
 import type { RoomAuthoringClient } from "@/services/api/roomAuthoringClient";
-import type { RoomAuthoringDraft } from "../adaptive/rooms/roomAuthoringState";
+import {
+  ROOM_MEDIA_MAX_FILE_SIZE,
+  type RoomAuthoringDraft,
+} from "../adaptive/rooms/roomAuthoringState";
 import { currencySymbol } from "../quick/quickHotelCurrency";
 import { SetupFrame, type SetupFooterProps, type SetupStepId } from "./SetupFrame";
 import { SetupPaymentsStep } from "./SetupPaymentsStep";
+import { SetupRoomAmenities } from "./SetupRoomAmenities";
 import { SetupRoomBasics } from "./SetupRoomBasics";
 import { SetupRoomChoice, type SetupRoomChoiceValue } from "./SetupRoomChoice";
-import { newSetupRoom, roomBasicsHint, setupRoomFromSaved, SETUP_ROOM_DRAFT_ID } from "./setupRoom";
+import { SETUP_PHOTO_TYPES, SetupRoomPhotos } from "./SetupRoomPhotos";
+import {
+  newSetupRoom,
+  roomBasicsHint,
+  SAME_AS_PROPERTY,
+  setupRoomFromSaved,
+  SETUP_ROOM_DRAFT_ID,
+  type SetupRoomLocation,
+} from "./setupRoom";
 
 /** The server's FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT, in the hotel's currency. */
 const PLACEHOLDER_PRICE = "100";
@@ -24,7 +36,16 @@ export type FourStepHotelStepsProps = {
   propertyId: string;
   setup: Pick<SharedHotelSetupApi, "getPropertyProfile">;
   firstRun: Pick<HotelFirstRunClient, "read" | "run">;
-  rooms: Pick<RoomAuthoringClient, "loadWorkspace" | "saveRoom">;
+  rooms: Pick<
+    RoomAuthoringClient,
+    "loadWorkspace" | "saveRoom" | "uploadRoomPhotos" | "loadPhotoPlan"
+  >;
+  /** Saves where guests see the room (the PMS room type update Rooms & Rates uses). */
+  saveRoomLocation: (
+    propertyId: string,
+    roomTypeId: string,
+    location: SetupRoomLocation,
+  ) => Promise<void>;
   /** The hotel's pricing currency (saved with the hotel at step 2). */
   readCurrency: (propertyId: string) => Promise<string | null>;
   /**
@@ -40,7 +61,7 @@ export type FourStepHotelStepsProps = {
 type View =
   | { kind: "loading" }
   | { kind: "unavailable" }
-  | { kind: "room"; part: "choose" | "basics" }
+  | { kind: "room"; part: "choose" | "basics" | "photos" | "amenities" }
   | { kind: "payments" };
 
 /** Steps 1 and 2 are done once the hotel exists; this frame doesn't reopen them. */
@@ -73,6 +94,7 @@ export function FourStepHotelSteps({
   setup,
   firstRun,
   rooms,
+  saveRoomLocation,
   readCurrency,
   initialStep = null,
   onSaveAndExit,
@@ -86,6 +108,10 @@ export function FourStepHotelSteps({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [maxPhotos, setMaxPhotos] = useState(10);
+  const [location, setLocation] = useState<SetupRoomLocation>(SAME_AS_PROPERTY);
+  const [locationChanged, setLocationChanged] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -100,7 +126,10 @@ export function FourStepHotelSteps({
         });
         const saved = workspace.find((item) => item.draftRoomId === SETUP_ROOM_DRAFT_ID) ?? null;
         const code = await readCurrency(propertyId).catch(() => null);
+        // The plan's photo limit (10 on Commission); 10 when it can't be read.
+        const plan = await rooms.loadPhotoPlan(propertyId).catch(() => null);
         if (!active) return;
+        if (plan) setMaxPhotos(plan.maxRoomPhotosPerType);
         setName(profile.profile.displayName || "Your property");
         setCurrency(code);
         if (saved) setRoom(setupRoomFromSaved(saved));
@@ -109,6 +138,8 @@ export function FourStepHotelSteps({
         if (initialStep === "payments") return setView({ kind: "payments" });
         if (initialStep === "room")
           return setView({ kind: "room", part: saved ? "basics" : "choose" });
+        // A room without a photo can't be sold: its next part is the photos.
+        if (saved && !saved.photos.length) return setView({ kind: "room", part: "photos" });
         // A hotel with rooms made elsewhere (Rooms & Rates, an import) needs no first room.
         setView(
           saved || workspace.length ? { kind: "payments" } : { kind: "room", part: "choose" },
@@ -162,12 +193,24 @@ export function FourStepHotelSteps({
     );
   }
 
-  /** Saves the room as it stands, then `then`; a failure stays on the screen with its message. */
+  /** Saves the room's location when the owner changed it (a separate one needs its address). */
+  const saveLocation = async () => {
+    if (!locationChanged || !room.roomTypeId) return;
+    if (location.source === "custom" && !location.address.trim()) return;
+    await saveRoomLocation(propertyId, room.roomTypeId, location);
+    setLocationChanged(false);
+  };
+  /**
+   * Saves the room as it stands (facts, rooms, uploaded photos, amenities) and its location, then `then`; a
+   * failure stays on the screen with its message.
+   */
   const saveRoomThen = async (then: () => void, draft = room) => {
     setBusy(true);
     setError(null);
     try {
-      setRoom(setupRoomFromSaved(await rooms.saveRoom({ propertyId, room: draft })));
+      const photos = draft.photos.filter((photo) => photo.uploadState === "ready");
+      setRoom(setupRoomFromSaved(await rooms.saveRoom({ propertyId, room: { ...draft, photos } })));
+      await saveLocation();
       then();
     } catch (caught) {
       setError(roomError(caught));
@@ -175,6 +218,8 @@ export function FourStepHotelSteps({
       setBusy(false);
     }
   };
+  /** While photos upload, nothing leaves the screen: they'd never be attached to the room. */
+  const uploading = room.photos.some((photo) => photo.uploadState === "uploading");
   /**
    * Leaving the room's parts (Save & exit, Skip for now) keeps the owner's work: a room that exists is saved
    * as it stands, and Save & exit also creates it once its basics are complete.
@@ -196,11 +241,11 @@ export function FourStepHotelSteps({
       reached={step === "room" ? 2 : 3}
       propertyName={name}
       subStep={subStep}
-      onPickStep={pick}
+      onPickStep={busy || uploading ? null : pick}
       canPickStep={canPickStep}
       onSaveAndExit={() => keepRoomThen(onSaveAndExit, true)}
-      saveAndExitDisabled={busy}
-      footer={{ backDisabled: busy, ...footer }}
+      saveAndExitDisabled={busy || uploading}
+      footer={{ backDisabled: busy || uploading, ...footer }}
     >
       {children}
       {error ? (
@@ -212,7 +257,8 @@ export function FourStepHotelSteps({
   );
   const skip = {
     onSkip: () => keepRoomThen(() => go({ kind: "payments" }), false),
-    skipDisabled: busy,
+    // Photos still uploading would be lost.
+    skipDisabled: busy || uploading,
   };
 
   if (view.kind === "room" && view.part === "choose") {
@@ -234,9 +280,122 @@ export function FourStepHotelSteps({
     );
   }
 
+  if (view.kind === "room" && view.part === "photos") {
+    const ready = room.photos.filter((photo) => photo.uploadState === "ready").length;
+    const hint =
+      ready === 0
+        ? "Add at least one photo to continue"
+        : uploading
+          ? "Wait for the photos to finish uploading"
+          : room.photos.some((photo) => photo.uploadState === "failed")
+            ? "Remove the photos that didn't upload"
+            : location.source === "custom" && !location.address.trim()
+              ? "Add the room's address, or choose Same as property"
+              : null;
+    const addFiles = async (files: File[]) => {
+      const { roomTypeId } = room;
+      if (!roomTypeId) return;
+      setPhotoError(null);
+      const space = Math.max(0, maxPhotos - room.photos.length);
+      const accepted = files.filter(
+        (file) =>
+          SETUP_PHOTO_TYPES.split(",").includes(file.type) && file.size <= ROOM_MEDIA_MAX_FILE_SIZE,
+      );
+      if (accepted.length < files.length)
+        setPhotoError("Use JPG, PNG or WebP photos of up to 10 MB.");
+      const chosen = accepted.slice(0, space);
+      if (accepted.length > space) setPhotoError(`Up to ${maxPhotos} photos per room type.`);
+      if (!chosen.length) return;
+      const placeholders = chosen.map((file, index) => ({
+        mediaObjectId: `pending:${Date.now()}:${index}`,
+        previewUrl: URL.createObjectURL(file),
+        uploadState: "uploading" as const,
+        errorMessage: null,
+      }));
+      setRoom((current) => ({ ...current, photos: [...current.photos, ...placeholders] }));
+      try {
+        const uploaded = await rooms.uploadRoomPhotos({
+          propertyId,
+          roomTypeId,
+          draftRoomId: SETUP_ROOM_DRAFT_ID,
+          files: chosen,
+        });
+        setRoom((current) => ({
+          ...current,
+          photos: current.photos.map((photo) => {
+            const at = placeholders.findIndex((item) => item.mediaObjectId === photo.mediaObjectId);
+            return at < 0
+              ? photo
+              : {
+                  ...photo,
+                  mediaObjectId: uploaded[at]!.mediaObjectId,
+                  uploadState: "ready" as const,
+                };
+          }),
+        }));
+      } catch {
+        setPhotoError("The photos didn't upload. Remove them and try again.");
+        setRoom((current) => ({
+          ...current,
+          photos: current.photos.map((photo) =>
+            placeholders.some((item) => item.mediaObjectId === photo.mediaObjectId)
+              ? { ...photo, uploadState: "failed" as const }
+              : photo,
+          ),
+        }));
+      }
+    };
+    return frame(
+      "room",
+      {
+        onBack: () => go({ kind: "room", part: "basics" }),
+        primaryLabel: "Continue",
+        onPrimary: () => void saveRoomThen(() => go({ kind: "room", part: "amenities" })),
+        primaryDisabled: Boolean(hint),
+        primaryBusy: busy,
+        primaryBusyLabel: "Saving…",
+        hint,
+        ...skip,
+      },
+      <SetupRoomPhotos
+        room={room}
+        onChange={setRoom}
+        maxPhotos={maxPhotos}
+        onAddFiles={(files) => void addFiles(files)}
+        location={location}
+        onLocationChange={(next) => {
+          setLocation(next);
+          setLocationChanged(true);
+        }}
+        photoError={photoError}
+      />,
+      "Photos & location, 2 of 3",
+    );
+  }
+
+  if (view.kind === "room" && view.part === "amenities") {
+    return frame(
+      "room",
+      {
+        onBack: () => go({ kind: "room", part: "photos" }),
+        primaryLabel: "Continue",
+        onPrimary: () =>
+          void saveRoomThen(() => go({ kind: "payments" }), {
+            ...room,
+            reviewedEmptyAmenities: true,
+          }),
+        primaryBusy: busy,
+        primaryBusyLabel: "Saving…",
+        ...skip,
+      },
+      <SetupRoomAmenities room={room} onChange={setRoom} />,
+      "Amenities, 3 of 3",
+    );
+  }
+
   if (view.kind === "room") {
     const hint = roomBasicsHint(room);
-    const save = () => saveRoomThen(() => go({ kind: "payments" }));
+    const save = () => saveRoomThen(() => go({ kind: "room", part: "photos" }));
     return frame(
       "room",
       {
@@ -268,7 +427,7 @@ export function FourStepHotelSteps({
   return frame(
     "payments",
     {
-      onBack: () => go({ kind: "room", part: room.roomTypeId ? "basics" : "choose" }),
+      onBack: () => go({ kind: "room", part: room.roomTypeId ? "amenities" : "choose" }),
       primaryLabel: "Finish setup",
       onPrimary: () => void finish(),
       primaryBusy: busy,
