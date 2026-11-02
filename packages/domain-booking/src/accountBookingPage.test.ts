@@ -20,7 +20,6 @@ function custom(): AccountBookingPageSettings {
     header: {
       topLeft: "name",
       designPropertyId: propertyA,
-      imageUrl: "https://media.vayada.com/agency/hero.jpg",
       gallery: true,
       contact: true,
       language: false,
@@ -62,7 +61,6 @@ describe("agency booking page settings", () => {
       header: {
         topLeft: "name",
         designPropertyId: null,
-        imageUrl: null,
         gallery: true,
         contact: false,
         language: true,
@@ -137,9 +135,6 @@ describe("agency booking page settings", () => {
       ["long description", (s) => (s.page.description = "x".repeat(301))],
       ["unknown top-left", (s) => ((s.header as { topLeft: string }).topLeft = "banner")],
       ["design property not an id", (s) => (s.header.designPropertyId = "escape-villa")],
-      ["image over http", (s) => (s.header.imageUrl = "http://media.vayada.com/hero.jpg")],
-      ["image with credentials", (s) => (s.header.imageUrl = "https://a:b@media.vayada.com/x.jpg")],
-      ["image not a URL", (s) => (s.header.imageUrl = "hero.jpg")],
       ["switch not a boolean", (s) => ((s.header as { gallery: unknown }).gallery = "yes")],
       ["email without domain", (s) => (s.header.contactEmail = "stay@")],
       ["WhatsApp without +", (s) => (s.header.contactWhatsapp = "6281234567890")],
@@ -225,14 +220,14 @@ describe("agency booking page settings", () => {
 
     const stored = custom() as unknown as Record<string, Record<string, unknown>>;
     stored["page"]!["title"] = "";
-    stored["header"]!["imageUrl"] = "ftp://old";
+    stored["header"]!["designPropertyId"] = "not-an-id";
     stored["header"]!["somethingNew"] = true;
     stored["layout"] = { allowed: ["list", "split"], default: "map" };
     delete stored["filters"]!["bedrooms"];
     stored["stayPage"] = "broken" as unknown as Record<string, unknown>;
     const read = readAccountBookingPageSettings(stored, defaults);
     expect(read.page.title).toBe("The Travel Ubud");
-    expect(read.header.imageUrl).toBeNull();
+    expect(read.header.designPropertyId).toBeNull();
     expect(read.header).not.toHaveProperty("somethingNew");
     expect(read.layout).toEqual({ allowed: ["list", "split"], default: "list" });
     expect(read.filters.bedrooms).toBe(false);
@@ -247,6 +242,17 @@ describe("agency booking page settings", () => {
     stored.header.contactEmail = null;
     stored.header.contactWhatsapp = null;
     expect(readAccountBookingPageSettings(stored, defaults).header.contact).toBe(false);
+  });
+
+  it("makes a valid title from any account name", () => {
+    for (const name of ["x".repeat(140), "The\nTravel\tUbud", "   ", "\u0007"]) {
+      const defaults = defaultAccountBookingPageSettings(name);
+      expect(parseAccountBookingPageSettings(defaults), JSON.stringify(name)).toEqual(defaults);
+    }
+    expect(defaultAccountBookingPageSettings("The\nTravel Ubud").page.title).toBe(
+      "The Travel Ubud",
+    );
+    expect(defaultAccountBookingPageSettings("   ").page.title).toBe("Our stays");
   });
 
   it("never hands out the defaults' own arrays", () => {

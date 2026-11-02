@@ -25,13 +25,14 @@ export const ACCOUNT_BOOKING_PAGE_RESERVED_SLUGS = Object.freeze(["www", "bookin
 export const ACCOUNT_BOOKING_PAGE_MAX_PROPERTIES = 200;
 const TITLE_MAX = 100;
 const DESCRIPTION_MAX = 300;
-const URL_MAX = 2048;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const WHATSAPP_PATTERN = /^\+[1-9][0-9]{7,14}$/;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS_GLOBAL = /[\u0000-\u001f\u007f]+/g;
 
 export type AccountBookingPageLayout = (typeof ACCOUNT_BOOKING_PAGE_LAYOUTS)[number];
 export type AccountBookingPageSort = (typeof ACCOUNT_BOOKING_PAGE_SORTS)[number];
@@ -44,9 +45,9 @@ export type AccountBookingPageSettings = {
   header: {
     /** What sits top left. The guest page shows the account name while the account has no logo. */
     topLeft: "name" | "logo";
-    /** Colours and fonts are copied from this property's booking page; null: the first included one. */
+    /** Colours and fonts are copied from this included property's booking page; null: the first
+     * included one. (The header image arrives with its upload, VAY-2457.) */
     designPropertyId: string | null;
-    imageUrl: string | null;
     gallery: boolean;
     contact: boolean;
     language: boolean;
@@ -83,11 +84,10 @@ export type AccountBookingPageUpdate = {
  * account gives an email address or a WhatsApp number. */
 export function defaultAccountBookingPageSettings(accountName: string): AccountBookingPageSettings {
   return {
-    page: { title: cleanText(accountName, TITLE_MAX) ?? "", description: "" },
+    page: { title: defaultTitle(accountName), description: "" },
     header: {
       topLeft: "name",
       designPropertyId: null,
-      imageUrl: null,
       gallery: true,
       contact: false,
       language: true,
@@ -248,7 +248,6 @@ export function readAccountBookingPageSettings(
 const HEADER_KEYS = [
   "topLeft",
   "designPropertyId",
-  "imageUrl",
   "gallery",
   "contact",
   "language",
@@ -266,7 +265,6 @@ const field = {
   description: (value: unknown) => cleanText(value, DESCRIPTION_MAX),
   topLeft: (value: unknown) => (value === "name" || value === "logo" ? value : undefined),
   propertyId: (value: unknown) => (value === null ? null : uuid(value)),
-  imageUrl: (value: unknown) => (value === null ? null : httpsUrl(value)),
   email: (value: unknown) =>
     value === null
       ? null
@@ -300,7 +298,6 @@ function readHeader(value: Record<string, unknown>, defaults: Header | null): He
   };
   const topLeft = read("topLeft", field.topLeft);
   const designPropertyId = read("designPropertyId", field.propertyId);
-  const imageUrl = read("imageUrl", field.imageUrl);
   const contactEmail = read("contactEmail", field.email);
   const contactWhatsapp = read("contactWhatsapp", field.whatsapp);
   const switches = booleans(
@@ -312,12 +309,11 @@ function readHeader(value: Record<string, unknown>, defaults: Header | null): He
     !switches ||
     topLeft === undefined ||
     designPropertyId === undefined ||
-    imageUrl === undefined ||
     contactEmail === undefined ||
     contactWhatsapp === undefined
   )
     return undefined;
-  return { topLeft, designPropertyId, imageUrl, ...switches, contactEmail, contactWhatsapp };
+  return { topLeft, designPropertyId, ...switches, contactEmail, contactWhatsapp };
 }
 
 type Header = AccountBookingPageSettings["header"];
@@ -361,16 +357,14 @@ function cleanText(value: unknown, max: number): string | undefined {
   return text.length <= max && !CONTROL_CHARACTERS.test(text) ? text : undefined;
 }
 
-function httpsUrl(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length > URL_MAX) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password && url.href === value
-      ? value
-      : undefined;
-  } catch {
-    return undefined;
-  }
+/** The account name as a valid title: one line, cut to the maximum length, never empty. */
+function defaultTitle(accountName: string): string {
+  const title = accountName
+    .replace(CONTROL_CHARACTERS_GLOBAL, " ")
+    .trim()
+    .slice(0, TITLE_MAX)
+    .trim();
+  return title || "Our stays";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

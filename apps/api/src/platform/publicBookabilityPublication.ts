@@ -75,6 +75,9 @@ const PROPERTY_FOR_PUBLICATION_SELECT = `
   FOR UPDATE OF property
 `;
 
+// An agency booking page shares the host names (VAY-2456). Its address is skipped like a taken one, so a
+// hotel named like it gets the suffixed address instead of the trigger's refusal (ON CONFLICT can't catch
+// that). Only an agency saving the very same address at that instant still fails it, and a retry moves on.
 const RESERVE_CANONICAL_SLUG = `
   INSERT INTO hotel_catalog.property_slugs (
     property_id,
@@ -84,7 +87,8 @@ const RESERVE_CANONICAL_SLUG = `
     status,
     updated_at
   )
-  VALUES ($1::uuid, $2, NULL, 'canonical', 'active', now())
+  SELECT $1::uuid, $2, NULL, 'canonical', 'active', now()
+  WHERE NOT EXISTS (SELECT 1 FROM booking.account_booking_pages page WHERE page.slug = $2)
   ON CONFLICT DO NOTHING
   RETURNING slug AS "canonicalSlug"
 `;

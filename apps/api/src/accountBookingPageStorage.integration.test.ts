@@ -7,6 +7,7 @@ import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
 } from "./hotelSetupOrdinaryLogin.fixture.js";
+import { ensureCanonicalPropertySlug } from "./platform/publicBookabilityPublication.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PUBLIC_ID_PREFIX = "vay-2456-";
@@ -197,6 +198,28 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page storage (runtime login)
        VALUES ($1::uuid, $2, 'canonical', 'active')`,
       [await property(), `agency-${n}`],
     );
+  });
+
+  it("gives a new hotel named like an agency address its suffixed address instead", async () => {
+    const n = randomUUID().slice(0, 8);
+    await page_(await account(), `clash-${n}`);
+    const hotel = randomUUID();
+    await admin.query(
+      `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+       VALUES ($1::uuid, $2, $3)`,
+      [hotel, `${PUBLIC_ID_PREFIX}${hotel}`, `Clash ${n}`],
+    );
+    const client = await runtime.connect();
+    try {
+      await client.query("BEGIN");
+      const slug = await ensureCanonicalPropertySlug(client, hotel);
+      await client.query("COMMIT");
+      expect(slug).not.toBe(`clash-${n}`);
+      expect(slug).toMatch(new RegExp(`^clash-${n}-[a-z0-9]+$`));
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
   });
 
   it("makes a hotel writer wait for an agency page taking the same address, then refuses it", async () => {
