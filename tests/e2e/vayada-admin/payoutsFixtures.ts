@@ -2,6 +2,14 @@ import type { Page, Route } from "@playwright/test";
 
 // VAY-2442 P5: mocked payouts API answers for the Vayada Admin Payouts page specs.
 export const ubud = "11111111-1111-4111-8111-111111111111";
+// P7: Vayada approved these accounts (the hotel's first card approval, or "Approve bank account").
+const approvedAccount = {
+  savedAt: "2026-10-20T09:00:00Z",
+  replaced: false,
+  approved: true,
+  approvedAt: "2026-10-21T08:30:00Z",
+  approvedVia: "card_approval",
+};
 export const startedPayoutId = "bbbbbbbb-0000-4000-8000-000000000001";
 export const payoutsFixture = {
   mode: "live",
@@ -18,6 +26,7 @@ export const payoutsFixture = {
         id: "d0000000-0000-4000-8000-000000006789",
         accountLast4: "6789",
         countryCode: "ID",
+        ...approvedAccount,
       },
       sending: null,
       lastPayout: {
@@ -38,11 +47,13 @@ export const payoutsFixture = {
         id: "d0000000-0000-4000-8000-000000001234",
         accountLast4: "1234",
         countryCode: "LK",
+        ...approvedAccount,
       },
       sending: {
         id: "aaaaaaaa-0000-4000-8000-000000000009",
         amountMinor: "18450000",
         startedAt: "2026-11-09T08:40:00Z",
+        destinationId: "d0000000-0000-4000-8000-000000001234",
       },
       lastPayout: null,
     },
@@ -57,6 +68,7 @@ export const payoutsFixture = {
         id: "d0000000-0000-4000-8000-000000005521",
         accountLast4: "5521",
         countryCode: "LK",
+        ...approvedAccount,
       },
       sending: null,
       lastPayout: {
@@ -88,6 +100,7 @@ export const payoutsFixture = {
         id: "d0000000-0000-4000-8000-000000000042",
         accountLast4: "0042",
         countryCode: "ID",
+        ...approvedAccount,
       },
       sending: null,
       lastPayout: {
@@ -109,6 +122,7 @@ export const ubudDetail = {
     id: "d0000000-0000-4000-8000-000000006789",
     accountLast4: "6789",
     countryCode: "ID",
+    ...approvedAccount,
   },
   payouts: [
     {
@@ -116,6 +130,7 @@ export const ubudDetail = {
       currency: "IDR",
       amountMinor: "98000000",
       cutoff: "2026-11-01",
+      destinationId: "d0000000-0000-4000-8000-000000006789",
       accountLast4: "6789",
       startedAt: "2026-11-02T09:05:00Z",
       reference: "WISE-48211907",
@@ -192,6 +207,81 @@ export const ubudDetail = {
   })),
 };
 
+// P7: two hotels that replaced their bank account on 2 Nov. Uluwatu's new account waits for
+// approval; Amed started a payout to its old account before replacing it.
+export const uluwatu = "66666666-6666-4666-8666-666666666666";
+export const amed = "77777777-7777-4777-8777-777777777777";
+const replacedAccount = (id: string, accountLast4: string) => ({
+  id,
+  accountLast4,
+  countryCode: "ID",
+  savedAt: "2026-11-02T10:15:00Z",
+  replaced: true,
+  approved: false,
+  approvedAt: null,
+  approvedVia: null,
+});
+export const uluwatuHotel = {
+  propertyId: uluwatu,
+  name: "Uluwatu Cliff Villa",
+  currency: "IDR",
+  payableMinor: "72000000",
+  payNowMinor: "72000000",
+  upcomingMinor: "0",
+  destination: replacedAccount("d0000000-0000-4000-8000-000000004321", "4321"),
+  sending: null,
+  lastPayout: {
+    id: "aaaaaaaa-0000-4000-8000-000000000004",
+    amountMinor: "54000000",
+    paidOn: "2026-11-02",
+    reference: "WISE-48211990",
+  },
+};
+const amedOldPayout = {
+  id: "aaaaaaaa-0000-4000-8000-000000000005",
+  currency: "IDR",
+  amountMinor: "39500000",
+  cutoff: "2026-11-01",
+  destinationId: "d0000000-0000-4000-8000-000000000777",
+  accountLast4: "0777",
+  startedAt: "2026-11-02T08:50:00Z",
+  reference: null,
+  paidOn: null,
+  sentAt: null,
+  returnedAt: null,
+  returnReason: null,
+};
+export const amedHotel = {
+  propertyId: amed,
+  name: "Amed Reef Bungalows",
+  currency: "IDR",
+  payableMinor: "0",
+  payNowMinor: "0",
+  upcomingMinor: "12000000",
+  destination: replacedAccount("d0000000-0000-4000-8000-000000008888", "8888"),
+  sending: {
+    id: amedOldPayout.id,
+    amountMinor: amedOldPayout.amountMinor,
+    startedAt: amedOldPayout.startedAt,
+    destinationId: amedOldPayout.destinationId,
+  },
+  lastPayout: null,
+};
+export const amedDetail = {
+  mode: "live",
+  cutoff: "2026-11-08",
+  propertyId: amed,
+  name: amedHotel.name,
+  balances: [amedHotel],
+  destination: amedHotel.destination,
+  payouts: [amedOldPayout],
+  entries: [],
+};
+export const replacedFixture = {
+  ...payoutsFixture,
+  hotels: [...payoutsFixture.hotels, uluwatuHotel, amedHotel],
+};
+
 export const api = (path: string) =>
   new RegExp(`https://api\\.localhost(?::\\d+)?${path.replace(/[?]/g, "\\?")}(?:\\?.*)?$`);
 
@@ -238,7 +328,11 @@ export async function signIn(page: Page, baseURL: string | undefined) {
 }
 
 /** The payouts API as it answers with vayada Payment on. */
-export async function mockPayouts(page: Page, origin: string, list = payoutsFixture) {
+export async function mockPayouts(
+  page: Page,
+  origin: string,
+  list: { mode: string; cutoff: string; hotels: unknown[] } = payoutsFixture,
+) {
   const posts: { url: string; body: Record<string, unknown> }[] = [];
   await page.route(api("/api/finance/platform/vayada-payment/payouts"), (route) =>
     fulfillJson(route, origin, {
