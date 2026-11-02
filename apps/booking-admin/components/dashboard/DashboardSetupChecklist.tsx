@@ -19,6 +19,7 @@ import {
 } from "@vayada/product-onboarding/HotelSetupChecklistCard";
 import {
   GoLiveChecklistCard,
+  type GoLiveChecklistMessages,
   GoLiveLaterCard,
   GoLiveSetupCard,
   goLiveSetupStepParam,
@@ -37,6 +38,7 @@ import { hotelSetupChecklistApi } from "@/services/api/hotelSetupChecklistClient
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 
 import { bookingAdminChecklistMessages } from "./bookingAdminChecklistMessages";
+import { bookingAdminGoLiveMessages } from "./bookingAdminGoLiveMessages";
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
 
@@ -213,11 +215,13 @@ function GoLiveCards({
   state,
   hotelName,
   navigate,
+  messages,
 }: {
   setup: DashboardSetupChecklist;
   state: Extract<DashboardSetupChecklistState, { kind: "go_live" }>;
   hotelName: string;
   navigate: (path: string) => void;
+  messages: GoLiveChecklistMessages;
 }) {
   const toast = useSetupFinishedToast();
   const open = (page: { app: "pms" | "booking_admin"; path: string }) =>
@@ -232,10 +236,12 @@ function GoLiveCards({
   const { checklist } = state;
   // A live hotel's card goes once dismissed or hidden (also when today's checklist was).
   if (checklist.phase === "live" && (checklist.viewer.dismissed || checklist.viewer.hidden))
-    return toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} /> : null;
+    return toast.shown ? (
+      <SetupFinishedToast onDismiss={toast.dismiss} messages={messages} />
+    ) : null;
   return (
     <>
-      {toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} /> : null}
+      {toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} messages={messages} /> : null}
       {checklist.phase === "setup" ? (
         <GoLiveSetupCard
           checklist={checklist}
@@ -246,6 +252,7 @@ function GoLiveCards({
               ? navigate(BOOKING_ADMIN_GO_LIVE_PAGES.property_details.path)
               : navigate(setupPath(step))
           }
+          messages={messages}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -262,11 +269,13 @@ function GoLiveCards({
             }}
             onPublish={() => window.dispatchEvent(new Event(PUBLISH_BOOKING_PAGE_EVENT))}
             onDismiss={() => void setup.dismissGoLive().catch(() => undefined)}
+            messages={messages}
           />
           <div>
             <GoLiveLaterCard
               checklist={checklist}
               onConnectCards={() => navigate("/settings/payments")}
+              messages={messages}
             />
           </div>
         </div>
@@ -287,9 +296,18 @@ export function DashboardSetupChecklistCard({
 }) {
   const { t } = useTranslation();
   const messages = useMemo(() => bookingAdminChecklistMessages(t), [t]);
+  const goLiveMessages = useMemo(() => bookingAdminGoLiveMessages(t), [t]);
   const { state } = setup;
   if (state.kind === "go_live")
-    return <GoLiveCards setup={setup} state={state} hotelName={hotelName} navigate={navigate} />;
+    return (
+      <GoLiveCards
+        setup={setup}
+        state={state}
+        hotelName={hotelName}
+        navigate={navigate}
+        messages={goLiveMessages}
+      />
+    );
   if (state.kind !== "ready") return null;
   const open = (item: HotelSetupChecklistItemId) => {
     const page = BOOKING_ADMIN_CHECKLIST_PAGES[item];
