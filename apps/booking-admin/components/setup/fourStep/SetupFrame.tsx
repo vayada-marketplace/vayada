@@ -2,7 +2,7 @@
 
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon } from "@heroicons/react/24/outline";
 import Image from "next/image";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 /**
  * VAY-2451: the four setup steps, in order (Timo's mockup, approved by Flamur 2026-11-02 in place of
@@ -28,14 +28,14 @@ export type SetupStepId = (typeof SETUP_STEPS)[number]["id"];
 
 export type SetupFooterProps = {
   onBack?: (() => void) | null;
+  /** Off while a save or an upload runs, so the screen can't move under it. */
+  backDisabled?: boolean;
   primaryLabel: string;
-  /** The primary button submits this form, or calls onPrimary. */
-  formId?: string;
   onPrimary?: (() => void) | null;
   primaryDisabled?: boolean;
   primaryBusy?: boolean;
   primaryBusyLabel?: string;
-  /** Why Continue is off ("Add a room name and size to continue"); next to the button, above it on phones. */
+  /** Why Continue is off ("Add a room name and size to continue"); next to the button, above it below 1280 px. */
   hint?: string | null;
   /** "Skip for now" on the room steps. */
   onSkip?: (() => void) | null;
@@ -68,8 +68,9 @@ const SECONDARY =
 
 /**
  * VAY-2451 setup frame: on wide screens a left rail with the four steps, the step's header with "Step N of 4"
- * and "Save & exit", the step scrolling in the middle and a footer that always stays in view. Below 720 px
- * the rail goes, the progress bar runs under the header and the footer becomes a bottom bar.
+ * and "Save & exit", the step scrolling in the middle and a footer that always stays in view. Below 1024 px
+ * the rail goes and the progress bar runs under the header; below 720 px the footer becomes a bottom bar.
+ * A new step or sub-step opens at the top with its heading focused.
  */
 export function SetupFrame({
   step,
@@ -86,9 +87,15 @@ export function SetupFrame({
 }: SetupFrameProps) {
   const current = SETUP_STEPS.findIndex((item) => item.id === step);
   const label = `Step ${current + 1} of ${SETUP_STEPS.length}`;
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    scroller.current?.scrollTo?.({ top: 0 });
+    if (typeof document !== "undefined")
+      document.getElementById("setup-step-heading")?.focus({ preventScroll: true });
+  }, [step, subStep]);
   return (
     <div className="flex h-[100dvh] bg-gray-50 text-gray-950">
-      <aside className="hidden w-[300px] shrink-0 flex-col border-r border-gray-200 bg-white px-5 py-7 min-[720px]:flex">
+      <aside className="hidden w-[300px] shrink-0 flex-col border-r border-gray-200 bg-white px-5 py-7 min-[1024px]:flex">
         <div className="px-3">
           <Image
             src="/vayada-logo.png"
@@ -122,7 +129,7 @@ export function SetupFrame({
                 }`}
               >
                 <span
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${
+                  className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${
                     done
                       ? "bg-green-500 text-white"
                       : isCurrent
@@ -131,7 +138,10 @@ export function SetupFrame({
                   }`}
                 >
                   {done ? (
-                    <CheckIcon className="h-4 w-4 stroke-[3]" aria-label="Done" />
+                    <>
+                      <CheckIcon className="h-4 w-4 stroke-[3]" aria-hidden="true" />
+                      <span className="sr-only">Done:</span>
+                    </>
                   ) : (
                     index + 1
                   )}
@@ -158,7 +168,7 @@ export function SetupFrame({
               alt="vayada"
               width={27}
               height={24}
-              className="h-6 w-auto min-[720px]:hidden"
+              className="h-6 w-auto min-[1024px]:hidden"
             />
             <p className="text-[13px] font-semibold text-primary-600">
               {label}
@@ -166,7 +176,7 @@ export function SetupFrame({
                 <span className="font-medium text-gray-600">{` · ${subStep}`}</span>
               ) : null}
             </p>
-            <Progress current={current} className="hidden gap-1 min-[720px]:flex" bar="w-7" />
+            <Progress current={current} className="hidden gap-1 min-[1024px]:flex" bar="w-7" />
           </div>
           <button
             type="button"
@@ -179,11 +189,14 @@ export function SetupFrame({
         </div>
         <Progress
           current={current}
-          className="flex gap-1 px-4 pt-2.5 min-[720px]:hidden"
+          className="flex gap-1 px-4 pt-2.5 min-[720px]:px-14 min-[1024px]:hidden"
           bar="flex-1"
         />
 
-        <div className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-5 min-[720px]:px-14 min-[720px]:pb-8">
+        <div
+          ref={scroller}
+          className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-5 min-[720px]:px-14 min-[720px]:pb-8"
+        >
           <div className="flex flex-wrap items-start gap-12">
             <div className="min-w-0 max-w-[620px] flex-[1_1_480px]">{children}</div>
             {aside ? (
@@ -232,8 +245,8 @@ function Progress({
 
 function SetupFooter({
   onBack,
+  backDisabled = false,
   primaryLabel,
-  formId,
   onPrimary,
   primaryDisabled = false,
   primaryBusy = false,
@@ -246,7 +259,7 @@ function SetupFooter({
     <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-3 min-[720px]:px-14 min-[720px]:py-4">
       {hint ? (
         <p
-          className="mb-2 text-[13px] font-medium text-amber-700 min-[720px]:hidden"
+          className="mb-2 text-[13px] font-medium text-amber-700 min-[1280px]:hidden"
           aria-live="polite"
         >
           {hint}
@@ -256,7 +269,12 @@ function SetupFooter({
         {onBack ? (
           <>
             <div className="hidden items-center gap-4 min-[720px]:flex">
-              <button type="button" onClick={onBack} className={`${SECONDARY} px-5`}>
+              <button
+                type="button"
+                onClick={onBack}
+                disabled={backDisabled}
+                className={`${SECONDARY} px-5`}
+              >
                 Back
               </button>
               <SavedAsYouGo />
@@ -264,6 +282,7 @@ function SetupFooter({
             <button
               type="button"
               onClick={onBack}
+              disabled={backDisabled}
               aria-label="Back"
               className={`${SECONDARY} w-12 shrink-0 min-[720px]:hidden`}
             >
@@ -277,7 +296,7 @@ function SetupFooter({
         )}
         <div className="flex flex-1 items-center justify-end gap-2.5 min-[720px]:flex-none">
           {hint ? (
-            <p className="hidden text-[13px] font-medium text-amber-700 min-[720px]:block">
+            <p className="hidden text-[13px] font-medium text-amber-700 min-[1280px]:block">
               {hint}
             </p>
           ) : null}
@@ -292,9 +311,8 @@ function SetupFooter({
             </button>
           ) : null}
           <button
-            type={formId ? "submit" : "button"}
-            form={formId}
-            onClick={formId ? undefined : (onPrimary ?? undefined)}
+            type="button"
+            onClick={onPrimary ?? undefined}
             disabled={primaryDisabled || primaryBusy}
             aria-busy={primaryBusy || undefined}
             className={`${PRIMARY} flex-1 min-[720px]:flex-none`}

@@ -34,8 +34,8 @@ describe("SetupFrame (VAY-2451)", () => {
     const nav = renderer.root.findByProps({ "aria-label": "Setup steps" });
     const steps = nav.findAllByType("button");
     expect(steps.map((step) => textOf(step))).toEqual([
-      "Your propertyName, type and logo",
-      "Location & contactAddress, contact and socials",
+      "Done:Your propertyName, type and logo",
+      "Done:Location & contactAddress, contact and socials",
       "3First roomOptional · everything but prices",
       "4Guest paymentsHow guests pay you",
     ]);

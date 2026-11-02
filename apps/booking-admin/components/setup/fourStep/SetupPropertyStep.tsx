@@ -37,7 +37,6 @@ export type SetupPropertyStepProps = {
   propertyTypes: readonly SharedPropertyTypeOption[];
   logoPreviewUrl?: string | null;
   onLogoSelected: (file: File) => void;
-  logoError?: string | null;
 };
 
 /** VAY-2451 step 1, "Your property": the name, the type as a compact grid and an optional logo. */
@@ -47,7 +46,6 @@ export function SetupPropertyStep({
   propertyTypes,
   logoPreviewUrl,
   onLogoSelected,
-  logoError,
 }: SetupPropertyStepProps) {
   const options = setupPropertyTypeOptions(propertyTypes, draft.propertyType);
   return (
@@ -142,11 +140,6 @@ export function SetupPropertyStep({
               }}
             />
           </label>
-          {logoError ? (
-            <p role="alert" className="mt-1.5 text-[13px] text-red-700">
-              {logoError}
-            </p>
-          ) : null}
         </div>
       </div>
     </div>

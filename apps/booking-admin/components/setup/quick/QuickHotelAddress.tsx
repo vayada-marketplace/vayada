@@ -58,7 +58,7 @@ export type QuickHotelAddressProps = {
   /** The long link a maps.app.goo.gl share link opens (the API reads it); null without. */
   resolveShortLink?: ((url: string) => Promise<string | null>) | null;
   /**
-   * VAY-2451 "Location & contact": a small map with the pin chip on it, "Guests will see" on one line, and
+   * VAY-2451 "Location & contact": a small map, "Pin placed · Guests will see …" on one line, and
    * time zone and currency on one line with one Change, so the step fits one screen.
    */
   compact?: boolean;
@@ -448,12 +448,6 @@ export function QuickHotelAddress({
                   onUnavailable={() => setMapFailed(true)}
                 />
               )}
-              {compact && hasPin(draft) ? (
-                <p className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1.5 text-[13px] font-medium text-green-700 shadow">
-                  <CheckCircleIcon className="h-4 w-4" aria-hidden="true" />
-                  Pin placed
-                </p>
-              ) : null}
             </div>
             {adjusting ? (
               <p className="mt-2 text-[13px] text-gray-500">
@@ -463,6 +457,10 @@ export function QuickHotelAddress({
           </div>
           {hasPin(draft) && compact ? (
             <p aria-live="polite" className="text-[13px] text-gray-600">
+              <span className="mr-1.5 inline-flex items-center gap-1 align-top font-medium text-green-700">
+                <CheckCircleIcon className="h-4 w-4" aria-hidden="true" />
+                Pin placed ·
+              </span>
               {"Guests will see "}
               <span className="font-semibold text-gray-950">
                 {formattedAddress(draft) ||
