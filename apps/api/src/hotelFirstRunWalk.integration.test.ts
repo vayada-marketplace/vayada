@@ -912,6 +912,66 @@ describe.skipIf(!url)(
             ok: true,
             ran: [],
           });
+
+          // The placeholder is the one thing keeping the page from going live...
+          expect(blockerCodes(await h.readiness())).toEqual([
+            expect.stringMatching(/:pricing_rates_placeholder$/),
+          ]);
+          // ...until the owner saves real prices, the way the Prices page does.
+          const pricing = h.pricing();
+          const current = (await pricing.read(h.propertyId))!;
+          const draftId = randomUUID();
+          const draft = { draftId, baseRevision: current.revision };
+          const prepared = await pricing.prepare(
+            h.propertyId,
+            {
+              currency: current.currency,
+              rooms: current.rooms.map((room) => ({
+                ...JSON.parse(
+                  JSON.stringify(room).replace('"amountMinor":"10000"', '"amountMinor":"1850000"'),
+                ),
+                revision: current.revision + 1,
+              })),
+            },
+            draft,
+          );
+          await pricing.saveDraft(h.propertyId, {
+            draftId,
+            expectedDraftRevision: 0,
+            baseRevision: current.revision,
+            ...prepared,
+          });
+          const review = (await pricing.reviewCharges(h.propertyId, draftId))!;
+          const charges = await pricing.confirmCharges(h.propertyId, {
+            draftId,
+            expectedDraftRevision: review.revision,
+            claimedFingerprint: review.fingerprint,
+            declaration: review.declaration,
+            declaredVia: "save_prices",
+            requestId: randomUUID(),
+          });
+          const snapshot = {
+            ...review.snapshot,
+            ownerReferences: { ...review.snapshot.ownerReferences, charges: charges.id },
+          };
+          const saved = await pricing.saveDraft(h.propertyId, {
+            draftId,
+            expectedDraftRevision: review.revision,
+            baseRevision: current.revision,
+            sources: review.sources,
+            ...(review.effectiveSources ? { effectiveSources: review.effectiveSources } : {}),
+            snapshot,
+          });
+          await pricing.publish(h.propertyId, {
+            requestId: randomUUID(),
+            expectedRevision: current.revision,
+            sources: review.sources,
+            ...(review.effectiveSources ? { effectiveSources: review.effectiveSources } : {}),
+            snapshot,
+            draft: { id: draftId, revision: saved },
+          });
+          expect(await pricingHead(h)).not.toMatch(/^first-run:/);
+          expect(blockerCodes(await h.readiness())).toEqual([]);
         } finally {
           await h.close();
         }

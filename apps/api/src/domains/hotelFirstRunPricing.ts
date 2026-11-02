@@ -68,6 +68,14 @@ export type HotelFirstRunPricingInput = Readonly<
 /** The request-id step of the placeholder price's publish (VAY-2451); the old first run used "pricing_publish". */
 export const FIRST_RUN_PLACEHOLDER_PUBLISH_STEP = "pricing_placeholder_publish";
 
+/** Whether a pricing revision is the first run's placeholder publish (its request id, see firstRunIdempotencyKey). */
+export function isFirstRunPlaceholderPricingRequestId(requestId: unknown): boolean {
+  return (
+    typeof requestId === "string" &&
+    requestId.startsWith(`first-run:v1:${FIRST_RUN_PLACEHOLDER_PUBLISH_STEP}:`)
+  );
+}
+
 /** A stable UUID (v4 layout) from the parts, for draft and offer ids the pricing store requires to be UUIDs. */
 export function firstRunUuid(...parts: unknown[]): string {
   const hex = createHash("sha256").update(JSON.stringify(parts)).digest("hex");

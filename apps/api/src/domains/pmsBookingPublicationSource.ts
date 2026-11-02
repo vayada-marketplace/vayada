@@ -235,6 +235,8 @@ async function load(
       gap === "hotel_setup_in_progress" ? "external_pending" : "user_fixable",
     ),
   );
+  // VAY-2451: the first run's placeholder price never goes live; real prices from Prices replace it.
+  if (pricing?.placeholder) pricingBlockers.push(blocker("pricing_rates_placeholder"));
   const inventoryMatches =
     currentCalendar &&
     inventory?.ready &&
