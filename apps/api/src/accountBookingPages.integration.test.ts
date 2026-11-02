@@ -393,15 +393,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     profile.hotel.slug = slug;
     // Only a fresh, bookable page can be built; a hidden one goes stale after it was published.
     // The build is frozen; mark a copy stale.
-    const content = structuredClone(publicContent(profile)) as {
-      profile: { freshness: { status: string } };
+    const content = structuredClone(publicContent(profile)) as unknown as {
+      profile: { freshness: { status: string }; hotel: Record<string, unknown> };
     };
     if (state === "hidden") {
       content.profile.freshness.status = "stale";
       // Its published hero comes before the room photo in Booking Admin's list.
-      (content.profile as { hotel: Record<string, unknown> }).hotel["branding"] = {
-        heroImage: "https://cdn.example/uma-hero.jpg",
-      };
+      content.profile.hotel["branding"] = { heroImage: "https://cdn.example/uma-hero.jpg" };
     }
     const revisionId = randomUUID();
     await admin.query(
