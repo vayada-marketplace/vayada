@@ -28,13 +28,21 @@ type Draft = {
 };
 
 /** pricing-v2 in memory: records the call order and keeps one draft. */
-function fakePricing(start: { priced?: boolean; draft?: Draft; fail?: string } = {}) {
+function fakePricing(
+  start: { priced?: boolean; otherPriced?: boolean; draft?: Draft; fail?: string } = {},
+) {
   const calls: Array<[string, unknown]> = [];
   let draft: Draft | null = start.draft ?? null;
   const record = (name: string, value?: unknown) => calls.push([name, value]);
   const pricing = {
     read: async () => {
       record("read");
+      if (start.otherPriced)
+        return {
+          revision: 3,
+          currency: "EUR",
+          rooms: [{ roomTypeId: "11111111-1111-4111-8111-111111111111", offers: [{}] }],
+        };
       return start.priced
         ? { revision: 3, currency: "EUR", rooms: [{ roomTypeId, offers: [{}] }] }
         : null;
@@ -184,14 +192,7 @@ describe("first run step 4: the first price (VAY-2247)", () => {
 
   it("never puts the placeholder next to prices the hotel already has (VAY-2451)", async () => {
     // Another room type is priced: the setup's room waits for the owner's own price.
-    const fake = fakePricing();
-    const read = fake.ports.pricing.read;
-    fake.ports.pricing.read = async (id: string) =>
-      (await read(id)) ?? {
-        revision: 3,
-        currency: "EUR",
-        rooms: [{ roomTypeId: "11111111-1111-4111-8111-111111111111", offers: [{}] }],
-      };
+    const fake = fakePricing({ otherPriced: true });
     expect(
       await runFirstRunPricing(fake.ports, actor, {
         roomTypeId,
