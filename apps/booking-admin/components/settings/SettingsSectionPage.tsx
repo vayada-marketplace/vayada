@@ -115,6 +115,35 @@ const PAGE_TITLES: Record<Section, string> = {
 };
 
 const STRIPE_DASHBOARD_ERROR = "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry";
+
+// VAY-2424 Step 2, as in Timo's mockup.
+const PAYMENT_PROVIDERS = [
+  {
+    id: "vayada",
+    name: "settings.billing.providerVayada",
+    desc: "settings.billing.providerVayadaDesc",
+  },
+  {
+    id: "stripe",
+    name: "settings.billing.providerStripe",
+    desc: "settings.billing.providerStripeDesc",
+  },
+  {
+    id: "xendit",
+    name: "settings.billing.providerXendit",
+    desc: "settings.billing.providerXenditDesc",
+  },
+] as const;
+type ProviderStatus = "connected" | "pending" | "not_connected";
+const PROVIDER_STATUS_TEXT: Record<ProviderStatus, string> = {
+  connected: "settings.billing.connected",
+  pending: "settings.payments.setupNotFinished",
+  not_connected: "settings.payments.notConnected",
+};
+const PRIMARY_BUTTON =
+  "inline-flex h-11 items-center gap-2 rounded-lg bg-primary-600 px-[18px] text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-50";
+const SECONDARY_BUTTON =
+  "inline-flex h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 transition-colors hover:bg-slate-50 disabled:opacity-50";
 const STRIPE_NOT_CONNECTED = "admin.yourStripeAccountIsnTConnectedConnectStripeInYour";
 
 function readBookingHotelId(settings: PropertySettings): string {
@@ -347,9 +376,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const paymentSettingsLoadVersion = useRef(0);
   const [stripeAccountCreationBlocked, setStripeAccountCreationBlocked] = useState(false);
   const [paymentProvider, setPaymentProvider] = useState<"stripe" | "xendit" | "vayada">("stripe");
-  const [xenditChannelCode, setXenditChannelCode] = useState("ID_BCA");
-  const [xenditAccountNumber, setXenditAccountNumber] = useState("");
-  const [xenditAccountHolderName, setXenditAccountHolderName] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [paymentSuccess, setPaymentSuccess] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
@@ -470,9 +496,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         : null;
     setStripeAccountId(stripeAccountId);
     setStripeOnboarded(isFinanceStripeReady(res));
-    setXenditChannelCode("ID_BCA");
-    setXenditAccountNumber("");
-    setXenditAccountHolderName("");
     const saved: PaymentsForm = {
       payAtProperty: ps.acceptedMethods.includes("pay_at_property"),
       payAtHotelMethods: payAtHotelMethodsFromFinance(ps.acceptedMethods),
@@ -629,7 +652,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       const paymentSettingsVersion = ++paymentSettingsLoadVersion.current;
       setStripeAccountCreationBlocked(true);
       setRefreshingStripe(true);
-      setPaymentError("");
+      // An earlier error stays until this check settles, so Step 2 keeps its "couldn't be
+      // confirmed" view (and the button just clicked) while it runs (VAY-2424).
       setPaymentSuccess("");
       try {
         const paymentSettings =
@@ -667,6 +691,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         }
         if (isFinanceStripeReady(paymentSettings)) {
           setStripeAccountCreationBlocked(false);
+          setPaymentError("");
           setPaymentSuccess("admin.stripeIsConnected");
         } else {
           setPaymentError("admin.stripeSetupIsStillPendingCompleteOnboardingOrCheckAgain");
@@ -770,6 +795,13 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, vayadaSaved, offeredMethods]);
   // A missing or unfinished account is the page's own knowledge: Finance's readiness can't tell a
   // missing account from a pending approval. Nothing is said while a Stripe check runs.
+  // Stripe may hold an account this page couldn't confirm (back from Stripe, or a failed read):
+  // Step 2 offers a check instead of a new account, and after a failed read, only the check.
+  const stripeUnconfirmed =
+    paymentProvider === "stripe" &&
+    !stripeAccountId &&
+    (stripeAccountCreationBlocked || !paymentSettingsLoaded);
+  const stripeStatusUnknown = stripeUnconfirmed && !!paymentError;
   const cardNotReadyReason: CardNotReadyReason | null =
     !cardSaved || refreshingStripe
       ? null
@@ -783,7 +815,10 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           ? cardNotReady
           : stripeAccountId
             ? "setup_incomplete"
-            : "not_connected";
+            : // Not "connect one" while an account may exist: Step 2 offers the check.
+              stripeUnconfirmed
+              ? null
+              : "not_connected";
 
   const handleAcceptanceToggle = async () => {
     const hotelId = readBookingHotelId(settings);
@@ -993,6 +1028,22 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       vayadaPayment?.available === true &&
       vayadaPayoutSaved === null
     );
+  const providerStatus: ProviderStatus | null =
+    paymentProvider === "stripe"
+      ? stripeOnboarded
+        ? "connected"
+        : stripeAccountId
+          ? "pending"
+          : stripeUnconfirmed
+            ? null
+            : "not_connected"
+      : paymentProvider === "vayada" && vayadaPayment?.available
+        ? vayadaPayoutSaved === null
+          ? null
+          : vayadaPayoutSaved
+            ? "connected"
+            : "not_connected"
+        : "not_connected";
   // VAY-2424: what changed on Payments, against what was saved.
   const paymentsForm = paymentsFormOf(settings, paymentProvider);
   const paymentMethodsChanged =
@@ -2044,7 +2095,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           {ownerFinance === false && (
             <OwnerOnlyNote>{t("settings.ownerOnly.payouts")}</OwnerOnlyNote>
           )}
-          {paymentSettingsLoaded && cardNotReadyReason && (
+          {paymentSettingsLoaded && settings.online_card_payment && cardNotReadyReason && (
             <CardNotReadyBanner reason={cardNotReadyReason} providerSectionId="payment-provider" />
           )}
           {localizationLoadError && localizationRetryCard}
@@ -2065,344 +2116,241 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         </div>
       )}
 
-      {activeSection === "payments" && (
-        <section id="payment-provider" className="mt-4 scroll-mt-4 space-y-4">
-          {!stripeAccountId &&
-          (stripeAccountCreationBlocked || !paymentSettingsLoaded) &&
-          paymentError ? (
-            <SettingsCard>
-              <FeedbackAlert type="error" message={t(paymentError)} className="mb-3" />
-              <span className="mb-3 inline-flex rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-700">
-                {t("settings.billing.pendingOnboarding")}
+      {/* VAY-2424 Step 2: where card payments go, while Credit card is on in Step 1. */}
+      {activeSection === "payments" &&
+        ((paymentSettingsLoaded && settings.online_card_payment) || stripeStatusUnknown) && (
+          <section
+            id="payment-provider"
+            aria-labelledby="payment-provider-heading"
+            className="mt-4 flex scroll-mt-4 flex-col gap-5 rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+          >
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold uppercase tracking-[0.04em] text-primary-600">
+                {t("settings.payments.step", { number: 2 })}
               </span>
-              <p className="mb-3 text-sm text-gray-700">
-                {t("admin.stripeAccountStatusCouldnTBeConfirmedCheckTheExisting")}
-              </p>
-              <button
-                type="button"
-                onClick={() => void refreshStripeOnboarding()}
-                disabled={refreshingStripe || !billingPropertyId}
-                className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-              >
-                {refreshingStripe ? t("admin.checkingStripe") : t("admin.checkStripeStatus")}
-              </button>
-            </SettingsCard>
-          ) : !settings.online_card_payment ? (
-            <SettingsCard>
-              <p className="text-sm text-gray-700">
-                {t("admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider")}
-              </p>
-            </SettingsCard>
-          ) : (
-            <>
-              <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
-                <span className="text-xs font-semibold uppercase tracking-[0.04em] text-primary-600">
-                  {t("settings.payments.step", { number: 2 })}
-                </span>
-                <h2 className="mt-1 text-lg font-semibold text-slate-900">
-                  {t("settings.payments.providerTitle")}
-                </h2>
-                <p className="mt-1 mb-4 text-sm text-slate-600">
-                  {t("settings.payments.providerDesc")}
+              <h2 id="payment-provider-heading" className="text-lg font-semibold text-slate-900">
+                {t("settings.payments.providerTitle")}
+              </h2>
+              <p className="text-sm text-slate-600">{t("settings.payments.providerDesc")}</p>
+            </div>
+
+            {/* The page-level Save already shows its result in the banner at the top. */}
+            {paymentError && paymentError !== feedback?.message && (
+              <FeedbackAlert type="error" message={t(paymentError)} />
+            )}
+            {paymentSuccess && paymentSuccess !== feedback?.message && (
+              <FeedbackAlert type="success" message={t(paymentSuccess)} />
+            )}
+
+            {stripeStatusUnknown ? (
+              // Stripe may have an account the page couldn't read: check before starting again.
+              <div className="flex flex-col items-start gap-3">
+                <p className="text-sm text-slate-600">
+                  {t("admin.stripeAccountStatusCouldnTBeConfirmedCheckTheExisting")}
                 </p>
-
-                {/* The page-level Save already shows its result in the banner at the top. */}
-                {paymentError && paymentError !== feedback?.message && (
-                  <FeedbackAlert type="error" message={t(paymentError)} className="mb-3" />
-                )}
-                {paymentSuccess && paymentSuccess !== feedback?.message && (
-                  <FeedbackAlert type="success" message={t(paymentSuccess)} className="mb-3" />
-                )}
-
-                {/* Provider selector */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                  <button
-                    type="button"
-                    disabled={vayadaPayment?.available !== true}
-                    onClick={() => setPaymentProvider("vayada")}
-                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left disabled:opacity-55 disabled:cursor-not-allowed ${
-                      paymentProvider === "vayada"
-                        ? "border-primary-500 bg-primary-50/30"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div
-                      className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "vayada" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                    >
-                      {paymentProvider === "vayada" && (
-                        <svg
-                          className="w-2.5 h-2.5 text-white"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={3}
-                            d="M5 13l4 4L19 7"
+                <button
+                  type="button"
+                  onClick={() => void refreshStripeOnboarding()}
+                  disabled={refreshingStripe || !billingPropertyId}
+                  className={SECONDARY_BUTTON}
+                >
+                  {refreshingStripe ? t("admin.checkingStripe") : t("admin.checkStripeStatus")}
+                </button>
+              </div>
+            ) : (
+              <>
+                <div
+                  role="radiogroup"
+                  aria-labelledby="payment-provider-heading"
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+                >
+                  {PAYMENT_PROVIDERS.map(({ id, name, desc }) => {
+                    const checked = paymentProvider === id;
+                    // vayada Payment once switched on for the hotel (VAY-2442); Xendit waits
+                    // for VAY-2443.
+                    const available =
+                      id === "stripe" || (id === "vayada" && vayadaPayment?.available === true);
+                    return (
+                      <label
+                        key={id}
+                        className={`relative flex min-h-[108px] flex-col items-start gap-2 rounded-[10px] p-4 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary-500 has-[:focus-visible]:ring-offset-2 ${
+                          checked
+                            ? "border-2 border-primary-500 bg-primary-50"
+                            : "m-px border border-slate-300"
+                        } ${available ? "cursor-pointer hover:border-primary-400" : "cursor-not-allowed opacity-55"}`}
+                      >
+                        <input
+                          type="radio"
+                          name="payment-provider"
+                          value={id}
+                          checked={checked}
+                          // The saved choice stays focusable even when it can't be chosen now,
+                          // so the keyboard still reaches the group (a disabled checked radio
+                          // takes the whole group out of the tab order).
+                          disabled={!available && !checked}
+                          onChange={() => {
+                            if (!available) return;
+                            // The vayada panel reads the payout account again when it opens.
+                            if (id === "vayada") setVayadaPayoutSaved(null);
+                            setPaymentProvider(id);
+                          }}
+                          className="sr-only"
+                        />
+                        <span className="flex w-full items-center justify-between gap-2">
+                          <span className="text-[15px] font-semibold text-slate-900">
+                            {t(name)}
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            className={`h-[18px] w-[18px] shrink-0 rounded-full ${
+                              checked
+                                ? "border-[6px] border-primary-500"
+                                : "border-2 border-slate-400"
+                            }`}
                           />
-                        </svg>
-                      )}
-                    </div>
-                    <span className="text-[13px] font-semibold text-gray-900">
-                      {t("settings.billing.providerVayada")}
-                    </span>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      {t("settings.billing.providerVayadaDesc")}
-                    </p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentProvider("stripe")}
-                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
-                      paymentProvider === "stripe"
-                        ? "border-primary-500 bg-primary-50/30"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div
-                      className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "stripe" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                    >
-                      {paymentProvider === "stripe" && (
-                        <svg
-                          className="w-2.5 h-2.5 text-white"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={3}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                      )}
-                    </div>
-                    <span className="text-[13px] font-semibold text-gray-900">
-                      {t("settings.billing.providerStripe")}
-                    </span>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      {t("settings.billing.providerStripeDesc")}
-                    </p>
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left opacity-55 cursor-not-allowed ${
-                      paymentProvider === "xendit"
-                        ? "border-primary-500 bg-primary-50/30"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div
-                      className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "xendit" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                    >
-                      {paymentProvider === "xendit" && (
-                        <svg
-                          className="w-2.5 h-2.5 text-white"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={3}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                      )}
-                    </div>
-                    <span className="text-[13px] font-semibold text-gray-900">
-                      {t("settings.billing.providerXendit")}
-                    </span>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      {t("settings.billing.providerXenditDesc")}
-                    </p>
-                  </button>
+                        </span>
+                        <span className="text-[13px] leading-[1.45] text-slate-600">{t(desc)}</span>
+                      </label>
+                    );
+                  })}
                 </div>
 
-                {/* Provider-specific content: connecting and opening payout accounts (VAY-2401). */}
-                <fieldset disabled={ownerFinance === false} className="min-w-0 disabled:opacity-60">
-                  {paymentProvider === "vayada" && vayadaPayment?.available && billingPropertyId ? (
-                    <VayadaPayoutAccountPanel
-                      propertyId={billingPropertyId}
-                      feePercent={vayadaPayment.feePercent ?? null}
-                      canEdit={ownerFinance === true}
-                      onAccountChange={setVayadaPayoutSaved}
-                    />
-                  ) : paymentProvider === "vayada" ? (
-                    <div className="space-y-3">
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-                        <p className="text-[13px] text-amber-900 font-medium">
-                          {t("admin.comingSoon")}
-                        </p>
-                        <p className="text-[12px] text-amber-800 mt-1">
-                          {t("admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet")}
-                        </p>
-                      </div>
+                {/* The chosen provider: its status (for everyone) and what to do next.
+                  Connecting and opening payout accounts is the owner's (VAY-2401). */}
+                <div className="flex flex-col gap-3.5 border-t border-slate-200 pt-5">
+                  {providerStatus && (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-slate-500">
+                        {t("settings.payments.status")}
+                      </span>
+                      <span
+                        data-testid="payment-provider-status"
+                        className={`text-sm font-semibold ${providerStatus === "connected" ? "text-green-700" : "text-amber-700"}`}
+                      >
+                        {t(PROVIDER_STATUS_TEXT[providerStatus])}
+                      </span>
                     </div>
-                  ) : paymentProvider === "xendit" ? (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                            {t("settings.billing.bankLabel")}
-                          </label>
-                          <select
-                            value={xenditChannelCode}
-                            onChange={(e) => setXenditChannelCode(e.target.value)}
-                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          >
-                            <option value="ID_BCA">BCA</option>
-                            <option value="ID_MANDIRI">Mandiri</option>
-                            <option value="ID_BNI">BNI</option>
-                            <option value="ID_BRI">BRI</option>
-                            <option value="ID_PERMATA">Permata</option>
-                            <option value="ID_CIMB">CIMB Niaga</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                            {t("settings.billing.accountNumberLabel")}
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            maxLength={20}
-                            value={xenditAccountNumber}
-                            onChange={(e) =>
-                              setXenditAccountNumber(e.target.value.replace(/\D/g, ""))
-                            }
-                            placeholder="1234567890"
-                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                          {t("settings.billing.accountHolderNameLabel")}
-                        </label>
-                        <input
-                          type="text"
-                          value={xenditAccountHolderName}
-                          onChange={(e) => setXenditAccountHolderName(e.target.value)}
-                          placeholder={t("settings.billing.accountHolderPlaceholderXendit")}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  )}
+                  <fieldset
+                    disabled={ownerFinance === false}
+                    className="flex min-w-0 flex-col items-start gap-3.5 disabled:opacity-60"
+                  >
+                    {paymentProvider === "vayada" &&
+                    vayadaPayment?.available &&
+                    billingPropertyId ? (
+                      <div className="w-full">
+                        <VayadaPayoutAccountPanel
+                          propertyId={billingPropertyId}
+                          feePercent={vayadaPayment.feePercent ?? null}
+                          canEdit={ownerFinance === true}
+                          onAccountChange={setVayadaPayoutSaved}
                         />
                       </div>
-                    </div>
-                  ) : stripeAccountId ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12px] font-semibold text-gray-700">
-                          {t("settings.billing.stripe")}
-                        </span>
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${stripeOnboarded ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
-                        >
-                          {stripeOnboarded
-                            ? t("settings.billing.connected")
-                            : t("settings.billing.pendingOnboarding")}
-                        </span>
-                      </div>
-                      {!stripeOnboarded && (
-                        <div>
-                          <p className="text-[13px] text-gray-600 mb-2">
-                            {t("settings.billing.completeOnboardingDesc")}
+                    ) : paymentProvider === "vayada" || paymentProvider === "xendit" ? (
+                      <>
+                        {paymentProvider === "xendit" && (
+                          <p className="text-sm text-slate-600">
+                            {t("settings.payments.xenditText")}
                           </p>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              onClick={handleOnboarding}
-                              disabled={refreshingStripe || issuingStripeOnboardingLink}
-                              className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-                            >
-                              {issuingStripeOnboardingLink
-                                ? t("admin.openingStripe")
-                                : t("settings.billing.completeOnboarding")}
-                            </button>
+                        )}
+                        <div className="w-full rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                          <p className="text-[13px] font-medium text-amber-900">
+                            {t("admin.comingSoon")}
+                          </p>
+                          {paymentProvider === "vayada" && (
+                            <p className="mt-1 text-[12px] text-amber-800">
+                              {t("admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet")}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm text-slate-600">
+                          {t(
+                            stripeUnconfirmed
+                              ? "admin.stripeAccountStatusCouldnTBeConfirmedCheckTheExisting"
+                              : stripeAccountId && !stripeOnboarded
+                                ? "settings.billing.completeOnboardingDesc"
+                                : "settings.payments.stripeText",
+                          )}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {stripeUnconfirmed ? (
                             <button
                               type="button"
                               onClick={() => void refreshStripeOnboarding()}
-                              disabled={refreshingStripe}
-                              className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                              disabled={refreshingStripe || !billingPropertyId}
+                              className={SECONDARY_BUTTON}
                             >
                               {refreshingStripe
                                 ? t("admin.checkingStripe")
                                 : t("admin.checkStripeStatus")}
                             </button>
-                          </div>
+                          ) : !stripeAccountId ? (
+                            <button
+                              type="button"
+                              onClick={handleCreateStripeAccount}
+                              disabled={creatingAccount || refreshingStripe || !connectEmail}
+                              className={PRIMARY_BUTTON}
+                            >
+                              {creatingAccount
+                                ? t("settings.billing.connectingAccount")
+                                : t("settings.payments.connectStripe")}
+                            </button>
+                          ) : (
+                            <>
+                              {!stripeOnboarded && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={handleOnboarding}
+                                    disabled={refreshingStripe || issuingStripeOnboardingLink}
+                                    className={PRIMARY_BUTTON}
+                                  >
+                                    {issuingStripeOnboardingLink
+                                      ? t("admin.openingStripe")
+                                      : t("settings.payments.finishSetup")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void refreshStripeOnboarding()}
+                                    disabled={refreshingStripe}
+                                    className={SECONDARY_BUTTON}
+                                  >
+                                    {refreshingStripe
+                                      ? t("admin.checkingStripe")
+                                      : t("admin.checkStripeStatus")}
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                type="button"
+                                onClick={handleStripeDashboard}
+                                disabled={openingStripeDashboard}
+                                className={stripeOnboarded ? PRIMARY_BUTTON : SECONDARY_BUTTON}
+                              >
+                                <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+                                {openingStripeDashboard
+                                  ? t("admin.openingStripe")
+                                  : t("settings.payments.openStripeDashboard")}
+                              </button>
+                            </>
+                          )}
                         </div>
-                      )}
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-                        <button
-                          type="button"
-                          onClick={handleStripeDashboard}
-                          disabled={openingStripeDashboard}
-                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-[13px] font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
-                          {openingStripeDashboard
-                            ? t("admin.openingStripe")
-                            : t("admin.viewStripeDashboard")}
-                        </button>
-                        <p className="mt-2 text-[12px] text-gray-500">
-                          {t("admin.checkYourPayoutsBalanceAndPaymentHistoryOrUpdateYour")}
-                        </p>
-                      </div>
-                    </div>
-                  ) : stripeAccountCreationBlocked || !paymentSettingsLoaded ? (
-                    <div className="space-y-3">
-                      <p className="text-[13px] text-gray-600">
-                        {t("admin.stripeAccountStatusCouldnTBeConfirmedCheckTheExisting")}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => void refreshStripeOnboarding()}
-                        disabled={refreshingStripe || !billingPropertyId}
-                        className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                      >
-                        {refreshingStripe
-                          ? t("admin.checkingStripe")
-                          : t("admin.checkStripeStatus")}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-1">
-                        <div className="flex items-center gap-2">
-                          <svg className="h-5" viewBox="0 0 60 25" fill="none">
-                            <path
-                              fillRule="evenodd"
-                              clipRule="evenodd"
-                              d="M60 12.8C60 8.5 57.9 5 54.4 5c-3.5 0-5.9 3.5-5.9 7.8s2.2 7.8 5.8 7.8c1.7 0 3-.4 4-1.1v-2.7c-1 .5-2.1.9-3.5.9-1.4 0-2.6-.5-2.8-2.2h6.9c0-.2.1-1 .1-1.7zm-7-1.4c0-1.6 1-2.3 1.9-2.3.9 0 1.8.7 1.8 2.3h-3.7zm-7.5-6.4c-1.4 0-2.3.7-2.8 1.1l-.2-.9h-3.1v19.7l3.5-.7.1-4.8c.5.4 1.3.9 2.5.9 2.5 0 4.8-2 4.8-6.5 0-4.1-2.4-6.8-4.8-6.8zm-.8 10.5c-.8 0-1.3-.3-1.7-.7l-.1-5.4c.4-.4.9-.7 1.7-.7 1.3 0 2.2 1.5 2.2 3.4.1 2-.9 3.4-2.1 3.4zM35.2 5l3.5-.8V1.5l-3.5.7V5zm0 .5h3.5v14.2h-3.5V5.5zM31.3 6.3l-.2-1H28v14.2h3.5V9.1c.8-1.1 2.2-.9 2.6-.7V5.5c-.5-.2-2.2-.5-2.8 1zm-7.4-3.8l-3.4.7-.1 13c0 2.4 1.8 4.2 4.2 4.2 1.3 0 2.3-.2 2.8-.5v-2.8c-.5.2-3.1.9-3.1-1.4V8.3h3.1V5.5h-3.1l-.4-3zm-8.8 8c0-.6.5-.8 1.3-.8 1.1 0 2.5.3 3.7 1V7.4c-1.2-.5-2.5-.7-3.7-.7-3 0-5 1.6-5 4.2 0 4.1 5.7 3.5 5.7 5.2 0 .7-.6.9-1.5.9-1.3 0-2.9-.5-4.2-1.2v3.2c1.4.6 2.9.9 4.2.9 3.1 0 5.2-1.5 5.2-4.2-.1-4.5-5.7-3.7-5.7-5.3z"
-                              fill="#635BFF"
-                            />
-                          </svg>
-                          <p className="text-[11px] text-gray-500">
-                            {t("settings.billing.stripeBlurb")}
+                        {stripeAccountId && (
+                          <p className="text-[13px] text-slate-500">
+                            {t("admin.checkYourPayoutsBalanceAndPaymentHistoryOrUpdateYour")}
                           </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={handleCreateStripeAccount}
-                        disabled={creatingAccount || refreshingStripe || !connectEmail}
-                        className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-                      >
-                        {creatingAccount
-                          ? t("settings.billing.connectingAccount")
-                          : t("settings.billing.connectPaymentAccount")}
-                      </button>
-                    </div>
-                  )}
-                </fieldset>
-              </div>
-            </>
-          )}
-        </section>
-      )}
+                        )}
+                      </>
+                    )}
+                  </fieldset>
+                </div>
+              </>
+            )}
+          </section>
+        )}
       {/* VAY-2424: one save bar for the whole page (methods, bank details, booking windows), at
           page level so it sticks to the bottom of the screen anywhere on the page. */}
       {activeSection === "payments" && (
