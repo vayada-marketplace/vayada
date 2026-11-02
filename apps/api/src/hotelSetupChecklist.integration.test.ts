@@ -238,9 +238,18 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
              id, bucket, storage_key, storage_kind, visibility, purpose, property_id,
              resource_product, resource_type, resource_id, lifecycle_status, content_type,
              width_px, height_px, size_bytes, checksum_sha256, public_approved
-           ) VALUES ($1, 'vayada-media-test', $2, 'vayada_managed', 'public', 'pms.room_type.media',
+           ) VALUES ($1, 'vayada-media-test', $2, 'vayada_managed', $7, 'pms.room_type.media',
              $3::uuid, 'pms', 'room_type', $4::text, 'active', 'image/webp', 1200, 800, 900, $5, $6)`,
-          [mediaId, `public/media/${mediaId}.webp`, propertyId, roomTypeId, checksum, approved],
+          // Waiting for review means private: only approved media is public.
+          [
+            mediaId,
+            `${approved ? "public" : "private"}/media/${mediaId}.webp`,
+            propertyId,
+            roomTypeId,
+            checksum,
+            approved,
+            approved ? "public" : "private",
+          ],
         );
         await t.admin.query(
           `INSERT INTO pms.room_type_media (property_id, room_type_id, platform_media_object_id, sort_order)
