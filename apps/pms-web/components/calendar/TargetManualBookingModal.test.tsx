@@ -58,7 +58,7 @@ describe("target manual booking fields", () => {
     expect(markup).toContain("Channel: Direct");
     // One pill per source, native radios underneath (VAY-2417).
     for (const source of ["call", "email", "whatsapp", "walk_in", "social_media", "other"])
-      expect(markup).toContain(`name="directSource" value="${source}"`);
+      expect(markup).toMatch(new RegExp(`name="directSource"[^>]*value="${source}"`));
     for (const source of ["Call", "Email", "WhatsApp", "Walk-in", "Social media", "Other"])
       expect(markup).toContain(`>${source}</span>`);
     for (const forbidden of ["Airbnb", "Booking.com", "Expedia", "Booking Engine"])
@@ -71,10 +71,10 @@ describe("target manual booking fields", () => {
     expect(markup).toContain('name="privateNote"');
     expect(markup).toContain('aria-label="Phone country code"');
     expect(markup).toContain('name="phone" type="tel"');
-    expect(markup).toContain('value="paid" disabled=""');
+    expect(markup).toMatch(/name="settlement"[^>]*disabled=""[^>]*value="paid"/);
     // prettier-ignore
     expect(markup).toMatch(/aria-describedby="paid-help"[^>]*>[\s\S]*Paid requires Finance write access/);
-    expect(render(true)).not.toContain('value="paid" disabled=""');
+    expect(render(true)).not.toMatch(/name="settlement"[^>]*disabled=""[^>]*value="paid"/);
   });
 
   // prettier-ignore
