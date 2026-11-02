@@ -206,6 +206,8 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   const dialog = page.getByRole("dialog", { name: "New booking" });
   const ratePlan = dialog.getByLabel("Room 1 rate plan");
   const createBooking = dialog.getByRole("button", { name: "Create booking" });
+  // The summary column carries the total from the server's price (VAY-2417).
+  const summary = dialog.getByRole("complementary", { name: "Summary" });
 
   // Flexible wins over the Non-refundable plan listed first by the server.
   await expect(ratePlan).toHaveValue("flexible-rate");
@@ -240,7 +242,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await dialog.getByLabel("Room 1 nightly rate").fill("150");
   await expect(dialog.getByText("Custom: €300")).toBeVisible();
   await expect(dialog.getByText("Standard:")).toHaveCount(0);
-  await expect(page.getByText("Total €300")).toBeVisible();
+  await expect(summary).toContainText(/Total\s*€300/);
   await expect(createBooking).toBeEnabled();
   // The legacy room type still sends its own currency with the custom rate.
   expect(previewBodies.at(-1)?.stays[0]?.pricing.nightlyAmount).toEqual({
@@ -253,7 +255,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await dialog.getByLabel("Room 1 room").selectOption(LOFT_ROOM_ID);
   await expect(ratePlan).toHaveValue("custom");
   await dialog.getByLabel("Room 1 nightly rate").fill("150");
-  await expect(page.getByText("Total €300")).toBeVisible();
+  await expect(summary).toContainText(/Total\s*€300/);
   await expect(createBooking).toBeEnabled();
   expect(previewBodies.at(-1)?.stays[0]?.pricing.nightlyAmount).toEqual({
     amountDecimal: "150.00",
@@ -310,7 +312,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await expect(
     dialog.getByRole("button", { name: "Guest 2 nationality", exact: true }),
   ).toContainText("Germany");
-  await expect(page.getByText("Total €300")).toBeVisible();
+  await expect(summary).toContainText(/Total\s*€300/);
   await createBooking.click();
   await expect.poll(() => createBody).not.toBeNull();
   expect(createBody).toMatchObject({

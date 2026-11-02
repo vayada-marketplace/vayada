@@ -57,7 +57,7 @@ type StayDraft = {
 };
 
 // prettier-ignore
-const inputClass = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-50 disabled:text-gray-500", labelClass = "block space-y-1 text-xs font-medium text-gray-700", sectionClass = "mb-2 text-xs font-medium uppercase tracking-wide text-gray-500";
+const inputClass = "min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-50 disabled:text-gray-500", labelClass = "block space-y-1.5 text-[13px] font-medium text-gray-700";
 
 // prettier-ignore
 function addDay(value: string): string { if (!value) return ""; const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + 1); return date.toISOString().slice(0, 10); }
@@ -175,7 +175,7 @@ export default function TargetManualBookingModal({
   initialCheckOut = "",
   canRecordPaidPayment: suppliedPaidCapability,
 }: Props) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const firstRoom = rooms.find((room) => room.id === initialRoomId) ?? rooms[0];
   // prettier-ignore
   const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonChoices, setAddonChoices] = useState<Record<string, AddonChoice>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
@@ -547,71 +547,129 @@ export default function TargetManualBookingModal({
   ) : (
     t("calendar.targetManualBooking.selectStayForTotal")
   );
+  const locked = submitting || retryLocked;
+  // prettier-ignore
+  const guestCounts = (adults: number, children: number) => [adults === 1 ? t("calendar.targetManualBooking.adultOne") : t("calendar.targetManualBooking.adults", { count: adults }), ...(children > 0 ? [children === 1 ? t("calendar.targetManualBooking.childOne") : t("calendar.targetManualBooking.children", { count: children })] : [])].join(" · ");
+  const day = (iso: string) =>
+    iso
+      ? new Date(`${iso}T00:00:00`).toLocaleDateString(locale, {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+        })
+      : "—";
+  const leadReady = Boolean(
+    firstName.trim() && lastName.trim() && /^\S+@\S+\.\S+$/.test(email.trim()),
+  );
+  const methodLabel = METHODS.find(([value]) => value === method)![1];
+  // What the summary lists: each room's rate and each picked extra, with the server's amounts.
+  const summaryLines = [
+    ...stays.map((stay, index) => {
+      const plan =
+        stay.ratePlanId === "custom"
+          ? t("calendar.targetManualBooking.customRate")
+          : (roomTypes
+              .find((type) => type.id === rooms.find((room) => room.id === stay.roomId)?.roomTypeId)
+              ?.ratePlans.find((item) => item.id === stay.ratePlanId)?.name ?? "—");
+      const serverStay = preview?.stays.find((item) => item.position === index + 1);
+      return {
+        key: `stay-${stay.key}`,
+        label:
+          stays.length > 1
+            ? `#${rooms.find((room) => room.id === stay.roomId)?.roomNumber ?? "—"} · ${plan}`
+            : plan,
+        detail: null as string | null,
+        amount: serverStay ? money(serverStay.appliedTotal.amountDecimal, preview!.currency) : "—",
+      };
+    }),
+    ...addons.flatMap((addon) => {
+      const line = addonSelection(addon, addonChoices[addon.id], stays);
+      if (!line) return [];
+      const serverAddon = preview?.addOns.find((item) => item.addonId === addon.id);
+      return [
+        {
+          key: addon.id,
+          label: addon.name,
+          detail: addonDetail(addon, line).join(" × ") || null,
+          amount: serverAddon ? money(serverAddon.total.amountDecimal, preview!.currency) : "—",
+        },
+      ];
+    }),
+  ];
+  const checks: Array<[boolean, string]> = [
+    [
+      Boolean(preview),
+      preview
+        ? t("calendar.targetManualBooking.checkStay")
+        : t("calendar.targetManualBooking.checkStayPending"),
+    ],
+    [
+      leadReady,
+      leadReady
+        ? t("calendar.targetManualBooking.checkLead")
+        : t("calendar.targetManualBooking.checkLeadPending"),
+    ],
+    [
+      namedGuests.length === guestCards.length,
+      guestCards.length
+        ? t("calendar.targetManualBooking.checkOthers", {
+            named: namedGuests.length,
+            count: guestCards.length,
+          })
+        : t("calendar.targetManualBooking.checkNoOthers"),
+    ],
+  ];
 
   return (
-    <>
-      <Modal
-        ariaLabel={t("calendar.targetManualBooking.ariaLabel")}
-        onClose={submitting || retryLocked ? () => undefined : onClose}
-        maxWidth="xl"
-        footer={
-          <div className="flex items-center justify-between gap-3">
-            {" "}
-            <span className="text-sm font-semibold text-gray-900"> {previewTotal} </span>{" "}
-            <div className="flex gap-2">
-              {" "}
-              <button
-                type="button"
-                disabled={submitting || retryLocked}
-                onClick={onClose}
-                className="px-4 py-2 text-sm text-gray-700 disabled:opacity-50"
-              >
-                {t("calendar.cancel")}
-              </button>{" "}
-              <button
-                form="target-manual-booking"
-                disabled={
-                  (!preview && !retryLocked) ||
-                  submitting ||
-                  (!retryLocked && previewState === "loading")
-                }
-                className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {" "}
-                {submitting
-                  ? t("calendar.newBookingModal.creating")
-                  : retryLocked
-                    ? t("calendar.targetManualBooking.retryCreation")
-                    : t("calendar.newBookingModal.createBooking")}{" "}
-              </button>{" "}
-            </div>{" "}
-          </div>
-        }
-      >
-        {" "}
-        <h2 className="text-lg font-bold text-gray-900">
-          {t("calendar.newBookingModal.title")}
-        </h2>{" "}
-        <p className="mt-0.5 text-sm text-gray-500">
-          {" "}
-          {t("calendar.targetManualBooking.description")}{" "}
-        </p>
-        <form
-          id="target-manual-booking"
-          aria-busy={submitting}
-          onSubmit={submit}
-          onChange={() => {
-            if (!attemptLocked.current) attempt.current = null;
-          }}
-          className="mt-5 space-y-6"
+    <Modal
+      ariaLabel={t("calendar.targetManualBooking.ariaLabel")}
+      onClose={locked ? () => undefined : onClose}
+      maxWidth="6xl"
+      bare
+    >
+      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-4 py-4 sm:px-7 sm:py-5">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-gray-900">
+            {t("calendar.newBookingModal.title")}
+          </h2>
+          <p className="mt-1 text-sm text-gray-600">
+            {t("calendar.targetManualBooking.description")}
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label={t("common.close")}
+          disabled={locked}
+          onClick={onClose}
+          className="-mr-2 flex size-11 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50"
         >
-          {" "}
-          <fieldset disabled={submitting || retryLocked} className="space-y-6">
-            <section>
-              {" "}
-              <h3 className={sectionClass}>{t("calendar.targetManualBooking.stays")}</h3>{" "}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="size-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </header>
+      {/* Phones: one scrolling column, the actions pinned below it. From lg: the form scrolls on the
+          left, the summary on the right, and the actions stay under the summary (VAY-2417). */}
+      <form
+        id="target-manual-booking"
+        aria-busy={submitting}
+        onSubmit={submit}
+        onChange={() => {
+          if (!attemptLocked.current) attempt.current = null;
+        }}
+        className="relative min-h-0 flex-1 overflow-y-auto bg-gray-50 sm:rounded-b-xl lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden"
+      >
+        <div className="relative min-w-0 lg:row-span-2 lg:overflow-y-auto">
+          <fieldset disabled={locked} className="min-w-0 space-y-4 p-4 sm:p-6">
+            <FormSection number={1} title={t("calendar.targetManualBooking.stay")}>
               <div className="space-y-3">
-                {" "}
                 {stays.map((stay, index) => {
                   const room = rooms.find((item) => item.id === stay.roomId),
                     roomType = roomTypes.find((item) => item.id === room?.roomTypeId),
@@ -958,7 +1016,7 @@ export default function TargetManualBookingModal({
                   type="button"
                   onClick={addStay}
                   disabled={stays.length >= 20}
-                  className="w-full rounded-lg border border-dashed border-primary-300 px-3 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:border-gray-200 disabled:text-gray-400"
+                  className="min-h-11 w-full rounded-lg border-[1.5px] border-dashed border-primary-300 bg-white px-3 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:border-gray-200 disabled:text-gray-400"
                 >
                   {t("calendar.targetManualBooking.addRoom")}
                 </button>{" "}
@@ -967,11 +1025,19 @@ export default function TargetManualBookingModal({
                     {t("calendar.targetManualBooking.roomLimitReached")}
                   </p>
                 )}{" "}
-              </div>{" "}
-            </section>
-            <section>
-              {" "}
-              <h3 className={sectionClass}>{t("bookings.detail.guests")}</h3>{" "}
+              </div>
+            </FormSection>
+            <FormSection
+              number={2}
+              title={t("bookings.detail.guests")}
+              note={guestCounts(
+                stays.reduce(
+                  (sum, stay) => sum + (Number.isInteger(stay.adults) ? stay.adults : 0),
+                  0,
+                ),
+                stays.reduce((sum, stay) => sum + stay.childAges.length, 0),
+              )}
+            >
               <GuestCards
                 stays={stays}
                 drafts={guestDrafts}
@@ -1059,7 +1125,7 @@ export default function TargetManualBookingModal({
                         required
                       />{" "}
                     </label>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
                       <PhoneNumberInput
                         label={t("calendar.newBookingModal.phoneLabel")}
                         countryLabel={t("calendar.targetManualBooking.phoneCountryCode")}
@@ -1073,14 +1139,13 @@ export default function TargetManualBookingModal({
                           setPhone(next.number);
                         }}
                         suggestedCountries={[propertyCountry]}
-                        className="sm:col-span-2"
-                        labelClassName="block text-xs font-medium text-gray-700"
+                        labelClassName="block text-[13px] font-medium text-gray-700"
                         inputClassName={inputClass}
                       />
                       <div>
                         <label
                           htmlFor={nationalityId}
-                          className="block text-xs font-medium text-gray-700"
+                          className="block text-[13px] font-medium text-gray-700"
                         >
                           {t("bookings.detail.nationality")}
                         </label>
@@ -1094,7 +1159,7 @@ export default function TargetManualBookingModal({
                           suggested={[propertyCountry, phoneCountry]}
                           display="name"
                           clearable
-                          className="mt-1"
+                          className="mt-1.5"
                           triggerClassName={inputClass}
                         />
                         {phone.trim() && phoneCountryName && !countryCode && (
@@ -1105,7 +1170,7 @@ export default function TargetManualBookingModal({
                               // The button goes once used; keep keyboard focus in the dialog.
                               globalThis.document?.getElementById(nationalityId)?.focus();
                             }}
-                            className="mt-1 min-h-11 rounded-full border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                            className="mt-1.5 min-h-11 rounded-full border border-dashed border-primary-300 bg-primary-50 px-3 text-xs font-medium text-primary-700 hover:bg-primary-100"
                           >
                             {t("calendar.targetManualBooking.useCountryFromPhone", {
                               country: phoneCountryName,
@@ -1126,13 +1191,13 @@ export default function TargetManualBookingModal({
                   })}
                 </p>
               )}
-            </section>
-            <section>
-              {" "}
-              <h3 className={sectionClass}>
-                {t("calendar.targetManualBooking.addonsOptional")}
-              </h3>{" "}
-              <div className="space-y-2">
+            </FormSection>
+            <FormSection
+              number={3}
+              title={t("calendar.targetManualBooking.extras")}
+              note={t("calendar.targetManualBooking.optional")}
+            >
+              <div className="space-y-3">
                 {" "}
                 {addonState === "loading" && (
                   <p className="text-sm text-gray-500">
@@ -1163,16 +1228,19 @@ export default function TargetManualBookingModal({
                     <div
                       key={addon.id}
                       data-addon
-                      className="rounded-lg border border-gray-200 px-3 py-1 text-sm"
+                      className="space-y-3 rounded-xl border border-gray-200 p-4 text-sm"
                     >
                       <div className="flex flex-wrap items-center gap-3">
                         {/* A minimum width for the name wraps the stepper below it on a phone. */}
                         {transfer ? (
-                          <span className="min-w-[10rem] flex-1 truncate py-2">{addon.name}</span>
+                          <span className="min-w-[10rem] flex-1 truncate py-2 font-semibold text-gray-900">
+                            {addon.name}
+                          </span>
                         ) : (
-                          <label className="flex min-h-11 min-w-[10rem] flex-1 items-center gap-2">
+                          <label className="flex min-h-11 min-w-[10rem] flex-1 items-center gap-3">
                             <input
                               type="checkbox"
+                              className="size-5 shrink-0 accent-primary-600"
                               checked={Boolean(choice)}
                               onChange={(event) =>
                                 chooseAddon(
@@ -1183,7 +1251,9 @@ export default function TargetManualBookingModal({
                                 )
                               }
                             />
-                            <span className="truncate">{addon.name}</span>
+                            <span className="truncate font-semibold text-gray-900">
+                              {addon.name}
+                            </span>
                           </label>
                         )}
                         {stepper && choice && (
@@ -1217,7 +1287,7 @@ export default function TargetManualBookingModal({
                             </span>
                           </div>
                         )}
-                        <strong className="ml-auto w-20 text-right">
+                        <strong className="ml-auto w-20 text-right tabular-nums">
                           {serverAddon
                             ? money(serverAddon.total.amountDecimal, preview!.currency)
                             : "—"}
@@ -1227,14 +1297,18 @@ export default function TargetManualBookingModal({
                         <div
                           role="group"
                           aria-label={addon.name}
-                          className="flex flex-wrap gap-x-4 text-xs"
+                          className="grid grid-cols-1 gap-3 sm:grid-cols-2"
                         >
                           {(["pickup", "dropOff"] as const).map((trip) => {
                             const date = trip === "pickup" ? party.arrival : party.departure;
                             return (
-                              <label key={trip} className="flex min-h-11 items-center gap-2">
+                              <label
+                                key={trip}
+                                className="flex min-h-14 items-center gap-3 rounded-lg border border-gray-300 px-3.5 py-2 has-[:checked]:border-primary-600 has-[:checked]:bg-primary-50/60 has-[:disabled]:opacity-50"
+                              >
                                 <input
                                   type="checkbox"
+                                  className="size-5 shrink-0 accent-primary-600"
                                   checked={Boolean(choice?.[trip])}
                                   disabled={!date}
                                   onChange={(event) => {
@@ -1252,10 +1326,10 @@ export default function TargetManualBookingModal({
                                 />
                                 {trip === "pickup"
                                   ? t("calendar.targetManualBooking.addonPickup", {
-                                      date: date ?? "—",
+                                      date: day(date ?? ""),
                                     })
                                   : t("calendar.targetManualBooking.addonDropOff", {
-                                      date: date ?? "—",
+                                      date: day(date ?? ""),
                                     })}
                               </label>
                             );
@@ -1263,7 +1337,7 @@ export default function TargetManualBookingModal({
                         </div>
                       )}
                       {detail.length > 0 && (
-                        <p className="pb-1 text-xs text-gray-500">
+                        <p className="rounded-lg bg-gray-50 px-3 py-2.5 text-[13px] text-gray-700">
                           {[
                             serverAddon
                               ? money(serverAddon.unitPrice.amountDecimal, preview!.currency)
@@ -1278,137 +1352,178 @@ export default function TargetManualBookingModal({
                   );
                 })}{" "}
               </div>{" "}
-            </section>
-            <section>
-              {" "}
-              <h3 className={sectionClass}>{t("bookings.tableSource")}</h3>{" "}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className={labelClass}>
-                  {t("calendar.newBookingModal.channelLabel")}
-                  <input
-                    value={t("calendar.newBookingModal.channelDirect")}
-                    disabled
-                    className={inputClass}
-                  />{" "}
-                </label>
-                <label className={labelClass}>
-                  {" "}
-                  {t("calendar.targetManualBooking.manualSource")} *{" "}
-                  <select
-                    value={source}
-                    onChange={(e) => setSource(e.target.value as typeof source)}
-                    className={inputClass}
-                  >
-                    {" "}
-                    {SOURCES.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {" "}
-                        {t(label)}{" "}
-                      </option>
-                    ))}{" "}
-                  </select>{" "}
-                </label>{" "}
-              </div>{" "}
-            </section>
-            <section>
-              {" "}
-              <h3 className={sectionClass}>{t("bookings.detail.payment")}</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={labelClass}>
-                  {" "}
-                  {t("calendar.targetManualBooking.expectedMethod")} *{" "}
-                  <select
-                    value={method}
-                    onChange={(e) => setMethod(e.target.value as typeof method)}
-                    className={inputClass}
-                  >
-                    {" "}
-                    {METHODS.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {" "}
-                        {t(label)}{" "}
-                      </option>
-                    ))}{" "}
-                  </select>{" "}
-                </label>{" "}
-                <fieldset>
-                  {" "}
-                  <legend className={labelClass}>
-                    {t("calendar.targetManualBooking.settlement")}
-                  </legend>{" "}
-                  <div className="mt-2 flex gap-4 text-sm">
-                    {" "}
-                    <label>
-                      {" "}
-                      <input
-                        type="radio"
-                        name="settlement"
-                        value="unpaid"
-                        checked={settlement === "unpaid"}
-                        onChange={() => setSettlement("unpaid")}
-                      />{" "}
-                      {t("calendar.targetManualBooking.unpaid")}{" "}
-                    </label>{" "}
-                    <label className={!canRecordPaidPayment ? "text-gray-400" : ""}>
-                      {" "}
-                      <input
-                        type="radio"
-                        name="settlement"
-                        value="paid"
-                        disabled={!canRecordPaidPayment}
-                        aria-describedby={!canRecordPaidPayment ? "paid-help" : undefined}
-                        checked={settlement === "paid"}
-                        onChange={() => setSettlement("paid")}
-                      />{" "}
-                      {t("bookings.balancePaid")}
-                    </label>{" "}
-                  </div>{" "}
-                  {!canRecordPaidPayment && (
-                    <p id="paid-help" className="mt-1 text-xs text-gray-500">
-                      {t("calendar.targetManualBooking.paidHelp")}
-                    </p>
-                  )}{" "}
-                </fieldset>{" "}
-              </div>{" "}
-            </section>
-            <section>
-              {" "}
-              <h3 className={sectionClass}>
-                {t("calendar.targetManualBooking.notesOptional")}
-              </h3>{" "}
-              <div className="space-y-3">
-                <label className={labelClass}>
-                  {" "}
-                  {t("calendar.targetManualBooking.specialRequests")}{" "}
-                  <textarea
-                    name="specialRequests"
-                    rows={2}
-                    value={specialRequests}
-                    onChange={(e) => setSpecialRequests(e.target.value)}
-                    className={inputClass}
-                  />{" "}
-                </label>
-                <label className={labelClass}>
-                  {" "}
-                  {t("calendar.targetManualBooking.privateNote")}{" "}
-                  <textarea
-                    name="privateNote"
-                    rows={2}
-                    value={privateNote}
-                    onChange={(e) => setPrivateNote(e.target.value)}
-                    className={inputClass}
-                  />{" "}
-                </label>{" "}
-              </div>{" "}
-            </section>{" "}
+            </FormSection>
+            <FormSection
+              number={4}
+              title={t("calendar.targetManualBooking.sourceAndPayment")}
+              note={
+                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700">
+                  {t("calendar.targetManualBooking.channelIs", {
+                    channel: t("calendar.newBookingModal.channelDirect"),
+                  })}
+                </span>
+              }
+            >
+              <ChoicePills
+                name="directSource"
+                legend={`${t("calendar.targetManualBooking.bookedVia")} *`}
+                value={source}
+                onChange={setSource}
+                options={SOURCES.map(([value, label]) => ({ value, label: t(label) }))}
+              />
+              <ChoicePills
+                name="expectedMethod"
+                legend={`${t("calendar.targetManualBooking.expectedPayment")} *`}
+                value={method}
+                onChange={setMethod}
+                options={METHODS.map(([value, label]) => ({ value, label: t(label) }))}
+              />
+              <ChoicePills
+                name="settlement"
+                legend={t("calendar.targetManualBooking.paymentStatus")}
+                value={settlement}
+                onChange={setSettlement}
+                options={[
+                  { value: "unpaid", label: t("calendar.targetManualBooking.unpaid") },
+                  {
+                    value: "paid",
+                    label: t("bookings.balancePaid"),
+                    disabled: !canRecordPaidPayment,
+                    describedBy: !canRecordPaidPayment ? "paid-help" : undefined,
+                  },
+                ]}
+              />
+              {!canRecordPaidPayment && (
+                <p id="paid-help" className="-mt-2 text-xs text-gray-600">
+                  {t("calendar.targetManualBooking.paidHelp")}
+                </p>
+              )}
+            </FormSection>
+            <FormSection
+              number={5}
+              title={t("calendar.targetManualBooking.notes")}
+              note={t("calendar.targetManualBooking.optional")}
+            >
+              <label className={labelClass}>
+                {t("calendar.targetManualBooking.specialRequests")}
+                <textarea
+                  name="specialRequests"
+                  rows={3}
+                  value={specialRequests}
+                  onChange={(e) => setSpecialRequests(e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <label className={labelClass}>
+                {t("calendar.targetManualBooking.privateNote")}
+                <textarea
+                  name="privateNote"
+                  rows={3}
+                  value={privateNote}
+                  onChange={(e) => setPrivateNote(e.target.value)}
+                  className={`${inputClass} bg-amber-50`}
+                />
+              </label>
+            </FormSection>
           </fieldset>
+        </div>
+        <aside
+          aria-labelledby="booking-summary-title"
+          className="mx-4 mb-4 space-y-4 rounded-xl border border-gray-200 bg-white p-5 sm:mx-6 lg:col-start-2 lg:row-start-1 lg:m-0 lg:overflow-y-auto lg:rounded-none lg:border-0 lg:border-l"
+        >
+          <h3 id="booking-summary-title" className="text-base font-semibold text-gray-900">
+            {t("calendar.targetManualBooking.summary")}
+          </h3>
+          {stays.map((stay) => {
+            const room = rooms.find((item) => item.id === stay.roomId),
+              type = roomTypes.find((item) => item.id === room?.roomTypeId),
+              nights = Math.round(
+                (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000,
+              );
+            return (
+              <div key={stay.key} className="space-y-1 text-[13px] text-gray-600">
+                <p className="text-[15px] font-semibold text-gray-900">
+                  {room ? `#${room.roomNumber} — ${type?.name ?? ""}` : "—"}
+                </p>
+                <p>
+                  {t("calendar.targetManualBooking.stayDates", {
+                    checkIn: day(stay.checkIn),
+                    checkOut: day(stay.checkOut),
+                  })}
+                  {nights > 0 &&
+                    ` · ${nights === 1 ? t("calendar.targetManualBooking.addonNightOne") : t("calendar.targetManualBooking.addonNights", { count: nights })}`}
+                </p>
+                <p>{guestCounts(stay.adults, stay.childAges.length)}</p>
+              </div>
+            );
+          })}
+          <dl className="space-y-2.5 border-y border-gray-200 py-4">
+            {summaryLines.map((line) => (
+              <div key={line.key} className="flex justify-between gap-3 text-sm">
+                <dt className="min-w-0 text-gray-700">
+                  {line.label}
+                  {line.detail && (
+                    <span className="block text-xs text-gray-500">{line.detail}</span>
+                  )}
+                </dt>
+                <dd className="shrink-0 tabular-nums text-gray-900">{line.amount}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-[15px] font-semibold text-gray-900">
+              {t("calendar.targetManualBooking.totalLabel")}
+            </span>
+            {preview ? (
+              <span className="text-2xl font-bold tabular-nums text-gray-900">
+                {money(preview.grandTotal.amountDecimal, preview.currency)}
+              </span>
+            ) : (
+              <span className="text-right text-[13px] text-gray-600">{previewTotal}</span>
+            )}
+          </div>
+          <p
+            className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${settlement === "paid" ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}
+          >
+            {t("calendar.targetManualBooking.paymentPill", {
+              status:
+                settlement === "paid"
+                  ? t("bookings.balancePaid")
+                  : t("calendar.targetManualBooking.unpaid"),
+              method: t(methodLabel),
+            })}
+          </p>
+          <ul className="space-y-2 rounded-lg bg-gray-50 p-3">
+            {checks.map(([ok, label]) => (
+              <li key={label} className="flex items-center gap-2 text-[13px] text-gray-700">
+                <span
+                  aria-hidden="true"
+                  className={`flex size-4 shrink-0 items-center justify-center rounded-full ${ok ? "bg-emerald-700" : "bg-white ring-[1.5px] ring-inset ring-gray-400"}`}
+                >
+                  {ok && (
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="size-2.5"
+                      fill="none"
+                      stroke="white"
+                      strokeWidth={4}
+                    >
+                      <path d="M5 12l5 5 9-10" />
+                    </svg>
+                  )}
+                </span>
+                {label}
+              </li>
+            ))}
+          </ul>
+        </aside>
+        <div className="sticky bottom-0 z-10 space-y-3 border-t border-gray-200 bg-white px-4 py-3 sm:px-6 lg:static lg:col-start-2 lg:row-start-2 lg:border-l lg:px-5 lg:py-4">
           {previewMessage && (
             <div
               role="alert"
               className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
             >
-              {" "}
-              <span>{previewMessage}</span>{" "}
+              <span>{previewMessage}</span>
               {previewCanRetry && (
                 <button
                   type="button"
@@ -1416,11 +1531,11 @@ export default function TargetManualBookingModal({
                     setPreviewMessage("");
                     setPreviewRetry((value) => value + 1);
                   }}
-                  className="shrink-0 font-semibold underline underline-offset-2"
+                  className="min-h-11 shrink-0 font-semibold underline underline-offset-2"
                 >
                   {t("calendar.targetManualBooking.retryPricing")}
                 </button>
-              )}{" "}
+              )}
             </div>
           )}
           {pricingNotice && (
@@ -1447,12 +1562,119 @@ export default function TargetManualBookingModal({
               role="alert"
               className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
             >
-              {" "}
-              {message}{" "}
+              {message}
             </p>
           )}
-        </form>{" "}
-      </Modal>
-    </>
+          <div className="flex items-center gap-2 lg:flex-col lg:items-stretch">
+            {/* The summary carries the total for screen readers; this copy is the phone's recap. */}
+            <span
+              aria-hidden="true"
+              className="mr-auto text-sm font-semibold text-gray-900 lg:hidden"
+            >
+              {preview ? previewTotal : null}
+            </span>
+            <button
+              type="button"
+              disabled={locked}
+              onClick={onClose}
+              className="min-h-11 rounded-lg px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 lg:order-last"
+            >
+              {t("calendar.cancel")}
+            </button>
+            <button
+              type="submit"
+              disabled={
+                (!preview && !retryLocked) ||
+                submitting ||
+                (!retryLocked && previewState === "loading")
+              }
+              className="min-h-11 rounded-lg bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 lg:min-h-12 lg:text-[15px]"
+            >
+              {submitting
+                ? t("calendar.newBookingModal.creating")
+                : retryLocked
+                  ? t("calendar.targetManualBooking.retryCreation")
+                  : t("calendar.newBookingModal.createBooking")}
+            </button>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** A numbered card of the New Booking form (VAY-2417). */
+function FormSection({
+  number,
+  title,
+  note,
+  children,
+}: {
+  number: number;
+  title: string;
+  note?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const id = useId();
+  return (
+    <section
+      aria-labelledby={id}
+      className="space-y-4 rounded-xl border border-gray-200 bg-white p-4 sm:p-5"
+    >
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary-50 text-[13px] font-semibold text-primary-700"
+        >
+          {number}
+        </span>
+        <h3 id={id} className="text-base font-semibold text-gray-900">
+          {title}
+        </h3>
+        {note && <span className="ml-auto text-[13px] text-gray-600">{note}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** One choice as pills: native radios underneath, so arrow keys move between them. */
+function ChoicePills<T extends string>({
+  name,
+  legend,
+  value,
+  onChange,
+  options,
+}: {
+  name: string;
+  legend: string;
+  value: T;
+  onChange: (value: T) => void;
+  options: Array<{ value: T; label: string; disabled?: boolean; describedBy?: string }>;
+}) {
+  return (
+    <fieldset>
+      <legend className="text-[13px] font-medium text-gray-700">{legend}</legend>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {options.map((option) => (
+          // relative: the visually hidden radio stays inside the scrolling form.
+          <label key={option.value} className="relative">
+            <input
+              type="radio"
+              name={name}
+              value={option.value}
+              checked={value === option.value}
+              disabled={option.disabled}
+              aria-describedby={option.describedBy}
+              onChange={() => onChange(option.value)}
+              className="peer sr-only"
+            />
+            <span className="flex min-h-11 cursor-pointer items-center rounded-full border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 peer-checked:border-primary-600 peer-checked:bg-primary-50 peer-checked:font-semibold peer-checked:text-primary-700 peer-focus-visible:ring-2 peer-focus-visible:ring-primary-500 peer-focus-visible:ring-offset-1 peer-disabled:cursor-not-allowed peer-disabled:text-gray-400">
+              {option.label}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }

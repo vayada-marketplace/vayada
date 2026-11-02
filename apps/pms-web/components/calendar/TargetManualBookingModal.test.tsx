@@ -55,9 +55,12 @@ describe("target manual booking fields", () => {
   it("offers only canonical direct sources and fixes the booking channel", () => {
     const markup = render();
     expect(markup).toMatch(/role="dialog"[^>]*aria-modal="true"[^>]*aria-label="New booking"/);
-    expect(markup).toMatch(/<input disabled=""[^>]*value="Direct"/);
+    expect(markup).toContain("Channel: Direct");
+    // One pill per source, native radios underneath (VAY-2417).
+    for (const source of ["call", "email", "whatsapp", "walk_in", "social_media", "other"])
+      expect(markup).toContain(`name="directSource" value="${source}"`);
     for (const source of ["Call", "Email", "WhatsApp", "Walk-in", "Social media", "Other"])
-      expect(markup).toContain(` ${source} </option>`);
+      expect(markup).toContain(`>${source}</span>`);
     for (const forbidden of ["Airbnb", "Booking.com", "Expedia", "Booking Engine"])
       expect(markup).not.toContain(forbidden);
   });
@@ -68,10 +71,10 @@ describe("target manual booking fields", () => {
     expect(markup).toContain('name="privateNote"');
     expect(markup).toContain('aria-label="Phone country code"');
     expect(markup).toContain('name="phone" type="tel"');
-    expect(markup).toMatch(/disabled=""[^>]*value="paid"/);
+    expect(markup).toContain('value="paid" disabled=""');
     // prettier-ignore
     expect(markup).toMatch(/aria-describedby="paid-help"[^>]*>[\s\S]*Paid requires Finance write access/);
-    expect(render(true)).not.toMatch(/disabled="" value="paid"/);
+    expect(render(true)).not.toContain('value="paid" disabled=""');
   });
 
   // prettier-ignore
@@ -255,8 +258,8 @@ describe("target manual booking fields", () => {
         .findAllByProps({ type: "number" })
         .some((node) => node.props["aria-label"]?.includes("packages")),
     ).toBe(false);
-    check("Airport transfer", "Arrival pickup · 2026-09-10");
-    check("Airport transfer", "Departure drop-off · 2026-09-12");
+    check("Airport transfer", "Arrival pickup · Thu, Sep 10");
+    check("Airport transfer", "Departure drop-off · Sat, Sep 12");
     check("Breakfast");
     check("Parking");
     check("Flowers");
@@ -314,6 +317,68 @@ describe("target manual booking fields", () => {
     expect(JSON.stringify(view.toJSON())).toContain("€10 × 1 vehicle × 2 trips");
   });
 
+  it("summarizes rooms, extras, the total, payment and what is left, and sends the picked pills", async () => {
+    // prettier-ignore
+    vi.spyOn(calendarService, "listAvailableAddons").mockResolvedValue([{ id: "breakfast", name: "Breakfast", description: "", price: 10, currency: "EUR", category: "meal", perPerson: true, perNight: true }]);
+    vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) =>
+      previewFor(input),
+    );
+    const onSubmit = vi.fn().mockResolvedValue({});
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); });
+    const summary = () =>
+      textOf(view.root.findByProps({ "aria-labelledby": "booking-summary-title" }));
+    const leadField = (label: string) =>
+      view.root
+        .findAllByType("label")
+        .find((node) => textOf(node).includes(label))!
+        .findByType("input");
+    const pill = (name: string, value: string) =>
+      act(() => view.root.findByProps({ name, value }).props.onChange());
+    await settlePreview();
+    expect(summary()).toContain("#101 — Double");
+    expect(summary()).toContain("Thu, Sep 10 → Fri, Sep 11 · 1 night");
+    expect(summary()).toContain("Flexible€100");
+    expect(summary()).toContain("Total€100");
+    expect(summary()).toContain("Unpaid · Pay at property");
+    expect(summary()).toContain("Room, dates and rate plan priced");
+    expect(summary()).toContain("Lead guest needs name and email");
+    expect(summary()).toContain("No other guests");
+
+    await act(async () =>
+      view.root
+        .findAllByType("input")
+        .find((node) => node.props.type === "checkbox")!
+        .props.onChange({ target: { checked: true } }),
+    );
+    await settlePreview();
+    expect(summary()).toContain("Breakfast1 guest × 1 night€20");
+    expect(summary()).toContain("Total€120");
+
+    pill("directSource", "whatsapp");
+    pill("expectedMethod", "bank_transfer");
+    expect(summary()).toContain("Unpaid · Bank transfer");
+    act(() => leadField("First Name *").props.onChange({ target: { value: "Ada" } }));
+    act(() => leadField("Last Name *").props.onChange({ target: { value: "Lovelace" } }));
+    act(() => leadField("Email *").props.onChange({ target: { value: "ada@example.com" } }));
+    expect(summary()).toContain("Lead guest complete");
+    act(() =>
+      view.root
+        .findByProps({ "aria-label": "Room 1 adults" })
+        .props.onChange({ target: { value: "2" } }),
+    );
+    expect(summary()).toContain("0 of 1 other guests named (optional)");
+    await settlePreview();
+    await act(async () => {
+      await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({
+      directSource: "whatsapp",
+      payment: { expectedMethod: "bank_transfer", settlement: { status: "unpaid" } },
+    });
+  });
+
   it("keeps the latest evidence when an older preview resolves last", async () => {
     const pending: Array<{
       input: PmsManualBookingPreviewInput;
@@ -352,7 +417,7 @@ describe("target manual booking fields", () => {
       }),
     );
     expect(JSON.stringify(view.toJSON())).toContain("Total €150");
-    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(false);
+    expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(false);
 
     await act(async () => pending[0]!.resolve(previewFor(pending[0]!.input)));
     expect(JSON.stringify(view.toJSON())).toContain("Total €150");
@@ -379,7 +444,7 @@ describe("target manual booking fields", () => {
       vi.advanceTimersByTime(999);
     });
     expect(view.root.findAllByProps({ "data-pricing-spinner": true })).toHaveLength(0);
-    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
+    expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(true);
     act(() => {
       vi.advanceTimersByTime(1);
     });
@@ -452,7 +517,7 @@ describe("target manual booking fields", () => {
         .findAllByType("button")
         .some((button) => button.children.join("") === "Retry pricing"),
     ).toBe(false);
-    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
+    expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(true);
   });
 
   it("falls back to Custom rate when the room type has no rate plan", async () => {
@@ -482,7 +547,7 @@ describe("target manual booking fields", () => {
     expect(markup).toContain("No rate plan is published for this room type.");
     expect(markup).toContain("Enter a custom nightly rate to calculate the total");
     expect(markup).not.toContain("No rate available");
-    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
+    expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(true);
 
     await act(async () =>
       view.root
@@ -497,7 +562,7 @@ describe("target manual booking fields", () => {
     const summary = JSON.stringify(view.toJSON());
     expect(summary).toContain("Custom:");
     expect(summary).not.toContain("Standard:");
-    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(false);
+    expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(false);
   });
 
   // VAY-2065: a setup-created room type has no currency until prices are published; the custom
@@ -658,7 +723,12 @@ describe("target manual booking fields", () => {
     type("Room 1 room", "room-2");
     type("Room 1 adults", "3");
     type("Room 1 children", "1");
-    expect(headings()).toEqual(["Guest 1 · Lead guest", "Guest 2", "Guest 3", "Guest 4 · Child"]);
+    expect(headings()).toEqual([
+      "Guest 1 · Lead guest",
+      "Guest 2 · Adult",
+      "Guest 3 · Adult",
+      "Guest 4 · Child",
+    ]);
     expect(view.root.findAllByProps({ "aria-label": "Guest 2 email" })).toHaveLength(0);
     expect(textOf(view.root)).toContain("Passport and ID details are collected at check-in.");
 
@@ -688,7 +758,7 @@ describe("target manual booking fields", () => {
 
     // One adult fewer removes the last adult's card; the child keeps its name and age.
     type("Room 1 adults", "2");
-    expect(headings()).toEqual(["Guest 1 · Lead guest", "Guest 2", "Guest 3 · Child"]);
+    expect(headings()).toEqual(["Guest 1 · Lead guest", "Guest 2 · Adult", "Guest 3 · Child"]);
     expect(field("Guest 3 first name").props.value).toBe("Ada");
     expect(field("Age at check-in, room 1, child 1").props.value).toBe("7");
   });
@@ -875,7 +945,7 @@ describe("target manual booking fields", () => {
   });
 
   // prettier-ignore
-  it("cannot create from stale evidence after the current preview fails", async () => { let fail = false; const onSubmit = vi.fn(); vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) => { if (fail) throw new Error("Preview failed."); return previewFor(input); }); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const adults = view.root.findByProps({ "aria-label": "Room 1 adults" }); fail = true; act(() => adults.props.onChange({ target: { value: "3" } })); await act(async () => view.root.findByProps({ "aria-label": "Room 1 adults" }).props.onChange({ target: { value: "1" } })); await settlePreview(); expect(JSON.stringify(view.toJSON())).toContain("Couldn't calculate pricing."); expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true); await act(async () => view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() })); expect(onSubmit).not.toHaveBeenCalled(); });
+  it("cannot create from stale evidence after the current preview fails", async () => { let fail = false; const onSubmit = vi.fn(); vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) => { if (fail) throw new Error("Preview failed."); return previewFor(input); }); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const adults = view.root.findByProps({ "aria-label": "Room 1 adults" }); fail = true; act(() => adults.props.onChange({ target: { value: "3" } })); await act(async () => view.root.findByProps({ "aria-label": "Room 1 adults" }).props.onChange({ target: { value: "1" } })); await settlePreview(); expect(JSON.stringify(view.toJSON())).toContain("Couldn't calculate pricing."); expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(true); await act(async () => view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() })); expect(onSubmit).not.toHaveBeenCalled(); });
 
   it("locks an ambiguous create and retries the identical request", async () => {
     let resolveAddons!: (addons: []) => void;
@@ -997,7 +1067,7 @@ describe("target manual booking fields", () => {
     expect(JSON.stringify(view.toJSON())).toContain(
       "Prices are not published yet. Publish them in Pricing, or choose a custom rate.",
     );
-    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
+    expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(true);
   });
   it("sends the preview's price version and re-prices when prices changed before saving", async () => {
     const request = vi
