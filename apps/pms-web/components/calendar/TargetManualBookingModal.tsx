@@ -828,7 +828,7 @@ export default function TargetManualBookingModal({
                             <rect x="3" y="5" width="18" height="16" rx="2" />
                             <path d="M3 10h18M8 3v4M16 3v4" />
                           </svg>
-                          <label className="flex min-h-12 flex-col justify-center text-[11px] leading-tight text-gray-600">
+                          <label className="flex min-h-12 min-w-0 flex-1 basis-28 flex-col justify-center text-[11px] leading-tight text-gray-600 sm:flex-none sm:basis-auto">
                             {t("calendar.newBookingModal.checkInLabel")}
                             <input
                               ref={(node) => {
@@ -854,7 +854,7 @@ export default function TargetManualBookingModal({
                                     : {}),
                                 });
                               }}
-                              className="bg-transparent p-0 text-sm font-medium text-gray-900 focus:outline-none"
+                              className="w-full min-w-0 bg-transparent p-0 text-sm font-medium text-gray-900 focus:outline-none"
                               required
                             />
                           </label>
@@ -868,7 +868,7 @@ export default function TargetManualBookingModal({
                           >
                             <path d="M5 12h14M13 6l6 6-6 6" />
                           </svg>
-                          <label className="flex min-h-12 flex-col justify-center text-[11px] leading-tight text-gray-600">
+                          <label className="flex min-h-12 min-w-0 flex-1 basis-28 flex-col justify-center text-[11px] leading-tight text-gray-600 sm:flex-none sm:basis-auto">
                             {t("calendar.newBookingModal.checkOutLabel")}
                             <input
                               aria-label={t("calendar.targetManualBooking.checkOutField", {
@@ -880,7 +880,7 @@ export default function TargetManualBookingModal({
                               onChange={(event) =>
                                 updateStay(index, { checkOut: event.target.value })
                               }
-                              className="bg-transparent p-0 text-sm font-medium text-gray-900 focus:outline-none"
+                              className="w-full min-w-0 bg-transparent p-0 text-sm font-medium text-gray-900 focus:outline-none"
                               required
                             />
                           </label>
