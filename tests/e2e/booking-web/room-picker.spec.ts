@@ -149,7 +149,9 @@ for (const width of [1440, 390]) {
     const garden = page.getByTestId("room-card-garden");
     await garden.getByRole("button", { name: "Select for Room 1" }).click();
     await garden.getByRole("button", { name: "Select for Room 2" }).click();
-    await expect(page).toHaveURL(/\/(en\/)?book\?/);
+    // /book opens its details step with a URL replace once its catalogues are in. A Back pressed
+    // before that is undone by the replace, which then lands on /book again, so go back from there.
+    await expect(page).toHaveURL(/\/(en\/)?book\?.*step=details/);
     await page.goBack();
     // Every room chosen: all tabs are done.
     await expect(page.getByTestId("rooms-help")).toContainText("All 2 rooms chosen");
