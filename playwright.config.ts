@@ -20,6 +20,12 @@ const landingBaseURL =
   process.env.E2E_BASE_URL ||
   (startServers ? "http://127.0.0.1:3006" : "https://landing.localhost");
 
+const hotelSitesBaseURL =
+  process.env.E2E_HOTEL_SITES_BASE_URL ||
+  (startServers
+    ? "http://animals-ahangama.site.localhost:3007"
+    : "https://animals-ahangama.site.localhost");
+
 const bookingBaseURL =
   process.env.E2E_BOOKING_BASE_URL ||
   (startServers
@@ -113,6 +119,13 @@ export default defineConfig({
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },
+          {
+            // A hotel site answers only on its own host; the health check answers on any.
+            command: "PORT=3007 npm run dev:hotel-sites",
+            url: "http://127.0.0.1:3007/api/health",
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
         ]
     : undefined,
   projects: [
@@ -122,6 +135,14 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         baseURL: landingBaseURL,
+      },
+    },
+    {
+      name: "hotel-sites-chromium",
+      testMatch: /hotel-sites\/.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: hotelSitesBaseURL,
       },
     },
     {

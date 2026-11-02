@@ -8,20 +8,23 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path                 | Stack      | Port | Local URL                         |
-| -------------------- | ---------- | ---- | --------------------------------- |
-| `apps/api`           | Node/TS    | 8003 | `https://api.localhost`           |
-| `apps/vayada-admin`  | Next.js 14 | 3001 | `https://admin.localhost`         |
-| `apps/booking-api`   | FastAPI    | 8001 | `https://api.booking.localhost`   |
-| `apps/booking-web`   | Next.js 14 | 3002 | `https://booking.localhost`       |
-| `apps/booking-admin` | Next.js 14 | 3003 | `https://admin.booking.localhost` |
-| `apps/pms-api`       | FastAPI    | 8002 | `https://api.pms.localhost`       |
-| `apps/pms-web`       | Next.js 14 | 3004 | `https://pms.localhost`           |
-| `apps/landing`       | Next.js 14 | 3006 | `https://landing.localhost`       |
+| Path                 | Stack      | Port | Local URL                                 |
+| -------------------- | ---------- | ---- | ----------------------------------------- |
+| `apps/api`           | Node/TS    | 8003 | `https://api.localhost`                   |
+| `apps/vayada-admin`  | Next.js 14 | 3001 | `https://admin.localhost`                 |
+| `apps/booking-api`   | FastAPI    | 8001 | `https://api.booking.localhost`           |
+| `apps/booking-web`   | Next.js 14 | 3002 | `https://booking.localhost`               |
+| `apps/booking-admin` | Next.js 14 | 3003 | `https://admin.booking.localhost`         |
+| `apps/pms-api`       | FastAPI    | 8002 | `https://api.pms.localhost`               |
+| `apps/pms-web`       | Next.js 14 | 3004 | `https://pms.localhost`                   |
+| `apps/landing`       | Next.js 14 | 3006 | `https://landing.localhost`               |
+| `apps/hotel-sites`   | Next.js 16 | 3007 | `https://animals-ahangama.site.localhost` |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
 `apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form posts `/api/contact` to `NEXT_PUBLIC_API_URL`, the platform contact intake in `apps/api` (`next-api.vayada.com` in production, VAY-2286); next-api allows the `vayada.com` origin through `CONTACT_INTAKE_ALLOWED_ORIGINS`. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
+
+`apps/hotel-sites` is the **hotel website template** (VAY-2422, a paid add-on): one static site per hotel from `sites/<slug>/` (content, photos, font), chosen by the request's host (`<slug>.site.vayada.com`, `<slug>.site.localhost` with `portless proxy start --wildcard`, or the hotel's own domain listed in `sites/hosts.ts`). Its booking buttons link to the hotel's Booking Engine page.
 
 ## Local dev — portless
 
