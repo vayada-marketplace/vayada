@@ -151,8 +151,9 @@ WHERE property.id = $1::uuid`;
 
 /**
  * VAY-2451: the go-live list's facts, in one query: the profile, the page, hotel photos, the booking rules
- * (as guest terms above), online cards, each active room type (rooms, guests, photos, saved prices) and
- * whether the current prices are the first run's placeholder. $4 is the placeholder publish's request id.
+ * (as guest terms above), online cards, each active room type (rooms, guests, approved photos as v1 counts
+ * them, saved prices) and whether the current prices are the first run's placeholder, or a payment
+ * re-publish of it. $4 is the start of the placeholder publish's request id.
  */
 const GO_LIVE_FACTS_SQL = `
 SELECT
@@ -173,10 +174,20 @@ SELECT
             AND room.room_type_id = room_type.id
             AND room.status <> 'retired'
         ),
-        'maxGuests', CASE WHEN jsonb_typeof(room_type.occupancy_limits -> 'total') = 'number'
-          THEN (room_type.occupancy_limits ->> 'total')::numeric::integer ELSE 0 END,
+        'maxGuests', COALESCE((
+          SELECT least(trunc((room_type.occupancy_limits ->> key)::numeric), 1000)::integer
+          FROM unnest(ARRAY['total', 'maxOccupancy']) WITH ORDINALITY AS keys(key, position)
+          WHERE jsonb_typeof(room_type.occupancy_limits -> key) = 'number'
+          ORDER BY position
+          LIMIT 1
+        ), 0),
         'photos', (
-          SELECT count(*) FROM pms.room_type_media media
+          SELECT count(*)
+          FROM pms.room_type_media media
+          JOIN platform.media_objects media_object
+            ON media_object.id = media.platform_media_object_id
+           AND media_object.property_id = media.property_id
+           AND ${APPROVED_PUBLIC_PROPERTY_MEDIA_OBJECT_PREDICATE}
           WHERE media.property_id = room_type.property_id AND media.room_type_id = room_type.id
         ),
         'priced', EXISTS (
@@ -196,7 +207,7 @@ SELECT
     SELECT 1 FROM pms.pricing_v2_heads head
     JOIN pms.pricing_v2_revisions revision
       ON revision.property_id = head.property_id AND revision.revision = head.revision
-    WHERE head.property_id = property.id AND revision.request_id LIKE $4::text
+    WHERE head.property_id = property.id AND starts_with(revision.request_id, $4::text)
   ) AS "placeholderPrices",
   COALESCE(viewer.hidden, FALSE) AS hidden,
   COALESCE(viewer.dismissed, FALSE) AS dismissed
@@ -230,14 +241,14 @@ export function createPgHotelSetupChecklistRepository(
           actor.propertyId,
           actor.userId,
           FIRST_RUN_GUEST_TERMS,
-          `first-run:v1:${FIRST_RUN_PLACEHOLDER_PUBLISH_STEP}:%`,
+          `first-run:v1:${FIRST_RUN_PLACEHOLDER_PUBLISH_STEP}:`,
         ]);
         const row = result.rows[0];
         if (!row) return null;
         const { hidden, dismissed, roomTypes, ...facts } = row;
         return Object.freeze({
           ...facts,
-          // count(*) comes back as text from pg's bigint.
+          // Numbers in the JSON; Number() also covers a driver that hands them over as text.
           roomTypes: Object.freeze(
             roomTypes.map((room) =>
               Object.freeze({ ...room, rooms: Number(room.rooms), photos: Number(room.photos) }),

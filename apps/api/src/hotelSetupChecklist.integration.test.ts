@@ -225,6 +225,63 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
     }
   });
 
+  it("VAY-2451: the go-live facts count a room's rooms, guests and approved photos only", async () => {
+    const t = await setUp();
+    try {
+      const propertyId = await t.hotel();
+      const roomTypeId = randomUUID();
+      const photo = async (approved: boolean, sortOrder: number) => {
+        const mediaId = randomUUID();
+        const checksum = createHash("sha256").update(mediaId).digest("hex");
+        await t.admin.query(
+          `INSERT INTO platform.media_objects (
+             id, bucket, storage_key, storage_kind, visibility, purpose, property_id,
+             resource_product, resource_type, resource_id, lifecycle_status, content_type,
+             width_px, height_px, size_bytes, checksum_sha256, public_approved
+           ) VALUES ($1, 'vayada-media-test', $2, 'vayada_managed', 'public', 'pms.room_type.media',
+             $3::uuid, 'pms', 'room_type', $4::text, 'active', 'image/webp', 1200, 800, 900, $5, $6)`,
+          [mediaId, `public/media/${mediaId}.webp`, propertyId, roomTypeId, checksum, approved],
+        );
+        await t.admin.query(
+          `INSERT INTO pms.room_type_media (property_id, room_type_id, platform_media_object_id, sort_order)
+           VALUES ($1, $2, $3, $4)`,
+          [propertyId, roomTypeId, mediaId, sortOrder],
+        );
+      };
+      await t.fixture(async () => {
+        // A room type from before room facts: its guest limit is stored as maxOccupancy.
+        await t.admin.query(
+          `INSERT INTO pms.room_types (id, property_id, name, currency, occupancy_limits, active)
+           VALUES ($1, $2, 'Pool Villa', 'LKR', '{"maxOccupancy": 4}', TRUE),
+                  ($3, $2, 'Old Room', 'LKR', '{"total": 2}', FALSE)`,
+          [roomTypeId, propertyId, randomUUID()],
+        );
+        await t.admin.query(
+          `INSERT INTO pms.rooms (property_id, room_type_id, room_number, status)
+           VALUES ($1, $2, 'Villa 1', 'available'), ($1, $2, 'Villa 2', 'maintenance'),
+                  ($1, $2, 'Villa 3', 'retired')`,
+          [propertyId, roomTypeId],
+        );
+        await photo(true, 0);
+        // Waiting for review: the page wouldn't show it, so it doesn't count.
+        await photo(false, 1);
+      });
+      expect(await t.repository.goLiveFacts.read(t.actor(propertyId))).toEqual({
+        propertyDetails: true,
+        bookingPublished: false,
+        propertyPhotos: false,
+        bookingRules: "default",
+        onlineCardReady: false,
+        roomTypes: [{ name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 1, priced: false }],
+        placeholderPrices: false,
+        viewer: { hidden: false, dismissed: false },
+      });
+      expect(await t.repository.goLiveFacts.read(t.actor(randomUUID()))).toBeNull();
+    } finally {
+      await t.close();
+    }
+  });
+
   it("counts only a logo as style, not a hotel photo", async () => {
     const t = await setUp();
     try {
