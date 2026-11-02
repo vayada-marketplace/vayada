@@ -208,7 +208,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   const createBooking = dialog.getByRole("button", { name: "Create booking" });
 
   // Plans are cards (VAY-2417); Flexible wins over the Non-refundable plan listed first.
-  const plan = (name: string) => ratePlan.locator("label", { hasText: name });
+  const planCard = (name: string) => ratePlan.locator("label", { hasText: name });
   await expect(ratePlan.getByRole("radio", { name: /^Flexible/ })).toBeChecked();
   await expect(ratePlan.locator("label")).toHaveText([
     /^Non-refundable/,
@@ -218,8 +218,8 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await dialog.getByLabel("Room 1 check-in").fill("2026-09-10");
   await dialog.getByLabel("Room 1 check-out").fill("2026-09-12");
   await expect(dialog.getByText("2 nights", { exact: true })).toBeVisible();
-  await expect(plan("Flexible")).toContainText("€360");
-  await expect(plan("Flexible")).toContainText("€180 / night");
+  await expect(planCard("Flexible")).toContainText("€360");
+  await expect(planCard("Flexible")).toContainText("€180 / night");
 
   // Offers take the published price, so the nightly field is Custom-only, and children are
   // priced by age: the stay is sent once every age is entered.
@@ -240,7 +240,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await expect(page.getByText("Enter a custom nightly rate to calculate the total")).toBeVisible();
   await expect(createBooking).toBeDisabled();
   await dialog.getByLabel("Room 1 nightly rate").fill("150");
-  await expect(plan("Custom rate")).toContainText("€300");
+  await expect(planCard("Custom rate")).toContainText("€300");
   await expect(page.getByText("Total €300")).toBeVisible();
   await expect(createBooking).toBeEnabled();
   // The legacy room type still sends its own currency with the custom rate.

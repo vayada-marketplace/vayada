@@ -176,7 +176,7 @@ describe("target manual-booking preview", () => {
     app = await testApp({ reads: [], minStay: 3 });
     const body = command();
     body.stays = [
-      body.stays[1],
+      { ...body.stays[1], position: 1 },
       { ...body.stays[1], position: 2, roomId: roomIds[0], children: 1 },
     ];
     body.addOns = [];

@@ -807,12 +807,12 @@ export default function TargetManualBookingModal({
                           {t("calendar.targetManualBooking.dates")} *
                         </span>
                         <div
-                          className={`flex flex-wrap items-center gap-x-3 rounded-lg border bg-white px-3.5 focus-within:border-transparent focus-within:ring-2 focus-within:ring-primary-500 ${serverError?.field === "checkIn" ? "border-red-500" : "border-gray-300"}`}
+                          className={`flex flex-wrap items-center gap-x-2 rounded-lg border bg-white px-3 sm:gap-x-3 sm:px-3.5 focus-within:border-transparent focus-within:ring-2 focus-within:ring-primary-500 ${serverError?.field === "checkIn" ? "border-red-500" : "border-gray-300"}`}
                         >
                           <svg
                             aria-hidden="true"
                             viewBox="0 0 24 24"
-                            className="size-[18px] shrink-0 text-gray-600"
+                            className="hidden size-[18px] shrink-0 text-gray-600 sm:block"
                             fill="none"
                             stroke="currentColor"
                             strokeWidth={2}
@@ -925,7 +925,7 @@ export default function TargetManualBookingModal({
                                         ? `stay-server-${stay.key}`
                                         : `stay-guests-${stay.key}`
                                   }
-                                  className={`flex h-11 items-center overflow-hidden rounded-lg border bg-white ${occupancyExceeded ? "border-red-500" : "border-gray-300"}`}
+                                  className={`flex h-[46px] items-center overflow-hidden rounded-lg border bg-white ${occupancyExceeded ? "border-red-500" : "border-gray-300"}`}
                                 >
                                   <button
                                     type="button"
@@ -1006,6 +1006,8 @@ export default function TargetManualBookingModal({
                       </div>
                       {/* Plans as cards with each one's total for this stay (VAY-2417). */}
                       <fieldset
+                        role="radiogroup"
+                        aria-invalid={serverError?.field === "ratePlanId"}
                         aria-label={t("calendar.targetManualBooking.ratePlanField", {
                           number: index + 1,
                         })}
@@ -1058,7 +1060,6 @@ export default function TargetManualBookingModal({
                                     name={`ratePlan-${stay.key}`}
                                     value={plan.id}
                                     checked={selected}
-                                    aria-invalid={selected && serverError?.field === "ratePlanId"}
                                     onChange={() =>
                                       updateStay(index, { ratePlanId: plan.id, nightlyRate: "" })
                                     }
