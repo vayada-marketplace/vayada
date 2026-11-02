@@ -40,7 +40,7 @@ export function SetupLocationStep({
         title="Location & contact"
         subtitle="Where guests find you and how they reach you. Shown on your booking page and in confirmation emails."
       />
-      <div className="mt-7 flex flex-col gap-5">
+      <div className="mt-6 flex flex-col gap-4">
         {address}
         <div className="h-px bg-gray-200" />
         {contactsAction}
@@ -138,7 +138,7 @@ export function SetupLocationStep({
                   value={value}
                   onChange={(event) => onChange({ [social.key]: event.target.value })}
                   placeholder={social.placeholder}
-                  className={`block h-11 w-full rounded-[10px] border bg-white px-3 text-sm text-gray-950 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-primary-100 ${
+                  className={`block h-10 w-full rounded-[10px] border bg-white px-3 text-sm text-gray-950 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-primary-100 ${
                     invalid ? "border-red-500" : "border-gray-300 focus:border-primary-600"
                   }`}
                 />

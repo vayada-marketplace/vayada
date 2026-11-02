@@ -268,7 +268,7 @@ export function QuickHotelAddress({
   );
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className={`flex flex-col ${compact ? "gap-3" : "gap-5"}`}>
       {mode === "search" && key ? (
         <div>
           <p className="text-sm font-semibold text-gray-950">
@@ -430,7 +430,7 @@ export function QuickHotelAddress({
             ) : null}
             <div
               className={`relative overflow-hidden rounded-xl border border-gray-200 bg-gray-100 ${
-                compact ? "h-28" : "h-[240px] lg:h-[300px]"
+                compact ? "h-24" : "h-[240px] lg:h-[300px]"
               }`}
             >
               {mapFailed ? (
@@ -449,7 +449,7 @@ export function QuickHotelAddress({
                 />
               )}
               {compact && hasPin(draft) ? (
-                <p className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1.5 text-[13px] font-medium text-green-700 shadow">
+                <p className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1.5 text-[13px] font-medium text-green-700 shadow">
                   <CheckCircleIcon className="h-4 w-4" aria-hidden="true" />
                   Pin placed
                 </p>
