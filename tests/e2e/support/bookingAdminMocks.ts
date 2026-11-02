@@ -4,6 +4,7 @@ import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
 import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
 import { mockBookingModules } from "./featureHubModuleMocks";
+import { mockSinglePropertyAccountBookingPage } from "./accountBookingPageMocks";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
@@ -444,6 +445,8 @@ export async function mockBookingAdminShellRoutes(
     }),
   );
   await mockBookingModules(page, BOOKING_ADMIN_PROPERTY_ID);
+  // Settings asks whether the account has an agency booking page to set up (VAY-2457): one property, no card.
+  await mockSinglePropertyAccountBookingPage(page);
   await page.route(/\/api\/pms\/properties\/[^/]+\/navigation-modules$/, (route) =>
     route.fulfill({
       json: {

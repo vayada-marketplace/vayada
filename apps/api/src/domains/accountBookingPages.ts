@@ -22,6 +22,10 @@ export type AccountBookingPageProperty = {
   name: string;
   propertyType: string | null;
   area: string | null;
+  /** The stay's own booking page hero image, else its first room photo (Booking Admin's list). */
+  photoUrl: string | null;
+  /** Rooms or villas in the PMS, retired ones left out. */
+  units: number;
   /** Ready to show guests: a visible booking page, a property type and a map location. */
   ready: boolean;
   missing: AccountBookingPageMissing[];
@@ -95,6 +99,8 @@ type PropertyRow = {
   area: string | null;
   active: boolean;
   located: boolean;
+  photoUrl: string | null;
+  units: number;
   publicContent: unknown;
   publishedPropertyId: string | null;
   position: number | null;
@@ -287,6 +293,8 @@ async function summary(
       name: row.name,
       propertyType: row.propertyType,
       area: row.area,
+      photoUrl: row.photoUrl,
+      units: row.units,
       ready: readiness.get(row.propertyId)!.ready,
       missing: readiness.get(row.propertyId)!.missing,
       included: included.has(row.propertyId),
@@ -315,11 +323,19 @@ async function propertyRows(client: Queryable, organizationId: string): Promise<
             property.property_type AS "propertyType", location.area,
             property.lifecycle_status = 'active' AS active,
             (location.latitude IS NOT NULL AND location.longitude IS NOT NULL) AS located,
+            COALESCE(
+              CASE WHEN settings.hero_image_url LIKE 'https://%' THEN settings.hero_image_url END,
+              CASE WHEN revision.public_content #>> '{rooms,0,images,0,url}' LIKE 'https://%'
+                THEN revision.public_content #>> '{rooms,0,images,0,url}' END
+            ) AS "photoUrl",
+            (SELECT count(*)::int FROM pms.rooms room
+             WHERE room.property_id = property.id AND room.status <> 'retired') AS units,
             revision.public_content AS "publicContent",
             active.property_id::text AS "publishedPropertyId",
             included.position
      FROM hotel_catalog.properties property
      LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
+     LEFT JOIN booking.booking_settings settings ON settings.property_id = property.id
      LEFT JOIN distribution.active_public_booking_revision active
        ON active.property_id = property.id
      LEFT JOIN distribution.public_booking_content_revisions revision

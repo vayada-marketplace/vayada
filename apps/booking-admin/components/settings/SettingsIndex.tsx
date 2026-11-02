@@ -6,6 +6,7 @@ import {
   AdjustmentsHorizontalIcon,
   ArrowsUpDownIcon,
   BoltIcon,
+  BuildingOffice2Icon,
   ClipboardDocumentListIcon,
   Cog6ToothIcon,
   CreditCardIcon,
@@ -20,6 +21,7 @@ import { SettingsCardGrid, type SettingsCardLink } from "@vayada/settings-ui";
 import { useTranslation } from "@/lib/i18n";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { legacySettingsPageUrl } from "@/lib/utils/settingsSectionUrl";
+import { accountBookingPageClient } from "@/services/api/accountBookingPageClient";
 
 // Titles and descriptions are translation keys. Cards without a page have no backend yet
 // (VAY-2095, VAY-2096).
@@ -28,6 +30,15 @@ const FEATURE_HUB = {
   description: "settings.cards.featureHub.description",
   icon: BoltIcon,
   href: "/settings/feature-hub",
+} satisfies SettingsCardLink;
+
+// One booking page for all stays (VAY-2457): only for accounts with two or more properties, and only
+// for members who may edit it (next-api answers 403 otherwise).
+const MULTI_PROPERTY = {
+  title: "settings.cards.multiProperty.title",
+  description: "settings.cards.multiProperty.description",
+  icon: BuildingOffice2Icon,
+  href: "/settings/multi-property",
 } satisfies SettingsCardLink;
 
 // Timo's order (VAY-2144). Email & notifications stays hidden until it has a page.
@@ -99,10 +110,24 @@ const CARDS: SettingsCardLink[] = [
   },
 ];
 
-export function SettingsIndex() {
+export function SettingsIndex({
+  client = accountBookingPageClient,
+}: {
+  client?: Pick<typeof accountBookingPageClient, "load">;
+}) {
   const { t } = useTranslation();
   const router = useRouter();
   const [legacyChecked, setLegacyChecked] = useState(false);
+  const [multiProperty, setMultiProperty] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    client
+      .load(controller.signal)
+      .then((summary) => setMultiProperty(summary.properties.length >= 2))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [client]);
 
   useEffect(() => {
     const target = legacySettingsPageUrl(window.location.search, window.location.hash);
@@ -123,7 +148,12 @@ export function SettingsIndex() {
       <PageHeader title={t("settings.index.title")} />
       <SettingsCardGrid
         featured={translate(FEATURE_HUB)}
-        cards={CARDS.map(translate)}
+        cards={(multiProperty
+          ? CARDS.flatMap((card) =>
+              card.href === "/settings/guest-form" ? [card, MULTI_PROPERTY] : [card],
+            )
+          : CARDS
+        ).map(translate)}
         openLabel={t("settings.index.open")}
         comingSoonLabel={t("settings.index.comingSoon")}
       />

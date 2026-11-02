@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { BookDirectBenefitsPage } from "@/components/settings/BookDirectBenefitsPage";
 import { GuestFormPage } from "@/components/settings/GuestFormPage";
+import { MultiPropertyBookingPage } from "@/components/settings/MultiPropertyBookingPage";
 import { DataExportPage } from "@/components/settings/DataExportPage";
 import { DeleteAccountPage } from "@/components/settings/DeleteAccountPage";
 import { PrivacyPage } from "@/components/settings/PrivacyPage";
@@ -24,6 +25,7 @@ export default async function SettingsRoute({
   if (page === "room-filters") return <RoomFiltersPage />;
   if (page === "room-sorting") return <RoomSortingPage />;
   if (page === "guest-form") return <GuestFormPage />;
+  if (page === "multi-property") return <MultiPropertyBookingPage />;
   if (page === "privacy") return <PrivacyPage />;
   if (page === "data-export") return <DataExportPage />;
   if (page === "delete-account") return <DeleteAccountPage />;

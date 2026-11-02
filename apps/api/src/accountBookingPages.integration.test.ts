@@ -84,7 +84,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
       },
     });
     expect(summary!.properties).toEqual([
-      row(stays.astavaka, "Astavaka Villa", "villa", false, ["setup"]),
+      row(stays.astavaka, "Astavaka Villa", "villa", false, ["setup"], false, null),
       row(stays.escape, "Escape Villa", "villa", true, [], true),
       row(stays.mandala, "Mandala Resort", "resort", true, [], true),
       row(stays.perum, "Perum Bali", null, false, ["type", "location"]),
@@ -450,8 +450,20 @@ function row(
   ready: boolean,
   missing: string[],
   included = false,
+  // Published stays show their first room photo (none has a hero image); nobody has PMS rooms here.
+  photoUrl: string | null = "https://cdn.example/villa.jpg",
 ) {
-  return { propertyId, name, propertyType, area: "Ubud", ready, missing, included };
+  return {
+    propertyId,
+    name,
+    propertyType,
+    area: "Ubud",
+    photoUrl,
+    units: 0,
+    ready,
+    missing,
+    included,
+  };
 }
 
 function customSettings(designPropertyId: string): AccountBookingPageSettings {
