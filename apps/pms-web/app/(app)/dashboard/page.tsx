@@ -36,6 +36,7 @@ import {
 } from "@/lib/dashboardBookings";
 import { useTranslation } from "@/lib/i18n";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
+import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
 import {
   PmsDashboardSetupBanner,
@@ -84,10 +85,6 @@ function roomLabel(b: Booking) {
   return assigned || "Unassigned";
 }
 
-function checkoutTime() {
-  return "12:00";
-}
-
 function isPaid(b: Booking) {
   if (b.amountStatus === "unverified") return false;
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
@@ -100,6 +97,8 @@ type InventoryLoadStatus = "loading" | "ready" | "error";
 export default function DashboardPage() {
   const { locale, t } = useTranslation();
   const showFinance = canSeeDashboardFinance(usePmsAccess().permissions);
+  // The check-out time guests see on the booking page; none when this member can't read it (VAY-2455).
+  const checkOutTime = useGuestStayTimes()?.checkOutTime ?? null;
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [forecastInventoryDays, setForecastInventoryDays] = useState<CalendarInventoryDay[]>([]);
   const [tonightInventoryDays, setTonightInventoryDays] = useState<CalendarInventoryDay[]>([]);
@@ -601,10 +600,15 @@ export default function DashboardPage() {
                       {b.guestFirstName} {b.guestLastName}
                     </p>
                     <p className="text-xs text-gray-400 truncate">
-                      <span className="text-gray-500">
-                        {t("dashboard.checkoutBy", { time: checkoutTime() })}
-                      </span>{" "}
-                      · <span className="text-gray-500">{roomLabel(b)}</span>
+                      {checkOutTime && (
+                        <>
+                          <span className="text-gray-500">
+                            {t("dashboard.checkoutBy", { time: checkOutTime })}
+                          </span>{" "}
+                          ·{" "}
+                        </>
+                      )}
+                      <span className="text-gray-500">{roomLabel(b)}</span>
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -743,6 +747,7 @@ export default function DashboardPage() {
           notes={quickView.notes}
           loading={quickView.loading}
           today={today}
+          checkOutTime={checkOutTime}
           onClose={() => setQuickView(null)}
         />
       )}
@@ -758,6 +763,7 @@ function DepartureQuickView({
   notes,
   loading,
   today,
+  checkOutTime,
   onClose,
 }: {
   booking: Booking;
@@ -765,6 +771,8 @@ function DepartureQuickView({
   notes: BookingNote[];
   loading: boolean;
   today: string;
+  /** "11:00", or null when unknown: the summary then leaves the time out. */
+  checkOutTime: string | null;
   onClose: () => void;
 }) {
   const { locale, t } = useTranslation();
@@ -777,6 +785,7 @@ function DepartureQuickView({
   const isFuture = eventDate > today;
   const isNotCheckedIn = !isFuture && isNotCheckedInDeparture(booking);
   const isCheckedOut = booking.status === "checked_out";
+  const stayGuests = (booking.numberOfGuests ?? booking.adults + booking.children) || 1;
 
   return createPortal(
     <div
@@ -866,11 +875,16 @@ function DepartureQuickView({
             <div>
               <dt className="text-xs font-medium text-gray-500">{t("bookings.detail.checkOut")}</dt>
               <dd className="mt-0.5 font-semibold text-gray-900">
-                {t("dashboard.staySummary", {
-                  time: t("dashboard.byTime", { time: checkoutTime() }),
-                  nights: booking.nights,
-                  guests: (booking.numberOfGuests ?? booking.adults + booking.children) || 1,
-                })}
+                {checkOutTime
+                  ? t("dashboard.staySummary", {
+                      time: t("dashboard.byTime", { time: checkOutTime }),
+                      nights: booking.nights,
+                      guests: stayGuests,
+                    })
+                  : t("dashboard.staySummaryNoTime", {
+                      nights: booking.nights,
+                      guests: stayGuests,
+                    })}
               </dd>
             </div>
           </dl>

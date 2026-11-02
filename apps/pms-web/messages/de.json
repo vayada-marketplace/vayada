@@ -3215,6 +3215,7 @@
   "dashboard.popup.startCheckIn": "Check-in starten",
   "dashboard.byTime": "bis {time}",
   "dashboard.staySummary": "Heute · {time} · {nights} Nacht/Nächte · {guests} Gast/Gäste",
+  "dashboard.staySummaryNoTime": "Heute · {nights} Nacht/Nächte · {guests} Gast/Gäste",
   "dashboard.internalNote": "Interne Notiz",
   "dashboard.specialRequest": "Sonderwunsch",
   "dashboard.checkInNow": "Jetzt einchecken",

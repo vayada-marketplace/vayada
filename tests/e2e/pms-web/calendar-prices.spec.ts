@@ -5,6 +5,7 @@ import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
   PMS_WEB_PROPERTY_ID,
+  pmsWebGuestRules,
   pmsWebReservation,
   pmsWebRoomType,
 } from "../support/pmsWebMocks";
@@ -327,10 +328,8 @@ test.describe("PMS calendar prices", () => {
     await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-blocks*`, (route) =>
       route.fulfill({ json: list([block]) }),
     );
-    await page.route(
-      `**/api/booking/properties/${PMS_WEB_PROPERTY_ID}/booking-guest-policy`,
-      (route) =>
-        route.fulfill({ json: { current: { bundle: { choices: { checkInTime: "15:00" } } } } }),
+    await page.route(`**/api/booking/properties/${PMS_WEB_PROPERTY_ID}/guest-rules`, (route) =>
+      route.fulfill({ json: pmsWebGuestRules({ checkInTime: "14:30" }) }),
     );
     await page.goto("/calendar");
 
@@ -342,7 +341,7 @@ test.describe("PMS calendar prices", () => {
       "Ada Lovelace",
       "Direct",
       "€243",
-      "Tue, Nov 3 · from 15:00",
+      "Tue, Nov 3 · from 14:30",
     ]);
     await expect(booking.getByRole("link", { name: "Open reservation" })).toHaveAttribute(
       "href",

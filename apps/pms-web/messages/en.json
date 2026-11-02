@@ -3202,6 +3202,7 @@
   "dashboard.popup.startCheckIn": "Start check-in",
   "dashboard.byTime": "by {time}",
   "dashboard.staySummary": "Today · {time} · {nights} night(s) · {guests} guest(s)",
+  "dashboard.staySummaryNoTime": "Today · {nights} night(s) · {guests} guest(s)",
   "dashboard.internalNote": "Internal note",
   "dashboard.specialRequest": "Special request",
   "dashboard.checkInNow": "Check in now",

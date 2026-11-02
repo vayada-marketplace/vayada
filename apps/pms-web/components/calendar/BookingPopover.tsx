@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { differenceInDays, parseISO } from "date-fns";
 import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
-import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
+import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import type { CalendarBlock, CalendarBooking } from "@/services/calendar";
-import { arrivalTimesService } from "@/services/settings/arrivalTimes";
 import CalendarPopover, { PopoverBadge, type PopoverAnchor } from "./CalendarPopover";
 
 const STATUS_KEYS: Record<CalendarBooking["status"], string> = {
@@ -64,19 +63,8 @@ export default function BookingPopover({
   onClose: () => void;
 }) {
   const { day, stay, t } = useStayText();
-  // The hotel's check-in time from its arrival times, which only staff who manage Booking settings may read; others
-  // see the arrival day alone.
-  const canReadArrivalTimes = useHasPmsPermission("booking.settings.manage");
-  const [checkInTime, setCheckInTime] = useState<string | null>(null);
-  useEffect(() => {
-    if (!canReadArrivalTimes) return;
-    const controller = new AbortController();
-    arrivalTimesService
-      .load(controller.signal)
-      .then((setup) => setCheckInTime(setup.current?.bundle.choices.checkInTime ?? null))
-      .catch(() => setCheckInTime(null));
-    return () => controller.abort();
-  }, [canReadArrivalTimes]);
+  // The check-in time guests see; staff who can't read it see the arrival day alone.
+  const checkInTime = useGuestStayTimes()?.checkInTime ?? null;
   const guest = `${booking.guestFirstName} ${booking.guestLastName}`.trim();
   const value = booking.bookingValue;
   const amount = value ? Number(value.amountDecimal) : null;

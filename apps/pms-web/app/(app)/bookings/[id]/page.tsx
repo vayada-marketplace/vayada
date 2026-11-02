@@ -37,6 +37,7 @@ import {
 } from "@/services/bookings";
 import { GuestNotes } from "@/components/guests/GuestNotes";
 import { useGuestsSectionOn } from "@/lib/guests/useGuestsSectionOn";
+import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { guestDataSettingsService, type GuestDataSettings } from "@/services/guests";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import { isChannelBooking } from "@/lib/bookings/channelLabel";
@@ -1287,6 +1288,8 @@ function EditAddOnsModal({
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { locale, t } = useTranslation();
   const hotelTimeZone = useHotelTimeZone();
+  // The times guests see on the booking page; none when this member can't read them (VAY-2455).
+  const stayTimes = useGuestStayTimes();
   const { id } = use(params);
   const [booking, setBooking] = useState<Booking | null>(null);
   const [directInboxEligibleBookingId, setDirectInboxEligibleBookingId] = useState<string | null>(
@@ -2346,9 +2349,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               <p className="font-semibold text-gray-900">
                 {formatDateLong(booking.checkIn, locale)}
               </p>
-              <p className="text-xs text-gray-500">
-                {t("bookings.detail.fromTime", { time: "15:00" })}
-              </p>
+              {stayTimes && (
+                <p className="text-xs text-gray-500">
+                  {t("bookings.detail.fromTime", { time: stayTimes.checkInTime })}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide">
@@ -2357,9 +2362,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               <p className="font-semibold text-gray-900">
                 {formatDateLong(booking.checkOut, locale)}
               </p>
-              <p className="text-xs text-gray-500">
-                {t("bookings.detail.byTime", { time: "12:00" })}
-              </p>
+              {stayTimes && (
+                <p className="text-xs text-gray-500">
+                  {t("bookings.detail.byTime", { time: stayTimes.checkOutTime })}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide">
