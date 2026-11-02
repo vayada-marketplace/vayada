@@ -8,17 +8,23 @@ import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
  * for a preview next to the form (Room Sorting, VAY-2449). */
 export function SettingsSubPage({
   title,
+  subtitle,
   children,
   wide = false,
 }: {
   title: string;
+  subtitle?: string;
   children: React.ReactNode;
   wide?: boolean;
 }) {
   return (
     <PageLayout>
       <div className={wide ? "max-w-6xl" : "max-w-3xl"}>
-        <PageHeader breadcrumb={<SettingsBreadcrumb current={title} />} title={title} />
+        <PageHeader
+          breadcrumb={<SettingsBreadcrumb current={title} />}
+          title={title}
+          subtitle={subtitle}
+        />
         {children}
       </div>
     </PageLayout>

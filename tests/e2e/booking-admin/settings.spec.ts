@@ -27,8 +27,19 @@ import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
-// The method tiles; the booking windows card below repeats the method names (VAY-2348).
-const paymentMethodTiles = (page: Page) => page.getByRole("group", { name: "Payment Methods" });
+// Step 1's ways to pay (VAY-2424); the booking windows card below repeats the method names.
+const paymentMethods = (page: Page) => page.getByRole("group", { name: "How guests can pay" });
+const offer = (page: Page, method: string) =>
+  page.getByRole("switch", { name: `Offer ${method}`, exact: true });
+const atHotel = (page: Page, choice: "Cash" | "Card") =>
+  page.getByRole("checkbox", { name: choice, exact: true });
+// Step 2's provider cards are labels around a radio (VAY-2424).
+const provider = (page: Page, name: RegExp) => page.getByRole("radio", { name });
+const pickProvider = (page: Page, name: RegExp) =>
+  page
+    .locator("label")
+    .filter({ has: provider(page, name) })
+    .click();
 
 test.describe("booking-admin settings no-legacy guard", () => {
   test("loads and saves the shared same-day booking cutoff", async ({ page }, testInfo) => {
@@ -267,7 +278,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       expect(settingsWrites[0]).not.toHaveProperty(field);
     }
     await page.goto("/settings/payments");
-    await expect(page.getByPlaceholder("payments@yourproperty.com")).toHaveValue(
+    await expect(page.getByPlaceholder("payments@yourhotel.com")).toHaveValue(
       "pay@alpenrose.example",
     );
 
@@ -1166,7 +1177,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await page.goto("/settings/billing");
     // Billing is only the Vayada plan; guest payment methods live on Payments.
-    await expect(page.getByRole("heading", { name: "Payment Methods" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "How guests can pay" })).toHaveCount(0);
     await expect(page.getByText("Fixed fee based on active units")).toBeVisible();
     await expect(page.getByText("$55.00", { exact: true })).toBeVisible();
     await expect(page.getByText("every month", { exact: true })).toBeVisible();
@@ -1269,7 +1280,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/settings/payments");
-    const dashboardButton = page.getByRole("button", { name: "View Stripe Dashboard" });
+    const dashboardButton = page.getByRole("button", { name: "Open Stripe dashboard" });
     await expect(dashboardButton).toBeVisible();
     await expect(
       page.getByText(
@@ -1287,7 +1298,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
     stripeConnected = false;
     await page.reload();
     await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "View Stripe Dashboard" })).toHaveCount(0);
+    // Checked once the page has loaded, so the button's absence means something.
+    await expect(page.getByTestId("payment-provider-status")).toHaveText("Not connected");
+    await expect(page.getByRole("button", { name: "Open Stripe dashboard" })).toHaveCount(0);
 
     await assertHealthy();
   });
@@ -1382,11 +1395,11 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/settings/payments");
-    await page.getByRole("button", { name: /Stripe Connect/ }).click();
+    await pickProvider(page, /Stripe Connect/);
     // VAY-2424: no country picker; the API opens the account in the hotel's address country.
     await expect(page.getByText("Country", { exact: true })).toHaveCount(0);
     const firstPopup = page.waitForEvent("popup");
-    await page.getByRole("button", { name: "Connect Payment Account" }).click();
+    await page.getByRole("button", { name: "Connect Stripe account" }).click();
     const onboarding = await firstPopup;
     await onboarding.waitForURL("about:blank#stripe-onboarding");
     expect(order).toEqual(["save", "create"]);
@@ -1394,18 +1407,16 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await onboarding.close();
 
     await page.reload();
-    await expect(page.getByRole("button", { name: /Stripe Connect/ })).toHaveClass(
-      /border-primary-500/,
-    );
-    await expect(page.getByRole("button", { name: "Connect Payment Account" })).toBeVisible();
+    await expect(provider(page, /Stripe Connect/)).toBeChecked();
+    await expect(page.getByRole("button", { name: "Connect Stripe account" })).toBeVisible();
 
     persistedProvider = "vayada";
     failSave = true;
     order.length = 0;
     await page.reload();
-    await page.getByRole("button", { name: /Stripe Connect/ }).click();
+    await pickProvider(page, /Stripe Connect/);
     const failedPopup = page.waitForEvent("popup");
-    await page.getByRole("button", { name: "Connect Payment Account" }).click();
+    await page.getByRole("button", { name: "Connect Stripe account" }).click();
     const closedPopup = await failedPopup;
     await closedPopup.waitForEvent("close");
 
@@ -1428,9 +1439,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
       failSave = false;
       createError = { code, message: "API message" };
       await page.reload();
-      await page.getByRole("button", { name: /Stripe Connect/ }).click();
+      await pickProvider(page, /Stripe Connect/);
       const closingPopup = page.waitForEvent("popup");
-      await page.getByRole("button", { name: "Connect Payment Account" }).click();
+      await page.getByRole("button", { name: "Connect Stripe account" }).click();
       await (await closingPopup).waitForEvent("close");
       await expect(page.getByText(text)).toBeVisible();
     }
@@ -1501,7 +1512,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await page.goto("/settings/payments");
     const popup = page.waitForEvent("popup");
-    await page.getByRole("button", { name: "Complete Onboarding" }).dblclick();
+    await expect(page.getByTestId("payment-provider-status")).toHaveText("Setup not finished");
+    await page.getByRole("button", { name: "Finish setup" }).dblclick();
     const onboarding = await popup;
     await onboarding.waitForURL("about:blank#stripe-relink");
 
@@ -1646,7 +1658,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await initialReadFinished;
     await page.waitForTimeout(100);
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-    await expect(page.getByText("Pending Onboarding", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Setup not finished", { exact: true })).toHaveCount(0);
     const markerKey = stripeOnboardingPropertyKey(BOOKING_ADMIN_PROPERTY_ID);
     await expect
       .poll(() => page.evaluate((key) => window.localStorage.getItem(key), markerKey))
@@ -1669,12 +1681,15 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.goto("/settings?stripe=return");
     await expect(page).toHaveURL(/\/settings\/payments$/);
     await expect(page.getByText("Couldn't refresh Stripe status.")).toBeVisible();
-    await expect(page.getByText("Pending Onboarding", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(/^Stripe account status couldn't be confirmed\./, { exact: false }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "Check Stripe status" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Connect payment account" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Connect Stripe account" })).toHaveCount(0);
+    await expect(page.getByRole("radio")).toHaveCount(0);
     await page.getByRole("button", { name: "Check Stripe status" }).click();
     await expect(page.getByText("Couldn't refresh Stripe status.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Connect payment account" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Connect Stripe account" })).toHaveCount(0);
     expect(forbiddenSetupRequests).toEqual([]);
     await assertNoLegacyCalls();
   });
@@ -1730,21 +1745,18 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
     });
   });
   await page.goto("/settings/payments");
-  const transfer = page
-    .getByRole("heading", { name: "Direct guest bank transfers" })
-    .locator("..")
-    .locator("..");
-  await expect(page.getByText(/Saved account: •••• 3000/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
+  const transfer = page.getByTestId("payment-method-bank_transfer");
+  await expect(transfer.getByText(/Saved account: •••• 3000/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How guests can pay" })).toBeVisible();
   await testInfo.attach("settings-payments", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });
   // VAY-2424: one Save for the page, offered once something changed.
   const savePayments = page.getByRole("button", { name: "Save changes", exact: true });
-  await expect(savePayments).toBeDisabled();
-  await expect(page.getByText("No unsaved changes", { exact: true })).toBeVisible();
-  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
+  await expect(savePayments).toHaveCount(0);
+  // VAY-2424: the save bar shows only once something changed.
+  await offer(page, "Pay at hotel").click();
   await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
   const response = page.waitForResponse(
     (response) =>
@@ -1822,38 +1834,30 @@ async function mockPaymentWrites(
 const savePaymentsButton = (page: Page) =>
   page.getByRole("button", { name: "Save changes", exact: true });
 
-/** Switches PayPal on with an email: a change that leaves Pay at Hotel as it is. */
+/** Switches PayPal on with an email: a change that leaves Pay at hotel as it is. */
 async function turnOnPayPal(page: Page) {
-  await paymentMethodTiles(page)
-    .getByRole("button", { name: /^PayPal/ })
-    .click();
-  await page.getByPlaceholder("payments@yourproperty.com").fill("pay@alpenrose.test");
+  await offer(page, "PayPal").click();
+  await page.getByPlaceholder("payments@yourhotel.com").fill("pay@alpenrose.test");
 }
 
 test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   const writes = await mockPaymentWrites(page, ["pay_at_property"]);
   await page.goto("/settings/payments");
-  await expect(page.getByRole("button", { name: "Cash", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(page.getByRole("button", { name: "Card", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await expect(atHotel(page, "Cash")).toBeChecked();
+  await expect(atHotel(page, "Card")).toBeChecked();
   await testInfo.attach("settings-payments-plain-pay-at-hotel", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });
   // Untouched, there is nothing to save (VAY-2424).
-  await expect(savePaymentsButton(page)).toBeDisabled();
+  await expect(savePaymentsButton(page)).toHaveCount(0);
 
   // Off and on again still shows Cash and Card, so nothing changed.
-  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
-  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
-  await expect(savePaymentsButton(page)).toBeDisabled();
+  await offer(page, "Pay at hotel").click();
+  await offer(page, "Pay at hotel").click();
+  await expect(atHotel(page, "Card")).toBeChecked();
+  await expect(savePaymentsButton(page)).toHaveCount(0);
 
   // Saving another change sends setup's plain Pay at Hotel back unchanged.
   await turnOnPayPal(page);
@@ -1862,78 +1866,54 @@ test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ pag
   expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "paypal"] }]);
 
   // A changed choice is sent as shown.
-  await page.getByRole("button", { name: "Card", exact: true }).click();
+  await atHotel(page, "Card").uncheck();
   await savePaymentsButton(page).click();
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property", "cash", "paypal"] });
   await assertHealthy();
 });
 
-// VAY-2235: "Cash & Card accepted" sat beside the Cash/Card buttons and spilled out of the card into
-// Bank Transfer. It now sits on its own line below the buttons, inside the card, at every width.
-test("keeps the Pay at Hotel choice inside its card at every width", async ({ page }, testInfo) => {
+// VAY-2424: Step 1 is one row per way to pay, with what it needs below it. Nothing in a row is
+// wider than the row, at any width.
+test("keeps every way to pay and its details inside its row at every width", async ({
+  page,
+}, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
-  await mockPaymentWrites(page, ["pay_at_property", "cash", "manual_card"]);
+  await mockPaymentWrites(page, ["pay_at_property", "cash", "manual_card", "card"]);
   await page.goto("/settings/payments");
   const methods = page.locator('fieldset[aria-labelledby="payment-methods-heading"]');
   await expect(methods).toHaveAttribute("aria-disabled", "false");
-  // The card that holds the Cash/Card choice (PayPal is a <div> card too).
-  const card = methods
-    .locator(":scope > div")
-    .filter({ has: page.getByRole("button", { name: "Cash", exact: true }) });
-  const cash = card.getByRole("button", { name: "Cash", exact: true });
-  const cardChoice = card.getByRole("button", { name: "Card", exact: true });
-  const states = [
-    ["Cash & Card accepted", async () => {}],
-    ["Cash only", () => cardChoice.click()],
-    [
-      "Card only",
-      async () => {
-        await cardChoice.click();
-        await cash.click();
-      },
-    ],
-  ] as const;
-  for (const [status, choose] of states) {
-    await choose();
-    for (const [width, height] of [
-      [1440, 900],
-      [1280, 800],
-      [1024, 768],
-      [640, 900],
-      [390, 844],
-    ] as const) {
-      await page.setViewportSize({ width, height });
-      const text = card.getByText(status, { exact: true });
-      await expect(text).toBeVisible();
-      const where = `${status} at ${width}px`;
-      // Nothing in the card is wider than the card.
+  await offer(page, "Bank transfer").click();
+  await offer(page, "PayPal").click();
+  await expect(page.getByPlaceholder("payments@yourhotel.com")).toBeVisible();
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [640, 900],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    for (const method of ["card", "pay_at_property", "bank_transfer", "paypal"]) {
+      const row = page.getByTestId(`payment-method-${method}`);
       expect(
-        await card.evaluate((element) => element.scrollWidth <= element.clientWidth),
-        where,
+        await row.evaluate((element) => element.scrollWidth <= element.clientWidth),
+        `${method} at ${width}px`,
       ).toBe(true);
-      const cardBox = (await card.boundingBox())!;
-      const buttonBox = (await cash.boundingBox())!;
-      // The rendered text itself, not its block, which is always as wide as the card.
-      const textBox = await text.evaluate((element) => {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        const box = range.getBoundingClientRect();
-        return { left: box.left, right: box.right, top: box.top };
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `page at ${width}px`,
+    ).toBe(true);
+    // Cash and Card sit below the Pay at hotel row's switch, not beside it.
+    const switchBox = (await offer(page, "Pay at hotel").boundingBox())!;
+    const cashBox = (await atHotel(page, "Cash").boundingBox())!;
+    expect(cashBox.y, `Cash below the switch at ${width}px`).toBeGreaterThan(
+      switchBox.y + switchBox.height,
+    );
+    if (width === 1440 || width === 390) {
+      await page.getByRole("region", { name: "How guests can pay" }).screenshot({
+        path: testInfo.outputPath(`vay2424-step1-${width}.png`),
       });
-      expect(textBox.left, where).toBeGreaterThanOrEqual(cardBox.x);
-      expect(textBox.right, where).toBeLessThanOrEqual(cardBox.x + cardBox.width);
-      expect(textBox.top, `${where}: below the buttons`).toBeGreaterThanOrEqual(
-        buttonBox.y + buttonBox.height,
-      );
-      expect(Math.round(textBox.left), `${where}: left-aligned with Cash`).toBe(
-        Math.round(buttonBox.x),
-      );
-      if (status === "Cash & Card accepted" && (width === 1440 || width === 390)) {
-        await methods.screenshot({
-          path: testInfo.outputPath(`vay2235-pay-at-hotel-${width}.png`),
-        });
-      }
     }
   }
   await assertHealthy();
@@ -1956,7 +1936,8 @@ test("re-sends Cash and Card once when Finance needs the Pay at Hotel choice", a
     ],
   );
   await page.goto("/settings/payments");
-  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await expect(atHotel(page, "Cash")).toBeChecked();
+  await expect(atHotel(page, "Card")).toBeChecked();
   await turnOnPayPal(page);
   await savePaymentsButton(page).click();
   await expect(page.getByText("Payment settings saved").first()).toBeVisible();
@@ -1969,9 +1950,10 @@ test("re-sends Cash and Card once when Finance needs the Pay at Hotel choice", a
 test("starts a newly switched-on Pay at Hotel with Cash and Card", async ({ page }) => {
   const writes = await mockPaymentWrites(page, [], [], false);
   await page.goto("/settings/payments");
-  await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
-  await paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
-  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How guests can pay" })).toBeVisible();
+  await offer(page, "Pay at hotel").click();
+  await expect(atHotel(page, "Cash")).toBeChecked();
+  await expect(atHotel(page, "Card")).toBeChecked();
   await savePaymentsButton(page).click();
   await expect(page.getByText("Payment settings saved").first()).toBeVisible();
   expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "cash", "manual_card"] }]);
@@ -1993,14 +1975,16 @@ test("waits for the saved payment methods before a click counts", async ({ page 
     await route.fallback();
   });
   await page.goto("/settings/payments");
-  // The cards are on screen and the saved methods are still on their way.
-  await expect(paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true })).toBeVisible();
+  // The rows are on screen and the saved methods are still on their way.
+  await expect(offer(page, "Pay at hotel")).toBeVisible();
   await readIsHeld;
-  const click = paymentMethodTiles(page).getByText("Pay at Hotel", { exact: true }).click();
+  await expect(paymentMethods(page)).toHaveAttribute("aria-disabled", "true");
+  const click = offer(page, "Pay at hotel").click();
   await page.waitForTimeout(300);
   releaseRead();
   await click;
-  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await expect(atHotel(page, "Cash")).toBeChecked();
+  await expect(atHotel(page, "Card")).toBeChecked();
   await savePaymentsButton(page).click();
   await expect(page.getByText("Payment settings saved").first()).toBeVisible();
   expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "cash", "manual_card"] }]);
@@ -2034,8 +2018,9 @@ test("says what went wrong when payments don't save, and offers Try again", asyn
     ],
   );
   await page.goto("/settings/payments");
-  await expect(page.getByText("Cash only", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Card", exact: true }).click();
+  await expect(atHotel(page, "Cash")).toBeChecked();
+  await expect(atHotel(page, "Card")).not.toBeChecked();
+  await atHotel(page, "Card").check();
   await savePaymentsButton(page).click();
   const banner = page.getByRole("alert").filter({ hasText: "Your hotel's currency changed." });
   await expect(banner).toHaveText(
@@ -2102,10 +2087,8 @@ test("saves bank details first and says what saved when the methods don't", asyn
   });
   await page.goto("/settings/payments");
   const save = savePaymentsButton(page);
-  await expect(save).toBeDisabled();
-  await paymentMethodTiles(page)
-    .getByRole("button", { name: /^Bank Transfer/ })
-    .click();
+  await expect(save).toHaveCount(0);
+  await offer(page, "Bank transfer").click();
   // Checked before anything is sent: bank transfer needs the bank details.
   await save.click();
   await expect(
@@ -2135,14 +2118,16 @@ test("saves bank details first and says what saved when the methods don't", asyn
   expect(writes.at(-1)).toEqual({
     acceptedMethods: ["pay_at_property", "cash", "manual_card", "bank_transfer"],
   });
-  await expect(save).toBeDisabled();
+  // Saved: the bar says so, then goes (VAY-2424).
+  await expect(save).toHaveCount(0);
 
   // Discard puts unsaved choices back.
-  await page.getByRole("button", { name: "Cash", exact: true }).click();
-  await expect(page.getByText("Card only", { exact: true })).toBeVisible();
+  await atHotel(page, "Cash").uncheck();
+  await expect(atHotel(page, "Cash")).not.toBeChecked();
   await page.getByRole("button", { name: "Discard", exact: true }).click();
-  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
-  await expect(save).toBeDisabled();
+  await expect(atHotel(page, "Cash")).toBeChecked();
+  await expect(atHotel(page, "Card")).toBeChecked();
+  await expect(save).toHaveCount(0);
 });
 
 // VAY-2424: Credit card on, but guests can't use it yet: say so at the top, and why.
@@ -2203,21 +2188,39 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   await page.goto("/settings/payments");
   const banner = page.getByTestId("card-not-ready-banner");
   await expect(banner).toContainText("Guests can't pay by card yet.");
-  await expect(banner).toContainText("No account for card payments is connected.");
-  await expect(paymentMethodTiles(page).getByText("Credit card", { exact: true })).toBeVisible();
+  await expect(banner).toContainText(
+    "Credit card is turned on, but no payment account is connected.",
+  );
+  await expect(paymentMethods(page).getByText("Credit card", { exact: true })).toBeVisible();
   await expect(
-    paymentMethodTiles(page).getByText("Guest pays online with a credit or debit card", {
-      exact: true,
-    }),
+    paymentMethods(page).getByText(
+      "Guest pays online with a credit or debit card (Visa, Mastercard, Amex).",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  // Step 1 says it too, where Credit card is switched on.
+  await expect(
+    page
+      .getByTestId("payment-method-card")
+      .getByText("Hidden from guests until a payment account is connected in Step 2."),
   ).toBeVisible();
   await expect(page.getByText(/via Stripe|Stripe fees/)).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("vay2424-card-not-connected.png") });
-  await banner.getByRole("link", { name: "Connect an account" }).click();
+  await banner.getByRole("link", { name: "Connect in Step 2" }).click();
   await expect(page).toHaveURL(/#payment-provider$/);
   await expect(
-    page.getByRole("heading", { name: "Payment Provider", exact: true }),
+    page.getByRole("heading", { name: "Where you receive card payments", exact: true }),
   ).toBeInViewport();
   expect(readinessReads).toEqual([]);
+  // Step 2 and the warning are about Credit card: switched off (not saved yet), both go.
+  const step2 = page.getByRole("region", { name: "Where you receive card payments" });
+  await expect(step2).toBeVisible();
+  await offer(page, "Credit card").click();
+  await expect(step2).toHaveCount(0);
+  await expect(banner).toHaveCount(0);
+  await offer(page, "Credit card").click();
+  await expect(step2).toBeVisible();
+  await expect(banner).toBeVisible();
 
   // An account whose setup isn't finished is not "no account".
   settings = cardPaymentSettings("pending");
@@ -2243,8 +2246,10 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   );
   await page.reload();
   await readyRead;
-  await expect(page.getByRole("button", { name: "View Stripe Dashboard" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Stripe dashboard" })).toBeVisible();
+  await expect(page.getByTestId("payment-provider-status")).toHaveText("Connected");
   await expect(banner).toHaveCount(0);
+  await expect(page.getByText(/^Hidden from guests until/)).toHaveCount(0);
 
   // Credit card off: nothing to warn about.
   settings = cardPaymentSettings(false, ["pay_at_property"]);
@@ -2253,7 +2258,7 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
     "aria-disabled",
     "false",
   );
-  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await expect(atHotel(page, "Card")).toBeChecked();
   await expect(banner).toHaveCount(0);
   await assertHealthy();
 });
@@ -2279,12 +2284,12 @@ test("lets staff set how guests pay, but not turn bank transfer on or off", asyn
   );
   const methods = page.locator('fieldset[aria-labelledby="payment-methods-heading"]');
   await expect(methods).toHaveAttribute("aria-disabled", "false");
-  await expect(methods.getByRole("button", { name: /^Bank Transfer/ })).toBeDisabled();
+  await expect(offer(page, "Bank transfer")).toBeDisabled();
   await testInfo.attach("settings-payments-staff", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });
-  await page.getByRole("button", { name: "Cash", exact: true }).click();
+  await atHotel(page, "Cash").uncheck();
   await savePaymentsButton(page).click();
   await expect(page.getByText("Payment settings saved")).toBeVisible();
   expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "manual_card"] }]);

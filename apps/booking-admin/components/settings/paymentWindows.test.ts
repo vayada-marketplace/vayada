@@ -10,7 +10,7 @@ import {
   paymentWindowsPlan,
   paymentWindowsSaveError,
   windowOf,
-} from "./PaymentWindowsCard";
+} from "./paymentWindows";
 
 const t = (key: string, params: Record<string, string | number> = {}) =>
   Object.entries(params).reduce(

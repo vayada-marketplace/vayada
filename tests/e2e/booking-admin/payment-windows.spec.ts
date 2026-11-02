@@ -10,10 +10,13 @@ import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
-// VAY-2348: Payments › "When guests can pay each way". The ticket's example with online card
-// switched off: pay at the hotel within 48 hours, bank transfer from 7 days, so guests booking
-// 2-7 days ahead have no way to pay.
-test("sets a booking window per way to pay and warns about a gap", async ({ page }, testInfo) => {
+// VAY-2348: when guests booking a given time before arrival can pay each way. Since VAY-2424 the
+// booking time is chosen in Step 1, from the mockup's presets: with online card switched off, pay
+// at the hotel from 14 days and bank transfer from 7 days leave guests booking under 7 days ahead
+// no way to pay.
+test("sets when guests can choose each way to pay and warns about a gap", async ({
+  page,
+}, testInfo) => {
   test.skip(
     !PROD,
     "Requires a production booking-admin build so the authenticated shell hydrates.",
@@ -82,70 +85,110 @@ test("sets a booking window per way to pay and warns about a gap", async ({ page
   });
 
   await page.goto("/settings/payments");
-  const card = page.getByRole("region", { name: "When guests can pay each way" });
+  // VAY-2424: "What guests will see" draws Step 1 as it stands.
+  const card = page.getByRole("region", { name: "What guests will see" });
   await expect(card).toBeVisible();
-  // VAY-2424: a way to pay guests aren't offered has no row, and no "Not offered" line either.
+  // A way to pay that is off has no bar, and no "Not offered" line either.
   await expect(card.getByText(/^Not offered to guests/)).toHaveCount(0);
   await expect(card.getByText("Credit card", { exact: true })).toHaveCount(0);
-  await expect(card.getByText("Fixed rule: guests have 48 hours to pay")).toBeVisible();
-  // One save bar for the whole page (VAY-2424): nothing to save yet.
+  await expect(page.getByText("Fixed rule: guests have 48 hours to pay")).toBeVisible();
+  // One save bar for the whole page (VAY-2424), shown once there is something to save.
   await expect(card.getByRole("button", { name: /save/i })).toHaveCount(0);
   const save = page.getByRole("button", { name: "Save changes", exact: true });
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
 
-  await card.getByLabel("When Pay at Hotel is offered").selectOption("within");
-  await card.getByLabel("Unit for Pay at Hotel").selectOption("hours");
-  await card.getByLabel("Hours for Pay at Hotel").fill("48");
-  await expect(card.getByText("Offered when guests book within 48 hours of arrival")).toBeVisible();
-
-  // D7: bank transfer needs more than its 48-hour payment deadline.
-  await card.getByLabel("When Bank Transfer is offered").selectOption("at_least");
-  await card.getByLabel("Days for Bank Transfer").fill("2");
-  await expect(card.getByText(/^Bank transfer needs at least 3 days/)).toBeVisible();
-  // Everything is checked before anything is sent.
-  await save.click();
+  const hotel = page.getByLabel("When guests can choose Pay at hotel", { exact: true });
+  const bank = page.getByLabel("When guests can choose Bank transfer", { exact: true });
+  // Credit card is off: its booking time can't be chosen.
   await expect(
-    page.getByText("Fix the booking windows marked in red, then save.", { exact: true }),
-  ).toBeVisible();
-  expect(writes).toEqual([]);
-  await card.getByLabel("Days for Bank Transfer").fill("7");
-  await expect(card.getByText(/^Bank transfer needs at least 3 days/)).toHaveCount(0);
+    page.getByLabel("When guests can choose Credit card", { exact: true }),
+  ).toBeDisabled();
+  // D7: bank transfer needs more than its 48-hour payment deadline, so 48 hours isn't offered.
+  await expect(bank.locator("option")).toHaveText([
+    "Any time",
+    "7 days+ before arrival",
+    "14 days+ before arrival",
+    "30 days+ before arrival",
+  ]);
+  await hotel.selectOption({ label: "14 days+ before arrival" });
+  await bank.selectOption({ label: "7 days+ before arrival" });
 
   await expect(
-    card.getByText("Guests booking between 48 hours and 7 days before arrival have no way to pay."),
+    card.getByText("Guests booking less than 7 days before arrival have no way to pay."),
   ).toBeVisible();
   await expect(card.getByTestId("payment-windows-strip").getByText("No way to pay")).toBeVisible();
+
+  // What checkout offers a guest booking 3 days, 2 weeks, a month ahead, or tonight.
+  const checkout = card.getByRole("list", { name: "Payment options at checkout" });
+  await expect(card.getByRole("button", { name: "3 days before" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    card.getByText("No way to pay: these guests can't complete a booking.", { exact: true }),
+  ).toBeVisible();
+  await card.getByRole("button", { name: "2 weeks before" }).click();
+  await expect(checkout.getByRole("listitem")).toHaveText(["Pay at hotel", "Bank transfer"]);
+  await card.getByRole("button", { name: "Books for tonight" }).click();
+  await expect(checkout).toHaveCount(0);
+  await card.getByRole("button", { name: "1 month+ before" }).click();
+  await expect(checkout.getByRole("listitem")).toHaveText(["Pay at hotel", "Bank transfer"]);
+  await card.screenshot({ path: testInfo.outputPath("vay2424-what-guests-see.png") });
 
   await save.click();
   await expect(page.getByText("Payment settings saved", { exact: true })).toBeVisible();
   expect(writes).toEqual([
     {
       windows: {
-        pay_at_property: { kind: "within", amount: 48, unit: "hours" },
+        pay_at_property: { kind: "at_least", amount: 14, unit: "days" },
         bank_transfer: { kind: "at_least", amount: 7, unit: "days" },
       },
     },
   ]);
   expect(settingsWrites).toEqual([]);
-  await expect(save).toBeDisabled();
+  // Saved: the bar says so, then goes.
+  await expect(save).toHaveCount(0);
 
   // Discard puts an unsaved edit back to what was saved.
-  await card.getByLabel("When Pay at Hotel is offered").selectOption("any");
+  await hotel.selectOption({ label: "Any time" });
   await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Discard", exact: true }).click();
-  await expect(card.getByLabel("Hours for Pay at Hotel")).toHaveValue("48");
-  await expect(save).toBeDisabled();
+  await expect(hotel).toHaveValue("14");
+  await expect(save).toHaveCount(0);
 
-  // The card shows what guests are offered: switching Credit card on above changes nothing here
-  // until it is saved with Stripe connected.
-  await page.getByRole("button", { name: /^Credit card/ }).click();
-  await expect(card.getByText("Credit card", { exact: true })).toHaveCount(0);
+  // A way to pay that is switched off has no booking time to choose.
+  await page.getByRole("switch", { name: "Offer Pay at hotel" }).click();
+  await expect(hotel).toBeDisabled();
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
+
+  // Credit card switched on without a payment account: drawn, but guests can't use it, so the
+  // gap stays and checkout doesn't list it.
+  await page.getByRole("switch", { name: "Offer Credit card" }).click();
+  await expect(
+    page.getByLabel("When guests can choose Credit card", { exact: true }),
+  ).toBeEnabled();
+  await expect(card.getByText("Credit card", { exact: true })).toHaveCount(1);
   await expect(card.getByText(/have no way to pay\.$/)).toHaveCount(1);
+  await expect(checkout.getByRole("listitem")).toHaveText(["Pay at hotel", "Bank transfer"]);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(card.getByLabel("Hours for Pay at Hotel")).toBeVisible();
+  await expect(hotel).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
+
+  // A way to pay switched on but not ready yet (no Stripe account) still saves its booking time.
+  await page
+    .getByLabel("When guests can choose Credit card", { exact: true })
+    .selectOption({ label: "7 days+ before arrival" });
+  await save.click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toEqual({
+    windows: {
+      card: { kind: "at_least", amount: 7, unit: "days" },
+      pay_at_property: { kind: "at_least", amount: 14, unit: "days" },
+      bank_transfer: { kind: "at_least", amount: 7, unit: "days" },
+    },
+  });
   await assertHealthy();
 });
