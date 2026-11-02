@@ -756,6 +756,236 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
+  it("records Stripe-dashboard refunds once and never takes a dispute twice after a full refund (VAY-2442)", async () => {
+    const { fixture, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    try {
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const provider = routeVayadaPaymentStripe({} as never, {
+        provider: { createPaymentIntent, retrievePaymentIntent } as never,
+        publishableKey: "pk_test_writer",
+      });
+      await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { enabled: true, feePercent: 6 },
+      });
+      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+      const currency = fixture.f.current.quote.stay.currency;
+      const lower = currency.toLowerCase();
+      const log = { info: vi.fn(), warn: vi.fn() };
+      const event = (type: string, object: Record<string, unknown>) =>
+        handleVayadaPaymentWebhookEvent(
+          fixture.pool,
+          { id: `evt_${type}_${String(object.id)}`, type, livemode: false, data: { object } },
+          log,
+        );
+      await event("payment_intent.succeeded", {
+        id: "pi_writer_test",
+        amount_received: amountMinor,
+        currency: lower,
+      });
+      const refund = (id: string, amount: number, extra: Record<string, unknown> = {}) => ({
+        id,
+        amount,
+        currency: lower,
+        status: "succeeded",
+        payment_intent: "pi_writer_test",
+        metadata: {},
+        ...extra,
+      });
+      const first = Math.floor(amountMinor / 3);
+      // A refund made in Stripe's dashboard: recorded once, however often Stripe tells us.
+      await expect(event("refund.created", refund("re_dash_1", first))).resolves.toBe("handled");
+      await expect(event("refund.updated", refund("re_dash_1", first))).resolves.toBe("handled");
+      // One of Vayada's own refunds (its command id in the metadata) settles through the sweep.
+      await expect(
+        event(
+          "refund.created",
+          refund("re_ours", first, { metadata: { vayada_refund_command_id: randomUUID() } }),
+        ),
+      ).resolves.toBe("ignored");
+      // Pending first, then succeeded: recorded when it succeeds.
+      await expect(
+        event("refund.created", refund("re_dash_2", amountMinor - first, { status: "pending" })),
+      ).resolves.toBe("ignored");
+      await expect(
+        event("charge.refund.updated", refund("re_dash_2", amountMinor - first)),
+      ).resolves.toBe("handled");
+      // Nothing is left to refund: a further one is flagged, never recorded.
+      await expect(event("refund.created", refund("re_dash_3", 100))).resolves.toBe("ignored");
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ refundId: "re_dash_3" }),
+        expect.stringContaining("exceeds"),
+      );
+      const payment = (
+        await fixture.observer.query(
+          `SELECT status,refunded_amount::text AS refunded,
+             (SELECT payment_status FROM booking.guest_bookings WHERE property_id=$1) AS booking
+           FROM finance.payments WHERE property_id=$1 AND payment_kind<>'refund'`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(payment).toMatchObject({ status: "refunded", booking: "refunded" });
+      expect(stripeAmountMinor(payment.refunded, currency)).toBe(amountMinor);
+
+      // The guest disputes after the full refund: the hotel already gave everything back, so the
+      // dispute takes nothing from it, not even Stripe's fee; winning it gives nothing back either.
+      const dispute = (bt: Record<string, unknown>) => ({
+        id: "dp_after_refund",
+        amount: amountMinor,
+        currency: lower,
+        payment_intent: "pi_writer_test",
+        balance_transactions: [{ currency: lower, exchange_rate: null, ...bt }],
+      });
+      await event("charge.dispute.funds_withdrawn", dispute({ amount: -amountMinor, fee: 1500 }));
+      await event("charge.dispute.funds_reinstated", dispute({ amount: amountMinor, fee: -1500 }));
+      const ledger = (
+        await fixture.observer.query(
+          `SELECT entry_kind,gross_minor::int AS gross,fee_minor::int AS fee,source_key
+           FROM finance.hotel_payout_ledger WHERE property_id=$1 AND entry_kind<>'charge'
+           ORDER BY source_key`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      const percent = Number(fixture.f.finance.commissionTermsSnapshot.bookingEngineFeePercent);
+      const planFee = Math.round((amountMinor * percent) / 100);
+      const back = (part: number) =>
+        Math.floor((planFee * part * 2 + amountMinor) / (2 * amountMinor));
+      expect(ledger).toEqual([
+        {
+          entry_kind: "dispute_reversal",
+          gross: 0,
+          fee: 0,
+          source_key: "dispute:dp_after_refund:reinstated",
+        },
+        {
+          entry_kind: "dispute",
+          gross: 0,
+          fee: 0,
+          source_key: "dispute:dp_after_refund:withdrawn",
+        },
+        {
+          entry_kind: "refund",
+          gross: -first,
+          fee: -back(first),
+          source_key: "refund:stripe:re_dash_1",
+        },
+        {
+          // The plan's fee comes back on the running total: all of it once all is refunded.
+          entry_kind: "refund",
+          gross: -(amountMinor - first),
+          fee: -(planFee - back(first)),
+          source_key: "refund:stripe:re_dash_2",
+        },
+      ]);
+      const owed = (
+        await fixture.observer.query(
+          "SELECT sum(net_minor)::int AS owed FROM finance.hotel_payout_ledger WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows[0].owed;
+      // Fully refunded: the hotel owes only the vayada Payment fee, which is kept on refunds.
+      expect(owed).toBe(-Math.round((amountMinor * 6) / 100));
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("never takes a refund after a dispute twice either, and waits for a dispute's withdrawal (VAY-2442)", async () => {
+    const { fixture, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    try {
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const provider = routeVayadaPaymentStripe({} as never, {
+        provider: { createPaymentIntent, retrievePaymentIntent } as never,
+        publishableKey: "pk_test_writer",
+      });
+      await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { enabled: true, feePercent: 6 },
+      });
+      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+      const currency = fixture.f.current.quote.stay.currency;
+      const lower = currency.toLowerCase();
+      const log = { info: vi.fn(), warn: vi.fn() };
+      const event = (type: string, object: Record<string, unknown>) =>
+        handleVayadaPaymentWebhookEvent(
+          fixture.pool,
+          { id: `evt_${type}_${String(object.id)}`, type, livemode: false, data: { object } },
+          log,
+        );
+      const refund = {
+        id: "re_late",
+        amount: amountMinor,
+        currency: lower,
+        status: "succeeded",
+        payment_intent: "pi_writer_test",
+        metadata: {},
+      };
+      // A refund before the payment settled here waits for it (Stripe retries).
+      await expect(event("refund.created", refund)).rejects.toThrow("before its payment");
+      await event("payment_intent.succeeded", {
+        id: "pi_writer_test",
+        amount_received: amountMinor,
+        currency: lower,
+      });
+      const dispute = (bt: Record<string, unknown>) => ({
+        id: "dp_before_refund",
+        amount: amountMinor,
+        currency: lower,
+        payment_intent: "pi_writer_test",
+        balance_transactions: [{ currency: lower, exchange_rate: null, ...bt }],
+      });
+      // A reinstatement before its withdrawal was recorded waits for it (Stripe retries).
+      await expect(
+        event("charge.dispute.funds_reinstated", dispute({ amount: amountMinor, fee: -1500 })),
+      ).rejects.toThrow("before its withdrawal");
+      await event("charge.dispute.funds_withdrawn", dispute({ amount: -amountMinor, fee: 1500 }));
+      // The dispute took the payment; a full refund made afterwards takes nothing more from the
+      // hotel, but the plan's fee comes back as on any refund.
+      await expect(event("refund.created", refund)).resolves.toBe("handled");
+      await event("charge.dispute.funds_reinstated", dispute({ amount: amountMinor, fee: -1500 }));
+      const percent = Number(fixture.f.finance.commissionTermsSnapshot.bookingEngineFeePercent);
+      const planFee = Math.round((amountMinor * percent) / 100);
+      const vayadaFee = Math.round((amountMinor * 6) / 100);
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT entry_kind,gross_minor::int AS gross,fee_minor::int AS fee
+             FROM finance.hotel_payout_ledger WHERE property_id=$1 ORDER BY created_at`,
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        { entry_kind: "charge", gross: amountMinor, fee: planFee + vayadaFee },
+        { entry_kind: "dispute", gross: -amountMinor, fee: 1500 },
+        { entry_kind: "refund", gross: 0, fee: -planFee },
+        // Won: the refund already gave the guest the money, so only Stripe's fee comes back.
+        { entry_kind: "dispute_reversal", gross: 0, fee: -1500 },
+      ]);
+      const owed = (
+        await fixture.observer.query(
+          "SELECT sum(net_minor)::int AS owed FROM finance.hotel_payout_ledger WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows[0].owed;
+      // The same as a refund followed by a dispute: only the vayada Payment fee stays.
+      expect(owed).toBe(-vayadaFee);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("takes a deposit by card and leaves the rest to pay at the property, with deposits on (VAY-2205)", async () => {
     const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
       await cardFixture(undefined, "EUR", "instant", (quote) => {
