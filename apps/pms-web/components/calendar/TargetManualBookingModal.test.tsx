@@ -340,7 +340,8 @@ describe("target manual booking fields", () => {
     expect(summary()).toContain("#101 — Double");
     expect(summary()).toContain("Thu, Sep 10 → Fri, Sep 11 · 1 night");
     expect(summary()).toContain("Flexible€100");
-    expect(summary()).toContain("Total€100");
+    // The total sits with the actions, in view on every screen size.
+    expect(JSON.stringify(view.toJSON())).toContain("Total €100");
     expect(summary()).toContain("Unpaid · Pay at property");
     expect(summary()).toContain("Room, dates and rate plan priced");
     expect(summary()).toContain("Lead guest needs name and email");
@@ -354,7 +355,7 @@ describe("target manual booking fields", () => {
     );
     await settlePreview();
     expect(summary()).toContain("Breakfast1 guest × 1 night€20");
-    expect(summary()).toContain("Total€120");
+    expect(JSON.stringify(view.toJSON())).toContain("Total €120");
 
     pill("directSource", "whatsapp");
     pill("expectedMethod", "bank_transfer");
@@ -973,6 +974,10 @@ describe("target manual booking fields", () => {
       await submission;
     });
     expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain("safely resend");
+    // Locked: neither the close button nor Cancel can drop the pending booking.
+    expect(view.root.findByProps({ "aria-label": "Close" }).props.disabled).toBe(true);
+    const cancel = view.root.findAllByType("button").find((node) => textOf(node) === "Cancel")!;
+    expect(cancel.props.disabled).toBe(true);
     // prettier-ignore
     await act(async () => { await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() }); });
     expect(onSubmit).toHaveBeenCalledTimes(2);

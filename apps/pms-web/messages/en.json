@@ -856,7 +856,6 @@
   "calendar.targetManualBooking.children": "{count} children",
   "calendar.targetManualBooking.adultTag": "Adult",
   "calendar.targetManualBooking.stayDates": "{checkIn} → {checkOut}",
-  "calendar.targetManualBooking.totalLabel": "Total",
   "calendar.targetManualBooking.paymentPill": "{status} · {method}",
   "calendar.targetManualBooking.checkStay": "Room, dates and rate plan priced",
   "calendar.targetManualBooking.checkStayPending": "Room, dates and rate plan not priced yet",

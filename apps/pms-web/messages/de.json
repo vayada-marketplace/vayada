@@ -851,7 +851,6 @@
   "calendar.targetManualBooking.children": "{count} Kinder",
   "calendar.targetManualBooking.adultTag": "Erwachsener",
   "calendar.targetManualBooking.stayDates": "{checkIn} → {checkOut}",
-  "calendar.targetManualBooking.totalLabel": "Gesamt",
   "calendar.targetManualBooking.paymentPill": "{status} · {method}",
   "calendar.targetManualBooking.checkStay": "Zimmer, Daten und Rate berechnet",
   "calendar.targetManualBooking.checkStayPending": "Zimmer, Daten und Rate noch nicht berechnet",

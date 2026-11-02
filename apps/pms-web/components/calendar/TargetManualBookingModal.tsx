@@ -530,7 +530,7 @@ export default function TargetManualBookingModal({
       amount: money(preview.grandTotal.amountDecimal, preview.currency),
     })
   ) : previewState === "loading" ? (
-    <span className="inline-flex items-center gap-2" role="status">
+    <span className="inline-flex items-center gap-2">
       {showPreviewSpinner ? (
         <span
           aria-hidden="true"
@@ -559,9 +559,22 @@ export default function TargetManualBookingModal({
         })
       : "—";
   const leadReady = Boolean(
-    firstName.trim() && lastName.trim() && /^\S+@\S+\.\S+$/.test(email.trim()),
+    firstName.trim() && lastName.trim() && /^[^\s@]+@[^\s@]+$/.test(email.trim()),
   );
   const methodLabel = METHODS.find(([value]) => value === method)![1];
+  const paymentPill = (
+    <p
+      className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${settlement === "paid" ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}
+    >
+      {t("calendar.targetManualBooking.paymentPill", {
+        status:
+          settlement === "paid"
+            ? t("bookings.balancePaid")
+            : t("calendar.targetManualBooking.unpaid"),
+        method: t(methodLabel),
+      })}
+    </p>
+  );
   // What the summary lists: each room's rate and each picked extra, with the server's amounts.
   const summaryLines = [
     ...stays.map((stay, index) => {
@@ -627,7 +640,7 @@ export default function TargetManualBookingModal({
       maxWidth="6xl"
       bare
     >
-      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-4 py-4 sm:px-7 sm:py-5">
+      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-4 py-4 sm:px-7 sm:py-5">
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-gray-900">
             {t("calendar.newBookingModal.title")}
@@ -654,7 +667,7 @@ export default function TargetManualBookingModal({
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>
         </button>
-      </header>
+      </div>
       {/* Phones: one scrolling column, the actions pinned below it. From lg: the form scrolls on the
           left, the summary on the right, and the actions stay under the summary (VAY-2417). */}
       <form
@@ -1421,7 +1434,7 @@ export default function TargetManualBookingModal({
                   rows={3}
                   value={privateNote}
                   onChange={(e) => setPrivateNote(e.target.value)}
-                  className={`${inputClass} bg-amber-50`}
+                  className={inputClass.replace("bg-white", "bg-amber-50")}
                 />
               </label>
             </FormSection>
@@ -1470,29 +1483,7 @@ export default function TargetManualBookingModal({
               </div>
             ))}
           </dl>
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-[15px] font-semibold text-gray-900">
-              {t("calendar.targetManualBooking.totalLabel")}
-            </span>
-            {preview ? (
-              <span className="text-2xl font-bold tabular-nums text-gray-900">
-                {money(preview.grandTotal.amountDecimal, preview.currency)}
-              </span>
-            ) : (
-              <span className="text-right text-[13px] text-gray-600">{previewTotal}</span>
-            )}
-          </div>
-          <p
-            className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${settlement === "paid" ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}
-          >
-            {t("calendar.targetManualBooking.paymentPill", {
-              status:
-                settlement === "paid"
-                  ? t("bookings.balancePaid")
-                  : t("calendar.targetManualBooking.unpaid"),
-              method: t(methodLabel),
-            })}
-          </p>
+          <div className="lg:hidden">{paymentPill}</div>
           <ul className="space-y-2 rounded-lg bg-gray-50 p-3">
             {checks.map(([ok, label]) => (
               <li key={label} className="flex items-center gap-2 text-[13px] text-gray-700">
@@ -1517,7 +1508,9 @@ export default function TargetManualBookingModal({
             ))}
           </ul>
         </aside>
-        <div className="sticky bottom-0 z-10 space-y-3 border-t border-gray-200 bg-white px-4 py-3 sm:px-6 lg:static lg:col-start-2 lg:row-start-2 lg:border-l lg:px-5 lg:py-4">
+        {/* The total and the actions stay in view: pinned under the form on phones, under the
+            summary from lg; alerts scroll here rather than push Create out (VAY-2417). */}
+        <div className="sticky bottom-0 z-10 space-y-3 border-t border-gray-200 bg-white px-4 py-3 sm:px-6 lg:static lg:col-start-2 lg:row-start-2 lg:max-h-[50dvh] lg:overflow-y-auto lg:border-l lg:px-5 lg:py-4">
           {previewMessage && (
             <div
               role="alert"
@@ -1565,19 +1558,20 @@ export default function TargetManualBookingModal({
               {message}
             </p>
           )}
-          <div className="flex items-center gap-2 lg:flex-col lg:items-stretch">
-            {/* The summary carries the total for screen readers; this copy is the phone's recap. */}
-            <span
-              aria-hidden="true"
-              className="mr-auto text-sm font-semibold text-gray-900 lg:hidden"
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+            {/* Announces price changes; the line is always there, so updates are heard. */}
+            <p
+              aria-live="polite"
+              className={`mr-auto text-sm font-semibold text-gray-900 lg:mr-0 lg:basis-full ${preview ? "lg:text-xl lg:font-bold" : "lg:font-normal lg:text-gray-600"}`}
             >
-              {preview ? previewTotal : null}
-            </span>
+              {previewTotal}
+            </p>
+            <div className="hidden lg:block lg:basis-full">{paymentPill}</div>
             <button
               type="button"
               disabled={locked}
               onClick={onClose}
-              className="min-h-11 rounded-lg px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 lg:order-last"
+              className="min-h-11 rounded-lg px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
             >
               {t("calendar.cancel")}
             </button>
@@ -1588,7 +1582,7 @@ export default function TargetManualBookingModal({
                 submitting ||
                 (!retryLocked && previewState === "loading")
               }
-              className="min-h-11 rounded-lg bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 lg:min-h-12 lg:text-[15px]"
+              className="min-h-11 rounded-lg bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 lg:min-h-12 lg:flex-1 lg:text-[15px]"
             >
               {submitting
                 ? t("calendar.newBookingModal.creating")
