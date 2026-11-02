@@ -801,6 +801,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(tableRows.map((row) => row.table_name)).toEqual([
+        "account_booking_page_properties",
+        "account_booking_pages",
         "active_booking_addon_selections",
         "addon_definitions",
         "addon_revenue_evidence",

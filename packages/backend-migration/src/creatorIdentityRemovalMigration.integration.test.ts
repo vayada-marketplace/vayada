@@ -309,6 +309,8 @@ const REFERENCES = [
   "identity.organization_memberships <- identity.membership_delegations(organization_id,subject_membership_id) c",
   "identity.organization_memberships <- identity.membership_property_assignments(membership_id) c",
   "identity.organization_memberships <- pms.message_threads(assigned_to_membership_id) n",
+  // 0539 (VAY-2456): an agency booking page goes with its account.
+  "identity.organizations <- booking.account_booking_pages(organization_id) c",
   "identity.organizations <- hotel_catalog.organization_setup_track_intents(organization_id) c",
   "identity.organizations <- hotel_catalog.property_setup_sessions(organization_id) c",
   "identity.organizations <- identity.account_admin_guards(organization_id) c",
