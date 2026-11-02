@@ -53,18 +53,16 @@ export const guestRulesService = {
   },
 };
 
-const SAVE_ERRORS: Record<string, string> = {
-  guest_choices_stale:
-    "Another user changed these settings. Reload saved values before saving again.",
-  guest_choices_idempotency_conflict:
-    "This save conflicts with an earlier one. Reload saved values before saving again.",
-  guest_choices_denied: "You no longer have permission to change these settings.",
-  invalid_guest_choices: "Check the guest policies and times before saving.",
-};
+const REFUSALS = [
+  "guest_choices_stale",
+  "guest_choices_idempotency_conflict",
+  "guest_choices_denied",
+  "invalid_guest_choices",
+] as const;
+export type GuestRulesRefusal = (typeof REFUSALS)[number];
 
-/** What to tell the user about a refused save: the API answers its refusals with a `code`. */
-export function guestRulesSaveError(error: unknown): string {
+/** Why the API refused a save (its answer's `code`), or null for anything else, such as a lost connection. */
+export function guestRulesRefusal(error: unknown): GuestRulesRefusal | null {
   const data = record(error) && record(error.data) ? error.data : null;
-  const code = typeof data?.code === "string" ? data.code : "";
-  return SAVE_ERRORS[code] ?? "Arrival times could not be saved. Please try again.";
+  return REFUSALS.find((code) => code === data?.code) ?? null;
 }

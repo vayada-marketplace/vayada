@@ -23,7 +23,10 @@ describe("Payments card banner (VAY-2424)", () => {
   it("says guests can't pay by card and why, linking to the provider when the account is missing or unfinished", () => {
     const missing = render("not_connected");
     expect(text(missing)).toContain("Guests can't pay by card yet.");
-    expect(text(missing)).toContain("No account for card payments is connected.");
+    expect(text(missing)).toContain(
+      "Credit card is turned on, but no payment account is connected.",
+    );
+    expect(missing.root.findByType("a").props.children).toBe("Connect in Step 2");
     expect(missing.root.findByType("a").props.href).toBe("#payment-provider");
 
     const unfinished = render("setup_incomplete");

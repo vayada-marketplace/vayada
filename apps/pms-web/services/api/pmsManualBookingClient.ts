@@ -75,6 +75,9 @@ export type PmsManualBookingPreviewResult = {
     position: number;
     roomId: string;
     ratePlanId: string | null;
+    /** Every published plan of the room priced for this stay; null where it can't be booked
+     * (VAY-2417). Absent from servers before that. */
+    ratePlanTotals?: Array<{ ratePlanId: string; total: PmsManualBookingMoney | null }>;
     nightly: Array<{
       serviceDate: string;
       standard: PmsManualBookingMoney | null;

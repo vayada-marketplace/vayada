@@ -26,18 +26,18 @@ for (const locale of ["de", "fr", "es", "id", "ja", "zh", "ru", "it", "nl"]) {
       page.getByRole("heading", { name: messages["admin.payments"], exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByText(messages["admin.howYourHotelCollectsPaymentsFromGuests"], { exact: true }),
+      page.getByText(messages["settings.payments.subtitle"], { exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: messages["settings.billing.paymentMethods"], exact: true }),
+      page.getByRole("heading", { name: messages["settings.payments.methodsTitle"], exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByText(messages["admin.guestsSendPaymentManuallyToYourPayPalEmailConfirmIt"], {
+      page.getByText(messages["settings.payments.paypalDesc"], { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Guest pays online with a credit or debit card (Visa, Mastercard, Amex).", {
         exact: true,
       }),
-    ).toBeVisible();
-    await expect(
-      page.getByText("Guest pays online with a credit or debit card", { exact: true }),
     ).toHaveCount(0);
     await page.goto("/add-ons");
     await page.getByRole("button", { name: messages["addons.list.new"], exact: true }).click();

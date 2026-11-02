@@ -198,12 +198,9 @@ test.describe("booking-admin localization settings cutover", () => {
     ]);
     expect(legacyWrites).toEqual([]);
 
-    // Payments saves what changed (VAY-2424): offer Pay at Hotel too, then save the page.
+    // Payments saves what changed (VAY-2424): switch Pay at hotel, then save the page.
     const savePayments = async () => {
-      await page
-        .locator('fieldset[aria-labelledby="payment-methods-heading"]')
-        .getByText("Pay at Hotel", { exact: true })
-        .click();
+      await page.getByRole("switch", { name: "Offer Pay at hotel" }).click();
       await page.getByRole("button", { name: "Save changes", exact: true }).click();
     };
 

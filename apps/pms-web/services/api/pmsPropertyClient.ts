@@ -180,6 +180,20 @@ export async function getPmsPropertyPlace(): Promise<PmsPropertyPlace> {
   return pmsPropertyPlace(propertyId, await sharedHotelSetupApi.getPropertyProfile(propertyId));
 }
 
+/** What the booking page shows about a property (VAY-2455): its name, town and time zone ("" when unset). One read
+ * of its shared profile, which members holding `hotel_catalog.setup.read` may make. */
+export async function getPmsPropertyFacts(
+  propertyId: string,
+  signal?: AbortSignal,
+): Promise<{ name: string; city: string; timeZone: string }> {
+  const { profile } = await sharedHotelSetupApi.getPropertyProfile(propertyId, { signal });
+  return {
+    name: profile.displayName,
+    city: profile.location.city ?? "",
+    timeZone: profile.location.timezone ?? "",
+  };
+}
+
 /** The property's place as the room editor shows it, from its shared profile (also right after a save). */
 export function pmsPropertyPlace(
   propertyId: string,

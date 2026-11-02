@@ -79,25 +79,57 @@ export default function GuestCards({
   // The buttons below disappear once used; keep keyboard focus inside the dialog.
   const focusNationality = (slotId: string) =>
     globalThis.document?.getElementById(`${id}-${slotId}-nationality`)?.focus();
+  // Number, "Guest N" and a Lead guest / Adult / Child pill, as in the design (VAY-2417).
+  const heading = (headingId: string, number: number, tag: "lead" | "adult" | "child") => (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <span
+        aria-hidden="true"
+        className={`flex size-7 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${tag === "lead" ? "bg-primary-600 text-white" : "bg-gray-100 text-gray-700"}`}
+      >
+        {number}
+      </span>
+      <h4 id={headingId} className="text-sm font-semibold text-gray-900">
+        {t("calendar.targetManualBooking.guestNumber", { number })}
+        <span className="sr-only"> · </span>
+        <span
+          className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${tag === "lead" ? "bg-primary-50 text-primary-700" : tag === "child" ? "bg-amber-100 text-amber-900" : "bg-gray-100 text-gray-700"}`}
+        >
+          {tag === "lead"
+            ? t("calendar.targetManualBooking.leadGuestTag")
+            : tag === "child"
+              ? t("calendar.targetManualBooking.childTag")
+              : t("calendar.targetManualBooking.adultTag")}
+        </span>
+      </h4>
+    </div>
+  );
   const leadCard = (
     <section
       data-guest-card
       aria-labelledby={`${id}-lead`}
-      className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 sm:p-4"
+      className="space-y-3.5 rounded-xl border border-gray-200 p-4"
     >
-      <h4 id={`${id}-lead`} className="mb-3 text-sm font-semibold text-gray-900">
-        {t("calendar.targetManualBooking.guestNumber", { number: 1 })}
-        <span className="font-normal text-gray-500">
-          {" · "}
-          {t("calendar.targetManualBooking.leadGuestTag")}
-        </span>
-      </h4>
+      {heading(`${id}-lead`, 1, "lead")}
       {lead}
     </section>
   );
 
   return (
     <div className="space-y-3">
+      <p className="flex items-start gap-2.5 rounded-lg bg-blue-50 px-3.5 py-3 text-[13px] text-blue-900">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          className="mt-px size-[18px] shrink-0"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5M12 8h.01" />
+        </svg>
+        {t("calendar.targetManualBooking.idDetailsAtCheckIn")}
+      </p>
       {leadCard}
       {slots.map((slot) => {
         const draft = drafts[slot.id] ?? EMPTY_GUEST;
@@ -113,18 +145,10 @@ export default function GuestCards({
             key={slot.id}
             data-guest-card
             aria-labelledby={`${id}-${slot.id}`}
-            className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 sm:p-4"
+            className="space-y-3.5 rounded-xl border border-gray-200 p-4"
           >
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h4 id={`${id}-${slot.id}`} className="text-sm font-semibold text-gray-900">
-                {t("calendar.targetManualBooking.guestNumber", { number })}
-                {slot.child !== null && (
-                  <span className="font-normal text-gray-500">
-                    {" · "}
-                    {t("calendar.targetManualBooking.childTag")}
-                  </span>
-                )}
-              </h4>
+            <div className="flex items-center justify-between gap-2">
+              {heading(`${id}-${slot.id}`, number, slot.child === null ? "adult" : "child")}
               {started && (
                 <button
                   type="button"
@@ -133,7 +157,7 @@ export default function GuestCards({
                     onDraft(slot.id, EMPTY_GUEST);
                     fields.current.get(`${slot.id}:firstName`)?.focus();
                   }}
-                  className="-my-3 min-h-11 px-2 text-xs font-medium text-gray-600 hover:text-gray-900"
+                  className="-my-3 min-h-11 shrink-0 px-2 text-xs font-medium text-gray-600 hover:text-gray-900"
                 >
                   {t("calendar.targetManualBooking.clear")}
                 </button>
@@ -167,7 +191,7 @@ export default function GuestCards({
               <div>
                 <label
                   htmlFor={`${id}-${slot.id}-nationality`}
-                  className="block text-xs font-medium text-gray-700"
+                  className="block text-[13px] font-medium text-gray-700"
                 >
                   {t("bookings.detail.nationality")}
                 </label>
@@ -181,7 +205,7 @@ export default function GuestCards({
                   suggested={suggestedCountries}
                   display="name"
                   clearable
-                  className="mt-1"
+                  className="mt-1.5"
                   triggerClassName={inputClass}
                 />
                 {leadCountry && !draft.countryCode && (
@@ -192,7 +216,7 @@ export default function GuestCards({
                       onDraft(slot.id, { countryCode: leadCountry });
                       focusNationality(slot.id);
                     }}
-                    className="mt-1 min-h-11 rounded-full border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    className="mt-1.5 min-h-11 rounded-full border border-dashed border-primary-300 bg-primary-50 px-3 text-xs font-medium text-primary-700 hover:bg-primary-100"
                   >
                     {t("calendar.targetManualBooking.sameAsGuest1")}
                   </button>
@@ -200,15 +224,12 @@ export default function GuestCards({
               </div>
               {slot.child !== null && childAge(slot.stayIndex, slot.child)}
             </div>
-            <p className="mt-2 text-xs text-gray-500">
+            <p className="text-xs text-gray-600">
               {t("calendar.targetManualBooking.optionalUntilCheckIn")}
             </p>
           </section>
         );
       })}
-      <p className="text-xs text-gray-500">
-        {t("calendar.targetManualBooking.idDetailsAtCheckIn")}
-      </p>
     </div>
   );
 }

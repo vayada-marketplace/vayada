@@ -104,6 +104,7 @@ export async function registerPmsManualBookingPreviewRoutes(
             authorize(request),
             parseRequest(request.query, request.body),
             ports,
+            { planTotals: true },
           ),
         );
       } catch (error) {

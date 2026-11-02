@@ -207,39 +207,40 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   const ratePlan = dialog.getByLabel("Room 1 rate plan");
   const createBooking = dialog.getByRole("button", { name: "Create booking" });
 
-  // Flexible wins over the Non-refundable plan listed first by the server.
-  await expect(ratePlan).toHaveValue("flexible-rate");
-  await expect(ratePlan.locator("option")).toHaveText([
-    "Non-refundable",
-    "Flexible",
-    "Custom rate",
+  // Plans are cards (VAY-2417); Flexible wins over the Non-refundable plan listed first.
+  const planCard = (name: string) => ratePlan.locator("label", { hasText: name });
+  await expect(ratePlan.getByRole("radio", { name: /^Flexible/ })).toBeChecked();
+  await expect(ratePlan.locator("label")).toHaveText([
+    /^Non-refundable/,
+    /^Flexible/,
+    /^Custom rate/,
   ]);
   await dialog.getByLabel("Room 1 check-in").fill("2026-09-10");
   await dialog.getByLabel("Room 1 check-out").fill("2026-09-12");
-  await expect(dialog.getByText("Standard: €360")).toBeVisible();
-  await expect(dialog.getByText("Applied: €360")).toBeVisible();
+  await expect(dialog.getByText("2 nights", { exact: true })).toBeVisible();
+  await expect(planCard("Flexible")).toContainText("€360");
+  await expect(planCard("Flexible")).toContainText("€180 / night");
 
   // Offers take the published price, so the nightly field is Custom-only, and children are
   // priced by age: the stay is sent once every age is entered.
   await expect(dialog.getByLabel("Room 1 nightly rate")).toHaveCount(0);
-  await dialog.getByLabel("Room 1 children").fill("1");
+  await dialog.getByRole("button", { name: "More children in room 1" }).click();
   const childAge = dialog.getByLabel("Age at check-in, room 1, child 1");
   await expect(childAge).toBeVisible();
   await childAge.fill("6");
   await expect.poll(() => previewBodies.at(-1)?.stays[0]?.childAgesAtCheckIn).toEqual([6]);
-  await dialog.getByLabel("Room 1 children").fill("0");
+  await dialog.getByRole("button", { name: "Fewer children in room 1" }).click();
   await expect(childAge).toHaveCount(0);
 
   // A room type without configured plans falls back to Custom instead of blocking.
   await dialog.getByLabel("Room 1 room").selectOption(GARDEN_ROOM_ID);
-  await expect(ratePlan).toHaveValue("custom");
-  await expect(ratePlan.locator("option")).toHaveText(["Custom rate"]);
+  await expect(ratePlan.getByRole("radio", { name: /^Custom rate/ })).toBeChecked();
+  await expect(ratePlan.locator("label")).toHaveText([/^Custom rate/]);
   await expect(dialog.getByText("No rate plan is published for this room type.")).toBeVisible();
   await expect(page.getByText("Enter a custom nightly rate to calculate the total")).toBeVisible();
   await expect(createBooking).toBeDisabled();
   await dialog.getByLabel("Room 1 nightly rate").fill("150");
-  await expect(dialog.getByText("Custom: €300")).toBeVisible();
-  await expect(dialog.getByText("Standard:")).toHaveCount(0);
+  await expect(planCard("Custom rate")).toContainText("€300");
   await expect(page.getByText("Total €300")).toBeVisible();
   await expect(createBooking).toBeEnabled();
   // The legacy room type still sends its own currency with the custom rate.
@@ -251,7 +252,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   // A setup-created room type has no currency yet: the custom rate goes without one and the
   // total shows the property currency the server answers with (VAY-2065).
   await dialog.getByLabel("Room 1 room").selectOption(LOFT_ROOM_ID);
-  await expect(ratePlan).toHaveValue("custom");
+  await expect(ratePlan.getByRole("radio", { name: /^Custom rate/ })).toBeChecked();
   await dialog.getByLabel("Room 1 nightly rate").fill("150");
   await expect(page.getByText("Total €300")).toBeVisible();
   await expect(createBooking).toBeEnabled();
@@ -303,7 +304,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   // One card per guest from the room's adults and children; other guests give a name and
   // nationality, and "Same as Guest 1" copies the lead's (VAY-2417).
   await expect(dialog.getByLabel("Guest 2 first name")).toHaveCount(0);
-  await dialog.getByLabel("Room 1 adults").fill("2");
+  await dialog.getByRole("button", { name: "More adults in room 1" }).click();
   await dialog.getByLabel("Guest 2 first name").fill("Grace");
   await dialog.getByLabel("Guest 2 last name").fill("Hopper");
   await dialog.getByRole("button", { name: "Same as Guest 1" }).click();

@@ -9,7 +9,7 @@ vi.mock("../api/pmsPropertyClient", () => ({
   resolveSelectedPmsPropertyId: mocks.resolvePropertyId,
 }));
 
-import { guestRulesSaveError, guestRulesService } from "./guestRules";
+import { guestRulesRefusal, guestRulesService } from "./guestRules";
 
 const PROPERTY = "f6853000-0000-4000-8000-000000000001";
 const REVISION = "6d1c3a52-5b5e-4c3f-9a51-1f3f8d1b2c4e";
@@ -67,18 +67,13 @@ describe("guest rules service", () => {
     ).rejects.toThrow("could not be confirmed");
   });
 
-  it("explains each refusal the API answers with a code", () => {
+  it("reads each refusal the API answers with a code", () => {
     const refusal = (code: string) =>
       Object.assign(new Error("API Error: 409"), { data: { code } });
-    expect(guestRulesSaveError(refusal("guest_choices_stale"))).toContain(
-      "Another user changed these settings",
-    );
-    expect(guestRulesSaveError(refusal("guest_choices_denied"))).toContain(
-      "no longer have permission",
-    );
-    expect(guestRulesSaveError(new TypeError("Failed to fetch"))).toBe(
-      "Arrival times could not be saved. Please try again.",
-    );
+    expect(guestRulesRefusal(refusal("guest_choices_stale"))).toBe("guest_choices_stale");
+    expect(guestRulesRefusal(refusal("guest_choices_denied"))).toBe("guest_choices_denied");
+    expect(guestRulesRefusal(refusal("something_else"))).toBeNull();
+    expect(guestRulesRefusal(new TypeError("Failed to fetch"))).toBeNull();
   });
 
   it("refuses a malformed answer instead of showing made-up times", async () => {
