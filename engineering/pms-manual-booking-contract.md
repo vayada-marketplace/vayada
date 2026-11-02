@@ -37,6 +37,7 @@ only writer that accepts them.
 | 2026-10-08 | VAY-2065 | A `custom` stay's `nightlyAmount.currency` is optional; omitted, the server prices it in the currency it resolves for custom-only bookings (below)     |
 | 2026-10-26 | VAY-2365 | Create refuses `422 guests_over_capacity` when the booker plus `additionalGuests` exceed the busiest night's room places (below); preview unchanged    |
 | 2026-10-29 | VAY-2417 | Add-on quantities capped at what the party needs; transfers may be dated on the arrival/departure day; the add-on list adds limits (below)             |
+| 2026-11-02 | VAY-2417 | Preview stays add optional `ratePlanTotals`: every published plan of the room priced for the stay, `null` where it can't be booked; create unchanged   |
 
 The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
 old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
@@ -212,6 +213,9 @@ type PreviewResult = {
     position: number; roomId: string; ratePlanId: string | null;
     nightly: Array<{ serviceDate: Date; standard: Money | null; applied: Money }>;
     standardTotal: Money | null; appliedTotal: Money;
+    // VAY-2417: each published offer of the room type for this stay; total null where the
+    // offer can't be booked (restrictions, no price, capacity, a child's age missing)
+    ratePlanTotals?: Array<{ ratePlanId: string; total: Money | null }>;
   }>;
   addOns: Array<{
     addonId: string; pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night";
