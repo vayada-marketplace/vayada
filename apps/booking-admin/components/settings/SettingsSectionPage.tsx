@@ -29,6 +29,7 @@ import {
 } from "@/services/api/financePaymentSettingsClient";
 import { paymentSaveError } from "@/components/settings/paymentSaveError";
 import { VayadaPayoutAccountPanel } from "@/components/settings/VayadaPayoutAccountPanel";
+import { PaymentMethodsStep } from "@/components/settings/PaymentMethodsStep";
 import {
   CardNotReadyBanner,
   type CardNotReadyReason,
@@ -975,6 +976,23 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     }
   };
 
+  // VAY-2424: Credit card has a payment account with the provider chosen in Step 2; without one,
+  // guests don't see it.
+  const cardConnected =
+    paymentProvider === "stripe"
+      ? stripeOnboarded
+      : paymentProvider === "vayada" && vayadaPayoutSaved === true;
+  // Said only once known: not while the settings load or Stripe is checked, nor before the vayada
+  // Payment panel has read the payout account.
+  const cardHidden =
+    paymentSettingsLoaded &&
+    !refreshingStripe &&
+    !cardConnected &&
+    !(
+      paymentProvider === "vayada" &&
+      vayadaPayment?.available === true &&
+      vayadaPayoutSaved === null
+    );
   // VAY-2424: what changed on Payments, against what was saved.
   const paymentsForm = paymentsFormOf(settings, paymentProvider);
   const paymentMethodsChanged =
@@ -985,9 +1003,19 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     offeredMethods && vayadaSaved && vayadaCardReady && vayadaPayoutSaved === true
       ? { ...offeredMethods, card: true }
       : offeredMethods;
+  // The windows of the ways switched on in Step 1 are saved, offered to guests yet or not.
   const windowsPlan =
-    windowMethods && paymentWindows.saved && paymentWindows.drafts
-      ? paymentWindowsPlan(windowMethods, paymentWindows.saved, paymentWindows.drafts)
+    paymentWindows.saved && paymentWindows.drafts
+      ? paymentWindowsPlan(
+          {
+            card: settings.online_card_payment ?? false,
+            pay_at_property: settings.pay_at_property_enabled,
+            bank_transfer: settings.bank_transfer ?? false,
+            paypalHours: null,
+          },
+          paymentWindows.saved,
+          paymentWindows.drafts,
+        )
       : null;
   const paymentsChanged =
     paymentMethodsChanged || bankDetailsChanged || (windowsPlan?.changed ?? false);
@@ -1155,6 +1183,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         saved.push("windows");
         if (!current()) return null;
         paymentWindows.apply(response.windows);
+      } else {
+        // A way switched off keeps its saved window: drop what was picked for it meanwhile.
+        paymentWindows.discard();
       }
       if (!current()) return null;
       setPaymentsSaveStatus({ kind: "saved" });
@@ -1371,7 +1402,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   }, []);
 
   const updateSetting = <K extends keyof PropertySettings>(key: K, value: PropertySettings[K]) => {
-    setSettings({ ...settings, [key]: value });
+    setSettings((previous) => ({ ...previous, [key]: value }));
     // A success banner next to unsaved edits reads as if they were saved.
     setFeedback((current) => (current?.type === "success" ? null : current));
   };
@@ -1397,7 +1428,10 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   );
 
   return (
-    <SettingsSubPage title={t(PAGE_TITLES[activeSection])}>
+    <SettingsSubPage
+      title={t(PAGE_TITLES[activeSection])}
+      subtitle={activeSection === "payments" ? t("settings.payments.subtitle") : undefined}
+    >
       {stripeDashboardToast && (
         <div className="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))]" role="alert">
           <FeedbackAlert type="error" message={t(stripeDashboardToast)} />
@@ -2007,9 +2041,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
 
       {activeSection === "payments" && (
         <div className="mt-4 space-y-4">
-          <p className="text-[13px] text-gray-500">
-            {t("admin.howYourHotelCollectsPaymentsFromGuests")}
-          </p>
           {ownerFinance === false && (
             <OwnerOnlyNote>{t("settings.ownerOnly.payouts")}</OwnerOnlyNote>
           )}
@@ -2017,632 +2048,19 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             <CardNotReadyBanner reason={cardNotReadyReason} providerSectionId="payment-provider" />
           )}
           {localizationLoadError && localizationRetryCard}
-          {/* Payment Methods */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <h2 id="payment-methods-heading" className="text-sm font-semibold text-gray-900">
-              {t("settings.billing.paymentMethods")}
-            </h2>
-            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
-              {t("settings.billing.paymentMethodsDesc")}
-            </p>
-            {/* Until the saved methods arrive (or while a Stripe refresh reloads them), a click
-                here would be undone when they do (VAY-2185); while Save runs, it would be lost
-                (VAY-2424). pointer-events-none also stops the Pay at Hotel card, which is a div
-                the disabled fieldset doesn't cover. */}
-            <fieldset
-              aria-labelledby="payment-methods-heading"
-              disabled={!paymentSettingsLoaded || refreshingStripe || savingPayment}
-              aria-disabled={!paymentSettingsLoaded || refreshingStripe || savingPayment}
-              aria-busy={(!paymentSettingsLoaded && !paymentError) || refreshingStripe}
-              className={`grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 ${
-                paymentSettingsLoaded && !refreshingStripe && !savingPayment
-                  ? ""
-                  : "pointer-events-none opacity-60"
-              }`}
-            >
-              {/* Credit card */}
-              <button
-                onClick={() => updateSetting("online_card_payment", !settings.online_card_payment)}
-                className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
-                  settings.online_card_payment
-                    ? "border-primary-500 bg-primary-50/30"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <div
-                  className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.online_card_payment ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                >
-                  {settings.online_card_payment && (
-                    <svg
-                      className="w-3 h-3 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={3}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  )}
-                </div>
-                <svg
-                  className="w-6 h-6 text-gray-700 mb-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
-                  />
-                </svg>
-                <span className="text-[13px] font-semibold text-gray-900">
-                  {t("settings.billing.onlineCard")}
-                </span>
-                <p className="text-[11px] text-gray-500 mt-1 mb-3">
-                  {t("settings.billing.onlineCardDesc")}
-                </p>
-                <div className="mt-auto space-y-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-green-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureInstantConfirmation")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-green-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureCardBrands")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-green-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureAutoPayout")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-amber-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureStripeFees")}
-                    </span>
-                  </div>
-                </div>
-              </button>
-
-              {/* PayPal */}
-              <div
-                className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
-                  settings.paypal_enabled
-                    ? "border-primary-500 bg-primary-50/30"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => updateSetting("paypal_enabled", !settings.paypal_enabled)}
-                  className="text-left"
-                >
-                  <div
-                    className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.paypal_enabled ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                  >
-                    {settings.paypal_enabled && (
-                      <svg
-                        className="w-3 h-3 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={3}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    )}
-                  </div>
-                  <svg
-                    className="w-6 h-6 text-gray-700 mb-2"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M12 6v12m-4-8h5a3 3 0 010 6H8V6h6a2 2 0 010 4H8"
-                    />
-                  </svg>
-                  <span className="text-[13px] font-semibold text-gray-900">PayPal</span>
-                  <p className="text-[11px] text-gray-500 mt-1 mb-3">
-                    {t("admin.guestsSendPaymentManuallyToYourPayPalEmailConfirmIt")}
-                  </p>
-                </button>
-                {settings.paypal_enabled && (
-                  <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                        {t("admin.paypalEmail")}
-                      </label>
-                      <input
-                        type="email"
-                        value={settings.paypal_email || ""}
-                        onChange={(e) => updateSetting("paypal_email", e.target.value)}
-                        placeholder="payments@yourproperty.com"
-                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[12px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                        {t("admin.paymentWindowHours")}
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={168}
-                        value={settings.paypal_payment_window_hours || 24}
-                        onChange={(e) =>
-                          updateSetting(
-                            "paypal_payment_window_hours",
-                            Math.max(1, Number(e.target.value) || 24),
-                          )
-                        }
-                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[12px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-                      />
-                      <p className="mt-1 text-[10px] text-gray-500">
-                        {t("admin.guestsAreAskedToPayWithinThisWindowConfirmReceipt")}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Pay at Hotel */}
-              <div
-                className={`relative flex min-w-0 flex-col p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
-                  settings.pay_at_property_enabled
-                    ? "border-primary-500 bg-primary-50/30"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <div
-                  onClick={() =>
-                    updateSetting("pay_at_property_enabled", !settings.pay_at_property_enabled)
-                  }
-                >
-                  <div
-                    className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.pay_at_property_enabled ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                  >
-                    {settings.pay_at_property_enabled && (
-                      <svg
-                        className="w-3 h-3 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={3}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    )}
-                  </div>
-                  <svg
-                    className="w-6 h-6 text-gray-700 mb-2"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                    />
-                  </svg>
-                  <span className="text-[13px] font-semibold text-gray-900">
-                    {t("settings.billing.payAtHotel")}
-                  </span>
-                  <p className="text-[11px] text-gray-500 mt-1 mb-3">
-                    {t("settings.billing.payAtHotelDesc")}
-                  </p>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <svg
-                        className="w-3 h-3 text-green-500 shrink-0"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <span className="text-[10px] text-gray-500">
-                        {t("settings.billing.featureNoProcessingFees")}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <svg
-                        className="w-3 h-3 text-green-500 shrink-0"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <span className="text-[10px] text-gray-500">
-                        {t("settings.billing.featureNoStripeAccount")}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <svg
-                        className="w-3 h-3 text-amber-500 shrink-0"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <span className="text-[10px] text-gray-500">
-                        {t("settings.billing.featureNoShowRisk")}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                {/* Status on its own line below the buttons, so it stays inside the card (VAY-2235). */}
-                {settings.pay_at_property_enabled && (
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { key: "cash", label: t("settings.billing.cash") },
-                        { key: "card", label: t("settings.billing.card") },
-                      ].map((m) => {
-                        const selected = settings.pay_at_hotel_methods.includes(m.key);
-                        return (
-                          <button
-                            key={m.key}
-                            type="button"
-                            aria-pressed={selected}
-                            onClick={() => {
-                              if (selected && settings.pay_at_hotel_methods.length > 1) {
-                                updateSetting(
-                                  "pay_at_hotel_methods",
-                                  settings.pay_at_hotel_methods.filter((v) => v !== m.key),
-                                );
-                              } else if (!selected) {
-                                updateSetting("pay_at_hotel_methods", [
-                                  ...settings.pay_at_hotel_methods,
-                                  m.key,
-                                ]);
-                              }
-                            }}
-                            className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
-                              selected
-                                ? "border-primary-500 bg-primary-50 text-primary-700"
-                                : "border-gray-200 text-gray-500 hover:border-gray-300"
-                            }`}
-                          >
-                            {m.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-2 text-[11px] text-gray-500">
-                      {settings.pay_at_hotel_methods.length === 2
-                        ? t("settings.billing.cashCardAccepted")
-                        : settings.pay_at_hotel_methods.includes("cash")
-                          ? t("settings.billing.cashOnly")
-                          : t("settings.billing.cardOnly")}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Bank Transfer: turning it on or off saves the guests' bank account (VAY-2401). */}
-              <button
-                onClick={() => updateSetting("bank_transfer", !settings.bank_transfer)}
-                disabled={ownerFinance === false}
-                className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left disabled:cursor-not-allowed disabled:opacity-60 ${
-                  settings.bank_transfer
-                    ? "border-primary-500 bg-primary-50/30"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <div
-                  className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.bank_transfer ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                >
-                  {settings.bank_transfer && (
-                    <svg
-                      className="w-3 h-3 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={3}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  )}
-                </div>
-                <svg
-                  className="w-6 h-6 text-gray-700 mb-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"
-                  />
-                </svg>
-                <span className="text-[13px] font-semibold text-gray-900">
-                  {t("settings.billing.bankTransfer")}
-                </span>
-                <p className="text-[11px] text-gray-500 mt-1 mb-3">
-                  {t("settings.billing.bankTransferDesc")}
-                </p>
-                <div className="mt-auto space-y-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-green-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureNoProcessingFees")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-green-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureDirectToAccount")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-green-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureGoodForLargeBookings")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <svg
-                      className="w-3 h-3 text-amber-500 shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-[10px] text-gray-500">
-                      {t("settings.billing.featureManualVerification")}
-                    </span>
-                  </div>
-                </div>
-              </button>
-            </fieldset>
-          </div>
-
-          {/* VAY-2348: each way to pay only for guests booking a certain time before arrival. */}
+          <PaymentMethodsStep
+            settings={settings}
+            update={updateSetting}
+            windows={paymentWindows}
+            busy={!paymentSettingsLoaded || refreshingStripe || savingPayment}
+            loading={(!paymentSettingsLoaded && !paymentError) || refreshingStripe}
+            ownerFinance={ownerFinance}
+            bankMaskedAccount={bankDestination?.maskedAccount ?? null}
+            cardHidden={cardHidden}
+          />
+          {/* VAY-2348: when guests booking a given time before arrival can pay, as offered. */}
           {paymentSettingsLoaded && billingPropertyId && windowMethods && (
-            <PaymentWindowsCard
-              methods={windowMethods}
-              windows={paymentWindows}
-              disabled={savingPayment}
-            />
-          )}
-          {settings.bank_transfer && bankDestination?.maskedAccount && (
-            <p className="text-sm text-gray-600">
-              {t("admin.savedAccount")} {bankDestination.maskedAccount}{" "}
-              {t("admin.leaveBankFieldsEmptyToKeepItOrEnterComplete")}
-            </p>
-          )}
-          {/* Direct-transfer details */}
-          {settings.bank_transfer && (
-            <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-3">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">
-                  {t("admin.directGuestBankTransfers")}
-                </h2>
-                <p className="text-[12px] text-gray-500 mt-0.5">
-                  {t("admin.guestsReceiveTheseBankDetailsAfterSubmittingABankTransfer")}
-                </p>
-              </div>
-              <fieldset
-                disabled={ownerFinance === false || savingPayment}
-                className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-60 sm:grid-cols-2"
-              >
-                <div className="sm:col-span-2">
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("settings.billing.payoutAccountHolder")}
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.payout_account_holder || ""}
-                    onChange={(e) => updateSetting("payout_account_holder", e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder={t("settings.billing.payoutAccountHolderPlaceholder")}
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-[12px] font-medium text-gray-700 mb-1">
-                    {t("settings.billing.accountFormatLabel")}
-                  </label>
-                  <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
-                    <button
-                      type="button"
-                      onClick={() => updateSetting("payout_account_type", "iban")}
-                      className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
-                        (settings.payout_account_type || "iban") === "iban"
-                          ? "bg-white text-gray-900 shadow-sm"
-                          : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      {t("settings.billing.payoutIban")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateSetting("payout_account_type", "account_number")}
-                      className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
-                        settings.payout_account_type === "account_number"
-                          ? "bg-white text-gray-900 shadow-sm"
-                          : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      {t("settings.billing.accountNumberLabel")}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    {(settings.payout_account_type || "iban") === "iban"
-                      ? t("settings.billing.useIbanHelp")
-                      : t("settings.billing.usePlainNumberHelp")}
-                  </p>
-                </div>
-                <div className="sm:col-span-2">
-                  {(settings.payout_account_type || "iban") === "iban" ? (
-                    <>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                        {t("settings.billing.payoutIban")}
-                      </label>
-                      <input
-                        type="text"
-                        value={settings.payout_iban || ""}
-                        onChange={(e) => updateSetting("payout_iban", e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder={t("settings.billing.payoutIbanPlaceholder")}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                        {t("settings.billing.accountNumberLabel")}
-                      </label>
-                      <input
-                        type="text"
-                        value={settings.payout_account_number || ""}
-                        onChange={(e) => updateSetting("payout_account_number", e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder={t("settings.billing.payoutAccountNumberPlaceholder")}
-                      />
-                    </>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("settings.billing.payoutBankName")}
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.payout_bank_name || ""}
-                    onChange={(e) => updateSetting("payout_bank_name", e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder={t("settings.billing.payoutBankNamePlaceholder")}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("settings.billing.payoutSwift")}
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.payout_swift || ""}
-                    onChange={(e) => updateSetting("payout_swift", e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder={t("settings.billing.payoutSwiftPlaceholder")}
-                  />
-                </div>
-              </fieldset>
-            </div>
+            <PaymentWindowsCard methods={windowMethods} windows={paymentWindows} />
           )}
         </div>
       )}
@@ -2677,12 +2095,15 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             </SettingsCard>
           ) : (
             <>
-              <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-                <h2 className="text-sm font-semibold text-gray-900">
-                  {t("settings.billing.paymentProvider")}
+              <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+                <span className="text-xs font-semibold uppercase tracking-[0.04em] text-primary-600">
+                  {t("settings.payments.step", { number: 2 })}
+                </span>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">
+                  {t("settings.payments.providerTitle")}
                 </h2>
-                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
-                  {t("settings.billing.paymentProviderDesc")}
+                <p className="mt-1 mb-4 text-sm text-slate-600">
+                  {t("settings.payments.providerDesc")}
                 </p>
 
                 {/* The page-level Save already shows its result in the banner at the top. */}

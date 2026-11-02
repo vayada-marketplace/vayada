@@ -292,21 +292,19 @@ export function paymentWindowsSaveError(
 }
 
 /**
- * VAY-2348: Booking Admin › Payments › "When guests can pay each way". Each switched-on way to pay
- * (online card, pay at the hotel, bank transfer) can be offered only to guests booking a certain
- * time before arrival. Windows change no price; the page's one Save stores them (VAY-2424).
+ * VAY-2348: Booking Admin › Payments › "When guests can pay each way": when guests booking a given
+ * time before arrival can pay each way they are offered, and where they have no way to pay. The
+ * windows are chosen in Step 1 (VAY-2424); the page's one Save stores them.
  */
 export function PaymentWindowsCard({
   methods,
   windows,
-  disabled = false,
 }: {
   methods: PaymentWindowMethods;
   windows: PaymentWindowsState;
-  disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const { saved, drafts, deadlineHours, loadError } = windows;
+  const { saved, drafts, loadError } = windows;
 
   const heading = (
     <div>
@@ -343,7 +341,7 @@ export function PaymentWindowsCard({
     );
 
   const shown = WINDOWED_PAYMENT_METHODS.filter((method) => methods[method]);
-  const { results, next } = paymentWindowsPlan(methods, saved, drafts);
+  const { next } = paymentWindowsPlan(methods, saved, drafts);
   const gaps = noWayToPay(methods, next);
   const lanes: { name: string; range: PaymentMethodGap }[] = shown.map((method) => ({
     name: t(METHOD_LABEL[method]),
@@ -359,122 +357,12 @@ export function PaymentWindowsCard({
   }
   if (from !== Number.POSITIVE_INFINITY) bookable.push({ fromHours: from, toHours: null });
 
-  const field =
-    "h-9 rounded-lg border bg-white text-[13px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500";
   return (
     <section
       aria-labelledby="payment-windows-heading"
       className="overflow-hidden rounded-lg border border-gray-200 bg-white"
     >
       <div className="p-4 pb-3 md:p-5 md:pb-3">{heading}</div>
-      <div className="border-t border-gray-100">
-        {shown.map((method) => {
-          const draft = drafts[method];
-          const result = results[method];
-          const problem = "problem" in result ? result.problem : null;
-          const name = t(METHOD_LABEL[method]);
-          const window = "window" in result ? result.window : null;
-          const summary = !window
-            ? t("settings.paymentWindows.offeredAlways")
-            : window.kind === "at_least"
-              ? t("settings.paymentWindows.offeredAtLeast", { count: window.amount })
-              : t("settings.paymentWindows.offeredWithin", {
-                  lead: leadText(window.amount * (window.unit === "days" ? 24 : 1), t),
-                });
-          return (
-            <div
-              key={method}
-              className="flex flex-col gap-2.5 border-b border-gray-100 px-4 py-4 md:px-5"
-            >
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-6">
-                <div className="min-w-0 md:flex-1">
-                  <p className="text-sm font-medium text-gray-900">{name}</p>
-                  {!problem && <p className="text-[12px] text-gray-500">{summary}</p>}
-                </div>
-                <div className="flex flex-wrap items-center gap-2 md:w-[340px] md:shrink-0">
-                  <select
-                    aria-label={t("settings.paymentWindows.whenOffered", { method: name })}
-                    value={draft.kind}
-                    disabled={disabled}
-                    onChange={(event) =>
-                      windows.update(method, { kind: event.target.value as WindowDraft["kind"] })
-                    }
-                    className={`${field} border-gray-300 px-2.5 ${draft.kind === "any" ? "flex-1" : "shrink-0"}`}
-                  >
-                    <option value="any">{t("settings.paymentWindows.anyTime")}</option>
-                    <option value="at_least">{t("settings.paymentWindows.atLeast")}</option>
-                    <option value="within">{t("settings.paymentWindows.within")}</option>
-                  </select>
-                  {draft.kind !== "any" && (
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      step={1}
-                      aria-label={t(
-                        draft.kind === "within" && draft.unit === "hours"
-                          ? "settings.paymentWindows.hoursFor"
-                          : "settings.paymentWindows.daysFor",
-                        { method: name },
-                      )}
-                      aria-invalid={problem ? true : undefined}
-                      aria-describedby={problem ? `payment-window-${method}-problem` : undefined}
-                      value={draft.amount}
-                      disabled={disabled}
-                      onChange={(event) => windows.update(method, { amount: event.target.value })}
-                      className={`${field} w-16 shrink-0 px-2 text-center ${problem ? "border-red-500 bg-red-50 text-red-700" : "border-gray-300"}`}
-                    />
-                  )}
-                  {draft.kind === "at_least" && (
-                    <span className="text-[13px] text-gray-700">
-                      {t("settings.paymentWindows.daysBeforeArrival")}
-                    </span>
-                  )}
-                  {draft.kind === "within" && (
-                    <select
-                      aria-label={t("settings.paymentWindows.unitFor", { method: name })}
-                      value={draft.unit}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        windows.update(method, { unit: event.target.value as WindowDraft["unit"] })
-                      }
-                      className={`${field} min-w-0 flex-1 border-gray-300 px-2.5`}
-                    >
-                      <option value="hours">{t("settings.paymentWindows.unitHours")}</option>
-                      <option value="days">{t("settings.paymentWindows.unitDays")}</option>
-                    </select>
-                  )}
-                </div>
-              </div>
-              {problem && (
-                <p
-                  id={`payment-window-${method}-problem`}
-                  className="text-[12px] font-medium text-red-700"
-                >
-                  {t(
-                    problem === "amount"
-                      ? "settings.paymentWindows.amountInvalid"
-                      : problem === "bank_at_least"
-                        ? "settings.paymentWindows.bankAtLeast"
-                        : "settings.paymentWindows.bankWithin",
-                    { hours: deadlineHours },
-                  )}
-                </p>
-              )}
-              {method === "bank_transfer" && (
-                <div className="rounded-lg bg-gray-50 px-3 py-2.5 text-[12px]">
-                  <p className="font-semibold text-gray-900">
-                    {t("settings.paymentWindows.bankRuleTitle", { hours: deadlineHours })}
-                  </p>
-                  <p className="text-gray-600">
-                    {t("settings.paymentWindows.bankRuleBody", { hours: deadlineHours })}
-                  </p>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
       <div
         aria-hidden="true"
         className="space-y-2 bg-gray-50/60 px-4 py-4 md:px-5"
