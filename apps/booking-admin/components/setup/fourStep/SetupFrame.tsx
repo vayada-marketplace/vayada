@@ -53,6 +53,8 @@ export type SetupFrameProps = {
   /** After "Step 3 of 4", e.g. "Room basics, 1 of 3". */
   subStep?: string | null;
   onPickStep?: ((step: SetupStepId) => void) | null;
+  /** Which done steps can be opened (all of them when not given). */
+  canPickStep?: ((step: SetupStepId) => boolean) | null;
   onSaveAndExit: () => void;
   saveAndExitDisabled?: boolean;
   footer: SetupFooterProps;
@@ -79,6 +81,7 @@ export function SetupFrame({
   propertyName,
   subStep,
   onPickStep,
+  canPickStep,
   onSaveAndExit,
   saveAndExitDisabled = false,
   footer,
@@ -121,7 +124,7 @@ export function SetupFrame({
               <button
                 key={item.id}
                 type="button"
-                disabled={locked || isCurrent || !onPickStep}
+                disabled={locked || isCurrent || !onPickStep || canPickStep?.(item.id) === false}
                 aria-current={isCurrent ? "step" : undefined}
                 onClick={() => onPickStep?.(item.id)}
                 className={`flex w-full items-start gap-3 rounded-xl p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary-600 disabled:cursor-default ${

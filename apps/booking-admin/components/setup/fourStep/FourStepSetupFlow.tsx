@@ -24,7 +24,8 @@ import {
   type QuickHotelDraft,
 } from "../quick/quickHotelDraft";
 import { saveQuickHotel } from "../quick/quickHotelSave";
-import { SetupFrame } from "./SetupFrame";
+import { FourStepHotelSteps, type FourStepHotelStepsProps } from "./FourStepHotelSteps";
+import { SetupFrame, type SetupStepId } from "./SetupFrame";
 import { SetupLocationStep } from "./SetupLocationStep";
 import { SetupPropertyStep } from "./SetupPropertyStep";
 import { SetupWelcome } from "./SetupWelcome";
@@ -45,7 +46,15 @@ export type FourStepSetupFlowProps = {
   onSaveAndExit: (propertyId: string | null) => void;
   googleMapsApiKey?: string | null;
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
-  /** Steps 3 and 4 for a hotel that exists (the room and guest payments). */
+  /** Steps 3 and 4 for a hotel that exists: the server's first run, the PMS room commands, its currency. */
+  firstRun: FourStepHotelStepsProps["firstRun"];
+  rooms: FourStepHotelStepsProps["rooms"];
+  readCurrency: (propertyId: string) => Promise<string | null>;
+  /** The step the URL asks for (?step=). */
+  initialStep?: SetupStepId | null;
+  /** After Finish setup. */
+  onFinished: (propertyId: string) => void;
+  /** Tests: in place of steps 3 and 4. */
   renderHotelSteps?: (propertyId: string) => ReactNode;
 };
 
@@ -236,15 +245,17 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
   if (view.kind === "hotel") {
     return (
       props.renderHotelSteps?.(view.propertyId) ?? (
-        <SetupFrame
-          step="room"
-          reached={2}
-          propertyName="Your property"
+        <FourStepHotelSteps
+          key={view.propertyId}
+          propertyId={view.propertyId}
+          setup={setup}
+          firstRun={props.firstRun}
+          rooms={props.rooms}
+          readCurrency={props.readCurrency}
+          initialStep={props.initialStep ?? null}
           onSaveAndExit={exit}
-          footer={{ primaryLabel: "Continue", primaryDisabled: true }}
-        >
-          <p className="text-sm text-gray-600">Your property is saved.</p>
-        </SetupFrame>
+          onFinished={() => props.onFinished(view.propertyId)}
+        />
       )
     );
   }
