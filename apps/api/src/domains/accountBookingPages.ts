@@ -22,6 +22,10 @@ export type AccountBookingPageProperty = {
   name: string;
   propertyType: string | null;
   area: string | null;
+  /** The published booking page's hero image, else its first room photo (Booking Admin's list). */
+  photoUrl: string | null;
+  /** Rooms or villas in the PMS, retired ones left out. */
+  units: number;
   /** Ready to show guests: a visible booking page, a property type and a map location. */
   ready: boolean;
   missing: AccountBookingPageMissing[];
@@ -95,6 +99,8 @@ type PropertyRow = {
   area: string | null;
   active: boolean;
   located: boolean;
+  photoUrl: string | null;
+  units: number;
   publicContent: unknown;
   publishedPropertyId: string | null;
   position: number | null;
@@ -287,6 +293,8 @@ async function summary(
       name: row.name,
       propertyType: row.propertyType,
       area: row.area,
+      photoUrl: row.photoUrl,
+      units: row.units,
       ready: readiness.get(row.propertyId)!.ready,
       missing: readiness.get(row.propertyId)!.missing,
       included: included.has(row.propertyId),
@@ -315,6 +323,13 @@ async function propertyRows(client: Queryable, organizationId: string): Promise<
             property.property_type AS "propertyType", location.area,
             property.lifecycle_status = 'active' AS active,
             (location.latitude IS NOT NULL AND location.longitude IS NOT NULL) AS located,
+            (SELECT photo FROM unnest(ARRAY[
+               revision.public_content #>> '{profile,hotel,branding,heroImage}',
+               revision.public_content #>> '{rooms,0,images,0,url}'
+             ]) WITH ORDINALITY AS candidate(photo, rank)
+             WHERE photo LIKE 'https://%' ORDER BY rank LIMIT 1) AS "photoUrl",
+            (SELECT count(*)::int FROM pms.rooms room
+             WHERE room.property_id = property.id AND room.status <> 'retired') AS units,
             revision.public_content AS "publicContent",
             active.property_id::text AS "publishedPropertyId",
             included.position

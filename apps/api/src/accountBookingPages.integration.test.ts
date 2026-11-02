@@ -71,6 +71,18 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
 
   it("starts from the defaults with every ready stay included and says what the others miss", async () => {
     const { organizationId, stays } = await travelUbud();
+    // Two rooms in the PMS count as units; a retired one doesn't.
+    const roomType = randomUUID();
+    await admin.query(
+      "INSERT INTO pms.room_types (id, property_id, name, active) VALUES ($1, $2, 'Villa', true)",
+      [roomType, stays.escape],
+    );
+    for (const status of ["available", "maintenance", "retired"])
+      await admin.query(
+        `INSERT INTO pms.rooms (id, property_id, room_type_id, operational_label_status, status)
+         VALUES ($1, $2, $3, 'unverified', $4)`,
+        [randomUUID(), stays.escape, roomType, status],
+      );
     const summary = await repository.read(organizationId);
     expect(summary).toMatchObject({
       saved: false,
@@ -84,12 +96,20 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
       },
     });
     expect(summary!.properties).toEqual([
-      row(stays.astavaka, "Astavaka Villa", "villa", false, ["setup"]),
-      row(stays.escape, "Escape Villa", "villa", true, [], true),
+      row(stays.astavaka, "Astavaka Villa", "villa", false, ["setup"], false, null),
+      { ...row(stays.escape, "Escape Villa", "villa", true, [], true), units: 2 },
       row(stays.mandala, "Mandala Resort", "resort", true, [], true),
       row(stays.perum, "Perum Bali", null, false, ["type", "location"]),
       row(stays.mansion, "The Mansion", "hotel", false, ["location"]),
-      row(stays.uma, "Uma Nature Villa", "villa", false, ["setup"]),
+      row(
+        stays.uma,
+        "Uma Nature Villa",
+        "villa",
+        false,
+        ["setup"],
+        false,
+        "https://cdn.example/uma-hero.jpg",
+      ),
     ]);
     expect(await repository.read(randomUUID())).toBeNull();
   });
@@ -373,10 +393,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     profile.hotel.slug = slug;
     // Only a fresh, bookable page can be built; a hidden one goes stale after it was published.
     // The build is frozen; mark a copy stale.
-    const content = structuredClone(publicContent(profile)) as {
-      profile: { freshness: { status: string } };
+    const content = structuredClone(publicContent(profile)) as unknown as {
+      profile: { freshness: { status: string }; hotel: Record<string, unknown> };
     };
-    if (state === "hidden") content.profile.freshness.status = "stale";
+    if (state === "hidden") {
+      content.profile.freshness.status = "stale";
+      // Its published hero comes before the room photo in Booking Admin's list.
+      content.profile.hotel["branding"] = { heroImage: "https://cdn.example/uma-hero.jpg" };
+    }
     const revisionId = randomUUID();
     await admin.query(
       `INSERT INTO distribution.public_booking_content_revisions (
@@ -424,6 +448,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         ["booking.account_booking_page_properties", "organization_id", organizations],
         ["booking.account_booking_pages", "organization_id", organizations],
         ["identity.organization_resource_links", "organization_id", organizations],
+        ["pms.rooms", "property_id", properties],
+        ["pms.room_types", "property_id", properties],
         ["distribution.active_public_booking_revision", "property_id", properties],
         ["distribution.public_booking_content_revisions", "property_id", properties],
         ["hotel_catalog.property_slugs", "property_id", properties],
@@ -450,8 +476,20 @@ function row(
   ready: boolean,
   missing: string[],
   included = false,
+  // Published stays show their first room photo (none has a hero image); nobody has PMS rooms here.
+  photoUrl: string | null = "https://cdn.example/villa.jpg",
 ) {
-  return { propertyId, name, propertyType, area: "Ubud", ready, missing, included };
+  return {
+    propertyId,
+    name,
+    propertyType,
+    area: "Ubud",
+    photoUrl,
+    units: 0,
+    ready,
+    missing,
+    included,
+  };
 }
 
 function customSettings(designPropertyId: string): AccountBookingPageSettings {

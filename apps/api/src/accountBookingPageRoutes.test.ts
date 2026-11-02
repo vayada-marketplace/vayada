@@ -29,6 +29,8 @@ const summary: AccountBookingPageSummary = {
       name: "Escape Villa",
       propertyType: "villa",
       area: "Ubud",
+      photoUrl: "https://cdn.example/escape.jpg",
+      units: 2,
       ready: true,
       missing: [],
       included: false,
