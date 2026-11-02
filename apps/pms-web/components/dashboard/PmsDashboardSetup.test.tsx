@@ -1,4 +1,8 @@
-import { buildHotelSetupChecklist, type HotelSetupChecklistFacts } from "@vayada/domain-hotels";
+import {
+  buildHotelSetupChecklist,
+  type HotelSetupChecklistFacts,
+  buildHotelGoLiveChecklist,
+} from "@vayada/domain-hotels";
 import React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
@@ -169,5 +173,61 @@ describe("PMS dashboard setup checklist (VAY-2247 wave 2)", () => {
       app: "booking_admin",
       path: "/settings/payments",
     });
+  });
+});
+
+describe("the go-live cards on the PMS dashboard (VAY-2451)", () => {
+  it("shows the go-live list instead of today's checklist, with rates opening Rooms & Rates", async () => {
+    const answer = buildHotelGoLiveChecklist({
+      propertyId: PROPERTY,
+      propertyDetails: true,
+      setupFinished: true,
+      roomTypes: [{ name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 1, priced: true }],
+      placeholderPrices: true,
+      bookingRules: "default",
+      propertyPhotos: false,
+      bookingPublished: false,
+      onlineCardReady: false,
+      onlineCardsOffered: false,
+      viewer: { hidden: false, dismissed: false },
+    });
+    const navigate = vi.fn();
+    const client = {
+      load: vi.fn(),
+      looksGood: vi.fn(),
+      setViewer: vi.fn(),
+      loadGoLive: vi.fn(async () => answer),
+    };
+    function Dashboard() {
+      const setup = usePmsSetupChecklist({
+        client: client as never,
+        resolvePropertyId: async () => PROPERTY,
+        hotelName: async () => "Lumansa Hiriketiya",
+      });
+      return (
+        <div>
+          <PmsDashboardSetupBanner setup={setup} incompleteSetupPropertyId={PROPERTY} />
+          <PmsDashboardSetupChip setup={setup} />
+          <PmsDashboardSetupCard setup={setup} navigate={navigate} />
+        </div>
+      );
+    }
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<Dashboard />);
+    });
+    await act(async () => undefined);
+    const text = textOf(renderer!.root);
+    expect(text).toContain("Get ready to go live");
+    expect(text).toContain("Later, when you're ready");
+    expect(text).not.toContain("Your property setup isn't complete.");
+    expect(client.load).not.toHaveBeenCalled();
+    await act(async () =>
+      renderer!.root
+        .find((node) => node.type === "button" && textOf(node) === "Add rates")
+        .props.onClick(),
+    );
+    expect(navigate).toHaveBeenCalledWith("/rooms");
+    renderer!.unmount();
   });
 });

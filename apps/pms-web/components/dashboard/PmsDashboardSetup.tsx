@@ -1,6 +1,8 @@
 "use client";
 
 import type {
+  HotelGoLiveChecklist,
+  HotelGoLiveItemId,
   HotelSetupChecklist,
   HotelSetupChecklistAcknowledgeable,
   HotelSetupChecklistItemId,
@@ -10,6 +12,12 @@ import {
   HotelSetupChecklistCard,
   HotelSetupChecklistChip,
 } from "@vayada/product-onboarding/HotelSetupChecklistCard";
+import {
+  GoLiveChecklistCard,
+  GoLiveLaterCard,
+  GoLiveSetupCard,
+  SetupFinishedToast,
+} from "@vayada/product-onboarding/GoLiveChecklistCard";
 import type { HotelSetupChecklistClient } from "@vayada/product-onboarding/hotelSetupChecklistApi";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -36,10 +44,18 @@ export type PmsSetupChecklistState =
       propertyId: string;
       hotelName: string;
       checklist: HotelSetupChecklist;
+    }>
+  /** VAY-2451: the four-step setup's cards (HOTEL_GO_LIVE_CHECKLIST_ENABLED). */
+  | Readonly<{
+      kind: "go_live";
+      propertyId: string;
+      hotelName: string;
+      checklist: HotelGoLiveChecklist;
     }>;
 
 type Deps = {
-  client: Pick<HotelSetupChecklistClient, "load" | "looksGood" | "setViewer">;
+  client: Pick<HotelSetupChecklistClient, "load" | "looksGood" | "setViewer"> &
+    Partial<Pick<HotelSetupChecklistClient, "loadGoLive" | "looksGoodGoLive">>;
   resolvePropertyId: () => Promise<string>;
   hotelName: () => Promise<string>;
 };
@@ -63,10 +79,14 @@ export function usePmsSetupChecklist(deps: Deps = DEFAULT_DEPS) {
     void (async () => {
       try {
         const propertyId = await deps.resolvePropertyId();
-        const [checklist, hotelName] = await Promise.all([
-          deps.client.load(propertyId),
-          deps.hotelName().catch(() => ""),
-        ]);
+        const hotelName = await deps.hotelName().catch(() => "");
+        // The go-live list first; when it isn't served (switched off) or fails, today's checklist.
+        const goLive = (await deps.client.loadGoLive?.(propertyId).catch(() => null)) ?? null;
+        if (goLive) {
+          if (active) setState({ kind: "go_live", propertyId, hotelName, checklist: goLive });
+          return;
+        }
+        const checklist = await deps.client.load(propertyId);
         if (active) setState({ kind: "ready", propertyId, hotelName, checklist });
       } catch {
         if (active) setState({ kind: "unavailable" });
@@ -88,8 +108,16 @@ export function usePmsSetupChecklist(deps: Deps = DEFAULT_DEPS) {
     [state],
   );
 
+  /** "Review booking rules" on the go-live list: the guest terms' Looks good. */
+  const reviewRules = async () => {
+    if (state.kind !== "go_live" || !deps.client.looksGoodGoLive) return;
+    const checklist = await deps.client.looksGoodGoLive(state.propertyId, "guest_terms");
+    setState({ ...state, checklist });
+  };
+
   return {
     state,
+    reviewRules,
     looksGood: (item: HotelSetupChecklistAcknowledgeable) =>
       update((propertyId) => deps.client.looksGood(propertyId, item)),
     hide: () => update((propertyId) => deps.client.setViewer(propertyId, { hidden: true })),
@@ -136,6 +164,83 @@ export const PMS_CHECKLIST_PAGES: Record<
   online_cards: { app: "booking_admin", path: "/settings/payments" },
 };
 
+/** VAY-2451: where the go-live rows open from the PMS. */
+export const PMS_GO_LIVE_PAGES: Record<
+  Exclude<HotelGoLiveItemId, "booking_published">,
+  { app: "pms" | "booking_admin"; path: string }
+> = {
+  property_details: { app: "pms", path: "/settings/property" },
+  room_types: { app: "pms", path: "/rooms" },
+  rates: { app: "pms", path: "/rooms" },
+  booking_rules: { app: "booking_admin", path: "/settings/policies" },
+  property_photos: { app: "booking_admin", path: "/design-studio" },
+};
+
+function useSetupFinishedToast() {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.location?.href) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("setupFinished") !== "1") return;
+    setShown(true);
+    url.searchParams.delete("setupFinished");
+    window.history.replaceState(window.history.state, "", url.toString());
+  }, []);
+  return { shown, dismiss: () => setShown(false) };
+}
+
+function PmsGoLiveCards({
+  setup,
+  state,
+  navigate,
+}: {
+  setup: PmsSetupChecklist;
+  state: Extract<PmsSetupChecklistState, { kind: "go_live" }>;
+  navigate: (path: string) => void;
+}) {
+  const toast = useSetupFinishedToast();
+  const open = (page: { app: "pms" | "booking_admin"; path: string }) =>
+    page.app === "pms" ? navigate(page.path) : void openBookingAdmin(page.path, state.propertyId);
+  const { checklist } = state;
+  return (
+    <>
+      {toast.shown ? <SetupFinishedToast onDismiss={toast.dismiss} /> : null}
+      {checklist.phase === "setup" ? (
+        <GoLiveSetupCard
+          checklist={checklist}
+          hotelName={state.hotelName || "your property"}
+          onContinue={() => navigate(setupHref(state.propertyId))}
+          onOpenStep={(step) =>
+            step === "property" || step === "location"
+              ? navigate(PMS_GO_LIVE_PAGES.property_details.path)
+              : navigate(`${setupHref(state.propertyId)}&step=${step}`)
+          }
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <GoLiveChecklistCard
+            checklist={checklist}
+            onOpenItem={(item) => {
+              if (item === "booking_rules")
+                void setup
+                  .reviewRules()
+                  .catch(() => undefined)
+                  .finally(() => open(PMS_GO_LIVE_PAGES[item]));
+              else open(PMS_GO_LIVE_PAGES[item]);
+            }}
+            // Booking Admin publishes the booking page.
+            onPublish={() => void openBookingAdmin("/dashboard", state.propertyId)}
+          />
+          <GoLiveLaterCard
+            checklist={checklist}
+            onConnectCards={() => void openBookingAdmin("/settings/payments", state.propertyId)}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * Today's amber "setup incomplete" banner, unchanged, for as long as there is no checklist: while it loads
  * and whenever the API doesn't answer (it isn't mounted while HOTEL_FIRST_RUN_ENABLED is off).
@@ -149,7 +254,8 @@ export function PmsDashboardSetupBanner({
   incompleteSetupPropertyId: string | null;
 }) {
   const { t } = useTranslation();
-  if (setup.state.kind === "ready" || !incompleteSetupPropertyId) return null;
+  if (setup.state.kind === "ready" || setup.state.kind === "go_live" || !incompleteSetupPropertyId)
+    return null;
   return (
     <div
       className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between"
@@ -179,6 +285,8 @@ export function PmsDashboardSetupCard({
   const { t } = useTranslation();
   const messages = useMemo(() => pmsChecklistMessages(t), [t]);
   const { state } = setup;
+  if (state.kind === "go_live")
+    return <PmsGoLiveCards setup={setup} state={state} navigate={navigate} />;
   if (state.kind !== "ready") return null;
   const open = (item: HotelSetupChecklistItemId) => {
     const page = PMS_CHECKLIST_PAGES[item];
