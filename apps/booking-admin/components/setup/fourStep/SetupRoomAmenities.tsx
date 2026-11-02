@@ -105,7 +105,11 @@ export function SetupRoomAmenities({
   const [open, setOpen] = useState<string | null>(null);
   const selected = new Set(room.amenityKeys);
   const set = (keys: Iterable<string>) =>
-    onChange({ ...room, amenityKeys: [...new Set(keys)].sort(), reviewedEmptyAmenities: true });
+    onChange({
+      ...room,
+      amenityKeys: Array.from(new Set(keys)).sort(),
+      reviewedEmptyAmenities: true,
+    });
   return (
     <div>
       <SetupStepHeading
@@ -138,7 +142,9 @@ export function SetupRoomAmenities({
                 <div className="px-4 pb-4">
                   <button
                     type="button"
-                    onClick={() => set([...selected, ...group.items.map(([key]) => key)])}
+                    onClick={() =>
+                      set(Array.from(selected).concat(group.items.map(([key]) => key)))
+                    }
                     className="rounded text-[13px] font-semibold text-primary-600 outline-none hover:text-primary-700 focus-visible:ring-2 focus-visible:ring-primary-600"
                   >
                     Select all
@@ -155,8 +161,8 @@ export function SetupRoomAmenities({
                           onClick={() =>
                             set(
                               on
-                                ? [...selected].filter((other) => other !== key)
-                                : [...selected, key],
+                                ? Array.from(selected).filter((other) => other !== key)
+                                : Array.from(selected).concat(key),
                             )
                           }
                           className="flex h-9 items-center gap-2.5 rounded text-left text-sm text-gray-800 outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
