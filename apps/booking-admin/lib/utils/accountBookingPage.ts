@@ -99,7 +99,9 @@ export function filterSplit(
         ? (property: AccountBookingPageProperty) => property.area?.trim() || null
         : null;
   if (!pick) return { splits: true, values: [] };
-  const values = [...new Set(included.map(pick).filter((value): value is string => !!value))];
+  const values = Array.from(
+    new Set(included.map(pick).filter((value): value is string => !!value)),
+  );
   return { splits: values.length > 1, values };
 }
 
