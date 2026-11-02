@@ -1,7 +1,7 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import { expect, it, vi } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig, vayadaPaymentOpenFor } from "./config.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
 
 const propertyId = "24420000-0000-4000-8000-000000000002";
@@ -77,6 +77,8 @@ async function appFor(variant: string) {
   await app.register(registerFinancePayoutDestinationRoutes, {
     prefix: "/api",
     repository,
+    // "unlisted": an owner whose hotel isn't on VAYADA_PAYMENT_PROPERTY_IDS.
+    open: (id: string) => variant !== "unlisted" && id === propertyId,
     propertyAccessRepository: {
       findMembershipPropertyScope: async () => ({
         mode: "assigned",
@@ -174,6 +176,67 @@ it("refuses bad input, reports conflicts and hides failures", async () => {
   } finally {
     await app.close();
   }
+});
+
+it("answers only for the hotels vayada Payment is on for", async () => {
+  const { app, repository, publisher } = await appFor("unlisted");
+  try {
+    for (const method of ["GET", "PUT"] as const) {
+      const response = await app.inject({
+        method,
+        url: path,
+        ...(method === "PUT" ? { payload: body } : {}),
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ code: "vayada_payment_unavailable" });
+    }
+    expect(repository.read).not.toHaveBeenCalled();
+    expect(repository.execute).not.toHaveBeenCalled();
+    expect(publisher.publish).not.toHaveBeenCalled();
+  } finally {
+    await app.close();
+  }
+});
+
+it("opens vayada Payment only for the hotels on VAYADA_PAYMENT_PROPERTY_IDS while it is on", () => {
+  const listed = "103a5fe7-05a4-4bf2-8a75-67a9ceaf9f21";
+  const keys = {
+    VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2442list",
+    VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2442list",
+  };
+  expect(loadConfig({}).vayadaPaymentPropertyIds).toEqual([]);
+  const config = loadConfig({
+    ...keys,
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: listed.toUpperCase(),
+  });
+  expect(config.vayadaPaymentPropertyIds).toEqual([listed]);
+  const open = vayadaPaymentOpenFor(config);
+  expect([open(listed), open(listed.toUpperCase()), open(propertyId)]).toEqual([true, true, false]);
+  // The list alone opens nothing; the switch with an empty list opens no hotel; without the
+  // Stripe keys (every charge would fail) no hotel can be set up either.
+  expect(
+    vayadaPaymentOpenFor(loadConfig({ ...keys, VAYADA_PAYMENT_PROPERTY_IDS: listed }))(listed),
+  ).toBe(false);
+  expect(
+    vayadaPaymentOpenFor(loadConfig({ ...keys, VAYADA_PAYMENT_ENABLED: "true" }))(listed),
+  ).toBe(false);
+  expect(
+    vayadaPaymentOpenFor(
+      loadConfig({ VAYADA_PAYMENT_ENABLED: "true", VAYADA_PAYMENT_PROPERTY_IDS: listed }),
+    )(listed),
+  ).toBe(false);
+  // "*": every hotel (for the launch).
+  const all = loadConfig({
+    ...keys,
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: "*",
+  });
+  expect(all.vayadaPaymentPropertyIds).toBe("all");
+  expect(vayadaPaymentOpenFor(all)(propertyId)).toBe(true);
+  expect(() => loadConfig({ VAYADA_PAYMENT_PROPERTY_IDS: "not-a-property" })).toThrow(
+    "VAYADA_PAYMENT_PROPERTY_IDS requires up to 100 property UUIDs",
+  );
 });
 
 it("keeps vayada Payment off unless VAYADA_PAYMENT_ENABLED is set", () => {

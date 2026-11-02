@@ -43,6 +43,7 @@ const states: Record<string, State> = {
   xendit: { provider: "xendit", reference: () => `xnd_${randomUUID()}`, evidence: "current" },
   vayadaReady: { provider: "vayada", evidence: "current" },
   vayadaNoApproval: { provider: "vayada", evidence: null },
+  vayadaSecondAccount: { provider: "vayada", evidence: null },
   vayadaPlaceholder: {
     provider: "vayada",
     reference: (id) => `settings-choice:${id}:vayada`,
@@ -87,6 +88,7 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
         "platform.product_audit_events",
         "platform.idempotency_keys",
         "finance.online_card_execution_evidence",
+        "finance.payout_destinations",
         "finance.payment_settings",
         "finance.payment_provider_accounts",
         "pms.property_pricing_settings",
@@ -232,6 +234,7 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
     const expected: Record<string, [binding: boolean, ready: boolean]> = {
       vayadaReady: [true, true],
       vayadaNoApproval: [true, false],
+      vayadaSecondAccount: [true, false],
       vayadaPlaceholder: [false, false],
       vayadaPayoutsOff: [true, false],
       vayadaImportedNoReference: [false, false],
@@ -298,12 +301,21 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
     }
   });
 
-  it("lets Vayada approve a bound vayada Payment account only while the switch is on", async () => {
+  it("lets Vayada approve a bound vayada Payment account only while it is on for the hotel", async () => {
     const off = createFinanceOnlineCardExecutionEvidenceRepository(pool);
     const on = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
-      vayadaPaymentEnabled: true,
+      vayadaPaymentOpen: () => true,
     });
     const propertyId = ids.vayadaNoApproval!;
+    // On, but only for other hotels (VAYADA_PAYMENT_PROPERTY_IDS): no approval for this one.
+    const otherHotels = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
+      vayadaPaymentOpen: (id) => id !== propertyId,
+    });
+    expect(await otherHotels.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
+      ok: false,
+      statusCode: 409,
+      code: "provider_capability_unavailable",
+    });
     // Off: Vayada sees the account (so it can still withdraw an approval) but can't approve it.
     expect(await off.readOnlineCardExecutionState(propertyId)).toMatchObject({
       providerAccount: { ready: true, cardCapabilityRevision: 3 },
@@ -328,11 +340,31 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
       providerAccount: { ready: true, cardCapabilityRevision: 3 },
       cardReady: false,
     });
+    // P7: the hotel's first card approval also approves its first payout account.
+    const firstAccount = await payoutAccount(propertyId, 1);
     expect(await on.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
       ok: true,
       status: "accepted",
       response: { cardReady: true },
     });
+    expect(await approval(firstAccount)).toEqual({ via: "card_approval", actor: userId });
+    // The owner (or a stolen owner login) replaced the first account before Vayada's first card
+    // approval: the card approval never approves a replacement (staff do that on the Payouts
+    // page, after checking it), while card payments go on as before.
+    const second = ids.vayadaSecondAccount!;
+    const replaced = await payoutAccount(second, 1);
+    await pool.query(
+      `UPDATE finance.payout_destinations SET enabled = FALSE, ciphertext = NULL, deleted_at = now()
+       WHERE id = $1::uuid`,
+      [replaced],
+    );
+    const replacement = await payoutAccount(second, 2);
+    expect(await on.acceptOnlineCardExecutionEvidence(accept(second))).toMatchObject({
+      ok: true,
+      response: { cardReady: true },
+    });
+    expect(await approval(replacement)).toEqual({ via: null, actor: null });
+    expect(await approval(replaced)).toEqual({ via: null, actor: null });
     expect((await row(NEW, propertyId)).online_card_ready).toBe(true);
     expect((await row(OLD, propertyId)).online_card_ready).toBe(false);
     // After switching off, the approval is still listed, so it can be withdrawn.
@@ -349,6 +381,27 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
     );
     expect((await row(NEW, propertyId)).online_card_ready).toBe(false);
   });
+
+  async function payoutAccount(propertyId: string, revision: number): Promise<string> {
+    const id = randomUUID();
+    await pool.query(
+      `INSERT INTO finance.payout_destinations
+         (id, property_id, revision, state_version, ciphertext, key_arn, account_last4, country_code)
+       VALUES ($1::uuid, $2::uuid, $3, $3, $4, 'key', '6789', 'ID')`,
+      [id, propertyId, revision, Buffer.alloc(40, revision)],
+    );
+    return id;
+  }
+
+  async function approval(id: string) {
+    return (
+      await pool.query<{ via: string | null; actor: string | null }>(
+        `SELECT approved_via AS via, approved_by_user_id::text AS actor
+         FROM finance.payout_destinations WHERE id = $1::uuid`,
+        [id],
+      )
+    ).rows[0];
+  }
 
   function accept(propertyId: string): AcceptFinanceOnlineCardExecutionEvidenceCommand {
     return {

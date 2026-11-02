@@ -4,8 +4,10 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import {
+  ApproveAccountModal,
   BankDetails,
   errorOf,
+  NeedsApproval,
   PayoutModal,
   type PayoutTarget,
   ReturnPayoutModal,
@@ -41,6 +43,7 @@ function PayoutHotelView() {
   const [paying, setPaying] = useState<PayoutTarget | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [returning, setReturning] = useState<Payout | null>(null);
+  const [approving, setApproving] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -64,8 +67,18 @@ function PayoutHotelView() {
   const finish = (payout: Payout) => {
     const balance = data?.balances.find((row) => row.currency === payout.currency);
     if (balance)
-      setPaying({ hotel: balance, started: { id: payout.id, amountMinor: payout.amountMinor } });
+      setPaying({
+        hotel: balance,
+        started: {
+          id: payout.id,
+          amountMinor: payout.amountMinor,
+          destinationId: payout.destinationId,
+        },
+      });
   };
+  // P7: a payout started to an account the hotel has replaced since (not sent or cancelled yet).
+  const toOldAccount = (payout: Payout) =>
+    !payout.sentAt && !payout.returnedAt && payout.destinationId !== data?.destination?.id;
   return (
     <div className="p-4 md:p-8 max-w-[1400px]">
       <Link href={back} className="text-[12px] text-gray-500 hover:text-gray-900">
@@ -143,7 +156,8 @@ function PayoutHotelView() {
                     </button>
                   ) : (
                     isPositive(balance.payNowMinor) &&
-                    data.destination && (
+                    data.destination &&
+                    (data.destination.approved ? (
                       <button
                         type="button"
                         onClick={() => setPaying({ hotel: balance })}
@@ -151,7 +165,11 @@ function PayoutHotelView() {
                       >
                         Pay
                       </button>
-                    )
+                    ) : (
+                      <p className="shrink-0 max-w-[220px] text-[12px] text-amber-700">
+                        Approve the bank account before paying out to it.
+                      </p>
+                    ))
                   )}
                 </div>
               ))}
@@ -160,7 +178,31 @@ function PayoutHotelView() {
               <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-gray-500">
                 Payout account
               </p>
-              <BankDetails propertyId={data.propertyId} destination={data.destination} />
+              <BankDetails
+                propertyId={data.propertyId}
+                destination={data.destination}
+                revealable={data.destination?.approved !== false}
+              />
+              {data.destination &&
+                (data.destination.approved ? (
+                  <p className="mt-2 text-[11px] text-gray-400">
+                    {`Saved ${formatDay(data.destination.savedAt)} · approved ${formatDay(data.destination.approvedAt ?? data.destination.savedAt)}${data.destination.approvedVia === "card_approval" ? " with the hotel's first card approval" : ""}`}
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    <NeedsApproval destination={data.destination} />
+                    <p className="text-[12px] text-gray-600">
+                      {`Saved ${formatDay(data.destination.savedAt)}. No payout goes to it until you approve it; card payments keep working. Its bank details open in Approve bank account.`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setApproving(true)}
+                      className="px-3 py-1.5 text-[12px] font-medium rounded-lg border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                    >
+                      Approve bank account
+                    </button>
+                  </div>
+                ))}
             </div>
           </div>
 
@@ -201,6 +243,7 @@ function PayoutHotelView() {
                         <td className="px-4 py-3 text-gray-600">{formatDay(payout.cutoff)}</td>
                         <td className="px-4 py-3">
                           <PayoutStatus payout={payout} />
+                          {toOldAccount(payout) && <OldAccountWarning />}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <PayoutAction
@@ -226,6 +269,7 @@ function PayoutHotelView() {
                     <p className="mt-1 text-[12px] text-gray-600">
                       {`${payout.paidOn ? `Paid ${formatDay(payout.paidOn)}` : `Started ${formatDay(payout.startedAt)}`} · stays by ${formatDay(payout.cutoff)} · account ${payout.accountLast4}`}
                     </p>
+                    {toOldAccount(payout) && <OldAccountWarning />}
                     <div className="mt-1 flex items-center justify-between gap-3">
                       <p className="font-mono text-[11px] text-gray-500 truncate">
                         {payout.reference ?? "—"}
@@ -337,6 +381,17 @@ function PayoutHotelView() {
               load();
             }}
           />
+          <ApproveAccountModal
+            propertyId={data.propertyId}
+            hotelName={data.name}
+            destination={approving ? data.destination : null}
+            onClose={() => setApproving(false)}
+            onApproved={(message) => {
+              setNotice(message);
+              setApproving(false);
+              load();
+            }}
+          />
           <ReturnPayoutModal
             propertyId={data.propertyId}
             payout={returning}
@@ -375,6 +430,15 @@ function Figure({
       </p>
       <p className="text-[11px] text-gray-400">{note}</p>
     </div>
+  );
+}
+
+function OldAccountWarning() {
+  return (
+    <p className="mt-1 max-w-[320px] text-[11px] text-amber-700">
+      The hotel replaced this bank account after this payout was started. If the money hasn&apos;t
+      gone out, cancel it and pay the new account once it&apos;s approved.
+    </p>
   );
 }
 

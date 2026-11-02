@@ -16,6 +16,10 @@ import {
 } from "./stripeMoney.js";
 import { isVayadaPaymentAccountRef } from "./vayadaPaymentStripe.js";
 
+/** VAY-2442: which hotels may start new vayada Payment charges (VAYADA_PAYMENT_ENABLED with its
+ * Stripe account, and the hotel on VAYADA_PAYMENT_PROPERTY_IDS), and Vayada's fee in percent. */
+export type VayadaPaymentCharges = { open: (propertyId: string) => boolean; feePercent: number };
+
 type Current = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
 type Finance = NonNullable<Awaited<ReturnType<typeof lockFinancePricingAcceptanceTerms>>>;
 
@@ -80,7 +84,7 @@ export function pricingCardPaymentIdempotencyKey(propertyId: string, requestId: 
  * vayada Payment (VAY-2442): a hotel bound as vayada:<property> is charged on Vayada's own Stripe
  * account (the provider routes it) with no application fee; Vayada's fee is the plan's fee plus
  * the vayada Payment fee, recorded on the payment and kept back from the hotel's payout. New
- * charges need `vayada.enabled` (VAYADA_PAYMENT_ENABLED with its Stripe account). */
+ * charges need `vayada.open` for the hotel (see VayadaPaymentCharges). */
 export async function startPricingCardPayment(
   client: PoolClient,
   provider: StripeBookingPaymentProvider,
@@ -93,7 +97,7 @@ export async function startPricingCardPayment(
     requestId: string;
     occurredAt: string;
   },
-  vayada?: { enabled: boolean; feePercent: number },
+  vayada?: VayadaPaymentCharges,
 ): Promise<StripeBookingPaymentIntent> {
   const scope = await lockPublicPricingAuthority(client, input.slug);
   const quote = input.current.quote;
@@ -126,7 +130,9 @@ export async function startPricingCardPayment(
   if (
     !account ||
     typeof account.provider_account_id !== "string" ||
-    (vayadaCharge ? vayada?.enabled !== true : !account.provider_account_id.startsWith("acct_"))
+    (vayadaCharge
+      ? vayada?.open(scope.propertyId) !== true
+      : !account.provider_account_id.startsWith("acct_"))
   )
     return fail();
   const currency = quote.stay.currency;

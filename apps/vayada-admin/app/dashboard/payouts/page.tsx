@@ -4,8 +4,10 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ApproveAccountModal,
   countryName,
   errorOf,
+  NeedsApproval,
   PayoutModal,
   type PayoutTarget,
 } from "@/components/payouts/PayoutDialogs";
@@ -14,6 +16,7 @@ import {
   formatMinor,
   isNegative,
   isPositive,
+  needsApproval,
   vayadaPayoutsService,
   type PayoutHotel,
   type PayoutList,
@@ -39,8 +42,11 @@ function totals(rows: PayoutHotel[], pick: (row: PayoutHotel) => string | null) 
 }
 
 const canPay = (row: PayoutHotel) =>
-  isPositive(row.payNowMinor) && row.destination !== null && row.sending === null;
-const needsAction = (row: PayoutHotel) => canPay(row) || row.sending !== null;
+  isPositive(row.payNowMinor) && row.destination?.approved === true && row.sending === null;
+// P7: a saved account no payout may go to until staff approve it.
+const waitsForApproval = (row: PayoutHotel) => needsApproval(row.destination);
+const needsAction = (row: PayoutHotel) =>
+  canPay(row) || row.sending !== null || waitsForApproval(row);
 
 export default function PayoutsPage() {
   return (
@@ -58,6 +64,7 @@ function Payouts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState<PayoutTarget | null>(null);
+  const [approving, setApproving] = useState<PayoutHotel | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -94,6 +101,9 @@ function Payouts() {
   const owing = hotels.filter((row) => isNegative(row.payableMinor));
   const owed = totals(owing, (row) => row.payableMinor.replace(/^-/, ""));
   const missingAccount = hotels.filter((row) => isPositive(row.payNowMinor) && !row.destination);
+  const awaitingApproval = hotels.filter(
+    (row) => isPositive(row.payNowMinor) && waitsForApproval(row),
+  );
 
   const open = (row: PayoutHotel) =>
     router.push(`/dashboard/payouts/${row.propertyId}${mode === "test" ? "?mode=test" : ""}`);
@@ -153,9 +163,16 @@ function Payouts() {
               label="Hotels to pay"
               lines={[String(hotels.filter(canPay).length)]}
               note={
-                missingAccount.length
-                  ? `${missingAccount.length} more without a payout account`
-                  : undefined
+                [
+                  missingAccount.length
+                    ? `${missingAccount.length} more without a payout account`
+                    : null,
+                  awaitingApproval.length
+                    ? `${awaitingApproval.length} waiting for bank account approval`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
               }
             />
             <Summary
@@ -221,7 +238,7 @@ function Payouts() {
                           <LastPayout row={row} />
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <PayButton row={row} onPay={setPaying} />
+                          <PayButton row={row} onPay={setPaying} onApprove={setApproving} />
                         </td>
                       </tr>
                     ))}
@@ -268,7 +285,7 @@ function Payouts() {
                     </button>
                     {needsAction(row) && (
                       <div className="mt-3">
-                        <PayButton row={row} onPay={setPaying} wide />
+                        <PayButton row={row} onPay={setPaying} onApprove={setApproving} wide />
                       </div>
                     )}
                   </li>
@@ -279,6 +296,17 @@ function Payouts() {
         </>
       )}
 
+      <ApproveAccountModal
+        propertyId={approving?.propertyId ?? ""}
+        hotelName={approving?.name ?? ""}
+        destination={approving?.destination ?? null}
+        onClose={() => setApproving(null)}
+        onApproved={(message) => {
+          setNotice(message);
+          setApproving(null);
+          load();
+        }}
+      />
       {data && (
         <PayoutModal
           target={paying}
@@ -315,6 +343,11 @@ function Account({ row }: { row: PayoutHotel }) {
     <span className="text-gray-600">
       {countryName(row.destination.countryCode)} ·{" "}
       <span className="font-mono">···· {row.destination.accountLast4}</span>
+      {!row.destination.approved && (
+        <span className="block mt-1">
+          <NeedsApproval destination={row.destination} />
+        </span>
+      )}
     </span>
   ) : (
     <span className="text-amber-700">No payout account</span>
@@ -344,6 +377,11 @@ function LastPayout({ row }: { row: PayoutHotel }) {
         <span className="block text-[11px] text-amber-600">
           {`Started ${formatDay(row.sending.startedAt)}, not marked sent yet`}
         </span>
+        {row.sending.destinationId !== row.destination?.id && (
+          <span className="block text-[11px] text-amber-600">
+            To the hotel&apos;s previous bank account
+          </span>
+        )}
       </span>
     );
   if (!row.lastPayout) return <span className="text-gray-400">—</span>;
@@ -360,14 +398,31 @@ function LastPayout({ row }: { row: PayoutHotel }) {
 function PayButton({
   row,
   onPay,
+  onApprove,
   wide = false,
 }: {
   row: PayoutHotel;
   onPay: (target: PayoutTarget) => void;
+  onApprove: (row: PayoutHotel) => void;
   wide?: boolean;
 }) {
   if (!needsAction(row)) return null;
   const sending = row.sending;
+  if (!sending && waitsForApproval(row))
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onApprove(row);
+        }}
+        className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 ${
+          wide ? "w-full py-2" : ""
+        }`}
+      >
+        Approve bank account
+      </button>
+    );
   return (
     <button
       type="button"

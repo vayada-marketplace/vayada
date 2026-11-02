@@ -19,6 +19,10 @@ function repository() {
     markSent: vi.fn(async () => ({ status: "sent" as const })),
     markReturned: vi.fn(async () => ({ status: "returned" as const })),
     revealDestination: vi.fn(async () => ({ status: "not_found" as const })),
+    approveDestination: vi.fn(async () => ({
+      status: "approved" as const,
+      approvedAt: "2026-11-09T08:00:00Z",
+    })),
   };
 }
 
@@ -136,6 +140,7 @@ describe("vayada Payment payouts for Vayada staff (VAY-2442 P5)", () => {
     for (const [path, payload] of [
       [url, payout()],
       [`${url}/destination/reveal`, {}],
+      [`${url}/destination/approve`, { destinationId: DESTINATION_ID }],
       [`${url}/${PAYOUT_ID}/sent`, { reference: "WISE-1", paidOn: "2026-11-09" }],
       [`${url}/${PAYOUT_ID}/returned`, { commandId: COMMAND_ID, reason: "Bounced" }],
     ] as const)
@@ -145,6 +150,39 @@ describe("vayada Payment payouts for Vayada staff (VAY-2442 P5)", () => {
     expect(repo.start).not.toHaveBeenCalled();
     expect(repo.markSent).not.toHaveBeenCalled();
     expect(repo.revealDestination).not.toHaveBeenCalled();
+    expect(repo.approveDestination).not.toHaveBeenCalled();
+  });
+
+  it("approves the bank account the operator checked, as the operator (P7)", async () => {
+    const repo = repository();
+    repo.approveDestination
+      .mockResolvedValueOnce({ status: "approved", approvedAt: "2026-11-09T08:00:00Z" })
+      .mockResolvedValueOnce({ status: "destination_changed" } as never)
+      .mockResolvedValueOnce({ status: "not_found" } as never);
+    app = await testApp(repo);
+    const url = `/api/finance/platform/vayada-payment/payouts/${PROPERTY_ID.toUpperCase()}/destination/approve`;
+    const approve = (payload: Record<string, unknown>) =>
+      app!.inject({ method: "POST", url, headers, payload });
+    const done = await approve({ destinationId: DESTINATION_ID.toUpperCase() });
+    expect([done.statusCode, done.json()]).toEqual([
+      200,
+      { approved: true, approvedAt: "2026-11-09T08:00:00Z" },
+    ]);
+    expect(repo.approveDestination).toHaveBeenCalledWith({
+      propertyId: PROPERTY_ID,
+      destinationId: DESTINATION_ID,
+      actorId: USER_ID,
+    });
+    // The hotel replaced the account after the operator opened it.
+    const changed = await approve({ destinationId: DESTINATION_ID });
+    expect([changed.statusCode, changed.json().code]).toEqual([409, "payout_destination_changed"]);
+    const missing = await approve({ destinationId: DESTINATION_ID });
+    expect([missing.statusCode, missing.json().code]).toEqual([
+      404,
+      "payout_destination_not_found",
+    ]);
+    expect((await approve({})).statusCode).toBe(400);
+    expect(repo.approveDestination).toHaveBeenCalledTimes(3);
   });
 
   it("starts a payout for this week's cut-off only, to the account shown, as the operator", async () => {
@@ -188,11 +226,12 @@ describe("vayada Payment payouts for Vayada staff (VAY-2442 P5)", () => {
     expect(repo.start).toHaveBeenCalledTimes(1);
   });
 
-  it("answers a changed balance, account or a busy hotel instead of starting", async () => {
+  it("answers a changed balance or account, an unapproved account or a busy hotel instead of starting", async () => {
     const repo = repository();
     repo.start
       .mockResolvedValueOnce({ status: "amount_changed", payNowMinor: "90000000" } as never)
       .mockResolvedValueOnce({ status: "destination_changed" } as never)
+      .mockResolvedValueOnce({ status: "destination_not_approved" } as never)
       .mockResolvedValueOnce({ status: "busy" } as never);
     app = await testApp(repo);
     const send = () =>
@@ -207,6 +246,12 @@ describe("vayada Payment payouts for Vayada staff (VAY-2442 P5)", () => {
       payNowMinor: "90000000",
     });
     expect((await send()).json()).toMatchObject({ code: "payout_destination_changed" });
+    // P7: a replaced account waits for staff approval.
+    const waiting = await send();
+    expect([waiting.statusCode, waiting.json().code]).toEqual([
+      409,
+      "payout_destination_not_approved",
+    ]);
     expect((await send()).json()).toMatchObject({ code: "payout_busy" });
   });
 

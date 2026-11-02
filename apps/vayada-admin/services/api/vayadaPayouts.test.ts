@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDay, formatMinor, isNegative, isPositive } from "./vayadaPayouts";
+import { formatDay, formatMinor, isNegative, isPositive, needsApproval } from "./vayadaPayouts";
 
 describe("vayada Payment payout amounts (VAY-2442 P5)", () => {
   it("shows minor units exactly, rupiah without the hundredths Stripe counts", () => {
@@ -22,6 +22,30 @@ describe("vayada Payment payout amounts (VAY-2442 P5)", () => {
     expect(isPositive("-5")).toBe(false);
     expect(isNegative("-5")).toBe(true);
     expect(isNegative("0")).toBe(false);
+  });
+
+  it("holds payouts to a saved account until Vayada approves it (P7)", () => {
+    const account = {
+      id: "60000000-0000-4000-8000-000000000001",
+      accountLast4: "4321",
+      countryCode: "ID",
+      savedAt: "2026-11-02T10:00:00Z",
+      replaced: true,
+      approved: false,
+      approvedAt: null,
+      approvedVia: null,
+    };
+    expect(needsApproval(account)).toBe(true);
+    expect(
+      needsApproval({
+        ...account,
+        approved: true,
+        approvedAt: "2026-11-02T11:00:00Z",
+        approvedVia: "payout_account",
+      }),
+    ).toBe(false);
+    // No account: nothing to approve (the hotel adds one first).
+    expect(needsApproval(null)).toBe(false);
   });
 
   it("names calendar days the same in every time zone", () => {

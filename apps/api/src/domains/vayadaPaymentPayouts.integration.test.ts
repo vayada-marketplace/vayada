@@ -137,7 +137,16 @@ it.skipIf(!url)(
       payableMinor: "100000050",
       payNowMinor: "100000000",
       upcomingMinor: "34000000",
-      destination: { id: destinationId, accountLast4: "6789", countryCode: "ID" },
+      destination: {
+        id: destinationId,
+        accountLast4: "6789",
+        countryCode: "ID",
+        savedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/),
+        replaced: false,
+        approved: false,
+        approvedAt: null,
+        approvedVia: null,
+      },
       sending: null,
       lastPayout: null,
     });
@@ -149,6 +158,18 @@ it.skipIf(!url)(
     ).resolves.toEqual({ status: "no_destination" });
     await expect(repository.start(start({ destinationId: randomUUID() }))).resolves.toEqual({
       status: "destination_changed",
+    });
+    // P7: nothing goes to an account Vayada staff haven't approved.
+    await expect(repository.start(start())).resolves.toEqual({
+      status: "destination_not_approved",
+    });
+    await expect(
+      repository.approveDestination({ propertyId: hotel, destinationId, actorId }),
+    ).resolves.toEqual({ status: "approved", approvedAt: expect.any(String) });
+    expect((await villa())?.destination).toMatchObject({
+      approved: true,
+      replaced: false,
+      approvedVia: "payout_account",
     });
     await expect(repository.start(start({ amountMinor: "100000050" }))).resolves.toEqual({
       status: "amount_changed",
@@ -299,8 +320,102 @@ it.skipIf(!url)("shows the hotel's bank details to send to, and audits every loo
   });
   const audits = await admin.query(
     `SELECT action, actor_user_id::text AS actor FROM platform.product_audit_events
-     WHERE property_id=$1 AND action LIKE 'finance.payout_destination.%'`,
+     WHERE property_id=$1 AND action LIKE 'finance.payout_destination.%' ORDER BY action`,
     [hotel],
   );
-  expect(audits.rows).toEqual([{ action: "finance.payout_destination.revealed", actor: actorId }]);
+  expect(audits.rows).toEqual([
+    { action: "finance.payout_destination.approved", actor: actorId },
+    { action: "finance.payout_destination.revealed", actor: actorId },
+  ]);
 });
+
+it.skipIf(!url)(
+  "waits for staff to approve a replaced account; a payout started to the old one still finishes (P7)",
+  async () => {
+    await charge({ property: hotel, net: 20_000_000, checkOut: "2026-11-04" });
+    const before = await repository.start(start({ amountMinor: "20000000" }));
+    expect(before).toMatchObject({ status: "started" });
+    const toOldAccount = (before as { payoutId: string }).payoutId;
+
+    // The owner replaces the account, as P1 does: the old revision is disabled and wiped.
+    const replacement = randomUUID();
+    await admin.query(
+      `UPDATE finance.payout_destinations SET enabled=FALSE, ciphertext=NULL, deleted_at=now()
+       WHERE id=$1`,
+      [destinationId],
+    );
+    await admin.query(
+      `INSERT INTO finance.payout_destinations
+         (id,property_id,revision,state_version,ciphertext,key_arn,account_last4,country_code)
+       VALUES ($1,$2,2,2,$3,'key','4321','ID')`,
+      [replacement, hotel, Buffer.alloc(40, 2)],
+    );
+    expect(await villa()).toMatchObject({
+      destination: { id: replacement, accountLast4: "4321", replaced: true, approved: false },
+      sending: { id: toOldAccount, amountMinor: "20000000", destinationId },
+    });
+
+    // The payout already started to the old, approved account can still be recorded as sent.
+    const today = (await admin.query("SELECT current_date::text AS d")).rows[0].d as string;
+    await expect(
+      repository.markSent({
+        propertyId: hotel,
+        payoutId: toOldAccount,
+        reference: "WISE-OLD",
+        paidOn: today,
+        actorId,
+      }),
+    ).resolves.toEqual({ status: "sent" });
+
+    // New money owed: nothing goes to the new account until staff approve it.
+    await charge({ property: hotel, net: 10_000_000, checkOut: "2026-11-04" });
+    await expect(
+      repository.start(start({ amountMinor: "10000000", destinationId: replacement })),
+    ).resolves.toEqual({ status: "destination_not_approved" });
+    await expect(repository.start(start({ amountMinor: "10000000" }))).resolves.toEqual({
+      status: "destination_changed",
+    });
+    await expect(
+      repository.approveDestination({ propertyId: hotel, destinationId, actorId }),
+    ).resolves.toEqual({ status: "destination_changed" });
+    await expect(
+      repository.approveDestination({ propertyId: noAccount, destinationId: replacement, actorId }),
+    ).resolves.toEqual({ status: "not_found" });
+    const approved = await repository.approveDestination({
+      propertyId: hotel,
+      destinationId: replacement,
+      actorId,
+    });
+    expect(approved).toEqual({ status: "approved", approvedAt: expect.any(String) });
+    // Approving again changes nothing.
+    await expect(
+      repository.approveDestination({ propertyId: hotel, destinationId: replacement, actorId }),
+    ).resolves.toEqual({
+      status: "replayed",
+      approvedAt: (approved as { approvedAt: string }).approvedAt,
+    });
+    await expect(
+      repository.start(start({ amountMinor: "10000000", destinationId: replacement })),
+    ).resolves.toMatchObject({ status: "started" });
+
+    const detail = await repository.detail({ propertyId: hotel, livemode: true, cutoff });
+    expect(detail?.destination).toMatchObject({ id: replacement, approved: true });
+    expect(detail?.payouts.find((payout) => payout.id === toOldAccount)).toMatchObject({
+      destinationId,
+      accountLast4: "6789",
+      reference: "WISE-OLD",
+    });
+    const stamp = await admin.query(
+      `SELECT approved_via AS via, approved_by_user_id::text AS actor
+       FROM finance.payout_destinations WHERE id=$1`,
+      [replacement],
+    );
+    expect(stamp.rows).toEqual([{ via: "payout_account", actor: actorId }]);
+    // The stamp never changes after.
+    await expect(
+      admin.query("UPDATE finance.payout_destinations SET approved_at=now() WHERE id=$1", [
+        replacement,
+      ]),
+    ).rejects.toMatchObject({ code: "55000" });
+  },
+);

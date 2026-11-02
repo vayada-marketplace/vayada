@@ -1642,7 +1642,26 @@ describe("finance route contracts", () => {
     expect(repository.writeCount).toBe(1);
   });
 
-  it("offers vayada Payment only while VAYADA_PAYMENT_ENABLED is on (VAY-2442)", async () => {
+  it("answers vayada Payment's availability per hotel from the server's check (VAY-2442)", () => {
+    const target = targetStripeProviderAccountPool();
+    const open = vi.fn((id: string) => id === propertyId);
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      vayadaPaymentOpen: open,
+    });
+    expect(repository.vayadaPaymentAvailable?.(propertyId)).toBe(true);
+    expect(repository.vayadaPaymentAvailable?.("24420000-0000-4000-8000-000000000009")).toBe(false);
+    expect(open).toHaveBeenCalledTimes(2);
+    // Without the server's check, no hotel gets it.
+    const unset = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+    });
+    expect(unset.vayadaPaymentAvailable?.(propertyId)).toBe(false);
+  });
+
+  it("offers vayada Payment only to the hotels it is switched on for (VAY-2442)", async () => {
     const choose = (key: string) => ({
       commandId: `cmd-vay-2442-${key}`,
       idempotencyKey: `finance-payment-settings-vay-2442-${key}`,
@@ -1655,10 +1674,21 @@ describe("finance route contracts", () => {
         requiresManualReview: false,
       },
     });
-    for (const available of [false, true]) {
+    // Off; on for other hotels only (VAYADA_PAYMENT_PROPERTY_IDS); on for this hotel.
+    const cases = [
+      () => false,
+      (id: string) => id !== propertyId,
+      (id: string) => id === propertyId,
+    ];
+    for (const [index, open] of cases.entries()) {
+      const available = open(propertyId);
       const repository = paymentSettingsWriteRepository();
       app = buildFinanceApp({
-        repository: { ...repository, vayadaPaymentAvailable: available },
+        repository: {
+          ...repository,
+          vayadaPaymentAvailable: open,
+          vayadaPaymentFeePercent: 6,
+        },
         permissions: financeManagePermissions(),
       });
       const read = await injectJson<Record<string, unknown>>(app, {
@@ -1667,11 +1697,15 @@ describe("finance route contracts", () => {
         headers: { authorization: "Bearer valid-token" },
       });
       expect(read.statusCode).toBe(200);
-      expect(read.body).toMatchObject({ vayadaPayment: { available } });
+      // The fee shows only once hotels can choose vayada Payment (VAY-2442 P6).
+      expect(read.body).toMatchObject({
+        vayadaPayment: available ? { available, feePercent: 6 } : { available },
+      });
+      if (!available) expect(read.body.vayadaPayment).not.toHaveProperty("feePercent");
       const patch = await injectJson<Record<string, unknown>>(app, {
         method: "PATCH",
         url: `/api/finance/properties/${propertyId}/payment-settings`,
-        payload: choose(String(available)),
+        payload: choose(String(index)),
         headers: { authorization: "Bearer valid-token" },
       });
       if (available) {

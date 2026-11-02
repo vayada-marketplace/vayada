@@ -192,6 +192,9 @@ export type ApiConfig = {
   /** VAY-2442: vayada Payment (guest card payments on Vayada's own Stripe account, paid out to
    * the hotel's bank). Off by default; no real money until Flamur switches it on. */
   vayadaPaymentEnabled: boolean;
+  /** VAY-2442: the hotels that get vayada Payment while VAYADA_PAYMENT_ENABLED is on
+   * (VAYADA_PAYMENT_PROPERTY_IDS: property UUIDs, or "*" for every hotel). Empty: no hotel. */
+  vayadaPaymentPropertyIds: readonly string[] | "all";
   /** VAY-2442: the Stripe account vayada Payment charges guests on, separate from the Connect
    * platform. Test mode only: live keys are refused until a payments lawyer and Stripe agree. */
   vayadaPaymentStripe?: { secretKey: string; publishableKey: string; webhookSecret?: string };
@@ -446,6 +449,21 @@ export function replacementPricingManualPaymentMethods(
       : []),
     ...(config.replacementPricingPaypalAcceptanceEnabled ? (["paypal"] as const) : []),
   ];
+}
+
+/** VAY-2442: whether a hotel gets vayada Payment: the switch is on, its Stripe (test) keys are
+ * set and the hotel is on VAYADA_PAYMENT_PROPERTY_IDS. Choosing it, the payout account, Vayada's
+ * approval and new card charges all ask this, so a hotel can't be set up for charges that would
+ * fail; refunds, disputes and payouts of money already taken do not. */
+export function vayadaPaymentOpenFor(
+  config: Pick<
+    ApiConfig,
+    "vayadaPaymentEnabled" | "vayadaPaymentPropertyIds" | "vayadaPaymentStripe"
+  >,
+): (propertyId: string) => boolean {
+  const ids = config.vayadaPaymentPropertyIds;
+  const on = config.vayadaPaymentEnabled && config.vayadaPaymentStripe !== undefined;
+  return (propertyId) => on && (ids === "all" || ids.includes(propertyId.toLowerCase()));
 }
 
 function loadVayadaPaymentStripe(env: NodeJS.ProcessEnv): ApiConfig["vayadaPaymentStripe"] {
@@ -1327,6 +1345,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     vayadaPaymentEnabled: readBooleanEnv(env, "VAYADA_PAYMENT_ENABLED"),
+    vayadaPaymentPropertyIds:
+      readOptionalEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS") === "*"
+        ? "all"
+        : readPropertyIdAllowlistEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS"),
     vayadaPaymentStripe: loadVayadaPaymentStripe(env),
     vayadaPaymentFeePercent: readVayadaPaymentFeePercent(env),
     identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),

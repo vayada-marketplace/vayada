@@ -438,19 +438,22 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         publishableKey: "pk_test_writer",
       });
 
-      // While VAYADA_PAYMENT_ENABLED is off, nothing is charged and nothing is kept.
+      // While vayada Payment isn't on for this hotel (switch off, or the hotel not on
+      // VAYADA_PAYMENT_PROPERTY_IDS), nothing is charged and nothing is kept.
+      const open = vi.fn((id: string) => id !== fixture.propertyId);
       await expect(
         writePricingAcceptance(fixture.pool, fixture.input, {
           provider,
-          vayada: { enabled: false, feePercent: 6 },
+          vayada: { open, feePercent: 6 },
         }),
       ).rejects.toMatchObject({ code: "conflict" });
+      expect(open).toHaveBeenCalledWith(fixture.propertyId);
       expect(createPaymentIntent).not.toHaveBeenCalled();
       expect((await snapshot(fixture.observer, fixture)).bookings).toBe(0);
 
       const result = await writePricingAcceptance(fixture.pool, fixture.input, {
         provider,
-        vayada: { enabled: true, feePercent: 6 },
+        vayada: { open: () => true, feePercent: 6 },
       });
       expect(result).toMatchObject({
         kind: "payment_required",
@@ -493,7 +496,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       await expect(
         writePricingAcceptance(fixture.pool, fixture.input, {
           provider,
-          vayada: { enabled: true, feePercent: 6 },
+          vayada: { open: () => true, feePercent: 6 },
         }),
       ).resolves.toMatchObject({
         replayed: true,
@@ -595,7 +598,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       });
       await writePricingAcceptance(fixture.pool, fixture.input, {
         provider,
-        vayada: { enabled: true, feePercent: 6 },
+        vayada: { open: () => true, feePercent: 6 },
       });
       const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
       const currency = fixture.f.current.quote.stay.currency;
@@ -772,7 +775,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       });
       await writePricingAcceptance(fixture.pool, fixture.input, {
         provider,
-        vayada: { enabled: true, feePercent: 6 },
+        vayada: { open: () => true, feePercent: 6 },
       });
       const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
       const currency = fixture.f.current.quote.stay.currency;
@@ -912,7 +915,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       });
       await writePricingAcceptance(fixture.pool, fixture.input, {
         provider,
-        vayada: { enabled: true, feePercent: 6 },
+        vayada: { open: () => true, feePercent: 6 },
       });
       const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
       const currency = fixture.f.current.quote.stay.currency;
@@ -2362,7 +2365,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     const accepted = (await writePricingAcceptance(
       card.fixture.pool,
       card.fixture.input,
-      { provider, ...(vayada ? { vayada: { enabled: true, feePercent: 6 } } : {}) },
+      { provider, ...(vayada ? { vayada: { open: () => true, feePercent: 6 } } : {}) },
       true,
     )) as { bookingId: string; bookingReference: string };
     const intent = {
