@@ -26,6 +26,7 @@ import {
   getPmsCalendarAutoOpen,
   getPmsPropertyProfile,
   getPmsCalendarSettings,
+  listPmsProperties,
   listPmsRoomShuffleHistory,
   PmsPropertySelectionRequiredError,
   resolveSelectedPmsPropertyId,
@@ -341,5 +342,44 @@ describe("PMS property profile", () => {
     );
     await expect(resolution).rejects.toBeInstanceOf(PmsPropertySelectionRequiredError);
     await expect(resolution).rejects.toMatchObject({ messageKey: "common.selectPmsPropertyFirst" });
+  });
+
+  it("lists properties A–Z by name, ignoring case and accents, with the id breaking ties", async () => {
+    const property = (id: string, displayName: string | null) => ({
+      propertyId: id,
+      publicId: id,
+      displayName,
+      locationSummary: null,
+    });
+    mocks.getStatus.mockResolvedValueOnce({
+      ...status,
+      propertySelection: {
+        state: "multiple_properties",
+        selectedPropertyId: null,
+        availableProperties: [
+          property("p-mansion", "The Mansion Resort Hotel & Spa"),
+          property("p-dewari", "Dewari Villa"),
+          property("p-unnamed", null),
+          property("p-adhi-2", "adhidrawa ubud"),
+          property("p-uma", "Uma Una"),
+          property("p-escape", "Escape Villa"),
+          property("p-adhi-1", "Adhidrawa Ubud"),
+          property("p-eden", "Éden Villa"),
+        ],
+      },
+    });
+
+    const properties = await listPmsProperties();
+
+    expect(properties.map(({ id, name }) => [id, name])).toEqual([
+      ["p-adhi-1", "Adhidrawa Ubud"],
+      ["p-adhi-2", "adhidrawa ubud"],
+      ["p-dewari", "Dewari Villa"],
+      ["p-eden", "Éden Villa"],
+      ["p-escape", "Escape Villa"],
+      ["p-mansion", "The Mansion Resort Hotel & Spa"],
+      ["p-uma", "Uma Una"],
+      ["p-unnamed", "Unnamed hotel"],
+    ]);
   });
 });

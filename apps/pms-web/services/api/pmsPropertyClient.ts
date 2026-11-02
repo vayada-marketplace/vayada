@@ -100,15 +100,24 @@ export type PmsRoomShuffleHistoryPage = {
   nextCursor: string | null;
 };
 
+const propertyNameOrder = new Intl.Collator(undefined, { sensitivity: "base" });
+
+/** Every PMS property list (switcher, chooser, Team) shows A–Z by name, ignoring case and accents (VAY-2454).
+ * The id breaks ties so equal names keep one order across reloads. */
 export async function listPmsProperties(): Promise<PmsPropertySummary[]> {
   const status = await sharedHotelSetupApi.getStatus({ entryProduct: "pms" });
-  return status.propertySelection.availableProperties.map((property) => ({
-    id: property.propertyId,
-    name: property.displayName ?? "Unnamed hotel",
-    slug: property.publicId,
-    location: property.locationSummary ?? "",
-    country: "",
-  }));
+  return status.propertySelection.availableProperties
+    .map((property) => ({
+      id: property.propertyId,
+      name: property.displayName ?? "Unnamed hotel",
+      slug: property.publicId,
+      location: property.locationSummary ?? "",
+      country: "",
+    }))
+    .sort(
+      (left, right) =>
+        propertyNameOrder.compare(left.name, right.name) || left.id.localeCompare(right.id),
+    );
 }
 
 // The English message keeps the caller's action for logs; the UI shows one translated message.
