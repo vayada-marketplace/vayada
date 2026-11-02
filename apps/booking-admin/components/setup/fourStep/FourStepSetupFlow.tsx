@@ -49,6 +49,7 @@ export type FourStepSetupFlowProps = {
   /** Steps 3 and 4 for a hotel that exists: the server's first run, the PMS room commands, its currency. */
   firstRun: FourStepHotelStepsProps["firstRun"];
   rooms: FourStepHotelStepsProps["rooms"];
+  saveRoomLocation: FourStepHotelStepsProps["saveRoomLocation"];
   readCurrency: (propertyId: string) => Promise<string | null>;
   /** The step the URL asks for (?step=). */
   initialStep?: SetupStepId | null;
@@ -251,6 +252,7 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
           setup={setup}
           firstRun={props.firstRun}
           rooms={props.rooms}
+          saveRoomLocation={props.saveRoomLocation}
           readCurrency={props.readCurrency}
           initialStep={props.initialStep ?? null}
           onSaveAndExit={exit}

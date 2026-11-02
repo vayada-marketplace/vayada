@@ -52,7 +52,14 @@ function props(overrides: Partial<FourStepHotelStepsProps> = {}) {
   };
   const rooms = {
     loadWorkspace: vi.fn(async () => [] as CanonicalRoomAuthoringState[]),
-    saveRoom: vi.fn(async () => SAVED),
+    saveRoom: vi.fn(async (input: { room: { photos: { mediaObjectId: string }[] } }) => ({
+      ...SAVED,
+      photos: input.room.photos.map(({ mediaObjectId }) => ({ mediaObjectId, publicUrl: null })),
+    })),
+    uploadRoomPhotos: vi.fn(async (input: { files: readonly File[] }) =>
+      input.files.map((_file, index) => ({ mediaObjectId: `media-${index + 1}` })),
+    ),
+    loadPhotoPlan: vi.fn(async () => ({ plan: "commission" as const, maxRoomPhotosPerType: 10 })),
   };
   const value: FourStepHotelStepsProps = {
     propertyId: PROPERTY,
@@ -65,6 +72,7 @@ function props(overrides: Partial<FourStepHotelStepsProps> = {}) {
     } as never,
     firstRun: firstRun as never,
     rooms: rooms as never,
+    saveRoomLocation: vi.fn(async () => undefined),
     readCurrency: vi.fn(async () => "LKR"),
     onSaveAndExit: vi.fn(),
     onFinished: vi.fn(),
@@ -153,6 +161,86 @@ describe("FourStepHotelSteps (VAY-2451)", () => {
       bathroomType: "private",
       beds: [{ type: "double", quantity: "1" }],
     });
+    // The photos come next: a room can't be sold without one.
+    expect(textOf(renderer.root)).toContain("Photos, description & location");
+    expect(textOf(renderer.root)).toContain("Step 3 of 4 · Photos & location, 2 of 3");
+    renderer.unmount();
+  });
+
+  it("takes photos, the description and a separate location, then the amenities", async () => {
+    const { value, rooms } = props({ initialStep: "room" });
+    rooms.loadWorkspace.mockResolvedValue([SAVED]);
+    const renderer = await mount(value);
+    await click(renderer, "Continue");
+    expect(textOf(renderer.root)).toContain("Photos, description & location");
+    expect(button(renderer, "Continue").props.disabled).toBe(true);
+    expect(textOf(renderer.root)).toContain("Add at least one photo to continue");
+    const URL_ = globalThis.URL as unknown as { createObjectURL?: unknown };
+    URL_.createObjectURL = vi.fn(() => "blob:villa");
+    const photo = new File(["x"], "villa.jpg", { type: "image/jpeg" });
+    const tooBig = { name: "huge.png", type: "image/png", size: 11 * 1024 * 1024 } as File;
+    await act(async () =>
+      renderer.root
+        .findByProps({ "aria-label": "Add room photos" })
+        .props.onChange({ target: { files: [photo, tooBig], value: "" } }),
+    );
+    await act(async () => undefined);
+    expect(rooms.uploadRoomPhotos).toHaveBeenCalledWith({
+      propertyId: PROPERTY,
+      roomTypeId: ROOM_TYPE,
+      draftRoomId: "first-run-room-1",
+      files: [photo],
+    });
+    expect(textOf(renderer.root)).toContain("Use JPG, PNG or WebP photos of up to 10 MB.");
+    expect(textOf(renderer.root)).toContain("Cover");
+    await act(async () =>
+      renderer.root
+        .findByProps({ id: "setup-room-description" })
+        .props.onChange({ target: { value: "A pool villa by the beach." } }),
+    );
+    await act(async () =>
+      renderer.root
+        .findAll((node) => node.props.role === "radio")
+        .find((node) => textOf(node).startsWith("Separate location"))!
+        .props.onClick(),
+    );
+    expect(button(renderer, "Continue").props.disabled).toBe(true);
+    await act(async () =>
+      renderer.root
+        .findByProps({ "aria-label": "Address of this room" })
+        .props.onChange({ target: { value: "Beach Road 7, Hiriketiya" } }),
+    );
+    await click(renderer, "Continue");
+    expect(rooms.saveRoom).toHaveBeenLastCalledWith({
+      propertyId: PROPERTY,
+      room: expect.objectContaining({
+        description: "A pool villa by the beach.",
+        photos: [expect.objectContaining({ mediaObjectId: "media-1", uploadState: "ready" })],
+      }),
+    });
+    expect(value.saveRoomLocation).toHaveBeenCalledWith(PROPERTY, ROOM_TYPE, {
+      source: "custom",
+      address: "Beach Road 7, Hiriketiya",
+      showMap: true,
+    });
+
+    expect(textOf(renderer.root)).toContain("Step 3 of 4 · Amenities, 3 of 3");
+    await act(async () =>
+      renderer.root
+        .find((node) => node.type === "button" && textOf(node).startsWith("Internet & Tech"))
+        .props.onClick(),
+    );
+    await act(async () =>
+      renderer.root
+        .find((node) => node.props.role === "checkbox" && textOf(node) === "Free WiFi")
+        .props.onClick(),
+    );
+    expect(textOf(renderer.root)).toContain("1 selected");
+    await click(renderer, "Continue");
+    expect(rooms.saveRoom).toHaveBeenLastCalledWith({
+      propertyId: PROPERTY,
+      room: expect.objectContaining({ amenityKeys: ["wifi"], reviewedEmptyAmenities: true }),
+    });
     expect(textOf(renderer.root)).toContain("How guests pay");
     renderer.unmount();
   });
@@ -170,9 +258,17 @@ describe("FourStepHotelSteps (VAY-2451)", () => {
     renderer.unmount();
   });
 
-  it("resumes at guest payments once the room exists, and leaves a finished setup for the dashboard", async () => {
+  it("resumes at the photos of a room without one, at guest payments once it has one, and leaves a finished setup for the dashboard", async () => {
+    const noPhoto = props();
+    noPhoto.rooms.loadWorkspace.mockResolvedValue([SAVED]);
+    const atPhotos = await mount(noPhoto.value);
+    expect(textOf(atPhotos.root)).toContain("Photos, description & location");
+    atPhotos.unmount();
+
     const withRoom = props();
-    withRoom.rooms.loadWorkspace.mockResolvedValue([SAVED]);
+    withRoom.rooms.loadWorkspace.mockResolvedValue([
+      { ...SAVED, photos: [{ mediaObjectId: "media-1", publicUrl: null }] },
+    ]);
     const resumed = await mount(withRoom.value);
     expect(textOf(resumed.root)).toContain("How guests pay");
     expect(withRoom.rooms.loadWorkspace).toHaveBeenCalledWith(
@@ -246,6 +342,37 @@ describe("FourStepHotelSteps (VAY-2451)", () => {
     await type(renderer, "setup-room-size", "85");
     await click(renderer, "Save & exit");
     expect(rooms.saveRoom).toHaveBeenCalledOnce();
+    expect(value.onSaveAndExit).toHaveBeenCalledOnce();
+    renderer.unmount();
+  });
+
+  it("holds the screen while photos upload, then Save & exit attaches them to the room", async () => {
+    const { value, rooms } = props({ initialStep: "room" });
+    rooms.loadWorkspace.mockResolvedValue([SAVED]);
+    let finishUpload: (value: { mediaObjectId: string }[]) => void = () => undefined;
+    rooms.uploadRoomPhotos.mockImplementationOnce(
+      () => new Promise((resolve) => (finishUpload = resolve)),
+    );
+    const renderer = await mount(value);
+    await click(renderer, "Continue");
+    const URL_ = globalThis.URL as unknown as { createObjectURL?: unknown };
+    URL_.createObjectURL = vi.fn(() => "blob:villa");
+    await act(async () =>
+      renderer.root.findByProps({ "aria-label": "Add room photos" }).props.onChange({
+        target: { files: [new File(["x"], "villa.jpg", { type: "image/jpeg" })], value: "" },
+      }),
+    );
+    expect(button(renderer, "Save & exit").props.disabled).toBe(true);
+    expect(button(renderer, "Skip for now").props.disabled).toBe(true);
+    expect(button(renderer, "Back").props.disabled).toBe(true);
+    await act(async () => finishUpload([{ mediaObjectId: "media-7" }]));
+    await click(renderer, "Save & exit");
+    expect(rooms.saveRoom).toHaveBeenLastCalledWith({
+      propertyId: PROPERTY,
+      room: expect.objectContaining({
+        photos: [expect.objectContaining({ mediaObjectId: "media-7", uploadState: "ready" })],
+      }),
+    });
     expect(value.onSaveAndExit).toHaveBeenCalledOnce();
     renderer.unmount();
   });
