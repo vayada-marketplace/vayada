@@ -85,16 +85,17 @@ test("sets when guests can choose each way to pay and warns about a gap", async 
   });
 
   await page.goto("/settings/payments");
-  const card = page.getByRole("region", { name: "When guests can pay each way" });
+  // VAY-2424: "What guests will see" draws Step 1 as it stands.
+  const card = page.getByRole("region", { name: "What guests will see" });
   await expect(card).toBeVisible();
-  // VAY-2424: a way to pay guests aren't offered has no lane, and no "Not offered" line either.
+  // A way to pay that is off has no bar, and no "Not offered" line either.
   await expect(card.getByText(/^Not offered to guests/)).toHaveCount(0);
   await expect(card.getByText("Credit card", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Fixed rule: guests have 48 hours to pay")).toBeVisible();
-  // One save bar for the whole page (VAY-2424): nothing to save yet.
+  // One save bar for the whole page (VAY-2424), shown once there is something to save.
   await expect(card.getByRole("button", { name: /save/i })).toHaveCount(0);
   const save = page.getByRole("button", { name: "Save changes", exact: true });
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
 
   const hotel = page.getByLabel("When guests can choose Pay at hotel", { exact: true });
   const bank = page.getByLabel("When guests can choose Bank transfer", { exact: true });
@@ -117,6 +118,23 @@ test("sets when guests can choose each way to pay and warns about a gap", async 
   ).toBeVisible();
   await expect(card.getByTestId("payment-windows-strip").getByText("No way to pay")).toBeVisible();
 
+  // What checkout offers a guest booking 3 days, 2 weeks, a month ahead, or tonight.
+  const checkout = card.getByRole("list", { name: "Payment options at checkout" });
+  await expect(card.getByRole("button", { name: "3 days before" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    card.getByText("No way to pay: these guests can't complete a booking.", { exact: true }),
+  ).toBeVisible();
+  await card.getByRole("button", { name: "2 weeks before" }).click();
+  await expect(checkout.getByRole("listitem")).toHaveText(["Pay at hotel", "Bank transfer"]);
+  await card.getByRole("button", { name: "Books for tonight" }).click();
+  await expect(checkout).toHaveCount(0);
+  await card.getByRole("button", { name: "1 month+ before" }).click();
+  await expect(checkout.getByRole("listitem")).toHaveText(["Pay at hotel", "Bank transfer"]);
+  await card.screenshot({ path: testInfo.outputPath("vay2424-what-guests-see.png") });
+
   await save.click();
   await expect(page.getByText("Payment settings saved", { exact: true })).toBeVisible();
   expect(writes).toEqual([
@@ -128,28 +146,30 @@ test("sets when guests can choose each way to pay and warns about a gap", async 
     },
   ]);
   expect(settingsWrites).toEqual([]);
-  await expect(save).toBeDisabled();
+  // Saved: the bar says so, then goes.
+  await expect(save).toHaveCount(0);
 
   // Discard puts an unsaved edit back to what was saved.
   await hotel.selectOption({ label: "Any time" });
   await expect(page.getByText("You have unsaved changes", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Discard", exact: true }).click();
   await expect(hotel).toHaveValue("14");
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
 
   // A way to pay that is switched off has no booking time to choose.
   await page.getByRole("switch", { name: "Offer Pay at hotel" }).click();
   await expect(hotel).toBeDisabled();
   await page.getByRole("button", { name: "Discard", exact: true }).click();
 
-  // The card shows what guests are offered: switching Credit card on in Step 1 changes nothing
-  // here until it is saved with Stripe connected.
+  // Credit card switched on without a payment account: drawn, but guests can't use it, so the
+  // gap stays and checkout doesn't list it.
   await page.getByRole("switch", { name: "Offer Credit card" }).click();
   await expect(
     page.getByLabel("When guests can choose Credit card", { exact: true }),
   ).toBeEnabled();
-  await expect(card.getByText("Credit card", { exact: true })).toHaveCount(0);
+  await expect(card.getByText("Credit card", { exact: true })).toHaveCount(1);
   await expect(card.getByText(/have no way to pay\.$/)).toHaveCount(1);
+  await expect(checkout.getByRole("listitem")).toHaveText(["Pay at hotel", "Bank transfer"]);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(hotel).toBeVisible();

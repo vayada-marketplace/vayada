@@ -8,7 +8,7 @@ import {
   leadText,
   type PaymentWindowsState,
   type WindowDraft,
-} from "@/components/settings/PaymentWindowsCard";
+} from "@/components/settings/paymentWindows";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 type Tone = "good" | "warn" | "neutral";

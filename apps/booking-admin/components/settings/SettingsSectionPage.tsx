@@ -36,12 +36,14 @@ import {
 } from "@/components/settings/CardNotReadyBanner";
 import { createReplacementPricingClient } from "@vayada/product-onboarding/replacementPricingClient";
 import {
-  PaymentWindowsCard,
   paymentWindowsPlan,
   paymentWindowsSaveError,
   usePaymentWindows,
-  type PaymentWindowMethods,
-} from "@/components/settings/PaymentWindowsCard";
+} from "@/components/settings/paymentWindows";
+import {
+  PaymentsGuestPreview,
+  type PreviewMethods,
+} from "@/components/settings/PaymentsGuestPreview";
 import {
   bankDetailsEdited,
   bankDetailsOf,
@@ -386,8 +388,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     available: boolean;
     feePercent?: number;
   } | null>(null);
-  // VAY-2442: whether the hotel saved a payout account (the panel tells), and card readiness.
+  // VAY-2442: whether the hotel saved a payout account (the panel tells).
   const [vayadaPayoutSaved, setVayadaPayoutSaved] = useState<boolean | null>(null);
+  // VAY-2442: card readiness said yes for vayada Payment as saved (unknown counts as no).
   const [vayadaCardReady, setVayadaCardReady] = useState(false);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   // Finance's currency, the PMS pricing currency guests pay in; not Localization's (VAY-2390).
@@ -395,10 +398,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   // The saved row has setup's plain Pay at Hotel, without a Cash/Card choice (VAY-2185).
   const [plainPayAtHotel, setPlainPayAtHotel] = useState(false);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
-  // VAY-2348: the ways to pay guests are offered as saved, for the booking windows card.
-  const [offeredMethods, setOfferedMethods] = useState<PaymentWindowMethods | null>(null);
   // VAY-2424: the payment choices as saved, so one Save sends only what changed and Discard
-  // puts the form back; the windows card's state lives here for the same Save.
+  // puts the form back; the booking windows' state lives here for the same Save.
   const [paymentBaseline, setPaymentBaseline] = useState<PaymentsForm | null>(null);
   const [paymentsSaveStatus, setPaymentsSaveStatus] = useState<PaymentsSaveStatus | null>(null);
   const paymentsSaveRunning = useRef(false);
@@ -513,17 +514,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     setVayadaPayment(res.vayadaPayment ?? null);
     setPaymentCurrency(ps.defaultCurrency);
     setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
-    setOfferedMethods({
-      card: ps.acceptedMethods.includes("card") && isFinanceStripeReady(res),
-      pay_at_property: ps.acceptedMethods.includes("pay_at_property"),
-      bank_transfer:
-        ps.acceptedMethods.includes("bank_transfer") &&
-        !!res.bankDestination?.enabled &&
-        !res.bankDestination.deleted,
-      paypalHours: ps.acceptedMethods.includes("paypal")
-        ? paymentPolicyNumber(ps.depositPolicy, "paypalPaymentWindowHours", 24)
-        : null,
-    });
     setPaymentSettingsLoaded(true);
   }, []);
 
@@ -536,7 +526,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     }
     setPaymentSettingsLoaded(false);
     setPaymentCurrency(null);
-    setOfferedMethods(null);
     setPaymentBaseline(null);
     setPaymentsSaveStatus(null);
     setBillingPlanLoading(true);
@@ -792,7 +781,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     return () => {
       current = false;
     };
-  }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, vayadaSaved, offeredMethods]);
+  }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, vayadaSaved, paymentBaseline]);
   // A missing or unfinished account is the page's own knowledge: Finance's readiness can't tell a
   // missing account from a pending approval. Nothing is said while a Stripe check runs.
   // Stripe may hold an account this page couldn't confirm (back from Stripe, or a failed read):
@@ -1044,16 +1033,38 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             ? "connected"
             : "not_connected"
         : "not_connected";
+  // VAY-2424 "What guests will see": Step 1 as it stands; Credit card counts once a payment
+  // account can take it.
+  // The readiness read is about the saved provider: it counts only while that is still chosen.
+  const savedCardProvider = cardSaved && paymentBaseline?.provider === paymentProvider;
+  const previewMethods: PreviewMethods = {
+    card: settings.online_card_payment ?? false,
+    pay_at_property: settings.pay_at_property_enabled,
+    bank_transfer: settings.bank_transfer ?? false,
+    paypal: settings.paypal_enabled ?? false,
+    paypalHours: Math.max(1, Math.min(168, settings.paypal_payment_window_hours || 24)),
+    cardReady:
+      paymentProvider === "stripe"
+        ? stripeOnboarded && (!savedCardProvider || cardNotReady === null)
+        : paymentProvider === "vayada" &&
+          savedCardProvider &&
+          vayadaPayoutSaved === true &&
+          vayadaCardReady,
+    // Guests get the bank details after booking: an active account, or complete new details.
+    bankReady:
+      (!!bankDestination?.enabled && !bankDestination.deleted) ||
+      (bankDetailsEdited(settings) &&
+        !bankTransferDetailsIncomplete({
+          enabled: true,
+          details: bankDetailsOf(settings),
+          saved: bankDestination,
+        })),
+  };
   // VAY-2424: what changed on Payments, against what was saved.
   const paymentsForm = paymentsFormOf(settings, paymentProvider);
   const paymentMethodsChanged =
     paymentBaseline !== null && !samePaymentsForm(paymentsForm, paymentBaseline);
   const bankDetailsChanged = (settings.bank_transfer ?? false) && bankDetailsEdited(settings);
-  // VAY-2442: card through vayada Payment is offered once Finance says it's ready.
-  const windowMethods =
-    offeredMethods && vayadaSaved && vayadaCardReady && vayadaPayoutSaved === true
-      ? { ...offeredMethods, card: true }
-      : offeredMethods;
   // The windows of the ways switched on in Step 1 are saved, offered to guests yet or not.
   const windowsPlan =
     paymentWindows.saved && paymentWindows.drafts
@@ -1211,18 +1222,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         if (!current()) return null;
         setPaymentBaseline(paymentsForm);
         setPlainPayAtHotel(keptPlain);
-        setOfferedMethods({
-          card:
-            (settings.online_card_payment ?? false) &&
-            paymentProvider === "stripe" &&
-            stripeOnboarded,
-          pay_at_property: settings.pay_at_property_enabled,
-          bank_transfer:
-            (settings.bank_transfer ?? false) && !!destination?.enabled && !destination.deleted,
-          paypalHours: settings.paypal_enabled
-            ? Math.max(1, Math.min(168, settings.paypal_payment_window_hours ?? 24))
-            : null,
-        });
       }
 
       part = "windows";
@@ -1239,7 +1238,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         paymentWindows.discard();
       }
       if (!current()) return null;
-      setPaymentsSaveStatus({ kind: "saved" });
+      // "Saved" only when something was sent (Connect Stripe saves first, often nothing).
+      setPaymentsSaveStatus(saved.length ? { kind: "saved" } : null);
       return propertyLink.propertyId;
     } catch (error) {
       const windowsMessage =
@@ -1259,6 +1259,21 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       setSavingPayment(false);
     }
   };
+
+  const saveBarMessage = paymentsChanged
+    ? t("settings.paymentsSave.unsaved")
+    : paymentsSaveStatus?.kind === "saved"
+      ? t("settings.billing.paymentSettingsSaved")
+      : "";
+  // As in the mockup the save bar goes once saved: "saved" shows for a few seconds first.
+  useEffect(() => {
+    if (paymentsSaveStatus?.kind !== "saved") return;
+    const timer = window.setTimeout(
+      () => setPaymentsSaveStatus((status) => (status?.kind === "saved" ? null : status)),
+      4000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [paymentsSaveStatus]);
 
   const discardPayments = () => {
     if (!paymentBaseline) return;
@@ -2109,10 +2124,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             bankMaskedAccount={bankDestination?.maskedAccount ?? null}
             cardHidden={cardHidden}
           />
-          {/* VAY-2348: when guests booking a given time before arrival can pay, as offered. */}
-          {paymentSettingsLoaded && billingPropertyId && windowMethods && (
-            <PaymentWindowsCard methods={windowMethods} windows={paymentWindows} />
-          )}
         </div>
       )}
 
@@ -2351,11 +2362,22 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             )}
           </section>
         )}
+      {/* VAY-2424: what guests booking at different times see at checkout, as Step 1 stands. */}
+      {activeSection === "payments" && paymentSettingsLoaded && billingPropertyId && (
+        <div className="mt-4">
+          <PaymentsGuestPreview
+            methods={previewMethods}
+            windows={paymentWindows}
+            next={windowsPlan?.next ?? null}
+          />
+        </div>
+      )}
       {/* VAY-2424: one save bar for the whole page (methods, bank details, booking windows), at
-          page level so it sticks to the bottom of the screen anywhere on the page. */}
-      {activeSection === "payments" && (
+          page level so it sticks to the bottom of the screen anywhere on the page. As in Timo's
+          mockup it shows only while there is something to save, or a save's result. */}
+      {activeSection === "payments" && (paymentsChanged || paymentsSaveStatus || savingPayment) && (
         <div
-          className="sticky bottom-0 z-10 mt-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm md:px-5"
+          className="sticky bottom-0 z-10 mt-4 border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-4px_16px_rgba(15,23,42,0.06)] sm:px-6"
           data-testid="payments-save-bar"
         >
           {paymentsSaveStatus && paymentsSaveStatus.kind !== "saved" && !savingPayment && (
@@ -2378,34 +2400,29 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               />
             </div>
           )}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <p
               role="status"
-              className={`text-[13px] font-medium ${paymentsChanged ? "text-amber-700" : "text-gray-500"}`}
+              className={`mr-auto text-sm ${paymentsChanged ? "text-slate-600" : "font-medium text-green-700"}`}
             >
-              {paymentsChanged
-                ? t("settings.paymentsSave.unsaved")
-                : paymentsSaveStatus?.kind === "saved"
-                  ? t("settings.billing.paymentSettingsSaved")
-                  : t("settings.paymentsSave.noChanges")}
+              {saveBarMessage}
             </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={discardPayments}
-                disabled={!paymentsChanged || savingPayment}
-                className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-              >
-                {t("settings.paymentsSave.discard")}
-              </button>
-              <SaveButton
-                onClick={handleSave}
-                saving={savingPayment}
-                disabled={!paymentsReady || !paymentsChanged}
-              >
-                {t("settings.paymentsSave.saveChanges")}
-              </SaveButton>
-            </div>
+            <button
+              type="button"
+              onClick={discardPayments}
+              disabled={!paymentsChanged || savingPayment}
+              className={SECONDARY_BUTTON}
+            >
+              {t("settings.paymentsSave.discard")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={!paymentsReady || !paymentsChanged || savingPayment}
+              className={PRIMARY_BUTTON}
+            >
+              {savingPayment ? t("common.saving") : t("settings.paymentsSave.saveChanges")}
+            </button>
           </div>
         </div>
       )}

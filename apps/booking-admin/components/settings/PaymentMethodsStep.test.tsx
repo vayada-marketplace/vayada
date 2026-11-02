@@ -14,7 +14,7 @@ vi.mock("@/lib/i18n", async () => {
 });
 
 import { PaymentMethodsStep, windowChoice } from "./PaymentMethodsStep";
-import { draftOf, type PaymentWindowsState, type WindowDrafts } from "./PaymentWindowsCard";
+import { draftOf, type PaymentWindowsState, type WindowDrafts } from "./paymentWindows";
 import type { PropertySettings } from "@/services/settings";
 
 const settings = {
