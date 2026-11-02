@@ -316,8 +316,14 @@ test.describe("pms-web room location", () => {
     const save = page.getByRole("button", { name: "Save Changes" });
     await expect(separate).toHaveAttribute("aria-checked", "true");
 
-    // A choice undone, or a switch turned off and on again, writes nothing.
+    // A choice undone, or a switch turned off and on again, writes nothing, even with a visit to another tab
+    // in between: the field remounts, and still knows the room had no saved choice (VAY-2452).
     await same.click();
+    const main = page.locator("main");
+    await main.getByRole("button", { name: "Room Details", exact: true }).click();
+    await expect(separate).toHaveCount(0);
+    await main.getByRole("button", { name: "Location", exact: true }).click();
+    await expect(same).toHaveAttribute("aria-checked", "true");
     await separate.click();
     const detailsMap = page.getByRole("switch", { name: "Show map in room details" });
     await detailsMap.click();

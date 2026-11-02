@@ -143,6 +143,16 @@ it("keeps the room's place on its own Location tab, saved by the form's one Save
   expect(submit()[0].props.disabled).toBe(true);
   act(() => field.props.onValidityChange(true));
   expect(submit()[0].props.disabled).toBe(false);
+
+  // Back on the tab after an unsaved choice, the field still learns the room's saved one (none here).
+  expect(field.props.savedSource).toBeUndefined();
+  const chosen = { ...props.form, locationSource: "custom" as const };
+  act(() => view.update(createElement(RoomTypeForm, { ...props, form: chosen, tab: "details" })));
+  act(() => view.update(createElement(RoomTypeForm, { ...props, form: chosen, tab: "location" })));
+  expect(view.root.findByType(RoomLocationField).props).toMatchObject({
+    value: { locationSource: "custom" },
+    savedSource: undefined,
+  });
 });
 
 it("shows the page's note beside the buttons and its text while saving (VAY-2147)", async () => {

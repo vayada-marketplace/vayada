@@ -102,6 +102,7 @@ export default function RoomLocationField({
   roomId = null,
   roomName,
   value,
+  savedSource,
   onChange,
   onValidityChange,
 }: {
@@ -109,6 +110,9 @@ export default function RoomLocationField({
   roomId?: string | null;
   roomName: string;
   value: RoomLocation;
+  /** The choice as saved, undefined while the room has none. The form reads it once: this field remounts on every
+   * visit to the Location tab, when `value` may already hold an unsaved choice (VAY-2452). */
+  savedSource: RoomLocationSource | undefined;
   onChange: (patch: Partial<RoomLocation>) => void;
   /** False while Save would lose what the host typed: an unreadable coordinate, or a pick still loading. */
   onValidityChange: (valid: boolean) => void;
@@ -145,8 +149,6 @@ export default function RoomLocationField({
   const separate = roomLocationSource(value, place?.pin ?? null) === "custom";
   // The coordinate fields only exist for a separate location; "Same as property" never holds Save.
   const valid = !separate || (!picking && (coordinates.ok || !edited));
-  // As saved: going back to the choice a room had without one restores "no choice", so nothing is written.
-  const savedSource = useRef(value.locationSource);
   // With no pin of its own yet, the map opens on the property's area, close enough to place the pin by click.
   const focusLatitude = place?.pin?.latitude;
   const focusLongitude = place?.pin?.longitude;
@@ -194,8 +196,9 @@ export default function RoomLocationField({
     setLatitudeText(formatCoordinate(value.latitude));
     setLongitudeText(formatCoordinate(value.longitude));
     const derived = roomLocationSource({ ...value, locationSource: undefined }, place?.pin ?? null);
+    // As saved: going back to the choice a room had without one restores "no choice", so nothing is written.
     onChange({
-      locationSource: savedSource.current === undefined && source === derived ? undefined : source,
+      locationSource: savedSource === undefined && source === derived ? undefined : source,
     });
   }
 

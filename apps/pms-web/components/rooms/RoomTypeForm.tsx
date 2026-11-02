@@ -237,6 +237,8 @@ export default function RoomTypeForm({
   const activeTab = tab ?? ownTab;
   // False while the Location box holds something Save would lose (VAY-2126): Save waits.
   const [locationValid, setLocationValid] = useState(true);
+  // The room's location choice as saved: the page remounts this form after each save (VAY-2452).
+  const [savedLocationSource] = useState(form.locationSource);
   const [amenityInput, setAmenityInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([
     "Internet & Tech",
@@ -1191,6 +1193,7 @@ export default function RoomTypeForm({
             locationArea: form.locationArea,
             showMapInDetails: form.showMapInDetails,
           }}
+          savedSource={savedLocationSource}
           // Functional: a selected address writes its pin after Google answers, onto the form as it is then.
           onChange={(patch) =>
             onChange((prev: RoomTypeCreate | RoomTypeUpdate) => ({ ...prev, ...patch }))
