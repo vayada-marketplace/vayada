@@ -2,12 +2,18 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PropertyAccessRepository } from "@vayada/backend-authorization";
 import type { createBookingGuestChoiceStore } from "../domains/bookingGuestChoiceStore.js";
 import type { createBookingGuestTermsStore } from "../domains/bookingGuestTermsStore.js";
+import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
 import { authorizeRequest, exactDataRecord, readIdempotencyKey } from "./bookingGuestPolicy.js";
+import { livePublicPageRefresh, refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
 export type BookingGuestChoiceRoutesOptions = {
   store: ReturnType<typeof createBookingGuestChoiceStore>;
   termsStore: ReturnType<typeof createBookingGuestTermsStore>;
   propertyAccessRepository: PropertyAccessRepository;
+  /** Refreshes a live booking page after a guest-rule save (VAY-2455), as other setup saves do. */
+  refreshPublicPage?: (propertyId: string) => Promise<void>;
+  /** Where the public site serves setup publications, refreshes a live page instead (VAY-2344). */
+  bookingPublicationRefresh?: BookingPublicationRefreshPort;
 };
 type Scope = { propertyId: string; organizationId: string; actorUserId: string };
 export async function registerBookingGuestChoiceRoutes(
@@ -15,6 +21,13 @@ export async function registerBookingGuestChoiceRoutes(
   options: BookingGuestChoiceRoutesOptions,
 ) {
   const scopes = new WeakMap<FastifyRequest, Scope>();
+  // The booking page shows the saved check-in and check-out times, so a live page is republished
+  // with them (VAY-2455: PMS Settings saves here); before go-live nothing is published.
+  refreshPublicPageAfterSaves(
+    app,
+    ["PUT /properties/:propertyId/guest-rules"],
+    livePublicPageRefresh(options),
+  );
   const route = (
     method: "GET" | "PUT",
     url: string,

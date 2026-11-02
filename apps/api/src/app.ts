@@ -810,6 +810,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerBookingGuestChoiceRoutes, {
       prefix: "/api/booking",
       ...options.bookingGuestChoices,
+      refreshPublicPage: options.publicPageRefresh,
+      bookingPublicationRefresh: options.bookingPublicationRefresh,
     });
   if (options.bookingLocationMap)
     app.register(registerBookingLocationMapRoutes, {
