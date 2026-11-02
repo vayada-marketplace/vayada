@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   defaultAccountBookingPageSettings,
+  parseAccountBookingPageSlug,
   readAccountBookingPageSettings,
   suggestAccountBookingPageSlug,
   type AccountBookingPageSettings,
@@ -380,4 +381,75 @@ async function readinessOf(
     readiness.set(row.propertyId, { ready: missing.length === 0, missing });
   }
   return readiness;
+}
+
+/**
+ * VAY-2458: the stays guests see on a live agency page, in the page's order, each with its booking
+ * address: included, ready by the rule above, and still the account's own. That is, the account
+ * is the single organization linked as owner or operator to both the PMS and the catalog property,
+ * as public pricing requires (`owningOrganization`). Null when no live page has this address.
+ */
+export async function readLiveAccountBookingPageStays(
+  client: Queryable,
+  slug: string,
+): Promise<{ organizationId: string; stays: { propertyId: string; slug: string }[] } | null> {
+  if (!parseAccountBookingPageSlug(slug)) return null;
+  const page = (
+    await client.query<{ organizationId: string }>(
+      `SELECT page.organization_id::text AS "organizationId"
+       FROM booking.account_booking_pages page
+       JOIN identity.organizations account
+         ON account.id = page.organization_id AND account.kind = 'hotel_group'
+        AND account.status = 'active'
+       WHERE page.slug = $1 AND page.live`,
+      [slug],
+    )
+  ).rows[0];
+  if (!page) return null;
+  const rows = (await propertyRows(client, page.organizationId)).filter(
+    (row) => row.position !== null,
+  );
+  const readiness = await readinessOf(client, rows);
+  const ready = rows
+    .filter((row) => readiness.get(row.propertyId)?.ready)
+    .sort((a, b) => a.position! - b.position!);
+  if (!ready.length) return { organizationId: page.organizationId, stays: [] };
+  const ids = ready.map((row) => row.propertyId);
+  const [addresses, owners] = await Promise.all([
+    client.query<{ propertyId: string; slug: string }>(
+      `SELECT property_id::text AS "propertyId", slug
+       FROM hotel_catalog.property_slugs
+       WHERE property_id = ANY($1::uuid[]) AND locale IS NULL
+         AND purpose = 'canonical' AND status = 'active'`,
+      [ids],
+    ),
+    client.query<{ propertyId: string; owners: string[] }>(
+      `SELECT owner.resource_id AS "propertyId", array_agg(owner.organization_id::text) AS owners
+       FROM (
+         SELECT resource_id, organization_id
+         FROM identity.organization_resource_links
+         WHERE resource_id = ANY($1::text[]) AND status = 'active'
+           AND relationship IN ('owner', 'operator')
+           AND ((product = 'pms' AND resource_type = 'pms_property')
+             OR (product = 'hotel_catalog' AND resource_type = 'property'))
+         GROUP BY resource_id, organization_id
+         HAVING count(DISTINCT product) = 2
+       ) owner
+       GROUP BY owner.resource_id`,
+      [ids],
+    ),
+  ]);
+  const address = new Map(addresses.rows.map((row) => [row.propertyId, row.slug]));
+  const owned = new Set(
+    owners.rows
+      .filter((row) => row.owners.length === 1 && row.owners[0] === page.organizationId)
+      .map((row) => row.propertyId),
+  );
+  return {
+    organizationId: page.organizationId,
+    stays: ready.flatMap((row) => {
+      const slug = address.get(row.propertyId);
+      return slug && owned.has(row.propertyId) ? [{ propertyId: row.propertyId, slug }] : [];
+    }),
+  };
 }

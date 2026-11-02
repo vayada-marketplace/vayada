@@ -4,6 +4,12 @@ import {
 } from "../jobs/channexManagementWorkerPrivileges.js";
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
 import { createPublicPricingDisplayPool } from "./publicPricingDisplayPool.js";
+import { createAgencyStayPrices, parseAgencyStayPricesQuery } from "./agencyStayPrices.js";
+import { readLiveAccountBookingPageStays } from "./accountBookingPages.js";
+import {
+  activeBookingPublicationGateConfig,
+  configureActiveBookingPublicationGate,
+} from "./activeBookingPublicationGate.js";
 import { createPublicPricingStayPrices } from "./publicPricingStayPrices.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { createTargetPmsInventoryPublicOfferProjection } from "./pmsInventoryPublicOfferProjection.js";
@@ -43,6 +49,7 @@ import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
 import { keepsBookedTerms, repriceFromPublication } from "./pricingStayDateChange.js";
 import {
+  defaultAccountBookingPageSettings,
   parsePublicPricingSelection,
   parseStoredPricingQuote,
   storedPricingQuoteStatus,
@@ -136,6 +143,8 @@ const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
+  /** VAY-2458: while set, fixtures add their property to this account instead of a new one. */
+  let sharedOrganization: string | null = null;
   /** Saves offer terms. Non-refundable terms that accept pay at property can no longer be written (VAY-2280); they are
    * stored as terms from before that rule are, so quotes and bookings over them are still covered. */
   async function saveTerms(
@@ -186,7 +195,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
     const actorUserId = randomUUID(),
-      organizationId = randomUUID(),
+      organizationId = sharedOrganization ?? randomUUID(),
       propertyId = randomUUID(),
       roomTypeId = randomUUID(),
       membershipId = randomUUID();
@@ -197,7 +206,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       `${actorUserId}@example.test`,
     ]);
     await pool.query(
-      "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Terms test',$2)",
+      "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Terms test',$2) ON CONFLICT (id) DO NOTHING",
       [organizationId, organizationId],
     );
     await pool.query(
@@ -230,7 +239,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         [organizationId, product, type, propertyId],
       );
     await pool.query(
-      "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management')",
+      "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management') ON CONFLICT DO NOTHING",
       [organizationId],
     );
     const context: RequestContext = {
@@ -6936,6 +6945,132 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await display.end();
     }
   });
+  it("prices all 13 stays of an agency page at once while the account's quotes go on (VAY-2458)", async () => {
+    const organizationId = randomUUID(),
+      suffix = organizationId.slice(0, 8);
+    sharedOrganization = organizationId;
+    const stays = [];
+    try {
+      // 13 stays on the page, one ready but left off it, one included but not ready.
+      for (let index = 0; index < 15; index++) stays.push(await bookableStay());
+    } finally {
+      sharedOrganization = null;
+    }
+    const other = await bookableStay(); // Another account's stay.
+    const ids = [...stays, other].map((stay) => stay.scope.propertyId);
+    await pool.query(
+      "UPDATE hotel_catalog.properties SET property_type='hotel' WHERE id=ANY($1::uuid[])",
+      [ids.slice(0, 14).concat(ids[15]!)],
+    );
+    await pool.query(
+      "UPDATE hotel_catalog.property_locations SET latitude=-8.5,longitude=115.26 WHERE property_id=ANY($1::uuid[])",
+      [ids],
+    );
+    const slug = `agency-${suffix}`;
+    await pool.query(
+      `INSERT INTO booking.account_booking_pages(organization_id,slug,live,settings) VALUES($1,$2,true,$3)`,
+      [organizationId, slug, defaultAccountBookingPageSettings("Agency test")],
+    );
+    // Included: the 13, the stay without a type, and the other account's stay. Not: stay 14.
+    const included = [...ids.slice(0, 13), ids[14]!, ids[15]!];
+    await pool.query(
+      `INSERT INTO booking.account_booking_page_properties(organization_id,property_id,position)
+      SELECT $1::uuid, included.id, included.position::int - 1
+      FROM unnest($2::uuid[]) WITH ORDINALITY AS included(id, position)`,
+      [organizationId, [...included].reverse()],
+    );
+    const gate = activeBookingPublicationGateConfig();
+    configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+    const display = createPublicPricingDisplayPool({ connectionString: url!, max: 4 });
+    // Quotes for the account's stays, refused if they wait longer than 200ms for a lock.
+    const quotes = new pg.Pool({ connectionString: url, max: 2, options: "-c lock_timeout=200ms" });
+    try {
+      const agency = createAgencyStayPrices({
+        pageStays: (page) => readLiveAccountBookingPageStays(pool, page),
+        stayPrices: createPublicPricingStayPrices(display, createPublicPricingOfferCatalog(display))
+          .read,
+      });
+      const [checkIn, checkOut] = [await localDay(5), await localDay(7)];
+      const search = parseAgencyStayPricesQuery({ checkIn, checkOut, adults: "2" })!;
+      const owner = await stays[0]!.readPublic();
+      const selection = {
+        version: "public-pricing-selection.v1",
+        checkIn,
+        checkOut,
+        currency: "EUR",
+        rooms: [
+          {
+            selectionId: "one",
+            publicOfferKey: publicPricingOfferBindings(owner!)[0]!.publicOfferKey,
+            guests: { adults: 1, childAgesAtCheckIn: [] as number[] },
+          },
+        ],
+        addons: [],
+        promoCode: null,
+      };
+      const quoteStore = createCurrentPricingQuoteStore(quotes, 300);
+      const issued = await quoteStore.issue(ids[0]!, {
+        requestId: randomUUID(),
+        selection,
+        paymentMethod: "pay_at_property",
+      });
+      expect(issued.quote).toBeTruthy();
+
+      let reading = true;
+      const quoteTimes: number[] = [];
+      const quoting = (async () => {
+        while (reading) {
+          const started = performance.now();
+          await quoteStore.issue(ids[0]!, {
+            requestId: randomUUID(),
+            selection,
+            paymentMethod: "pay_at_property",
+          });
+          quoteTimes.push(performance.now() - started);
+        }
+      })();
+      const started = performance.now();
+      let result;
+      try {
+        result = await agency.read(slug, search);
+      } finally {
+        reading = false;
+        await quoting;
+      }
+      const took = performance.now() - started;
+      console.info(
+        `VAY-2458: 13 stays in ${Math.round(took)}ms; ${quoteTimes.length} quotes meanwhile, slowest ${Math.round(Math.max(...quoteTimes))}ms`,
+      );
+      // In the page's order; never the stay left off, the one not ready or another account's.
+      expect(result?.stays.map((stay) => stay.propertyId)).toEqual(ids.slice(0, 13).reverse());
+      expect(result?.stays.every((stay) => stay.status === "available")).toBe(true);
+      // Measured 0.9s on the CI-sized worker; quotes meanwhile took at most 0.1s.
+      expect(took).toBeLessThan(5_000);
+      expect(quoteTimes.length).toBeGreaterThan(0);
+
+      // The card's price is the lowest the stay's own page shows for the same search.
+      const stayPage = await createPublicPricingStayPrices(
+        pool,
+        createPublicPricingOfferCatalog(pool),
+      ).read(ids[0]!, { checkIn, checkOut, adults: 2, children: 0, promoCode: null });
+      const lowest = stayPage!.rooms
+        .flatMap((room) => (room.availability === "available" ? room.offers : []))
+        .flatMap((offer) => (offer.status === "priced" ? [BigInt(offer.totalMinor)] : []))
+        .sort((a, b) => (a < b ? -1 : 1))[0];
+      expect(result?.stays.at(-1)?.price?.totalMinor).toBe(lowest?.toString());
+
+      // A page that isn't live has no prices.
+      await pool.query(
+        "UPDATE booking.account_booking_pages SET live=false WHERE organization_id=$1",
+        [organizationId],
+      );
+      expect(await agency.read(slug, search)).toBeNull();
+    } finally {
+      configureActiveBookingPublicationGate(gate);
+      await display.end();
+      await quotes.end();
+    }
+  }, 300_000);
   /** "Save prices" for the next revision, with its Finance evidence and charge declaration. */
   async function savePrices(
     f: Awaited<ReturnType<typeof publicFixture>>,

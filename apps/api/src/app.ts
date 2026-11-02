@@ -150,6 +150,7 @@ import {
 } from "./routes/staffInvitations.js";
 import {
   BOOKING_LOOKUP_PATH,
+  AGENCY_STAY_PRICES_PATH,
   registerBookingWebPublicRoutes,
   type BookingWebAttributionSink,
   type BookingWebCheckoutAdapter,
@@ -535,6 +536,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       // VAY-2220: guests' browsers call the booking lookup directly, so its line (preflight
       // included) would hold the guest's IP address.
       BOOKING_LOOKUP_PATH.test(request.url.split("?", 1)[0] ?? "") ||
+      // VAY-2458: and agency page prices.
+      AGENCY_STAY_PRICES_PATH.test(request.url.split("?", 1)[0] ?? "") ||
       (request.url.startsWith("/api/pms/properties/") &&
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });
