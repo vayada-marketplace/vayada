@@ -244,8 +244,9 @@ function syntheticIdentity(
 /**
  * Signs a hotel owner up the way a new hotel does (VAY-2270): Booking Admin /signup, the email
  * code (read from WorkOS, which sent it), then the account details step of /setup. The signup
- * creates the owner's hotel group. Stops on the first run's "Your hotel" step (VAY-2247,
- * ONBOARDING_V2_ENABLED), or on the older setup wizard's track choice, and says which.
+ * creates the owner's hotel group. Stops on the four-step setup's Welcome (VAY-2451,
+ * FOUR_STEP_SETUP_ENABLED), the first run's "Your hotel" step (VAY-2247, ONBOARDING_V2_ENABLED), or the
+ * older setup wizard's track choice, and says which.
  */
 export async function signUpSyntheticHotelOwner(
   page: Page,
@@ -253,7 +254,11 @@ export async function signUpSyntheticHotelOwner(
   environment: SmokeEnvironment,
   qualifier = "",
   phone = "+49 30 5550102",
-): Promise<{ user: SyntheticUser; session: AuthSession; flow: "first_run" | "wizard" }> {
+): Promise<{
+  user: SyntheticUser;
+  session: AuthSession;
+  flow: "four_step" | "first_run" | "wizard";
+}> {
   const identity = syntheticIdentity(environment, "hotel", qualifier);
   await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/signup`);
   await page.getByLabel("Email address").fill(identity.email);
@@ -299,10 +304,19 @@ export async function signUpSyntheticHotelOwner(
   await page.getByRole("button", { name: "Verify email", exact: true }).click();
 
   // The first run asks for the same details on its own first step, then opens "Your hotel"
-  // instead of the wizard's track choice.
-  const flow = await submitAccountDetails(page, identity, phone);
+  // instead of the wizard's track choice; the four-step setup opens its Welcome there.
+  let flow: "four_step" | "first_run" | "wizard" = await submitAccountDetails(
+    page,
+    identity,
+    phone,
+  );
   if (flow === "first_run") {
-    await page.getByRole("heading", { name: "Your hotel", level: 1 }).waitFor({ timeout: 45_000 });
+    const welcome = page.getByRole("heading", { name: "Welcome to vayada", level: 1 });
+    await page
+      .getByRole("heading", { name: "Your hotel", level: 1 })
+      .or(welcome)
+      .waitFor({ timeout: 45_000 });
+    if (await welcome.isVisible()) flow = "four_step";
   } else {
     await page
       .getByRole("heading", { name: "Choose how you’ll use vayada" })
