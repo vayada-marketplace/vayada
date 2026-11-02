@@ -200,7 +200,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
       ),
     ).toMatchObject({ ok: true });
     await admin.query(
-      "UPDATE hotel_catalog.property_locations SET latitude = NULL WHERE property_id = $1::uuid",
+      "UPDATE hotel_catalog.property_locations SET latitude = NULL, longitude = NULL WHERE property_id = $1::uuid",
       [stays.escape],
     );
     const resaved = await repository.save(
@@ -331,7 +331,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     profile.hotel.propertyId = propertyId;
     profile.hotel.slug = slug;
     // Only a fresh, bookable page can be built; a hidden one goes stale after it was published.
-    const content = publicContent(profile) as { profile: { freshness: { status: string } } };
+    // The build is frozen; mark a copy stale.
+    const content = structuredClone(publicContent(profile)) as {
+      profile: { freshness: { status: string } };
+    };
     if (state === "hidden") content.profile.freshness.status = "stale";
     const revisionId = randomUUID();
     await admin.query(
