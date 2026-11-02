@@ -26,6 +26,8 @@ export const PMS_PRICING_CURRENCY_CHANGE_BLOCKER_CODES = Object.freeze([
   // VAY-2390: an owner's currency change waits for channels and keeps money history in its currency.
   "channel_connection",
   "finance_record",
+  // VAY-2453: a hotel still in setup chooses its first currency there, which also switches on Financials.
+  "hotel_setup_incomplete",
   "other_pricing_configuration",
   "dependency_check_unavailable",
 ] as const);
@@ -69,6 +71,9 @@ type PmsPricingCommandContext = {
 export type UpsertPropertyPricingCurrencyCommand = PmsPricingCommandContext & {
   readonly expectedPricingCurrencyRevision: number;
   readonly currency: PmsPricingCurrency;
+  /** VAY-2453: the currency the Owner saw for a hotel without its own pricing currency yet; the
+   * change adopts it only while the hotel still shows it. */
+  readonly expectedPricingCurrency?: PmsPricingCurrency;
 };
 
 export type FlexibleCancellationTerms = {
@@ -462,6 +467,9 @@ export function parseUpsertPropertyPricingCurrencyCommand(
       "audit",
       "expectedPricingCurrencyRevision",
       "currency",
+      ...(isRecord(value) && Object.hasOwn(value, "expectedPricingCurrency")
+        ? ["expectedPricingCurrency"]
+        : []),
     ]) ||
     !isRevision(value["expectedPricingCurrencyRevision"], true)
   ) {
@@ -469,11 +477,14 @@ export function parseUpsertPropertyPricingCurrencyCommand(
   }
   const context = parseCommandContext(value);
   const currency = parsePmsPricingCurrency(value["currency"]);
-  return context && currency
+  const adopts = Object.hasOwn(value, "expectedPricingCurrency");
+  const expected = adopts ? parsePmsPricingCurrency(value["expectedPricingCurrency"]) : null;
+  return context && currency && (!adopts || expected)
     ? Object.freeze({
         ...context,
         expectedPricingCurrencyRevision: value["expectedPricingCurrencyRevision"],
         currency,
+        ...(expected ? { expectedPricingCurrency: expected } : {}),
       })
     : null;
 }
@@ -530,6 +541,10 @@ export function serializePropertyPricingCurrencyFingerprint(
     propertyId: command.propertyId,
     expectedPricingCurrencyRevision: command.expectedPricingCurrencyRevision,
     currency: command.currency,
+    // Only when present, so every earlier key keeps its fingerprint.
+    ...(command.expectedPricingCurrency
+      ? { expectedPricingCurrency: command.expectedPricingCurrency }
+      : {}),
   });
 }
 

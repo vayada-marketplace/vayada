@@ -294,6 +294,17 @@ describe("PMS pricing routes", () => {
     app = await build("owner", "session-1");
     expect((await injectJson(app, request)).statusCode).toBe(201);
     expect(setup.currencyCalls).toHaveLength(1);
+    // VAY-2453: only the Owner's change adopts a shown currency; setup chooses the first one.
+    expect(
+      (
+        await injectJson(app, {
+          ...request,
+          headers: headers("currency-shown-key"),
+          payload: { ...request.payload, expectedPricingCurrency: "EUR" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(setup.currencyCalls).toHaveLength(1);
     await app.close();
     for (const [relationship, sessionId] of [
       ["operator", "session-1"],
@@ -375,6 +386,33 @@ describe("PMS pricing routes", () => {
       pricingCurrency: { currency: "CHF" },
     });
     expect(change.currencyCalls).toHaveLength(1);
+    // VAY-2453: it may name the currency shown for a hotel without its own; a malformed one never
+    // reaches the port.
+    const adopt = {
+      ...request,
+      headers: headers("adopt-key"),
+      payload: {
+        expectedPricingCurrencyRevision: 0,
+        currency: "CHF",
+        expectedPricingCurrency: "EUR",
+      },
+    };
+    expect((await injectJson(app, adopt)).statusCode).toBeLessThan(300);
+    expect(change.currencyCalls[1]).toMatchObject({
+      expectedPricingCurrencyRevision: 0,
+      currency: "CHF",
+      expectedPricingCurrency: "EUR",
+    });
+    expect(
+      (
+        await injectJson(app, {
+          ...adopt,
+          headers: headers("adopt-bad-key"),
+          payload: { ...adopt.payload, expectedPricingCurrency: "eur" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(change.currencyCalls).toHaveLength(2);
     await app.close();
     // Staff with pricing rights, an operator, or no session never reach the port.
     for (const [relationship, sessionId, permissions] of [
@@ -387,7 +425,7 @@ describe("PMS pricing routes", () => {
       expect((await injectJson(app, previewRequest)).statusCode).toBe(403);
       await app.close();
     }
-    expect(change.currencyCalls).toHaveLength(1);
+    expect(change.currencyCalls).toHaveLength(2);
     expect(ports.currencyCalls).toHaveLength(0);
     expect(previewReads).toHaveLength(1);
 

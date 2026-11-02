@@ -20,12 +20,24 @@ export type PricingCurrencyChangeOutcome =
 const endpoint = (id: string) => `/api/pms/properties/${encodeURIComponent(id)}/pricing-source`;
 
 export const pricingCurrencyService = {
-  async load(): Promise<PricingCurrencyState> {
+  /** `shownCurrency` is the currency the page shows. A hotel without its own pricing currency yet
+   * (VAY-2453) changes from it at revision 0; the API adopts it, then changes it. */
+  async load(shownCurrency: string): Promise<PricingCurrencyState> {
     const propertyId = await resolveSelectedPmsPropertyId("loading the property currency");
     const [source, capabilities] = await Promise.all([
-      pmsOperationsClient.get<{
-        pricingCurrency: { currency: string; pricingCurrencyRevision: number };
-      }>(endpoint(propertyId), pmsOperationsRequestOptions),
+      pmsOperationsClient
+        .get<{
+          pricingCurrency: { currency: string; pricingCurrencyRevision: number };
+        }>(endpoint(propertyId), pmsOperationsRequestOptions)
+        .catch((error: unknown) => {
+          if (
+            error instanceof ApiErrorResponse &&
+            error.status === 404 &&
+            error.data.code === "pricing_currency_not_configured"
+          )
+            return { pricingCurrency: { currency: shownCurrency, pricingCurrencyRevision: 0 } };
+          throw error;
+        }),
       pmsOperationsClient.get<{ supportedCurrencies: { code: string }[] }>(
         `${endpoint(propertyId)}/currency-capabilities`,
         pmsOperationsRequestOptions,
@@ -58,7 +70,12 @@ export const pricingCurrencyService = {
     try {
       const response = await pmsOperationsClient.put<{ pricingCurrency: { currency: string } }>(
         `${endpoint(state.propertyId)}/currency-change`,
-        { expectedPricingCurrencyRevision: state.revision, currency },
+        {
+          expectedPricingCurrencyRevision: state.revision,
+          currency,
+          // Revision 0: the API adopts the currency shown, only while the hotel still shows it.
+          ...(state.revision === 0 ? { expectedPricingCurrency: state.currency } : {}),
+        },
         {
           ...pmsOperationsRequestOptions,
           headers: { ...pmsOperationsRequestOptions.headers, "Idempotency-Key": key },

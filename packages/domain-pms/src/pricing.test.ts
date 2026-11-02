@@ -131,6 +131,36 @@ describe("PMS pricing command contract", () => {
     }
   });
 
+  it("parses the currency an Owner saw for a hotel without its own, fingerprinted only when sent (VAY-2453)", () => {
+    const input = {
+      organizationId,
+      propertyId,
+      idempotencyKey: "pricing-currency-shown",
+      audit: audit(),
+      expectedPricingCurrencyRevision: 0,
+      currency: "IDR",
+    };
+    const shown = parseUpsertPropertyPricingCurrencyCommand({
+      ...input,
+      expectedPricingCurrency: "EUR",
+    });
+    expect(shown).toMatchObject({ currency: "IDR", expectedPricingCurrency: "EUR" });
+    for (const invalid of ["eur", "EURO", null, undefined]) {
+      expect(
+        parseUpsertPropertyPricingCurrencyCommand({ ...input, expectedPricingCurrency: invalid }),
+      ).toBeNull();
+    }
+    const plain = parseUpsertPropertyPricingCurrencyCommand(input)!;
+    expect(plain).not.toHaveProperty("expectedPricingCurrency");
+    // Unchanged for every key sent before VAY-2453.
+    expect(serializePropertyPricingCurrencyFingerprint(plain)).toBe(
+      `{"organizationId":"${organizationId}","propertyId":"${propertyId}","expectedPricingCurrencyRevision":0,"currency":"IDR"}`,
+    );
+    expect(serializePropertyPricingCurrencyFingerprint(shown!)).toContain(
+      '"expectedPricingCurrency":"EUR"',
+    );
+  });
+
   it("validates meal inclusion and fingerprints explicit changes separately from omission", () => {
     const input = {
       organizationId,

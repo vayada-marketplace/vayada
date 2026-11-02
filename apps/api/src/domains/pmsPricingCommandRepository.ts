@@ -11,6 +11,7 @@ import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 import {
   PMS_PRICING_CONTRACT_VERSION,
   PMS_PRICING_CURRENCY_CHANGE_BLOCKER_CODES,
+  parsePmsPricingCurrency,
   parsePropertyPricingCurrencyCommandResult,
   serializePropertyPricingCurrencyFingerprint,
   type FlexibleRatePlanCommandResult,
@@ -363,9 +364,12 @@ export function createPgPmsPricingCommandRepository(
           ),
         );
 
+      // VAY-2390 P5: the Owner's change checks every dependency in its own locked transaction, also
+      // for a hotel without a pricing currency row yet (VAY-2453).
+      if (supported && ownerChange && prepared.currentCurrency !== command.currency) {
+        return execute(true, []);
+      }
       if (supported && prepared.currentCurrency && prepared.currentCurrency !== command.currency) {
-        // VAY-2390 P5: the Owner's change checks every dependency in its own locked transaction.
-        if (ownerChange) return execute(true, []);
         let callbackStarted = false;
         try {
           return await config.currencyChangeGuard.runWithCurrencyChangeGuard(
@@ -392,6 +396,13 @@ export function createPgPmsPricingCommandRepository(
       if (!ownerChange) throw new Error("Currency change blockers are read for the Owner's change");
       const client = await pool.connect();
       try {
+        const pricingRow = await client.query(
+          "SELECT 1 FROM pms.property_pricing_settings WHERE property_id = $1::uuid",
+          [propertyId],
+        );
+        if (pricingRow.rows.length === 0 && (await hotelSetupCurrencyPending(client, propertyId))) {
+          return HOTEL_SETUP_BLOCKERS;
+        }
         return mergeBlockers([
           ...(await inspectLocalCurrencyBlockers(client, propertyId)),
           ...(await inspectOwnerChangeBlockers(client, propertyId)),
@@ -435,6 +446,14 @@ async function upsertCurrency(
           currentRevision: 0,
         }),
       };
+    }
+    if (ownerChange) {
+      return adoptShownCurrencyAndChange(
+        client,
+        command,
+        !guardHeld || observedCurrency !== null,
+        at,
+      );
     }
     const legacyCurrencies = await inspectLegacyCurrencies(client, command.propertyId);
     if (legacyCurrencies.some((currency) => currency !== command.currency)) {
@@ -508,7 +527,113 @@ async function upsertCurrency(
       }),
     };
   }
+  return changePricingCurrency(
+    client,
+    command,
+    snapshot.currency,
+    command.expectedPricingCurrencyRevision,
+    at,
+    ownerChange,
+  );
+}
 
+const HOTEL_SETUP_BLOCKERS: readonly PmsPricingCurrencyChangeBlocker[] = Object.freeze([
+  Object.freeze({ code: "hotel_setup_incomplete" as const }),
+]);
+
+/** VAY-2453: a hotel without its own pricing currency row (set up before the row existed, or
+ * imported) shows the Booking default, else Finance's, else EUR, as Finance's payment read does.
+ * The Owner's change adopts that currency at revision 1, only while it is still the one the Owner
+ * saw, and changes it like any other, with the same blockers and carry, to revision 2, so a
+ * publish in the new currency keeps its numbers (VAY-2425). Nothing is written while anything
+ * blocks. A hotel still in setup chooses its first currency there instead, as that also switches
+ * on its Financials default. */
+async function adoptShownCurrencyAndChange(
+  client: PmsPricingCommandClient,
+  command: UpsertPropertyPricingCurrencyCommand,
+  unguarded: boolean,
+  at: Date,
+): Promise<CommandWorkResult<PropertyPricingCurrencyCommandResult>> {
+  if (await hotelSetupCurrencyPending(client, command.propertyId)) {
+    return {
+      result: currencyFailure({
+        code: "pricing_currency_change_blocked",
+        currentRevision: 0,
+        blockers: HOTEL_SETUP_BLOCKERS,
+      }),
+    };
+  }
+  const shown = await client.query<{ currency: string }>(
+    `SELECT COALESCE(
+       (SELECT default_currency::text FROM booking.booking_settings WHERE property_id = $1::uuid),
+       (SELECT default_currency::text FROM finance.payment_settings WHERE property_id = $1::uuid),
+       'EUR') AS currency`,
+    [command.propertyId],
+  );
+  const from = parsePmsPricingCurrency(shown.rows[0]?.currency);
+  if (!from) throw new Error("PMS shown currency is invalid");
+  // Another change since the Owner looked (or a client that showed nothing): reload, as on a
+  // revision conflict.
+  if (command.expectedPricingCurrency !== from) {
+    return {
+      result: currencyFailure({ code: "pricing_currency_revision_conflict", currentRevision: 0 }),
+    };
+  }
+  if (from === command.currency) {
+    return { result: currencyFailure({ code: "pricing_currency_unchanged" }) };
+  }
+  // Every older price row is a blocker here (0050 allows only v1 or unversioned plans), so the
+  // pricing row's legacy-currency trigger never sees a mismatch.
+  const blockers = mergeBlockers([
+    ...(await inspectLocalCurrencyBlockers(client, command.propertyId)),
+    ...(await inspectOwnerChangeBlockers(client, command.propertyId)),
+    ...(unguarded ? ([{ code: "dependency_check_unavailable" }] as const) : []),
+  ]);
+  if (blockers.length > 0) {
+    return {
+      result: currencyFailure({
+        code: "pricing_currency_change_blocked",
+        currentRevision: 0,
+        blockers,
+      }),
+    };
+  }
+  await client.query(
+    `INSERT INTO pms.property_pricing_settings (
+       property_id, currency, pricing_currency_revision, created_at, updated_at
+     )
+     VALUES ($1::uuid, $2, 1, $3::timestamptz, $3::timestamptz)`,
+    [command.propertyId, from, at.toISOString()],
+  );
+  return changePricingCurrency(client, command, from, 1, at, true);
+}
+
+/** A new-hotel Financials default that waits for setup's first currency (0439, 0448). */
+async function hotelSetupCurrencyPending(
+  client: PmsPricingCommandClient,
+  propertyId: string,
+): Promise<boolean> {
+  const result = await client.query<{ pending: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM identity.product_entitlements
+       WHERE product = 'pms' AND entitlement_key = 'module:financials'
+         AND resource_product = 'pms' AND resource_type = 'pms_property'
+         AND lower(resource_id) = $1::uuid::text
+         AND status = 'suspended' AND metadata ->> 'newHotelFinancialsDefault' = 'pending'
+     ) AS pending`,
+    [propertyId],
+  );
+  return result.rows[0]?.pending === true;
+}
+
+async function changePricingCurrency(
+  client: PmsPricingCommandClient,
+  command: UpsertPropertyPricingCurrencyCommand,
+  from: PmsPricingCurrency,
+  expectedRevision: number,
+  at: Date,
+  ownerChange: boolean,
+): Promise<CommandWorkResult<PropertyPricingCurrencyCommandResult>> {
   const updated = await client.query<PmsPricingCurrencyRow>(
     `UPDATE pms.property_pricing_settings
      SET currency = $3,
@@ -517,17 +642,12 @@ async function upsertCurrency(
      WHERE property_id = $1::uuid
        AND pricing_currency_revision = $2
      RETURNING ${CURRENCY_RETURNING}`,
-    [
-      command.propertyId,
-      command.expectedPricingCurrencyRevision,
-      command.currency,
-      at.toISOString(),
-    ],
+    [command.propertyId, expectedRevision, command.currency, at.toISOString()],
   );
   if (!updated.rows[0]) throw new Error("PMS pricing currency compare-and-set failed");
   const pricingCurrency = pmsPricingCurrencySnapshotFromRow(updated.rows[0]);
   if (ownerChange) {
-    await carryPricingCurrency(client, command.propertyId, snapshot.currency, command.currency, at);
+    await carryPricingCurrency(client, command.propertyId, from, command.currency, at);
   }
   const response = {
     contractVersion: PMS_PRICING_CONTRACT_VERSION,

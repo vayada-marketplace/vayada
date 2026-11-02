@@ -76,7 +76,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
     }
     const tables = {
       "hotel_catalog.properties": ["SELECT", "UPDATE"],
-      "pms.property_pricing_settings": ["SELECT", "UPDATE"],
+      // VAY-2453: a hotel without its pricing currency row gets one first.
+      "pms.property_pricing_settings": ["SELECT", "INSERT", "UPDATE"],
       "finance.payment_settings": ["SELECT", "UPDATE"],
       "booking.addon_definitions": ["SELECT", "UPDATE"],
       "booking.booking_settings": ["SELECT", "UPDATE"],
@@ -221,6 +222,145 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
     expect(await snapshot()).toEqual(before);
   });
 
+  // VAY-2453: hotels set up before the pricing currency row existed show the Booking default
+  // (else Finance's, else EUR); the dialog read answers 404 for them.
+  describe("a hotel without its pricing currency row", () => {
+    beforeEach(async () => {
+      // Finance never bound to a pricing currency (0055: the readiness binding is all or nothing).
+      await admin.query(
+        `UPDATE finance.payment_settings SET payment_readiness_contract_version=NULL,
+           payment_methods_revision=NULL, source_pricing_currency_revision=NULL
+         WHERE property_id=$1`,
+        [hotel],
+      );
+      await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [hotel]);
+    });
+
+    it("adopts the currency the page shows and changes it like any other, to revision 2", async () => {
+      await expect(repository.getCurrencyChangeBlockers(hotel)).resolves.toEqual([]);
+
+      const adopt = command("adopt", 0, "CHF", "EUR");
+      const result = await repository.upsertPropertyPricingCurrency(adopt);
+
+      expect(result).toMatchObject({
+        ok: true,
+        response: {
+          outcome: "updated",
+          pricingCurrency: { currency: "CHF", pricingCurrencyRevision: 2 },
+        },
+      });
+      // Revision 2, so a publish in CHF keeps its numbers (VAY-2425); the carry moved the rest.
+      expect(await snapshot()).toEqual({
+        pricing: "CHF:2",
+        finance: null,
+        addon: "CHF",
+        display: "CHF",
+      });
+      expect(await finance(hotel)).toMatchObject({
+        default_currency: "CHF",
+        source_pricing_currency_revision: null,
+      });
+      // A retry after a lost response replays the same answer and writes nothing more.
+      await expect(repository.upsertPropertyPricingCurrency(adopt)).resolves.toEqual(result);
+      expect((await snapshot()).pricing).toBe("CHF:2");
+    });
+
+    it("adopts Finance's currency, then EUR, where Booking has no settings, as the page shows", async () => {
+      await admin.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [hotel]);
+      await admin.query(
+        "UPDATE finance.payment_settings SET default_currency='GBP' WHERE property_id=$1",
+        [hotel],
+      );
+      await expect(
+        repository.upsertPropertyPricingCurrency(command("finance", 0, "CHF", "GBP")),
+      ).resolves.toMatchObject({ ok: true, response: { pricingCurrency: { currency: "CHF" } } });
+      expect(await finance(hotel)).toMatchObject({ default_currency: "CHF" });
+    });
+
+    it("asks to reload when the page showed another currency than the hotel now has", async () => {
+      await admin.query(
+        "UPDATE booking.booking_settings SET default_currency='USD' WHERE property_id=$1",
+        [hotel],
+      );
+      const before = await snapshot();
+
+      for (const shown of ["EUR", undefined]) {
+        await expect(
+          repository.upsertPropertyPricingCurrency(command(`stale-${shown}`, 0, "CHF", shown)),
+        ).resolves.toMatchObject({
+          ok: false,
+          error: { code: "pricing_currency_revision_conflict", currentRevision: 0 },
+        });
+      }
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it("answers unchanged for the currency the page already shows, and writes nothing", async () => {
+      await admin.query(
+        "UPDATE booking.booking_settings SET default_currency='USD' WHERE property_id=$1",
+        [hotel],
+      );
+      const before = await snapshot();
+
+      await expect(
+        repository.upsertPropertyPricingCurrency(command("shown", 0, "USD", "USD")),
+      ).resolves.toMatchObject({ ok: false, error: { code: "pricing_currency_unchanged" } });
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it("refuses while the hotel has an upcoming booking, and writes nothing", async () => {
+      await admin.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,currency,total_amount,room_count,adults,children,booking_metadata)
+         VALUES(gen_random_uuid(),$1,'${PREFIX}' || gen_random_uuid(),'booking_com','confirmed',CURRENT_DATE + 3,CURRENT_DATE + 5,'EUR',300,1,2,0,'{}')`,
+        [hotel],
+      );
+      const before = await snapshot();
+      await expect(repository.getCurrencyChangeBlockers(hotel)).resolves.toEqual([
+        { code: "booking_reference", affectedCount: 1 },
+      ]);
+
+      await expect(
+        repository.upsertPropertyPricingCurrency(command("adopt-blocked", 0, "CHF", "EUR")),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: {
+          code: "pricing_currency_change_blocked",
+          currentRevision: 0,
+          blockers: [{ code: "booking_reference", affectedCount: 1 }],
+        },
+      });
+      expect(await snapshot()).toEqual({ ...before, pricing: null });
+    });
+
+    it("sends a hotel still in setup back to setup, which chooses the first currency and Financials", async () => {
+      await admin.query(
+        `INSERT INTO identity.product_entitlements
+           (organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id,metadata)
+         VALUES ($1,'pms','module:financials','suspended','pms','pms_property',$2::uuid::text,'{"newHotelFinancialsDefault":"pending"}')`,
+        [organizationId, hotel],
+      );
+      const before = await snapshot();
+      const blocked = [{ code: "hotel_setup_incomplete" }];
+      await expect(repository.getCurrencyChangeBlockers(hotel)).resolves.toEqual(blocked);
+
+      await expect(
+        repository.upsertPropertyPricingCurrency(command("setup", 0, "IDR", "EUR")),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "pricing_currency_change_blocked", currentRevision: 0, blockers: blocked },
+      });
+      expect(await snapshot()).toEqual(before);
+      expect(
+        (
+          await admin.query(
+            "SELECT status FROM identity.product_entitlements WHERE entitlement_key='module:financials' AND resource_id=$1",
+            [hotel],
+          )
+        ).rows,
+      ).toEqual([{ status: "suspended" }]);
+    });
+  });
+
   it("waits for a booking writer holding the property, then sees what it wrote", async () => {
     const writer = await admin.connect();
     try {
@@ -296,7 +436,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
     }
   });
 
-  function command(key: string, expectedRevision: number, currency: string) {
+  function command(key: string, expectedRevision: number, currency: string, shown?: string) {
     const parsed = parseUpsertPropertyPricingCurrencyCommand({
       organizationId,
       propertyId: hotel,
@@ -309,6 +449,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Owner pricing currency change (runtime logi
       },
       expectedPricingCurrencyRevision: expectedRevision,
       currency: parsePmsPricingCurrency(currency),
+      ...(shown ? { expectedPricingCurrency: shown } : {}),
     });
     if (!parsed) throw new Error("Invalid currency change fixture");
     return parsed;
