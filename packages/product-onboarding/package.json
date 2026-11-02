@@ -52,6 +52,7 @@
     "./TimezoneField": "./src/TimezoneField.tsx",
     "./timezones": "./src/timezones.ts",
     "./HotelSetupChecklistCard": "./src/HotelSetupChecklistCard.tsx",
+    "./GoLiveChecklistCard": "./src/GoLiveChecklistCard.tsx",
     "./hotelSetupChecklistMessages": "./src/hotelSetupChecklistMessages.ts",
     "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts",
     "./CountryPhoneField": "./src/CountryPhoneField.tsx"

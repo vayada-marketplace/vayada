@@ -33,19 +33,27 @@ import {
 } from "./hotelFirstRunSteps.js";
 
 /**
- * VAY-2247: the server's first run. It takes what the new setup collects (the room types and their prices,
- * the taxes tick, how guests pay and the plan), saves every default the hotel needs to go live, and resumes
+ * VAY-2247: the server's first run. It takes what the setup collects (the room types and their prices, the
+ * taxes tick, how guests pay and the plan), saves every default the hotel needs to go live, and resumes
  * where it stopped. Steps run in order and stop at the first one that fails, so later steps never run on
  * top of a half-written earlier one. Concurrent runs for the same property are refused.
+ *
+ * VAY-2451: the four-step setup sends no room types, prices or plan. It makes its room type itself under the
+ * first run's draft id (or skips it); the first run gives that room type the placeholder price and the hotel
+ * the Commission plan, and leaves the calendar until the hotel has a room type.
  */
 
 export type HotelFirstRunRequest = Readonly<{
-  /** The room types to create, in order: 1 to FIRST_RUN_MAX_ROOM_TYPES, with different names. */
+  /**
+   * The room types to create, in order: 1 to FIRST_RUN_MAX_ROOM_TYPES, with different names. None from the
+   * four-step setup (VAY-2451): its room type, if it made one, gets the placeholder price instead.
+   */
   rooms: readonly FirstRunRoomInput[];
   pricesIncludeMandatoryCharges: boolean;
   /** Online card comes later (VAY-2205): the first run only sets up paying at the property. */
   guestPayment: "pay_at_property";
-  plan: HotelFirstRunPlanChoice;
+  /** Null from the four-step setup (VAY-2451): Commission unless the hotel has a plan or a Fixed Fee checkout. */
+  plan: HotelFirstRunPlanChoice | null;
   /** The owner's choices for every room type the first run makes (1.12b): free cancellation and beds. */
   freeCancellationDays: FirstRunFreeCancellationDays;
   bed: FirstRunBedChoice;
@@ -134,8 +142,8 @@ async function runSteps(
     (room) => firstRunRoomFacts(room, request.bed)?.occupancy ?? null,
   );
   const names = new Set(request.rooms.map((room) => room.name.trim().toLowerCase()));
+  const placeholder = request.rooms.length === 0;
   if (
-    request.rooms.length < 1 ||
     request.rooms.length > FIRST_RUN_MAX_ROOM_TYPES ||
     names.size !== request.rooms.length ||
     occupancies.some((occupancy) => !occupancy)
@@ -161,6 +169,7 @@ async function runSteps(
         // The owner's own rooms (no first-run room types) are priced by the owner, not by the first run.
         if (!facts.currency || facts.firstRunRoomTypeIds.length === 0)
           return Object.freeze({ ok: true as const, wrote: false });
+        if (placeholder) return priceWithPlaceholder(ports, actor, facts, request);
         let wrote = false;
         for (const [index, roomTypeId] of facts.firstRunRoomTypeIds.entries()) {
           const room = request.rooms[index];
@@ -186,8 +195,10 @@ async function runSteps(
     ],
     [
       "calendar",
-      (facts) =>
-        runFirstRunCalendar(ports, actor, {
+      async (facts) => {
+        // A calendar needs a room type (VAY-2451: the room is optional); a later run opens it.
+        if (facts.roomTypes.length === 0) return Object.freeze({ ok: true as const, wrote: false });
+        return runFirstRunCalendar(ports, actor, {
           propertyProfileRevision: facts.profile?.revision ?? 0,
           timezone: facts.profile?.timezone ?? null,
           roomTypes: facts.roomTypes.map((room) => ({
@@ -197,7 +208,8 @@ async function runSteps(
             activeUnitCount: room.activeUnitCount,
           })),
           inventoryPrepared: facts.calendar.inventoryPrepared,
-        }),
+        });
+      },
     ],
     [
       "guest_rules",
@@ -244,4 +256,41 @@ async function runSteps(
     ran,
     checkoutUrl,
   });
+}
+
+/**
+ * VAY-2451: the placeholder price for each room type the setup made under the first run's draft ids, sized
+ * to the room type's own occupancy. A room type that has prices already keeps them.
+ */
+async function priceWithPlaceholder(
+  ports: HotelFirstRunPorts,
+  actor: HotelFirstRunActor,
+  facts: HotelFirstRunWriteFacts,
+  request: HotelFirstRunRequest,
+): Promise<Readonly<{ ok: true; wrote: boolean }> | Readonly<{ ok: false; code: string }>> {
+  const occupancies = new Map(
+    (await ports.roomRead.listRoomTypeFacts(actor.propertyId)).map((room) => [
+      room.roomTypeId,
+      room.facts.occupancy,
+    ]),
+  );
+  let wrote = false;
+  for (const roomTypeId of facts.firstRunRoomTypeIds) {
+    const occupancy = occupancies.get(roomTypeId);
+    if (!occupancy || !facts.currency) continue;
+    const outcome = await runFirstRunPricing(ports, actor, {
+      roomTypeId,
+      capacity: {
+        total: occupancy.maxGuests,
+        adults: occupancy.maxAdults,
+        children: occupancy.maxChildren,
+      },
+      currency: facts.currency.code,
+      freeCancellationDays: request.freeCancellationDays,
+      placeholder: true,
+    });
+    if (!outcome.ok) return outcome;
+    wrote ||= outcome.wrote;
+  }
+  return Object.freeze({ ok: true, wrote });
 }

@@ -44,6 +44,8 @@ export const BOOKING_LAUNCH_BLOCKER_MESSAGES: Readonly<Record<string, string>> =
     "Your prices are saved. Guests see them once your hotel is set up.",
   pricing_terms_changed: "Your rate terms changed after prices were saved. Save your prices again.",
   public_room_content_incomplete: "Every bookable room needs a saved price.",
+  pricing_rates_placeholder:
+    "Your rooms still show the placeholder price. Set your real prices in Rooms & Rates › Prices.",
   // Open your calendar
   operating_calendar_missing: "Open your calendar and confirm your starting availability.",
   operating_calendar_source_stale:

@@ -115,6 +115,11 @@ function service(
         options.busy ? "busy" : work(),
     },
     activation,
+    roomRead: {
+      listRoomTypeFacts: vi.fn(async () => [
+        { roomTypeId, facts: { occupancy: { maxGuests: 3, maxAdults: 3, maxChildren: 2 } } },
+      ]),
+    },
   } as unknown as HotelFirstRunPorts;
   return { first: createHotelFirstRunService(ports), plans, activation };
 }
@@ -217,7 +222,6 @@ describe("hotel first run (VAY-2247)", () => {
 
   it.each([
     ["an invalid room", [{ ...classicDouble, maxGuests: 0 }]],
-    ["no room type", []],
     [
       "two room types with the same name",
       [classicDouble, { ...classicDouble, name: "classic double" }],
@@ -280,6 +284,47 @@ describe("hotel first run (VAY-2247)", () => {
   });
 });
 
+describe("the four-step setup's first run (VAY-2451)", () => {
+  const fourStep = { ...request, rooms: [], pricesIncludeMandatoryCharges: false, plan: null };
+
+  it("gives the room type the setup made the placeholder price, sized to its own guests", async () => {
+    const result = await service().first.run(actor, fourStep, null);
+    expect(result).toMatchObject({ ok: true });
+    expect(steps.rooms).toHaveBeenCalledWith(expect.anything(), actor, [], "double");
+    expect(steps.pricing).toHaveBeenCalledTimes(1);
+    expect(steps.pricing).toHaveBeenCalledWith(expect.anything(), actor, {
+      roomTypeId,
+      capacity: { total: 3, adults: 3, children: 2 },
+      currency: "EUR",
+      freeCancellationDays: 3,
+      placeholder: true,
+    });
+    expect(steps.calendar).toHaveBeenCalled();
+  });
+
+  it("finishes without a room: no price, no calendar, and the hotel still goes live", async () => {
+    const done = service({ facts: { ...facts, firstRunRoomTypeIds: [], roomTypes: [] } });
+    const result = await done.first.run(actor, fourStep, null);
+    expect(result).toMatchObject({
+      ok: true,
+      ran: ["currency", "rooms", "payments", "guest_rules", "plan"],
+    });
+    expect(steps.pricing).not.toHaveBeenCalled();
+    expect(steps.calendar).not.toHaveBeenCalled();
+    expect(done.plans.selectCommissionPlan).toHaveBeenCalled();
+    expect(done.activation.activateWhenComplete).toHaveBeenCalledWith(actor);
+  });
+
+  it("leaves the owner's own room types to them", async () => {
+    await service({ facts: { ...facts, firstRunRoomTypeIds: [] } }).first.run(
+      actor,
+      fourStep,
+      null,
+    );
+    expect(steps.pricing).not.toHaveBeenCalled();
+  });
+});
+
 describe("first run step 7: the plan (VAY-2247)", () => {
   const ports = (plan: object = {}) =>
     ({
@@ -306,6 +351,32 @@ describe("first run step 7: the plan (VAY-2247)", () => {
       propertyId,
       idempotencyKey: expect.stringMatching(/^first-run:v1:plan:/),
     });
+  });
+
+  it("VAY-2451: without a chosen plan, Commission, unless a Fixed Fee checkout is open", async () => {
+    const none = ports();
+    expect(await runFirstRunPlan(none, actor, { plan: null, customerEmail: null })).toEqual({
+      ok: true,
+      wrote: true,
+    });
+    const checkout = ports({
+      getPlanStatus: vi.fn(async () => ({ plan: null, checkoutPending: true })),
+    });
+    expect(await runFirstRunPlan(checkout, actor, { plan: null, customerEmail: null })).toEqual({
+      ok: true,
+      wrote: false,
+    });
+    expect(checkout.plans.selectCommissionPlan).not.toHaveBeenCalled();
+    // The same key as an owner's own Commission choice: a retry from either replays.
+    const chosen = ports();
+    await runFirstRunPlan(chosen, actor, { plan: "commission", customerEmail: null });
+    expect(
+      (chosen.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock.calls[0]![0]
+        .idempotencyKey,
+    ).toBe(
+      (none.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock.calls[0]![0]
+        .idempotencyKey,
+    );
   });
 
   it("keeps a plan the hotel already has", async () => {

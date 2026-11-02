@@ -2164,6 +2164,7 @@ const app = buildApp({
   ...hotelSetupOrdinaryOptions,
   hotelFirstRun,
   hotelSetupChecklist,
+  hotelGoLiveChecklist: config.hotelGoLiveChecklistEnabled,
   hotelAccountAgreements,
   // VAY-2444: needs signed-in users, so only with WorkOS auth configured.
   googleMapsLinks: config.auth ? {} : undefined,

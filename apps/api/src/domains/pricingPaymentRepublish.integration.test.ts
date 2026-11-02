@@ -109,6 +109,46 @@ describe.skipIf(!url)("re-publishing prices after a payment change", () => {
     expect(await revisions(id)).toHaveLength(2);
   });
 
+  it("keeps the first run's placeholder prices marked through every copy (VAY-2451)", async () => {
+    const f = await fixture(["pay_at_property"]),
+      id = f.propertyId;
+    const placeholder = `first-run:v1:pricing_placeholder_publish:${"a".repeat(64)}`;
+    expect(await (await f.save(0, "10000", placeholder))()).toEqual({
+      revision: 1,
+      replayed: false,
+    });
+    const requestIds = async () =>
+      (
+        await pool.query(
+          "SELECT request_id FROM pms.pricing_v2_revisions WHERE property_id=$1 ORDER BY revision",
+          [id],
+        )
+      ).rows.map((row) => row.request_id as string);
+    for (const methods of [["pay_at_property", "paypal"], ["pay_at_property"]]) {
+      await pool.query(
+        "UPDATE finance.payment_settings SET accepted_methods=$2::text[] WHERE property_id=$1",
+        [id, methods],
+      );
+      expect(await republishPricingAfterPaymentChange(pool, id)).toMatchObject({
+        outcome: "republished",
+      });
+    }
+    // Each copy names the placeholder it comes from, so the booking page still can't go live on it.
+    expect(await requestIds()).toEqual([
+      placeholder,
+      `${placeholder}:republish:2`,
+      `${placeholder}:republish:3`,
+    ]);
+    // The hotel's own save ends it: its copies are ordinary re-publishes again.
+    expect(await (await f.save(3, "18500"))()).toEqual({ revision: 4, replayed: false });
+    await pool.query(
+      "UPDATE finance.payment_settings SET accepted_methods=ARRAY['pay_at_property','paypal'] WHERE property_id=$1",
+      [id],
+    );
+    await republishPricingAfterPaymentChange(pool, id);
+    expect((await requestIds()).at(-1)).toBe("pricing.v2.payment-republish:5");
+  });
+
   it("follows Vayada card off and on again, each time with the methods the hotel can take", async () => {
     const f = await fixture(["card", "pay_at_property"], true),
       id = f.propertyId;
