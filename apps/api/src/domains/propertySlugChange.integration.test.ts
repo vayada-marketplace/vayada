@@ -279,6 +279,25 @@ describe.skipIf(!url)("operator booking address change in PostgreSQL (VAY-2295)"
       await refuses("invalid_slug", slug);
     await refuses("slug_taken", `hotel-${other.n}`);
     await refuses("slug_taken", `former-${other.n}`);
+    // VAY-2456: an agency booking page holds the address; plan and write both refuse it.
+    const agency = randomUUID();
+    await pool.query(
+      "INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Agency',$2,'active')",
+      [agency, `agency-${agency}`],
+    );
+    await pool.query(
+      "INSERT INTO booking.account_booking_pages(organization_id,slug,settings) VALUES($1,$2,'{}')",
+      [agency, `agency-${n}`],
+    );
+    await refuses("slug_taken", `agency-${n}`);
+    await expect(
+      pool.query(
+        `INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose,status)
+         VALUES($1,$2,'redirect','retired')`,
+        [propertyId, `agency-${n}`],
+      ),
+    ).rejects.toMatchObject({ code: "23505", constraint: "uq_booking_address_slug" });
+    await pool.query("DELETE FROM identity.organizations WHERE id=$1", [agency]);
     await refuses("plan_changed", `lodge-${n}`);
     await refuses("invalid_platform_scope", `lodge-${n}`, {
       audit: { ...audit, actorUserId: other.propertyId },

@@ -674,6 +674,7 @@ function isRetryableFailure(error: PmsReservationError): boolean {
 }
 
 export * from "./conversionFunnel.js";
+export * from "./accountBookingPage.js";
 export * from "./bookingPromotions.js";
 
 export * from "./roomCombinationSearch.js";

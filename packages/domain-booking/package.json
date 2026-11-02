@@ -18,6 +18,10 @@
     "./conversion-funnel": {
       "types": "./dist/conversionFunnel.d.ts",
       "default": "./dist/conversionFunnel.js"
+    },
+    "./account-booking-page": {
+      "types": "./dist/accountBookingPage.d.ts",
+      "default": "./dist/accountBookingPage.js"
     }
   },
   "scripts": {

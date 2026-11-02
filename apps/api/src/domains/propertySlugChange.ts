@@ -145,7 +145,12 @@ export function createPropertySlugChangeCommand(config: {
       }).catch((error: unknown) => {
         // Another hotel took the free address after the plan locked its rows.
         const failure = error as { code?: unknown; constraint?: unknown };
-        if (failure.code === "23505" && failure.constraint === "uq_property_slugs_slug_locale")
+        // An agency booking page shares the namespace (VAY-2456); its trigger refuses the address.
+        if (
+          failure.code === "23505" &&
+          (failure.constraint === "uq_property_slugs_slug_locale" ||
+            failure.constraint === "uq_booking_address_slug")
+        )
           throw new PropertySlugChangeError("slug_taken");
         throw error;
       });
@@ -226,6 +231,13 @@ async function plan(
           ? "former_address"
           : null;
   if (!change) throw new PropertySlugChangeError("slug_taken");
+  // Agency booking pages live under the same host names (VAY-2456).
+  if (
+    change === "new_address" &&
+    (await client.query("SELECT 1 FROM booking.account_booking_pages WHERE slug = $1", [toSlug]))
+      .rows.length
+  )
+    throw new PropertySlugChangeError("slug_taken");
 
   const openAttempt = await client.query(
     `SELECT 1 FROM booking.booking_publication_attempts
