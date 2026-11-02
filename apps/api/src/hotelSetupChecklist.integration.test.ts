@@ -251,9 +251,10 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
       await t.fixture(async () => {
         // A room type from before room facts: its guest limit is stored as maxOccupancy.
         await t.admin.query(
-          `INSERT INTO pms.room_types (id, property_id, name, currency, occupancy_limits, active)
-           VALUES ($1, $2, 'Pool Villa', 'LKR', '{"maxOccupancy": 4}', TRUE),
-                  ($3, $2, 'Old Room', 'LKR', '{"total": 2}', FALSE)`,
+          `INSERT INTO pms.room_types
+             (id, property_id, name, base_rate_amount, currency, occupancy_limits, active)
+           VALUES ($1, $2, 'Pool Villa', NULL, NULL, '{"maxOccupancy": 4}', TRUE),
+                  ($3, $2, 'Old Room', NULL, NULL, '{"total": 2}', FALSE)`,
           [roomTypeId, propertyId, randomUUID()],
         );
         await t.admin.query(
