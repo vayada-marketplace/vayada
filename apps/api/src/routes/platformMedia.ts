@@ -33,6 +33,7 @@ export type PlatformMediaPurpose =
   | "identity.user.profile_image"
   | "booking.header_logo"
   | "booking.addon.image"
+  | "booking.account_page.header_image"
   | "property.hero_image"
   | "property.gallery_image"
   | "property.logo"
@@ -523,6 +524,7 @@ export function isAutoApprovedPublicMediaPurpose(purpose: PlatformMediaPurpose):
     purpose === "identity.user.profile_image" ||
     purpose === "booking.header_logo" ||
     purpose === "booking.addon.image" ||
+    purpose === "booking.account_page.header_image" ||
     purpose === "pms.room_type.media"
   );
 }
@@ -574,6 +576,27 @@ const targetPurposePolicies: Record<PlatformMediaPurpose, PlatformMediaPurposePo
     privateOnly: false,
     targetResourceProduct: "booking",
     targetResourceType: "booking_hotel",
+    requiredVariants: publicImageVariants,
+  },
+  // The agency booking page's header image (VAY-2457). It belongs to the account, so it is filed under
+  // the account's booking page; the upload names one of the account's booking hotels only to prove the
+  // member's link, and authorizeMediaResource also requires access to every property.
+  "booking.account_page.header_image": {
+    purpose: "booking.account_page.header_image",
+    permission: "booking.settings.manage",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [{ product: "booking", resourceType: "booking_hotel" }],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFileCount: 1,
+    maxImagePixels: defaultMaxImagePixels,
+    autoApprovePublicOnFinalize: isAutoApprovedPublicMediaPurpose(
+      "booking.account_page.header_image",
+    ),
+    privateOnly: false,
+    targetResourceProduct: "booking",
+    targetResourceType: "account_booking_page",
     requiredVariants: publicImageVariants,
   },
   "property.hero_image": {
@@ -2020,6 +2043,24 @@ function authorizeMediaResource(
     return context.selectedOrganization.kind === "hotel_group"
       ? { ok: true, context }
       : { ok: false, message: "Selected organization cannot upload PMS Inbox attachments." };
+  }
+  if (policy.purpose === "booking.account_page.header_image") {
+    const context = enforceRoutePolicy(request, {
+      permission: permissionForResource(policy),
+      resource: {
+        product: resource.product,
+        resourceType: resource.resourceType,
+        resourceId: resource.resourceId,
+        allowedRelationships: policy.allowedRelationships,
+      },
+    });
+    // The page speaks for every stay: as its settings, only agency members with every property.
+    const access = context.membership.propertyAccess;
+    return context.selectedOrganization.kind === "hotel_group" &&
+      access?.mode === "all" &&
+      access.accessOrigin === "agency"
+      ? { ok: true, context }
+      : { ok: false, message: "Only members with access to all properties can change this image." };
   }
   if (policy.purpose === "finance.expense.receipt") {
     const permission = permissionForResource(policy);

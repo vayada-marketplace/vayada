@@ -1741,6 +1741,108 @@ describe("platform media upload routes", () => {
   // prettier-ignore
   it("never exposes Finance receipt storage metadata on finalize or replay", async () => { const app = buildMediaApp({ permissions: ["pms.finance.manage"], resources: [{ product: "pms", resourceType: "pms_property", resourceId: financePropertyId, relationship: "owner" }], entitlements: [financeEntitlement("property-management"), financeEntitlement("module:financials")], enabledPurposes: ["finance.expense.receipt"] }); const created = await injectJson(app, { method: "POST", url: "/api/media/upload-sessions", headers: { authorization: "Bearer valid-token" }, payload: { purpose: "finance.expense.receipt", visibility: "private", resource: { product: "pms", resourceType: "pms_property", resourceId: financePropertyId, propertyId: financePropertyId, targetResourceId: "00000000-0000-4000-8000-000000000060" }, files: [{ filename: "receipt.webp", contentType: "image/webp", sizeBytes: 1024 }] } }); const upload = created.body as MediaCreateResponse, request = { method: "POST" as const, url: `/api/media/upload-sessions/${upload.uploadSession.sessionId}/finalize`, headers: { authorization: "Bearer valid-token" }, payload: { files: [{ uploadTargetId: upload.uploadTargets[0]!.uploadTargetId, contentType: "image/webp", sizeBytes: 1024 }] } }; for (const response of [await injectJson(app, request), await injectJson(app, request)]) { expect(response.statusCode).toBe(200); expect(response.body).toMatchObject({ mediaObject: { mediaObjectId: expect.any(String), purpose: "finance.expense.receipt" } }); expect(JSON.stringify(response.body)).not.toMatch(/bucket|storageKey|checksumSha256|variants/); } });
 
+  it("files the agency page's header image under the account, only for members with every property", async () => {
+    // VAY-2457: the upload names one of the account's booking hotels to prove the member's link.
+    const resources = [
+      {
+        product: "booking" as const,
+        resourceType: "booking_hotel" as const,
+        resourceId: "booking_hotel_alpenrose",
+        relationship: "owner" as const,
+      },
+    ];
+    const accountTarget: PlatformMediaTargetResolver = {
+      async resolveTarget({ context, policy }) {
+        return {
+          ok: true,
+          target: {
+            resourceProduct: policy.targetResourceProduct,
+            resourceType: policy.targetResourceType,
+            resourceId: context.selectedOrganization.organizationId,
+          },
+        };
+      },
+    };
+    const options = {
+      permissions: ["booking.settings.manage" as PermissionKey],
+      resources,
+      targetResolver: accountTarget,
+      enabledPurposes: ["booking.account_page.header_image" as const],
+    };
+    const payload = {
+      purpose: "booking.account_page.header_image",
+      visibility: "public",
+      resource: {
+        product: "booking",
+        resourceType: "booking_hotel",
+        resourceId: "booking_hotel_alpenrose",
+      },
+      files: [
+        { clientFileId: "hero", filename: "hero.jpg", contentType: "image/jpeg", sizeBytes: 2048 },
+      ],
+    };
+    const request = {
+      method: "POST" as const,
+      url: "/api/media/upload-sessions",
+      headers: { authorization: "Bearer valid-token" },
+      payload,
+    };
+
+    const app = buildMediaApp(options);
+    const created = await injectJson(app, request);
+    expect(created.statusCode).toBe(201);
+    const upload = created.body as MediaCreateResponse;
+    expect(upload.uploadSession).toMatchObject({
+      purpose: "booking.account_page.header_image",
+      effectiveVisibility: "public",
+      target: {
+        resourceProduct: "booking",
+        resourceType: "account_booking_page",
+        resourceId: "org_media",
+      },
+    });
+    const finalized = await injectJson(app, {
+      method: "POST",
+      url: `/api/media/upload-sessions/${upload.uploadSession.sessionId}/finalize`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        files: [
+          {
+            uploadTargetId: upload.uploadTargets[0]!.uploadTargetId,
+            contentType: "image/jpeg",
+            sizeBytes: 2048,
+          },
+        ],
+      },
+    });
+    expect(finalized.statusCode).toBe(200);
+    expect(finalized.body).toMatchObject({
+      mediaObject: {
+        purpose: "booking.account_page.header_image",
+        visibility: "public",
+        approvalStatus: "approved",
+        lifecycleStatus: "active",
+      },
+    });
+
+    // A member with only some properties, without the permission, or without the hotel link: refused.
+    for (const refused of [
+      { ...options, propertyAccessMode: "assigned" as const },
+      { ...options, permissions: ["booking.settings.read" as PermissionKey] },
+      { ...options, resources: [] },
+    ])
+      expect((await injectJson(buildMediaApp(refused), request)).statusCode).toBe(403);
+    // Public only, one image, within 10 MB.
+    for (const changed of [
+      { ...payload, visibility: "private" },
+      { ...payload, files: [{ ...payload.files[0]!, sizeBytes: 10 * 1024 * 1024 + 1 }] },
+      { ...payload, files: [payload.files[0]!, { ...payload.files[0]!, clientFileId: "second" }] },
+    ])
+      expect(
+        (await injectJson(buildMediaApp(options), { ...request, payload: changed })).statusCode,
+      ).toBe(400);
+  });
+
   it("publishes Booking-scoped SVG header logos within the 500 KB limit", async () => {
     const app = buildMediaApp({
       permissions: ["booking.settings.manage"],
@@ -2777,6 +2879,7 @@ function buildMediaApp(
     workosOrgId?: string;
     userId?: string;
     organizationKind?: "hotel_group" | "platform";
+    propertyAccessMode?: "all" | "assigned";
   } = {},
 ): ReturnType<typeof buildApp> {
   const workosOrgId = options.workosOrgId ?? session.workosOrgId ?? "workos_media_org";
@@ -2804,7 +2907,16 @@ function buildMediaApp(
         },
         options.userId,
       ),
-      propertyAccessRepository: agencyPropertyAccessRepository,
+      propertyAccessRepository:
+        options.propertyAccessMode === "assigned"
+          ? {
+              async findMembershipPropertyScope(context) {
+                const scope =
+                  await agencyPropertyAccessRepository.findMembershipPropertyScope(context);
+                return scope && { ...scope, mode: "assigned" };
+              },
+            }
+          : agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return options.permissions ?? ["hotel_catalog.setup.manage"];

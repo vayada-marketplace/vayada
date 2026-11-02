@@ -41,6 +41,7 @@ function draft(changes: Partial<AccountBookingPageDraft> = {}): AccountBookingPa
     live: false,
     settings: defaultAccountBookingPageSettings("The Travel Ubud"),
     propertyIds: ["a", "b"],
+    headerImage: null,
     ...changes,
   };
 }

@@ -21,7 +21,14 @@ const headers = { authorization: "Bearer valid-token" };
 const settings = defaultAccountBookingPageSettings("The Travel Ubud");
 const summary: AccountBookingPageSummary = {
   saved: false,
-  page: { slug: "the-travel-ubud", live: false, revision: 0, settings, propertyIds: [propertyA] },
+  page: {
+    slug: "the-travel-ubud",
+    live: false,
+    revision: 0,
+    settings,
+    propertyIds: [propertyA],
+    headerImage: null,
+  },
   defaults: settings,
   properties: [
     {
@@ -92,6 +99,7 @@ describe("Agency booking page routes", () => {
   it("answers each refusal with its status and a message", async () => {
     const expected: Array<[AccountBookingPageSaveError, number]> = [
       ["account_not_found", 404],
+      ["header_image_invalid", 422],
       ["page_changed", 409],
       ["slug_taken", 409],
       ["account_needs_two_properties", 422],

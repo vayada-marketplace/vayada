@@ -24,9 +24,15 @@ export type AccountBookingPageProperty = {
 };
 
 /** GET/PUT /api/booking/account-booking-page (VAY-2456): the selected account's agency booking page. */
+export type AccountBookingPageHeaderImage = { mediaId: string; url: string };
+
 export type AccountBookingPageSummary = {
   saved: boolean;
-  page: Omit<AccountBookingPageUpdate, "propertyIds"> & { propertyIds: string[] };
+  page: Omit<AccountBookingPageUpdate, "propertyIds" | "headerImageMediaId"> & {
+    propertyIds: string[];
+    /** The page's own header image (VAY-2457); null while it uses a stay's photo. */
+    headerImage: AccountBookingPageHeaderImage | null;
+  };
   defaults: AccountBookingPageSettings;
   properties: AccountBookingPageProperty[];
   canSave: boolean;
@@ -39,6 +45,17 @@ const MISSING = new Set<string>(["setup", "type", "location"]);
 const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === "string" ? v : null);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseHeaderImage(v: unknown): AccountBookingPageHeaderImage | null {
+  return record(v) &&
+    typeof v.mediaId === "string" &&
+    UUID.test(v.mediaId) &&
+    typeof v.url === "string" &&
+    v.url.startsWith("https://")
+    ? { mediaId: v.mediaId, url: v.url }
+    : null;
+}
 
 function parseProperty(v: unknown): AccountBookingPageProperty | null {
   if (
@@ -105,6 +122,7 @@ export function parseAccountBookingPageSummary(v: unknown): AccountBookingPageSu
       revision: page.revision,
       settings,
       propertyIds: page.propertyIds as string[],
+      headerImage: parseHeaderImage(page.headerImage),
     },
     defaults,
     properties: properties as AccountBookingPageProperty[],

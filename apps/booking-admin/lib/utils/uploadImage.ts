@@ -13,7 +13,11 @@ export const HERO_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
 const MAX_HERO_IMAGE_BYTES = 10 * 1024 * 1024;
 const GALLERY_UPLOAD_TIMEOUT_MS = 30_000;
 
-type BookingMediaPurpose = "booking.header_logo" | "booking.addon.image";
+type BookingMediaPurpose =
+  | "booking.header_logo"
+  | "booking.addon.image"
+  // The agency booking page's own header image (VAY-2457), filed under the account.
+  | "booking.account_page.header_image";
 
 type PropertyMediaPurpose = "property.hero_image" | "property.gallery_image";
 

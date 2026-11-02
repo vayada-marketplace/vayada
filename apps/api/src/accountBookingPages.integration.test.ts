@@ -284,6 +284,47 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     ).toMatchObject({ ok: true, summary: { page: { live: false, revision: 2 } } });
   });
 
+  it("keeps the account's own header image, and refuses another account's or another kind", async () => {
+    const { organizationId, stays } = await travelUbud();
+    const other = await account("Other Agency", [{ name: "Foreign Villa", published: "visible" }]);
+    const own = await headerImage(organizationId, "https://cdn.example/agency-hero-large.jpg");
+    const foreign = await headerImage(other.organizationId, "https://cdn.example/foreign.jpg");
+    const logo = await headerImage(
+      organizationId,
+      "https://cdn.example/logo.png",
+      "booking.header_logo",
+    );
+    for (const headerImageMediaId of [foreign, logo, randomUUID()])
+      expect(
+        await repository.save(command(organizationId, update(stays, { headerImageMediaId }))),
+      ).toEqual({ ok: false, error: "header_image_invalid" });
+
+    const saved = await repository.save(
+      command(organizationId, update(stays, { headerImageMediaId: own })),
+    );
+    expect(saved).toMatchObject({
+      ok: true,
+      summary: {
+        page: { headerImage: { mediaId: own, url: "https://cdn.example/agency-hero-large.jpg" } },
+      },
+    });
+    // Left out, the image stays (an older Booking Admin); null removes it.
+    expect(
+      await repository.save(command(organizationId, update(stays, { revision: 1 }))),
+    ).toMatchObject({ ok: true, summary: { page: { headerImage: { mediaId: own } } } });
+    expect(
+      await repository.save(
+        command(organizationId, update(stays, { revision: 2, headerImageMediaId: null })),
+      ),
+    ).toMatchObject({ ok: true, summary: { page: { headerImage: null } } });
+    // Deleting the media clears the page's reference.
+    await repository.save(
+      command(organizationId, update(stays, { revision: 3, headerImageMediaId: own })),
+    );
+    await admin.query("DELETE FROM platform.media_objects WHERE id = $1::uuid", [own]);
+    expect(await repository.read(organizationId)).toMatchObject({ page: { headerImage: null } });
+  });
+
   // Public pricing locks the account row FOR UPDATE in short transactions. Reading never waits for it;
   // a save only waits at its audit row (a key-share lock on the account), then finishes.
   it("reads while public pricing holds the account row, and saves once it lets go", async () => {
@@ -386,6 +427,38 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     return { organizationId, stays };
   }
 
+  /** A finished public upload with a large variant, as platform media leaves it (VAY-2457). */
+  async function headerImage(
+    organizationId: string,
+    url: string,
+    purpose = "booking.account_page.header_image",
+  ): Promise<string> {
+    const id = randomUUID();
+    const page = purpose === "booking.account_page.header_image";
+    await admin.query(
+      `INSERT INTO platform.media_objects
+         (id, bucket, storage_key, visibility, purpose, owner_organization_id, resource_product,
+          resource_type, resource_id, lifecycle_status, public_approved, content_type)
+       VALUES ($1::uuid, 'vayada-test', $2, 'public', $3, $4::uuid, 'booking', $5, $6, 'active', TRUE,
+         'image/jpeg')`,
+      [
+        id,
+        `media/${id}`,
+        purpose,
+        organizationId,
+        page ? "account_booking_page" : "booking_hotel",
+        page ? organizationId : "booking_hotel_alpenrose",
+      ],
+    );
+    await admin.query(
+      `INSERT INTO platform.media_variants
+         (media_object_id, variant_name, visibility, storage_key, content_type, public_cdn_url)
+       VALUES ($1::uuid, 'large', 'public', $2, 'image/jpeg', $3)`,
+      [id, `media/${id}/large`, url],
+    );
+    return id;
+  }
+
   async function publish(propertyId: string, slug: string, state: "visible" | "hidden") {
     const bookable = PUBLIC_BOOKABILITY_FIXTURES.find((item) => item.caseId === "bookable")!;
     const profile = structuredClone(bookable.profile);
@@ -443,6 +516,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
       ).rows.map(({ id }) => id);
       // Replica mode skips the append-only triggers and FK cascades, so every row goes explicitly.
       await client.query("SET LOCAL session_replication_role = replica");
+      await client.query(
+        `DELETE FROM platform.media_variants WHERE media_object_id IN (
+           SELECT id FROM platform.media_objects WHERE owner_organization_id = ANY($1::uuid[]))`,
+        [organizations],
+      );
       for (const [table, column, ids] of [
         ["platform.product_audit_events", "organization_id", organizations],
         ["booking.account_booking_page_properties", "organization_id", organizations],
@@ -455,6 +533,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         ["hotel_catalog.property_slugs", "property_id", properties],
         ["hotel_catalog.property_locations", "property_id", properties],
         ["hotel_catalog.properties", "id", properties],
+        ["platform.media_objects", "owner_organization_id", organizations],
         ["identity.organizations", "id", organizations],
       ] as const)
         await client.query(`DELETE FROM ${table} WHERE ${column} = ANY($1::uuid[])`, [ids]);

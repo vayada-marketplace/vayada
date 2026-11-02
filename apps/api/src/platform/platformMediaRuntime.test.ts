@@ -96,6 +96,7 @@ describe("platform media runtime composition", () => {
         "identity.user.profile_image",
         "booking.header_logo",
         "booking.addon.image",
+        "booking.account_page.header_image",
         "property.hero_image",
         "property.gallery_image",
         "property.logo",
