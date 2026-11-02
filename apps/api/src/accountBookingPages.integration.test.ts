@@ -241,7 +241,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
       ),
     ).toMatchObject({ ok: true });
     await admin.query(
-      `UPDATE hotel_catalog.properties SET lifecycle_status = 'retired'
+      `UPDATE hotel_catalog.properties SET lifecycle_status = 'provisioning'
        WHERE id = ANY($1::uuid[])`,
       [[stays.mandala, stays.mansion, stays.perum, stays.astavaka, stays.uma]],
     );
