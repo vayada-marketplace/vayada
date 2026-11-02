@@ -225,6 +225,9 @@ describe("Booking publication builder", () => {
             { type: "website", value: "http://hotel.test" },
             { type: "instagram", value: "https://instagram.test/hotel#top" },
             { type: "x", value: " https://x.test/hotel " },
+            // VAY-2451: TikTok and YouTube links reach the page, as full https links only.
+            { type: "tiktok", value: "https://tiktok.test/@hotel" },
+            { type: "youtube", value: "youtube.test/@hotel" },
             { type: "email", value: "not-an-email" },
             { type: "phone", value: "+94 771 021 677" },
             { type: "phone", value: "+94 771 021 677 " },
@@ -255,6 +258,7 @@ describe("Booking publication builder", () => {
     expect(profile.hotel.images).toEqual([{ url: photo.url, alt: null }]);
     expect(profile.hotel.publicContacts).toEqual([
       { type: "x", value: "https://x.test/hotel" },
+      { type: "tiktok", value: "https://tiktok.test/@hotel" },
       { type: "phone", value: "+94 771 021 677" },
     ]);
     // Setup offers half bathrooms; the room's photo shows once, without blank text. Text that was
