@@ -338,6 +338,7 @@ import { createPgPmsNavigationModuleRepository } from "./routes/pmsNavigationMod
 import { createPgPmsGuestRegistrationRepository } from "./routes/pmsGuestRegistrations.js";
 import { createPgPmsGuestProfileRepository } from "./routes/pmsGuestProfiles.js";
 import { createPgPmsCheckinSettingsRepository } from "./routes/pmsCheckinSettings.js";
+import { createPgPmsGuestStayTimesRepository } from "./routes/pmsGuestStayTimes.js";
 import { createPgBookingModuleRepository } from "./routes/pmsBookingModules.js";
 import { createPgBookingLocationMapRepository } from "./domains/bookingLocationMap.js";
 import { createPgBookingRoomSortingRepository } from "./domains/bookingRoomSorting.js";
@@ -689,6 +690,10 @@ const pmsGuestProfileRepository = config.auth
 // Settings → Check-in (VAY-2374).
 const pmsCheckinSettingsRepository = config.auth
   ? createPgPmsCheckinSettingsRepository({ connectionString: targetDatabaseUrl, max: 2 })
+  : undefined;
+// The guest rules' check-in and check-out times for the front desk (VAY-2455).
+const pmsGuestStayTimesRepository = config.auth
+  ? createPgPmsGuestStayTimesRepository({ connectionString: targetDatabaseUrl, max: 2 })
   : undefined;
 const bookingModuleRepository = config.auth
   ? createPgBookingModuleRepository({ connectionString: targetDatabaseUrl })
@@ -2154,6 +2159,7 @@ const app = buildApp({
   pmsGuestRegistrationRepository,
   pmsGuestProfileRepository,
   pmsCheckinSettingsRepository,
+  pmsGuestStayTimesRepository,
   bookingModuleRepository,
   ...hotelSetupOrdinaryOptions,
   hotelFirstRun,

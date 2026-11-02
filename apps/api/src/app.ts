@@ -236,6 +236,10 @@ import {
   type PmsCheckinSettingsRepository,
 } from "./routes/pmsCheckinSettings.js";
 import {
+  registerPmsGuestStayTimesRoutes,
+  type PmsGuestStayTimesRepository,
+} from "./routes/pmsGuestStayTimes.js";
+import {
   registerPmsBookingModuleRoutes,
   type BookingModuleRepository,
 } from "./routes/pmsBookingModules.js";
@@ -374,6 +378,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsGuestRegistrationRepository?: PmsGuestRegistrationRepository;
   pmsGuestProfileRepository?: PmsGuestProfileRepository;
   pmsCheckinSettingsRepository?: PmsCheckinSettingsRepository;
+  /** The guest rules' check-in and check-out times for the PMS team (VAY-2455). */
+  pmsGuestStayTimesRepository?: PmsGuestStayTimesRepository;
   bookingModuleRepository?: BookingModuleRepository;
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
@@ -1039,6 +1045,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.pmsCheckinSettingsRepository,
       propertyAccessRepository: options.auth.propertyAccessRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (options.pmsGuestStayTimesRepository && options.auth) {
+    app.register(registerPmsGuestStayTimesRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsGuestStayTimesRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins ?? [],
     });
   }
   if (options.bookingModuleRepository && options.auth) {
