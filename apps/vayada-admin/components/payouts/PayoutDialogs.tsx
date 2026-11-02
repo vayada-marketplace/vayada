@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui";
 import {
   formatDay,
   formatMinor,
+  needsApproval,
   today,
   vayadaPayoutsService,
   type PayoutBankDetails,
@@ -42,17 +43,24 @@ export function errorOf(error: unknown): {
 }
 
 /** The hotel's bank account: masked until an operator asks, and every look is audited. Only the
- * account the operator expects is shown; a changed account says so instead. */
+ * account the operator expects is shown; a changed account says so instead. Details revealed for
+ * one account are never shown under another (the hotel may replace it while the page is open). */
 export function BankDetails({
   propertyId,
   destination,
   autoReveal = false,
+  revealable = true,
+  onRevealed,
 }: {
   propertyId: string;
   destination: PayoutDestination | null;
   autoReveal?: boolean;
+  /** False for an account staff haven't approved yet: its details open only to approve it (P7). */
+  revealable?: boolean;
+  onRevealed?: () => void;
 }) {
-  const [details, setDetails] = useState<PayoutBankDetails | null>(null);
+  const [revealed, setRevealed] = useState<PayoutBankDetails | null>(null);
+  const details = revealed && revealed.destinationId === destination?.id ? revealed : null;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reveal = async () => {
@@ -60,7 +68,8 @@ export function BankDetails({
     setLoading(true);
     setError(null);
     try {
-      setDetails(await vayadaPayoutsService.revealBankDetails(propertyId, destination.id));
+      setRevealed(await vayadaPayoutsService.revealBankDetails(propertyId, destination.id));
+      onRevealed?.();
     } catch (failure) {
       setError(errorOf(failure).message);
     } finally {
@@ -96,7 +105,7 @@ export function BankDetails({
           {countryName(destination.countryCode)} · account ending{" "}
           <span className="font-mono">{destination.accountLast4}</span>
         </p>
-        {!details && !autoReveal && (
+        {!details && !autoReveal && revealable && (
           <button
             type="button"
             onClick={reveal}
@@ -130,10 +139,17 @@ export function BankDetails({
   );
 }
 
+type StartedPayout = {
+  id: string;
+  amountMinor: string;
+  /** The account it was started for; an older one if the hotel replaced it since (P7). */
+  destinationId?: string;
+};
+
 export type PayoutTarget = {
   hotel: PayoutHotel;
   /** A payout already started (resume): straight to sending it. */
-  started?: { id: string; amountMinor: string };
+  started?: StartedPayout;
 };
 
 /** Paying a hotel in two steps. Start: exactly what is owed comes off the hotel's balance before
@@ -152,7 +168,7 @@ export function PayoutModal({
   onClose: () => void;
   onChanged: (message: string) => void;
 }) {
-  const [started, setStarted] = useState<{ id: string; amountMinor: string } | null>(null);
+  const [started, setStarted] = useState<StartedPayout | null>(null);
   const [reference, setReference] = useState("");
   const [paidOn, setPaidOn] = useState(today());
   const [sent, setSent] = useState(false);
@@ -169,6 +185,11 @@ export function PayoutModal({
   }, [target]);
   if (!target) return null;
   const { hotel } = target;
+  // P7: the hotel replaced the account after this payout started. Its details were wiped, and the
+  // account in use now is not where this payout was meant to go.
+  const accountReplaced =
+    started?.destinationId !== undefined && started.destinationId !== hotel.destination?.id;
+  const unapproved = needsApproval(hotel.destination);
   const amountMinor = started?.amountMinor ?? hotel.payNowMinor;
   const amount = formatMinor(amountMinor, hotel.currency);
   const run = async (work: () => Promise<void>) => {
@@ -197,7 +218,11 @@ export function PayoutModal({
         amountMinor: hotel.payNowMinor,
         destinationId: hotel.destination.id,
       });
-      setStarted({ id: payoutId, amountMinor: hotel.payNowMinor });
+      setStarted({
+        id: payoutId,
+        amountMinor: hotel.payNowMinor,
+        destinationId: hotel.destination.id,
+      });
     });
   const markSent = () =>
     run(async () => {
@@ -242,7 +267,16 @@ export function PayoutModal({
               <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-gray-500">
                 Payout account
               </p>
-              <BankDetails propertyId={hotel.propertyId} destination={hotel.destination} />
+              <BankDetails
+                propertyId={hotel.propertyId}
+                destination={hotel.destination}
+                revealable={!unapproved}
+              />
+              {unapproved && (
+                <p className="mt-2 text-[12px] text-amber-700">
+                  Approve this bank account before paying out to it.
+                </p>
+              )}
             </div>
             <ol className="space-y-1.5 text-[12px] text-gray-600 list-decimal pl-4">
               <li>Start the payout: the amount comes off the hotel&apos;s balance.</li>
@@ -252,16 +286,23 @@ export function PayoutModal({
           </>
         ) : (
           <>
-            <div className="rounded-xl border border-gray-200 px-4 py-3">
-              <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-gray-500">
-                Send to this account
+            {accountReplaced ? (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] text-amber-800">
+                The hotel replaced this bank account after this payout was started. If the money
+                hasn&apos;t gone out, cancel it and pay the new account once it&apos;s approved.
               </p>
-              <BankDetails
-                propertyId={hotel.propertyId}
-                destination={hotel.destination}
-                autoReveal
-              />
-            </div>
+            ) : (
+              <div className="rounded-xl border border-gray-200 px-4 py-3">
+                <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-gray-500">
+                  Send to this account
+                </p>
+                <BankDetails
+                  propertyId={hotel.propertyId}
+                  destination={hotel.destination}
+                  autoReveal
+                />
+              </div>
+            )}
             <label className="block">
               <span className="text-[12px] font-medium text-gray-700">Transfer reference</span>
               <input
@@ -290,9 +331,11 @@ export function PayoutModal({
                 className="mt-0.5 h-4 w-4 rounded border-gray-300"
               />
               <span className="text-gray-700">
-                {hotel.destination
-                  ? `I sent exactly ${amount} to the account ending ${hotel.destination.accountLast4}.`
-                  : `I sent exactly ${amount}.`}
+                {accountReplaced
+                  ? `I sent exactly ${amount} to the account this payout was started for.`
+                  : hotel.destination
+                    ? `I sent exactly ${amount} to the account ending ${hotel.destination.accountLast4}.`
+                    : `I sent exactly ${amount}.`}
               </span>
             </label>
           </>
@@ -349,7 +392,7 @@ export function PayoutModal({
                 <button
                   type="button"
                   onClick={start}
-                  disabled={saving || !hotel.destination}
+                  disabled={saving || !hotel.destination || unapproved}
                   className={primaryClass}
                 >
                   {saving ? "Starting…" : `Start payout of ${amount}`}
@@ -424,5 +467,117 @@ export function ReturnPayoutModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** P7: Vayada staff approve a hotel's payout account after checking it; until then no payout goes
+ * to it (card payments keep working). Shows what was saved and when, and whether it replaced an
+ * earlier account; the bank details open on request, audited like every look. */
+export function ApproveAccountModal({
+  propertyId,
+  hotelName,
+  destination,
+  onClose,
+  onApproved,
+}: {
+  propertyId: string;
+  hotelName: string;
+  destination: PayoutDestination | null;
+  onClose: () => void;
+  onApproved: (message: string) => void;
+}) {
+  const [checked, setChecked] = useState(false);
+  const [looked, setLooked] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setChecked(false);
+    setLooked(false);
+    setError(null);
+  }, [destination]);
+  if (!destination) return null;
+  const approve = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await vayadaPayoutsService.approveBankAccount(propertyId, destination.id);
+      onApproved(
+        `Approved the bank account ending ${destination.accountLast4} for ${hotelName}. Payouts can go to it now.`,
+      );
+    } catch (failure) {
+      const problem = errorOf(failure);
+      setError(
+        problem.code === "payout_destination_changed"
+          ? `${hotelName} changed its bank account again. Close this and check the new one.`
+          : problem.message,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal isOpen onClose={onClose} title="Approve bank account" size="md">
+      <div className="space-y-4 text-[13px]">
+        <p className="text-gray-700">
+          {`${hotelName} ${destination.replaced ? "replaced its bank account" : "saved a bank account"} on ${formatDay(destination.savedAt)}. Check it before any payout goes to it. Card payments keep working meanwhile.`}
+        </p>
+        <div className="rounded-xl border border-gray-200 px-4 py-3">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500">
+              {`Saved ${formatDay(destination.savedAt)}`}
+            </p>
+            {destination.replaced && (
+              <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
+                Replaced
+              </span>
+            )}
+          </div>
+          <BankDetails
+            propertyId={propertyId}
+            destination={destination}
+            onRevealed={() => setLooked(true)}
+          />
+          {!looked && (
+            <p className="mt-2 text-[12px] text-gray-500">
+              Open the bank details to check them before approving.
+            </p>
+          )}
+        </div>
+        <label className="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => setChecked(event.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300"
+          />
+          <span className="text-gray-700">
+            {`I checked that this account belongs to ${hotelName}.`}
+          </span>
+        </label>
+        {error && <p className="text-[12px] text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className={secondaryClass}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={approve}
+            disabled={saving || !checked || !looked}
+            className={primaryClass}
+          >
+            {saving ? "Approving…" : "Approve bank account"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** The amber "needs approval" chip for a saved account no payout may go to yet (P7). */
+export function NeedsApproval({ destination }: { destination: PayoutDestination }) {
+  return (
+    <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
+      {destination.replaced ? "New bank account – needs approval" : "Bank account – needs approval"}
+    </span>
   );
 }

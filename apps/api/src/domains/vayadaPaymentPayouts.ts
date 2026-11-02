@@ -6,6 +6,21 @@ import { recordBankTransferAudit } from "./financeBankTransferRepository.js";
 type Codec = Pick<ReturnType<typeof createPayoutDestinationCodec>, "decrypt">;
 type Queryable = Pick<pg.PoolClient, "query">;
 
+/** The hotel's payout account in use (P7): staff approve each account before money goes to it. */
+export type VayadaPayoutAccount = {
+  id: string;
+  accountLast4: string;
+  countryCode: string;
+  /** When the owner saved this account. */
+  savedAt: string;
+  /** The hotel had an account before this one. */
+  replaced: boolean;
+  /** Vayada staff approved it (or the hotel's first card approval did, for a first account). */
+  approved: boolean;
+  approvedAt: string | null;
+  /** How: staff's "Approve bank account", or the hotel's first card approval (first account). */
+  approvedVia: "payout_account" | "card_approval" | null;
+};
 /** Money in the ledger's minor units, as strings (BIGINT never passes through a JS number). */
 export type VayadaPayoutHotel = {
   propertyId: string;
@@ -17,9 +32,10 @@ export type VayadaPayoutHotel = {
   payNowMinor: string;
   /** Owed for stays that check out after the cut-off, or whose refund is still on its way. */
   upcomingMinor: string;
-  destination: { id: string; accountLast4: string; countryCode: string } | null;
-  /** A payout started but not yet marked sent: finish it (or cancel it) before anything else. */
-  sending: { id: string; amountMinor: string; startedAt: string } | null;
+  destination: VayadaPayoutAccount | null;
+  /** A payout started but not yet marked sent: finish it (or cancel it) before anything else.
+   * `destinationId` is the account it was started for: an older one if the hotel replaced it. */
+  sending: { id: string; amountMinor: string; startedAt: string; destinationId: string } | null;
   lastPayout: { id: string; amountMinor: string; paidOn: string; reference: string } | null;
 };
 export type VayadaPayoutEntry = {
@@ -38,6 +54,8 @@ export type VayadaPayout = {
   currency: string;
   amountMinor: string;
   cutoff: string;
+  /** The payout account it was started for (an older one if the hotel replaced it since). */
+  destinationId: string;
   accountLast4: string;
   startedAt: string;
   reference: string | null;
@@ -62,6 +80,12 @@ export type SentVayadaPayoutCommand = {
   payoutId: string;
   reference: string;
   paidOn: string;
+  actorId: string;
+};
+export type ApproveVayadaPayoutAccountCommand = {
+  propertyId: string;
+  /** The account the operator checked: refused if the hotel replaced it since. */
+  destinationId: string;
   actorId: string;
 };
 export type ReturnVayadaPayoutCommand = {
@@ -106,12 +130,36 @@ const BALANCE = `
   WHERE l.livemode = $1`;
 
 const PAYOUT_COLUMNS = `h.id::text, trim(h.currency) AS currency, h.amount_minor::text AS "amountMinor",
-  h.cutoff::text, d.account_last4 AS "accountLast4",
+  h.cutoff::text, h.payout_destination_id::text AS "destinationId", d.account_last4 AS "accountLast4",
   to_char(h.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "startedAt",
   h.reference, h.paid_on::text AS "paidOn",
   to_char(h.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "sentAt",
   to_char(h.returned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "returnedAt",
   h.return_reason AS "returnReason"`;
+
+const ACCOUNT_TIMES = `to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "savedAt",
+  to_char(approved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "approvedAt"`;
+
+function account(row: {
+  id: string;
+  revision: number;
+  accountLast4: string;
+  countryCode: string;
+  savedAt: string;
+  approvedAt: string | null;
+  approvedVia: VayadaPayoutAccount["approvedVia"];
+}): VayadaPayoutAccount {
+  return {
+    id: row.id,
+    accountLast4: row.accountLast4,
+    countryCode: row.countryCode,
+    savedAt: row.savedAt,
+    replaced: row.revision > 1,
+    approved: row.approvedAt !== null,
+    approvedAt: row.approvedAt,
+    approvedVia: row.approvedVia,
+  };
+}
 
 /** vayada Payment payouts for Vayada staff (VAY-2442 P5): what each hotel is owed, its lines and
  * payouts, starting a payout before the money is sent by hand, marking it sent, a payout cancelled
@@ -120,7 +168,9 @@ const PAYOUT_COLUMNS = `h.id::text, trim(h.currency) AS currency, h.amount_minor
 export function createVayadaPaymentPayoutRepository(connectionString: string, codec?: Codec) {
   const pool = new pg.Pool({ connectionString, max: 5 });
 
-  async function destination(queryable: Queryable, propertyId: string) {
+  /** The account in use. `lock` (a payout start): a replacement saving at the same moment makes
+   * the start find no account instead of one being replaced under it. */
+  async function destination(queryable: Queryable, propertyId: string, lock = false) {
     return (
       (
         await queryable.query<{
@@ -130,10 +180,14 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
           keyArn: string;
           accountLast4: string;
           countryCode: string;
+          savedAt: string;
+          approvedAt: string | null;
+          approvedVia: VayadaPayoutAccount["approvedVia"];
         }>(
           `SELECT id::text, revision, ciphertext, key_arn AS "keyArn", account_last4 AS "accountLast4",
-             country_code AS "countryCode"
-           FROM finance.payout_destinations WHERE property_id=$1::uuid AND enabled`,
+             country_code AS "countryCode", ${ACCOUNT_TIMES}, approved_via AS "approvedVia"
+           FROM finance.payout_destinations WHERE property_id=$1::uuid AND enabled
+           ${lock ? "FOR SHARE" : ""}`,
           [propertyId],
         )
       ).rows[0] ?? null
@@ -152,11 +206,16 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
         payable: string;
         upcoming: string;
         destinationId: string | null;
+        revision: number | null;
         accountLast4: string | null;
         countryCode: string | null;
+        savedAt: string | null;
+        approvedAt: string | null;
+        approvedVia: VayadaPayoutAccount["approvedVia"];
         sendingId: string | null;
         sendingAmount: string | null;
         sendingStartedAt: string | null;
+        sendingDestinationId: string | null;
         payoutId: string | null;
         payoutAmount: string | null;
         paidOn: string | null;
@@ -165,18 +224,21 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
         `WITH balance AS (${BALANCE}
            ${input.propertyId ? "AND l.property_id = $3::uuid" : ""}
            GROUP BY 1, 2, 3)
-         SELECT balance.*, d.id::text AS "destinationId", d.account_last4 AS "accountLast4",
+         SELECT balance.*, d.id::text AS "destinationId", d.revision, d.account_last4 AS "accountLast4",
            d.country_code AS "countryCode",
+           to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "savedAt",
+           to_char(d.approved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "approvedAt",
+           d.approved_via AS "approvedVia",
            sending.id::text AS "sendingId", sending.amount_minor::text AS "sendingAmount",
            to_char(sending.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-             AS "sendingStartedAt",
+             AS "sendingStartedAt", sending.payout_destination_id::text AS "sendingDestinationId",
            last.id::text AS "payoutId", last.amount_minor::text AS "payoutAmount",
            last.paid_on::text AS "paidOn", last.reference
          FROM balance
          LEFT JOIN finance.payout_destinations d
            ON d.property_id = balance."propertyId"::uuid AND d.enabled
          LEFT JOIN LATERAL (
-           SELECT id, amount_minor, started_at FROM finance.hotel_payouts h
+           SELECT id, amount_minor, started_at, payout_destination_id FROM finance.hotel_payouts h
            WHERE h.property_id = balance."propertyId"::uuid AND h.currency = balance.currency
              AND h.livemode = $1 AND h.sent_at IS NULL AND h.returned_at IS NULL
            ORDER BY h.started_at DESC LIMIT 1
@@ -201,12 +263,25 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
       payNowMinor: vayadaPayNow(row.currency, BigInt(row.payable)).toString(),
       upcomingMinor: row.upcoming,
       destination:
-        row.destinationId && row.accountLast4 && row.countryCode
-          ? { id: row.destinationId, accountLast4: row.accountLast4, countryCode: row.countryCode }
+        row.destinationId && row.revision && row.accountLast4 && row.countryCode && row.savedAt
+          ? account({
+              id: row.destinationId,
+              revision: row.revision,
+              accountLast4: row.accountLast4,
+              countryCode: row.countryCode,
+              savedAt: row.savedAt,
+              approvedAt: row.approvedAt,
+              approvedVia: row.approvedVia,
+            })
           : null,
       sending:
-        row.sendingId && row.sendingAmount && row.sendingStartedAt
-          ? { id: row.sendingId, amountMinor: row.sendingAmount, startedAt: row.sendingStartedAt }
+        row.sendingId && row.sendingAmount && row.sendingStartedAt && row.sendingDestinationId
+          ? {
+              id: row.sendingId,
+              amountMinor: row.sendingAmount,
+              startedAt: row.sendingStartedAt,
+              destinationId: row.sendingDestinationId,
+            }
           : null,
       lastPayout:
         row.payoutId && row.payoutAmount && row.paidOn && row.reference
@@ -255,7 +330,7 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
         )
       ).rows[0]?.name;
       if (name === undefined) return null;
-      const [balances, entries, payouts, account] = await Promise.all([
+      const [balances, entries, payouts, current] = await Promise.all([
         hotels(pool, input),
         pool.query<VayadaPayoutEntry>(
           `SELECT l.id::text, l.entry_kind AS kind, trim(l.currency) AS currency,
@@ -285,9 +360,7 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
         propertyId: input.propertyId,
         name,
         balances,
-        destination: account
-          ? { id: account.id, accountLast4: account.accountLast4, countryCode: account.countryCode }
-          : null,
+        destination: current ? account(current) : null,
         entries: entries.rows,
         payouts: payouts.rows,
       };
@@ -318,9 +391,11 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
           return replay.same
             ? { status: "replayed" as const, payoutId: replay.id }
             : { status: "conflict" as const };
-        const account = await destination(client, command.propertyId);
-        if (!account) return { status: "no_destination" as const };
-        if (account.id !== command.destinationId) return { status: "destination_changed" as const };
+        const current = await destination(client, command.propertyId, true);
+        if (!current) return { status: "no_destination" as const };
+        if (current.id !== command.destinationId) return { status: "destination_changed" as const };
+        // P7: never to an account Vayada staff haven't approved (a replaced one, until checked).
+        if (current.approvedAt === null) return { status: "destination_not_approved" as const };
         const owed = (
           await hotels(client, {
             livemode: command.livemode,
@@ -344,7 +419,7 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
             command.amountMinor,
             command.livemode,
             command.cutoff,
-            account.id,
+            current.id,
             command.actorId,
           ],
         );
@@ -358,6 +433,39 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
         });
         await audit(client, command.propertyId, id, "started", command.actorId);
         return { status: "started" as const, payoutId: id };
+      });
+    },
+
+    /** P7: Vayada staff approve the hotel's payout account in use after checking it, so payouts
+     * can go to it. Only the account the operator checked; approving it again changes nothing. */
+    approveDestination(command: ApproveVayadaPayoutAccountCommand) {
+      return locked(command.propertyId, async (client) => {
+        const approved = (
+          await client.query<{ approvedAt: string }>(
+            `UPDATE finance.payout_destinations
+             SET approved_at=now(), approved_by_user_id=$3::uuid, approved_via='payout_account'
+             WHERE id=$1::uuid AND property_id=$2::uuid AND enabled AND deleted_at IS NULL
+               AND approved_at IS NULL
+             RETURNING to_char(approved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+               AS "approvedAt"`,
+            [command.destinationId, command.propertyId, command.actorId],
+          )
+        ).rows[0];
+        if (approved) {
+          await recordBankTransferAudit(client, {
+            propertyId: command.propertyId,
+            id: command.destinationId,
+            action: "approved",
+            actorId: command.actorId,
+            auditKey: `approved:${command.destinationId}`,
+            kind: "payout_destination",
+          });
+          return { status: "approved" as const, approvedAt: approved.approvedAt };
+        }
+        const current = await destination(client, command.propertyId);
+        if (!current) return { status: "not_found" as const };
+        if (current.id !== command.destinationId) return { status: "destination_changed" as const };
+        return { status: "replayed" as const, approvedAt: current.approvedAt! };
       });
     },
 
@@ -441,22 +549,22 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
      * one a payout was started for), and every look is audited. */
     async revealDestination(propertyId: string, actorId: string, destinationId?: string) {
       if (!codec) return { status: "unavailable" as const };
-      const account = await destination(pool, propertyId);
-      if (!account) return { status: "not_found" as const };
-      if (destinationId && account.id !== destinationId)
+      const current = await destination(pool, propertyId);
+      if (!current) return { status: "not_found" as const };
+      if (destinationId && current.id !== destinationId)
         return { status: "destination_changed" as const };
       let details: Awaited<ReturnType<Codec["decrypt"]>>;
       try {
         details = await codec.decrypt(
-          { propertyId, id: account.id, revision: account.revision },
-          { ciphertext: account.ciphertext, keyArn: account.keyArn },
+          { propertyId, id: current.id, revision: current.revision },
+          { ciphertext: current.ciphertext, keyArn: current.keyArn },
         );
       } catch {
         return { status: "unavailable" as const };
       }
       await recordBankTransferAudit(pool, {
         propertyId,
-        id: account.id,
+        id: current.id,
         action: "revealed",
         actorId,
         auditKey: randomUUID(),
@@ -464,8 +572,8 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
       });
       return {
         status: "revealed" as const,
-        destinationId: account.id,
-        countryCode: account.countryCode,
+        destinationId: current.id,
+        countryCode: current.countryCode,
         details,
       };
     },

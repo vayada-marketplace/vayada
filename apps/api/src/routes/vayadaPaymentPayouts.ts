@@ -7,7 +7,13 @@ import { authorizePlatformFinance } from "./financePlatformAuthorization.js";
 
 type Repository = Pick<
   ReturnType<typeof createVayadaPaymentPayoutRepository>,
-  "list" | "detail" | "start" | "markSent" | "markReturned" | "revealDestination"
+  | "list"
+  | "detail"
+  | "start"
+  | "markSent"
+  | "markReturned"
+  | "revealDestination"
+  | "approveDestination"
 >;
 type Mode = { mode?: string };
 type PropertyParams = { propertyId: string };
@@ -23,13 +29,15 @@ type StartBody = {
 type SentBody = { reference?: unknown; paidOn?: unknown };
 type ReturnBody = { commandId?: unknown; reason?: unknown };
 type RevealBody = { destinationId?: unknown };
+type ApproveBody = { destinationId?: unknown };
 
 const BASE = "/finance/platform/vayada-payment/payouts";
 
 /** vayada Payment payouts for Vayada staff (VAY-2442 P5). Registered only while
  * VAYADA_PAYMENT_ENABLED is on. Live money by default; `mode=test` shows Stripe test-mode money,
  * which is paid out only as a test. A payout is started before the money is sent by hand (that
- * takes it off the hotel's balance), then marked sent with the transfer's reference. */
+ * takes it off the hotel's balance), then marked sent with the transfer's reference. Staff approve
+ * each payout account before money goes to it (P7). */
 export async function registerVayadaPaymentPayoutRoutes(
   app: FastifyInstance,
   options: { repository: Repository; now?: () => Date },
@@ -96,6 +104,27 @@ export async function registerVayadaPaymentPayoutRoutes(
     },
   );
 
+  // P7: "Approve bank account", after staff checked the account the hotel saved.
+  app.post<{ Params: PropertyParams; Body: ApproveBody }>(
+    `${BASE}/:propertyId/destination/approve`,
+    async (request, reply) => {
+      const context = authorizePlatformFinance(request, reply, "manage");
+      if (!context) return reply;
+      const expected = request.body?.destinationId;
+      if (!uuid(request.params.propertyId) || !uuid(expected)) return invalid(reply);
+      const result = await options.repository.approveDestination({
+        propertyId: request.params.propertyId.toLowerCase(),
+        destinationId: expected.toLowerCase(),
+        actorId: context.actor.internalUserId,
+      });
+      if (result.status === "not_found") return notFound(reply, "payout_destination_not_found");
+      if (result.status === "destination_changed") return destinationChanged(reply);
+      if (result.status === "busy") return busy(reply);
+      if (result.status === "conflict") return conflict(reply);
+      return { approved: true, approvedAt: result.approvedAt };
+    },
+  );
+
   app.post<{ Params: PropertyParams; Body: StartBody }>(
     `${BASE}/:propertyId`,
     async (request, reply) => {
@@ -147,6 +176,12 @@ export async function registerVayadaPaymentPayoutRoutes(
           });
         case "destination_changed":
           return destinationChanged(reply);
+        case "destination_not_approved":
+          return reply.code(409).send({
+            statusCode: 409,
+            code: "payout_destination_not_approved",
+            message: "Approve the hotel's bank account before paying out to it.",
+          });
         case "amount_changed":
           return reply.code(409).send({
             statusCode: 409,

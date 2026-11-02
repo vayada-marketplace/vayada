@@ -139,3 +139,131 @@ it.skipIf(!process.env.TEST_DATABASE_URL)(
     }
   },
 );
+
+it.skipIf(!process.env.TEST_DATABASE_URL)(
+  "approves a payout account once, only while it is the account in use (VAY-2442 P7)",
+  async () => {
+    assertSafeTestDatabase(process.env.TEST_DATABASE_URL!);
+    const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`CREATE SCHEMA hotel_catalog; CREATE SCHEMA finance;
+      CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY);
+      INSERT INTO hotel_catalog.properties VALUES ('22222222-2222-4222-8222-222222222222');`);
+      for (const file of [
+        "0531_finance_payout_destinations.sql",
+        "0538_finance_payout_destination_approval.sql",
+      ])
+        await client.query(
+          await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"),
+        );
+      const actor = "66666666-6666-4666-8666-666666666666";
+      const insert = (revision: number, approval = "") =>
+        client.query(
+          `INSERT INTO finance.payout_destinations
+          (property_id, revision, state_version, ciphertext, key_arn, account_last4, country_code
+           ${approval ? ", approved_at, approved_by_user_id, approved_via" : ""})
+          VALUES ('22222222-2222-4222-8222-222222222222', $1, $1, $2, 'key', '3000', 'ID'
+           ${approval ? `, now(), '${actor}', '${approval}'` : ""})`,
+          [revision, Buffer.alloc(40)],
+        );
+      const step = async (name: string, run: () => Promise<unknown>, code: string) => {
+        await client.query(`SAVEPOINT ${name}`);
+        await expect(run()).rejects.toMatchObject({ code });
+        await client.query(`ROLLBACK TO ${name}`);
+      };
+      // A new account is never saved as approved.
+      await step("born_approved", () => insert(1, "payout_account"), "55000");
+      await insert(1);
+      // All three together, and only the two known ways.
+      await step(
+        "partial",
+        () => client.query("UPDATE finance.payout_destinations SET approved_at = now()"),
+        "23514",
+      );
+      await step(
+        "unknown_way",
+        () =>
+          client.query(
+            `UPDATE finance.payout_destinations
+             SET approved_at = now(), approved_by_user_id = $1, approved_via = 'owner'`,
+            [actor],
+          ),
+        "23514",
+      );
+      // The approval's time is the database's, not the writer's.
+      await client.query(
+        `UPDATE finance.payout_destinations
+         SET approved_at = '2000-01-01T00:00:00Z', approved_by_user_id = $1,
+           approved_via = 'payout_account'`,
+        [actor],
+      );
+      expect(
+        (
+          await client.query(
+            "SELECT approved_at = now() AS stamped_now FROM finance.payout_destinations",
+          )
+        ).rows,
+      ).toEqual([{ stamped_now: true }]);
+      // 0531's rules still hold with 0538's function.
+      for (const change of ["country_code = 'LK'", "account_last4 = '9999'", "revision = 2"])
+        await step(
+          "still_immutable",
+          () => client.query(`UPDATE finance.payout_destinations SET ${change}`),
+          "55000",
+        );
+      // Never changed or withdrawn after.
+      for (const change of [
+        "approved_at = now() + interval '1 day'",
+        "approved_via = 'card_approval'",
+        "approved_at = NULL, approved_by_user_id = NULL, approved_via = NULL",
+      ])
+        await step(
+          "changed",
+          () => client.query(`UPDATE finance.payout_destinations SET ${change}`),
+          "55000",
+        );
+      // Replaced: the approved revision is wiped as before, and keeps its approval.
+      await client.query(`UPDATE finance.payout_destinations
+      SET ciphertext = NULL, enabled = FALSE, deleted_at = now(), state_version = 2`);
+      await insert(2);
+      // Removed before anyone approved it: it can't be approved any more.
+      await client.query(`UPDATE finance.payout_destinations
+      SET ciphertext = NULL, enabled = FALSE, deleted_at = now(), state_version = 3
+      WHERE revision = 2`);
+      const approve = (revision: number) =>
+        client.query(
+          `UPDATE finance.payout_destinations
+           SET approved_at = now(), approved_by_user_id = $1, approved_via = 'payout_account'
+           WHERE revision = $2`,
+          [actor, revision],
+        );
+      await step("approve_removed", () => approve(2), "55000");
+      for (const change of ["ciphertext = '\\x00'::bytea", "enabled = TRUE", "deleted_at = NULL"])
+        await step(
+          "revive",
+          () => client.query(`UPDATE finance.payout_destinations SET ${change} WHERE revision = 2`),
+          "55000",
+        );
+      // The account in use can.
+      await insert(3);
+      await approve(3);
+      expect(
+        (
+          await client.query(
+            `SELECT revision, enabled, approved_via FROM finance.payout_destinations
+             ORDER BY revision`,
+          )
+        ).rows,
+      ).toEqual([
+        { revision: 1, enabled: false, approved_via: "payout_account" },
+        { revision: 2, enabled: false, approved_via: null },
+        { revision: 3, enabled: true, approved_via: "payout_account" },
+      ]);
+    } finally {
+      await client.query("ROLLBACK");
+      await client.end();
+    }
+  },
+);

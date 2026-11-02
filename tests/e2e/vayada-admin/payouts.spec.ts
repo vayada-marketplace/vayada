@@ -1,5 +1,16 @@
 import { expect, test } from "@playwright/test";
-import { api, fulfillJson, mockPayouts, signIn, startedPayoutId, ubud } from "./payoutsFixtures";
+import {
+  amed,
+  amedDetail,
+  api,
+  fulfillJson,
+  mockPayouts,
+  replacedFixture,
+  signIn,
+  startedPayoutId,
+  ubud,
+  uluwatu,
+} from "./payoutsFixtures";
 
 // VAY-2442 P5: Vayada finance pays vayada Payment hotels by hand on Mondays, for stays checked out
 // by the Sunday before: a payout is started before the money moves, then marked sent. The page
@@ -133,6 +144,108 @@ test("a hotel's lines and payouts, and a payout the bank sent back (VAY-2442)", 
   await page.getByPlaceholder("For example: account closed").fill("Account closed");
   await page.getByRole("button", { name: "Mark returned" }).last().click();
   await expect.poll(() => returned).toMatchObject({ reason: "Account closed" });
+});
+
+test("a replaced bank account waits for staff approval; card payments go on (VAY-2442 P7)", async ({
+  page,
+  baseURL,
+}) => {
+  const { adminBaseURL, origin } = await signIn(page, baseURL);
+  await mockPayouts(page, origin, replacedFixture);
+  let approved: Record<string, unknown> | null = null;
+  await page.route(
+    api(`/api/finance/platform/vayada-payment/payouts/${uluwatu}/destination/reveal`),
+    (route) =>
+      fulfillJson(route, origin, {
+        destinationId: "d0000000-0000-4000-8000-000000004321",
+        countryCode: "ID",
+        accountHolder: "PT Uluwatu Tebing Indah",
+        accountNumber: "1180 0045 4321",
+        bankName: "Bank Mandiri",
+        bankCode: "008",
+        branchCode: "",
+        bicSwift: "",
+        holderAddress: "",
+      }),
+  );
+  await page.route(
+    api(`/api/finance/platform/vayada-payment/payouts/${uluwatu}/destination/approve`),
+    (route) => {
+      approved = route.request().postDataJSON();
+      return fulfillJson(route, origin, { approved: true, approvedAt: "2026-11-09T08:00:00Z" });
+    },
+  );
+  await page.goto(new URL("/dashboard/payouts", adminBaseURL).toString());
+  const row = (name: RegExp) => page.locator("table").getByRole("row", { name });
+  await expect(row(/Uluwatu Cliff Villa/)).toContainText("New bank account – needs approval");
+  // Owed money, but no "Pay" until the new account is approved.
+  await expect(
+    row(/Uluwatu Cliff Villa/).getByRole("button", { name: "Pay", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText("1 waiting for bank account approval")).toBeVisible();
+
+  await row(/Uluwatu Cliff Villa/)
+    .getByRole("button", { name: "Approve bank account" })
+    .click();
+  const dialog = page.getByRole("heading", { name: "Approve bank account" }).locator("../..");
+  await expect(dialog).toContainText(
+    "Uluwatu Cliff Villa replaced its bank account on 2 Nov 2026. Check it before any payout goes to it.",
+  );
+  await expect(dialog.getByText("Replaced", { exact: true })).toBeVisible();
+  // Approving needs a look at the details (audited) and the operator's check.
+  const approve = dialog.getByRole("button", { name: "Approve bank account" });
+  await dialog.getByLabel("I checked that this account belongs to Uluwatu Cliff Villa.").check();
+  await expect(approve).toBeDisabled();
+  await dialog.getByRole("button", { name: "Show bank details" }).click();
+  await expect(dialog).toContainText("1180 0045 4321");
+  await approve.click();
+  await expect(
+    page.getByText(
+      "Approved the bank account ending 4321 for Uluwatu Cliff Villa. Payouts can go to it now.",
+    ),
+  ).toBeVisible();
+  expect(approved).toEqual({ destinationId: "d0000000-0000-4000-8000-000000004321" });
+});
+
+test("a payout started before the hotel replaced its account never shows the new one (VAY-2442 P7)", async ({
+  page,
+  baseURL,
+}) => {
+  const { adminBaseURL, origin } = await signIn(page, baseURL);
+  await mockPayouts(page, origin, replacedFixture);
+  let revealed = 0;
+  await page.route(api(`/api/finance/platform/vayada-payment/payouts/${amed}`), (route) =>
+    route.request().method() === "GET" ? fulfillJson(route, origin, amedDetail) : route.fallback(),
+  );
+  await page.route(
+    api(`/api/finance/platform/vayada-payment/payouts/${amed}/destination/reveal`),
+    (route) => {
+      revealed += 1;
+      return fulfillJson(route, origin, {});
+    },
+  );
+  await page.goto(new URL(`/dashboard/payouts/${amed}`, adminBaseURL).toString());
+  await expect(page.getByRole("heading", { name: "Amed Reef Bungalows" })).toBeVisible();
+  await expect(page.getByText("New bank account – needs approval")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve bank account" })).toBeVisible();
+  // An unapproved account's details open only inside "Approve bank account".
+  await expect(page.getByRole("button", { name: "Show bank details" })).toHaveCount(0);
+  await expect(
+    page.getByText("The hotel replaced this bank account after this payout was started.").first(),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Finish payout of IDR 395,000" }).click();
+  const dialog = page.getByRole("heading", { name: "Send payout" }).locator("../..");
+  await expect(dialog).toContainText(
+    "The hotel replaced this bank account after this payout was started. If the money hasn't gone out, cancel it",
+  );
+  await expect(
+    dialog.getByLabel("I sent exactly IDR 395,000 to the account this payout was started for."),
+  ).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Not sent? Cancel" })).toBeVisible();
+  // The new, unapproved account's details are never opened for this payout.
+  expect(revealed).toBe(0);
+  await expect(dialog).not.toContainText("8888");
 });
 
 test("says so while vayada Payment is switched off (VAY-2442)", async ({ page, baseURL }) => {
