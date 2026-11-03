@@ -149,8 +149,8 @@ for (const width of [1440, 390]) {
     const garden = page.getByTestId("room-card-garden");
     await garden.getByRole("button", { name: "Select for Room 1" }).click();
     await garden.getByRole("button", { name: "Select for Room 2" }).click();
-    // /book opens its details step with a URL replace once its catalogues are in. A Back pressed
-    // before that is undone by the replace, which then lands on /book again, so go back from there.
+    // /book opens its details step with a URL replace once its catalogues are in; go back from
+    // there. A Back pressed before that has its own test below (VAY-2464).
     await expect(page).toHaveURL(/\/(en\/)?book\?.*step=details/);
     await page.goBack();
     // Every room chosen: all tabs are done.
@@ -201,6 +201,76 @@ for (const width of [1440, 390]) {
     // Back to 2 + 2: both Garden rooms fit again.
     await expect(page.getByTestId("rooms-help")).toContainText("All 2 rooms chosen");
     await expect(page.getByTestId("room-tab-1")).toContainText("Garden Double Room");
+    await assertHealthy();
+  });
+}
+
+// VAY-2464: /book's first reads of what it settles on (the room and extras catalogues and the ways
+// to pay) wait for the browser's Back, then all arrive in that moment, when the address is already
+// the hotel page's. Installed once the hotel page is open, so its listener runs after Next's own.
+// Next 16 shows the kept hotel page again at once on Back, so this checks where the guest ends up;
+// CI's rarer timing (#4015), with /book still on screen, can't be forced from a test.
+async function holdBookReadsUntilBack(page: Page) {
+  await page.evaluate(() => {
+    const realFetch = window.fetch.bind(window);
+    const held = new Set<string>();
+    let release = () => {};
+    const back = new Promise<void>((resolve) => (release = resolve));
+    window.addEventListener("popstate", () => release(), { once: true });
+    Object.assign(window, { heldBookReads: held });
+    window.fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      const read = /\/(pricing-offers|pricing-addons|checkout-config)$/.exec(url.pathname)?.[1];
+      if (!read || held.has(read) || !location.pathname.endsWith("/book"))
+        return realFetch(input, init);
+      const response = await realFetch(input, init);
+      const body = await response.text();
+      held.add(read);
+      await back;
+      // Read at once (no task to wait for): /book has its reads in the moment of the Back.
+      const copy = new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+      copy.json = async () => JSON.parse(body);
+      copy.text = async () => body;
+      return copy;
+    };
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`goes back to the chosen rooms when Back is pressed while /book loads at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await mockBookingApis(page);
+    await mockGroup(page, []);
+    // 4 adults in two rooms: /book goes straight on to the details once it has settled.
+    await openHotelPage(page, "/?checkIn=2026-11-10&checkOut=2026-11-12&adults=4&rooms=2");
+    await holdBookReadsUntilBack(page);
+    const garden = page.getByTestId("room-card-garden");
+    await garden.getByRole("button", { name: "Select for Room 1" }).click();
+    await garden.getByRole("button", { name: "Select for Room 2" }).click();
+    await expect(page).toHaveURL(/\/(en\/)?book\?.*pick=/);
+    const picks = new URL(page.url()).searchParams.getAll("pick");
+    expect(picks).toHaveLength(2);
+    // /book asked for everything it settles on and has none of it yet.
+    await page.waitForFunction(
+      () => (window as unknown as { heldBookReads: Set<string> }).heldBookReads.size === 3,
+    );
+    await page.goBack();
+    // The hotel page, with both rooms still chosen.
+    await expect(page.getByTestId("rooms-help")).toContainText("All 2 rooms chosen");
+    await expect(page.getByTestId("room-tab-1")).toContainText("Garden Double Room");
+    await expect(page.getByTestId("room-tab-2")).toContainText("Garden Double Room");
+    expect(new URL(page.url()).pathname).toMatch(/^\/(en\/?)?$/);
+    // /book's own entry is untouched: Forward opens it with the picks, and it goes on by itself.
+    await page.goForward();
+    await expect(page).toHaveURL(/\/(en\/)?book\?.*step=details/);
+    expect(new URL(page.url()).searchParams.getAll("pick")).toEqual(picks);
     await assertHealthy();
   });
 }

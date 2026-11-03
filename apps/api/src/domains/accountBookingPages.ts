@@ -43,6 +43,8 @@ export type AccountBookingPageSummary = {
     settings: AccountBookingPageSettings;
     /** Included properties of the account in their "Recommended" order. */
     propertyIds: string[];
+    /** The page's own header image (VAY-2457); null while it uses a stay's photo. */
+    headerImage: { mediaId: string; url: string } | null;
   };
   defaults: AccountBookingPageSettings;
   /** Every property of the account, by name. */
@@ -53,6 +55,7 @@ export type AccountBookingPageSummary = {
 
 export type AccountBookingPageSaveError =
   | "account_not_found"
+  | "header_image_invalid"
   | "page_changed"
   | "slug_taken"
   | "account_needs_two_properties"
@@ -91,7 +94,31 @@ type AccountRow = {
   live: boolean | null;
   settings: unknown;
   revision: number | null;
+  headerImageId: string | null;
+  headerImageUrl: string | null;
 };
+
+/** The account's own header image as guests may see it: its public, approved, active upload for this
+ * account's booking page, by its largest public variant. */
+const HEADER_IMAGE_SQL = (mediaId: string, organizationId: string) => `
+  SELECT variant.public_cdn_url AS url
+  FROM platform.media_objects media
+  JOIN platform.media_variants variant
+    ON variant.media_object_id = media.id
+   AND variant.visibility = 'public'
+   AND variant.public_cdn_url LIKE 'https://%'
+  WHERE media.id = ${mediaId}
+    AND media.purpose = 'booking.account_page.header_image'
+    AND media.visibility = 'public'
+    AND media.public_approved = TRUE
+    AND media.lifecycle_status = 'active'
+    AND media.owner_organization_id = ${organizationId}
+    AND media.resource_product = 'booking'
+    AND media.resource_type = 'account_booking_page'
+    AND media.resource_id = ${organizationId}::text
+  ORDER BY (variant.variant_name = 'large') DESC, (variant.variant_name = 'original_safe') DESC,
+           variant.created_at, variant.id
+  LIMIT 1`;
 
 type PropertyRow = {
   propertyId: string;
@@ -205,17 +232,36 @@ async function saveLocked(
     return { ok: false, error: "property_not_ready" };
   if (update.live && !update.propertyIds.some((id) => readiness.get(id)?.ready))
     return { ok: false, error: "no_ready_property" };
+  // A new header image must be this account's own finished, public upload (VAY-2457).
+  const image = update.headerImageMediaId;
+  if (
+    image &&
+    !(await client.query(HEADER_IMAGE_SQL("$1::uuid", "$2::uuid"), [image, organizationId])).rows
+      .length
+  )
+    return { ok: false, error: "header_image_invalid" };
 
+  // Left out of the update, the saved image stays ($5 false).
   const saved = await client.query<{ revision: number }>(
     current
       ? `UPDATE booking.account_booking_pages
-         SET slug = $2, live = $3, settings = $4::jsonb, revision = revision + 1, updated_at = now()
+         SET slug = $2, live = $3, settings = $4::jsonb, revision = revision + 1, updated_at = now(),
+             header_image_media_object_id =
+               CASE WHEN $5::boolean THEN $6::uuid ELSE header_image_media_object_id END
          WHERE organization_id = $1::uuid
          RETURNING revision`
-      : `INSERT INTO booking.account_booking_pages (organization_id, slug, live, settings)
-         VALUES ($1::uuid, $2, $3, $4::jsonb)
+      : `INSERT INTO booking.account_booking_pages
+           (organization_id, slug, live, settings, header_image_media_object_id)
+         VALUES ($1::uuid, $2, $3, $4::jsonb, CASE WHEN $5::boolean THEN $6::uuid END)
          RETURNING revision`,
-    [organizationId, update.slug, update.live, JSON.stringify(update.settings)],
+    [
+      organizationId,
+      update.slug,
+      update.live,
+      JSON.stringify(update.settings),
+      image !== undefined,
+      image ?? null,
+    ],
   );
   await client.query(
     "DELETE FROM booking.account_booking_page_properties WHERE organization_id = $1::uuid",
@@ -250,6 +296,7 @@ async function saveLocked(
         slug: update.slug,
         live: update.live,
         propertyIds: update.propertyIds,
+        ...(image !== undefined ? { headerImageMediaId: image } : {}),
       }),
     ],
   );
@@ -287,6 +334,10 @@ async function summary(
           ? { ...settings, header: { ...settings.header, designPropertyId: null } }
           : settings,
       propertyIds,
+      headerImage:
+        account.headerImageId && account.headerImageUrl
+          ? { mediaId: account.headerImageId, url: account.headerImageUrl }
+          : null,
     },
     defaults,
     properties: rows.map((row) => ({
@@ -306,9 +357,14 @@ async function summary(
 
 async function accountRow(client: Queryable, organizationId: string): Promise<AccountRow | null> {
   const result = await client.query<AccountRow>(
-    `SELECT organization.name, page.slug, page.live, page.settings, page.revision
+    `SELECT organization.name, page.slug, page.live, page.settings, page.revision,
+            CASE WHEN image.url IS NOT NULL THEN page.header_image_media_object_id::text END
+              AS "headerImageId",
+            image.url AS "headerImageUrl"
      FROM identity.organizations organization
      LEFT JOIN booking.account_booking_pages page ON page.organization_id = organization.id
+     LEFT JOIN LATERAL (${HEADER_IMAGE_SQL("page.header_image_media_object_id", "organization.id")})
+       image ON TRUE
      WHERE organization.id = $1::uuid
        AND organization.kind = 'hotel_group'
        AND organization.status = 'active'`,

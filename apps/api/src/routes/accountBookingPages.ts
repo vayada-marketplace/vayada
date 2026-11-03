@@ -21,6 +21,7 @@ export type AccountBookingPageRoutesOptions = {
 
 const MESSAGES: Record<AccountBookingPageSaveError, [number, string]> = {
   account_not_found: [404, "This account can't have a booking page."],
+  header_image_invalid: [422, "Upload the header image again: this one can't be used."],
   page_changed: [
     409,
     "Someone else saved this page meanwhile. Reload it and make your changes again.",

@@ -3,7 +3,10 @@ import {
   type AccountBookingPageFilter,
   type AccountBookingPageSettings,
 } from "@vayada/domain-booking/account-booking-page";
-import type { AccountBookingPageProperty } from "@/services/api/accountBookingPageClient";
+import type {
+  AccountBookingPageHeaderImage,
+  AccountBookingPageProperty,
+} from "@/services/api/accountBookingPageClient";
 
 /** The page as the form edits it (VAY-2457). */
 export type AccountBookingPageDraft = {
@@ -11,6 +14,7 @@ export type AccountBookingPageDraft = {
   live: boolean;
   settings: AccountBookingPageSettings;
   propertyIds: string[];
+  headerImage: AccountBookingPageHeaderImage | null;
 };
 
 export type PropertyStatus =

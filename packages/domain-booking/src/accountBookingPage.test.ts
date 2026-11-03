@@ -161,6 +161,24 @@ describe("agency booking page settings", () => {
     }
   });
 
+  it("takes the header image as an id, null to remove it, or leaves it out", () => {
+    const image = "30000000-0000-4000-8000-00000000000c";
+    expect(
+      parseAccountBookingPageUpdate(update({ headerImageMediaId: image.toUpperCase() })),
+    ).toMatchObject({
+      headerImageMediaId: image,
+    });
+    expect(parseAccountBookingPageUpdate(update({ headerImageMediaId: null }))).toMatchObject({
+      headerImageMediaId: null,
+    });
+    expect(parseAccountBookingPageUpdate(update())).not.toHaveProperty("headerImageMediaId");
+    for (const headerImageMediaId of ["hero.jpg", 42, undefined, ""])
+      expect(
+        parseAccountBookingPageUpdate(update({ headerImageMediaId })),
+        String(headerImageMediaId),
+      ).toBeNull();
+  });
+
   it("refuses bad revisions, switches and property lists", () => {
     for (const overrides of [
       { revision: -1 },

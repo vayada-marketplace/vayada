@@ -16,6 +16,7 @@ const summary = {
     revision: 4,
     settings: defaults,
     propertyIds: [escape],
+    headerImage: null,
   },
   defaults,
   properties: [
@@ -37,6 +38,23 @@ const summary = {
 describe("account booking page client", () => {
   it("takes the summary next-api sends", () => {
     expect(parseAccountBookingPageSummary(summary)).toEqual(summary);
+  });
+
+  it("takes the page's own header image only as an id with an https address", () => {
+    const image = {
+      mediaId: "30000000-0000-4000-8000-00000000000c",
+      url: "https://cdn.example/hero.jpg",
+    };
+    const read = (headerImage: unknown) =>
+      parseAccountBookingPageSummary({ ...summary, page: { ...summary.page, headerImage } })?.page
+        .headerImage;
+    expect(read(image)).toEqual(image);
+    for (const broken of [
+      { ...image, url: "http://cdn.example/hero.jpg" },
+      { ...image, mediaId: "x" },
+      "x",
+    ])
+      expect(read(broken), JSON.stringify(broken)).toBeNull();
   });
 
   it("drops photos the browser shouldn't load and counts no units below one", () => {

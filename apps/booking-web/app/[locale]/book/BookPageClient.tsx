@@ -532,6 +532,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // The steps this tab moved forward from, so in-page Back returns through the browser history.
   const forwardFrom = useRef<BookStep[]>([]);
   const go = (next: BookStep, replace = false) => {
+    // VAY-2464: a Back pressed while /book loads leaves it before its steps settle. The address is
+    // then the hotel page's, and a step change built from it would send the guest forward again,
+    // without their rooms.
+    if (!window.location.pathname.endsWith("/book")) return;
     const href = `/book?${bookStepQuery(window.location.search, next)}`;
     if (replace) return router.replace(href);
     if (steps.indexOf(next) > steps.indexOf(step)) forwardFrom.current.push(step);

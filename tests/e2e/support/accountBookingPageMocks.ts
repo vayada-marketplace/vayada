@@ -23,7 +23,10 @@ export type AccountBookingPageMockProperty = {
 export function accountBookingPageSummary(
   accountName: string,
   properties: AccountBookingPageMockProperty[],
-  page?: Partial<Omit<AccountBookingPageUpdate, "revision">> & { revision?: number },
+  page?: Partial<Omit<AccountBookingPageUpdate, "revision" | "headerImageMediaId">> & {
+    revision?: number;
+    headerImage?: { mediaId: string; url: string } | null;
+  },
 ) {
   const defaults = defaultAccountBookingPageSettings(accountName);
   const saved = page?.revision !== undefined && page.revision > 0;
@@ -37,6 +40,7 @@ export function accountBookingPageSummary(
       revision: page?.revision ?? 0,
       settings: page?.settings ?? defaults,
       propertyIds,
+      headerImage: page?.headerImage ?? null,
     },
     defaults,
     properties: properties.map((property) => ({

@@ -61,6 +61,7 @@ const supportedPurposes = new Set([
   "identity.user.profile_image",
   "booking.header_logo",
   "booking.addon.image",
+  "booking.account_page.header_image",
   "property.hero_image",
   "property.gallery_image",
   "property.logo",
@@ -425,7 +426,8 @@ async function resolveTarget(
 
   if (
     input.request.purpose === "booking.header_logo" ||
-    input.request.purpose === "booking.addon.image"
+    input.request.purpose === "booking.addon.image" ||
+    input.request.purpose === "booking.account_page.header_image"
   ) {
     const bookingHotelId = input.request.resource.resourceId;
     const result = await queryable.query<PropertyTargetRow>(
@@ -449,6 +451,21 @@ async function resolveTarget(
       [bookingHotelId],
     );
     if (result.rows.length !== 1) return propertyMediaTargetForbidden();
+    // The agency page's header image is the account's (VAY-2457): filed under its booking page, with
+    // no property. Authorization already tied the named booking hotel to this account.
+    if (input.request.purpose === "booking.account_page.header_image") {
+      const organizationId = input.context.selectedOrganization?.organizationId;
+      if (!organizationId || !CANONICAL_UUID.test(organizationId))
+        return propertyMediaTargetForbidden();
+      return {
+        ok: true,
+        target: {
+          resourceProduct: "booking",
+          resourceType: "account_booking_page",
+          resourceId: organizationId.toLowerCase(),
+        },
+      };
+    }
     return {
       ok: true,
       target: {
