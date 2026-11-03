@@ -136,6 +136,40 @@ describe("GoLiveChecklistCard (VAY-2451 dashboard state B)", () => {
   });
 });
 
+describe("GoLiveChecklistCard room photos (VAY-2451)", () => {
+  it("counts room types without a photo as done, and suggests one instead of requiring it", () => {
+    const card = create(
+      <GoLiveChecklistCard
+        checklist={checklist({
+          placeholderPrices: false,
+          bookingPublished: true,
+          roomTypes: [{ name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 0, priced: true }],
+        })}
+        onOpenItem={vi.fn()}
+        onPublish={vi.fn()}
+      />,
+    );
+    const row = card.root.find((node) => node.type === "li" && textOf(node).includes("Room types"));
+    expect(textOf(row)).toContain("Done:");
+    expect(textOf(row)).toContain("Recommended");
+    expect(textOf(row)).toContain("Add a photo to each room type. Guests book rooms they can see.");
+    expect(textOf(row)).not.toContain("Required");
+    expect(textOf(card.root)).toContain("4 of 6 done");
+    card.unmount();
+
+    // With its photos, the row names the room and says nothing more.
+    const photographed = create(
+      <GoLiveChecklistCard checklist={checklist()} onOpenItem={vi.fn()} onPublish={vi.fn()} />,
+    );
+    const done = photographed.root.find(
+      (node) => node.type === "li" && textOf(node).includes("Room types"),
+    );
+    expect(textOf(done)).toContain("Pool Villa · 2 rooms · up to 4 guests · 3 photos");
+    expect(textOf(done)).not.toContain("Recommended");
+    photographed.unmount();
+  });
+});
+
 describe("GoLiveChecklistCard booking rules (VAY-2451)", () => {
   it("names the defaults only while they are the defaults", () => {
     for (const [rules, shown, hidden] of [

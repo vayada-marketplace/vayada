@@ -309,6 +309,7 @@
   "dashboard.goLive.photos.one": "写真{count}枚",
   "dashboard.goLive.photos.other": "写真{count}枚",
   "dashboard.goLive.ratesPlaceholder": "客室には仮の料金が表示されています。公開前に実際の料金を設定してください。",
+  "dashboard.goLive.roomPhotosMissing": "各客室タイプに写真を追加してください。ゲストは見て選べる客室を予約します。",
   "dashboard.goLive.publishTitle": "予約ページを公開",
   "dashboard.goLive.publishLocked": "客室タイプと料金を設定すると利用できます",
   "dashboard.goLive.publishReady": "準備完了です。公開するとすぐにゲストが予約できます。",

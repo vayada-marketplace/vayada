@@ -854,6 +854,7 @@
   "dashboard.goLive.photos.one": "{count} 张照片",
   "dashboard.goLive.photos.other": "{count} 张照片",
   "dashboard.goLive.ratesPlaceholder": "您的房间目前显示的是占位价格。上线前请设置真实价格。",
+  "dashboard.goLive.roomPhotosMissing": "请为每种房型添加照片。客人会预订他们能看到的房间。",
   "dashboard.goLive.publishTitle": "发布预订页面",
   "dashboard.goLive.publishLocked": "添加房型和价格后即可发布",
   "dashboard.goLive.publishReady": "一切就绪。发布后客人即可预订。",

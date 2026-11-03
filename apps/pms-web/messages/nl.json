@@ -854,6 +854,7 @@
   "dashboard.goLive.photos.one": "{count} foto",
   "dashboard.goLive.photos.other": "{count} foto's",
   "dashboard.goLive.ratesPlaceholder": "Je kamer toont een tijdelijke prijs. Stel echte prijzen in voordat je live gaat.",
+  "dashboard.goLive.roomPhotosMissing": "Voeg aan elk kamertype een foto toe. Gasten boeken kamers die ze kunnen zien.",
   "dashboard.goLive.publishTitle": "Publiceer je boekingspagina",
   "dashboard.goLive.publishLocked": "Beschikbaar zodra je kamertypes en tarieven erin staan",
   "dashboard.goLive.publishReady": "Alles klaar. Gasten kunnen boeken zodra je publiceert.",

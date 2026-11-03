@@ -21,6 +21,7 @@ vi.mock("@/lib/i18n", async () => {
 
 import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
 import {
+  BOOKING_PAGE_ONLINE_EVENT,
   PUBLISH_BOOKING_PAGE_EVENT,
   DashboardSetupChecklistCard,
   useDashboardSetupChecklist,
@@ -170,6 +171,25 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
     expect(published).toHaveBeenCalledOnce();
     window.removeEventListener(PUBLISH_BOOKING_PAGE_EVENT, published);
     renderer.unmount();
+  });
+
+  it("reads the list again once the booking page card says the page went online", async () => {
+    const ready = goLive(true, false);
+    const live = goLive(true, false, { bookingPublished: true });
+    let published = false;
+    const { renderer, client } = await mountGoLive(async () => (published ? live : ready));
+    expect(textOf(renderer.root)).toContain("Get ready to go live");
+    published = true;
+    await act(async () => {
+      window.dispatchEvent(new Event(BOOKING_PAGE_ONLINE_EVENT));
+    });
+    await act(async () => undefined);
+    expect(client.loadGoLive).toHaveBeenCalledTimes(2);
+    expect(textOf(renderer.root)).toContain("Your booking page is live");
+    // Once unmounted (its effects cleaned up), the event reads nothing.
+    await act(async () => renderer.unmount());
+    window.dispatchEvent(new Event(BOOKING_PAGE_ONLINE_EVENT));
+    expect(client.loadGoLive).toHaveBeenCalledTimes(2);
   });
 
   it("before Finish setup: continue where setup stopped", async () => {
