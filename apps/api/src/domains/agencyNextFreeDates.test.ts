@@ -1,7 +1,12 @@
 import type { PricingConfiguration, PricingOffer } from "@vayada/domain-pms";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { freeWindows, type FreeNight } from "./agencyNextFreeDates.js";
-import { createAgencyStayPrices, parseAgencyStayPricesQuery } from "./agencyStayPrices.js";
+import {
+  createAgencyStayPrices,
+  splitParty,
+  type StayOffers,
+  type StayPrices,
+} from "./agencyStayPrices.js";
 
 type Rules = Extract<PricingOffer["restrictions"], { kind: "own" }>["rules"];
 const RULES: Rules = {
@@ -63,15 +68,15 @@ const nights = (roomTypeId: string, free: number, except: Record<string, number>
     }),
   );
 // Searched: 2 nights from 1 December, full.
-const search = (more: Record<string, string> = {}) =>
-  parseAgencyStayPricesQuery({
-    checkIn: day(0),
-    checkOut: day(2),
-    adults: "2",
-    ...more,
-  })!;
-const first = (pricing: PricingConfiguration[], free: FreeNight[], s = search()) =>
-  freeWindows({ rooms: pricing }, free, s)[0];
+const DATES = { checkIn: day(0), checkOut: day(2) };
+const first = (
+  pricing: PricingConfiguration[],
+  free: FreeNight[],
+  slots = [{ adults: 2, children: 0 }],
+) => {
+  const window = freeWindows({ rooms: pricing }, free, DATES, slots, 3)[0];
+  return window && { checkIn: window.checkIn, checkOut: window.checkOut };
+};
 
 describe("next free dates (VAY-2458)", () => {
   it("is the next arrival with free rooms on every night of the same length", () => {
@@ -119,75 +124,184 @@ describe("next free dates (VAY-2458)", () => {
       freeWindows(
         { rooms: [room("a", [{ date: day(1), rules: { minArrivalNights: 3 } }])] },
         nights("a", 0),
-        search(),
+        DATES,
+        [{ adults: 2, children: 0 }],
+        3,
       ),
     ).toEqual([]);
   });
 
-  it("needs enough rooms of one type for the whole party, or a room for each room of a split", () => {
-    const free = [...nights("double", 1), ...nights("single", 1)];
-    const rooms = [room("double"), room("single", [], { total: 1, adults: 1, children: 0 })];
-    // Three adults: two doubles would be needed, and one is left; no single type fits them.
-    expect(first(rooms, free, search({ adults: "3" }))).toBeUndefined();
-    // Split into a double and a single, both free.
-    expect(first(rooms, free, search({ adults: "3", rooms: "2-0,1-0" }))).toEqual({
-      checkIn: day(1),
-      checkOut: day(3),
-    });
-    // Two singles but only one single and one double left: the double takes one of them.
-    expect(first(rooms, free, search({ adults: "2", rooms: "1-0,1-0" }))).toEqual({
-      checkIn: day(1),
-      checkOut: day(3),
-    });
-    // Three single rooms can't be placed in two free rooms.
-    expect(first(rooms, free, search({ adults: "3", rooms: "1-0,1-0,1-0" }))).toBeUndefined();
+  it("stops after the windows asked for, each with the rate that found it, and tries only listed rates", () => {
+    const windows = freeWindows(
+      { rooms: [room("a")] },
+      nights("a", 1),
+      DATES,
+      splitParty(2, 0, 1),
+      3,
+    );
+    expect(windows).toEqual(
+      [1, 2, 3].map((offset) => ({
+        checkIn: day(offset),
+        checkOut: day(offset + 2),
+        offers: [{ roomTypeId: "a", offerId: "flex" }],
+      })),
+    );
+    // A rate the stay's page doesn't offer (a guest couldn't pay it) finds nothing.
+    expect(
+      freeWindows(
+        { rooms: [room("a")] },
+        nights("a", 1),
+        DATES,
+        splitParty(2, 0, 1),
+        3,
+        () => false,
+      ),
+    ).toEqual([]);
   });
 
-  it("are confirmed with the stay's own price read before a card shows them", async () => {
-    const sold = {
-      rooms: [{ roomTypeId: "a", roomCount: 1, availability: "sold_out" as const, offers: [] }],
+  it("needs a free room for each of the party's rooms", () => {
+    const free = [...nights("double", 1), ...nights("single", 1)];
+    const rooms = [room("double"), room("single", [], { total: 1, adults: 1, children: 0 })];
+    // Three adults in one room: no type takes them.
+    expect(first(rooms, free, splitParty(3, 0, 1))).toBeUndefined();
+    // In two rooms, a double and a single, both free.
+    expect(first(rooms, free, splitParty(3, 0, 2))).toEqual({ checkIn: day(1), checkOut: day(3) });
+    // Two singles but only one single and one double left: the double takes one of them.
+    expect(first(rooms, free, splitParty(2, 0, 2))).toEqual({ checkIn: day(1), checkOut: day(3) });
+    // Three rooms can't be placed in two free rooms.
+    expect(first(rooms, free, splitParty(3, 0, 3))).toBeUndefined();
+  });
+
+  it("are confirmed with the stay's own price read of the rate that found them", async () => {
+    const offers: StayOffers = {
+      rooms: ["a", "b"].map((roomTypeId) => ({
+        roomTypeId,
+        occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+        offers: [`${roomTypeId}1`, `${roomTypeId}2`].map((publicOfferKey) => ({
+          publicOfferKey,
+          currency: "EUR",
+        })),
+      })),
     };
-    const open = {
-      rooms: [
-        {
-          roomTypeId: "a",
-          roomCount: 1,
-          availability: "available" as const,
-          offers: [
-            {
+    const read = (offered: StayOffers, available: boolean): StayPrices => ({
+      rooms: offered.rooms.map((room) => ({
+        roomTypeId: room.roomTypeId,
+        roomCount: 1,
+        availability: available ? "available" : "sold_out",
+        roomsFree: available ? 2 : 0,
+        offers: available
+          ? room.offers.map((offer) => ({
+              publicOfferKey: offer.publicOfferKey,
               status: "priced" as const,
               totalMinor: "20000",
               currency: "EUR",
               promoApplied: false,
-            },
-          ],
-        },
-      ],
-    };
+            }))
+          : [],
+      })),
+    });
+    const confirmations: StayOffers[] = [];
     const agency = createAgencyStayPrices({
       pageStays: async () => ({ stays: [{ propertyId: "p1", slug: "villa" }] }),
+      offers: async () => offers,
       // The rules found the 2nd and the 3rd; the stay page can't sell the 2nd.
-      freeWindows: async () => [
-        { checkIn: day(1), checkOut: day(3) },
-        { checkIn: day(2), checkOut: day(4) },
-      ],
-      stayPrices: async (_slug, query) => (query.checkIn === day(2) ? open : sold),
+      freeWindows: async (slug, dates, slots, offered) => {
+        expect([slug, dates.checkIn, slots, offered]).toEqual([
+          "villa",
+          day(0),
+          [{ adults: 2, children: 0 }],
+          offers,
+        ]);
+        return [
+          {
+            checkIn: day(1),
+            checkOut: day(3),
+            offers: [{ roomTypeId: "a", publicOfferKey: "a2" }],
+          },
+          {
+            checkIn: day(2),
+            checkOut: day(4),
+            offers: [{ roomTypeId: "b", publicOfferKey: "b1" }],
+          },
+        ];
+      },
+      stayPrices: async (_slug, query, offered) => {
+        if (query.checkIn !== day(0)) confirmations.push(offered);
+        return read(offered, query.checkIn === day(2));
+      },
     });
-    expect((await agency.read("agency", search()))?.stays[0]).toMatchObject({
+    const search = { ...DATES, adults: 2, children: 0, promoCode: null, rooms: 1 };
+    expect((await agency.read("agency", search))?.stays[0]).toMatchObject({
       status: "unavailable",
       nextFree: { checkIn: day(2), checkOut: day(4) },
     });
+    // Each confirmation reads only that window's rate.
+    expect(
+      confirmations.map((offered) =>
+        offered.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
+      ),
+    ).toEqual([["a2"], ["b1"]]);
 
+    // A window whose rate is bookable but wasn't priced (past the search's budget) isn't shown.
+    const unpriced = createAgencyStayPrices({
+      pageStays: async () => ({ stays: [{ propertyId: "p1", slug: "villa" }] }),
+      offers: async () => offers,
+      freeWindows: async () => [
+        { checkIn: day(1), checkOut: day(3), offers: [{ roomTypeId: "a", publicOfferKey: "a1" }] },
+      ],
+      stayPrices: async (_slug, query, offered) =>
+        query.checkIn === day(0)
+          ? read(offered, false)
+          : {
+              rooms: [
+                {
+                  roomTypeId: "a",
+                  roomCount: 1,
+                  availability: "available",
+                  offers: [{ publicOfferKey: "a1", status: "unpriced" }],
+                },
+              ],
+            },
+    });
+    expect((await unpriced.read("agency", search))?.stays[0]?.nextFree).toBeNull();
+
+    // A group's window is confirmed with every rate of its room types, so rates the page books
+    // together can be found.
+    const groups: StayOffers[] = [];
+    const group = createAgencyStayPrices({
+      pageStays: async () => ({ stays: [{ propertyId: "p1", slug: "villa" }] }),
+      offers: async () => offers,
+      freeWindows: async () => [
+        { checkIn: day(1), checkOut: day(3), offers: [{ roomTypeId: "a", publicOfferKey: "a1" }] },
+      ],
+      stayPrices: async (_slug, query, offered) => {
+        if (query.checkIn !== day(0)) groups.push(offered);
+        return read(offered, query.checkIn !== day(0));
+      },
+    });
+    expect(
+      (await group.read("agency", { ...search, adults: 4, rooms: 2 }))?.stays[0],
+    ).toMatchObject({ rooms: 2, nextFree: { checkIn: day(1), checkOut: day(3) } });
+    expect(
+      groups[0]?.rooms.map((room) => room.offers.map((offer) => offer.publicOfferKey)),
+    ).toEqual([["a1", "a2"]]);
+
+    const warn = vi.fn();
     const failing = createAgencyStayPrices({
       pageStays: async () => ({ stays: [{ propertyId: "p1", slug: "villa" }] }),
+      offers: async () => offers,
       freeWindows: async () => {
         throw new Error("statement timeout");
       },
-      stayPrices: async () => sold,
+      stayPrices: async (_slug, _query, offered) => read(offered, false),
     });
-    expect((await failing.read("agency", search()))?.stays[0]).toMatchObject({
+    expect((await failing.read("agency", search, { log: { warn } }))?.stays[0]).toMatchObject({
       status: "unavailable",
       nextFree: null,
     });
+    expect(warn).toHaveBeenCalledWith(
+      { err: expect.any(Error), propertyId: "p1" },
+      "Agency next free dates failed",
+    );
   });
 });

@@ -4,6 +4,7 @@ import { buildApp } from "../app.js";
 import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js";
 import {
   AGENCY_STAY_PRICES_PATH,
+  createHttpError,
   createTargetBookingWebCheckoutAdapter,
 } from "./bookingWebPublic.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
@@ -19,9 +20,11 @@ it("serves an agency page's stay prices through the public no-store route (VAY-2
     publicHotelProfileRepository: { findProfileBySlug: async () => null },
     bookingWebCheckoutAdapter: {
       ...unusedBookingWebCheckoutAdapter,
-      getAgencyStayPrices: async (slug, query) => {
+      getAgencyStayPrices: async (slug, query, context) => {
         expect(slug).toBe("the-travel-ubud");
         expect(query).toEqual({ checkIn: "2026-11-06", checkOut: "2026-11-08", adults: "2" });
+        // Its stays' failures are logged with the request's logger.
+        expect(typeof context?.log?.warn).toBe("function");
         return body;
       },
     },
@@ -81,6 +84,30 @@ it("admits 30 searches a minute per guest address", async () => {
   }
 });
 
+it("asks guests to try again in a moment while too many searches run", async () => {
+  const app = buildApp({
+    logger: false,
+    publicHotelProfileRepository: { findProfileBySlug: async () => null },
+    bookingWebCheckoutAdapter: {
+      ...unusedBookingWebCheckoutAdapter,
+      getAgencyStayPrices: async () => {
+        throw createHttpError(
+          503,
+          "Too many searches right now. Please try again in a moment.",
+          "AGENCY_STAY_PRICES_BUSY",
+        );
+      },
+    },
+  });
+  try {
+    const busy = await app.inject({ method: "GET", url: ROUTE });
+    expect(busy.statusCode).toBe(503);
+    expect(busy.headers["retry-after"]).toBe("5");
+  } finally {
+    await app.close();
+  }
+});
+
 it("is missing without the read, refuses an invalid search and hides database errors", async () => {
   const app = buildApp({
     logger: false,
@@ -112,7 +139,7 @@ it("is missing without the read, refuses an invalid search and hides database er
         checkIn: "2026-11-06",
         checkOut: "2026-11-08",
         adults: "2",
-        rooms: "1-0",
+        rooms: "3",
       }),
     ).rejects.toMatchObject({ statusCode: 400 });
     await expect(

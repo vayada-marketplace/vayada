@@ -318,7 +318,12 @@ async function accountRow(client: Queryable, organizationId: string): Promise<Ac
 }
 
 /** The account's properties: its active owner/operator catalog links, by name. */
-async function propertyRows(client: Queryable, organizationId: string): Promise<PropertyRow[]> {
+async function propertyRows(
+  client: Queryable,
+  organizationId: string,
+  /** Only the stays the page includes (VAY-2458: the public read). */
+  includedOnly = false,
+): Promise<PropertyRow[]> {
   const result = await client.query<PropertyRow>(
     `SELECT property.id::text AS "propertyId", property.display_name AS name,
             property.property_type AS "propertyType", location.area,
@@ -351,8 +356,9 @@ async function propertyRows(client: Queryable, organizationId: string): Promise<
          AND link.status = 'active'
          AND link.relationship IN ('owner', 'operator')
      )
+       AND ($2::boolean IS FALSE OR included.property_id IS NOT NULL)
      ORDER BY property.display_name, property.id`,
-    [organizationId],
+    [organizationId, includedOnly],
   );
   return result.rows;
 }
@@ -392,7 +398,10 @@ async function readinessOf(
 export async function readLiveAccountBookingPageStays(
   client: Queryable,
   slug: string,
-): Promise<{ organizationId: string; stays: { propertyId: string; slug: string }[] } | null> {
+): Promise<{
+  organizationId: string;
+  stays: { propertyId: string; slug: string; childrenEnabled: boolean }[];
+} | null> {
   if (!parseAccountBookingPageSlug(slug)) return null;
   const page = (
     await client.query<{ organizationId: string }>(
@@ -406,9 +415,7 @@ export async function readLiveAccountBookingPageStays(
     )
   ).rows[0];
   if (!page) return null;
-  const rows = (await propertyRows(client, page.organizationId)).filter(
-    (row) => row.position !== null,
-  );
+  const rows = await propertyRows(client, page.organizationId, true);
   const readiness = await readinessOf(client, rows);
   const ready = rows
     .filter((row) => readiness.get(row.propertyId)?.ready)
@@ -449,7 +456,41 @@ export async function readLiveAccountBookingPageStays(
     organizationId: page.organizationId,
     stays: ready.flatMap((row) => {
       const slug = address.get(row.propertyId);
-      return slug && owned.has(row.propertyId) ? [{ propertyId: row.propertyId, slug }] : [];
+      return slug && owned.has(row.propertyId)
+        ? [
+            {
+              propertyId: row.propertyId,
+              slug,
+              childrenEnabled: childrenEnabled(row.publicContent),
+            },
+          ]
+        : [];
     }),
   };
+}
+
+/** Whether the stay's published page takes children; its page counts none when it doesn't. */
+function childrenEnabled(publicContent: unknown): boolean {
+  const content = publicContent as {
+    profile?: { hotel?: { supportedQuoteParameters?: { childrenSupported?: unknown } } };
+  } | null;
+  return content?.profile?.hotel?.supportedQuoteParameters?.childrenSupported !== false;
+}
+
+/**
+ * VAY-2458: which of these stays have this promo code, active, as the quote matches it
+ * (`replacementPromoCode`: the code as typed, upper-cased). Other stays are priced without it.
+ */
+export async function readStaysWithPromoCode(
+  client: Queryable,
+  propertyIds: string[],
+  code: string,
+): Promise<ReadonlySet<string>> {
+  const result = await client.query<{ propertyId: string }>(
+    `SELECT DISTINCT property_id::text AS "propertyId"
+     FROM booking.promo_definitions
+     WHERE property_id = ANY($1::uuid[]) AND code = $2 AND status = 'active'`,
+    [propertyIds, code.toUpperCase()],
+  );
+  return new Set(result.rows.map((row) => row.propertyId));
 }

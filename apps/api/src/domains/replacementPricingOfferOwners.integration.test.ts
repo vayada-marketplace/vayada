@@ -4,14 +4,19 @@ import {
 } from "../jobs/channexManagementWorkerPrivileges.js";
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
 import { createPublicPricingDisplayPool } from "./publicPricingDisplayPool.js";
-import { createAgencyStayPrices, parseAgencyStayPricesQuery } from "./agencyStayPrices.js";
+import {
+  NEXT_FREE_TRIES,
+  createAgencyStayPrices,
+  parseAgencyStayPricesQuery,
+} from "./agencyStayPrices.js";
 import { readFreeWindows } from "./agencyNextFreeDates.js";
-import { readLiveAccountBookingPageStays } from "./accountBookingPages.js";
+import { readLiveAccountBookingPageStays, readStaysWithPromoCode } from "./accountBookingPages.js";
+import { installPostgresPoolRuntime } from "../platform/postgresRuntime.js";
 import {
   activeBookingPublicationGateConfig,
   configureActiveBookingPublicationGate,
 } from "./activeBookingPublicationGate.js";
-import { createPublicPricingStayPrices } from "./publicPricingStayPrices.js";
+import { createPublicPricingStayPrices, type StayPricesQuery } from "./publicPricingStayPrices.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { createTargetPmsInventoryPublicOfferProjection } from "./pmsInventoryPublicOfferProjection.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "../platform/publicBookabilityPublication.js";
@@ -6922,25 +6927,35 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       }
       expect(probes).toBeGreaterThan(0);
 
-      // The display pool can't write, and a lock clause the rewrite missed fails rather than locks.
-      await expect(
-        display.query("UPDATE identity.organizations SET name=name WHERE id=$1", [
-          f.scope.organizationId,
-        ]),
-      ).rejects.toMatchObject({ code: "25006" });
-      const raw = new pg.Pool({
-        connectionString: url,
-        max: 1,
-        options: "-c default_transaction_read_only=on",
-      });
+      // Display transactions can't write, and nothing runs outside one.
+      const writer = await display.connect();
       try {
+        await writer.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        expect(
+          (await writer.query("SHOW transaction_isolation")).rows[0].transaction_isolation,
+        ).toBe("repeatable read");
         await expect(
-          raw.query("SELECT 1 FROM identity.organizations WHERE id=$1 for share", [
+          writer.query("UPDATE identity.organizations SET name=name WHERE id=$1", [
             f.scope.organizationId,
           ]),
         ).rejects.toMatchObject({ code: "25006" });
       } finally {
-        await raw.end();
+        await writer.query("ROLLBACK");
+        writer.release();
+      }
+      await expect(display.query("SELECT 1")).rejects.toThrow("use connect()");
+      // A lock clause the rewrite missed fails in a read-only transaction rather than locks.
+      const raw = await pool.connect();
+      try {
+        await raw.query("BEGIN READ ONLY");
+        await expect(
+          raw.query("SELECT 1 FROM identity.organizations WHERE id=$1 FOR SHARE", [
+            f.scope.organizationId,
+          ]),
+        ).rejects.toMatchObject({ code: "25006" });
+      } finally {
+        await raw.query("ROLLBACK");
+        raw.release();
       }
     } finally {
       await display.end();
@@ -6952,8 +6967,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     sharedOrganization = organizationId;
     const stays = [];
     try {
-      // 13 stays on the page, one ready but left off it, one included but not ready.
-      for (let index = 0; index < 15; index++) stays.push(await bookableStay());
+      // 13 stays on the page; one ready but left off it; one included without a type; one
+      // included and taken offline.
+      for (let index = 0; index < 16; index++) stays.push(await bookableStay());
     } finally {
       sharedOrganization = null;
     }
@@ -6961,36 +6977,58 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const ids = [...stays, other].map((stay) => stay.scope.propertyId);
     await pool.query(
       "UPDATE hotel_catalog.properties SET property_type='hotel' WHERE id=ANY($1::uuid[])",
-      [ids.slice(0, 14).concat(ids[15]!)],
+      [ids.filter((_, index) => index !== 14)],
     );
     await pool.query(
       "UPDATE hotel_catalog.property_locations SET latitude=-8.5,longitude=115.26 WHERE property_id=ANY($1::uuid[])",
       [ids],
+    );
+    await pool.query(
+      "UPDATE hotel_catalog.properties SET lifecycle_status='provisioning' WHERE id=$1",
+      [ids[15]],
     );
     const slug = `agency-${suffix}`;
     await pool.query(
       `INSERT INTO booking.account_booking_pages(organization_id,slug,live,settings) VALUES($1,$2,true,$3)`,
       [organizationId, slug, defaultAccountBookingPageSettings("Agency test")],
     );
-    // Included: the 13, the stay without a type, and the other account's stay. Not: stay 14.
-    const included = [...ids.slice(0, 13), ids[14]!, ids[15]!];
+    // Included: the 13, the one without a type, the one offline and the other account's stay.
+    // Not: ids[13].
+    const included = [...ids.slice(0, 13), ids[14]!, ids[15]!, ids[16]!];
     await pool.query(
       `INSERT INTO booking.account_booking_page_properties(organization_id,property_id,position)
       SELECT $1::uuid, included.id, included.position::int - 1
       FROM unnest($2::uuid[]) WITH ORDINALITY AS included(id, position)`,
       [organizationId, [...included].reverse()],
     );
+    // Only the first stay has the code.
+    await pool.query(
+      `INSERT INTO booking.promo_definitions(property_id,code,discount_type,discount_value,max_uses,min_booking_value)
+      VALUES($1,'SAVE','percentage',10,100,NULL)`,
+      [ids[0]],
+    );
     const gate = activeBookingPublicationGateConfig();
     configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
-    const display = createPublicPricingDisplayPool({ connectionString: url!, max: 4 });
-    // Quotes for the account's stays, refused if they wait longer than 200ms for a lock.
+    // As in production: the pool runtime shares and bounds pools.
+    const runtimePg = { Pool: pg.Pool };
+    const runtime = installPostgresPoolRuntime(runtimePg);
+    const display = createPublicPricingDisplayPool(
+      { connectionString: url!, max: 4 },
+      runtimePg.Pool,
+    );
+    // Quotes and acceptances for the account's stays, refused if they wait 200ms for a lock.
     const quotes = new pg.Pool({ connectionString: url, max: 2, options: "-c lock_timeout=200ms" });
     try {
+      const displayOffers = createPublicPricingOfferCatalog(display);
+      const displayPrices = createPublicPricingStayPrices(display, displayOffers);
       const agency = createAgencyStayPrices({
         pageStays: (page) => readLiveAccountBookingPageStays(pool, page),
-        stayPrices: createPublicPricingStayPrices(display, createPublicPricingOfferCatalog(display))
-          .read,
-        freeWindows: (propertyId, dates) => readFreeWindows(display, propertyId, dates),
+        promoStays: (propertyIds, code) => readStaysWithPromoCode(pool, propertyIds, code),
+        offers: (stay) => displayOffers.read(stay),
+        stayPrices: (stay, query, offered, budget) =>
+          displayPrices.readOffered(stay, query, offered, budget),
+        freeWindows: (stay, dates, slots, offered) =>
+          readFreeWindows(display, stay, dates, slots, offered, NEXT_FREE_TRIES),
       });
       const [checkIn, checkOut] = [await localDay(5), await localDay(7)];
       const search = parseAgencyStayPricesQuery({ checkIn, checkOut, adults: "2" })!;
@@ -7028,18 +7066,34 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         paymentMethod: "pay_at_property",
       });
       expect(issued.quote).toBeTruthy();
+      // What accepting a quote runs first: its revalidation under the account's locks.
+      const revalidate = async () => {
+        const client = await quotes.connect();
+        try {
+          await client.query("BEGIN");
+          return await lockCurrentQuoteRevalidation(client, ids[0]!, issued.quote!.quoteId);
+        } finally {
+          await client.query("ROLLBACK");
+          client.release();
+        }
+      };
+      expect(await revalidate()).not.toBeNull();
 
       let reading = true;
       const quoteTimes: number[] = [];
+      const acceptTimes: number[] = [];
       const quoting = (async () => {
         while (reading) {
-          const started = performance.now();
+          let started = performance.now();
           await quoteStore.issue(ids[0]!, {
             requestId: randomUUID(),
             selection,
             paymentMethod: "pay_at_property",
           });
           quoteTimes.push(performance.now() - started);
+          started = performance.now();
+          await revalidate();
+          acceptTimes.push(performance.now() - started);
         }
       })();
       const started = performance.now();
@@ -7052,9 +7106,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       }
       const took = performance.now() - started;
       console.info(
-        `VAY-2458: 13 stays in ${Math.round(took)}ms; ${quoteTimes.length} quotes meanwhile, slowest ${Math.round(Math.max(...quoteTimes))}ms`,
+        `VAY-2458: 13 stays in ${Math.round(took)}ms; meanwhile ${quoteTimes.length} quotes (slowest ${Math.round(Math.max(...quoteTimes))}ms) and ${acceptTimes.length} acceptance checks (slowest ${Math.round(Math.max(0, ...acceptTimes))}ms)`,
       );
-      // In the page's order; never the stay left off, the one not ready or another account's.
+      // In the page's order; never the stay left off, the one not ready, the one offline or
+      // another account's.
       expect(result?.stays.map((stay) => stay.propertyId)).toEqual(ids.slice(0, 13).reverse());
       expect(
         result?.stays.filter((stay) => stay.status === "available").map((stay) => stay.propertyId),
@@ -7064,25 +7119,53 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           .reverse()
           .filter((id) => id !== ids[1]),
       );
+      expect(result?.stays.every((stay) => stay.rooms === 1 && stay.pricesComplete)).toBe(true);
       expect(result?.stays.find((stay) => stay.propertyId === ids[1])).toMatchObject({
         status: "unavailable",
         price: null,
         nextFree: { checkIn: await localDay(8), checkOut: await localDay(10) },
       });
-      // Measured 0.9s on the CI-sized worker; quotes meanwhile took at most 0.1s.
+      // Measured 0.9s on the CI-sized worker before; quotes meanwhile took at most 0.1s.
       expect(took).toBeLessThan(5_000);
       expect(quoteTimes.length).toBeGreaterThan(0);
 
-      // The card's price is the lowest the stay's own page shows for the same search.
-      const stayPage = await createPublicPricingStayPrices(
-        pool,
-        createPublicPricingOfferCatalog(pool),
-      ).read(ids[0]!, { checkIn, checkOut, adults: 2, children: 0, promoCode: null });
-      const lowest = stayPage!.rooms
-        .flatMap((room) => (room.availability === "available" ? room.offers : []))
-        .flatMap((offer) => (offer.status === "priced" ? [BigInt(offer.totalMinor)] : []))
-        .sort((a, b) => (a < b ? -1 : 1))[0];
-      expect(result?.stays.at(-1)?.price?.totalMinor).toBe(lowest?.toString());
+      // A card's price is the lowest the stay's own page shows for the same search: the whole
+      // party in one room, as the page opens; and with two rooms, a room each.
+      const stayPage = createPublicPricingStayPrices(pool, createPublicPricingOfferCatalog(pool));
+      const lowest = async (stay: string, query: StayPricesQuery) =>
+        (await stayPage.read(stay, query))!.rooms
+          .flatMap((room) => (room.availability === "available" ? room.offers : []))
+          .flatMap((offer) => (offer.status === "priced" ? [BigInt(offer.totalMinor)] : []))
+          .sort((a, b) => (a < b ? -1 : 1))[0];
+      const pageQuery = (promoCode: string | null, adults = 2) => ({
+        checkIn,
+        checkOut,
+        adults,
+        children: 0,
+        promoCode,
+        room: { adults: 2, children: 0 },
+      });
+      expect(result?.stays.at(-1)?.price?.totalMinor).toBe(
+        (await lowest(ids[0]!, pageQuery(null)))?.toString(),
+      );
+      const twoRooms = await agency.read(slug, { ...search, adults: 4, rooms: 2 });
+      expect(twoRooms?.stays.at(-1)).toMatchObject({ status: "available", rooms: 2 });
+      expect(twoRooms?.stays.at(-1)?.price?.totalMinor).toBe(
+        (2n * (await lowest(ids[0]!, pageQuery(null, 4)))!).toString(),
+      );
+
+      // A promo code prices only the stay that has it.
+      const promo = await agency.read(slug, { ...search, promoCode: "SAVE" });
+      expect(promo?.stays.at(-1)?.price).toMatchObject({
+        promoApplied: true,
+        totalMinor: (await lowest(ids[0]!, pageQuery("SAVE")))?.toString(),
+      });
+      expect(BigInt(promo!.stays.at(-1)!.price!.totalMinor)).toBeLessThan(
+        BigInt(result!.stays.at(-1)!.price!.totalMinor),
+      );
+      expect(promo?.stays.slice(0, -1).map((stay) => stay.price)).toEqual(
+        result?.stays.slice(0, -1).map((stay) => stay.price),
+      );
 
       // A page that isn't live has no prices.
       await pool.query(
@@ -7093,6 +7176,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     } finally {
       configureActiveBookingPublicationGate(gate);
       await display.end();
+      await runtime.close();
       await quotes.end();
     }
   }, 300_000);
