@@ -626,7 +626,17 @@ export function monthNights(
     { length: days },
     (_, day) => `${month}-${String(day + 1).padStart(2, "0")}`,
   );
-  const nights = projectReplacementRoomNights(
+  const nights = datesNights(room, offerId, dates, adults);
+  return dates.map((date, index) => ({ date, night: nights[index] }));
+}
+/** The engine's night evaluator for one option and number of adults on each of `dates`, in one call. */
+export function datesNights(
+  room: Room,
+  offerId: string,
+  dates: readonly string[],
+  adults: number,
+): RoomNightProjectionResult[] {
+  return projectReplacementRoomNights(
     room,
     {
       propertyId: room.propertyId,
@@ -638,5 +648,4 @@ export function monthNights(
     },
     dates,
   );
-  return dates.map((date, index) => ({ date, night: nights[index] }));
 }

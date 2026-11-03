@@ -5,7 +5,6 @@ import { ApiErrorResponse } from "@/services/api/client";
 import type { PricingDraft, PricingSnapshot } from "@/services/api/replacementPricingClient";
 import {
   listPrice,
-  lowestBaseMinor,
   RoomPriceSummary,
   RoomPricesLink,
   RoomsPricesStrip,
@@ -19,7 +18,10 @@ const room: PricingSnapshot["rooms"][number] = {
   revision: 4,
   currency: "EUR",
   capacity: { total: 2, adults: 2, children: 0 },
-  children: { adultFromAge: 12, bands: [] },
+  children: {
+    adultFromAge: 12,
+    bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],
+  },
   offers: [
     {
       id: "flex",
@@ -90,6 +92,7 @@ const props = (stale = true, error: unknown = null): PropertyPrices => ({
   prices: {
     client: client as unknown as NonNullable<PropertyPrices["prices"]>["client"],
     publication: publication(stale),
+    notSelling: [],
   },
   error,
   reload,
@@ -208,9 +211,7 @@ it("keeps the Rooms list usable when prices cannot be read", async () => {
   await act(async () => button("Retry")!.props.onClick());
   expect(reload).toHaveBeenCalledOnce();
 });
-it("summarises a room's published rates from its lowest base price and links to its Prices tab", async () => {
-  expect(lowestBaseMinor(room)).toBe("9000");
-  expect(lowestBaseMinor({ ...room, offers: [room.offers[1]] })).toBeNull();
+it("summarises a room's published rates from the lowest night guests can book and links to its Prices tab", async () => {
   const id = room.roomTypeId.toLowerCase();
   await act(async () => {
     view = create(
@@ -220,9 +221,26 @@ it("summarises a room's published rates from its lowest base price and links to 
       </>,
     );
   });
-  expect(text()).toContain(`from ${listPrice("9000", "EUR", "en")}`);
+  // VAY-2466: 1 adult's €90 at the saver rate's 10% off, as the Prices tab's "Guests from" counts it.
+  expect(text()).toContain(`from ${listPrice("8100", "EUR", "en")}`);
   expect(text()).toContain("2 rates · per night");
   expect(view.root.findByType("a").props.href).toBe(`/rooms/${id}?tab=prices`);
+  // A rate guests can't book now (VAY-2304) doesn't count: the flexible rate's €90.
+  act(() =>
+    view.update(
+      <>
+        <RoomPriceSummary
+          roomTypeId={id}
+          publication={publication(false)}
+          notSelling={[
+            { roomTypeId: room.roomTypeId, offerId: "saver", reason: "card_off", fixes: [] },
+          ]}
+        />
+        <RoomPricesLink roomTypeId={id} publication={publication(false)} />
+      </>,
+    ),
+  );
+  expect(text()).toContain(`from ${listPrice("9000", "EUR", "en")}`);
   expect(view.root.findByType("a").children.join("")).toBe("Edit prices");
   act(() =>
     view.update(
@@ -235,6 +253,55 @@ it("summarises a room's published rates from its lowest base price and links to 
   expect(text()).toContain("No prices yet");
   expect(text()).toContain("Guests can't book it yet");
   expect(view.root.findByType("a").children.join("")).toBe("Set prices");
+});
+it("counts seasons and single dates from today on in the list's from price (VAY-2466)", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 3, 12));
+  const flex = room.offers[0]!;
+  const calendar = flex.price.kind === "independent" ? flex.price.calendar : null;
+  const seasonal = {
+    ...room,
+    offers: [
+      {
+        ...flex,
+        price: {
+          kind: "independent" as const,
+          calendar: {
+            ...calendar!,
+            seasons: [
+              {
+                name: "Low",
+                tier: "",
+                from: "11-01",
+                through: "12-31",
+                price: { mode: "occupancy" as const, amountsMinor: ["7000", "8000"] },
+              },
+            ],
+            // Yesterday's €40 is past; the 20th's €60 counts.
+            dates: [
+              { date: "2026-11-02", price: { mode: "flat" as const, amountMinor: "4000" } },
+              { date: "2026-11-20", price: { mode: "flat" as const, amountMinor: "6000" } },
+            ],
+          },
+        },
+      },
+      room.offers[1]!,
+    ],
+  };
+  try {
+    await act(async () => {
+      view = create(
+        <RoomPriceSummary
+          roomTypeId={room.roomTypeId}
+          publication={{ ...publication(false), rooms: [seasonal] }}
+        />,
+      );
+    });
+    // The 20th at the saver rate's 10% off.
+    expect(text()).toContain(`from ${listPrice("5400", "EUR", "en")}`);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 it("writes list prices with the currency code and grouped digits, without .00 on whole amounts (VAY-2338)", () => {
   const plain = (value: string) => value.replace(/\s/g, " ");

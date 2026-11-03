@@ -1157,7 +1157,14 @@ test("says on a rate's card when it isn't selling, why and how to fix it (VAY-23
     "Not selling",
   );
   await expect(main(page).getByText(/isn't selling$/)).toBeVisible();
+  // VAY-2466: guests can't book Non-refundable's €72, so the bar and the Rooms list say €80 (the Low season).
+  await expect(
+    main(page).getByText("Guests from €80 a night on your booking page.", { exact: true }),
+  ).toBeVisible();
   await assertHealthy();
+  await page.goto("/rooms");
+  await expect(main(page).getByText(/^from EUR\s80$/)).toBeVisible();
+  await expect(main(page).getByText(/^from EUR\s72$/)).toHaveCount(0);
 });
 
 test("says what guests see first when they start in another currency, on desktop only (VAY-2390)", async ({

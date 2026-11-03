@@ -342,6 +342,69 @@ test("keeps this room's edits over a reload when someone else published another 
   await expect(main(page).getByText("Pricing data could not be verified")).toHaveCount(0);
 });
 
+/** The device's date `offset` days from today ("YYYY-MM-DD"), as the browser counts it. */
+const localDay = (offset: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
+test("shows the same lowest night in the Rooms list and the Prices tab, from today on (VAY-2466)", async ({
+  page,
+}, testInfo) => {
+  await openPms(page);
+  // Alpine Suite: €120 standard, a €100 February season, €50 yesterday (past) and €80 tomorrow.
+  const suite = pricedRoom(SUITE, "12000", 3) as { offers: { price: { calendar: Room } }[] };
+  const flat = (amountMinor: string) => ({ mode: "flat", amountMinor });
+  Object.assign(suite.offers[0]!.price.calendar, {
+    seasons: [{ name: "Low", tier: "", from: "02-01", through: "02-28", price: flat("10000") }],
+    dates: [
+      { date: localDay(-1), price: flat("5000") },
+      { date: localDay(1), price: flat("8000") },
+    ],
+  });
+  const pricing = await mockPricing(
+    page,
+    publicationOf(3, [suite as Room, pricedRoom(GARDEN, "9000", 3)]),
+  );
+
+  await page.goto("/rooms");
+  await expect(main(page).getByText(/^from EUR\s80$/)).toBeVisible();
+  // A room with only a standard price still shows it.
+  await expect(main(page).getByText(/^from EUR\s90$/)).toBeVisible();
+  await expect(main(page).getByText("1 rate · per night", { exact: true })).toHaveCount(2);
+
+  // Page health from the room page on: the Rooms list's import panels call setup APIs this spec does not mock.
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await page.goto(`/rooms/${SUITE}?tab=prices`);
+  const bar = (amount: string) =>
+    main(page).getByText(`Guests from €${amount} a night on your booking page.`, { exact: true });
+  await expect(bar("80")).toBeVisible();
+  // Today's own price from the calendar, under every other night, is the lowest once it is published.
+  const calendar = main(page).getByRole("region", { name: "Prices by date" });
+  const panel = main(page).getByRole("region", { name: "Picked dates" });
+  const now = new Date();
+  const today = `${now.getDate()} ${now.toLocaleString("en-GB", { month: "long" })} ${now.getFullYear()}`;
+  await calendar.getByRole("button", { name: new RegExp(`^${today}, €`) }).click();
+  await panel.getByRole("button", { name: "Own price for this date" }).click();
+  await panel.getByLabel("Own price: Per room").fill("60");
+  await panel.getByRole("button", { name: "Apply" }).click();
+  await expect(bar("60")).toBeVisible();
+  await main(page).getByRole("button", { name: "Save and publish" }).click();
+  await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
+  expect(pricing.publishes).toHaveLength(1);
+  const published = (pricing.publishes[0].snapshot.rooms as Room[]).find(
+    (room) => room.roomTypeId === SUITE,
+  ) as typeof suite;
+  expect(published.offers[0]!.price.calendar.dates).toContainEqual({
+    date: localDay(0),
+    price: flat("6000"),
+  });
+  await assertHealthy();
+
+  await page.goto("/rooms");
+  await expect(main(page).getByText(/^from EUR\s60$/)).toBeVisible();
+});
+
 test("republishes stale prices from the Rooms list", async ({ page }) => {
   // No page-health watch: the Rooms list's import panels call setup APIs this spec does not mock.
   await openPms(page);
