@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { trapFocus } from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
 
 /** Where the clicked night, stay or bar is on screen (viewport pixels). */
@@ -60,8 +61,15 @@ export default function CalendarPopover({
     );
   });
 
-  // Focus moves into the card, so a keyboard or screen reader user lands on what opened.
-  useEffect(() => ref.current?.focus({ preventScroll: true }), []);
+  const anchored = anchor !== undefined;
+  // Focus moves into the card, so a keyboard or screen reader user lands on what opened; a sheet hands it back.
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.focus({ preventScroll: true });
+    return () => {
+      if (!anchored) previous?.focus({ preventScroll: true });
+    };
+  }, [anchored]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -71,12 +79,14 @@ export default function CalendarPopover({
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onDown);
+    // A sheet closes from its backdrop's click instead: closing on the press would let the tap's click land on the
+    // room below and open another sheet.
+    if (anchored) document.addEventListener("mousedown", onDown);
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onDown);
     };
-  }, [onClose]);
+  }, [onClose, anchored]);
 
   const content = (
     <>
@@ -113,13 +123,15 @@ export default function CalendarPopover({
   if (!anchor)
     return (
       <div className="fixed inset-0 z-50">
-        <div aria-hidden="true" className="absolute inset-0 bg-black/40" />
+        {/* Its own click: iOS Safari sends no mouse events to an element without one. */}
+        <div aria-hidden="true" className="absolute inset-0 bg-black/40" onClick={onClose} />
         <div
           ref={ref}
           role="dialog"
           aria-modal="true"
           aria-label={label}
           tabIndex={-1}
+          onKeyDown={(event) => event.key === "Tab" && trapFocus(event, ref.current, onClose)}
           className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto overflow-x-hidden rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-xl focus:outline-none"
         >
           {content}

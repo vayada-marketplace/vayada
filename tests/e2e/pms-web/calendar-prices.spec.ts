@@ -494,6 +494,18 @@ test.describe("PMS phone calendar rooms and prices", () => {
     await expect(sheet.getByRole("button", { name: "Unblock dates" })).toBeVisible();
     await sheet.getByRole("button", { name: "Edit" }).click();
     await expect(page.getByText("Blocked Room")).toBeVisible();
+    await page
+      .locator("div.fixed.inset-0")
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
+    await expect(page.getByText("Blocked Room")).toHaveCount(0);
+
+    // The next month opens on its first day, with that month's rooms.
+    await page.getByRole("button", { name: "Next month" }).click();
+    await expect(page.getByRole("heading", { name: "December", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tuesday, Dec 1" })).toBeVisible();
+    await expect(paddy).toContainText("Available");
+    await expect(rice).toContainText("€81");
     await assertHealthy();
   });
 
@@ -543,6 +555,12 @@ test.describe("PMS phone calendar rooms and prices", () => {
     await expect(roomRow(page, "Paddy Villa")).toContainText("Booked");
     const nov7 = await phonePrice("2026-11-07", "Paddy Villa");
     expect([nov4, nov7]).toEqual(["€81", "€97.20"]);
+    // Nothing after Ada: free through the grid's last day, Sunday 6 December.
+    await roomRow(page, "Paddy Villa").click();
+    const sheet = page.getByRole("dialog", { name: "#Paddy Villa · Sat, Nov 7" });
+    await expect(sheet.getByText("Free through Dec 6")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
 
     // The same nights on a laptop: the timeline starts today, 2 November.
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -586,7 +604,7 @@ test.describe("PMS phone calendar rooms and prices", () => {
     );
     await openCalendar(page);
     const price = (date: string) => day(page, date).locator("[data-price]");
-    await expect(price("2026-10-30")).toHaveText("€63"); // the own price, in the grid's October days
+    await expect(price("2026-10-30")).toHaveCount(0); // past nights show no price, as on the timeline
     await expect(price("2026-11-03")).toHaveText("€81"); // Ada has Paddy Villa, Rice Field Villa is free
     await expect(price("2026-11-04")).toHaveCount(0);
     await expect(price("2026-11-07")).toHaveText("€97.20"); // the High season

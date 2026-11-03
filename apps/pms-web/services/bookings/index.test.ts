@@ -780,11 +780,14 @@ describe("PMS target calendar projection", () => {
     expect(result.bookings).toMatchObject([{ id: "booking-1", bookingReference: "VAY-1", roomPosition: 0, checkIn: "2026-09-10", checkOut: "2026-09-12" }, { id: "booking-1", bookingReference: "VAY-1", roomPosition: 1, checkIn: "2026-09-12", checkOut: "2026-09-15" }]);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-11T12:00:00Z"));
+    // VAY-2470: the phone lists each room with the stay that holds it on the tapped day.
     // prettier-ignore
-    const mobile = create(createElement(MobileCalendar, { currentMonth: new Date(), bookings: result.bookings.map((booking) => ({ ...booking, checkIn: "2026-09-10", checkOut: "2026-09-12" })), blocks: [], roomTypes: [], onMonthChange: vi.fn(), onSelectBooking: vi.fn(), onNewBooking: vi.fn(), onBlockRoom: vi.fn(), onSelectBlock: vi.fn() }));
+    const room = (id: string, roomTypeId: string, roomNumber: string) => ({ id, roomTypeId, roomTypeName: roomTypeId, roomNumber, floor: "1", status: "available", baseRate: 0, currency: null, maxOccupancy: 2, size: 0 });
+    // prettier-ignore
+    const mobile = create(createElement(MobileCalendar, { currentMonth: new Date(), bookings: result.bookings.map((booking) => ({ ...booking, checkIn: "2026-09-10", checkOut: "2026-09-12" })), blocks: [], roomTypes: [], rooms: [room("room-1", "type-1", "101"), room("room-2", "type-2", "202")], blocksForRoom: () => [], nightRates: {}, rateNames: {}, currency: null, onMonthChange: vi.fn(), onSelectBooking: vi.fn(), onNewBooking: vi.fn(), onBlockRoom: vi.fn(), onSelectBlock: vi.fn(), onSelectRoom: vi.fn() }));
     try {
-      expect(JSON.stringify(mobile.toJSON())).toContain("Room 1 of 2");
-      expect(JSON.stringify(mobile.toJSON())).toContain("Room 2 of 2");
+      expect(JSON.stringify(mobile.toJSON())).toContain("VAY-1 · room 1 of 2");
+      expect(JSON.stringify(mobile.toJSON())).toContain("VAY-1 · room 2 of 2");
       expect([0, 1].map(calendarLaneTop)).toEqual([6, 42]);
     } finally {
       mobile.unmount();

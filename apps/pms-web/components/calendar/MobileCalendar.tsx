@@ -25,7 +25,7 @@ import { getChannelBarColor } from "@/lib/constants/statusStyles";
 import { AWAITING_PAYMENT_BADGE_CLASS, formatPaymentDeadline } from "@/lib/awaitingPayment";
 import { useTranslation } from "@/lib/i18n";
 import { groupRoomsByType } from "@/lib/roomOrdering";
-import { byPrice, cellPrice, nightTaken, type NightRate } from "./calendarPrices";
+import { byPrice, cellPrice, nightTaken, stayTotals, type NightRate } from "./calendarPrices";
 
 export const calendarLaneTop = (index: number) => index * 36 + 6;
 
@@ -40,7 +40,9 @@ interface MobileCalendarProps {
   blocksForRoom: (room: CalendarRoom) => CalendarBlock[];
   /** Each room type's open rates per night, cheapest first, from the published prices. */
   nightRates: Record<string, Record<string, NightRate[]>>;
-  /** The published prices' currency; null while there are none. */
+  /** The rates' names per room type; a stay's total counts the named rates, as the stay popover does. */
+  rateNames: Record<string, Record<string, string>>;
+  /** The published prices' currency; null while there are none or "Show prices" is off. */
   currency: string | null;
   loading?: boolean;
   loadError?: boolean;
@@ -67,6 +69,7 @@ export default function MobileCalendar({
   rooms,
   blocksForRoom,
   nightRates,
+  rateNames,
   currency,
   loading = false,
   loadError = false,
@@ -104,6 +107,17 @@ export default function MobileCalendar({
   // distinguish a tap from a drag — only past a small movement threshold do
   // we start treating the gesture as a range select.
   const downPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // A new month opens on its first day (today in this month), so the room list never shows a day whose bookings the
+  // month's data doesn't hold (VAY-2470).
+  const shownMonth = useRef(currentMonth);
+  useEffect(() => {
+    if (isSameMonth(shownMonth.current, currentMonth)) return;
+    shownMonth.current = currentMonth;
+    const day = isSameMonth(new Date(), currentMonth) ? new Date() : startOfMonth(currentMonth);
+    setSelectionStart(day);
+    setSelectionEnd(day);
+  }, [currentMonth]);
 
   const clearRange = () => {
     if (selectionStart) setSelectionEnd(selectionStart);
@@ -282,25 +296,24 @@ export default function MobileCalendar({
     }
     return map;
   }, [bookings]);
-  // Under each date, the cheapest rate among the rooms free that night, as the timeline prices its free nights. Hidden
-  // while a month loads, so no night looks free before its bookings arrive.
+  // Under each date from today on, the cheapest rate among the rooms free that night, as the timeline prices its free
+  // nights. Hidden while a month loads, so no night looks free before its bookings arrive.
+  const todayKey = format(new Date(), "yyyy-MM-dd");
   const dayPrices = useMemo(() => {
     const prices: Record<string, string> = {};
     if (!currency || loading || loadError) return prices;
-    const stays = new Map(
-      rooms.map((room) => [
-        room.id,
-        [
-          ...(bookingsByRoomId.get(room.id) ?? []).map((b) => ({
-            start: b.checkIn,
-            end: b.checkOut,
-          })),
-          ...blocksForRoom(room).map((bl) => ({ start: bl.startDate, end: bl.endDate })),
-        ],
-      ]),
-    );
+    const stays = new Map<string, { start: string; end: string }[]>();
+    for (const room of rooms)
+      stays.set(room.id, [
+        ...(bookingsByRoomId.get(room.id) ?? []).map((b) => ({
+          start: b.checkIn,
+          end: b.checkOut,
+        })),
+        ...blocksForRoom(room).map((bl) => ({ start: bl.startDate, end: bl.endDate })),
+      ]);
     for (const day of days) {
       const key = format(day, "yyyy-MM-dd");
+      if (key < todayKey) continue;
       let best: NightRate | undefined;
       for (const room of rooms) {
         const lowest = nightRates[room.roomTypeId]?.[key]?.[0];
@@ -320,6 +333,7 @@ export default function MobileCalendar({
     nightRates,
     days,
     locale,
+    todayKey,
   ]);
   const roomGroups = groupRoomsByType(rooms).map(({ roomTypeId, rooms: typed }) => ({
     roomTypeId,
@@ -335,22 +349,15 @@ export default function MobileCalendar({
   const unassignedHere = bookings.filter((b) => !b.roomId && holds(b.checkIn, b.checkOut));
 
   /** A free room's price for the chosen nights, in minor units: the cheapest rate for one night, else the cheapest
-   * stay total among the rates open every night (as the stay popover adds them up). Null when no rate is open;
-   * undefined without published prices. */
+   * stay total, as the stay popover adds them up. Null when no rate is open; undefined without prices to show or for
+   * past nights, which the timeline doesn't price either. */
   const freePrice = (roomTypeId: string): string | null | undefined => {
-    if (!currency || nightKeys.length === 0) return undefined;
+    if (!currency || nightKeys.length === 0 || nightKeys[0]! < todayKey) return undefined;
     const rates = nightRates[roomTypeId];
     if (nightKeys.length === 1) return rates?.[nightKeys[0]!]?.[0]?.totalMinor ?? null;
-    const totals = (rates?.[nightKeys[0]!] ?? []).flatMap(({ offerId }) => {
-      let total = BigInt(0);
-      for (const key of nightKeys) {
-        const rate = rates?.[key]?.find((value) => value.offerId === offerId);
-        if (!rate) return [];
-        total += BigInt(rate.totalMinor);
-      }
-      return [{ totalMinor: total.toString() }];
-    });
-    return totals.sort(byPrice)[0]?.totalMinor ?? null;
+    return (
+      stayTotals(rates, Object.keys(rateNames[roomTypeId] ?? {}), nightKeys)[0]?.totalMinor ?? null
+    );
   };
   const shortDay = (date: string) =>
     parseISO(date).toLocaleDateString(locale, { month: "short", day: "numeric" });
@@ -793,6 +800,15 @@ function BookingRow({
           {`${b.guestFirstName} ${b.guestLastName}`.trim()} · {shortDay(b.checkIn)} →{" "}
           {shortDay(b.checkOut)}
         </span>
+        {b.numberOfRooms > 1 && (
+          <span className="block truncate text-[11px] text-gray-500">
+            {t("calendar.bookingRoomPosition", {
+              reference: b.bookingReference,
+              position: b.roomPosition + 1,
+              total: b.numberOfRooms,
+            })}
+          </span>
+        )}
         {awaiting && b.paymentDeadlineAt && (
           <span className="block text-[11px] font-semibold text-amber-800">
             {t("bookings.payBy", {

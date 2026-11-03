@@ -92,17 +92,18 @@ test.describe("PMS calendar channel colours", () => {
     await expectDistinctChannelBackgrounds(bar);
   });
 
-  test("colours the channel badge of a mobile day's bookings", async ({ page }, testInfo) => {
+  test("colours the channel stripe of a mobile day's bookings", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/calendar");
     await page.locator('[data-day="2026-08-18"]').click();
+    // VAY-2470: the phone's room list marks a booking's channel with a coloured stripe.
     const badge = page
       .getByRole("button", { name: /Eve Expedia/ })
-      .locator('[class~="w-8"][class~="rounded-full"]');
+      .locator('[class~="w-1"][class~="rounded-full"]');
     await expect(badge).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("calendar-mobile.png") });
 
     const color = await badge.evaluate((element) => getComputedStyle(element).backgroundColor);
-    expect(color, "Eve Expedia's badge has a background").not.toBe(TRANSPARENT);
+    expect(color, "Eve Expedia's stripe has a background").not.toBe(TRANSPARENT);
   });
 });

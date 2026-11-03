@@ -780,8 +780,10 @@ export default function CalendarPage() {
   // The nights priced: the timeline's 21 days, or the phone's whole month grid (VAY-2470).
   const priceDays = useMemo(() => {
     if (!isMobileViewport) return dayKeys;
+    // The range's end is exclusive and a day late in the evening (endOfWeek + 1), so compare days, not times.
+    const end = format(fetchRange.end, "yyyy-MM-dd");
     const keys: string[] = [];
-    for (let day = fetchRange.start; day < fetchRange.end; day = addDays(day, 1))
+    for (let day = fetchRange.start; format(day, "yyyy-MM-dd") < end; day = addDays(day, 1))
       keys.push(format(day, "yyyy-MM-dd"));
     return keys;
   }, [isMobileViewport, fetchRange, dayKeys]);
@@ -826,7 +828,8 @@ export default function CalendarPage() {
             rooms={data?.rooms || []}
             blocksForRoom={blocksForRoom}
             nightRates={nightRates}
-            currency={publication?.currency ?? null}
+            rateNames={rateNames}
+            currency={pricesShown && publication ? publication.currency : null}
             onSelectBooking={openMobileBooking}
             onNewBooking={handleMobileNewBooking}
             onBlockRoom={handleMobileBlockRoom}
