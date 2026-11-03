@@ -229,11 +229,6 @@ export type ApiConfig = {
   replacementPricingPaypalAcceptanceEnabled: boolean;
   /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
   hotelFirstRunEnabled: boolean;
-  /**
-   * VAY-2451: mounts the go-live checklist (/api/hotel-setup/properties/:id/checklist/v2) with the first run.
-   * The dashboards show the four-step setup's cards when it answers, today's card when it doesn't. Off by default.
-   */
-  hotelGoLiveChecklistEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -1397,7 +1392,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED",
     ),
     hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
-    hotelGoLiveChecklistEnabled: readBooleanEnv(env, "HOTEL_GO_LIVE_CHECKLIST_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),

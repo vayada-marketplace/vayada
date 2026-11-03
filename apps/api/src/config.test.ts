@@ -941,13 +941,6 @@ describe("api config", () => {
     expect(loadConfig({ HOTEL_FIRST_RUN_ENABLED: "true" }).hotelFirstRunEnabled).toBe(true);
   });
 
-  it("keeps the go-live checklist (VAY-2451) unmounted unless explicitly enabled", () => {
-    expect(loadConfig({}).hotelGoLiveChecklistEnabled).toBe(false);
-    expect(
-      loadConfig({ HOTEL_GO_LIVE_CHECKLIST_ENABLED: "true" }).hotelGoLiveChecklistEnabled,
-    ).toBe(true);
-  });
-
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
     expect(() =>
       loadConfig({
