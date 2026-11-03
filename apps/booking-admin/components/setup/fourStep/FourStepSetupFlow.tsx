@@ -102,7 +102,7 @@ const newKey = () =>
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 /**
- * VAY-2451: the four-step setup (behind FOUR_STEP_SETUP_ENABLED with ONBOARDING_V2). About you when the
+ * VAY-2451: the four-step setup (behind ONBOARDING_V2). About you when the
  * account's name or phone is missing, the welcome card, then "Your property" and "Location & contact" kept
  * on this device until the last one's Continue creates the hotel; steps 3 and 4 follow for the hotel.
  */

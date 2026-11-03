@@ -57,7 +57,8 @@ test("shows the banner from the exit marker alone, once the checklist can't load
   await mockSetupStatus(page);
   let answerChecklist = () => {};
   const checklistAsked = new Promise<void>((asked) => {
-    void page.route(/\/api\/hotel-setup\/properties\/[^/]+\/checklist$/, async (route) => {
+    // The go-live checklist (VAY-2451), the only one the dashboard reads.
+    void page.route(/\/api\/hotel-setup\/properties\/[^/]+\/checklist\/v2$/, async (route) => {
       const headers = corsHeaders(route);
       if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
       await new Promise<void>((answer) => {
