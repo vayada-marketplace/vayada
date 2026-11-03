@@ -14,10 +14,18 @@ import {
   parseISO,
   isWithinInterval,
 } from "date-fns";
-import { CalendarBooking, CalendarBlock, CalendarRoomType } from "@/services/calendar";
+import {
+  CalendarBooking,
+  CalendarBlock,
+  CalendarRoom,
+  CalendarRoomType,
+} from "@/services/calendar";
+import { money } from "@/components/pricing/stepPricing";
 import { getChannelBarColor } from "@/lib/constants/statusStyles";
 import { AWAITING_PAYMENT_BADGE_CLASS, formatPaymentDeadline } from "@/lib/awaitingPayment";
 import { useTranslation } from "@/lib/i18n";
+import { groupRoomsByType } from "@/lib/roomOrdering";
+import { byPrice, cellPrice, nightTaken, stayTotals, type NightRate } from "./calendarPrices";
 
 export const calendarLaneTop = (index: number) => index * 36 + 6;
 
@@ -26,6 +34,16 @@ interface MobileCalendarProps {
   bookings: CalendarBooking[];
   blocks: CalendarBlock[];
   roomTypes: CalendarRoomType[];
+  /** Every room in the calendar's order: a tapped day lists them all with their status and price (VAY-2470). */
+  rooms: CalendarRoom[];
+  /** The blocks holding a room, as the timeline draws them (legacy count blocks fill a type's first rooms). */
+  blocksForRoom: (room: CalendarRoom) => CalendarBlock[];
+  /** Each room type's open rates per night, cheapest first, from the published prices. */
+  nightRates: Record<string, Record<string, NightRate[]>>;
+  /** The rates' names per room type; a stay's total counts the named rates, as the stay popover does. */
+  rateNames: Record<string, Record<string, string>>;
+  /** The published prices' currency; null while there are none or "Show prices" is off. */
+  currency: string | null;
   loading?: boolean;
   loadError?: boolean;
   onMonthChange: (month: Date) => void;
@@ -35,6 +53,8 @@ interface MobileCalendarProps {
   onNewBooking: (startDate?: string, endDate?: string) => void;
   onBlockRoom: (startDate: string, endDate: string) => void;
   onSelectBlock: (block: CalendarBlock) => void;
+  /** A free room tapped, for its nights from startDate up to the check-out endDate (both yyyy-MM-dd). */
+  onSelectRoom: (room: CalendarRoom, startDate: string, endDate: string) => void;
   writeActionsAvailable?: boolean;
   manualBookingAvailable?: boolean;
   /** The hotel's time zone, for payment deadlines (VAY-2348). */
@@ -46,6 +66,11 @@ export default function MobileCalendar({
   bookings,
   blocks,
   roomTypes,
+  rooms,
+  blocksForRoom,
+  nightRates,
+  rateNames,
+  currency,
   loading = false,
   loadError = false,
   onMonthChange,
@@ -53,6 +78,7 @@ export default function MobileCalendar({
   onNewBooking,
   onBlockRoom,
   onSelectBlock,
+  onSelectRoom,
   writeActionsAvailable = true,
   manualBookingAvailable = writeActionsAvailable,
   hotelTimeZone = null,
@@ -81,6 +107,17 @@ export default function MobileCalendar({
   // distinguish a tap from a drag — only past a small movement threshold do
   // we start treating the gesture as a range select.
   const downPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // A new month opens on its first day (today in this month), so the room list never shows a day whose bookings the
+  // month's data doesn't hold (VAY-2470).
+  const shownMonth = useRef(currentMonth);
+  useEffect(() => {
+    if (isSameMonth(shownMonth.current, currentMonth)) return;
+    shownMonth.current = currentMonth;
+    const day = isSameMonth(new Date(), currentMonth) ? new Date() : startOfMonth(currentMonth);
+    setSelectionStart(day);
+    setSelectionEnd(day);
+  }, [currentMonth]);
 
   const clearRange = () => {
     if (selectionStart) setSelectionEnd(selectionStart);
@@ -230,8 +267,7 @@ export default function MobileCalendar({
       : drag.start
     : selectionEnd;
 
-  // Aggregate bookings/blocks across the (preview or committed) range so the
-  // user still sees what's occupied while picking dates for a booking/block.
+  // The (preview or committed) nights, so the room list shows what's free while picking dates for a booking/block.
   const rangeDays = useMemo(() => {
     if (!headerStart || !headerEnd) return [] as Date[];
     const result: Date[] = [];
@@ -243,34 +279,88 @@ export default function MobileCalendar({
     return result;
   }, [headerStart, headerEnd]);
 
-  const selectedBookings = useMemo(() => {
-    const seen = new Set<string>();
-    const out: CalendarBooking[] = [];
-    for (const d of rangeDays) {
-      for (const b of bookingsByDay[format(d, "yyyy-MM-dd")] || []) {
-        const key = `${b.id}:${b.roomPosition}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          out.push(b);
-        }
-      }
+  // VAY-2470: every room for the (preview or committed) nights, as the timeline shows them: who holds it, or what it
+  // costs. A stay ends on its check-out day, so a guest leaving on the first day doesn't hold the room.
+  const listStart = headerStart ? format(headerStart, "yyyy-MM-dd") : null;
+  const listEnd = headerEnd ? format(addDays(headerEnd, 1), "yyyy-MM-dd") : null;
+  const nightKeys = useMemo(() => rangeDays.map((d) => format(d, "yyyy-MM-dd")), [rangeDays]);
+  const holds = (start: string, end: string) =>
+    listStart !== null && listEnd !== null && start < listEnd && end > listStart;
+  const bookingsByRoomId = useMemo(() => {
+    const map = new Map<string, CalendarBooking[]>();
+    for (const b of bookings) {
+      if (!b.roomId) continue;
+      const list = map.get(b.roomId);
+      if (list) list.push(b);
+      else map.set(b.roomId, [b]);
     }
-    return out;
-  }, [rangeDays, bookingsByDay]);
+    return map;
+  }, [bookings]);
+  // Under each date from today on, the cheapest rate among the rooms free that night, as the timeline prices its free
+  // nights. Hidden while a month loads, so no night looks free before its bookings arrive.
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+  const dayPrices = useMemo(() => {
+    const prices: Record<string, string> = {};
+    if (!currency || loading || loadError) return prices;
+    const stays = new Map<string, { start: string; end: string }[]>();
+    for (const room of rooms)
+      stays.set(room.id, [
+        ...(bookingsByRoomId.get(room.id) ?? []).map((b) => ({
+          start: b.checkIn,
+          end: b.checkOut,
+        })),
+        ...blocksForRoom(room).map((bl) => ({ start: bl.startDate, end: bl.endDate })),
+      ]);
+    for (const day of days) {
+      const key = format(day, "yyyy-MM-dd");
+      if (key < todayKey) continue;
+      let best: NightRate | undefined;
+      for (const room of rooms) {
+        const lowest = nightRates[room.roomTypeId]?.[key]?.[0];
+        if (!lowest || nightTaken(stays.get(room.id) ?? [], key)) continue;
+        if (!best || byPrice(lowest, best) < 0) best = lowest;
+      }
+      if (best) prices[key] = cellPrice(best.totalMinor, currency, locale);
+    }
+    return prices;
+  }, [
+    currency,
+    loading,
+    loadError,
+    rooms,
+    bookingsByRoomId,
+    blocksForRoom,
+    nightRates,
+    days,
+    locale,
+    todayKey,
+  ]);
+  const roomGroups = groupRoomsByType(rooms).map(({ roomTypeId, rooms: typed }) => ({
+    roomTypeId,
+    name: roomTypes.find((type) => type.id === roomTypeId)?.name ?? typed[0]?.roomTypeName ?? "",
+    rooms: typed.map((room) => ({
+      room,
+      bookings: (bookingsByRoomId.get(room.id) ?? [])
+        .filter((b) => holds(b.checkIn, b.checkOut))
+        .sort((a, b) => a.checkIn.localeCompare(b.checkIn)),
+      blocks: blocksForRoom(room).filter((bl) => holds(bl.startDate, bl.endDate)),
+    })),
+  }));
+  const unassignedHere = bookings.filter((b) => !b.roomId && holds(b.checkIn, b.checkOut));
 
-  const selectedBlocks = useMemo(() => {
-    const seen = new Set<string>();
-    const out: CalendarBlock[] = [];
-    for (const d of rangeDays) {
-      for (const bl of blocksByDay[format(d, "yyyy-MM-dd")] || []) {
-        if (!seen.has(bl.id)) {
-          seen.add(bl.id);
-          out.push(bl);
-        }
-      }
-    }
-    return out;
-  }, [rangeDays, blocksByDay]);
+  /** A free room's price for the chosen nights, in minor units: the cheapest rate for one night, else the cheapest
+   * stay total, as the stay popover adds them up. Null when no rate is open; undefined without prices to show or for
+   * past nights, which the timeline doesn't price either. */
+  const freePrice = (roomTypeId: string): string | null | undefined => {
+    if (!currency || nightKeys.length === 0 || nightKeys[0]! < todayKey) return undefined;
+    const rates = nightRates[roomTypeId];
+    if (nightKeys.length === 1) return rates?.[nightKeys[0]!]?.[0]?.totalMinor ?? null;
+    return (
+      stayTotals(rates, Object.keys(rateNames[roomTypeId] ?? {}), nightKeys)[0]?.totalMinor ?? null
+    );
+  };
+  const shortDay = (date: string) =>
+    parseISO(date).toLocaleDateString(locale, { month: "short", day: "numeric" });
 
   const isRangeSelection = !!headerStart && !!headerEnd && !isSameDay(headerStart, headerEnd);
   const nights = rangeDays.length; // 1 for single-day selection, N for an N-day range
@@ -406,6 +496,22 @@ export default function MobileCalendar({
                     {format(day, "d")}
                   </span>
                 )}
+                {dayPrices[key] && (
+                  <span
+                    data-price
+                    className={`mt-0.5 text-[9px] leading-none tabular-nums ${
+                      isEndpoint
+                        ? "text-white/90"
+                        : isMiddle
+                          ? "text-primary-700"
+                          : isCurrentMonth
+                            ? "text-gray-500"
+                            : "text-gray-300"
+                    }`}
+                  >
+                    {dayPrices[key]}
+                  </span>
+                )}
                 {/* Booking dots (channel-colored) + a red dot when the day is blocked */}
                 {(hasBookings || hasBlocks) && (
                   <div className="flex gap-0.5 mt-0.5">
@@ -507,144 +613,218 @@ export default function MobileCalendar({
             <div className="bg-white rounded-lg border border-red-200 p-6 text-center" role="alert">
               <p className="text-[12px] text-red-600">{t("calendar.mobile.loadError")}</p>
             </div>
-          ) : selectedBookings.length === 0 && selectedBlocks.length === 0 ? (
+          ) : roomGroups.length === 0 && unassignedHere.length === 0 ? (
             <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
               <p className="text-[12px] text-gray-400">
                 {isRangeSelection ? t("calendar.mobile.emptyRange") : t("calendar.mobile.emptyDay")}
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {selectedBlocks.map((bl) => {
-                const rt = roomTypes.find((r) => r.id === bl.roomTypeId);
-                return (
-                  <button
-                    key={`block-${bl.id}`}
-                    type="button"
-                    onClick={() => onSelectBlock(bl)}
-                    className={`w-full rounded-lg border border-dashed p-3 text-left transition-colors ${
-                      bl.protected
-                        ? "bg-amber-50 border-amber-200 hover:bg-amber-100"
-                        : "bg-red-50 border-red-200 hover:bg-red-100"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                          bl.protected ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600"
-                        }`}
-                      >
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
+            <div className="space-y-3">
+              {roomGroups.map((group) => (
+                <section key={group.roomTypeId} className="space-y-1.5">
+                  <h4 className="px-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    {group.name}
+                  </h4>
+                  {group.rooms.map(({ room, bookings: held, blocks: closed }) => {
+                    const label = `#${room.roomNumber}`;
+                    if (held.length === 0 && closed.length === 0) {
+                      const price = freePrice(room.roomTypeId);
+                      return (
+                        <button
+                          key={room.id}
+                          type="button"
+                          onClick={() =>
+                            listStart && listEnd && onSelectRoom(room, listStart, listEnd)
+                          }
+                          className={`${ROW_CLASS} border-gray-200 bg-white hover:border-gray-300`}
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                          <span
+                            aria-hidden="true"
+                            className="w-1 self-stretch rounded-full bg-green-500"
                           />
-                        </svg>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px] font-semibold text-gray-900">
+                              {label}
+                            </span>
+                            <span className="block text-[11px] font-medium text-green-700">
+                              {t("calendar.popover.available")}
+                            </span>
+                          </span>
+                          {price && currency && (
+                            <span className="shrink-0 text-right">
+                              <span className="block text-[13px] font-semibold tabular-nums text-gray-900">
+                                {money(price, currency)}
+                              </span>
+                              <span className="block text-[10px] text-gray-500">
+                                {nightKeys.length === 1
+                                  ? t("calendar.mobile.perNight")
+                                  : t("calendar.popover.total")}
+                              </span>
+                            </span>
+                          )}
+                          {CHEVRON}
+                        </button>
+                      );
+                    }
+                    return (
+                      <div key={room.id} className="space-y-1.5">
+                        {closed.map((bl) => (
+                          <button
+                            key={`block-${bl.id}`}
+                            type="button"
+                            onClick={() => onSelectBlock(bl)}
+                            className={`${ROW_CLASS} border-dashed ${
+                              bl.protected
+                                ? "border-gray-300 bg-white hover:bg-gray-50"
+                                : "border-red-200 bg-red-50 hover:bg-red-100"
+                            }`}
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`w-1 self-stretch rounded-full ${bl.protected ? "bg-gray-400" : "bg-red-500"}`}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[13px] font-semibold text-gray-900">
+                                {label}
+                              </span>
+                              <span
+                                className={`block truncate text-[11px] ${bl.protected ? "text-gray-600" : "text-red-700"}`}
+                              >
+                                {bl.protected
+                                  ? bl.sourceSummary || t("rooms.linkedInventory")
+                                  : bl.reason || t("calendar.blocked")}
+                              </span>
+                            </span>
+                            <span
+                              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                bl.protected
+                                  ? "bg-gray-100 text-gray-700"
+                                  : "bg-red-100 text-red-700"
+                              }`}
+                            >
+                              {bl.protected ? t("rooms.linked") : t("calendar.blocked")}
+                            </span>
+                            {CHEVRON}
+                          </button>
+                        ))}
+                        {held.map((b) => (
+                          <BookingRow
+                            key={`${b.id}:${b.roomPosition}`}
+                            booking={b}
+                            title={label}
+                            shortDay={shortDay}
+                            onSelect={onSelectBooking}
+                            hotelTimeZone={hotelTimeZone}
+                          />
+                        ))}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div
-                          className={`text-[13px] font-semibold truncate ${bl.protected ? "text-amber-700" : "text-red-700"}`}
-                        >
-                          {bl.protected
-                            ? t("rooms.linkedInventory")
-                            : bl.reason || t("calendar.blocked")}
-                        </div>
-                        <div className="text-[11px] text-red-500">
-                          {bl.startDate} → {bl.endDate}
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span
-                          className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                            bl.protected ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
-                          }`}
-                        >
-                          {bl.protected ? t("rooms.linked") : t("calendar.blocked")}
-                        </span>
-                        <div className="text-[10px] text-red-400 mt-0.5 truncate max-w-[90px]">
-                          {bl.sourceSummary ||
-                            (bl.roomId ? `#${bl.roomNumber ?? ""}` : rt?.name || "")}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-              {selectedBookings.map((b) => {
-                const channelColor = getChannelBarColor(b.channel);
-                // VAY-2348: held for a bank transfer: amber, with the payment deadline.
-                const awaiting = b.status === "awaiting_payment";
-                return (
-                  <button
-                    key={`${b.id}:${b.roomPosition}`}
-                    onClick={() => onSelectBooking(b)}
-                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                      awaiting
-                        ? "border-amber-200 border-l-4 border-l-amber-600 bg-amber-50 hover:border-amber-300"
-                        : "bg-white border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className={`w-8 h-8 rounded-full ${channelColor} flex items-center justify-center text-white text-[10px] font-bold shrink-0`}
-                      >
-                        {b.guestFirstName.charAt(0)}
-                        {b.guestLastName.charAt(0)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-semibold text-gray-900 truncate">
-                          {b.guestFirstName} {b.guestLastName}
-                        </div>
-                        <div className="text-[11px] text-gray-500">
-                          {b.numberOfRooms > 1 &&
-                            `Room ${b.roomPosition + 1} of ${b.numberOfRooms} · `}
-                          {b.checkIn} → {b.checkOut}
-                        </div>
-                        {awaiting && b.paymentDeadlineAt && (
-                          <div className="text-[11px] font-semibold text-amber-800">
-                            {t("bookings.payBy", {
-                              date: formatPaymentDeadline(
-                                b.paymentDeadlineAt,
-                                locale,
-                                hotelTimeZone,
-                              ),
-                            })}
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span
-                          className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                            awaiting
-                              ? `border ${AWAITING_PAYMENT_BADGE_CLASS}`
-                              : b.status === "confirmed"
-                                ? "bg-green-100 text-green-700"
-                                : b.status === "pending"
-                                  ? "bg-yellow-100 text-yellow-700"
-                                  : "bg-gray-100 text-gray-600"
-                          }`}
-                        >
-                          {awaiting ? t("bookings.statusAwaitingPayment") : b.status}
-                        </span>
-                        <div className="text-[10px] text-gray-400 mt-0.5 capitalize">
-                          {b.channel}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    );
+                  })}
+                </section>
+              ))}
+              {unassignedHere.length > 0 && (
+                <section className="space-y-1.5">
+                  <h4 className="px-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    {t("calendar.unassigned")}
+                  </h4>
+                  {unassignedHere.map((b) => (
+                    <BookingRow
+                      key={`${b.id}:${b.roomPosition}`}
+                      booking={b}
+                      title={b.roomName}
+                      shortDay={shortDay}
+                      onSelect={onSelectBooking}
+                      hotelTimeZone={hotelTimeZone}
+                    />
+                  ))}
+                </section>
+              )}
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+const ROW_CLASS =
+  "w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors";
+
+const CHEVRON = (
+  <svg
+    aria-hidden="true"
+    className="w-4 h-4 shrink-0 text-gray-300"
+    fill="none"
+    stroke="currentColor"
+    viewBox="0 0 24 24"
+  >
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+  </svg>
+);
+
+/** A booking in the phone's room list: the room (or room type while unassigned), the guest and the stay. */
+function BookingRow({
+  booking: b,
+  title,
+  shortDay,
+  onSelect,
+  hotelTimeZone,
+}: {
+  booking: CalendarBooking;
+  title: string;
+  shortDay: (date: string) => string;
+  onSelect: (booking: CalendarBooking) => void;
+  hotelTimeZone: string | null;
+}) {
+  const { locale, t } = useTranslation();
+  // VAY-2348: held for a bank transfer: amber, with the payment deadline.
+  const awaiting = b.status === "awaiting_payment";
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(b)}
+      className={`${ROW_CLASS} ${
+        awaiting
+          ? "border-amber-200 bg-amber-50 hover:border-amber-300"
+          : "border-gray-200 bg-white hover:border-gray-300"
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`w-1 self-stretch rounded-full ${awaiting ? "bg-amber-600" : getChannelBarColor(b.channel)}`}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold text-gray-900">{title}</span>
+        <span className="block truncate text-[11px] text-gray-600">
+          {`${b.guestFirstName} ${b.guestLastName}`.trim()} · {shortDay(b.checkIn)} →{" "}
+          {shortDay(b.checkOut)}
+        </span>
+        {b.numberOfRooms > 1 && (
+          <span className="block truncate text-[11px] text-gray-500">
+            {t("calendar.bookingRoomPosition", {
+              reference: b.bookingReference,
+              position: b.roomPosition + 1,
+              total: b.numberOfRooms,
+            })}
+          </span>
+        )}
+        {awaiting && b.paymentDeadlineAt && (
+          <span className="block text-[11px] font-semibold text-amber-800">
+            {t("bookings.payBy", {
+              date: formatPaymentDeadline(b.paymentDeadlineAt, locale, hotelTimeZone),
+            })}
+          </span>
+        )}
+      </span>
+      <span
+        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+          awaiting ? `border ${AWAITING_PAYMENT_BADGE_CLASS}` : "bg-primary-50 text-primary-700"
+        }`}
+      >
+        {awaiting ? t("bookings.statusAwaitingPayment") : t("calendar.mobile.booked")}
+      </span>
+      {CHEVRON}
+    </button>
   );
 }

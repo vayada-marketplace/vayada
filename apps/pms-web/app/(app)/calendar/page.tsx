@@ -141,15 +141,15 @@ export default function CalendarPage() {
   // VAY-2411: free nights show their cheapest rate from the published prices, unless this user turned it off.
   const [showPrices, setShowPrices] = useShowPrices();
   const { prices, error: pricesError } = usePropertyPrices();
-  // VAY-2411: a timeline bar (with its anchor) opens the booking's popover; the month and mobile views open its
-  // window as before.
+  // VAY-2411: a timeline bar (with its anchor) opens the booking's popover; the month view opens its window as
+  // before. The phone opens the popovers without an anchor, as bottom sheets (VAY-2470).
   const [bookingPopover, setBookingPopover] = useState<{
     booking: CalendarBooking;
-    anchor: PopoverAnchor;
+    anchor?: PopoverAnchor;
   } | null>(null);
   const [blockPopover, setBlockPopover] = useState<{
     block: CalendarBlock;
-    anchor: PopoverAnchor;
+    anchor?: PopoverAnchor;
   } | null>(null);
   const openBooking = useCallback((booking: CalendarBooking, anchor?: PopoverAnchor) => {
     if (booking.status === "awaiting_payment") return setAwaitingBooking(booking);
@@ -220,11 +220,12 @@ export default function CalendarPage() {
     endIdx: number;
     limitIdx: number;
   } | null>(null);
+  // The night popover's room and nights; the phone's room list opens it without an anchor (VAY-2470).
   const [prefill, setPrefill] = useState<{
     roomId: string;
     startDate: string;
     endDate: string;
-    anchor: PopoverAnchor;
+    anchor?: PopoverAnchor;
   } | null>(null);
   const dragActive = drag !== null;
 
@@ -462,6 +463,26 @@ export default function CalendarPage() {
       setMobilePrefill(null);
     }
     setShowNewBookingModal(true);
+  };
+
+  // VAY-2470: the phone's room list opens the timeline's popovers as bottom sheets: a free room's nights, a
+  // booking's basics (a bank-transfer hold keeps its deadline card) and a block.
+  const openMobileRoom = (room: CalendarRoom, startDate: string, endDate: string) => {
+    setBookingPopover(null);
+    setBlockPopover(null);
+    setMobilePrefill(null);
+    setPrefill({ roomId: room.id, startDate, endDate });
+  };
+  const openMobileBooking = (booking: CalendarBooking) => {
+    if (booking.status === "awaiting_payment") return setAwaitingBooking(booking);
+    setPrefill(null);
+    setBlockPopover(null);
+    setBookingPopover({ booking });
+  };
+  const openMobileBlock = (block: CalendarBlock) => {
+    setPrefill(null);
+    setBookingPopover(null);
+    setBlockPopover({ block });
   };
 
   const handleUpdateBlock = async (updates: {
@@ -746,17 +767,30 @@ export default function CalendarPage() {
   const allBookings = useMemo(() => data?.bookings || [], [data]);
 
   // Per-room blocks render on their own row; legacy count-based blocks still fill the first N rooms of the type.
-  const blocksForRoom = (room: CalendarRoom) => [
-    ...(blocksByRoom[room.id] || []),
-    ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
-      (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
-    ),
-  ];
+  const blocksForRoom = useCallback(
+    (room: CalendarRoom) => [
+      ...(blocksByRoom[room.id] || []),
+      ...(legacyBlocksByRoomType[room.roomTypeId] || []).filter(
+        (bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount,
+      ),
+    ],
+    [blocksByRoom, legacyBlocksByRoomType, roomIndexInType],
+  );
 
+  // The nights priced: the timeline's 21 days, or the phone's whole month grid (VAY-2470).
+  const priceDays = useMemo(() => {
+    if (!isMobileViewport) return dayKeys;
+    // The range's end is exclusive and a day late in the evening (endOfWeek + 1), so compare days, not times.
+    const end = format(fetchRange.end, "yyyy-MM-dd");
+    const keys: string[] = [];
+    for (let day = fetchRange.start; format(day, "yyyy-MM-dd") < end; day = addDays(day, 1))
+      keys.push(format(day, "yyyy-MM-dd"));
+    return keys;
+  }, [isMobileViewport, fetchRange, dayKeys]);
   const publication = prices?.publication ?? null;
   const nightRates = useMemo(
-    () => (publication && data ? calendarNightRates(publication, data.roomTypes, dayKeys) : {}),
-    [publication, data, dayKeys],
+    () => (publication && data ? calendarNightRates(publication, data.roomTypes, priceDays) : {}),
+    [publication, data, priceDays],
   );
   const rateNames = useMemo(() => {
     const names: Record<string, Record<string, string>> = {};
@@ -777,7 +811,8 @@ export default function CalendarPage() {
       {roomShuffleNotice && <RoomShuffleNotice {...roomShuffleNotice} />}
       {/* Mobile Calendar */}
       <div className="md:hidden flex-1 flex flex-col">
-        {loading && !data ? (
+        {/* Mounted on phones only: its room list would otherwise sit, hidden, beside the timeline's rows (VAY-2470). */}
+        {!isMobileViewport || (loading && !data) ? (
           <div className="p-6 animate-pulse">
             <div className="h-64 bg-gray-200 rounded" />
           </div>
@@ -791,10 +826,16 @@ export default function CalendarPage() {
             loading={loading}
             loadError={loadError}
             onMonthChange={handleMobileMonthChange}
-            onSelectBooking={openBooking}
+            rooms={data?.rooms || []}
+            blocksForRoom={blocksForRoom}
+            nightRates={nightRates}
+            rateNames={rateNames}
+            currency={pricesShown && publication ? publication.currency : null}
+            onSelectBooking={openMobileBooking}
             onNewBooking={handleMobileNewBooking}
             onBlockRoom={handleMobileBlockRoom}
-            onSelectBlock={(bl) => setSelectedBlock(bl)}
+            onSelectBlock={openMobileBlock}
+            onSelectRoom={openMobileRoom}
             manualBookingAvailable={MANUAL_BOOKINGS_AVAILABLE}
           />
         )}
@@ -1487,7 +1528,7 @@ export default function CalendarPage() {
               names={rateNames[room.roomTypeId] ?? {}}
               bookings={bookingsByRoom[room.id] || []}
               blocks={blocksForRoom(room)}
-              lastDay={dayKeys[VIEW_DAYS - 1]!}
+              lastDay={priceDays[priceDays.length - 1]!}
               onNewBooking={
                 MANUAL_BOOKINGS_AVAILABLE ? () => setShowNewBookingModal(true) : undefined
               }

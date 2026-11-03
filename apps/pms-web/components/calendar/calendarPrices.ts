@@ -74,6 +74,26 @@ export function calendarNightRates(
   return byRoomType;
 }
 
+/** Each rate's total for a stay (VAY-2411/2470): its nightly prices added up, for the given rates open every night,
+ * cheapest first. The stay popover and the phone's room list both show these. */
+export function stayTotals(
+  nightRates: Record<string, NightRate[]> | undefined,
+  offerIds: readonly string[],
+  dates: readonly string[],
+): { offerId: string; totalMinor: string }[] {
+  return offerIds
+    .flatMap((offerId) => {
+      let total = BigInt(0);
+      for (const date of dates) {
+        const rate = nightRates?.[date]?.find((value) => value.offerId === offerId);
+        if (!rate) return [];
+        total += BigInt(rate.totalMinor);
+      }
+      return [{ offerId, totalMinor: total.toString() }];
+    })
+    .sort(byPrice);
+}
+
 /** The calendar's rates by name, as the Prices tab words them ("Free cancellation", "Non-refundable"): from each
  * rate's meal plan and cancellation terms. A rate without readable terms is left out. */
 export function calendarRateNames(

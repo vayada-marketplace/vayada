@@ -3676,6 +3676,8 @@
   "calendar.mobile.loadError": "Kalenderdaten konnten nicht geladen werden.",
   "calendar.mobile.emptyRange": "Keine Buchungen oder Sperren in diesem Zeitraum",
   "calendar.mobile.emptyDay": "Keine Buchungen oder Sperren an diesem Tag",
+  "calendar.mobile.booked": "Belegt",
+  "calendar.mobile.perNight": "pro Nacht",
   "calendar.refreshRooms": "Zimmer aktualisieren",
   "calendar.roomNumber": "Zimmer #{room}",
   "calendar.bookingRoomPosition": "{reference} · Zimmer {position} von {total}",

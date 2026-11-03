@@ -58,7 +58,8 @@ export default function BookingPopover({
   booking: CalendarBooking;
   /** "#101", or "Unassigned · Suite" for a booking without a room yet. */
   roomLabel: string;
-  anchor: PopoverAnchor;
+  /** None opens a bottom sheet (the phone calendar). */
+  anchor?: PopoverAnchor;
   onChangeRoom: () => void;
   onClose: () => void;
 }) {
@@ -134,7 +135,8 @@ export function BlockPopover({
   onClose,
 }: {
   block: CalendarBlock;
-  anchor: PopoverAnchor;
+  /** None opens a bottom sheet (the phone calendar). */
+  anchor?: PopoverAnchor;
   onEdit: () => void;
   onUnblock: () => Promise<void>;
   onClose: () => void;

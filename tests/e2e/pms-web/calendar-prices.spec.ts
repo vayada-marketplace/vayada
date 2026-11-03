@@ -367,3 +367,258 @@ test.describe("PMS calendar prices", () => {
     await assertHealthy();
   });
 });
+
+// VAY-2470: the phone calendar lists every room of a tapped day with its status and the night's cheapest rate, and
+// opens the timeline's popovers as sheets from the bottom of the screen. A second villa, painted 12–13 November.
+const ROOM2 = "room_rice_field_villa";
+
+async function addRiceFieldVilla(page: Page) {
+  const rooms = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/rooms*`;
+  const room = (roomId: string, roomNumber: string, sortOrder: number) => ({
+    roomId,
+    roomTypeId: VILLA,
+    roomNumber,
+    floor: "1",
+    status: "available",
+    sortOrder,
+    metadata: {},
+  });
+  await page.unroute(rooms);
+  await page.route(rooms, (route) =>
+    route.fulfill({
+      json: {
+        ...list([room(ROOM, "Paddy Villa", 0), room(ROOM2, "Rice Field Villa", 1)]),
+        orderVersion: "order-1",
+      },
+    }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-blocks*`, (route) =>
+    route.fulfill({ json: list([{ ...block, blockId: "block_rice_paint", roomId: ROOM2 }]) }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guest-stay-times`, (route) =>
+    route.fulfill({ json: pmsWebStayTimes({ checkInTime: "14:30", checkOutTime: "11:00" }) }),
+  );
+  // New Booking's reads, for the sheets' New Booking.
+  const manualBookings = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/manual-bookings`;
+  await page.route(`${manualBookings}/capabilities`, (route) =>
+    route.fulfill({
+      json: { contractVersion: "pms-manual-booking.v1", canRecordPaidPayment: false },
+    }),
+  );
+  await page.route(`${manualBookings}/addons`, (route) =>
+    route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: [] } }),
+  );
+}
+
+test.describe("PMS phone calendar rooms and prices", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test.beforeEach(async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-11-02T08:00:00.000Z"));
+    await mockPmsWebAuthenticatedSession(page);
+    await mockPmsWebTargetRoutes(page);
+    await mockPricedVilla(page);
+    await addRiceFieldVilla(page);
+  });
+
+  const openCalendar = async (page: Page) => {
+    await page.goto("/calendar");
+    await expect(page.getByRole("heading", { name: "November", exact: true })).toBeVisible();
+    await expect(page.getByText("Loading bookings and blocks...")).toBeHidden();
+  };
+  const day = (page: Page, date: string) => page.locator(`[data-day="${date}"]`);
+  const roomRow = (page: Page, room: string) =>
+    page.getByRole("button", { name: new RegExp(`^#${room}`) });
+
+  test("a tapped day lists every room with its status and price, and opens the popovers as sheets", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await openCalendar(page);
+    await day(page, "2026-11-04").click();
+    const paddy = roomRow(page, "Paddy Villa");
+    const rice = roomRow(page, "Rice Field Villa");
+    await expect(paddy).toContainText("Ada Lovelace · Nov 3 → Nov 6");
+    await expect(paddy).toContainText("Booked");
+    await expect(rice).toContainText("Available");
+    await expect(rice).toContainText("€81");
+    await expect(rice).toContainText("per night");
+    await page.screenshot({ path: testInfo.outputPath("phone-day-rooms.png") });
+
+    // A free room: the timeline's night popover, across the bottom of the screen.
+    await rice.click();
+    let sheet = page.getByRole("dialog", { name: "#Rice Field Villa · Wed, Nov 4" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText("Available")).toBeVisible();
+    await expect(sheet.getByText("Season: Standard")).toBeVisible();
+    await expect(sheet.getByRole("listitem").nth(0)).toHaveText(/Non-refundable\s*Lowest\s*€81/);
+    await expect(sheet.getByRole("listitem").nth(1)).toHaveText(/Free cancellation\s*€90/);
+    await expect(sheet.getByText("1 night", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("Free until Nov 12 · 8 nights open")).toBeVisible();
+    await expect(sheet.getByRole("link", { name: /Edit prices & rules/ })).toHaveAttribute(
+      "href",
+      `/rooms/${VILLA}?tab=prices&date=2026-11-04`,
+    );
+    const box = await sheet.boundingBox();
+    expect(box && [box.x, box.width, Math.round(box.y + box.height)]).toEqual([0, 390, 844]);
+    await page.screenshot({ path: testInfo.outputPath("phone-night-sheet.png") });
+    // New Booking starts with that room and night.
+    await sheet.getByRole("button", { name: "New Booking" }).click();
+    await expect(page.getByLabel("Room 1 room")).toHaveValue(ROOM2);
+    await expect(page.getByLabel("Room 1 check-in")).toHaveValue("2026-11-04");
+    await expect(page.getByLabel("Room 1 check-out")).toHaveValue("2026-11-05");
+    await page.keyboard.press("Escape");
+    await expect(page.getByLabel("Room 1 room")).toHaveCount(0);
+
+    // A booking: the timeline's booking popover; Change room opens the reservation window.
+    await paddy.click();
+    sheet = page.getByRole("dialog", { name: "Ada Lovelace · #Paddy Villa" });
+    await expect(sheet).toContainText("Nov 3 → Nov 6 · 3 nights");
+    await expect(sheet).toContainText("Confirmed");
+    await expect(sheet.getByRole("definition")).toHaveText([
+      "Ada Lovelace",
+      "Direct",
+      "€243",
+      "Tue, Nov 3 · from 14:30",
+    ]);
+    await expect(sheet.getByRole("link", { name: "Open reservation" })).toHaveAttribute(
+      "href",
+      "/bookings/guest_booking_ada",
+    );
+    await page.screenshot({ path: testInfo.outputPath("phone-booking-sheet.png") });
+    await sheet.getByRole("button", { name: "Change room" }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Move to another room|Assign room/ }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Close" }).first().click();
+
+    // A block: its reason in the list, Unblock dates and Edit in the sheet.
+    await day(page, "2026-11-12").click();
+    await expect(paddy).toContainText("Available");
+    await expect(rice).toContainText("Painting");
+    await expect(rice).toContainText("Blocked");
+    await rice.click();
+    sheet = page.getByRole("dialog", { name: "Blocked · #Rice Field Villa" });
+    await expect(sheet).toContainText("Nov 12 → Nov 14 · 2 nights");
+    await expect(sheet.getByRole("button", { name: "Unblock dates" })).toBeVisible();
+    await sheet.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByText("Blocked Room")).toBeVisible();
+    await page
+      .locator("div.fixed.inset-0")
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
+    await expect(page.getByText("Blocked Room")).toHaveCount(0);
+
+    // The next month opens on its first day, with that month's rooms.
+    await page.getByRole("button", { name: "Next month" }).click();
+    await expect(page.getByRole("heading", { name: "December", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tuesday, Dec 1" })).toBeVisible();
+    await expect(paddy).toContainText("Available");
+    await expect(rice).toContainText("€81");
+    await assertHealthy();
+  });
+
+  test("a dragged range shows each free room's stay total and opens the stay sheet", async ({
+    page,
+  }) => {
+    await openCalendar(page);
+    const center = async (date: string) => {
+      const box = await day(page, date).boundingBox();
+      if (!box) throw new Error(`${date} is not on screen`);
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    const from = await center("2026-11-06");
+    const to = await center("2026-11-08");
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.getByRole("heading", { name: "Nov 6 – Nov 8 · 3 nights" })).toBeVisible();
+
+    // The High season nights at the cheapest rate: 3 × €97.20. Ada leaves on the 6th, so both villas are free.
+    const paddy = roomRow(page, "Paddy Villa");
+    await expect(paddy).toContainText("€291.60");
+    await expect(paddy).toContainText("Total");
+    await expect(roomRow(page, "Rice Field Villa")).toContainText("€291.60");
+    await paddy.click();
+    const sheet = page.getByRole("dialog", { name: "#Paddy Villa · Nov 6 → Nov 9 · 3 nights" });
+    const totals = sheet.locator("section", { hasText: "Total" }).getByRole("listitem");
+    await expect(totals.nth(0)).toHaveText(/Non-refundable\s*Lowest\s*€291.60/);
+    await sheet.getByRole("button", { name: "New Booking · 3 nights" }).click();
+    await expect(page.getByLabel("Room 1 room")).toHaveValue(ROOM);
+    await expect(page.getByLabel("Room 1 check-in")).toHaveValue("2026-11-06");
+    await expect(page.getByLabel("Room 1 check-out")).toHaveValue("2026-11-09");
+  });
+
+  test("shows the same prices and availability as the timeline for the same nights", async ({
+    page,
+  }) => {
+    await openCalendar(page);
+    const phonePrice = async (date: string, room: string) => {
+      await day(page, date).click();
+      const row = roomRow(page, room);
+      await expect(row).toContainText("Available");
+      return (await row.locator(".tabular-nums").innerText()).trim();
+    };
+    const nov4 = await phonePrice("2026-11-04", "Rice Field Villa");
+    await expect(roomRow(page, "Paddy Villa")).toContainText("Booked");
+    const nov7 = await phonePrice("2026-11-07", "Paddy Villa");
+    expect([nov4, nov7]).toEqual(["€81", "€97.20"]);
+    // Nothing after Ada: free through the grid's last day, Sunday 6 December.
+    await roomRow(page, "Paddy Villa").click();
+    const sheet = page.getByRole("dialog", { name: "#Paddy Villa · Sat, Nov 7" });
+    await expect(sheet.getByText("Free through Dec 6")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
+
+    // The same nights on a laptop: the timeline starts today, 2 November.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator('[data-bar="booking"]', { hasText: "Ada Lovelace" })).toBeVisible();
+    const openNight = async (room: string, index: number) => {
+      const box = await page
+        .locator("tr", { hasText: `#${room}` })
+        .locator("td[colspan]")
+        .boundingBox();
+      if (!box) throw new Error(`The ${room} row is not on screen`);
+      await page.mouse.click(box.x + ((index + 0.5) * box.width) / 21, box.y + box.height - 8);
+    };
+    await openNight("Rice Field Villa", 2);
+    let popover = page.getByRole("dialog", { name: "#Rice Field Villa · Wed, Nov 4" });
+    await expect(popover.getByRole("listitem").nth(0)).toContainText("Lowest");
+    await expect(popover.getByRole("listitem").nth(0)).toContainText(nov4);
+    await page.keyboard.press("Escape");
+    await openNight("Paddy Villa", 5);
+    popover = page.getByRole("dialog", { name: "#Paddy Villa · Sat, Nov 7" });
+    await expect(popover.getByRole("listitem").nth(0)).toContainText(nov7);
+  });
+
+  test("the month grid shows each night's cheapest free room under its date", async ({
+    page,
+  }, testInfo) => {
+    // Rice Field Villa is also closed on 4 November, while Ada has Paddy Villa: no villa is free that night.
+    await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-blocks*`, (route) =>
+      route.fulfill({
+        json: list([
+          { ...block, blockId: "block_rice_paint", roomId: ROOM2 },
+          {
+            ...block,
+            blockId: "block_rice_repair",
+            roomId: ROOM2,
+            startsOn: "2026-11-04",
+            endsOn: "2026-11-04",
+            reason: "Repairs",
+          },
+        ]),
+      }),
+    );
+    await openCalendar(page);
+    const price = (date: string) => day(page, date).locator("[data-price]");
+    await expect(price("2026-10-30")).toHaveCount(0); // past nights show no price, as on the timeline
+    await expect(price("2026-11-03")).toHaveText("€81"); // Ada has Paddy Villa, Rice Field Villa is free
+    await expect(price("2026-11-04")).toHaveCount(0);
+    await expect(price("2026-11-07")).toHaveText("€97.20"); // the High season
+    await expect(price("2026-11-12")).toHaveText("€81"); // Rice Field Villa is painted, Paddy Villa is free
+    await page.screenshot({ path: testInfo.outputPath("phone-month-prices.png") });
+  });
+});

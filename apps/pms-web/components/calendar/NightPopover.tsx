@@ -13,7 +13,7 @@ import CalendarPopover, {
   PopoverBadge,
   type PopoverAnchor,
 } from "./CalendarPopover";
-import { byPrice, type NightRate } from "./calendarPrices";
+import { stayTotals, type NightRate } from "./calendarPrices";
 
 const nightsBetween = (from: string, to: string) =>
   Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -40,7 +40,8 @@ export default function NightPopover({
   startDate: string;
   /** The check-out day, after the last night. */
   endDate: string;
-  anchor: PopoverAnchor;
+  /** None opens a bottom sheet (the phone calendar). */
+  anchor?: PopoverAnchor;
   /** The published prices' currency; null while there are none. */
   currency: string | null;
   /** The prices could not be read (not "none published yet"). */
@@ -84,19 +85,7 @@ export default function NightPopover({
 
   // Each rate's total for the stay: its nightly prices added up, for the rates open every night. Shown even when the
   // stay breaks a rule, which the warnings below explain.
-  const totals = single
-    ? []
-    : Object.keys(names)
-        .flatMap((offerId) => {
-          let total = BigInt(0);
-          for (const date of dates) {
-            const rate = nightRates?.[date]?.find((value) => value.offerId === offerId);
-            if (!rate) return [];
-            total += BigInt(rate.totalMinor);
-          }
-          return [{ offerId, totalMinor: total.toString() }];
-        })
-        .sort(byPrice);
+  const totals = single ? [] : stayTotals(nightRates, Object.keys(names), dates);
 
   const warnings = [
     lowest && lowest.minNights > nights
@@ -231,7 +220,7 @@ export default function NightPopover({
                 })}
               </p>
             )}
-            <p className="text-gray-500">{t("calendar.popover.dragHint")}</p>
+            {anchor && <p className="text-gray-500">{t("calendar.popover.dragHint")}</p>}
           </div>
         )}
       </div>

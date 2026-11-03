@@ -3663,6 +3663,8 @@
   "calendar.mobile.loadError": "Calendar data could not be loaded.",
   "calendar.mobile.emptyRange": "No bookings or blocks in this range",
   "calendar.mobile.emptyDay": "No bookings or blocks on this day",
+  "calendar.mobile.booked": "Booked",
+  "calendar.mobile.perNight": "per night",
   "calendar.refreshRooms": "Refresh rooms",
   "calendar.roomNumber": "Room #{room}",
   "calendar.bookingRoomPosition": "{reference} · room {position} of {total}",

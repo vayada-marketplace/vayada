@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { trapFocus } from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
 
 /** Where the clicked night, stay or bar is on screen (viewport pixels). */
@@ -11,7 +12,8 @@ const GAP = 8;
 const EDGE = 8;
 
 /** The calendar's popover card (VAY-2411): under what was clicked when it fits, above it otherwise, and never over it,
- * so the next night can still be clicked; with room on neither side it scrolls on the roomier one. Escape, the close
+ * so the next night can still be clicked; with room on neither side it scrolls on the roomier one. Without an anchor
+ * (the phone calendar, VAY-2470) the same content opens as a sheet from the bottom of the screen. Escape, the close
  * button and a click anywhere else close it. */
 export default function CalendarPopover({
   anchor,
@@ -22,7 +24,8 @@ export default function CalendarPopover({
   onClose,
   children,
 }: {
-  anchor: PopoverAnchor;
+  /** What was clicked; none opens a bottom sheet. */
+  anchor?: PopoverAnchor;
   /** The dialog's accessible name. */
   label: string;
   eyebrow: ReactNode;
@@ -39,6 +42,7 @@ export default function CalendarPopover({
 
   // Measured after every render, since the card's height follows its content.
   useLayoutEffect(() => {
+    if (!anchor) return;
     const height = ref.current?.scrollHeight ?? 0;
     const left = Math.max(EDGE, Math.min(anchor.left, window.innerWidth - WIDTH - EDGE));
     const below = anchor.bottom + GAP;
@@ -57,8 +61,15 @@ export default function CalendarPopover({
     );
   });
 
-  // Focus moves into the card, so a keyboard or screen reader user lands on what opened.
-  useEffect(() => ref.current?.focus({ preventScroll: true }), []);
+  const anchored = anchor !== undefined;
+  // Focus moves into the card, so a keyboard or screen reader user lands on what opened; a sheet hands it back.
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.focus({ preventScroll: true });
+    return () => {
+      if (!anchored) previous?.focus({ preventScroll: true });
+    };
+  }, [anchored]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -68,29 +79,20 @@ export default function CalendarPopover({
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onDown);
+    // A sheet closes from its backdrop's click instead: closing on the press would let the tap's click land on the
+    // room below and open another sheet.
+    if (anchored) document.addEventListener("mousedown", onDown);
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onDown);
     };
-  }, [onClose]);
+  }, [onClose, anchored]);
 
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label={label}
-      tabIndex={-1}
-      className="fixed z-50 bg-white border border-gray-200 shadow-xl rounded-xl overflow-y-auto focus:outline-none"
-      style={{
-        left: position?.left ?? anchor.left,
-        top: position?.top ?? anchor.bottom + GAP,
-        width: WIDTH,
-        maxHeight: position?.maxHeight,
-        visibility: position ? "visible" : "hidden",
-      }}
-    >
-      <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-start gap-2">
+  const content = (
+    <>
+      <div
+        className={`px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-start gap-2 ${anchor ? "" : "sticky top-0 z-10"}`}
+      >
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide truncate">
             {eyebrow}
@@ -115,6 +117,44 @@ export default function CalendarPopover({
         </button>
       </div>
       {children}
+    </>
+  );
+
+  if (!anchor)
+    return (
+      <div className="fixed inset-0 z-50">
+        {/* Its own click: iOS Safari sends no mouse events to an element without one. */}
+        <div aria-hidden="true" className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div
+          ref={ref}
+          role="dialog"
+          aria-modal="true"
+          aria-label={label}
+          tabIndex={-1}
+          onKeyDown={(event) => event.key === "Tab" && trapFocus(event, ref.current, onClose)}
+          className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto overflow-x-hidden rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-xl focus:outline-none"
+        >
+          {content}
+        </div>
+      </div>
+    );
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={label}
+      tabIndex={-1}
+      className="fixed z-50 bg-white border border-gray-200 shadow-xl rounded-xl overflow-y-auto focus:outline-none"
+      style={{
+        left: position?.left ?? anchor.left,
+        top: position?.top ?? anchor.bottom + GAP,
+        width: WIDTH,
+        maxHeight: position?.maxHeight,
+        visibility: position ? "visible" : "hidden",
+      }}
+    >
+      {content}
     </div>
   );
 }
