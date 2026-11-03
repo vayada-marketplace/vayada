@@ -36,6 +36,8 @@ export default function Modal({ onClose, maxWidth = "md", children, footer, aria
     ? `h-[100dvh] w-full rounded-none sm:h-auto sm:max-h-[90dvh] sm:w-full sm:rounded-xl sm:mx-4 ${maxWidthClass}`
     : `w-full mx-4 rounded-xl max-h-[90dvh] ${maxWidthClass}`;
 
+  // min-w-0 keeps a long word or row from widening the panel past the screen, and the body never scrolls
+  // sideways (VAY-2470: the reservation sheet slid left and right on phones).
   // prettier-ignore
   useEffect(() => { if (!ariaLabel || typeof document === "undefined") return; const previous = document.activeElement as HTMLElement | null; panelRef.current?.focus(); return () => previous?.focus(); }, [ariaLabel]);
 
@@ -43,8 +45,8 @@ export default function Modal({ onClose, maxWidth = "md", children, footer, aria
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       {/* prettier-ignore */}
-      <div ref={panelRef} role={ariaLabel ? "dialog" : undefined} aria-modal={ariaLabel ? "true" : undefined} aria-label={ariaLabel} tabIndex={-1} onKeyDown={(event) => trapFocus(event, panelRef.current, onClose)} className={`relative bg-white shadow-xl flex flex-col ${panelSizing}`}>
-        {bare ? children : <div className="flex-1 min-h-0 overflow-y-auto p-6">{children}</div>}
+      <div ref={panelRef} role={ariaLabel ? "dialog" : undefined} aria-modal={ariaLabel ? "true" : undefined} aria-label={ariaLabel} tabIndex={-1} onKeyDown={(event) => trapFocus(event, panelRef.current, onClose)} className={`relative min-w-0 bg-white shadow-xl flex flex-col ${panelSizing}`}>
+        {bare ? children : <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6">{children}</div>}
         {footer && <div className="shrink-0 border-t border-gray-100 p-4 sm:px-6">{footer}</div>}
       </div>
     </div>
