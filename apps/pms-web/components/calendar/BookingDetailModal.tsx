@@ -636,8 +636,8 @@ export default function BookingDetailModal({
         </div>
       ) : view === "roomPicker" ? (
         /* ── ROOM PICKER ── */
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-1">
+        <div className="sm:p-6">
+          <div className="flex items-center gap-3 mb-1 pr-8 sm:pr-0">
             <button
               onClick={() => setView("detail")}
               aria-label={t("calendar.bookingDetail.back")}
@@ -951,8 +951,8 @@ export default function BookingDetailModal({
         </div>
       ) : view === "swapConfirm" && pendingSwap ? (
         /* ── SWAP CONFIRM ── */
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-1">
+        <div className="sm:p-6">
+          <div className="flex items-center gap-3 mb-1 pr-8 sm:pr-0">
             <button
               onClick={() => setView("roomPicker")}
               aria-label={t("calendar.bookingDetail.back")}
@@ -1064,8 +1064,8 @@ export default function BookingDetailModal({
         </div>
       ) : view === "unassignConfirm" && pendingUnassign ? (
         /* ── UNASSIGN CONFIRM ── */
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-1">
+        <div className="sm:p-6">
+          <div className="flex items-center gap-3 mb-1 pr-8 sm:pr-0">
             <button
               onClick={() => setView("roomPicker")}
               aria-label={t("calendar.bookingDetail.back")}
@@ -1187,10 +1187,12 @@ export default function BookingDetailModal({
         </div>
       ) : editing ? (
         /* ── EDIT MODE ── */
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-5">
+        <div className="sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-5 pr-8 sm:pr-0">
             <h2 className="text-lg font-bold text-gray-900">{t("bookings.modal.editBooking")}</h2>
-            <span className="text-sm text-gray-500">{booking.bookingReference}</span>
+            <span className="min-w-0 break-all text-sm text-gray-500">
+              {booking.bookingReference}
+            </span>
           </div>
 
           <div className="space-y-4">
@@ -1351,14 +1353,16 @@ export default function BookingDetailModal({
         </div>
       ) : (
         /* ── VIEW MODE ── */
-        <div className="p-6">
+        <div className="sm:p-6">
           {/* Header */}
           <div className="mb-6">
-            <h2 className="text-xl font-bold text-gray-900">
+            <h2 className="pr-8 text-xl font-bold text-gray-900 [overflow-wrap:anywhere] sm:pr-0">
               {booking.guestFirstName} {booking.guestLastName}
             </h2>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-sm text-gray-500">{booking.bookingReference}</span>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+              <span className="min-w-0 break-all text-sm text-gray-500">
+                {booking.bookingReference}
+              </span>
               <span
                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${channelStyle.bg} ${channelStyle.text}`}
               >
@@ -1414,9 +1418,9 @@ export default function BookingDetailModal({
 
           {/* Room info */}
           <div hidden={booking.numberOfRooms > 1} className="bg-gray-50 rounded-lg p-4 mb-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-900">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900 [overflow-wrap:anywhere]">
                   {booking.numberOfRooms > 1 && `${booking.numberOfRooms}× `}
                   {booking.roomName}
                   {booking.mealDescription && (
@@ -1454,7 +1458,7 @@ export default function BookingDetailModal({
                   )}
                 </div>
               </div>
-              <div className="text-right text-sm text-gray-600">
+              <div className="shrink-0 text-right text-sm text-gray-600">
                 <p>
                   {t(
                     booking.nights === 1
@@ -1523,7 +1527,7 @@ export default function BookingDetailModal({
               {booking.guestEmail ? (
                 <div className="flex items-center gap-2 text-sm">
                   <svg
-                    className="w-4 h-4 text-gray-400"
+                    className="w-4 h-4 shrink-0 text-gray-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1535,13 +1539,13 @@ export default function BookingDetailModal({
                       d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
                     />
                   </svg>
-                  <span className="text-gray-700">{booking.guestEmail}</span>
+                  <span className="min-w-0 break-all text-gray-700">{booking.guestEmail}</span>
                 </div>
               ) : null}
               {booking.guestPhone ? (
                 <div className="flex items-center gap-2 text-sm">
                   <svg
-                    className="w-4 h-4 text-gray-400"
+                    className="w-4 h-4 shrink-0 text-gray-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1553,7 +1557,7 @@ export default function BookingDetailModal({
                       d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
                     />
                   </svg>
-                  <span className="text-gray-700">{booking.guestPhone}</span>
+                  <span className="min-w-0 break-all text-gray-700">{booking.guestPhone}</span>
                 </div>
               ) : null}
               {!booking.guestEmail && !booking.guestPhone && (
@@ -1622,7 +1626,7 @@ export default function BookingDetailModal({
               <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
                 {t("calendar.newBookingModal.specialRequestsLabel")}
               </h3>
-              <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">
+              <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3 [overflow-wrap:anywhere]">
                 {booking.specialRequests}
               </p>
             </div>
@@ -1633,7 +1637,7 @@ export default function BookingDetailModal({
               <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
                 {t("bookings.detail.estimatedArrivalTime")}
               </h3>
-              <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">
+              <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3 [overflow-wrap:anywhere]">
                 {booking.estimatedArrivalTime}
               </p>
             </div>

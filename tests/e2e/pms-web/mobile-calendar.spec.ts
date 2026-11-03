@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
@@ -32,6 +32,57 @@ const futureBlock = {
   reason: "Owner maintenance",
   status: "active",
 };
+
+// VAY-2470: Timo's booking — a long booking reference and email made the reservation sheet scroll sideways.
+const longReferenceReservation = {
+  ...pmsWebReservation,
+  bookingReference: "C01D5073548DEA79A67855EF0453F",
+  primaryGuest: {
+    ...pmsWebReservation.primaryGuest,
+    displayName: "Timo Schreyer",
+    email: "timo.schreyer.reservations@vayada-hotels.example.com",
+    phone: "+4915735490950",
+  },
+};
+
+/** The open window: the last full-screen overlay's panel. */
+const openSheet = (page: Page) => page.locator("div.fixed.inset-0 > div.relative").last();
+
+/** Nothing in the sheet reaches past its edges, the sheet stays on screen, and nothing scrolls sideways. */
+async function expectSheetFits(sheet: Locator) {
+  const fit = await sheet.evaluate((panel) => {
+    const box = panel.getBoundingClientRect();
+    const sticksOut: string[] = [];
+    const scrollsSideways: string[] = [];
+    for (const el of Array.from(panel.querySelectorAll<HTMLElement>("*"))) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 1 && (r.left < box.left - 0.5 || r.right > box.right + 0.5)) {
+        sticksOut.push(
+          `${el.tagName.toLowerCase()} "${(el.textContent ?? "").trim().slice(0, 40)}"`,
+        );
+      }
+      const overflowX = getComputedStyle(el).overflowX;
+      const scroller =
+        overflowX === "auto" || overflowX === "scroll" || el.matches(".overflow-y-auto");
+      if (scroller && el.scrollWidth > el.clientWidth + 1) {
+        scrollsSideways.push(`${el.tagName.toLowerCase()}.${el.className}`);
+      }
+    }
+    return {
+      left: Math.round(box.left),
+      right: Math.round(box.right),
+      viewport: window.innerWidth,
+      pageWidth: document.documentElement.scrollWidth,
+      sticksOut,
+      scrollsSideways,
+    };
+  });
+  expect(fit.left).toBeGreaterThanOrEqual(0);
+  expect(fit.right).toBeLessThanOrEqual(fit.viewport);
+  expect(fit.pageWidth).toBeLessThanOrEqual(fit.viewport);
+  expect(fit.sticksOut).toEqual([]);
+  expect(fit.scrollsSideways).toEqual([]);
+}
 
 test.describe("mobile PMS calendar", () => {
   test.use({ viewport: { width: 390, height: 844 } });
@@ -167,5 +218,60 @@ test.describe("mobile PMS calendar", () => {
     await page.waitForTimeout(250);
     expect(reservationRanges).toHaveLength(settledReservationRequestCount);
     expect(blockRanges).toHaveLength(settledBlockRequestCount);
+  });
+
+  test("the reservation, New Booking and Block windows fit a phone screen", async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-08-11T12:00:00.000Z"));
+    await mockPmsWebAuthenticatedSession(page);
+    await mockPmsWebTargetRoutes(page);
+    const reservationsRoute = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations*`;
+    await page.unroute(reservationsRoute);
+    await page.route(reservationsRoute, (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          items: [longReferenceReservation],
+          sourceFreshness: {},
+          pagination: { total: 1, limit: 500, offset: 0 },
+        },
+      }),
+    );
+    await page.route(
+      `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`,
+      (route) =>
+        route.fulfill({
+          json: {
+            contractVersion: "pms-operations.v1",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            item: longReferenceReservation,
+            sourceFreshness: {},
+          },
+        }),
+    );
+
+    await page.goto("/calendar");
+    await expect(page.getByRole("heading", { name: "August", exact: true })).toBeVisible();
+    await expect(page.getByText("Loading bookings and blocks...")).toBeHidden();
+
+    await page.locator('[data-day="2026-08-15"]').click();
+    await page.getByRole("button", { name: /Timo Schreyer/ }).click();
+    const sheet = openSheet(page);
+    await expect(sheet.getByText("C01D5073548DEA79A67855EF0453F")).toBeVisible();
+    await expect(sheet.getByText("Confirmed", { exact: true })).toBeInViewport({ ratio: 1 });
+    await expectSheetFits(sheet);
+    await sheet.getByRole("button", { name: "Close" }).first().click();
+    await expect(sheet.getByText("C01D5073548DEA79A67855EF0453F")).toBeHidden();
+
+    await page.locator('[data-day="2026-08-20"]').click();
+    await page.getByRole("button", { name: "+ New", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "New Booking" })).toBeVisible();
+    await expectSheetFits(openSheet(page));
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("heading", { name: "New Booking" })).toBeHidden();
+
+    await page.getByRole("button", { name: "Block", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Block Rooms" })).toBeVisible();
+    await expectSheetFits(openSheet(page));
   });
 });
