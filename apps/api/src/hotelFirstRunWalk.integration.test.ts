@@ -501,9 +501,8 @@ describe.skipIf(!url)(
         if (!result.ok) return;
         expect(result.state.nextStep).toBeNull();
         expect(new Set(result.state.steps.map((step) => step.state))).toEqual(new Set(["done"]));
-        // The checklist's light read agrees, without the booking readiness (VAY-2247 incident).
+        // The go-live list's light read agrees, without the booking readiness (VAY-2247 incident).
         expect(await h.service().readSetupProgress(h.actor)).toEqual({
-          firstRoom: true,
           guestPayment: true,
         });
         // It takes no locks either: it answers while a pricing save holds the owner locks.
@@ -521,7 +520,6 @@ describe.skipIf(!url)(
             );
           });
           expect(await Promise.race([h.service().readSetupProgress(h.actor), late])).toEqual({
-            firstRoom: true,
             guestPayment: true,
           });
         } finally {
@@ -825,7 +823,6 @@ describe.skipIf(!url)(
         });
         expect((await h.service().read(h.actor)).nextStep).toBe("pricing");
         expect(await h.service().readSetupProgress(h.actor)).toEqual({
-          firstRoom: false,
           guestPayment: false,
         });
         // A first run that stopped leaves the hotel being set up; finishing it makes it live.
@@ -1024,7 +1021,6 @@ describe.skipIf(!url)(
           ).toBeNull();
           // Setup is done (how guests pay and the plan); the room is what the go-live list asks for.
           expect(await h.service().readSetupProgress(h.actor)).toEqual({
-            firstRoom: false,
             guestPayment: true,
           });
           const checklist = await goLive(h);
@@ -1138,10 +1134,10 @@ describe.skipIf(!url)(
           peak.stalledPools = Math.max(peak.stalledPools, now.stalledPools);
           peak.totalConnections = Math.max(peak.totalConnections, now.totalConnections);
         }, 10);
-        // What one Booking Admin dashboard load fires at once: the checklist, the booking page status
+        // What one Booking Admin dashboard load fires at once: the go-live list, the booking page status
         // (the booking readiness) and the dashboard's other reads on the shared pool.
         const load = () => [
-          checklist.read(actor),
+          checklist.readGoLive(actor),
           readiness(),
           ...Array.from({ length: 8 }, () => pool.query("SELECT pg_sleep(0.02)")),
         ];
@@ -1156,12 +1152,12 @@ describe.skipIf(!url)(
         expect(failures).toEqual([]);
         expect(tookMs, JSON.stringify(peak)).toBeLessThan(10_000);
         expect(peak.stalledPools, JSON.stringify(peak)).toBe(0);
-        // Every checklist came back with the first room and guest payment done: next is going live.
+        // Every go-live list came back with setup finished (how guests pay and the plan saved).
         for (const [index, result] of results.entries())
           if (index % 10 === 0)
             expect(result).toMatchObject({
               status: "fulfilled",
-              value: { setup: { next: "go_live" } },
+              value: { contractVersion: "hotel-setup-checklist.v2", setup: { next: null } },
             });
       } finally {
         await h?.close();

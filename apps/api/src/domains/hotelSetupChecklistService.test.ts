@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createHotelSetupChecklistService,
   type HotelGoLiveFactsRow,
-  type HotelSetupChecklistFactsRow,
 } from "./hotelSetupChecklistService.js";
 
 const propertyId = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
@@ -18,22 +17,8 @@ const actor = {
 
 /** The first run's light setup-progress read, from the first-run steps that are done. */
 function progress(done: readonly string[]) {
-  return {
-    firstRoom: done.includes("rooms") && done.includes("pricing"),
-    guestPayment: done.includes("payments") && done.includes("plan"),
-  };
+  return { guestPayment: done.includes("payments") && done.includes("plan") };
 }
-
-const LIVE: HotelSetupChecklistFactsRow = {
-  hotelBasics: true,
-  bookingPublished: true,
-  photos: false,
-  style: false,
-  calendar: "default",
-  guestTerms: "default",
-  onlineCardReady: false,
-  viewer: { hidden: false, dismissed: false },
-};
 
 /** VAY-2451: a hotel that finished the four-step setup with its room, on the placeholder price. */
 const GO_LIVE: HotelGoLiveFactsRow = {
@@ -49,9 +34,8 @@ const GO_LIVE: HotelGoLiveFactsRow = {
 
 function service(
   done: readonly string[],
-  facts: HotelSetupChecklistFactsRow | null = LIVE,
-  onlineCardsOffered = false,
   goLive: HotelGoLiveFactsRow | null = GO_LIVE,
+  onlineCardsOffered = false,
 ) {
   const store = {
     acknowledge: vi.fn(async () => undefined),
@@ -61,7 +45,6 @@ function service(
     store,
     checklist: createHotelSetupChecklistService({
       firstRun: { readSetupProgress: vi.fn(async () => progress(done)) },
-      facts: { read: vi.fn(async () => facts) },
       goLiveFacts: { read: vi.fn(async () => goLive) },
       store,
       onlineCardsOffered,
@@ -71,7 +54,7 @@ function service(
 
 const ALL = ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"];
 
-describe("hotel setup checklist service (VAY-2247 wave 2)", () => {
+describe("go-live checklist service (VAY-2247 wave 2, VAY-2451)", () => {
   it("reads the hotel and its setup progress one after the other, never in parallel (incident 2026-10-21)", async () => {
     let inFlight = 0;
     let most = 0;
@@ -85,59 +68,15 @@ describe("hotel setup checklist service (VAY-2247 wave 2)", () => {
       });
     const checklist = createHotelSetupChecklistService({
       firstRun: { readSetupProgress: timed(progress(ALL)) },
-      facts: { read: timed(LIVE) },
       goLiveFacts: { read: timed(GO_LIVE) },
       store: { acknowledge: vi.fn(), setViewer: vi.fn() },
       onlineCardsOffered: false,
     });
-    expect(await checklist.read(actor)).toMatchObject({ done: 4 });
     expect(await checklist.readGoLive(actor)).toMatchObject({ phase: "go_live" });
     expect(most).toBe(1);
   });
 
-  it("shows a hotel that went live through the first run with 4 of 9 done", async () => {
-    expect(await service(ALL).checklist.read(actor)).toMatchObject({
-      phase: "live",
-      done: 4,
-      total: 9,
-    });
-  });
-
-  it("follows the setup screens before the page is published", async () => {
-    const unpublished = { ...LIVE, bookingPublished: false };
-    expect((await service(["currency"], unpublished).checklist.read(actor))?.setup).toEqual({
-      done: 2,
-      total: 5,
-      next: "first_room",
-    });
-    expect(
-      (await service(["currency", "rooms", "pricing"], unpublished).checklist.read(actor))?.setup
-        .next,
-    ).toBe("guest_payment");
-    expect((await service(ALL, unpublished).checklist.read(actor))?.setup.next).toBe("go_live");
-  });
-
-  it("says Later for online cards until they're offered", async () => {
-    const later = await service(ALL).checklist.read(actor);
-    expect(later?.items.find((item) => item.id === "online_cards")?.state).toBe("later");
-    const offered = await service(ALL, LIVE, true).checklist.read(actor);
-    expect(offered?.items.find((item) => item.id === "online_cards")?.state).toBe("todo");
-  });
-
-  it("writes Looks good and the viewer's change, then answers with the checklist", async () => {
-    const { checklist, store } = service(ALL);
-    expect(await checklist.acknowledge(actor, "calendar")).toMatchObject({ phase: "live" });
-    expect(store.acknowledge).toHaveBeenCalledWith(actor, "calendar");
-    await checklist.setViewer(actor, { hidden: true });
-    expect(store.setViewer).toHaveBeenCalledWith(actor, { hidden: true });
-  });
-
-  it("has no checklist for a hotel that isn't there", async () => {
-    expect(await service(ALL, null).checklist.read(actor)).toBeNull();
-    expect(await service(ALL, LIVE, false, null).checklist.readGoLive(actor)).toBeNull();
-  });
-
-  it("VAY-2451: the go-live list is past setup once how guests pay and the plan are saved", async () => {
+  it("is past setup once how guests pay and the plan are saved", async () => {
     expect(await service(ALL).checklist.readGoLive(actor)).toMatchObject({
       contractVersion: "hotel-setup-checklist.v2",
       phase: "go_live",
@@ -153,14 +92,28 @@ describe("hotel setup checklist service (VAY-2247 wave 2)", () => {
     });
   });
 
-  it("VAY-2451: Looks good and Hide for now answer with the go-live list when asked", async () => {
+  it("says Later for online cards until they're offered", async () => {
+    expect((await service(ALL).checklist.readGoLive(actor))?.later).toEqual([
+      { id: "online_cards", state: "later" },
+    ]);
+    expect((await service(ALL, GO_LIVE, true).checklist.readGoLive(actor))?.later).toEqual([
+      { id: "online_cards", state: "todo" },
+    ]);
+  });
+
+  it("writes Looks good and the viewer's change, then answers with the go-live list", async () => {
     const { checklist, store } = service(ALL);
-    expect(await checklist.acknowledge(actor, "guest_terms", "v2")).toMatchObject({
+    expect(await checklist.acknowledge(actor, "guest_terms")).toMatchObject({
       contractVersion: "hotel-setup-checklist.v2",
     });
     expect(store.acknowledge).toHaveBeenCalledWith(actor, "guest_terms");
-    expect(await checklist.setViewer(actor, { hidden: true }, "v2")).toMatchObject({
+    expect(await checklist.setViewer(actor, { dismissed: true })).toMatchObject({
       contractVersion: "hotel-setup-checklist.v2",
     });
+    expect(store.setViewer).toHaveBeenCalledWith(actor, { dismissed: true });
+  });
+
+  it("has no list for a hotel that isn't there", async () => {
+    expect(await service(ALL, null).checklist.readGoLive(actor)).toBeNull();
   });
 });

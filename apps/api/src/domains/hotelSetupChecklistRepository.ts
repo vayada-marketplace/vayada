@@ -10,7 +10,6 @@ import { FIRST_RUN_PLACEHOLDER_PUBLISH_STEP } from "./hotelFirstRunPricing.js";
 import { onlineCardReadySql } from "./financeOnlineCardReadySql.js";
 import type {
   HotelGoLiveFactsRow,
-  HotelSetupChecklistFactsRow,
   HotelSetupChecklistPorts,
   HotelSetupChecklistViewerChange,
 } from "./hotelSetupChecklistService.js";
@@ -74,89 +73,10 @@ const ONLINE_CARD_READY = `COALESCE(
   )`;
 
 /**
- * VAY-2247 wave 2: everything the checklist reads beyond the first run's own state, in one query:
- * - hotel basics: the stored profile status (the basics rule, VAY-2247 1.4a);
- * - published: an active booking page revision;
- * - photos: an approved hotel photo, or a room photo approved like hotel media;
- * - style: a logo, or a page style other than the one the first run saved (its audit source);
- * - calendar: "Looks good", else changed when the latest calendar isn't open all year with 1 night
- *   minimum or auto-open was saved, else setup's default;
- * - guest terms: "Looks good", else changed when the terms aren't the default text or the guest rules
- *   were saved after the first run, else setup's default;
- * - online cards: finance's readiness view; and the signed-in person's own Hide for now / Dismiss.
- */
-const FACTS_SQL = `
-SELECT
-  property.profile_status = 'complete' AS "hotelBasics",
-  EXISTS (
-    SELECT 1 FROM distribution.active_public_booking_revision active
-    WHERE active.property_id = property.id
-  ) AS "bookingPublished",
-  (
-    ${hotelImage("'hero_image', 'gallery_image'")}
-    OR EXISTS (
-      SELECT 1
-      FROM pms.room_type_media room_media
-      JOIN pms.room_types room_type
-        ON room_type.id = room_media.room_type_id
-       AND room_type.property_id = room_media.property_id
-       AND room_type.active
-      JOIN platform.media_objects media_object
-        ON media_object.id = room_media.platform_media_object_id
-       AND media_object.property_id = room_media.property_id
-       AND ${APPROVED_PUBLIC_PROPERTY_MEDIA_OBJECT_PREDICATE}
-      WHERE room_media.property_id = property.id
-    )
-  ) AS photos,
-  (
-    ${hotelImage("'logo'")}
-    OR EXISTS (
-      SELECT 1 FROM booking.current_working_design_revisions current
-      WHERE current.property_id = property.id
-        AND NOT EXISTS (
-          SELECT 1 FROM platform.product_audit_events audit
-          WHERE audit.property_id = current.property_id
-            AND audit.action = 'booking.design.created'
-            AND audit.target_resource_id = current.revision_id::text
-            AND audit.audit_metadata ->> 'source' = 'hotel_first_run'
-        )
-    )
-  ) AS style,
-  CASE
-    WHEN EXISTS (
-      SELECT 1 FROM hotel_catalog.setup_checklist_acknowledgements ack
-      WHERE ack.property_id = property.id AND ack.item = 'calendar'
-    ) THEN 'acknowledged'
-    WHEN EXISTS (
-      SELECT 1 FROM pms.calendar_auto_open_settings settings
-      WHERE settings.property_id = property.id
-    )
-    OR EXISTS (
-      SELECT 1 FROM (
-        SELECT revision.schedule_mode, revision.default_minimum_stay_nights
-        FROM pms.operating_calendar_revisions revision
-        WHERE revision.property_id = property.id
-        ORDER BY revision.calendar_revision DESC
-        LIMIT 1
-      ) latest
-      WHERE latest.schedule_mode <> 'year_round' OR latest.default_minimum_stay_nights <> 1
-    ) THEN 'changed'
-    ELSE 'default'
-  END AS calendar,
-  ${GUEST_TERMS} AS "guestTerms",
-  ${ONLINE_CARD_READY} AS "onlineCardReady",
-  COALESCE(viewer.hidden, FALSE) AS hidden,
-  COALESCE(viewer.dismissed, FALSE) AS dismissed
-FROM hotel_catalog.properties property
-LEFT JOIN hotel_catalog.setup_checklist_viewer_states viewer
-  ON viewer.property_id = property.id AND viewer.user_id = $2::uuid
-WHERE property.id = $1::uuid`;
-
-/**
  * VAY-2451: the go-live list's facts, in one query: the profile, the page, hotel photos, the booking rules
- * (as guest terms above), online cards, each active room type (rooms, guests, approved photos as v1 counts
- * them, saved prices) and whether the current prices are the first run's placeholder, or a payment
- * re-publish of it. $4 is the start of the placeholder publish's request id.
+ * (as guest terms above), online cards, each active room type (rooms, guests, approved photos, saved prices)
+ * and whether the current prices are the first run's placeholder, or a payment re-publish of it. $4 is the
+ * start of the placeholder publish's request id.
  */
 const GO_LIVE_FACTS_SQL = `
 SELECT
@@ -219,10 +139,6 @@ LEFT JOIN hotel_catalog.setup_checklist_viewer_states viewer
   ON viewer.property_id = property.id AND viewer.user_id = $2::uuid
 WHERE property.id = $1::uuid`;
 
-type FactsRow = Omit<HotelSetupChecklistFactsRow, "viewer"> & {
-  hidden: boolean;
-  dismissed: boolean;
-};
 type GoLiveRow = Omit<HotelGoLiveFactsRow, "viewer" | "roomTypes"> & {
   roomTypes: Array<
     Omit<HotelGoLiveRoomType, "rooms" | "photos"> & {
@@ -236,7 +152,7 @@ type GoLiveRow = Omit<HotelGoLiveFactsRow, "viewer" | "roomTypes"> & {
 
 export function createPgHotelSetupChecklistRepository(
   pool: Pool,
-): Pick<HotelSetupChecklistPorts, "facts" | "goLiveFacts" | "store"> {
+): Pick<HotelSetupChecklistPorts, "goLiveFacts" | "store"> {
   return {
     goLiveFacts: {
       async read(actor: HotelFirstRunActor) {
@@ -259,19 +175,6 @@ export function createPgHotelSetupChecklistRepository(
           ),
           viewer: Object.freeze({ hidden, dismissed }),
         });
-      },
-    },
-    facts: {
-      async read(actor: HotelFirstRunActor) {
-        const result = await pool.query<FactsRow>(FACTS_SQL, [
-          actor.propertyId,
-          actor.userId,
-          FIRST_RUN_GUEST_TERMS,
-        ]);
-        const row = result.rows[0];
-        if (!row) return null;
-        const { hidden, dismissed, ...facts } = row;
-        return Object.freeze({ ...facts, viewer: Object.freeze({ hidden, dismissed }) });
       },
     },
     store: {

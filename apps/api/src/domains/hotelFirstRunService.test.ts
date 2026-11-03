@@ -108,7 +108,7 @@ function service(
     plans,
     facts: {
       read: vi.fn(async () => options.facts ?? facts),
-      readSetupProgress: vi.fn(async () => ({ firstRoom: true, guestPayment: true })),
+      readSetupProgress: vi.fn(async () => ({ guestPayment: true })),
     },
     lock: {
       withPropertyLock: async (_id: string, work: () => Promise<unknown>) =>
