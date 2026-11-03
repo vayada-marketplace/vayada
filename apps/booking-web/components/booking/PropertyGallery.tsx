@@ -15,22 +15,40 @@ import { createPortal } from "react-dom";
 type PropertyGalleryProps = {
   hotelName: string;
   images: string[];
+  /** VAY-2459: an agency's gallery, its stays' photos one stay after another, each named. */
+  groups?: { name: string; images: string[] }[];
   /** Phone nav: the grid icon alone, like the Contact button there, with a 44px tap area. */
   compact?: boolean;
 };
 
 const MAX_PROPERTY_GALLERY_PHOTOS = 10;
+const GROUP_PHOTOS = 6;
+
+const unique = (images: string[], most: number) =>
+  Array.from(new Set(images.filter(Boolean))).slice(0, most);
 
 export default function PropertyGallery({
   hotelName,
   images,
+  groups,
   compact = false,
 }: PropertyGalleryProps) {
   const t = useTranslations("home.gallery");
-  const galleryImages = Array.from(new Set(images.filter(Boolean))).slice(
-    0,
-    MAX_PROPERTY_GALLERY_PHOTOS,
-  );
+  // Each photo with the stay it shows and its number there.
+  const photos = groups
+    ? groups.flatMap((group) =>
+        unique(group.images, GROUP_PHOTOS).map((url, i) => ({
+          url,
+          name: group.name,
+          number: i + 1,
+        })),
+      )
+    : unique(images, MAX_PROPERTY_GALLERY_PHOTOS).map((url, i) => ({
+        url,
+        name: hotelName,
+        number: i + 1,
+      }));
+  const galleryImages = photos.map((photo) => photo.url);
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const [failedImages, setFailedImages] = useState<ReadonlySet<string>>(() => new Set());
@@ -83,7 +101,8 @@ export default function PropertyGallery({
   if (galleryImages.length < 2) return null;
 
   const currentImage = galleryImages[index]!;
-  const currentAlt = t("photoAlt", { hotelName, index: index + 1 });
+  const currentPhoto = photos[index]!;
+  const currentAlt = t("photoAlt", { hotelName: currentPhoto.name, index: currentPhoto.number });
 
   return (
     <>
@@ -121,6 +140,7 @@ export default function PropertyGallery({
           >
             <div className="flex h-16 shrink-0 items-center justify-between px-4 md:px-6">
               <p className="text-sm font-semibold tabular-nums" aria-live="polite">
+                {groups && <span className="mr-3">{currentPhoto.name}</span>}
                 {index + 1} / {galleryImages.length}
               </p>
               <button

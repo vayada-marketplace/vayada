@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useHotel } from "@/contexts/HotelContext";
+import { useAgencyPage, useHotel } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useTranslations, useLocale } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
 import PropertyGallery from "@/components/booking/PropertyGallery";
+import type { Hotel } from "@/lib/types";
+import type { AgencyPage } from "@/services/api/agencyPage";
 
 const LANGUAGES = [
   { code: "en", label: "English" },
@@ -76,16 +78,17 @@ function ContactPopover({
 }: {
   open: boolean;
   onClose: () => void;
-  phone: string;
+  /** VAY-2459: an agency gives an email address, a WhatsApp number or both, and no phone. */
+  phone?: string;
   whatsapp?: string;
-  email: string;
+  email?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const t = useTranslations("nav");
   useClickOutside(ref, onClose);
   if (!open) return null;
 
-  const phoneDigits = phone.replace(/\s+/g, "");
+  const phoneDigits = phone?.replace(/\s+/g, "");
   const whatsappDigits = whatsapp?.replace(/\D/g, "");
 
   return (
@@ -93,30 +96,32 @@ function ContactPopover({
       ref={ref}
       className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50"
     >
-      <a
-        href={`tel:${phoneDigits}`}
-        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-      >
-        <div className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
-          <svg
-            className="w-4 h-4 text-primary-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-            />
-          </svg>
-        </div>
-        <div>
-          <p className="text-sm font-medium text-gray-900">{t("phone")}</p>
-          <p className="text-xs text-gray-500">{phone}</p>
-        </div>
-      </a>
+      {phone !== undefined && (
+        <a
+          href={`tel:${phoneDigits}`}
+          className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+        >
+          <div className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
+            <svg
+              className="w-4 h-4 text-primary-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+              />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">{t("phone")}</p>
+            <p className="text-xs text-gray-500">{phone}</p>
+          </div>
+        </a>
+      )}
       {whatsapp && whatsappDigits && (
         <a
           href={`https://wa.me/${whatsappDigits}`}
@@ -135,30 +140,32 @@ function ContactPopover({
           </div>
         </a>
       )}
-      <a
-        href={`mailto:${email}`}
-        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-      >
-        <div className="w-8 h-8 rounded-full bg-info-50 flex items-center justify-center flex-shrink-0">
-          <svg
-            className="w-4 h-4 text-info-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-            />
-          </svg>
-        </div>
-        <div>
-          <p className="text-sm font-medium text-gray-900">{t("email")}</p>
-          <p className="text-xs text-gray-500">{email}</p>
-        </div>
-      </a>
+      {email !== undefined && (
+        <a
+          href={`mailto:${email}`}
+          className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+        >
+          <div className="w-8 h-8 rounded-full bg-info-50 flex items-center justify-center flex-shrink-0">
+            <svg
+              className="w-4 h-4 text-info-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+              />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">{t("email")}</p>
+            <p className="text-xs text-gray-500">{email}</p>
+          </div>
+        </a>
+      )}
     </div>
   );
 }
@@ -221,6 +228,55 @@ function Dropdown({
   );
 }
 
+/** What the bar shows, from a hotel or (VAY-2459) an agency page. */
+type NavigationSource = {
+  name: string;
+  logoUrl?: string;
+  header: NonNullable<Hotel["headerSettings"]>;
+  languages: string[];
+  images: string[];
+  groups?: { name: string; images: string[] }[];
+  contact: { phone?: string; whatsapp?: string; email?: string };
+};
+
+function hotelSource(hotel: Hotel): NavigationSource {
+  return {
+    name: hotel.name,
+    logoUrl: hotel.branding?.logoUrl,
+    header: hotel.headerSettings ?? {
+      showContactButton: true,
+      showLanguageSelector: true,
+      showCurrencySelector: true,
+      showGalleryButton: true,
+    },
+    languages: [...(hotel.supportedLanguages ?? []), hotel.defaultLanguage],
+    images: hotel.images,
+    contact: hotel.contact,
+  };
+}
+
+/** An agency's bar: its name (it has no logo yet), its own contact, its design stay's languages,
+ * and its stays' photos, stay by stay. */
+function agencySource(agency: AgencyPage): NavigationSource {
+  const contact = agency.header.contact;
+  return {
+    name: agency.name,
+    header: {
+      showContactButton: !!contact,
+      showLanguageSelector: agency.header.language,
+      showCurrencySelector: agency.header.currency,
+      showGalleryButton: agency.header.gallery,
+    },
+    languages: agency.locales ? [...agency.locales.supported, agency.locales.default] : [],
+    images: [],
+    groups: agency.stays.map((stay) => ({
+      name: stay.name,
+      images: stay.photos.length ? stay.photos : stay.photoUrl ? [stay.photoUrl] : [],
+    })),
+    contact: { email: contact?.email ?? undefined, whatsapp: contact?.whatsapp ?? undefined },
+  };
+}
+
 // --- Main Navigation ---
 /**
  * Sits over a hero photo by default; `solid` puts it on its own white bar (the booking page).
@@ -235,6 +291,8 @@ export default function BookingNavigation({
   showGallery?: boolean;
 }) {
   const { hotel } = useHotel();
+  const { agency } = useAgencyPage();
+  const nav = useMemo(() => (hotel ? hotelSource(hotel) : agencySource(agency!)), [hotel, agency]);
   const { selectedCurrency, setSelectedCurrency, availableCurrencies } = useCurrency();
   const t = useTranslations("nav");
   const locale = useLocale();
@@ -243,20 +301,13 @@ export default function BookingNavigation({
   const [contactOpen, setContactOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [currOpen, setCurrOpen] = useState(false);
-  const logoUrl = hotel.branding?.logoUrl;
-  const header = hotel.headerSettings ?? {
-    showContactButton: true,
-    showLanguageSelector: true,
-    showCurrencySelector: true,
-    showGalleryButton: true,
-  };
+  const { logoUrl, header } = nav;
   const galleryButton = showGallery && header.showGalleryButton !== false;
 
   const availableLanguages = useMemo(() => {
-    const codes = new Set<string>(hotel?.supportedLanguages ?? []);
-    if (hotel?.defaultLanguage) codes.add(hotel.defaultLanguage);
+    const codes = new Set<string>(nav.languages.filter(Boolean));
     return LANGUAGES.filter((l) => codes.has(l.code));
-  }, [hotel?.defaultLanguage, hotel?.supportedLanguages]);
+  }, [nav.languages]);
   const selectedLangLabel =
     LANGUAGES.find((l) => l.code === locale)
       ?.label.slice(0, 2)
@@ -305,7 +356,7 @@ export default function BookingNavigation({
                 long name truncates rather than pushing the actions off-screen. */}
             <Link
               href="/"
-              aria-label={hotel.name}
+              aria-label={nav.name}
               className={`${logoUrl || solid ? "flex" : "hidden"} min-w-0 flex-1 items-center overflow-hidden pr-2 md:flex md:flex-initial`}
             >
               {/* Uploaded logos are made for the dark hero; the solid white bar shows the name. */}
@@ -315,7 +366,7 @@ export default function BookingNavigation({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={logoUrl}
-                  alt={`${hotel.name} logo`}
+                  alt={`${nav.name} logo`}
                   loading="eager"
                   fetchPriority="high"
                   decoding="async"
@@ -329,14 +380,16 @@ export default function BookingNavigation({
                       : "truncate text-lg font-semibold text-white"
                   }
                 >
-                  {hotel.name}
+                  {nav.name}
                 </span>
               )}
             </Link>
 
             {/* Right - Actions (always visible on mobile, full nav on desktop) */}
             <div className="hidden md:flex items-center gap-2">
-              {galleryButton && <PropertyGallery hotelName={hotel.name} images={hotel.images} />}
+              {galleryButton && (
+                <PropertyGallery hotelName={nav.name} images={nav.images} groups={nav.groups} />
+              )}
 
               {/* Contact */}
               {header.showContactButton && (
@@ -425,7 +478,12 @@ export default function BookingNavigation({
             {/* Mobile inline actions */}
             <div className="md:hidden flex shrink-0 items-center gap-1.5 ml-auto">
               {galleryButton && (
-                <PropertyGallery hotelName={hotel.name} images={hotel.images} compact />
+                <PropertyGallery
+                  hotelName={nav.name}
+                  images={nav.images}
+                  groups={nav.groups}
+                  compact
+                />
               )}
               {header.showContactButton && (
                 <div className="relative">
@@ -521,9 +579,9 @@ export default function BookingNavigation({
               <ContactPopover
                 open={contactOpen}
                 onClose={() => setContactOpen(false)}
-                phone={hotel.contact.phone}
-                whatsapp={hotel.contact.whatsapp}
-                email={hotel.contact.email}
+                phone={nav.contact.phone}
+                whatsapp={nav.contact.whatsapp}
+                email={nav.contact.email}
               />
             )}
           </div>

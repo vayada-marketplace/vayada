@@ -552,9 +552,9 @@ const GALLERY_PHOTOS = 24;
 /**
  * VAY-2459: a live agency page as guests see it: its settings (without the Booking Admin-only
  * contact details when Contact is off), its header image (its own upload; else the design stay's
- * header, else its first photo), the design stay's colours, fonts and languages, and each live stay's
- * card (`liveStays`), all from the stays' published booking pages. Null when no live page has this
- * address.
+ * header, else its first photo), the design stay's address, colours, fonts, languages and display
+ * currencies, and each live stay's card (`liveStays`), all from the stays' published booking pages.
+ * Null when no live page has this address.
  */
 export async function readPublicAccountBookingPage(client: Queryable, slug: string) {
   const page = await livePage(client, slug);
@@ -586,8 +586,14 @@ export async function readPublicAccountBookingPage(client: Queryable, slug: stri
       imageUrl: page.headerImageUrl ?? design?.hotel.heroImage ?? design?.row.photoUrl ?? null,
     },
     design: {
+      // VAY-2459: the currency switch converts with this stay's display rates
+      // (`/hotels/:slug/exchange-rates`), as its own page does.
+      slug: design?.row.slug ?? null,
       primaryColor: design?.hotel.primaryColor ?? null,
       fontPairing: design?.hotel.fontPairing ?? null,
+      currency: design?.hotel.currency ?? null,
+      displayCurrencies: design?.hotel.displayCurrencies ?? [],
+      displayDefaultCurrency: design?.hotel.displayDefaultCurrency ?? null,
     },
     locales: design?.hotel.locales ?? null,
     layout: settings.layout,
@@ -633,6 +639,12 @@ function publishedHotel(publicContent: unknown) {
           }
         : null,
     currency: text(hotel?.["defaultCurrency"]),
+    displayCurrencies: Array.isArray(branding["displayCurrencies"])
+      ? (branding["displayCurrencies"] as unknown[]).filter(
+          (code): code is string => typeof code === "string" && /^[A-Z]{3}$/.test(code),
+        )
+      : [],
+    displayDefaultCurrency: text(branding["displayDefaultCurrency"]),
     photos: (Array.isArray(hotel?.["images"]) ? (hotel["images"] as unknown[]) : []).flatMap(
       (image) => {
         const { url, alt } = (image ?? {}) as { url?: unknown; alt?: unknown };

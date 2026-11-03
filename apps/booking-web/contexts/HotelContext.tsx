@@ -1,18 +1,22 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Hotel, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
+import { getAgencyPage, type AgencyPage } from "@/services/api/agencyPage";
 import { ApiError } from "@/services/api/client";
+import { routing } from "@/i18n/routing";
 import { generateColorPalette } from "@/lib/utils/colors";
 import { brandFontPairing } from "@vayada/fonts/brand";
 
 // Rooms, availability and prices are served by the room-and-price page (/book); this
-// provider only carries the hotel profile and its add-on catalogue.
+// provider only carries the hotel profile and its add-on catalogue. An agency's address
+// (VAY-2459) carries its page instead, and `hotel` stays null.
 interface HotelContextValue {
   hotel: Hotel | null;
+  agency: AgencyPage | null;
   addons: Addon[];
   loading: boolean;
   error: string | null;
@@ -22,6 +26,7 @@ interface HotelContextValue {
 
 const HotelContext = createContext<HotelContextValue>({
   hotel: null,
+  agency: null,
   addons: [],
   loading: true,
   error: null,
@@ -41,6 +46,9 @@ const HotelContext = createContext<HotelContextValue>({
 // no slug can be resolved we return `null` so the provider can render
 // a clear error instead of fetching a dev seed slug that 404s in prod.
 const DEV_SLUG_STORAGE_KEY = "dev-hotel-slug";
+
+// An agency page has only its overview so far ("/", "/de"); its checkout comes with VAY-2462.
+const HOME_PATH = new RegExp(`^/(?:(?:${routing.locales.join("|")})/?)?$`);
 
 function resolveSlug(slugProp?: string): string | null {
   if (slugProp) return slugProp;
@@ -83,8 +91,13 @@ export function HotelProvider({
     setSlug(resolveSlug(slugProp));
     setSlugResolved(true);
   }, [slugProp]);
-  const quoteEntry = /\/book\/?$/.test(usePathname());
+  const pathname = usePathname();
+  const quoteEntry = /\/book\/?$/.test(pathname);
+  const home = HOME_PATH.test(pathname);
   const [hotel, setHotel] = useState<Hotel | null>(null);
+  const [agency, setAgency] = useState<AgencyPage | null>(null);
+  // The address whose agency page is here: it doesn't change with the language or the path.
+  const agencySlug = useRef<string | null>(null);
   const [addons, setAddons] = useState<Addon[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +116,8 @@ export function HotelProvider({
       setNotOnline(true);
       return;
     }
+    if (agencySlug.current === slug) return;
+    setAgency(null);
     let canceled = false;
     setLoading(true);
     setError(null);
@@ -134,8 +149,22 @@ export function HotelProvider({
           }
         }
       })
-      .catch((err) => {
+      .catch(async (err) => {
         if (canceled) return;
+        // VAY-2459: no hotel at this address; an agency page may have it (one address space).
+        if (err instanceof ApiError && err.status === 404) {
+          try {
+            const page = await getAgencyPage(slug);
+            if (canceled) return;
+            agencySlug.current = slug;
+            setAgency(page);
+            setLoading(false);
+            return;
+          } catch (agencyErr) {
+            if (canceled) return;
+            err = agencyErr;
+          }
+        }
         if (err instanceof ApiError && err.status === 404) setNotOnline(true);
         else setError(err instanceof Error ? err.message : "Failed to load hotel data");
         setLoading(false);
@@ -145,16 +174,17 @@ export function HotelProvider({
     };
   }, [locale, slug, slugResolved, quoteEntry]);
 
-  // Apply branding colors as CSS variables
+  // Apply branding colors as CSS variables (an agency's: its design stay's, VAY-2459)
+  const primaryColor = hotel?.branding?.primaryColor ?? agency?.design.primaryColor;
   useEffect(() => {
-    if (hotel?.branding?.primaryColor) {
-      const palette = generateColorPalette(hotel.branding.primaryColor);
+    if (primaryColor) {
+      const palette = generateColorPalette(primaryColor);
       const root = document.documentElement;
       for (const [shade, color] of Object.entries(palette)) {
         root.style.setProperty(`--color-primary-${shade}`, color);
       }
     }
-  }, [hotel?.branding?.primaryColor]);
+  }, [primaryColor]);
 
   // Apply accent color (card/section backgrounds)
   useEffect(() => {
@@ -164,16 +194,19 @@ export function HotelProvider({
   }, [hotel?.branding?.accentColor]);
 
   // Apply the branding font pairing (self-hosted, see packages/fonts) as CSS variables
+  const fontPairing = hotel?.branding?.fontPairing ?? agency?.design.fontPairing ?? undefined;
   useEffect(() => {
-    const pairing = brandFontPairing(hotel?.branding?.fontPairing);
+    const pairing = brandFontPairing(fontPairing);
     if (pairing) {
       const root = document.documentElement;
       root.style.setProperty("--font-heading", pairing.heading);
       root.style.setProperty("--font-body", pairing.body);
     }
-  }, [hotel?.branding?.fontPairing]);
+  }, [fontPairing]);
 
-  if (notOnline || error) {
+  // An agency page has no other pages yet.
+  const offline = notOnline || (!!agency && !home);
+  if (offline || error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="bg-white rounded-2xl border border-red-200 shadow-sm p-8 max-w-md w-full text-center">
@@ -193,12 +226,12 @@ export function HotelProvider({
             </svg>
           </div>
           <h2 className="text-lg font-bold text-gray-900 mb-2">
-            {notOnline ? t("notOnline") : t("unableToLoad")}
+            {offline ? t("notOnline") : t("unableToLoad")}
           </h2>
           <p className="text-sm text-gray-600 mb-4">
-            {notOnline ? t("checkBackLater") : t("tryAgainLater")}
+            {offline ? t("checkBackLater") : t("tryAgainLater")}
           </p>
-          {!notOnline && (
+          {!offline && (
             <>
               <div className="bg-red-50 rounded-lg p-3 mb-6">
                 <p className="text-sm text-red-700 font-mono break-all">{error}</p>
@@ -219,7 +252,7 @@ export function HotelProvider({
   // The first load only. A hotel fetched again (moving between /book and the other pages, which
   // load the add-ons) keeps the page mounted: a remount would lose what it read once on arrival,
   // such as the room to change or a room's Undo (VAY-2393).
-  if (loading && !hotel) {
+  if (loading && !hotel && !agency) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="animate-spin w-8 h-8 border-4 border-gray-200 border-t-gray-900 rounded-full" />
@@ -231,6 +264,7 @@ export function HotelProvider({
     <HotelContext.Provider
       value={{
         hotel,
+        agency,
         addons,
         loading,
         error,
@@ -246,6 +280,12 @@ export function HotelProvider({
 export function useHotel() {
   const { hotel, loading, error } = useContext(HotelContext);
   return { hotel: hotel!, loading, error };
+}
+
+/** The agency page at this address (VAY-2459); null on a hotel's. */
+export function useAgencyPage() {
+  const { agency } = useContext(HotelContext);
+  return { agency };
 }
 
 export function useAddons() {

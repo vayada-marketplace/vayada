@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useAgencyPage, useHotel, useSlug } from "@/contexts/HotelContext";
 import {
   analyticsChoice,
   clearAnalyticsSession,
@@ -16,6 +16,7 @@ const PRIVACY_NOTICE_URL = "https://vayada.com/privacy#booking-guests";
 export default function AnalyticsConsent() {
   const { slug } = useSlug();
   const { hotel } = useHotel();
+  const { agency } = useAgencyPage();
   const t = useTranslations("analyticsConsent");
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState<boolean | null>(null);
@@ -86,7 +87,7 @@ export default function AnalyticsConsent() {
       <p className="mt-3 text-sm">{t("description")}</p>
       <p className="mb-3 mt-2 text-sm">
         {t.rich("controller", {
-          hotel: hotel?.name ?? "",
+          hotel: hotel?.name ?? agency?.name ?? "",
           policy: (chunks) => (
             <a
               href={PRIVACY_NOTICE_URL}

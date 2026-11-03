@@ -432,6 +432,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         childrenEnabled: expect.any(Boolean),
       });
       expect(page!.locales).toEqual({ default: "en", supported: ["en", "de"] });
+      // The design stay's address and currencies, for the currency switch.
+      expect(page!.design).toMatchObject({
+        slug: `${PUBLIC_ID_PREFIX}${stays.escape}`,
+        currency: "EUR",
+        displayCurrencies: expect.any(Array),
+      });
       // Nothing Booking Admin-only.
       expect(JSON.stringify(page)).not.toMatch(/designPropertyId|contactEmail|organizationId/);
 

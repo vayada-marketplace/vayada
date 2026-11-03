@@ -71,6 +71,7 @@
     "noMatchingRooms": "No accommodations match your filters. Try removing a filter.",
     "yourStay": "Your Stay",
     "addPromo": "Add promo",
+    "removePromo": "Remove promo code",
     "promoTitle": "Have a promo code?",
     "enterCode": "Enter code",
     "apply": "Apply",
@@ -1007,5 +1008,50 @@
     "changeRoom": "Change Room {number}",
     "remove": "Remove",
     "pickAnother": "Your remaining place is too small – pick another."
+  },
+  "agency": {
+    "sortBy": "Sort by",
+    "sort": {
+      "price_low": "Lowest price",
+      "price_high": "Highest price",
+      "recommended": "Recommended"
+    },
+    "checking": "Checking {total, plural, one {# stay} other {# stays}} for {dates}…",
+    "count": "{available} of {total, plural, one {# stay is} other {# stays are}} available for {dates} and fit {guests}",
+    "adults": "{count, plural, one {# adult} other {# adults}}",
+    "children": "{count, plural, one {# child} other {# children}}",
+    "party": "{adults} and {children}",
+    "inRooms": "{guests} in {count} rooms",
+    "facts": "{count, plural, one {# room type free} other {# room types free}} · fits {guests}",
+    "fromNight": "from <strong>{amount}</strong> / night",
+    "fromTotal": "from {price} total",
+    "noPrice": "See prices on its page",
+    "viewRooms": "View rooms",
+    "lowestPrice": "Lowest price",
+    "childrenNote": "Prices are for the adults; each stay prices children on its own page.",
+    "fullHeading": "Not available for {dates} ({count})",
+    "nextFree": "Next free: {dates}",
+    "noNextFree": "No free dates of this length in the next 60 days",
+    "tooSmall": "No room fits {guests}",
+    "useDates": "Use these dates",
+    "busy": "Too many searches right now. Please try again in a moment.",
+    "failed": "We couldn't check prices. Please try again.",
+    "retry": "Try again",
+    "tooLong": "Choose a stay of up to {count} nights.",
+    "promoNoStay": "This code doesn't apply to any stay for these dates.",
+    "type": {
+      "hotel": "Hotel",
+      "resort": "Resort",
+      "hostel": "Hostel",
+      "apartment": "Apartment",
+      "aparthotel": "Aparthotel",
+      "guesthouse": "Guest house",
+      "bed_and_breakfast": "Bed and breakfast",
+      "homestay": "Homestay",
+      "villa": "Villa",
+      "vacation_rental": "Vacation rental",
+      "motel": "Motel",
+      "other": "Other"
+    }
   }
 }

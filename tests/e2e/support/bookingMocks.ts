@@ -366,6 +366,15 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     await route.fulfill({ status: 204, body: "" });
   });
 
+  // VAY-2459: booking-web asks for an agency page only when an address has no hotel; no agency
+  // page has the seeded hotel's address. Agency specs route their own page after this.
+  await page.route("**/api/booking-web/agency-pages/**", async (route) => {
+    await route.fulfill({
+      status: 404,
+      json: { statusCode: 404, error: "Not Found", message: "Agency page not found." },
+    });
+  });
+
   await page.route("**/api/booking-web/events", async (route) => {
     await route.fulfill({ status: 204, body: "" });
   });

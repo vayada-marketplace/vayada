@@ -2,19 +2,34 @@
 import { act, createElement, useEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import enMessages from "../messages/en.json";
 import { ApiError } from "@/services/api/client";
-import { HotelProvider, useAddons, useHotel } from "./HotelContext";
+import type { AgencyPage } from "@/services/api/agencyPage";
+import { HotelProvider, useAddons, useAgencyPage, useHotel } from "./HotelContext";
 
-const { getHotel, getAddons, path } = vi.hoisted(() => ({
+const { getHotel, getAddons, getAgencyPage, path } = vi.hoisted(() => ({
   getHotel: vi.fn(),
   getAddons: vi.fn(),
+  getAgencyPage: vi.fn(),
   path: { current: "/" },
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => path.current }));
 vi.mock("@/services/api/hotel", () => ({ hotelService: { getHotel, getAddons } }));
+vi.mock("@/services/api/agencyPage", () => ({ getAgencyPage }));
+
+const notFound = (message: string) =>
+  new ApiError("Something went wrong. Please try again.", 404, {
+    statusCode: 404,
+    error: "Not Found",
+    message,
+  });
+
+// No agency page has a hotel's address.
+beforeEach(() => {
+  getAgencyPage.mockRejectedValue(notFound("Agency page not found."));
+});
 // next/font only runs inside Next's compiler; the pairing map has its own test.
 vi.mock("@vayada/fonts/brand", () => ({
   brandFontPairing: (id?: string) =>
@@ -171,6 +186,68 @@ it("keeps a friendly retry message for server errors", async () => {
     expect(container.querySelector("button")?.textContent).toBe("Retry");
     expect(container.textContent).not.toContain("isn't online");
     expect(container.textContent).not.toContain("Hotel content");
+  } finally {
+    cleanup();
+  }
+});
+
+const agency = {
+  slug: "the-travel-ubud",
+  name: "The Travel Ubud",
+  design: { primaryColor: "#2b3033", fontPairing: "high-end-serif" },
+} as AgencyPage;
+
+// VAY-2459: hotels and agency pages share one address space.
+it("shows an agency's page, in its design stay's look, at an address no hotel has", async () => {
+  getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockResolvedValue(agency);
+  function Probe() {
+    const { agency } = useAgencyPage();
+    return createElement("p", null, agency?.name ?? "no agency");
+  }
+
+  const { container, render, cleanup } = await renderProvider(<Probe />, "the-travel-ubud");
+  try {
+    expect(getAgencyPage).toHaveBeenCalledWith("the-travel-ubud");
+    expect(container.textContent).toBe("The Travel Ubud");
+    const root = document.documentElement.style;
+    expect(root.getPropertyValue("--font-heading")).toBe("'Heading', serif");
+    expect(root.getPropertyValue("--color-primary-600")).not.toBe("");
+    // Its page doesn't change with the language: no second read.
+    await render();
+    expect(getAgencyPage).toHaveBeenCalledTimes(1);
+  } finally {
+    cleanup();
+  }
+});
+
+it("shows an agency's address as not online past its overview (its checkout comes later)", async () => {
+  getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockResolvedValue(agency);
+  path.current = "/book";
+
+  const { container, cleanup } = await renderProvider(<p>Hotel content</p>, "the-travel-ubud");
+  try {
+    expect(container.querySelector("h2")?.textContent).toBe(
+      "This booking page isn't online right now",
+    );
+    expect(container.textContent).not.toContain("Hotel content");
+  } finally {
+    cleanup();
+  }
+});
+
+it("offers Retry when the agency page can't be read", async () => {
+  getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockRejectedValue(new ApiError("Something went wrong.", 503, null));
+
+  const { container, cleanup } = await renderProvider(<p>Hotel content</p>, "the-travel-ubud");
+  try {
+    expect(container.querySelector("h2")?.textContent).toBe("Unable to Load Hotel");
+    expect(container.querySelector("button")?.textContent).toBe("Retry");
   } finally {
     cleanup();
   }

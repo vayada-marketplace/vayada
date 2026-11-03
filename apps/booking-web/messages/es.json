@@ -71,6 +71,7 @@
     "noMatchingRooms": "Ningún alojamiento coincide con sus filtros. Pruebe a quitar un filtro.",
     "yourStay": "Tu Estancia",
     "addPromo": "Añadir promo",
+    "removePromo": "Quitar el código promocional",
     "promoTitle": "¿Tienes un código promocional?",
     "enterCode": "Introduce el código",
     "apply": "Aplicar",
@@ -1006,5 +1007,50 @@
     "changeRoom": "Cambiar la habitación {number}",
     "remove": "Quitar",
     "pickAnother": "El alojamiento que queda es demasiado pequeño: elige otro."
+  },
+  "agency": {
+    "sortBy": "Ordenar por",
+    "sort": {
+      "price_low": "Precio más bajo",
+      "price_high": "Precio más alto",
+      "recommended": "Recomendado"
+    },
+    "checking": "Comprobando {total, plural, one {# alojamiento} other {# alojamientos}} para {dates}…",
+    "count": "{available} de {total, plural, one {# alojamiento está disponible} other {# alojamientos están disponibles}} para {dates} y caben {guests}",
+    "adults": "{count, plural, one {# adulto} other {# adultos}}",
+    "children": "{count, plural, one {# niño} other {# niños}}",
+    "party": "{adults} y {children}",
+    "inRooms": "{guests} en {count} habitaciones",
+    "facts": "{count, plural, one {# tipo de habitación libre} other {# tipos de habitación libres}} · para {guests}",
+    "fromNight": "desde <strong>{amount}</strong> / noche",
+    "fromTotal": "desde {price} en total",
+    "noPrice": "Precios en su página",
+    "viewRooms": "Ver habitaciones",
+    "lowestPrice": "Precio más bajo",
+    "childrenNote": "Los precios son para los adultos; cada alojamiento calcula el precio de los niños en su propia página.",
+    "fullHeading": "No disponibles para {dates} ({count})",
+    "nextFree": "Próximas fechas libres: {dates}",
+    "noNextFree": "Sin fechas libres de esta duración en los próximos 60 días",
+    "tooSmall": "Ninguna habitación para {guests}",
+    "useDates": "Usar estas fechas",
+    "busy": "Hay demasiadas búsquedas en este momento. Inténtalo de nuevo en un momento.",
+    "failed": "No pudimos comprobar los precios. Inténtalo de nuevo.",
+    "retry": "Reintentar",
+    "tooLong": "Elige una estancia de {count} noches como máximo.",
+    "promoNoStay": "Este código no se aplica a ningún alojamiento para estas fechas.",
+    "type": {
+      "hotel": "Hotel",
+      "resort": "Resort",
+      "hostel": "Hostel",
+      "apartment": "Apartamento",
+      "aparthotel": "Aparthotel",
+      "guesthouse": "Casa de huéspedes",
+      "bed_and_breakfast": "Alojamiento y desayuno",
+      "homestay": "Casa particular",
+      "villa": "Villa",
+      "vacation_rental": "Alquiler vacacional",
+      "motel": "Motel",
+      "other": "Otro"
+    }
   }
 }
