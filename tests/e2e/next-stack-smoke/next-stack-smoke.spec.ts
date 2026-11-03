@@ -40,7 +40,13 @@ import {
   type BookingResource,
 } from "./booking-lifecycle";
 import { cleanupSmokeResources, recoverSmokeProperty, type HotelResource } from "./cleanup";
-import { completeFirstRun } from "./first-run";
+import {
+  completeFirstRun,
+  completeFourStepSetup,
+  publishFromDashboard,
+  setRoomPriceInPms,
+  type FirstRunHotel,
+} from "./first-run";
 import {
   confirmStaffInvitationDelivery,
   expectPms,
@@ -551,9 +557,10 @@ async function runHotelFlow(
       expect(result.session.organizationKind).toBe("hotel_group");
       return result;
     });
-  // New hotels set up through Booking Admin's first run (VAY-2247, ONBOARDING_V2_ENABLED).
-  expect(flow, "Booking Admin opened the old setup wizard instead of the first run.").toBe(
-    "first_run",
+  // New hotels set up through Booking Admin's first run (VAY-2247, ONBOARDING_V2_ENABLED), or its
+  // four-step setup once FOUR_STEP_SETUP_ENABLED is on (VAY-2451).
+  expect(flow, "Booking Admin opened the old setup wizard instead of the first run.").not.toBe(
+    "wizard",
   );
 
   const owner = {
@@ -563,20 +570,37 @@ async function runHotelFlow(
   };
   const hotelName = `QA Next Hotel ${environment.runId}`;
   const room = { name: "QA Double Room", numberOfRooms: 2, maxGuests: 2, pricePerNight: "150" };
-  const { propertyId, bookingUrl } = await completeFirstRun(
-    page,
-    {
-      name: hotelName,
-      streetAddress: "Alexanderplatz 1",
-      postalCode: "10178",
-      city: "Berlin",
-      countryCode: "DE",
-      receptionEmail: user.email,
-      receptionPhone: "+49 30 5550102",
-      room,
-    },
-    (id) => registerHotel({ ...owner, propertyId: id }),
-  );
+  const firstRunHotel: FirstRunHotel = {
+    name: hotelName,
+    streetAddress: "Alexanderplatz 1",
+    postalCode: "10178",
+    city: "Berlin",
+    countryCode: "DE",
+    receptionEmail: user.email,
+    receptionPhone: "+49 30 5550102",
+    room,
+  };
+  const onPropertyCreated = (id: string) => registerHotel({ ...owner, propertyId: id });
+  const { propertyId, bookingUrl } =
+    flow === "four_step"
+      ? await (async () => {
+          // VAY-2451: setup leaves the room on a placeholder price; the owner prices it in the PMS and
+          // publishes from the dashboard.
+          const setup = await completeFourStepSetup(page, firstRunHotel, onPropertyCreated);
+          await page.screenshot({
+            path: testInfo.outputPath("four-step-dashboard.png"),
+            fullPage: true,
+          });
+          await loginPms(page, user, environment.password);
+          await setRoomPriceInPms(page, NEXT_STACK_ORIGINS.pms, {
+            roomTypeId: setup.roomTypeId,
+            name: room.name,
+            pricePerNight: room.pricePerNight,
+          });
+          const url = await publishFromDashboard(page, NEXT_STACK_ORIGINS.bookingAdmin);
+          return { propertyId: setup.propertyId, bookingUrl: url };
+        })()
+      : await completeFirstRun(page, firstRunHotel, onPropertyCreated);
   await page.screenshot({ path: testInfo.outputPath("first-run-live.png"), fullPage: true });
 
   const slug =
@@ -619,8 +643,10 @@ async function runHotelFlow(
     });
 
   await test.step("the owner's dashboard opens on the new hotel", async () => {
-    // Before any booking exists, so no new-booking notice covers the page.
-    await page.getByRole("button", { name: "Go to my dashboard" }).click();
+    // Before any booking exists, so no new-booking notice covers the page. The four-step setup's owner
+    // published from the dashboard and is there already.
+    if (flow === "four_step") await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/dashboard`);
+    else await page.getByRole("button", { name: "Go to my dashboard" }).click();
     await page.waitForURL(
       (url) => url.origin === NEXT_STACK_ORIGINS.bookingAdmin && url.pathname === "/dashboard",
       { timeout: 45_000 },

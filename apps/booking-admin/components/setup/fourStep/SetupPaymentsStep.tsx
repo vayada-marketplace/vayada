@@ -50,7 +50,7 @@ const OPTIONS: ReadonlyArray<{
  * comes after setup (the dashboard's "Later" list, Settings › Payments); setup saves nothing for them, so
  * they aren't choices here.
  */
-export function SetupPaymentsStep() {
+export function SetupPaymentsStep({ checkoutPending = false }: { checkoutPending?: boolean }) {
   return (
     <div>
       <SetupStepHeading
@@ -97,6 +97,18 @@ export function SetupPaymentsStep() {
           );
         })}
       </ul>
+      {checkoutPending ? (
+        // The 7-step setup could start a Fixed Fee checkout; the first run waits for Stripe rather than
+        // switching the hotel to Commission.
+        <p
+          role="status"
+          className="mt-4 rounded-xl bg-amber-50 p-4 text-[13px] leading-5 text-amber-900"
+        >
+          Your Fixed Fee checkout is still open in Stripe. Setup finishes once it is paid. To start
+          on Commission instead, leave it unpaid: it closes after 24 hours, then Finish setup starts
+          you on Commission.
+        </p>
+      ) : null}
       <p className="mt-4 text-[13px] text-gray-500">
         You can change this anytime in Settings › Payments.
       </p>

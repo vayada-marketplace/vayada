@@ -45,6 +45,27 @@ const SAVED: CanonicalRoomAuthoringState = {
   amenitiesReviewed: true,
 };
 
+const PROFILE = {
+  displayName: "Lumansa Hiriketiya",
+  propertyType: "villa",
+  location: {
+    streetAddress: "Hiriketiya Road 4",
+    postalCode: "",
+    city: "Dickwella",
+    countryCode: "LK",
+    timezone: "Asia/Colombo",
+    latitude: 5.96,
+    longitude: 80.71,
+    localityPublic: true,
+    geoPublic: true,
+    mapDisplayMode: "exact",
+  },
+  contacts: [
+    { channelType: "email", value: "stay@lumansa.example", purpose: "general", isPublic: true },
+    { channelType: "phone", value: "+94 77 308 7696", purpose: "general", isPublic: true },
+  ],
+};
+
 function props(overrides: Partial<FourStepHotelStepsProps> = {}) {
   const firstRun = {
     read: vi.fn(async () => firstRunState(["currency"])),
@@ -67,7 +88,7 @@ function props(overrides: Partial<FourStepHotelStepsProps> = {}) {
       getPropertyProfile: vi.fn(async () => ({
         propertyId: PROPERTY,
         profileRevision: 2,
-        profile: { displayName: "Lumansa Hiriketiya" },
+        profile: PROFILE,
       })),
     } as never,
     firstRun: firstRun as never,
@@ -374,6 +395,65 @@ describe("FourStepHotelSteps (VAY-2451)", () => {
       }),
     });
     expect(value.onSaveAndExit).toHaveBeenCalledOnce();
+    renderer.unmount();
+  });
+
+  it("sends a hotel an older setup made without its address to step 2, and reopens steps 1–2", async () => {
+    const onEditHotel = vi.fn();
+    const missing = props({ onEditHotel });
+    (missing.value.setup.getPropertyProfile as ReturnType<typeof vi.fn>).mockResolvedValue({
+      propertyId: PROPERTY,
+      profileRevision: 2,
+      profile: { ...PROFILE, location: { ...PROFILE.location, streetAddress: "", timezone: "" } },
+    });
+    await mount(missing.value);
+    expect(onEditHotel).toHaveBeenCalledWith("location");
+
+    const complete = props({ onEditHotel: vi.fn() });
+    const renderer = await mount(complete.value);
+    expect(complete.value.onEditHotel).not.toHaveBeenCalled();
+    // Back from the room choice, and the rail, open steps 1–2 again.
+    await click(renderer, "Back");
+    expect(complete.value.onEditHotel).toHaveBeenLastCalledWith("location");
+    const rail = renderer.root.findByProps({ "aria-label": "Setup steps" }).findAllByType("button");
+    expect(rail.map((step) => step.props.disabled)).toEqual([false, false, true, true]);
+    await act(async () => rail[0]!.props.onClick());
+    expect(complete.value.onEditHotel).toHaveBeenLastCalledWith("property");
+    renderer.unmount();
+  });
+
+  it("goes on with the room the 7-step setup kept on this device, and sends a finished setup to its page", async () => {
+    const kept = {
+      rooms: [{ name: "Garden Double", numberOfRooms: "3", maxGuests: "3", pricePerNight: "90" }],
+      pricesIncludeMandatoryCharges: true,
+      bed: "twin",
+    };
+    const storage = {
+      getItem: (key: string) =>
+        key === `vayada.quickSetup.v1.room.${PROPERTY}` ? JSON.stringify(kept) : null,
+    };
+    const { value } = props({ storage });
+    const renderer = await mount(value);
+    await click(renderer, "Continue");
+    expect(renderer.root.findByProps({ id: "setup-room-name" }).props.value).toBe("Garden Double");
+    expect(textOf(renderer.root)).toContain("2 twin beds");
+    renderer.unmount();
+
+    const onAlreadyFinished = vi.fn();
+    const done = props({ onAlreadyFinished, initialStep: "payments" });
+    done.firstRun.read.mockResolvedValue(firstRunState(["payments", "guest_rules", "plan"]));
+    await mount(done.value);
+    expect(onAlreadyFinished).toHaveBeenCalledOnce();
+    expect(done.value.onSaveAndExit).not.toHaveBeenCalled();
+  });
+
+  it("says a Fixed Fee checkout from the 7-step setup is still open", async () => {
+    const { value } = props({
+      initialStep: "payments",
+      readCheckoutPending: vi.fn(async () => true),
+    });
+    const renderer = await mount(value);
+    expect(textOf(renderer.root)).toContain("Your Fixed Fee checkout is still open in Stripe.");
     renderer.unmount();
   });
 

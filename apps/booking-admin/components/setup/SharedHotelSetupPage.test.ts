@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  finishedSetupStepPage,
   fourStepSetupStep,
   isPmsSetupContext,
   productHandoffReturnTo,
@@ -108,6 +109,24 @@ describe("the four-step setup's links (VAY-2451)", () => {
     expect(fourStepSetupStep("payments")).toBe("payments");
     expect(fourStepSetupStep("calendar")).toBeNull();
     expect(fourStepSetupStep(null)).toBeNull();
+    // An older setup's "Fix in setup" for the hotel's details opens steps 1–2.
+    expect(fourStepSetupStep("present_hotel")).toBe("property");
+    expect(fourStepSetupStep("present_hotel", "location")).toBe("location");
+  });
+
+  it("sends an older setup link's step to the page that owns it once setup is finished", () => {
+    expect(finishedSetupStepPage("pricing")).toEqual({ app: "pms", path: "/rooms" });
+    expect(finishedSetupStepPage("calendar")).toEqual({ app: "pms", path: "/settings/calendar" });
+    expect(finishedSetupStepPage("payments")).toEqual({
+      app: "booking_admin",
+      path: "/settings/payments",
+    });
+    expect(finishedSetupStepPage("guest_experience")).toEqual({
+      app: "booking_admin",
+      path: "/settings/policies",
+    });
+    expect(finishedSetupStepPage("toString")).toBeNull();
+    expect(finishedSetupStepPage(null)).toBeNull();
   });
 
   it("marks the exit after Finish setup for the dashboard's toast", () => {

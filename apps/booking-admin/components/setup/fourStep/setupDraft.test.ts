@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { EMPTY_QUICK_HOTEL_DRAFT, type QuickHotelDraft } from "../quick/quickHotelDraft";
-import { locationStepHint, propertyStepHint, socialLinkValid } from "./setupDraft";
+import {
+  hotelDetailsStepToFinish,
+  locationStepHint,
+  propertyStepHint,
+  setupDraftFromProfile,
+  setupProfilePatch,
+  socialLinkValid,
+} from "./setupDraft";
 
 const FULL: QuickHotelDraft = {
   ...EMPTY_QUICK_HOTEL_DRAFT,
@@ -60,5 +67,100 @@ describe("four-step setup checks (VAY-2451)", () => {
     expect(socialLinkValid("http://instagram.com/lumansa")).toBe(false);
     expect(socialLinkValid("@lumansa")).toBe(false);
     expect(socialLinkValid("https://user:pass@instagram.com")).toBe(false);
+  });
+});
+
+describe("steps 1–2 of a hotel that exists (VAY-2451 resume)", () => {
+  const profile = {
+    displayName: "Lumansa Hiriketiya",
+    propertyType: "villa",
+    location: {
+      streetAddress: "Hiriketiya Road 4",
+      postalCode: "",
+      city: "Dickwella",
+      countryCode: "LK",
+      timezone: "Asia/Colombo",
+      latitude: 5.96,
+      longitude: 80.71,
+      localityPublic: true,
+      geoPublic: true,
+      mapDisplayMode: "exact" as const,
+    },
+    contacts: [
+      {
+        channelType: "email" as const,
+        value: "stay@lumansa.example",
+        purpose: "general" as const,
+        isPublic: true,
+      },
+      {
+        channelType: "phone" as const,
+        value: "+94 77 308 7696",
+        purpose: "general" as const,
+        isPublic: true,
+      },
+      {
+        channelType: "website" as const,
+        value: "https://lumansa.example",
+        purpose: "general" as const,
+        isPublic: true,
+      },
+    ],
+  };
+
+  it("reads WhatsApp as the phone unless the hotel has another number", () => {
+    expect(setupDraftFromProfile(profile, null)).toMatchObject({
+      contactEmail: "stay@lumansa.example",
+      phone: "+94 77 308 7696",
+      whatsappSameAsPhone: true,
+      whatsapp: "",
+    });
+    const other = {
+      ...profile,
+      contacts: [
+        ...profile.contacts,
+        {
+          channelType: "whatsapp" as const,
+          value: "+94 70 000 0000",
+          purpose: "general" as const,
+          isPublic: true,
+        },
+      ],
+    };
+    expect(setupDraftFromProfile(other, null)).toMatchObject({
+      whatsappSameAsPhone: false,
+      whatsapp: "+94 70 000 0000",
+    });
+  });
+
+  it("saves WhatsApp with the details and keeps the hotel's other contacts", () => {
+    const draft = setupDraftFromProfile(profile, null);
+    expect(setupProfilePatch(draft, profile).contacts).toEqual([
+      ...profile.contacts,
+      { channelType: "whatsapp", value: "+94 77 308 7696", purpose: "general", isPublic: true },
+    ]);
+    const cleared = setupProfilePatch(
+      { ...draft, whatsappSameAsPhone: false, whatsapp: " " },
+      {
+        ...profile,
+        contacts: [
+          ...profile.contacts,
+          { channelType: "whatsapp", value: "+94 70 000 0000", purpose: "general", isPublic: true },
+        ],
+      },
+    );
+    expect(cleared.contacts?.map((contact) => contact.channelType)).toEqual([
+      "email",
+      "phone",
+      "website",
+    ]);
+  });
+
+  it("says which of steps 1–2 an older setup's hotel still lacks", () => {
+    const draft = setupDraftFromProfile(profile, null);
+    expect(hotelDetailsStepToFinish(draft)).toBeNull();
+    expect(hotelDetailsStepToFinish({ ...draft, propertyType: "" })).toBe("property");
+    expect(hotelDetailsStepToFinish({ ...draft, streetAddress: "" })).toBe("location");
+    expect(hotelDetailsStepToFinish({ ...draft, phone: "" })).toBe("location");
   });
 });

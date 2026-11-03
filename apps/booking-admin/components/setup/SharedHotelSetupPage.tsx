@@ -267,7 +267,18 @@ export function SharedHotelSetupPage({
           (await onboardingPricingApi.load(propertyId, { cache: "no-store" })).pricing
             ?.pricingCurrency.currency ?? null
         }
-        initialStep={fourStepSetupStep(searchParams.get("step"))}
+        initialStep={fourStepSetupStep(searchParams.get("step"), searchParams.get("focus"))}
+        readCheckoutPending={async (propertyId) =>
+          (await hotelOperationsSetupApi.getPlanStatus(propertyId)).checkoutPending === true
+        }
+        onAlreadyFinished={(propertyId) => {
+          // An old "Fix in setup" link (rooms, prices, calendar…) opens the page that owns it now.
+          const page = finishedSetupStepPage(searchParams.get("step"));
+          if (!page) return handleExit(propertyId);
+          if (page.app === "pms") return void handoffToPms(page.path, propertyId);
+          localStorage.setItem("selectedSharedPropertyId", propertyId);
+          window.location.assign(page.path);
+        }}
         onFinished={(propertyId) => handleExit(propertyId, { finished: true })}
       />
     );
@@ -494,13 +505,41 @@ export function withSetupFinished(path: string): string {
 }
 
 /**
- * The four-step setup's step from ?step= (a dashboard tile), or null. The tiles name the room step "rooms",
- * the setup's older id, because the PMS's /setup link keeps only those.
+ * The four-step setup's step from ?step= (a dashboard tile, or an older setup's link), or null. The tiles name
+ * the room step "rooms", the setup's older id, because the PMS's /setup link keeps only those; an older
+ * "present_hotel" link (the hotel's details, `focus=location` for the address) opens steps 1–2.
  */
-export function fourStepSetupStep(value: string | null): SetupStepId | null {
+export function fourStepSetupStep(
+  value: string | null,
+  focus: string | null = null,
+): SetupStepId | null {
   if (value === "rooms") return "room";
+  if (value === "present_hotel") return focus === "location" ? "location" : "property";
   return value === "property" || value === "location" || value === "room" || value === "payments"
     ? value
+    : null;
+}
+
+/**
+ * VAY-2451: where an older setup link's step lives once setup is finished, since the four-step setup has no
+ * such step (Booking Admin's "Fix in setup", Add-ons' currency link, the PMS calendar's recovery link).
+ */
+const FINISHED_SETUP_STEP_PAGES: Readonly<
+  Record<string, { app: "pms" | "booking_admin"; path: string }>
+> = {
+  rooms: { app: "pms", path: "/rooms" },
+  pricing: { app: "pms", path: "/rooms" },
+  calendar: { app: "pms", path: "/settings/calendar" },
+  payments: { app: "booking_admin", path: "/settings/payments" },
+  booking_design: { app: "booking_admin", path: "/design-studio" },
+  guest_experience: { app: "booking_admin", path: "/settings/policies" },
+};
+
+export function finishedSetupStepPage(
+  step: string | null,
+): { app: "pms" | "booking_admin"; path: string } | null {
+  return step && Object.prototype.hasOwnProperty.call(FINISHED_SETUP_STEP_PAGES, step)
+    ? FINISHED_SETUP_STEP_PAGES[step]!
     : null;
 }
 

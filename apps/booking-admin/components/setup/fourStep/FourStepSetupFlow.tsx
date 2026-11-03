@@ -24,6 +24,7 @@ import {
   type QuickHotelDraft,
 } from "../quick/quickHotelDraft";
 import { saveQuickHotel } from "../quick/quickHotelSave";
+import { FourStepHotelDetails } from "./FourStepHotelDetails";
 import { FourStepHotelSteps, type FourStepHotelStepsProps } from "./FourStepHotelSteps";
 import { SetupFrame, type SetupStepId } from "./SetupFrame";
 import { SetupLocationStep } from "./SetupLocationStep";
@@ -51,8 +52,12 @@ export type FourStepSetupFlowProps = {
   rooms: FourStepHotelStepsProps["rooms"];
   saveRoomLocation: FourStepHotelStepsProps["saveRoomLocation"];
   readCurrency: (propertyId: string) => Promise<string | null>;
-  /** The step the URL asks for (?step=). */
+  /** The step the URL asks for (?step=); steps 1 and 2 open for a hotel that exists, even after setup. */
   initialStep?: SetupStepId | null;
+  /** Whether a Fixed Fee checkout the 7-step setup started is still open in Stripe. */
+  readCheckoutPending?: FourStepHotelStepsProps["readCheckoutPending"];
+  /** Where a finished setup goes (an old "Fix in setup" link's page); the dashboard by default. */
+  onAlreadyFinished?: ((propertyId: string) => void) | null;
   /** After Finish setup. */
   onFinished: (propertyId: string) => void;
   /** Tests: in place of steps 3 and 4. */
@@ -72,7 +77,9 @@ type View =
   | { kind: "about_you" }
   | { kind: "welcome" }
   | { kind: "draft"; step: "property" | "location" }
-  | { kind: "hotel"; propertyId: string };
+  | { kind: "hotel"; propertyId: string; step?: SetupStepId | null }
+  /** Steps 1 and 2 of a hotel that exists (VAY-2451 resume): edited in place, then on to the room. */
+  | { kind: "edit"; propertyId: string; step: "property" | "location" };
 
 function readStored(storage: FourStepSetupFlowProps["storage"]): Stored | null {
   try {
@@ -137,7 +144,10 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
             ? nextStatus.propertySelection.selectedPropertyId
             : null);
         if (!accountDone) return setView({ kind: "about_you" });
-        if (propertyId) return setView({ kind: "hotel", propertyId });
+        const asked = props.initialStep ?? null;
+        if (propertyId && (asked === "property" || asked === "location"))
+          return setView({ kind: "edit", propertyId, step: asked });
+        if (propertyId) return setView({ kind: "hotel", propertyId, step: asked });
         setView(
           resumed ? { kind: "draft", step: resumed.step ?? "property" } : { kind: "welcome" },
         );
@@ -190,7 +200,9 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
     [stored.draft.countryCode, stored.draft.currency],
   );
   const exit = () =>
-    props.onSaveAndExit(view.kind === "hotel" ? view.propertyId : props.propertyId);
+    props.onSaveAndExit(
+      view.kind === "hotel" || view.kind === "edit" ? view.propertyId : props.propertyId,
+    );
 
   if (view.kind === "loading" || view.kind === "unavailable") {
     return (
@@ -243,20 +255,44 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
 
   if (view.kind === "welcome") return <SetupWelcome onStart={() => goTo("property")} />;
 
-  if (view.kind === "hotel") {
+  if (view.kind === "edit") {
     return (
-      props.renderHotelSteps?.(view.propertyId) ?? (
+      <FourStepHotelDetails
+        key={`${view.propertyId}:${view.step}`}
+        propertyId={view.propertyId}
+        setup={setup}
+        propertyTypes={types}
+        readCurrency={props.readCurrency}
+        saveCurrency={props.saveCurrency}
+        googleMapsApiKey={props.googleMapsApiKey}
+        initialStep={view.step}
+        onDone={(step) => setView({ kind: "hotel", propertyId: view.propertyId, step })}
+        onSaveAndExit={exit}
+      />
+    );
+  }
+
+  if (view.kind === "hotel") {
+    const { propertyId } = view;
+    return (
+      props.renderHotelSteps?.(propertyId) ?? (
         <FourStepHotelSteps
-          key={view.propertyId}
-          propertyId={view.propertyId}
+          key={`${propertyId}:${view.step ?? ""}`}
+          propertyId={propertyId}
           setup={setup}
           firstRun={props.firstRun}
           rooms={props.rooms}
           saveRoomLocation={props.saveRoomLocation}
           readCurrency={props.readCurrency}
-          initialStep={props.initialStep ?? null}
+          initialStep={view.step ?? null}
+          onEditHotel={(step) => setView({ kind: "edit", propertyId, step })}
+          onAlreadyFinished={
+            props.onAlreadyFinished ? () => props.onAlreadyFinished?.(propertyId) : null
+          }
+          readCheckoutPending={props.readCheckoutPending}
+          storage={storage}
           onSaveAndExit={exit}
-          onFinished={() => props.onFinished(view.propertyId)}
+          onFinished={() => props.onFinished(propertyId)}
         />
       )
     );

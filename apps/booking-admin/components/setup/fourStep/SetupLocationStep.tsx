@@ -17,6 +17,11 @@ export type SetupLocationStepProps = {
   contactsAction?: ReactNode;
   /** A save error from the last Continue. */
   error?: string | null;
+  /**
+   * The four social links (a new hotel's booking page starts with them). A hotel that exists edits them in
+   * Settings › Booking page, so editing its steps 1–2 leaves them out.
+   */
+  socials?: boolean;
 };
 
 const PHONE_INPUT = "h-12 text-[15px]";
@@ -32,6 +37,7 @@ export function SetupLocationStep({
   address,
   contactsAction,
   error,
+  socials = true,
 }: SetupLocationStepProps) {
   const sameAsPhone = draft.whatsappSameAsPhone !== false;
   return (
@@ -117,35 +123,37 @@ export function SetupLocationStep({
             )}
           </div>
         </div>
-        <div>
-          <p className={SETUP_LABEL}>
-            Social media{" "}
-            <span className="font-normal text-gray-500">
-              · optional, linked on your booking page
-            </span>
-          </p>
-          <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-2 min-[720px]:grid-cols-2">
-            {SETUP_SOCIALS.map((social) => {
-              const value = draft[social.key] ?? "";
-              const invalid = !socialLinkValid(value);
-              return (
-                <input
-                  key={social.key}
-                  type="url"
-                  inputMode="url"
-                  aria-label={`${social.label} link`}
-                  aria-invalid={invalid || undefined}
-                  value={value}
-                  onChange={(event) => onChange({ [social.key]: event.target.value })}
-                  placeholder={social.placeholder}
-                  className={`block h-10 w-full rounded-[10px] border bg-white px-3 text-sm text-gray-950 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-primary-100 ${
-                    invalid ? "border-red-500" : "border-gray-300 focus:border-primary-600"
-                  }`}
-                />
-              );
-            })}
+        {socials ? (
+          <div>
+            <p className={SETUP_LABEL}>
+              Social media{" "}
+              <span className="font-normal text-gray-500">
+                · optional, linked on your booking page
+              </span>
+            </p>
+            <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-2 min-[720px]:grid-cols-2">
+              {SETUP_SOCIALS.map((social) => {
+                const value = draft[social.key] ?? "";
+                const invalid = !socialLinkValid(value);
+                return (
+                  <input
+                    key={social.key}
+                    type="url"
+                    inputMode="url"
+                    aria-label={`${social.label} link`}
+                    aria-invalid={invalid || undefined}
+                    value={value}
+                    onChange={(event) => onChange({ [social.key]: event.target.value })}
+                    placeholder={social.placeholder}
+                    className={`block h-10 w-full rounded-[10px] border bg-white px-3 text-sm text-gray-950 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-primary-100 ${
+                      invalid ? "border-red-500" : "border-gray-300 focus:border-primary-600"
+                    }`}
+                  />
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ) : null}
         {error ? (
           <p role="alert" className="text-sm text-red-700">
             {error}

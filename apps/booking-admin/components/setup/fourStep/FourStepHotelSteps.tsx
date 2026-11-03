@@ -1,5 +1,6 @@
 "use client";
 
+import { firstRunBeds, isFirstRunBedChoice } from "@vayada/domain-booking";
 import type { SharedHotelSetupApi } from "@vayada/product-onboarding";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -28,6 +29,7 @@ import {
   SETUP_ROOM_DRAFT_ID,
   type SetupRoomLocation,
 } from "./setupRoom";
+import { hotelDetailsStepToFinish, setupDraftFromProfile } from "./setupDraft";
 
 /** The server's FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT, in the hotel's currency. */
 const PLACEHOLDER_PRICE = "100";
@@ -49,10 +51,18 @@ export type FourStepHotelStepsProps = {
   /** The hotel's pricing currency (saved with the hotel at step 2). */
   readCurrency: (propertyId: string) => Promise<string | null>;
   /**
-   * The step the URL asks for (?step=, a dashboard tile); otherwise where setup stopped. Steps 1 and 2 of a
-   * hotel that exists aren't reopened here (Settings has them), and a finished setup always leaves.
+   * The step the URL asks for (?step=, a dashboard tile); otherwise where setup stopped. A finished setup
+   * always leaves (`onAlreadyFinished`, else the dashboard).
    */
   initialStep?: SetupStepId | null;
+  /** Steps 1 and 2 of this hotel, in the same frame (Back, the rail, and a hotel that lacks them). */
+  onEditHotel?: ((step: "property" | "location") => void) | null;
+  /** Where a finished setup goes instead (an old "Fix in setup" link's page); the dashboard by default. */
+  onAlreadyFinished?: (() => void) | null;
+  /** Whether a Fixed Fee checkout the 7-step setup started is still open in Stripe. */
+  readCheckoutPending?: ((propertyId: string) => Promise<boolean>) | null;
+  /** This device's storage: the 7-step setup kept its room answers there. */
+  storage?: Pick<Storage, "getItem"> | null;
   onSaveAndExit: () => void;
   /** After Finish setup: to the dashboard, which says setup is complete. */
   onFinished: () => void;
@@ -64,8 +74,45 @@ type View =
   | { kind: "room"; part: "choose" | "basics" | "photos" | "amenities" }
   | { kind: "payments" };
 
-/** Steps 1 and 2 are done once the hotel exists; this frame doesn't reopen them. */
-const canPickStep = (step: SetupStepId) => step === "room" || step === "payments";
+/**
+ * The first room the 7-step setup kept on this device for the hotel (VAY-2247, `vayada.quickSetup.v1.room.<id>`):
+ * a hotel that started there continues with the same name, rooms, guests and bed. Its price isn't used (the
+ * first run sets the placeholder; prices are set in Rooms & Rates).
+ */
+export function roomFromQuickSetup(
+  storage: Pick<Storage, "getItem"> | null | undefined,
+  propertyId: string,
+): RoomAuthoringDraft | null {
+  try {
+    const value = JSON.parse(storage?.getItem(`vayada.quickSetup.v1.room.${propertyId}`) ?? "null");
+    const first = value?.rooms?.[0];
+    const name = typeof first?.name === "string" ? first.name.trim() : "";
+    if (!name) return null;
+    const whole = (raw: unknown, min: number, max: number) => {
+      const count = Number(raw);
+      return Number.isInteger(count) && count >= min && count <= max ? String(count) : null;
+    };
+    const room = newSetupRoom();
+    const guests = whole(first.maxGuests, 1, 50) ?? room.maxGuests;
+    const beds = isFirstRunBedChoice(value?.bed) ? firstRunBeds(value.bed) : null;
+    return {
+      ...room,
+      name,
+      unitCount: whole(first.numberOfRooms, 1, 500) ?? room.unitCount,
+      maxGuests: guests,
+      maxAdults: guests,
+      beds: beds
+        ? beds.map((bed, index) => ({
+            id: `${SETUP_ROOM_DRAFT_ID}:bed:${index + 1}`,
+            type: bed.type,
+            quantity: String(bed.quantity),
+          }))
+        : room.beds,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const finishedSetup = (state: HotelFirstRunState) =>
   state.steps.every(
@@ -97,6 +144,10 @@ export function FourStepHotelSteps({
   saveRoomLocation,
   readCurrency,
   initialStep = null,
+  onEditHotel = null,
+  onAlreadyFinished = null,
+  readCheckoutPending = null,
+  storage = null,
   onSaveAndExit,
   onFinished,
 }: FourStepHotelStepsProps) {
@@ -112,6 +163,7 @@ export function FourStepHotelSteps({
   const [location, setLocation] = useState<SetupRoomLocation>(SAME_AS_PROPERTY);
   const [locationChanged, setLocationChanged] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [checkoutPending, setCheckoutPending] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -128,13 +180,24 @@ export function FourStepHotelSteps({
         const code = await readCurrency(propertyId).catch(() => null);
         // The plan's photo limit (10 on Commission); 10 when it can't be read.
         const plan = await rooms.loadPhotoPlan(propertyId).catch(() => null);
+        const pending = (await readCheckoutPending?.(propertyId).catch(() => false)) ?? false;
         if (!active) return;
         if (plan) setMaxPhotos(plan.maxRoomPhotosPerType);
         setName(profile.profile.displayName || "Your property");
         setCurrency(code);
+        setCheckoutPending(pending);
         if (saved) setRoom(setupRoomFromSaved(saved));
+        else {
+          const started = roomFromQuickSetup(storage, propertyId);
+          if (started) setRoom(started);
+        }
         // Old links (?step=payments from "Fix in setup") must not run a finished first run again.
-        if (finishedSetup(state)) return onSaveAndExit();
+        if (finishedSetup(state)) return (onAlreadyFinished ?? onSaveAndExit)();
+        // A hotel an older setup made without its address or contacts finishes them first.
+        const details = onEditHotel
+          ? hotelDetailsStepToFinish(setupDraftFromProfile(profile.profile, code))
+          : null;
+        if (details) return onEditHotel?.(details);
         if (initialStep === "payments") return setView({ kind: "payments" });
         if (initialStep === "room")
           return setView({ kind: "room", part: saved ? "basics" : "choose" });
@@ -160,9 +223,13 @@ export function FourStepHotelSteps({
     setView(next);
   };
   const pick = (step: SetupStepId) => {
-    if (step === "room") go({ kind: "room", part: room.roomTypeId ? "basics" : "choose" });
-    else if (step === "payments") go({ kind: "payments" });
+    if (step === "property" || step === "location") onEditHotel?.(step);
+    else if (step === "room") go({ kind: "room", part: room.roomTypeId ? "basics" : "choose" });
+    else go({ kind: "payments" });
   };
+  /** Steps 1 and 2 open again when the host can show them. */
+  const canPickStep = (step: SetupStepId) =>
+    Boolean(onEditHotel) || step === "room" || step === "payments";
 
   if (view.kind === "loading" || view.kind === "unavailable") {
     return (
@@ -266,7 +333,7 @@ export function FourStepHotelSteps({
     return frame(
       "room",
       {
-        onBack: null,
+        onBack: onEditHotel ? () => onEditHotel("location") : null,
         primaryLabel: "Continue",
         onPrimary: () =>
           go(choice === "skip" ? { kind: "payments" } : { kind: "room", part: "basics" }),
@@ -433,6 +500,6 @@ export function FourStepHotelSteps({
       primaryBusy: busy,
       primaryBusyLabel: "Finishing…",
     },
-    <SetupPaymentsStep />,
+    <SetupPaymentsStep checkoutPending={checkoutPending} />,
   );
 }
