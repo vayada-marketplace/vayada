@@ -314,6 +314,62 @@ describe.skipIf(!url)("physical-room management PostgreSQL", () => {
       ).rows[0].count,
     ).toBe(1);
   });
+  it("frees a deleted room's number at once and still keeps rooms in use apart", async () => {
+    // VAY-2467: a deleted room used to keep its number taken for good.
+    const create = async (expectedRevision: number, operationalLabel: string) => {
+      const result = await repository.managePhysicalRoom({
+        ...command(expectedRevision),
+        action: "create",
+        changes: { operationalLabel },
+      });
+      if (!result.ok) throw new Error(JSON.stringify(result));
+      return result.response.roomUnitId;
+    };
+    const rename = (expectedRevision: number, roomUnitId: string, operationalLabel: string) =>
+      repository.managePhysicalRoom({
+        ...command(expectedRevision),
+        action: "update",
+        roomUnitId,
+        changes: { operationalLabel },
+      });
+    const deleted = await create(1, "Studio 2");
+    const room1 = await create(2, "Room 1");
+    expect(
+      await repository.managePhysicalRoom({
+        ...command(3),
+        action: "retire",
+        roomUnitId: deleted,
+      }),
+    ).toMatchObject({ ok: true, response: { outcome: "retired", roomUnitsRevision: 4 } });
+
+    const reused = await create(4, "Studio 2");
+    expect(await rename(5, room1, "studio 2")).toMatchObject({
+      ok: false,
+      error: { code: "operational_label_conflict" },
+    });
+    expect(await rename(5, reused, "Studio X")).toMatchObject({
+      ok: true,
+      response: { roomUnitsRevision: 6 },
+    });
+    expect(await rename(6, room1, "studio 2")).toMatchObject({
+      ok: true,
+      response: { roomUnitsRevision: 7 },
+    });
+
+    const rooms = await admin.query<{ id: string; status: string; room_number: string }>(
+      "SELECT id::text, status, room_number FROM pms.rooms WHERE property_id=$1",
+      [propertyId],
+    );
+    expect(
+      new Map(rooms.rows.map((room) => [room.id, `${room.status} ${room.room_number}`])),
+    ).toEqual(
+      new Map([
+        [deleted, "retired Studio 2"],
+        [room1, "available studio 2"],
+        [reused, "available Studio X"],
+      ]),
+    );
+  });
   it("serializes competing creates at the same revision", async () => {
     const results = await Promise.all([
       repository.managePhysicalRoom(command(1)),

@@ -788,8 +788,9 @@ async function verifyOperationalLabels(
   const activeUnits = (units as PhysicalRoomUnitIdentity[]).filter(
     ({ lifecycle }) => lifecycle === "active",
   );
+  // A deleted (retired) room no longer holds its number, so new rooms can reuse it (VAY-2467).
   const usedLabels = new Set(
-    (units as PhysicalRoomUnitIdentity[]).flatMap(({ operationalLabel }) =>
+    activeUnits.flatMap(({ operationalLabel }) =>
       operationalLabel ? [operationalLabel.toLowerCase()] : [],
     ),
   );

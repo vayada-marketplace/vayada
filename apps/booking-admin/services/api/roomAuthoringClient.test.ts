@@ -416,11 +416,12 @@ describe("roomAuthoringClient", () => {
       ),
     ).toBe(false);
     expect(labelWrites).toBe(3);
+    // The retired room's "Garden Suite 2" is free again (VAY-2467).
     expect(
       calls.put.mock.calls
         .filter(([endpoint]) => endpoint.endsWith("/operational-label"))
         .map(([, body]) => (body as { operationalLabel: string }).operationalLabel),
-    ).toEqual(["Garden Suite 1", "Garden Suite 3", "Garden Suite 4", "Garden Suite 5"]);
+    ).toEqual(["Garden Suite 1", "Garden Suite 2", "Garden Suite 3", "Garden Suite 4"]);
     expect(
       calls.put.mock.calls.some(([endpoint]) =>
         endpoint.startsWith(`/api/pms/setup/properties/${propertyId}/room-types/`),

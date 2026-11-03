@@ -1259,7 +1259,7 @@ describe("roomsService.create", () => {
         roomTypeId: canonicalRoomTypeId,
         roomUnitId,
         roomUnitsRevision: 6,
-        operationalLabel: "Castrop Suite 3",
+        operationalLabel: "Castrop Suite 2",
         operationalLabelStatus: "verified",
         acceptedAt: "2026-09-04T00:00:00.000Z",
       });
@@ -1271,9 +1271,10 @@ describe("roomsService.create", () => {
       expectedRevision: 4,
       targetActiveUnitCount: 2,
     });
+    // The retired room's "Castrop Suite 2" is free again (VAY-2467).
     expect(mocks.put.mock.calls[1]?.[1]).toEqual({
       expectedRevision: 5,
-      operationalLabel: "Castrop Suite 3",
+      operationalLabel: "Castrop Suite 2",
     });
     expect(updated.totalRooms).toBe(2);
   });
