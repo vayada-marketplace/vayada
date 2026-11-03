@@ -62,6 +62,24 @@ test("tells search engines and link previews what the page is, and keeps placeho
   const meta = (selector: string) => page.locator(selector).getAttribute("content");
   expect(await meta('meta[name="description"]')).toContain("Ahangama, Sri Lanka");
   expect(await meta('meta[name="robots"]')).toBe("noindex, nofollow");
+  // Also as a response header on every file, which keeps the photos out of image search too; and
+  // build files are kept for good (the host folder's _headers, applied as Cloudflare Pages will).
+  const headers = await page.evaluate(async () => {
+    const [home, photo] = await Promise.all([
+      fetch("/"),
+      fetch(document.querySelector("img")!.src),
+    ]);
+    return {
+      page: home.headers.get("x-robots-tag"),
+      photo: photo.headers.get("x-robots-tag"),
+      photoCache: photo.headers.get("cache-control"),
+    };
+  });
+  expect(headers).toEqual({
+    page: "noindex",
+    photo: "noindex",
+    photoCache: "public, max-age=31536000, immutable",
+  });
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
     /^https:\/\/animals-ahangama\.site\.vayada\.com\/?$/,
