@@ -249,22 +249,88 @@ async function enablePlan(
   };
 }
 
-/** VAY-2108 D7 leaves this stub for a plain provisioning job: creating a hotel's Channex room
- * types from the worker needs an INSERT right on pms.channel_room_type_mappings that the worker
- * login does not have (its matrix allows locks only), so that part is the D7b follow-up with its
- * own migration and platform grant. Rate plans come from published offers (the pricing bundle). */
+type RoomRow = {
+  roomTypeId: string;
+  name: string;
+  countOfRooms: number;
+  adults: number;
+  children: number;
+  mappingStatus: string | null;
+};
+
+/** VAY-2108 D7b: provisioning creates the hotel's missing Channex room types, nothing else. Rate
+ * plans come from published offers (the pricing bundle), so a meal-plan provisioning request still
+ * has no pricing to draw on. Rooms with an active mapping, including the adopted rooms of a
+ * taken-over hotel, are left alone; a room is looked up by its exact provider title before it is
+ * created, so a retried job never creates it twice. The worker records the mapping through the
+ * 0523 insert policy (claimed hotel, connected binding, active room, no edits). */
 async function provisioningPlan(
   pool: Pool,
   job: ChannexManagementJob,
   externalPropertyId: string,
 ): Promise<ChannexManagementActionPlan> {
-  void pool;
-  void job;
-  void externalPropertyId;
-  throw Object.assign(
-    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+  if (job.input.mealRatePlanId)
+    throw Object.assign(
+      new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+      { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+    );
+  // occupancy_limits keys are the room facts' adults/children/total (pmsRoomFactsCommandRepository).
+  // Room types without a sellable unit are left out: Channex needs a unit count, and the next
+  // provisioning job picks the room up once it has one.
+  const rooms = await pool.query<RoomRow>(
+    `SELECT room.id::text AS "roomTypeId", room.name,
+       count(unit.id)::integer AS "countOfRooms",
+       COALESCE((room.occupancy_limits ->> 'adults')::integer, 2) AS adults,
+       COALESCE((room.occupancy_limits ->> 'children')::integer, 0) AS children,
+       mapping.status AS "mappingStatus"
+     FROM pms.room_types room LEFT JOIN pms.rooms unit
+       ON unit.room_type_id = room.id AND unit.status <> 'retired'
+     LEFT JOIN pms.channel_connections connection
+       ON connection.property_id = room.property_id AND connection.provider = 'channex'
+     LEFT JOIN pms.channel_room_type_mappings mapping
+       ON mapping.connection_id = connection.id AND mapping.room_type_id = room.id
+     WHERE room.property_id = $1::uuid AND room.active
+       AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+         WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
+       AND (mapping.id IS NULL OR mapping.status <> 'active')
+     GROUP BY room.id, mapping.status HAVING count(unit.id) > 0
+     ORDER BY room.sort_order, room.name`,
+    [job.propertyId],
   );
+  // A disabled or stale mapping cannot be refreshed by this insert-only job; succeeding with an
+  // empty plan would report the hotel as mapped while Channex has no room type for it.
+  const repair = rooms.rows.find((room) => room.mappingStatus !== null);
+  if (repair)
+    throw Object.assign(
+      new Error(`Channex room type mapping for ${repair.roomTypeId} needs audited repair`),
+      { statusCode: 409, code: "CHANNEX_MAPPING_REPAIR_REQUIRED" },
+    );
+  return {
+    externalPropertyId,
+    requests: rooms.rows.flatMap((room) => {
+      const title = providerTitle(room.name, room.roomTypeId);
+      return [
+        channexRequests.listRoomTypes(externalPropertyId, [
+          { roomTypeId: room.roomTypeId, roomTypeName: title },
+        ]),
+        channexRequests.createRoomType({
+          roomTypeId: room.roomTypeId,
+          roomTypeName: title,
+          roomType: {
+            property_id: externalPropertyId,
+            title,
+            count_of_rooms: Math.max(1, room.countOfRooms),
+            occ_adults: Math.max(1, room.adults),
+            occ_children: Math.max(0, room.children),
+            occ_infants: 0,
+            default_occupancy: Math.min(2, Math.max(1, room.adults)),
+            room_kind: "room",
+          },
+        }),
+      ];
+    }),
+    checkpoint: checkpoint(pool, job),
+  };
 }
 
 async function ariPlan(
