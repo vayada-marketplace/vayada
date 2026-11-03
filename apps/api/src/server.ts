@@ -179,6 +179,12 @@ import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFac
 import { createPgPmsPhysicalRoomManagementRepository } from "./domains/pmsPhysicalRoomManagementRepository.js";
 import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./domains/pmsPhysicalRoomUnitReconcileRepository.js";
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
+import {
+  followRoomChangesInCalendar,
+  repairPmsOperatingCalendarRooms,
+  type PmsOperatingCalendarRoomRefreshPorts,
+  type PmsRoomChangeCommand,
+} from "./domains/pmsOperatingCalendarRoomRefresh.js";
 import { createPmsRoomAmenityVocabularyValidationPort } from "./domains/pmsRoomAmenityVocabulary.js";
 import { createPgPmsRoomPublicationCommandRepository } from "./domains/pmsRoomPublicationCommandRepository.js";
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
@@ -1507,6 +1513,31 @@ const pmsPhysicalRoomOperationalLabels = pmsRoomSetupRuntime?.operationalLabels;
 const pmsPhysicalRoomManagement = pmsRoomSetupRuntime
   ? createPgPmsPhysicalRoomManagementRepository({ connectionString: targetDatabaseUrl })
   : undefined;
+// VAY-2469: room changes after the calendar was saved bring the calendar along (the staff routes
+// below, and the hourly repair in the auto-open scheduler run).
+const pmsCalendarRoomRefreshPorts: PmsOperatingCalendarRoomRefreshPorts | undefined =
+  pmsOperatingCalendarRuntime?.routes.materializationPort
+    ? {
+        pool: propertySetupOwnerPool,
+        calendarRead: propertySetupPmsRuntime.operatingCalendar,
+        rooms: {
+          roomFacts: propertySetupPmsRuntime.roomFacts,
+          roomCapacity: propertySetupPmsRuntime.roomFacts,
+        },
+        preview: pmsOperatingCalendarRuntime.routes.impactPreviewPort,
+        calendar: pmsOperatingCalendarRuntime.routes.commandPort,
+        materialization: pmsOperatingCalendarRuntime.routes.materializationPort,
+      }
+    : undefined;
+const followInCalendar = <Command extends PmsRoomChangeCommand, Result extends { ok: boolean }>(
+  run: (command: Command) => Promise<Result>,
+) =>
+  pmsCalendarRoomRefreshPorts
+    ? followRoomChangesInCalendar(run, pmsCalendarRoomRefreshPorts, (fields, message) =>
+        // Called per request, after `app` below exists.
+        app.log.warn(fields, message),
+      )
+    : run;
 
 const pmsRoomPublicationRuntime = bookingDesignMediaAdapter
   ? (() => {
@@ -2145,14 +2176,38 @@ const app = buildApp({
           unitReadPort: propertySetupPmsRuntime.roomFacts,
           capacityReadPort: propertySetupPmsRuntime.roomFacts,
         },
-        physicalUnits: { commandPort: pmsRoomSetupRuntime.physicalUnits },
+        // "Total rooms" in the PMS room form and the setup rooms step (VAY-2469).
+        physicalUnits: {
+          commandPort: {
+            reconcilePhysicalRoomUnits: followInCalendar(
+              pmsRoomSetupRuntime.physicalUnits.reconcilePhysicalRoomUnits.bind(
+                pmsRoomSetupRuntime.physicalUnits,
+              ),
+            ),
+          },
+        },
       }
     : undefined,
   pmsPhysicalRoomManagement: pmsPhysicalRoomManagement
-    ? { commandPort: pmsPhysicalRoomManagement }
+    ? {
+        commandPort: {
+          managePhysicalRoom: followInCalendar(
+            pmsPhysicalRoomManagement.managePhysicalRoom.bind(pmsPhysicalRoomManagement),
+          ),
+        },
+      }
     : undefined,
+  // A room's label is part of its room count's revision, so naming new rooms moves it too.
   pmsPhysicalRoomOperationalLabels: pmsPhysicalRoomOperationalLabels
-    ? { commandPort: pmsPhysicalRoomOperationalLabels }
+    ? {
+        commandPort: {
+          setPhysicalRoomOperationalLabel: followInCalendar(
+            pmsPhysicalRoomOperationalLabels.setPhysicalRoomOperationalLabel.bind(
+              pmsPhysicalRoomOperationalLabels,
+            ),
+          ),
+        },
+      }
     : undefined,
   pmsModuleActivationRepository,
   pmsNavigationModuleRepository,
@@ -2879,6 +2934,29 @@ const runCalendarAutoOpenSchedule = () => {
   const startedAt = Date.now();
   activeCalendarAutoOpenSchedule = store
     .withRunLock(async (session) => {
+      // VAY-2469: first bring calendars behind their rooms up to date, so those hotels are no
+      // longer paused and get their dates opened in this same run.
+      if (pmsCalendarRoomRefreshPorts) {
+        const repair = await repairPmsOperatingCalendarRooms(pmsCalendarRoomRefreshPorts, {
+          limit: 25,
+          runId: `pms.calendar-room-repair:${new Date().toISOString()}`,
+        }).catch((error: unknown) => {
+          app.log.warn({ err: error }, "PMS calendar room repair failed");
+          return null;
+        });
+        if (repair && repair.candidates > 0) {
+          app.log[repair.failed.length > 0 ? "warn" : "info"](
+            {
+              candidates: repair.candidates,
+              refreshed: repair.refreshed,
+              unchanged: repair.unchanged,
+              failed: repair.failed.length,
+              failedProperties: repair.failed.slice(0, 10),
+            },
+            "PMS calendar room repair run",
+          );
+        }
+      }
       const run = await runPmsCalendarAutoOpenScheduler(session, {
         workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
       });

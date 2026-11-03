@@ -50,7 +50,16 @@ import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTr
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { processNextPmsAcceptedPricingReservationJob } from "./domains/pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./domains/pmsInventoryReservation.js";
+import { createManualBookingPricingPublicationReader } from "./domains/pmsManualBookingTransactionalPricing.js";
+import { createTargetPmsOperationsCommandRepository } from "./domains/pmsOperationsCommandRepository.js";
+import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
+import {
+  findPmsOperatingCalendarRoomRefreshCandidates,
+  followRoomChangesInCalendar,
+  repairPmsOperatingCalendarRooms,
+  type PmsOperatingCalendarRoomRefreshPorts,
+} from "./domains/pmsOperatingCalendarRoomRefresh.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
 import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./domains/pmsPhysicalRoomUnitReconcileRepository.js";
@@ -81,6 +90,8 @@ import {
 } from "./platform/sharedHotelSetupStatusReadModel.js";
 import { createPublicRuntimeRepositories } from "./publicRuntime.js";
 import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
+import type { BookingAddonItemsContext } from "./routes/bookingAddonItems.js";
+import { calculateManualBookingPreview } from "./routes/pmsManualBookingPreviewCalculation.js";
 import {
   createTargetBookingWebCheckoutAdapter,
   registerBookingWebPublicRoutes,
@@ -124,6 +135,19 @@ function localDate(offsetDays = 0): string {
   const date = new Date(`${today}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + offsetDays);
   return date.toISOString().slice(0, 10);
+}
+
+/** Eleven closed nights at least 100 days out, as the one open period around them (VAY-2469). */
+function closedSeason() {
+  for (let offset = 100; ; offset += 1) {
+    const days = Array.from({ length: 13 }, (_, index) => localDate(offset - 1 + index));
+    // The schedule has no 29 February.
+    if (days.some((day) => day.endsWith("-02-29"))) continue;
+    return {
+      nights: days.slice(1, 12),
+      periods: [{ startsOn: days[12]!.slice(5), endsOn: days[0]!.slice(5) }],
+    };
+  }
 }
 
 function ok<T extends { ok: boolean }>(result: T, step: string): Extract<T, { ok: true }> {
@@ -1520,6 +1544,46 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         const quoteAfterEdits = await quoteSeaSuite();
         expect(quoteAfterEdits.statusCode, quoteAfterEdits.body).toBe(200);
         await acceptQuote(quoteAfterEdits.json() as { quoteId: string }, "guest-after-edits");
+        // VAY-2469: what a later room change must keep on the Sea Suite's nights: the two guests'
+        // bookings above, a room block made in the PMS and a manual limit of one room.
+        const operations = createTargetPmsOperationsCommandRepository({
+          connectionString: cs,
+          pool,
+          readRepository: createTargetPmsOperationsReadRepository({ connectionString: cs, pool }),
+        });
+        const operationsAudit = (step: string) => ({
+          actor: { kind: "user" as const, userId: owner, organizationId },
+          requestId: `${step}-${suffix}`,
+          reason: step,
+          requestedAt: now(),
+        });
+        const unitsOf = async (roomTypeId: string) =>
+          (
+            await admin.query<{ id: string }>(
+              "SELECT id::text FROM pms.rooms WHERE room_type_id=$1 AND status<>'retired' ORDER BY id",
+              [roomTypeId],
+            )
+          ).rows.map(({ id }) => id);
+        expect(
+          await operations.createRoomBlocks!({
+            propertyId,
+            commandId: randomUUID(),
+            idempotencyKey: `block-${suffix}`,
+            roomTypeId: seaSuite,
+            roomIds: [(await unitsOf(seaSuite))[0]!],
+            startsOn: localDate(40),
+            endsOn: localDate(41),
+            reason: "Painting",
+            audit: operationsAudit("block"),
+          }),
+        ).toMatchObject({ ok: true });
+        await admin.query(
+          `UPDATE pms.inventory_days SET manual_sellable_limit_count=1,
+             manual_source_revision=manual_source_revision+1, inventory_revision=inventory_revision+1,
+             effective_sellable_limit_count=1, available_count=GREATEST(0,1-assigned_count-blocked_count)
+           WHERE room_type_id=$1 AND stay_date=$2::date`,
+          [seaSuite, localDate(50)],
+        );
         // A changed unit count still changes the calendar.
         ok(
           await rooms.units.reconcilePhysicalRoomUnits(
@@ -1547,6 +1611,357 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect(blockerCodes(await readiness())).toContain(
           "booking.calendar:operating_calendar_source_stale",
         );
+
+        // VAY-2469, as at Tiga Lombok: the owner also duplicates the Sea Suite in the PMS, gives the
+        // copy two rooms and prices it. Nothing told the calendar: the copy has no nights, and the
+        // Sea Suite still counts two rooms, both booked on the guests' nights.
+        const duplicated = await operations.duplicateRoomType({
+          propertyId,
+          roomTypeId: seaSuite,
+          commandId: randomUUID(),
+          idempotencyKey: `duplicate-${suffix}`,
+          expectedVersion: `room-type-facts-v${Number((await seaSuiteRevisions()).facts)}`,
+          audit: operationsAudit("duplicate"),
+        });
+        if (!duplicated.ok) throw new Error(`duplicate failed: ${JSON.stringify(duplicated)}`);
+        const copy = duplicated.roomType.roomTypeId;
+        type RoomPorts = {
+          reconcile: typeof rooms.units.reconcilePhysicalRoomUnits;
+          label: typeof rooms.labels.setPhysicalRoomOperationalLabel;
+        };
+        // The PMS room form's "Total rooms": reconcile the count, then name each new room.
+        const setTotalRooms = async (
+          roomTypeId: string,
+          targetActiveUnitCount: number,
+          step: string,
+          port: RoomPorts,
+        ) => {
+          const expectedRevision = Number(
+            (
+              await admin.query("SELECT room_units_revision FROM pms.room_types WHERE id=$1", [
+                roomTypeId,
+              ])
+            ).rows[0]!.room_units_revision,
+          );
+          const reconciled = ok(
+            await port.reconcile(
+              parsed(
+                parseReconcilePhysicalRoomUnitsCommand({
+                  organizationId,
+                  propertyId,
+                  roomTypeId,
+                  expectedRevision,
+                  targetActiveUnitCount,
+                  idempotencyKey: `units-${step}-${suffix}`,
+                  audit: commandAudit(`units-${step}`),
+                }),
+                step,
+              ),
+            ),
+            step,
+          );
+          let revision = reconciled.response.capacity.roomUnitsRevision;
+          for (const [index, unit] of reconciled.response.addedUnits.entries()) {
+            revision = ok(
+              await port.label(
+                parsed(
+                  parseSetPhysicalRoomOperationalLabelCommand({
+                    organizationId,
+                    propertyId,
+                    roomTypeId,
+                    roomUnitId: unit.roomUnitId,
+                    expectedRevision: revision,
+                    operationalLabel: `${step.toUpperCase()}-${index + 1}`,
+                    idempotencyKey: `label-${step}-${index}-${suffix}`,
+                    audit: commandAudit(`label-${step}-${index}`),
+                  }),
+                  `${step} label`,
+                ),
+              ),
+              `${step} label`,
+            ).response.roomUnitsRevision;
+          }
+        };
+        const unfollowed: RoomPorts = {
+          reconcile: rooms.units.reconcilePhysicalRoomUnits.bind(rooms.units),
+          label: rooms.labels.setPhysicalRoomOperationalLabel.bind(rooms.labels),
+        };
+        await setTotalRooms(copy, 2, "copy", unfollowed);
+        const pricingRevision = Number(
+          (
+            await admin.query("SELECT revision FROM pms.pricing_v2_heads WHERE property_id=$1", [
+              propertyId,
+            ])
+          ).rows[0]!.revision,
+        );
+        await savePrices([gardenSuite, seaSuite, copy], pricingRevision + 1);
+
+        type Night = {
+          stayDate: string;
+          total: number;
+          assigned: number;
+          blocked: number;
+          manual: number | null;
+          available: number;
+          status: string;
+        };
+        const nights = async (roomTypeId: string) =>
+          (
+            await admin.query<Night>(
+              `SELECT stay_date::text AS "stayDate", total_count AS total, assigned_count AS assigned,
+                 blocked_count AS blocked, manual_sellable_limit_count AS manual,
+                 available_count AS available, status
+               FROM pms.inventory_days WHERE room_type_id=$1 AND stay_date>=$2::date
+               ORDER BY stay_date`,
+              [roomTypeId, localDate(0)],
+            )
+          ).rows;
+        const stayAt = async (roomTypeId: string) =>
+          (
+            (await read(
+              `/hotels/${moved}/pricing-offers/stay-prices?checkIn=${localDate(30)}&checkOut=${localDate(32)}&adults=2`,
+            )) as StayPrices
+          ).rooms.find((room) => room.roomTypeId === roomTypeId);
+        // New Booking in the PMS, for one of the copy's rooms at its published price.
+        const pmsRead = createTargetPmsOperationsReadRepository({ connectionString: cs, pool });
+        const copyRooms = await unitsOf(copy);
+        const newBooking = (roomId: string) =>
+          calculateManualBookingPreview(
+            { propertyId, organizationId },
+            {
+              contractVersion: "pms-manual-booking.v1",
+              stays: [
+                {
+                  position: 1,
+                  roomId,
+                  checkIn: localDate(30),
+                  checkOut: localDate(32),
+                  adults: 2,
+                  children: 0,
+                  ratePlanId: "standard",
+                  pricing: { kind: "rate_plan", manualOverride: null },
+                },
+              ],
+              addOns: [],
+            },
+            {
+              pms: pmsRead,
+              publication: createManualBookingPricingPublicationReader(pool),
+              booking: {
+                listAddonItemsByHotelId: async () =>
+                  ({ addonItems: [] }) as unknown as BookingAddonItemsContext,
+              },
+            },
+          );
+        expect(await stayAt(seaSuite)).toMatchObject({ availability: "sold_out" });
+        expect(await stayAt(copy)).toMatchObject({ availability: "sold_out" });
+        expect(await nights(copy)).toEqual([]);
+        await expect(newBooking(copyRooms[0]!)).rejects.toMatchObject({
+          body: { code: "room_unavailable" },
+        });
+        const seaBefore = await nights(seaSuite);
+        expect(seaBefore.find(({ stayDate }) => stayDate === localDate(30))).toMatchObject({
+          total: 2,
+          assigned: 2,
+          available: 0,
+        });
+
+        // The hourly repair finds the hotel and saves its calendar again as the owner, who saved
+        // it last: the same schedule and limits, with the copy and the Sea Suite's third room.
+        const refreshPorts: PmsOperatingCalendarRoomRefreshPorts = {
+          pool,
+          calendarRead: operatingCalendar,
+          rooms: { roomFacts, roomCapacity: roomFacts },
+          preview: calendar.routes.impactPreviewPort,
+          calendar: calendar.routes.commandPort,
+          materialization: calendar.routes.materializationPort!,
+        };
+        expect(await findPmsOperatingCalendarRoomRefreshCandidates(pool, 25, [propertyId])).toEqual(
+          [{ propertyId, organizationId, userId: owner }],
+        );
+        expect(
+          await repairPmsOperatingCalendarRooms(refreshPorts, {
+            limit: 25,
+            runId: `repair-${suffix}`,
+            propertyIds: [propertyId],
+          }),
+        ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, failed: [] });
+        expect(await findPmsOperatingCalendarRoomRefreshCandidates(pool, 25, [propertyId])).toEqual(
+          [],
+        );
+        const repaired =
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId);
+        expect(repaired).toMatchObject({ sourceStatus: "current", sourceConflicts: [] });
+        expect(
+          Object.fromEntries(
+            repaired!.configuration.sourceInputs.roomBindings.map((binding) => [
+              binding.roomTypeId,
+              [binding.physicalCapacityCount, binding.startingSellableLimitCount],
+            ]),
+          ),
+        ).toEqual({ [gardenSuite]: [2, 2], [seaSuite]: [3, 3], [copy]: [2, 2] });
+        expect(blockerCodes(await readiness())).not.toContain(
+          "booking.calendar:operating_calendar_source_stale",
+        );
+        // Every Sea Suite night counts three rooms and keeps its bookings, block and manual limit.
+        const seaAfter = await nights(seaSuite);
+        expect(seaAfter).toEqual(
+          seaBefore.map((night) => ({
+            ...night,
+            total: 3,
+            available:
+              night.status === "open"
+                ? Math.max(0, (night.manual ?? 3) - night.assigned - night.blocked)
+                : 0,
+          })),
+        );
+        expect(seaAfter.filter(({ blocked }) => blocked > 0).length).toBeGreaterThan(0);
+        expect(seaAfter.find(({ stayDate }) => stayDate === localDate(50))).toMatchObject({
+          manual: 1,
+          available: 1,
+        });
+        // The copy has the same nights, both its rooms on sale.
+        const copyNights = await nights(copy);
+        expect(copyNights.map(({ stayDate }) => stayDate)).toEqual(
+          seaAfter.map(({ stayDate }) => stayDate),
+        );
+        expect(new Set(copyNights.map(({ total, available }) => `${total}/${available}`))).toEqual(
+          new Set(["2/2"]),
+        );
+        // The booking page sells the third Sea Suite and the copy, at their prices; New Booking
+        // prices the copy's rooms.
+        expect(await stayAt(seaSuite)).toMatchObject({ availability: "available", roomsLeft: 1 });
+        expect(await stayAt(copy)).toMatchObject({
+          availability: "available",
+          roomsLeft: 2,
+          offers: [{ status: "priced" }],
+        });
+        for (const roomId of copyRooms) {
+          expect(await newBooking(roomId)).toMatchObject({
+            stays: [{ roomId, standardTotal: { currency: "EUR" } }],
+          });
+        }
+        const thirdSeaSuite = await quoteSeaSuite(moved);
+        expect(thirdSeaSuite.statusCode, thirdSeaSuite.body).toBe(200);
+        await acceptQuote(thirdSeaSuite.json() as { quoteId: string }, "guest-third-room");
+        expect(await stayAt(seaSuite)).toMatchObject({ availability: "sold_out" });
+
+        // The owner then closes the hotel for a season, with a two-night minimum. From now on the
+        // PMS room commands bring the calendar along themselves: a third room for the copy keeps
+        // the season, the minimum stay and the other rooms' limits.
+        const season = closedSeason();
+        const seasonal = {
+          organizationId,
+          propertyId,
+          expectedCalendarRevision: repaired!.configuration.calendarRevision,
+          expectedPropertyProfileRevision: await profileRevision(),
+          schedule: { mode: "recurring", periods: season.periods },
+          defaultMinimumStayNights: 2,
+          roomTypeLimits: repaired!.configuration.sourceInputs.roomBindings.map((binding) => ({
+            roomTypeId: binding.roomTypeId,
+            expectedRoomFactsRevision: binding.sourceRoomFactsRevision,
+            expectedRoomUnitsRevision: binding.sourceRoomUnitsRevision,
+            startingSellableLimitCount: binding.startingSellableLimitCount,
+          })),
+        };
+        const seasonalPreview = ok(
+          await calendar.routes.impactPreviewPort.previewOperatingCalendarImpact(
+            parsed(
+              parsePreviewPmsOperatingCalendarImpactCommand({
+                ...seasonal,
+                audit: commandAudit("calendar-preview-season"),
+              }),
+              "seasonal calendar preview",
+            ),
+          ),
+          "seasonal calendar preview",
+        );
+        const seasonalCalendar = ok(
+          await calendar.routes.commandPort.upsertOperatingCalendar(
+            parsed(
+              parseUpsertPmsOperatingCalendarCommand({
+                ...seasonal,
+                impactConfirmation: seasonalPreview.preview.confirmation,
+                idempotencyKey: `calendar-season-${suffix}`,
+                audit: commandAudit("calendar-season"),
+              }),
+              "seasonal calendar save",
+            ),
+          ),
+          "seasonal calendar save",
+        ).response.configuration;
+        ok(
+          await prepareCalendar(seasonalCalendar, { from: localDate(0), through: localDate(365) }),
+          "seasonal calendar nights",
+        );
+        const calendarLog: unknown[] = [];
+        const followed: RoomPorts = {
+          reconcile: followRoomChangesInCalendar(unfollowed.reconcile, refreshPorts, (fields) =>
+            calendarLog.push(fields),
+          ),
+          label: followRoomChangesInCalendar(unfollowed.label, refreshPorts, (fields) =>
+            calendarLog.push(fields),
+          ),
+        };
+        await setTotalRooms(copy, 3, "copy-more", followed);
+        expect(calendarLog).toEqual([]);
+        const followedCalendar =
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId);
+        expect(followedCalendar).toMatchObject({
+          sourceStatus: "current",
+          configuration: {
+            schedule: seasonalCalendar.schedule,
+            defaultMinimumStayNights: 2,
+          },
+        });
+        expect(
+          Object.fromEntries(
+            followedCalendar!.configuration.sourceInputs.roomBindings.map((binding) => [
+              binding.roomTypeId,
+              [binding.physicalCapacityCount, binding.startingSellableLimitCount],
+            ]),
+          ),
+        ).toEqual({ [gardenSuite]: [2, 2], [seaSuite]: [3, 3], [copy]: [3, 3] });
+        // Every room type stays closed for the season, the copy included.
+        for (const roomTypeId of [gardenSuite, seaSuite, copy]) {
+          expect(
+            (await nights(roomTypeId))
+              .filter(({ status }) => status === "closed")
+              .map(({ stayDate }) => stayDate),
+          ).toEqual(season.nights);
+        }
+        expect(new Set((await nights(copy)).map(({ total }) => total))).toEqual(new Set([3]));
+        expect(await stayAt(copy)).toMatchObject({ availability: "available", roomsLeft: 3 });
+        // Fewer rooms follow too ...
+        await setTotalRooms(copy, 2, "copy-fewer", followed);
+        expect(calendarLog).toEqual([]);
+        expect(new Set((await nights(copy)).map(({ total }) => total))).toEqual(new Set([2]));
+        // ... unless a night holds more than the rooms left: a manual limit of two rooms keeps the
+        // calendar where it is, rather than saving one whose nights can't be prepared.
+        await admin.query(
+          `UPDATE pms.inventory_days SET manual_sellable_limit_count=2,
+             manual_source_revision=manual_source_revision+1, inventory_revision=inventory_revision+1,
+             effective_sellable_limit_count=2, available_count=GREATEST(0,2-assigned_count-blocked_count)
+           WHERE room_type_id=$1 AND stay_date=$2::date`,
+          [copy, localDate(60)],
+        );
+        const beforeRefused =
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId);
+        await setTotalRooms(copy, 1, "copy-crowded", followed);
+        expect(calendarLog).toEqual([
+          expect.objectContaining({
+            propertyId,
+            outcome: "not_room_change",
+            reason: "room_capacity_protected",
+          }),
+        ]);
+        expect(
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+        ).toMatchObject({
+          sourceStatus: "stale",
+          configuration: { calendarRevision: beforeRefused!.configuration.calendarRevision },
+        });
+        expect(new Set((await nights(copy)).map(({ total }) => total))).toEqual(new Set([2]));
       }
       if (manualMethod) {
         // Once the site serves setup publications, prices follow the page: hidden while bank
