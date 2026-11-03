@@ -62,8 +62,7 @@ export const BOOKING_LAUNCH_BLOCKER_MESSAGES: Readonly<Record<string, string>> =
   pricing_currency_unavailable:
     "Set your property currency in Pricing before saving payment methods.",
   pricing_currency_mismatch: "Your property currency changed. Review how guests can pay.",
-  online_card_execution_unavailable:
-    "Online card payments are waiting for verified payment execution.",
+  online_card_execution_unavailable: "Online card payments need a connected payment account.",
   online_card_currency_unsupported: "Online cards do not support the property's current currency.",
   provider_restricted:
     "Stripe has restricted this account. Review your Stripe account requirements.",

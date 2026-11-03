@@ -760,19 +760,17 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       )
       .then(
         ({ card }) => {
-          // The page already shows this Stripe account as connected: something on the account
-          // itself still stops it (e.g. Stripe's card capability), not a missing account.
+          // The page already shows the account as connected (Stripe, or vayada Payment with its
+          // payout account saved, checked below): something on the account itself still stops
+          // it, not a missing account. No Vayada approval since VAY-2442 (Flamur, 2026-11-03);
+          // an API from before then may still answer "not_approved" for it.
           if (!current) return;
-          // vayada Payment: with its payout account saved (checked below), what's left is Vayada's
-          // approval, which Finance also reports as no account.
           if (vayadaSaved) setVayadaCardReady(card.ready);
           setCardNotReady(
             card.ready
               ? null
-              : card.reason === "not_connected"
-                ? vayadaSaved
-                  ? "not_approved"
-                  : "account_not_ready"
+              : card.reason === "not_connected" || card.reason === "not_approved"
+                ? "account_not_ready"
                 : card.reason,
           );
         },
@@ -782,8 +780,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       current = false;
     };
   }, [activeSection, billingPropertyId, cardSaved, stripeOnboarded, vayadaSaved, paymentBaseline]);
-  // A missing or unfinished account is the page's own knowledge: Finance's readiness can't tell a
-  // missing account from a pending approval. Nothing is said while a Stripe check runs.
+  // A missing or unfinished account is the page's own knowledge: Finance's readiness reports both
+  // as no account. Nothing is said while a Stripe check runs.
   // Stripe may hold an account this page couldn't confirm (back from Stripe, or a failed read):
   // Step 2 offers a check instead of a new account, and after a failed read, only the check.
   const stripeUnconfirmed =

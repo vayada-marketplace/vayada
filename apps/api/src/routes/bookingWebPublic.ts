@@ -84,6 +84,7 @@ import {
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { isVayadaPaymentAccountRef, stripeCallAccountRef } from "../domains/vayadaPaymentStripe.js";
+import { onlineCardReadySql } from "../domains/financeOnlineCardReadySql.js";
 import { createHash, randomBytes } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
@@ -2987,11 +2988,11 @@ export async function loadTargetCheckoutConfig(
        account.id::text AS "providerAccountId",
        account.provider_account_id AS "providerAccountRef",
        COALESCE(
-         readiness.online_card_ready
+         ${onlineCardReadySql("readiness", "fs")}
          AND upper(trim(fs.default_currency)) = upper(trim(bs.default_currency)),
          FALSE
        ) AS "onlineCardReady",
-       COALESCE(readiness.online_card_ready, FALSE) AS "bookingPageCardReady"
+       ${onlineCardReadySql("readiness", "fs")} AS "bookingPageCardReady"
      FROM hotel_catalog.properties p
      LEFT JOIN booking.booking_settings bs ON bs.property_id = p.id
      LEFT JOIN hotel_catalog.property_policy_summaries policy ON policy.property_id = p.id

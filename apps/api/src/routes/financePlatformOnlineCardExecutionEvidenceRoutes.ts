@@ -1,31 +1,17 @@
-import type {
-  AcceptFinanceOnlineCardExecutionEvidenceCommand,
-  FinancePlatformOnlineCardExecutionEvidenceRepository,
-  RevokeFinanceOnlineCardExecutionEvidenceCommand,
-} from "@vayada/domain-finance";
-import type { RequestContext } from "@vayada/backend-auth";
-import { createHash } from "node:crypto";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FinancePlatformOnlineCardExecutionEvidenceRepository } from "@vayada/domain-finance";
+import type { FastifyInstance, FastifyReply } from "fastify";
 
 import { authorizePlatformFinance } from "./financePlatformAuthorization.js";
 
 type PropertyParams = { propertyId: string };
-type EvidenceParams = PropertyParams & { evidenceId: string };
-type AcceptBody = {
-  commandId?: unknown;
-  idempotencyKey?: unknown;
-  expectedCardCapabilityRevision?: unknown;
-  expectedPropertyReadinessRevision?: unknown;
-  evidenceFingerprintHash?: unknown;
-  executedAt?: unknown;
-};
-type RevokeBody = { commandId?: unknown; idempotencyKey?: unknown };
 
 export async function registerFinancePlatformOnlineCardExecutionEvidenceRoutes(
   app: FastifyInstance,
   options: { repository: Partial<FinancePlatformOnlineCardExecutionEvidenceRepository> },
 ): Promise<void> {
-  // VAY-2205: what an operator needs before turning card on or off for a hotel.
+  // VAY-2205: a hotel's card payments for Vayada finance. Read only since VAY-2442 (Flamur,
+  // 2026-11-03): card works as soon as the hotel's own settings are complete, so Vayada no
+  // longer turns it on or off (the approval routes are gone).
   app.get<{ Params: PropertyParams }>(
     "/finance/platform/properties/:propertyId/online-card-execution-evidence",
     async (request, reply) => {
@@ -47,155 +33,6 @@ export async function registerFinancePlatformOnlineCardExecutionEvidenceRoutes(
       );
     },
   );
-
-  app.post<{ Params: PropertyParams; Body: AcceptBody }>(
-    "/finance/platform/properties/:propertyId/online-card-execution-evidence",
-    async (request, reply) => {
-      const context = authorizePlatformFinance(request, reply, "manage");
-      if (!context) return reply;
-      if (!options.repository.acceptOnlineCardExecutionEvidence) return unavailable(reply);
-      const command = acceptCommand(request, context);
-      if (!command) return invalid(reply);
-      return sendResult(reply, await options.repository.acceptOnlineCardExecutionEvidence(command));
-    },
-  );
-
-  app.post<{ Params: EvidenceParams; Body: RevokeBody }>(
-    "/finance/platform/properties/:propertyId/online-card-execution-evidence/:evidenceId/revoke",
-    async (request, reply) => {
-      const context = authorizePlatformFinance(request, reply, "manage");
-      if (!context) return reply;
-      if (!options.repository.revokeOnlineCardExecutionEvidence) return unavailable(reply);
-      const command = revokeCommand(request, context);
-      if (!command) return invalid(reply);
-      return sendResult(reply, await options.repository.revokeOnlineCardExecutionEvidence(command));
-    },
-  );
-}
-
-function acceptCommand(
-  request: FastifyRequest<{ Params: PropertyParams; Body: AcceptBody }>,
-  context: RequestContext,
-): AcceptFinanceOnlineCardExecutionEvidenceCommand | null {
-  const body = request.body;
-  if (
-    !plainRecord(body) ||
-    Object.keys(body).some(
-      (key) =>
-        ![
-          "commandId",
-          "idempotencyKey",
-          "expectedCardCapabilityRevision",
-          "expectedPropertyReadinessRevision",
-        ].includes(key),
-    )
-  ) {
-    return null;
-  }
-  const commandId = trimmed(body.commandId);
-  const idempotencyKey = trimmed(body.idempotencyKey);
-  // VAY-2205 (D3): Vayada's approval is the operator's attestation, recorded at the server's time
-  // with a fingerprint the server computes, so the browser's clock and input don't matter. Proof
-  // from an ONB-25A run is refused until something verifies it.
-  const executedAt = context.audit.receivedAt;
-  const evidenceFingerprintHash = createHash("sha256")
-    .update(
-      [
-        "vayada-card-approval.v1",
-        request.params.propertyId.toLowerCase(),
-        `card-capability:${String(body.expectedCardCapabilityRevision)}`,
-        `property-readiness:${String(body.expectedPropertyReadinessRevision)}`,
-        `operator:${context.actor.internalUserId}`,
-        executedAt,
-      ].join("\n"),
-    )
-    .digest("hex");
-  if (
-    !uuid(request.params.propertyId) ||
-    !uuid(commandId) ||
-    !uuid(idempotencyKey) ||
-    !positiveInteger(body.expectedCardCapabilityRevision) ||
-    !positiveInteger(body.expectedPropertyReadinessRevision)
-  ) {
-    return null;
-  }
-  return {
-    commandType: "finance.online_card_execution_evidence.accept",
-    commandId,
-    idempotencyKey,
-    propertyId: request.params.propertyId.toLowerCase(),
-    audit: audit(context, "Vayada finance operator approves card payments (attestation)"),
-    payload: {
-      expectedCardCapabilityRevision: body.expectedCardCapabilityRevision as number,
-      expectedPropertyReadinessRevision: body.expectedPropertyReadinessRevision as number,
-      evidenceFingerprintHash,
-      executedAt,
-    },
-  };
-}
-
-function revokeCommand(
-  request: FastifyRequest<{ Params: EvidenceParams; Body: RevokeBody }>,
-  context: RequestContext,
-): RevokeFinanceOnlineCardExecutionEvidenceCommand | null {
-  const body = request.body;
-  if (
-    !plainRecord(body) ||
-    Object.keys(body).some((key) => !["commandId", "idempotencyKey"].includes(key)) ||
-    !uuid(request.params.propertyId) ||
-    !uuid(request.params.evidenceId)
-  ) {
-    return null;
-  }
-  const commandId = trimmed(body.commandId);
-  const idempotencyKey = trimmed(body.idempotencyKey);
-  if (!uuid(commandId) || !uuid(idempotencyKey)) return null;
-  return {
-    commandType: "finance.online_card_execution_evidence.revoke",
-    commandId,
-    idempotencyKey,
-    propertyId: request.params.propertyId.toLowerCase(),
-    audit: audit(context, "Revoke ONB-25A online-card execution evidence"),
-    payload: { evidenceId: request.params.evidenceId.toLowerCase() },
-  };
-}
-
-function audit(context: RequestContext, reason: string) {
-  return {
-    actor: {
-      kind: "user" as const,
-      userId: context.actor.internalUserId,
-      organizationId: context.selectedOrganization.organizationId,
-    },
-    requestId: context.audit.requestId,
-    ...(context.audit.correlationId ? { correlationId: context.audit.correlationId } : {}),
-    reason,
-    requestedAt: context.audit.receivedAt,
-  };
-}
-
-function sendResult(
-  reply: FastifyReply,
-  result: Awaited<
-    ReturnType<
-      FinancePlatformOnlineCardExecutionEvidenceRepository["acceptOnlineCardExecutionEvidence"]
-    >
-  >,
-) {
-  if (result.ok) return result.response;
-  return reply.code(result.statusCode).send({
-    statusCode: result.statusCode,
-    code: result.code,
-    category:
-      result.statusCode === 400
-        ? "validation"
-        : result.statusCode === 404
-          ? "not_found"
-          : result.statusCode === 409
-            ? "conflict"
-            : "write_model",
-    message: result.message,
-  });
 }
 
 function unavailable(reply: FastifyReply) {
@@ -214,18 +51,6 @@ function invalid(reply: FastifyReply) {
     category: "validation",
     message: "Online-card execution evidence is invalid.",
   });
-}
-
-function plainRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function trimmed(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 && value === value.trim() ? value : null;
-}
-
-function positiveInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 2_147_483_647;
 }
 
 function uuid(value: unknown): value is string {

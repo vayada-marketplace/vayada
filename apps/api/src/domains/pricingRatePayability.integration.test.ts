@@ -28,6 +28,12 @@ describe.skipIf(!url)("rates guests can't pay", () => {
   const pool = new pg.Pool({ connectionString: url, max: 6 });
   afterAll(() => pool.end());
 
+  const stripeCharges = (accountId: string, on: boolean) =>
+    pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=$2 WHERE id=$1", [
+      accountId,
+      on,
+    ]);
+
   async function hotel(
     ...args: Parameters<typeof paymentRepublishFixture> extends [unknown, ...infer R] ? R : never
   ) {
@@ -37,7 +43,7 @@ describe.skipIf(!url)("rates guests can't pay", () => {
     // Card readiness as the PMS rate screens read it (createPricingCardReadinessReader).
     let card: PricingCardReadiness["card"] = {
       ready: false,
-      reason: "not_approved",
+      reason: "not_connected",
       charge: "at_booking",
     };
     const app = Fastify();
@@ -90,7 +96,7 @@ describe.skipIf(!url)("rates guests can't pay", () => {
   it("stops only the card-only rate when card goes off, and names it with the fix", async () => {
     const h = await hotel(["card", "pay_at_property"], true, [nonRefundableCardOnly]);
     try {
-      const approval = await h.cardOn();
+      // VAY-2442: a verified Stripe account takes cards, with no Vayada approval.
       h.cardReady(true);
       await (
         await h.save(0)
@@ -110,8 +116,9 @@ describe.skipIf(!url)("rates guests can't pay", () => {
         nrf: [],
       });
 
-      await h.cardOff(approval);
-      h.cardReady(false, "not_approved");
+      // The hotel's Stripe account stops taking charges.
+      await stripeCharges(h.accountId, false);
+      h.cardReady(false, "not_connected");
       await republishPricingAfterPaymentChange(pool, h.propertyId);
       // Flex is still paid at the property; the non-refundable rate took only card.
       expect(await h.selling()).toEqual(["flex"]);
@@ -119,11 +126,12 @@ describe.skipIf(!url)("rates guests can't pay", () => {
         version: "pricing-rates-not-selling.v1",
         publishedRevision: 2,
         rates: [
+          // VAY-2442: card is off because of the hotel's own Stripe account, not a Vayada switch.
           {
             roomTypeId: expect.any(String),
             offerId: "nrf",
-            reason: "card_off",
-            fixes: ["turn_card_on"],
+            reason: "card_setup_incomplete",
+            fixes: ["finish_stripe_setup"],
           },
         ],
       });
@@ -135,6 +143,8 @@ describe.skipIf(!url)("rates guests can't pay", () => {
   it("offers nothing when no way to pay is left, and the hotel sees every rate with its fix", async () => {
     const h = await hotel(["card", "pay_at_property"], true, [nonRefundableCardOnly, atProperty]);
     try {
+      // Card isn't on: the hotel's Stripe account can't take charges yet.
+      await stripeCharges(h.accountId, false);
       await (
         await h.save(0)
       )();
@@ -154,14 +164,14 @@ describe.skipIf(!url)("rates guests can't pay", () => {
         {
           roomTypeId: expect.any(String),
           offerId: "flex",
-          reason: "card_off",
-          fixes: ["turn_card_on"],
+          reason: "card_setup_incomplete",
+          fixes: ["finish_stripe_setup"],
         },
         {
           roomTypeId: expect.any(String),
           offerId: "nrf",
-          reason: "card_off",
-          fixes: ["turn_card_on"],
+          reason: "card_setup_incomplete",
+          fixes: ["finish_stripe_setup"],
         },
         {
           roomTypeId: expect.any(String),

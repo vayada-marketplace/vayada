@@ -15,8 +15,8 @@ export type PaymentSettingsDefaults = {
 };
 
 /** What Payment settings give a first price (VAY-2188), which the rule setup's pricing step uses too: pay at the
- * hotel when it is on, card once the booking page can take it (Stripe, Vayada's approval and the switch,
- * VAY-2205), and bank transfer and PayPal when they are ready (VAY-2139). */
+ * hotel when it is on, card once the booking page can take it (the hotel's payment account and the switch,
+ * VAY-2205; no Vayada approval since VAY-2442), and bank transfer and PayPal when they are ready (VAY-2139). */
 export async function paymentSettingsDefaults(client: {
   paymentMethods(): Promise<ManualPaymentMethod[]>;
   cardReadiness(): Promise<PricingCardReadiness>;

@@ -5,6 +5,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFinanceOnlineCardExecutionEvidenceRepository } from "../routes/financeOnlineCardExecutionEvidenceRepository.js";
+import { onlineCardReadySql } from "./financeOnlineCardReadySql.js";
 import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -263,7 +264,7 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
   });
 
   it("sells card in published prices exactly when the booking page shows it ready", async () => {
-    // The published-price check computes readiness in TypeScript; the booking page reads the view.
+    // The published-price check computes readiness in TypeScript; the booking page in SQL.
     const terms: ReplacementOfferTerms[] = [
       {
         roomTypeId: randomUUID(),
@@ -297,90 +298,74 @@ describe.skipIf(!url)("card readiness per provider (VAY-2442)", () => {
         await client.query("ROLLBACK");
         client.release();
       }
-      expect([name, sellsCard]).toEqual([name, (await row(NEW, ids[name]!)).online_card_ready]);
+      // VAY-2442: the booking page reads onlineCardReadySql, never the views' approval column.
+      expect([name, sellsCard]).toEqual([name, await cardReady(ids[name]!)]);
     }
+    // No hotel needs a Vayada approval any more, whatever happened to an old one.
+    for (const name of [
+      "stripeNoApproval",
+      "stripeStaleApproval",
+      "stripeRevoked",
+      "vayadaNoApproval",
+      "vayadaStaleApproval",
+    ])
+      expect([name, await cardReady(ids[name]!)]).toEqual([name, true]);
   });
 
-  it("lets Vayada approve a bound vayada Payment account only while it is on for the hotel", async () => {
-    const off = createFinanceOnlineCardExecutionEvidenceRepository(pool);
-    const on = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
+  it("takes card for vayada Payment once the payout account is saved; no card approval stamps it (VAY-2442 K)", async () => {
+    const repository = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
       vayadaPaymentOpen: () => true,
     });
     const propertyId = ids.vayadaNoApproval!;
-    // On, but only for other hotels (VAYADA_PAYMENT_PROPERTY_IDS): no approval for this one.
-    const otherHotels = createFinanceOnlineCardExecutionEvidenceRepository(pool, {
-      vayadaPaymentOpen: (id) => id !== propertyId,
-    });
-    expect(await otherHotels.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
-      ok: false,
-      statusCode: 409,
-      code: "provider_capability_unavailable",
-    });
-    // Off: Vayada sees the account (so it can still withdraw an approval) but can't approve it.
-    expect(await off.readOnlineCardExecutionState(propertyId)).toMatchObject({
-      providerAccount: { ready: true, cardCapabilityRevision: 3 },
-    });
-    expect(await off.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
-      ok: false,
-      statusCode: 409,
-      code: "provider_capability_unavailable",
-    });
-    // A placeholder or an account without payouts is never approvable.
-    expect(await on.readOnlineCardExecutionState(ids.vayadaPlaceholder!)).toMatchObject({
+    // A placeholder or an account without payouts never takes card.
+    expect(await repository.readOnlineCardExecutionState(ids.vayadaPlaceholder!)).toMatchObject({
       providerAccount: null,
-    });
-    expect(await on.readOnlineCardExecutionState(ids.vayadaPayoutsOff!)).toMatchObject({
-      providerAccount: { ready: false },
-    });
-    expect(await on.acceptOnlineCardExecutionEvidence(accept(ids.vayadaPayoutsOff!))).toMatchObject(
-      { ok: false, code: "provider_capability_unavailable" },
-    );
-
-    expect(await on.readOnlineCardExecutionState(propertyId)).toMatchObject({
-      providerAccount: { ready: true, cardCapabilityRevision: 3 },
       cardReady: false,
     });
-    // P7: the hotel's first card approval also approves its first payout account.
-    const firstAccount = await payoutAccount(propertyId, 1);
-    expect(await on.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
-      ok: true,
-      status: "accepted",
-      response: { cardReady: true },
+    expect(await repository.readOnlineCardExecutionState(ids.vayadaPayoutsOff!)).toMatchObject({
+      providerAccount: { ready: false },
+      cardReady: false,
     });
-    expect(await approval(firstAccount)).toEqual({ via: "card_approval", actor: userId });
-    // The owner (or a stolen owner login) replaced the first account before Vayada's first card
-    // approval: the card approval never approves a replacement (staff do that on the Payouts
-    // page, after checking it), while card payments go on as before.
-    const second = ids.vayadaSecondAccount!;
-    const replaced = await payoutAccount(second, 1);
-    await pool.query(
-      `UPDATE finance.payout_destinations SET enabled = FALSE, ciphertext = NULL, deleted_at = now()
-       WHERE id = $1::uuid`,
-      [replaced],
-    );
-    const replacement = await payoutAccount(second, 2);
-    expect(await on.acceptOnlineCardExecutionEvidence(accept(second))).toMatchObject({
-      ok: true,
-      response: { cardReady: true },
-    });
-    expect(await approval(replacement)).toEqual({ via: null, actor: null });
-    expect(await approval(replaced)).toEqual({ via: null, actor: null });
-    expect((await row(NEW, propertyId)).online_card_ready).toBe(true);
-    expect((await row(OLD, propertyId)).online_card_ready).toBe(false);
-    // After switching off, the approval is still listed, so it can be withdrawn.
-    expect(await off.readOnlineCardExecutionState(propertyId)).toMatchObject({
-      evidence: { current: true },
+    // Bound with its payout account saved: card is on, with no Vayada approval.
+    expect(await repository.readOnlineCardExecutionState(propertyId)).toMatchObject({
+      providerAccount: { ready: true, cardCapabilityRevision: 3 },
+      evidence: null,
       cardReady: true,
     });
+    expect(await cardReady(propertyId)).toBe(true);
+    // The old view's column still asks for one; nothing reads it any more.
+    expect((await row(OLD, propertyId)).online_card_ready).toBe(false);
 
-    // Removing the payout account turns payouts off (P1): the approval no longer counts.
+    // K: only staff's "Approve bank account" on the Payouts page approves a payout account. Even
+    // the leftover internal card approval (no route reaches it) never stamps the first one.
+    const firstAccount = await payoutAccount(propertyId, 1);
+    expect(await repository.acceptOnlineCardExecutionEvidence(accept(propertyId))).toMatchObject({
+      ok: true,
+      response: { cardReady: true },
+    });
+    expect(await approval(firstAccount)).toEqual({ via: null, actor: null });
+
+    // Removing the payout account turns payouts off (P1): card stops.
     await pool.query(
       `UPDATE finance.payment_provider_accounts SET payouts_enabled = FALSE
        WHERE property_id = $1::uuid AND provider = 'vayada'`,
       [propertyId],
     );
-    expect((await row(NEW, propertyId)).online_card_ready).toBe(false);
+    expect(await cardReady(propertyId)).toBe(false);
   });
+
+  /** Card readiness as the booking page, publication and checklist read it (onlineCardReadySql). */
+  async function cardReady(propertyId: string): Promise<boolean> {
+    return (
+      await pool.query<{ ready: boolean }>(
+        `SELECT ${onlineCardReadySql("readiness", "settings")} AS ready
+         FROM finance.online_card_readiness_by_provider readiness
+         JOIN finance.payment_settings settings ON settings.property_id = readiness.property_id
+         WHERE readiness.property_id = $1::uuid`,
+        [propertyId],
+      )
+    ).rows[0]!.ready;
+  }
 
   async function payoutAccount(propertyId: string, revision: number): Promise<string> {
     const id = randomUUID();

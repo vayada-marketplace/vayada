@@ -2171,7 +2171,7 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   );
   let readiness: { ready: boolean; reason: string | null } = {
     ready: false,
-    reason: "not_approved",
+    reason: "not_connected",
   };
   const readinessReads: string[] = [];
   await page.route(
@@ -2229,16 +2229,18 @@ test("warns that guests can't pay by card yet, and why", async ({ page }, testIn
   await expect(banner.getByRole("link", { name: "Finish setup" })).toBeVisible();
   expect(readinessReads).toEqual([]);
 
-  // Connected: card readiness says what else is missing.
+  // Connected: card readiness says what else is missing. Readiness can't tell an account it
+  // doesn't accept from a missing one; the page shows it. VAY-2442: no Vayada approval any more,
+  // and an older API's "not_approved" reads the same way.
   settings = cardPaymentSettings(true);
   await page.goto("/settings/payments");
-  await expect(banner).toContainText("Vayada still has to approve card payments for your hotel.");
-  await expect(banner.getByRole("link")).toHaveCount(0);
-  // Readiness can't tell an account it doesn't accept from a missing one; the page shows it.
-  readiness = { ready: false, reason: "not_connected" };
-  await page.reload();
   await expect(banner).toContainText("The connected account can't take card payments yet.");
   await expect(banner.getByRole("link")).toHaveCount(0);
+  await expect(banner).not.toContainText("approve");
+  readiness = { ready: false, reason: "not_approved" };
+  await page.reload();
+  await expect(banner).toContainText("The connected account can't take card payments yet.");
+  await expect(banner).not.toContainText("approve");
 
   readiness = { ready: true, reason: null };
   const readyRead = page.waitForResponse((response) =>

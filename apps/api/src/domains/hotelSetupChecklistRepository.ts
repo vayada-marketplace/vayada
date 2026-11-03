@@ -7,6 +7,7 @@ import type { QueryResult, QueryResultRow } from "pg";
 
 import { APPROVED_PUBLIC_PROPERTY_MEDIA_OBJECT_PREDICATE } from "../platform/propertyMediaPublicationJob.js";
 import { FIRST_RUN_PLACEHOLDER_PUBLISH_STEP } from "./hotelFirstRunPricing.js";
+import { onlineCardReadySql } from "./financeOnlineCardReadySql.js";
 import type {
   HotelGoLiveFactsRow,
   HotelSetupChecklistFactsRow,
@@ -65,7 +66,9 @@ const GUEST_TERMS = `CASE
   END`;
 
 const ONLINE_CARD_READY = `COALESCE(
-    (SELECT readiness.online_card_ready FROM finance.online_card_readiness_by_provider readiness
+    (SELECT ${onlineCardReadySql("readiness", "settings")}
+     FROM finance.online_card_readiness_by_provider readiness
+     JOIN finance.payment_settings settings ON settings.property_id = readiness.property_id
      WHERE readiness.property_id = property.id),
     FALSE
   )`;
