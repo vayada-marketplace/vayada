@@ -18,13 +18,13 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 | `apps/pms-api`       | FastAPI    | 8002 | `https://api.pms.localhost`               |
 | `apps/pms-web`       | Next.js 14 | 3004 | `https://pms.localhost`                   |
 | `apps/landing`       | Next.js 14 | 3006 | `https://landing.localhost`               |
-| `apps/hotel-sites`   | Next.js 16 | 3007 | `https://animals-ahangama.site.localhost` |
+| `apps/hotel-sites`   | Next.js 16 | 3007 | `https://site.localhost/animals-ahangama` |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
 `apps/landing` is the **public marketing/landing site**: home, `/booking-engine`, `/pms`, `/partner-program`, `/pricing`, about/contact and the legal pages. Its contact form posts `/api/contact` to `NEXT_PUBLIC_API_URL`, the platform contact intake in `apps/api` (`next-api.vayada.com` in production, VAY-2286); next-api allows the `vayada.com` origin through `CONTACT_INTAKE_ALLOWED_ORIGINS`. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated apps and APIs remain on their separate hostnames.
 
-`apps/hotel-sites` is the **hotel website template** (VAY-2422, a paid add-on): one static site per hotel from `sites/<slug>/` (content, photos, font), chosen by the request's host (`<slug>.site.vayada.com`, `<slug>.site.localhost` with `portless proxy start --wildcard`, or the hotel's own domain listed in `sites/hosts.ts`). Its booking buttons link to the hotel's Booking Engine page.
+`apps/hotel-sites` is the **hotel website template** (VAY-2422, a paid add-on): one site per hotel from `sites/<slug>/` (content, photos, font), published as plain static files with no server. `npm run build:hotel-sites` writes one folder per hotel address to `apps/hotel-sites/build/<host>/` (the host of the site's `url`, e.g. `animals-ahangama.site.vayada.com`), with every photo converted to AVIF, WebP and its own format at build time; photos go through `components/Photo.tsx`, and a bare `<Image>` fails the build. `npm --workspace vayada-hotel-sites run start` serves those folders on `http://<slug>.site.localhost:3007/` the way the static host will, and the browser specs run against it. In `npm run dev:hotel-sites` a site is at `/<slug>`. Its booking buttons link to the hotel's Booking Engine page.
 
 ## Local dev — portless
 

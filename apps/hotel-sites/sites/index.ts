@@ -1,7 +1,7 @@
 import { animalsAhangama } from "./animals-ahangama/content";
 import type { HotelSite } from "./types";
 
-// A new hotel: its folder (content.ts, assets.ts), an entry here and its hosts in hosts.ts.
+// A new hotel: its folder (content.ts, assets.ts) and an entry here. Its `url` names its build folder.
 export const SITES: HotelSite[] = [animalsAhangama];
 
 export function siteBySlug(slug: string): HotelSite | null {

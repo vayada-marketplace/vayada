@@ -1,7 +1,6 @@
-import Image from "next/image";
-
 import type { HotelSite, SiteRoom } from "@/sites/types";
 
+import { Photo } from "./Photo";
 import { Split } from "./Split";
 
 /** "Stay with us": one card per room, each linking to its details row. */
@@ -14,7 +13,7 @@ export function RoomCards({ site }: { site: HotelSite }) {
           {site.rooms.items.map((room) => (
             <a key={room.id} href={`#${room.id}`} className="room-card">
               {/* The details row below describes the same photo. */}
-              <Image
+              <Photo
                 src={room.image.src}
                 alt=""
                 sizes="(max-width: 599px) 100vw, (max-width: 1059px) 50vw, 280px"

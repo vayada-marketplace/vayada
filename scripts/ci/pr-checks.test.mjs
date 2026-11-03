@@ -129,7 +129,7 @@ test("frontend-only changes skip the PostgreSQL and Python jobs", () => {
     "first_party_auth",
   ]);
   assert.deepEqual(
-    selectJobs(["apps/hotel-sites/middleware.ts", "tests/e2e/hotel-sites/home.spec.ts"]).jobs,
+    selectJobs(["apps/hotel-sites/next.config.js", "tests/e2e/hotel-sites/home.spec.ts"]).jobs,
     [...FRONTEND, "first_party_auth"],
   );
 });

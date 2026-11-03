@@ -6,7 +6,7 @@ import { SITES, siteBySlug } from "@/sites";
 
 import "./site.css";
 
-// One static page per hotel; the middleware maps each request's host to its slug.
+// One static page per hotel; the build serves each at "/" of its own address (export-sites.mjs).
 export const dynamicParams = false;
 export function generateStaticParams() {
   return SITES.map((site) => ({ site: site.slug }));

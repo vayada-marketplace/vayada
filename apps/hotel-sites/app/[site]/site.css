@@ -37,6 +37,16 @@ img {
   display: block;
 }
 
+/* Photo's <picture> only offers file formats: its <img> lays out as if the picture weren't there.
+   Its <source>s would otherwise become empty flex items, each adding a gap. */
+picture {
+  display: contents;
+}
+
+picture > source {
+  display: none;
+}
+
 .button-light,
 .button-light:hover {
   background: #ffffff;
@@ -276,7 +286,7 @@ img {
   flex-direction: row-reverse;
 }
 
-.split > img {
+.split img {
   flex: 1 1 480px;
   min-width: 0;
   width: 100%;

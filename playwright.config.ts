@@ -20,11 +20,9 @@ const landingBaseURL =
   process.env.E2E_BASE_URL ||
   (startServers ? "http://127.0.0.1:3006" : "https://landing.localhost");
 
+// The built hotel sites, served the way the static host will (apps/hotel-sites/scripts/serve.mjs).
 const hotelSitesBaseURL =
-  process.env.E2E_HOTEL_SITES_BASE_URL ||
-  (startServers
-    ? "http://animals-ahangama.site.localhost:3007"
-    : "https://animals-ahangama.site.localhost");
+  process.env.E2E_HOTEL_SITES_BASE_URL || "http://animals-ahangama.site.localhost:3007";
 
 const bookingBaseURL =
   process.env.E2E_BOOKING_BASE_URL ||
@@ -120,11 +118,13 @@ export default defineConfig({
             timeout: 120_000,
           },
           {
-            // A hotel site answers only on its own host; the health check answers on any.
-            command: "PORT=3007 npm run dev:hotel-sites",
-            url: "http://127.0.0.1:3007/api/health",
+            // The specs check the built files, so build them first. Each hotel answers only on its
+            // own address, so wait for the port rather than a URL.
+            command:
+              "npm run build:hotel-sites && PORT=3007 npm --workspace vayada-hotel-sites run start",
+            port: 3007,
             reuseExistingServer: !process.env.CI,
-            timeout: 120_000,
+            timeout: 300_000,
           },
         ]
     : undefined,

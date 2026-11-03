@@ -38,7 +38,8 @@ export type HotelSite = {
   slug: string;
   name: string;
   locale: string;
-  /** Where the site is published: canonical URL, Open Graph and structured data. */
+  /** Where the site is published: canonical URL, Open Graph, structured data, and the name of its
+   * folder in the build (`build/<host>/`). */
   url: string;
   /** Off while the site still holds placeholder photos or copy: search engines stay away. */
   indexable: boolean;
