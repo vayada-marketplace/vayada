@@ -16,15 +16,18 @@ const queue = "pms.channex.webhooks",
 /** A page is one Channex list plus up to 20 reads of 30 s each: a lease older than this is dead. */
 const LEASE_MINUTES = 15;
 
-/** Default-off runtime integration must supply its explicit rollout property allowlist. */
+/** Undefined scope means the explicitly enabled all-hotels rollout; [] schedules nothing. */
 export async function scheduleChannexAlterationScans(options: {
   pool: pg.Pool;
-  propertyIds: readonly string[];
+  propertyIds?: readonly string[];
   ownsMutation: () => boolean;
   signal?: AbortSignal;
   limit?: number;
 }): Promise<number> {
-  const properties = z.array(z.uuid()).max(100).parse(options.propertyIds);
+  const properties =
+    options.propertyIds === undefined
+      ? null
+      : z.array(z.uuid()).max(100).parse(options.propertyIds);
   const limit = z
     .number()
     .int()
@@ -32,7 +35,7 @@ export async function scheduleChannexAlterationScans(options: {
     .max(100)
     .parse(options.limit ?? 25);
   const active = () => !options.signal?.aborted && options.ownsMutation();
-  if (!properties.length || !active()) return 0;
+  if (properties?.length === 0 || !active()) return 0;
   const client = await options.pool.connect();
   try {
     await client.query("BEGIN");
@@ -43,7 +46,7 @@ export async function scheduleChannexAlterationScans(options: {
          ON claim.property_id=connection.property_id AND claim.provider='channex'
          AND claim.external_property_id=connection.external_property_id AND claim.claim_state='active'
        WHERE connection.provider='channex' AND connection.connection_status='connected'
-         AND connection.property_id=ANY($1::uuid[]) AND NOT EXISTS (
+         AND ($1::uuid[] IS NULL OR connection.property_id=ANY($1::uuid[])) AND NOT EXISTS (
            SELECT 1 FROM platform.jobs job WHERE job.queue_name=$2 AND job.job_type=$3
              AND job.resource_product='pms' AND job.property_id=connection.property_id
              AND ((job.resource_type='channel_connection' AND job.resource_id=connection.id::text)
