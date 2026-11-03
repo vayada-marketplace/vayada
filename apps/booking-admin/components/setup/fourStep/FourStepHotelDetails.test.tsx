@@ -93,6 +93,12 @@ describe("FourStepHotelDetails (VAY-2451 resume)", () => {
       "stay@lumansa.example",
     );
     expect(textOf(renderer.root)).toContain("Add a valid reception phone to continue");
+    // On step 1, the rail doesn't tick step 2 while it isn't complete.
+    await act(async () => button(renderer, "Back").props.onClick());
+    const rail = renderer.root.findByProps({ "aria-label": "Setup steps" }).findAllByType("button");
+    expect(textOf(rail[1]!)).not.toContain("Done:");
+    await act(async () => button(renderer, "Continue").props.onClick());
+    expect(textOf(renderer.root)).toContain("Step 2 of 4");
     expect(button(renderer, "Continue").props.disabled).toBe(true);
 
     // The phone field (CountryPhoneField) hands back the full number.

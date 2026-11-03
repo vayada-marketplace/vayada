@@ -184,7 +184,8 @@ export function FourStepHotelDetails({
       void saveThen(() => onDone("room"));
   };
   const frame = {
-    reached: 2,
+    // The rail ticks only what is complete: an older setup's hotel without its address isn't past step 2.
+    reached: propertyStepHint(draft) ? 0 : locationStepHint(draft, Boolean(currency)) ? 1 : 2,
     propertyName,
     onPickStep: saving ? null : pick,
     onSaveAndExit: () => {
