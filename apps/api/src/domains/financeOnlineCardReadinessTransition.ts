@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import type { QueryResult, QueryResultRow } from "pg";
 
 import { PROJECT_PUBLIC_BOOKABILITY_PROFILE } from "../platform/publicBookabilityPublication.js";
+import { onlineCardReadySql } from "./financeOnlineCardReadySql.js";
 
 type Client = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -42,12 +43,13 @@ export async function loadFinanceOnlineCardReadinessState(
   propertyId: string,
 ): Promise<FinanceOnlineCardReadinessState | null> {
   const result = await client.query<FinanceOnlineCardReadinessState>(
-    `SELECT provider_account_id::text AS "providerAccountId",
-            card_capability_revision::int AS "providerCapabilityRevision",
-            online_card_ready AS ready
-     FROM finance.online_card_readiness_by_provider
-     WHERE property_id = $1::uuid
-       AND provider_account_id IS NOT NULL`,
+    `SELECT readiness.provider_account_id::text AS "providerAccountId",
+            readiness.card_capability_revision::int AS "providerCapabilityRevision",
+            ${onlineCardReadySql("readiness", "settings")} AS ready
+     FROM finance.online_card_readiness_by_provider readiness
+     JOIN finance.payment_settings settings ON settings.property_id = readiness.property_id
+     WHERE readiness.property_id = $1::uuid
+       AND readiness.provider_account_id IS NOT NULL`,
     [propertyId],
   );
   return result.rows[0] ?? null;

@@ -163,14 +163,15 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
   });
 
   it("accepts exact-revision evidence, replays once, and never silently publishes card", async () => {
-    // VAY-2205: the operator's switch reads the revisions to accept against, and the approval.
+    // VAY-2205: the operator's view reads the revisions and the approval. Since VAY-2442 card is
+    // ready without one: the hotel's own settings and Stripe account are enough.
     expect(await repository.readOnlineCardExecutionState(propertyId)).toEqual({
       propertyId,
       providerAccount: { ready: true, cardCapabilityRevision: 7 },
       propertyReadinessRevision: 1,
       paymentSettings: { paymentsOn: true, cardChosen: true, currencyEligible: true },
       evidence: null,
-      cardReady: false,
+      cardReady: true,
     });
     expect(await repository.readOnlineCardExecutionState(randomUUID())).toBeNull();
     const accepted = await repository.acceptOnlineCardExecutionEvidence(acceptCommand());
@@ -370,7 +371,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
     );
     expect(replay).toEqual({ ...revoked, status: "idempotent_replay" });
 
-    await expect(publicPaymentMethods()).resolves.toEqual(["pay_at_property"]);
+    // VAY-2442: the public profile is projected from the hotel's own readiness, so revoking an
+    // old approval (no route reaches it any more) leaves card published.
+    await expect(publicPaymentMethods()).resolves.toEqual(["card", "pay_at_property"]);
     const state = await pool.query<{
       ready: boolean;
       outcomes: string[];
@@ -513,7 +516,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
       "selection_changed",
       "readiness_gained",
     ]);
-    await expect(publicPaymentMethods()).resolves.toEqual(["pay_at_property"]);
+    // VAY-2442: choosing card publishes it at once; no Vayada approval is waited for.
+    await expect(publicPaymentMethods()).resolves.toEqual(["card", "pay_at_property"]);
   });
 
   it("invalidates evidence and suppresses card when another onboarding link is issued", async () => {

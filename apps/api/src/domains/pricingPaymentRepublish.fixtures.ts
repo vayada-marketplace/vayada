@@ -17,7 +17,8 @@ const flexible = {
 };
 
 /** VAY-2304 tests: a hotel that publishes through the real "Save prices" commands, with a payment
- * setup to change. Card hotels get a ready synthetic Stripe account; cardOn() is Vayada's approval. */
+ * setup to change. Card hotels get a ready synthetic Stripe account, which takes cards on its own
+ * since VAY-2442; cardOn() adds an approval from before then, which no longer decides anything. */
 export async function paymentRepublishFixture(
   pool: pg.Pool,
   methods: string[],

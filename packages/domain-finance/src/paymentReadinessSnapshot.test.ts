@@ -57,11 +57,15 @@ function snapshot(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Finance payment readiness derivation", () => {
-  it("does not treat a fully connected Stripe account as execution evidence", () => {
-    expect(resolveFinanceOnlineCardReadiness(onlineCardEvidence())).toBe("execution_unavailable");
+  it("is ready with a verified Stripe account and no Vayada approval (VAY-2442)", () => {
+    expect(resolveFinanceOnlineCardReadiness(onlineCardEvidence())).toBe("ready");
+    // Without a payment account there is nothing to charge with.
+    expect(resolveFinanceOnlineCardReadiness(onlineCardEvidence({ providerAccount: null }))).toBe(
+      "execution_unavailable",
+    );
   });
 
-  it("accepts only matching ONB-25A evidence for the exact capability revision", () => {
+  it("ignores an approval from before VAY-2442, current or out of date", () => {
     const accepted = {
       contractVersion: "finance-online-card-execution-evidence.v1",
       providerAccountId,
@@ -69,33 +73,23 @@ describe("Finance payment readiness derivation", () => {
       propertyReadinessRevision: 8,
       revokedAt: null,
     };
-    expect(
-      resolveFinanceOnlineCardReadiness(onlineCardEvidence({ executionEvidence: accepted })),
-    ).toBe("ready");
-    expect(
+    for (const executionEvidence of [
+      accepted,
+      { ...accepted, providerCapabilityRevision: 3 },
+      { ...accepted, propertyReadinessRevision: 7 },
+      { ...accepted, providerAccountId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+    ])
+      expect(resolveFinanceOnlineCardReadiness(onlineCardEvidence({ executionEvidence }))).toBe(
+        "ready",
+      );
+    // It is still checked for shape: the price fingerprint reads it.
+    expect(() =>
       resolveFinanceOnlineCardReadiness(
         onlineCardEvidence({
-          executionEvidence: { ...accepted, providerCapabilityRevision: 3 },
+          executionEvidence: { ...accepted, providerAccountId: "not-a-uuid" },
         }),
       ),
-    ).toBe("execution_unavailable");
-    expect(
-      resolveFinanceOnlineCardReadiness(
-        onlineCardEvidence({
-          executionEvidence: { ...accepted, propertyReadinessRevision: 7 },
-        }),
-      ),
-    ).toBe("execution_unavailable");
-    expect(
-      resolveFinanceOnlineCardReadiness(
-        onlineCardEvidence({
-          executionEvidence: {
-            ...accepted,
-            providerAccountId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-          },
-        }),
-      ),
-    ).toBe("execution_unavailable");
+    ).toThrow("execution evidence is invalid");
   });
 
   it("distinguishes provider restriction from canonical capability loss", () => {
@@ -144,7 +138,7 @@ describe("Finance payment readiness derivation", () => {
     );
   });
 
-  it("reads vayada Payment as ready only with payouts on, its own binding and Vayada's approval (VAY-2442)", () => {
+  it("reads vayada Payment as ready with payouts on and its own binding, no approval (VAY-2442)", () => {
     const executionEvidence = {
       contractVersion: "finance-online-card-execution-evidence.v1",
       providerAccountId,
@@ -165,7 +159,7 @@ describe("Finance payment readiness derivation", () => {
       ),
     ).toBe("ready");
     expect(resolveFinanceOnlineCardReadiness(onlineCardEvidence({ providerAccount: vayada }))).toBe(
-      "execution_unavailable",
+      "ready",
     );
     for (const lost of [
       { payoutsEnabled: false },

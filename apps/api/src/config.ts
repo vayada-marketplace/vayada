@@ -452,9 +452,11 @@ export function replacementPricingManualPaymentMethods(
 }
 
 /** VAY-2442: whether a hotel gets vayada Payment: the switch is on, its Stripe (test) keys are
- * set and the hotel is on VAYADA_PAYMENT_PROPERTY_IDS. Choosing it, the payout account, Vayada's
- * approval and new card charges all ask this, so a hotel can't be set up for charges that would
- * fail; refunds, disputes and payouts of money already taken do not. */
+ * set and the hotel is on VAYADA_PAYMENT_PROPERTY_IDS. Choosing it, the payout account and new
+ * card charges all ask this, so a hotel can't be set up for charges that would fail; refunds,
+ * disputes and payouts of money already taken do not. Card readiness doesn't (no Vayada approval
+ * since 2026-11-03): a hotel taken off the list keeps showing card until it turns card off, and
+ * its card checkouts are refused before any money is taken. */
 export function vayadaPaymentOpenFor(
   config: Pick<
     ApiConfig,

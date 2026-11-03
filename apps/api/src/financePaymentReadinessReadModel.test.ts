@@ -109,12 +109,8 @@ describe("Finance payment readiness read model", () => {
       pricingCurrency: { matchesCurrent: true },
       methods: [
         { method: "pay_at_property", selected: true, readiness: "ready" },
-        {
-          method: "card",
-          selected: true,
-          readiness: "unready",
-          blockers: ["online_card_execution_unavailable"],
-        },
+        // VAY-2442: a verified Stripe account is enough, with no Vayada approval.
+        { method: "card", selected: true, readiness: "ready", blockers: [] },
         { method: "bank_transfer", selected: false, availability: "unavailable" },
       ],
     });
@@ -122,7 +118,7 @@ describe("Finance payment readiness read model", () => {
     expect(deps.queries[0]?.values).toEqual([organizationId, propertyId]);
   });
 
-  it("makes card ready only for matching accepted ONB-25A evidence", async () => {
+  it("makes card ready with an approval from before VAY-2442 too", async () => {
     const { readModel } = model({
       rows: [
         row({
@@ -168,23 +164,27 @@ describe("Finance payment readiness read model", () => {
     ["stale property revision", { executionEvidencePropertyReadinessRevision: "7" }],
     ["other account", { executionEvidenceProviderAccountId: organizationId }],
     ["lookalike contract", { executionEvidenceContractVersion: "lookalike.v1" }],
-  ])("fails card closed for %s evidence", async (_label, evidenceOverride) => {
-    const { readModel } = model({
-      rows: [
-        row({
-          acceptedMethods: ["card"],
-          executionEvidenceContractVersion: "finance-online-card-execution-evidence.v1",
-          executionEvidenceProviderAccountId: providerAccountId,
-          executionEvidenceCapabilityRevision: "4",
-          ...evidenceOverride,
-        }),
-      ],
-    });
-    const snapshot = await readModel.getPaymentReadiness({ organizationId, propertyId });
-    expect(snapshot?.methods.find(({ method }) => method === "card")?.blockers).toContain(
-      "online_card_execution_unavailable",
-    );
-  });
+  ])(
+    "ignores an approval with %s since VAY-2442: card stays ready",
+    async (_label, evidenceOverride) => {
+      const { readModel } = model({
+        rows: [
+          row({
+            acceptedMethods: ["card"],
+            executionEvidenceContractVersion: "finance-online-card-execution-evidence.v1",
+            executionEvidenceProviderAccountId: providerAccountId,
+            executionEvidenceCapabilityRevision: "4",
+            ...evidenceOverride,
+          }),
+        ],
+      });
+      const snapshot = await readModel.getPaymentReadiness({ organizationId, propertyId });
+      expect(snapshot?.methods.find(({ method }) => method === "card")).toMatchObject({
+        readiness: "ready",
+        blockers: [],
+      });
+    },
+  );
 
   it.each([
     ["missing", null, "pricing_currency_unavailable"],

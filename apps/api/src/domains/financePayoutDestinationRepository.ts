@@ -38,10 +38,10 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 /** A hotel's vayada Payment payout account (VAY-2442). Owner writes only (the route checks);
  * the hotel reads it masked. Each write also keeps the hotel's vayada provider account in step:
  * `vayada:<property>` with payouts on exactly while an account is saved. That account is what
- * card readiness and Vayada's card approval bind to, so removing the payout account withdraws
- * the approval (the 0119 trigger bumps its capability revision), while replacing it does not:
- * card payments keep working, and payouts to the new account wait until Vayada staff approve it
- * (P7, 0538: a new revision is always saved unapproved). */
+ * card readiness binds to, so removing the payout account stops card payments, while replacing it
+ * does not: card payments keep working, and payouts to every account, the first one included,
+ * wait until Vayada staff approve it (P7, 0538: a new revision is always saved unapproved;
+ * variant K, 2026-11-03: only "Approve bank account" approves). */
 export function createPayoutDestinationRepository(
   connectionString: string,
   codec: Codec,
