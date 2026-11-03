@@ -1932,6 +1932,103 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         }
         expect(new Set((await nights(copy)).map(({ total }) => total))).toEqual(new Set([3]));
         expect(await stayAt(copy)).toMatchObject({ availability: "available", roomsLeft: 3 });
+
+        // As at one more live hotel in production: setup adds a room type and saves the calendar
+        // with it, but its nights are never prepared. The hourly repair prepares them for that
+        // saved calendar: the new room type gets the same nights, closed in the season, and every
+        // other night keeps its bookings, block, manual limit and season.
+        const villa = await addRoom("Hill Villa", "setup-room-c");
+        const nightsBefore = Object.fromEntries(
+          await Promise.all(
+            [gardenSuite, seaSuite, copy].map(async (id) => [id, await nights(id)] as const),
+          ),
+        );
+        const unpreparedRows = (
+          await admin.query<{ id: string; facts: string; units: string }>(
+            `SELECT id::text, room_facts_revision AS facts, room_units_revision AS units
+             FROM pms.room_types WHERE id=ANY($1::uuid[]) ORDER BY id::text`,
+            [[gardenSuite, seaSuite, copy, villa]],
+          )
+        ).rows;
+        const limits = new Map(
+          followedCalendar!.configuration.sourceInputs.roomBindings.map((binding) => [
+            binding.roomTypeId,
+            binding.startingSellableLimitCount,
+          ]),
+        );
+        const unpreparedProposal = {
+          organizationId,
+          propertyId,
+          expectedCalendarRevision: followedCalendar!.configuration.calendarRevision,
+          expectedPropertyProfileRevision: await profileRevision(),
+          schedule: seasonalCalendar.schedule,
+          defaultMinimumStayNights: 2,
+          roomTypeLimits: unpreparedRows.map((row) => ({
+            roomTypeId: row.id,
+            expectedRoomFactsRevision: Number(row.facts),
+            expectedRoomUnitsRevision: Number(row.units),
+            startingSellableLimitCount: limits.get(row.id) ?? 2,
+          })),
+        };
+        const unpreparedPreview = ok(
+          await calendar.routes.impactPreviewPort.previewOperatingCalendarImpact(
+            parsed(
+              parsePreviewPmsOperatingCalendarImpactCommand({
+                ...unpreparedProposal,
+                audit: commandAudit("calendar-preview-unprepared"),
+              }),
+              "unprepared calendar preview",
+            ),
+          ),
+          "unprepared calendar preview",
+        );
+        const savedOnly = ok(
+          await calendar.routes.commandPort.upsertOperatingCalendar(
+            parsed(
+              parseUpsertPmsOperatingCalendarCommand({
+                ...unpreparedProposal,
+                impactConfirmation: unpreparedPreview.preview.confirmation,
+                idempotencyKey: `calendar-unprepared-${suffix}`,
+                audit: commandAudit("calendar-unprepared"),
+              }),
+              "unprepared calendar save",
+            ),
+          ),
+          "unprepared calendar save",
+        ).response.configuration;
+        expect(
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+        ).toMatchObject({ sourceStatus: "current" });
+        expect(await nights(villa)).toEqual([]);
+        expect(
+          await repairPmsOperatingCalendarRooms(refreshPorts, {
+            limit: 25,
+            runId: `repair-unprepared-${suffix}`,
+            propertyIds: [propertyId],
+          }),
+        ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, failed: [] });
+        expect(
+          (
+            await admin.query(
+              "SELECT calendar_revision AS revision FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+              [propertyId],
+            )
+          ).rows[0]!.revision,
+        ).toBe(savedOnly.calendarRevision);
+        for (const [id, before] of Object.entries(nightsBefore)) {
+          expect(await nights(id)).toEqual(before);
+        }
+        const villaNights = await nights(villa);
+        expect(villaNights.map(({ stayDate }) => stayDate)).toEqual(
+          nightsBefore[seaSuite]!.map(({ stayDate }) => stayDate),
+        );
+        expect(
+          villaNights.filter(({ status }) => status === "closed").map(({ stayDate }) => stayDate),
+        ).toEqual(season.nights);
+        expect(new Set(villaNights.map(({ total }) => total))).toEqual(new Set([2]));
+        expect(await findPmsOperatingCalendarRoomRefreshCandidates(pool, 25, [propertyId])).toEqual(
+          [],
+        );
         // Fewer rooms follow too ...
         await setTotalRooms(copy, 2, "copy-fewer", followed);
         expect(calendarLog).toEqual([]);

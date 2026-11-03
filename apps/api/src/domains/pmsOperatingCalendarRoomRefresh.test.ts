@@ -248,9 +248,22 @@ describe("the calendar follows room changes (VAY-2469)", () => {
       calendarRevision: 4,
       savedCalendar: false,
     });
+    // Every room type's nights are checked against its rooms first.
     expect(unprepared.calls.map(([name, command]) => [name, command["horizon"]])).toEqual([
+      ["crowded", undefined],
+      ["crowded", undefined],
       ["materialize", { from: "2026-11-03", through: "2027-03-31" }],
     ]);
+    const crowded = fake({
+      current: "current",
+      coverage: { calendarRevision: 3, through: "2027-03-31" },
+      crowded: [garden],
+    });
+    expect(await refreshPmsOperatingCalendarRooms(crowded.ports, actor)).toEqual({
+      outcome: "not_room_change",
+      reason: "room_capacity_protected",
+    });
+    expect(crowded.calls.map(([name]) => name)).toEqual(["crowded", "crowded"]);
   });
 
   it("leaves calendars that still need setup's calendar step", async () => {

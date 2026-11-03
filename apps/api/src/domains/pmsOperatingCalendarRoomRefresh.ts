@@ -30,7 +30,8 @@ import { firstRunInventoryHorizon } from "./hotelFirstRunCalendar.js";
  * minimum stay and room limits (a new room type sells all its rooms; a limit equal to the old room
  * count follows the new count, a lower one stays unless it is now too high), then prepares the
  * nights through the hotel's current calendar end (at most a year, like setup), so no new dates
- * open. It changes nothing when the calendar is current; when the hotel has no calendar or
+ * open. A calendar saved in setup whose nights were never prepared gets its nights the same way.
+ * It changes nothing when the calendar is current; when the hotel has no calendar or
  * prepared nights yet (setup isn't done) or its calendar has ended; when a night holds more
  * bookings, blocks or limits than the rooms left; or when the calendar is behind for another
  * reason (a new time zone, a room type without rooms), which still needs setup's calendar step.
@@ -184,6 +185,22 @@ export async function refreshPmsOperatingCalendarRooms(
     if (!saved.ok) return Object.freeze({ outcome: "failed", step: "save", error: saved.error });
     calendarRevision = saved.response.configuration.calendarRevision;
     savedCalendar = true;
+  } else {
+    // A calendar saved in setup whose nights were never prepared: only while every night still
+    // fits its room type's rooms.
+    for (const binding of configuration.sourceInputs.roomBindings) {
+      if (
+        await nightsHoldMoreThan(
+          ports.pool,
+          propertyId,
+          binding.roomTypeId,
+          binding.physicalCapacityCount,
+          year.from,
+        )
+      ) {
+        return Object.freeze({ outcome: "not_room_change", reason: "room_capacity_protected" });
+      }
+    }
   }
 
   const horizon = {
@@ -227,9 +244,9 @@ export type PmsOperatingCalendarRoomRefreshCandidate = Readonly<{
 
 /**
  * Live hotels whose calendar is behind their rooms: an active room type with rooms that the
- * latest calendar doesn't list or lists with an older room count, or a listed room type that is
- * gone. A calendar saved in setup whose nights were never prepared is not picked: applying it is
- * the owner's call (a room change still prepares it). Each comes with the last person who saved
+ * latest calendar doesn't list or lists with an older room count, a listed room type that is
+ * gone, or a calendar saved in setup whose nights were never prepared. Each
+ * comes with the last person who saved
  * its calendar and may still manage it, who the hourly repair runs as (never anyone else, as for
  * VAY-2350's background page refresh). Left out, so they don't come back every hour: hotels the
  * repair can't fix (a room type without rooms, a new time zone, an ended calendar) and hotels
@@ -284,7 +301,8 @@ export async function findPmsOperatingCalendarRoomRefreshCandidates(
            )
        )
        AND (
-         EXISTS (
+         coverage.calendar_revision < latest.calendar_revision
+         OR EXISTS (
            SELECT 1 FROM pms.room_types room
            LEFT JOIN pms.operating_calendar_room_bindings binding
              ON binding.property_id = room.property_id AND binding.room_type_id = room.id
