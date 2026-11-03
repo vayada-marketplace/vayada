@@ -10,7 +10,8 @@ import { useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
-import { useAddons, useHotel, useSlug } from "@/contexts/HotelContext";
+import { useAddons, useAgencyPage, useHotel, useSlug } from "@/contexts/HotelContext";
+import AgencyOverview from "@/components/agency/AgencyOverview";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
 import { trackEvent } from "@/services/api/tracking";
 import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
@@ -988,9 +989,11 @@ function HomePageContent() {
 }
 
 export default function HomePage() {
+  // VAY-2459: an agency's address shows its stays.
+  const { agency } = useAgencyPage();
   return (
     <Suspense fallback={<div className="min-h-screen bg-white" />}>
-      <HomePageContent />
+      {agency ? <AgencyOverview agency={agency} /> : <HomePageContent />}
     </Suspense>
   );
 }

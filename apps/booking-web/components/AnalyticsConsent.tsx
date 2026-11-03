@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useAgencyPage, useHotel, useSlug } from "@/contexts/HotelContext";
 import {
   analyticsChoice,
   clearAnalyticsSession,
@@ -16,6 +16,7 @@ const PRIVACY_NOTICE_URL = "https://vayada.com/privacy#booking-guests";
 export default function AnalyticsConsent() {
   const { slug } = useSlug();
   const { hotel } = useHotel();
+  const { agency } = useAgencyPage();
   const t = useTranslations("analyticsConsent");
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState<boolean | null>(null);
@@ -63,7 +64,8 @@ export default function AnalyticsConsent() {
       document.removeEventListener("keydown", escape);
     };
   }, [open]);
-  if (!slug || !open) return null;
+  // VAY-2459: an agency's overview records no analytics, so it asks nothing.
+  if (!slug || !open || agency) return null;
   const save = (enabled: boolean) => {
     const saved = saveAnalyticsChoice(slug, enabled);
     setError(!saved);

@@ -10,8 +10,11 @@ const hotel = {
   headerSettings: { showCurrencySelector: true },
 };
 const get = vi.fn();
+// A hotel's page, or an agency's (VAY-2459, no hotel).
+const source: { hotel: typeof hotel | null; agency: unknown } = { hotel, agency: null };
 vi.mock("@/contexts/HotelContext", () => ({
-  useHotel: () => ({ hotel }),
+  useHotel: () => ({ hotel: source.hotel }),
+  useAgencyPage: () => ({ agency: source.agency }),
   useSlug: () => ({ slug: "currency-test" }),
 }));
 vi.mock("@/services/api/client", () => ({
@@ -34,6 +37,8 @@ async function renderCurrency(stored: string | null = null) {
 }
 
 afterEach(() => {
+  source.hotel = hotel;
+  source.agency = null;
   hotel.displayCurrencies = ["EUR", "USD", "JPY"];
   hotel.displayDefaultCurrency = null;
   hotel.headerSettings.showCurrencySelector = true;
@@ -132,5 +137,43 @@ it("keeps the hotel currency while the guest display currency has no rate (VAY-2
   const { currency, unmount } = await renderCurrency();
   expect(currency().selectedCurrency).toBe("EUR");
   expect(currency().approximate(610.25, "EUR")).toBeNull();
+  unmount();
+});
+
+it("converts on an agency page with its design stay's rates and guest currency (VAY-2459)", async () => {
+  source.hotel = null;
+  source.agency = {
+    header: { currency: true },
+    design: {
+      slug: "escape-villa",
+      currency: "EUR",
+      displayCurrencies: ["EUR", "USD"],
+      displayDefaultCurrency: "USD",
+    },
+  };
+  get.mockResolvedValue(rates);
+  const { currency, unmount } = await renderCurrency();
+  expect(get).toHaveBeenCalledWith("/api/booking-web/hotels/escape-villa/exchange-rates");
+  expect(currency().availableCurrencies).toEqual(["EUR", "USD"]);
+  expect(currency().selectedCurrency).toBe("USD");
+  expect(currency().approximate(100, "EUR")).toBe("≈ US$110");
+  unmount();
+});
+
+it("shows an agency page in its own currency while its switch is off (VAY-2459)", async () => {
+  source.hotel = null;
+  source.agency = {
+    header: { currency: false },
+    design: {
+      slug: "escape-villa",
+      currency: "EUR",
+      displayCurrencies: ["EUR", "USD"],
+      displayDefaultCurrency: "USD",
+    },
+  };
+  const { currency, unmount } = await renderCurrency();
+  expect(get).not.toHaveBeenCalled();
+  expect(currency().selectedCurrency).toBe("EUR");
+  expect(currency().approximate(100, "EUR")).toBeNull();
   unmount();
 });

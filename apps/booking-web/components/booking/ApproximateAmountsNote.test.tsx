@@ -17,6 +17,7 @@ const hotel = {
 const get = vi.fn();
 vi.mock("@/contexts/HotelContext", () => ({
   useHotel: () => ({ hotel }),
+  useAgencyPage: () => ({ agency: null }),
   useSlug: () => ({ slug: "note-test" }),
 }));
 vi.mock("@/services/api/client", () => ({

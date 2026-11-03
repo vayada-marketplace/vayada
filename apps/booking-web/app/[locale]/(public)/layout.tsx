@@ -13,6 +13,10 @@ import {
   resolveHotelUrlPolicy,
   type PublicHotelMetadata,
 } from "@/lib/server/publicHotelMetadata";
+import {
+  buildPublicAgencyMetadata,
+  fetchPublicAgencyPage,
+} from "@/lib/server/publicAgencyMetadata";
 
 // VAY-394/VAY-663/VAY-832: public hotel SEO metadata belongs only on
 // public listing routes. Checkout routes inherit the minimal root metadata
@@ -30,7 +34,18 @@ export async function generateMetadata({
   if (!slug) return fallbackHotelMetadata;
 
   const hotel = await fetchPublicHotel(slug, locale);
-  if (!hotel) return fallbackHotelMetadata;
+  if (!hotel) {
+    // VAY-2459: an agency's address: its page title and description.
+    const agency = await fetchPublicAgencyPage(slug);
+    return agency
+      ? buildPublicAgencyMetadata({
+          agency,
+          hostname,
+          protocol: requestProtocol(headersList),
+          locale,
+        })
+      : fallbackHotelMetadata;
+  }
   const policy = resolveHotelUrlPolicy(hostname, requestProtocol(headersList), locale, hotel, slug);
   return buildPublicHotelMetadata({ hotel, policy });
 }

@@ -9,12 +9,14 @@ import {
   useCallback,
   ReactNode,
 } from "react";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useAgencyPage, useHotel, useSlug } from "@/contexts/HotelContext";
 import { bookingWebPublic } from "@/services/api/client";
 
 export type RateAttribution = { label: string; url: string };
 
 interface CurrencyContextValue {
+  /** The currency `rates` start from: the hotel's (an agency's: its design stay's). */
+  baseCurrency: string;
   selectedCurrency: string;
   setSelectedCurrency: (currency: string) => void;
   /** The hotel currency plus each display currency that has a rate. */
@@ -30,6 +32,7 @@ interface CurrencyContextValue {
 }
 
 const CurrencyContext = createContext<CurrencyContextValue>({
+  baseCurrency: "EUR",
   selectedCurrency: "EUR",
   setSelectedCurrency: () => {},
   availableCurrencies: ["EUR"],
@@ -49,11 +52,18 @@ function getStorageKey(slug: string) {
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const { hotel } = useHotel();
+  const { agency } = useAgencyPage();
   const { slug } = useSlug();
-  const baseCurrency = hotel?.currency || "EUR";
+  // VAY-2459: an agency page converts as its design stay's page does, with that stay's rates.
+  const design = hotel ? null : agency?.design;
+  const ratesSlug = design ? (design.slug ?? "") : slug;
+  const baseCurrency = hotel?.currency || design?.currency || "EUR";
   // With the selector switched off in Design Studio, guests only ever see the hotel currency.
-  const displayKey =
-    hotel?.headerSettings?.showCurrencySelector === false
+  const displayKey = design
+    ? agency?.header.currency
+      ? design.displayCurrencies.join(",")
+      : ""
+    : hotel?.headerSettings?.showCurrencySelector === false
       ? ""
       : (hotel?.displayCurrencies ?? []).join(",");
 
@@ -65,18 +75,19 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   const [attribution, setAttribution] = useState<RateAttribution | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const displayDefault = hotel ? hotel.displayDefaultCurrency : design?.displayDefaultCurrency;
   useEffect(() => {
-    if (!hotel || !slug) return;
+    if (!(hotel || design) || !slug) return;
     const stored = localStorage.getItem(getStorageKey(slug));
     // VAY-2390: without a saved choice, guests start in the hotel's guest display currency.
-    setChosenCurrency(stored || hotel.displayDefaultCurrency || hotel.currency);
-  }, [hotel, slug]);
+    setChosenCurrency(stored || displayDefault || baseCurrency);
+  }, [hotel, design, slug, displayDefault, baseCurrency]);
 
   // Rates only for this hotel's display currencies; a hotel with one currency asks for none.
   useEffect(() => {
     setRates({});
     setAttribution(null);
-    if (!slug || !displayKey.split(",").some((code) => code && code !== baseCurrency)) {
+    if (!ratesSlug || !displayKey.split(",").some((code) => code && code !== baseCurrency)) {
       setLoading(false);
       return;
     }
@@ -84,7 +95,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     bookingWebPublic
       .get<{ base: string; rates: Record<string, unknown>; attribution?: RateAttribution }>(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/exchange-rates`,
+        `/api/booking-web/hotels/${encodeURIComponent(ratesSlug)}/exchange-rates`,
       )
       .then((data) => {
         if (cancelled || data.base !== baseCurrency) return;
@@ -105,7 +116,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [slug, baseCurrency, displayKey]);
+  }, [ratesSlug, baseCurrency, displayKey]);
 
   const availableCurrencies = useMemo(
     () =>
@@ -187,6 +198,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   return (
     <CurrencyContext.Provider
       value={{
+        baseCurrency,
         selectedCurrency,
         setSelectedCurrency,
         availableCurrencies,
