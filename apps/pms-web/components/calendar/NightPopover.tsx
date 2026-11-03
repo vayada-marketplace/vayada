@@ -40,7 +40,8 @@ export default function NightPopover({
   startDate: string;
   /** The check-out day, after the last night. */
   endDate: string;
-  anchor: PopoverAnchor;
+  /** None opens a bottom sheet (the phone calendar). */
+  anchor?: PopoverAnchor;
   /** The published prices' currency; null while there are none. */
   currency: string | null;
   /** The prices could not be read (not "none published yet"). */
@@ -231,7 +232,7 @@ export default function NightPopover({
                 })}
               </p>
             )}
-            <p className="text-gray-500">{t("calendar.popover.dragHint")}</p>
+            {anchor && <p className="text-gray-500">{t("calendar.popover.dragHint")}</p>}
           </div>
         )}
       </div>

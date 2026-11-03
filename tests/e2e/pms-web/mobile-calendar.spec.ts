@@ -254,8 +254,10 @@ test.describe("mobile PMS calendar", () => {
     await expect(page.getByRole("heading", { name: "August", exact: true })).toBeVisible();
     await expect(page.getByText("Loading bookings and blocks...")).toBeHidden();
 
+    // The booking's sheet (VAY-2470) opens the reservation window with Change room.
     await page.locator('[data-day="2026-08-15"]').click();
     await page.getByRole("button", { name: /Timo Schreyer/ }).click();
+    await page.getByRole("button", { name: "Change room" }).click();
     const sheet = openSheet(page);
     await expect(sheet.getByText("C01D5073548DEA79A67855EF0453F")).toBeVisible();
     await expect(sheet.getByText("Confirmed", { exact: true })).toBeInViewport({ ratio: 1 });
