@@ -13,7 +13,9 @@ import { watchPageHealth } from "../support/pageHealth";
 // agency's header, the hotel page's search card, and a card per stay for the search.
 
 // No hotel has the agency's address: the page asks for one first, then for the agency page.
-const expectedMissingUrls = [/\/api\/booking-web\/hotels\/the-travel-ubud(\/checkout-config)?$/];
+const expectedMissingUrls = [
+  /\/api\/booking-web\/hotels\/the-travel-ubud(\/checkout-config)?(\?.*)?$/,
+];
 const { checkIn, checkOut } = searchDates();
 const search = `?checkIn=${checkIn}&checkOut=${checkOut}&adults=2&children=0`;
 
