@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration, pricingOfferOnBookingPage } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { localToday } from "@/lib/guests/guestDisplay";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import { samePricingValue, type createReplacementPricingClient, type PricingGuestDisplay, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
@@ -35,7 +36,7 @@ import { MoreOptions } from "./MoreOptions";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
 import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, money, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
-import { lowestNightMinor, nightsWithoutPrice } from "./priceCalendarModel";
+import { guestsFromMinor, nightsWithoutPrice } from "./priceCalendarModel";
 import { setOfferSale, simpleRoom } from "./simplePricing";
 import { StepRates } from "./StepRates";
 import { StepExtras } from "./StepExtras";
@@ -48,7 +49,6 @@ import { paymentSettingsDefaults, type PaymentSettingsDefaults } from "./pricing
 import { carriesEveryRoom, roomsInPricingCurrency } from "./pricingCurrencyCarry";
 import { bookingsService } from "@/services/bookings";
 import type { PaymentMethod } from "./AcceptedPaymentMethods";
-import { GuestPreview } from "./GuestPreview";
 import { ArrowPathIcon, CalendarDaysIcon, CheckIcon } from "@heroicons/react/24/outline";
 import { PriceCalendar } from "./PriceCalendar";
 import { NightPanel } from "./NightPanel";
@@ -69,7 +69,7 @@ type NewRoom = { take: MutableRefObject<(() => NewRoomPrices | null) | null>; ac
  * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
  * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work; `staleShown`: the
  * page already warns that the prices need saving again, so the editor does not repeat it. */
-export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, date, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover, staleShown = false }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; date?: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void; staleShown?: boolean }) {
+export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus, date, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover, staleShown = false }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; date?: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void; staleShown?: boolean }) {
   const manualMethods = useLoadedPricingManualMethods(client);
   const cardReadiness = useLoadedPricingCardReadiness(client);
   const onPrices = newRoom?.onPrices;
@@ -81,9 +81,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [independentOffer, setIndependentOffer] = useState<boolean | null>(null);
   const [optionOpen, setOptionOpen] = useState<string | null>(null), [childrenOpen, setChildrenOpen] = useState(false);
   const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null), [deleteError, setDeleteError] = useState<unknown>(null);
-  // The guest preview's sample stay (a picked calendar night, or the next weekend), the calendar's month and option.
+  // The price calendar's sample stay (a picked night, or the next weekend), its month and its option.
   // `date` (from the calendar, VAY-2411) opens the price calendar on that night, picked as onPick picks it.
-  const [stayStart, setStayStart] = useState<string | null>(date ?? null), [shownMonth, setShownMonth] = useState<string | null>(date?.slice(0, 7) ?? null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
+  const [stayStart, setStayStart] = useState<string | null>(date ?? null), [shownMonth, setShownMonth] = useState<string | null>(date?.slice(0, 7) ?? null), [calendarOffer, setCalendarOffer] = useState<string | null>(null);
   const [calendarAdults, setCalendarAdults] = useState<number | null>(null), [selection, setSelection] = useState<NightSelection | null>(date ? { from: date, to: date } : null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   // A first price's ways to pay and currency from Payment settings (undefined: loading; methods null: unknown), and a
@@ -375,23 +375,22 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const firstCurrency = display ? (holdFirst ? undefined : relabeled?.snapshot.currency ?? display.currency) : paymentDefaults?.currency ?? undefined;
   const firstMethods = holdFirst ? undefined : defaultMethods;
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
-  // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
-  // rates guests can book (VAY-2285).
+  // The Save bar's "Guests from" (VAY-2280): the focused room's lowest night guests can book, as the Rooms list's "from"
+  // (VAY-2466: `guestsFromMinor`).
   // The CEO's bar (VAY-2305) also counts the open nights no price covers, as "Pricing setup" does.
   // VAY-2390: guests start in Localization's display currency when it isn't the prices' own, so the bar also says what
   // they see first, in whole units as the booking page shows it ("≈ US$73"). Desktop only, as the board.
+  // This room's published rates guests can't book now (VAY-2304); their cards say why, and the bar leaves them out.
+  const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
   let guestsFrom = "", seeFirst = "", barGaps = 0;
   if (display && editing) try {
-    const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, rate = simpleRoom(shown, optionTerms)?.nonRefundable;
-    const booked = [mainOffer(shown), ...(rate ? [rate] : [])].filter(pricingOfferOnBookingPage).map((offer) => offer.id);
-    const minor = lowestNightMinor(shown, booked, sampleAdults(shown), String(new Date().getFullYear()));
+    const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, today = localToday();
+    const minor = guestsFromMinor(shown, today, stopped.map((rate) => rate.offerId));
     if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
     if (minor && guestDisplay?.base === shown.currency) seeFirst = t("pricing.bar.seeFirst", { amount: new Intl.NumberFormat("en-GB", { style: "currency", currency: guestDisplay.currency, minimumFractionDigits: 0, maximumFractionDigits: 0 })
       .format(Number(minor) / 10 ** (pricingCurrencyScale(shown.currency) ?? 2) * guestDisplay.rate) });
-    barGaps = nightsWithoutPrice(shown, mainOffer(shown).id, sampleAdults(shown), localToday());
+    barGaps = nightsWithoutPrice(shown, mainOffer(shown).id, sampleAdults(shown), today);
   } catch { guestsFrom = ""; seeFirst = ""; }
-  // This room's published rates guests can't book now (VAY-2304); their cards say why.
-  const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
   const status = firstForm ? { key: "pricing.bar.noPrice", tone: "text-amber-700", icon: <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> }
     : busy ? { key: "pricing.editor.saving", tone: "text-primary-700", icon: <ArrowPathIcon aria-hidden="true" className="h-4 w-4 animate-spin" /> }
     : done || (!dirty && !stale) ? { key: done ? "pricing.editor.statusSaved" : "pricing.editor.statusCurrent", tone: "text-green-700", icon: <CheckIcon aria-hidden="true" className="h-4 w-4" /> }
@@ -456,23 +455,21 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       const sample = sampleStay(edited ?? room, today), stayNights = Math.round((Date.parse(sample.checkOut) - Date.parse(sample.checkIn)) / 86400000);
       const stay = stayStart ? { checkIn: stayStart, checkOut: addDays(stayStart, stayNights) } : sample;
-      // Options off the booking page (VAY-2285) aren't in the guest card or the calendar's rates.
+      // Options off the booking page (VAY-2285) aren't in the calendar's rates.
       const firstShown = room.offers.find(pricingOfferOnBookingPage) ?? main;
-      const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer && pricingOfferOnBookingPage(offer)) ? previewOffer : firstShown.id;
+      const shownId = calendarOffer && room.offers.some((offer) => offer.id === calendarOffer && pricingOfferOnBookingPage(offer)) ? calendarOffer : firstShown.id;
       const termsFailed = room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null);
       const simple = simpleRoom(room, optionTerms), kept = keptSettings(room, simple);
       // VAY-2284: the calendar shows what guests pay for the rates, Flexible and Non-refundable; other options build on them.
       const rates = [{ offer: main, name: t("pricing.calendar.flexible") }, ...(simple?.nonRefundable ? [{ offer: simple.nonRefundable, name: t("pricing.calendar.nonRefundable") }] : [])]
         .filter(({ offer }) => pricingOfferOnBookingPage(offer)).map(({ offer, name }) => ({ id: offer.id, name }));
-      const calendarId = rates.some((rate) => rate.id === previewId) ? previewId : rates[0]?.id ?? main.id;
+      const calendarId = rates.some((rate) => rate.id === shownId) ? shownId : rates[0]?.id ?? main.id;
       const others = simple ? simple.others : room.offers.filter((offer) => offer.id !== main.id);
       const gaps = edited ? nightsWithoutPrice(edited, main.id, sampleAdults(edited), today) : 0;
-      const preview = <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
-        stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />;
-      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup", whose step "Meal plans" holds "On your booking page".
+      // The CEO's layout (VAY-2305): "Prices by date" first, then "Pricing setup"; step "Meal plans" spans the column (VAY-2468).
       return <div key={room.roomTypeId} className="space-y-6">
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setPreviewOffer}
+          <PriceCalendar room={edited} options={rates} offerId={calendarId} onOffer={setCalendarOffer}
             adults={calendarAdults} onAdults={setCalendarAdults} month={shownMonth ?? stay.checkIn.slice(0, 7)} today={today} stay={stay} selection={selection}
             onMonth={setShownMonth} onPick={(date) => { const next = pickNight(selection, date); setSelection(next); setStayStart(next.from); setShownMonth(date.slice(0, 7)); }} />
           <NightPanel room={room} shown={edited} selection={selection} adults={calendarAdults ?? sampleAdults(room)} names={names} disabled={disabled || exclusiveEditPending}
@@ -521,10 +518,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
               <p className={ui.stepHint}>{t("pricing.paymentMethods.hint")}</p>
             </div>
           </StepRates>
-          {/* Step "Meal plans": breakfast, beside "On your booking page"; while the options' terms load, the preview alone. */}
-          {simple ? <StepExtras room={room} simple={simple} prices={prices} only="breakfast" disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
-            onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} preview={preview} />
-            : <div className="border-t border-gray-200 py-7">{preview}</div>}
+          {/* Step "Meal plans": breakfast, once the options' terms have loaded. */}
+          {simple && <StepExtras room={room} simple={simple} prices={prices} only="breakfast" disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
+            onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} />}
         </div>
         <OptionWindow open={childrenOpen} title={t("pricing.steps.rules.childrenTitle")} closable={!pendingEntries[`children:${ri}`]} onClose={() => setChildrenOpen(false)}>
           <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
@@ -638,8 +634,6 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
   </section></PricingNotSellingProvider></PricingCardReadinessProvider></PricingManualMethodsProvider>;
 }
-/** Today's date on this device (YYYY-MM-DD), as the calendar counts nights. */
-const localToday = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 /** A room's prices without what a save assigns (its revision and its options' terms revisions). */
 const savedPrices = (room: Room) => ({ ...room, revision: 0, offers: room.offers.map((offer) => ({ ...offer, termsRevision: "" })) });
 /** The New room page's kept prices as edits kept over a reload: a new room has no saved prices to compare with. */

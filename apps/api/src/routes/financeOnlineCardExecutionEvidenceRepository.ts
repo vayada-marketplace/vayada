@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import type { QueryResult, QueryResultRow } from "pg";
 
 import { PROJECT_PUBLIC_BOOKABILITY_PROFILE } from "../platform/publicBookabilityPublication.js";
-import { recordBankTransferAudit } from "../domains/financeBankTransferRepository.js";
+import { onlineCardReadySql } from "../domains/financeOnlineCardReadySql.js";
 
 type Client = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -176,7 +176,6 @@ async function accept(
       "Current execution evidence already exists for this Stripe account.",
     );
   }
-  if (provider.provider === "vayada") await approveFirstPayoutAccount(client, command);
   const cardReady = await currentCardReady(client, command.propertyId);
   const response = responseFor(command, evidence, "accepted", null, cardReady, cardReady, keyHash);
   if (cardReady) await emitReadinessChange(client, command, evidence, "readiness_gained");
@@ -342,31 +341,6 @@ async function readState(
   };
 }
 
-/** VAY-2442 P7: a hotel's first card approval for vayada Payment also approves its payout account,
- * but only the hotel's very first one (revision 1, never replaced or removed): the card approval
- * screen doesn't show the account, so a replacement saved before it (perhaps by a stolen owner
- * login) must wait for staff's "Approve bank account" on the Payouts page like any later one.
- * Runs under the hotel row lock that saving a payout account takes too. */
-async function approveFirstPayoutAccount(client: Client, command: UserAcceptCommand) {
-  const approved = await client.query<{ id: string }>(
-    `UPDATE finance.payout_destinations d
-     SET approved_at = now(), approved_by_user_id = $2::uuid, approved_via = 'card_approval'
-     WHERE d.property_id = $1::uuid AND d.revision = 1 AND d.enabled AND d.deleted_at IS NULL
-       AND d.approved_at IS NULL
-     RETURNING d.id::text`,
-    [command.propertyId, command.audit.actor.userId],
-  );
-  for (const row of approved.rows)
-    await recordBankTransferAudit(client, {
-      propertyId: command.propertyId,
-      id: row.id,
-      action: "approved_with_card_approval",
-      actorId: command.audit.actor.userId,
-      auditKey: `approved:${row.id}`,
-      kind: "payout_destination",
-    });
-}
-
 async function lockPropertySettings(client: Client, propertyId: string): Promise<void> {
   await client.query(`SELECT id FROM hotel_catalog.properties WHERE id = $1::uuid FOR UPDATE`, [
     propertyId,
@@ -427,8 +401,10 @@ function providerReady(row: ProviderRow): boolean {
 
 async function currentCardReady(client: Client, propertyId: string): Promise<boolean> {
   const result = await client.query<{ ready: boolean }>(
-    `SELECT online_card_ready AS ready
-     FROM finance.online_card_readiness_by_provider WHERE property_id = $1::uuid`,
+    `SELECT ${onlineCardReadySql("readiness", "settings")} AS ready
+     FROM finance.online_card_readiness_by_provider readiness
+     JOIN finance.payment_settings settings ON settings.property_id = readiness.property_id
+     WHERE readiness.property_id = $1::uuid`,
     [propertyId],
   );
   return result.rows[0]?.ready === true;

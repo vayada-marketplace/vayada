@@ -1,5 +1,15 @@
-import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import { mainOffer, money, monthNights, restrictionOwner } from "./stepPricing";
+import {
+  pricingOfferOnBookingPage,
+  type PricingConfiguration,
+} from "@vayada/domain-pms/replacement-pricing";
+import {
+  datesNights,
+  mainOffer,
+  money,
+  monthNights,
+  restrictionOwner,
+  sampleAdults,
+} from "./stepPricing";
 
 type Room = PricingConfiguration;
 type Offer = Room["offers"][number];
@@ -195,7 +205,7 @@ export function nightLabel(
 export type PriceRange = { lowMinor: string; highMinor: string };
 type LegendRanges = { standard: PriceRange | null; seasons: Record<string, PriceRange> };
 // The editor rebuilds the room on every render; a year's nights are worked out again only when it changes. A few
-// recent answers are kept (the legend's, and the Save bar's for each rate).
+// recent answers are kept (the legend's, and the Save bar's).
 const cache = new Map<string, unknown>();
 function cached<T>(key: string, work: () => T): T {
   if (cache.has(key)) return cache.get(key) as T;
@@ -253,51 +263,71 @@ export function calendarAdults(room: Room): number[] {
   return varies ? Array.from({ length: room.capacity.adults }, (_, index) => index + 1) : [];
 }
 
-const monthAfter = (month: string, delta: number) =>
-  new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + delta, 1))
-    .toISOString()
-    .slice(0, 7);
-/** Nights from `today` (YYYY-MM-DD) through the same date 12 months on that no price covers, so guests can't book them
- * ("Price rules", VAY-2280). Past nights don't count. */
+/** One option's nights from `today` (YYYY-MM-DD) through the same date 12 months on, in one engine call: past nights
+ * don't count, and rooms are open for sale that far ahead. */
+function nightsAhead(room: Room, offerId: string, adults: number, today: string) {
+  const [year, month, day] = today.split("-").map(Number) as [number, number, number];
+  const dates: string[] = [];
+  for (
+    let time = Date.UTC(year, month - 1, day), end = Date.UTC(year + 1, month - 1, day);
+    time <= end;
+    time += 86_400_000
+  )
+    dates.push(new Date(time).toISOString().slice(0, 10));
+  return datesNights(room, offerId, dates, adults);
+}
+/** Nights ahead (`nightsAhead`) that no price covers, so guests can't book them ("Price rules", VAY-2280). */
 export function nightsWithoutPrice(
   room: Room,
   offerId: string,
   adults: number,
   today: string,
 ): number {
-  const end = new Date(
-    Date.UTC(
-      Number(today.slice(0, 4)) + 1,
-      Number(today.slice(5, 7)) - 1,
-      Number(today.slice(8, 10)),
-    ),
-  )
-    .toISOString()
-    .slice(0, 10);
   return cached(
     JSON.stringify(["gaps", room, offerId, adults, today]),
     () =>
-      Array.from({ length: 13 }, (_, index) =>
-        projectNights(room, offerId, monthAfter(today.slice(0, 7), index), adults),
-      )
-        .flat()
-        .filter((night) => night.kind === "none" && night.date >= today && night.date <= end)
-        .length,
+      nightsAhead(room, offerId, adults, today).filter(
+        (night) => night.kind === "unavailable" && night.reason === "missing_price",
+      ).length,
   );
 }
-/** The lowest nightly price guests pay in `year` at the standard or a season price, for these rates and adults (the
- * Save bar's "Guests pay from", VAY-2280); null without any. */
-export function lowestNightMinor(
+/** Whether any of the room's prices depends on the number of adults ("Price depends on number of guests"). */
+function pricedPerGuest(room: Room): boolean {
+  return room.offers.some(({ price }) =>
+    (price.kind === "independent"
+      ? [
+          price.calendar.base,
+          ...[...price.calendar.months, ...price.calendar.seasons, ...price.calendar.dates].map(
+            (value) => value.price,
+          ),
+        ]
+      : price.dateOverrides.map((value) => value.price)
+    ).some((value) => !!value && value.mode !== "flat"),
+  );
+}
+/** The lowest price a guest can book for a night (VAY-2466): the Rooms list's "from" and the Prices tab's "Guests from"
+ * bar, so both say the same. Any open night ahead (`nightsAhead`) at the standard, a season or a single date's own
+ * price, over the rates the booking page sells (not `notSelling`, VAY-2304), and for every number of adults when a
+ * price depends on it (else the sample guests). Null without any. */
+export function guestsFromMinor(
   room: Room,
-  offerIds: readonly string[],
-  adults: number,
-  year: string,
+  today: string,
+  notSelling: readonly string[] = [],
 ): string | null {
-  const lows = offerIds.flatMap((offerId) => {
-    const { standard, seasons } = legendRanges(room, offerId, adults, year);
-    return [standard, ...Object.values(seasons)].flatMap((range) =>
-      range ? [BigInt(range.lowMinor)] : [],
-    );
+  return cached(JSON.stringify(["from", room, today, notSelling]), () => {
+    const adults = pricedPerGuest(room)
+      ? Array.from({ length: room.capacity.adults }, (_, index) => index + 1)
+      : [sampleAdults(room)];
+    let low: bigint | null = null;
+    for (const offer of room.offers)
+      if (pricingOfferOnBookingPage(offer) && !notSelling.includes(offer.id))
+        for (const count of adults)
+          for (const night of nightsAhead(room, offer.id, count, today))
+            // Priced and open, as the calendar's priced nights (`projectNights`).
+            if (night.kind === "projected" && !night.night.restrictions.stopSell) {
+              const amount = BigInt(night.night.totalMinor);
+              if (low === null || amount < low) low = amount;
+            }
+    return low === null ? null : low.toString();
   });
-  return lows.length ? lows.reduce((low, value) => (value < low ? value : low)).toString() : null;
 }

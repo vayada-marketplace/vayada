@@ -16,9 +16,12 @@ vi.mock("next/link", () => ({ default: "a" }));
 vi.mock("@/services/api/pmsPropertyClient", () => ({
   resolveSelectedPmsPropertyId: async () => "test-property",
 }));
-const { pricingRead } = vi.hoisted(() => ({ pricingRead: vi.fn() }));
+const { pricingRead, notSellingRates } = vi.hoisted(() => ({
+  pricingRead: vi.fn(),
+  notSellingRates: vi.fn(),
+}));
 vi.mock("@/services/api/replacementPricingClient", () => ({
-  createReplacementPricingClient: () => ({ read: pricingRead }),
+  createReplacementPricingClient: () => ({ read: pricingRead, notSellingRates }),
 }));
 vi.mock("@vayada/product-onboarding/PreparedHotelImportPanel", () => ({
   PreparedHotelImportPanel: () => null,
@@ -31,6 +34,7 @@ let view: ReactTestRenderer;
 const room = { id: "room-1", name: "Existing suite" } as RoomType;
 beforeEach(() => {
   pricingRead.mockReset().mockResolvedValue(null);
+  notSellingRates.mockReset().mockResolvedValue([]);
   vi.spyOn(individualRoomsService, "list").mockResolvedValue([]);
   vi.spyOn(linkedInventoryGroupsService, "list").mockResolvedValue([]);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -99,6 +103,8 @@ it("ignores a late failed read after a newer import refresh succeeds", async () 
 });
 
 it("shows each room's published prices with a link to its Prices tab (VAY-2093)", async () => {
+  // An unreadable list of rates that aren't selling leaves them all counted, as on the Prices tab (VAY-2466).
+  notSellingRates.mockRejectedValue(new Error("offline"));
   pricingRead.mockResolvedValue({
     currency: "EUR",
     revision: 2,
@@ -106,13 +112,42 @@ it("shows each room's published prices with a link to its Prices tab (VAY-2093)"
     ownerReferences: { finance: "finance" },
     rooms: [
       {
+        version: "pricing.v2",
+        propertyId: "test-property",
         roomTypeId: "ROOM-1",
+        revision: 2,
+        currency: "EUR",
+        capacity: { total: 2, adults: 2, children: 0 },
+        children: {
+          adultFromAge: 12,
+          bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],
+        },
         offers: [
           {
             id: "flex",
+            termsRevision: "terms",
+            meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
             price: {
               kind: "independent",
-              calendar: { base: { mode: "flat", amountMinor: "12000" } },
+              calendar: {
+                base: { mode: "flat", amountMinor: "12000" },
+                months: [],
+                seasons: [],
+                weekdays: [],
+                dates: [],
+              },
+            },
+            restrictions: {
+              kind: "own",
+              rules: {
+                minArrivalNights: 1,
+                maxStayNights: null,
+                closedToArrival: false,
+                closedToDeparture: false,
+                stopSell: false,
+              },
+              seasons: [],
+              dates: [],
             },
           },
         ],
@@ -124,6 +159,7 @@ it("shows each room's published prices with a link to its Prices tab (VAY-2093)"
   // The subtitle carries the currency; each row shows "from …" over its rates (VAY-2338).
   expect(text()).toContain("rooms.roomTypeCount.other · rooms.roomCount.other · rooms.pricesIn");
   expect(text()).toContain("pricing.list.from");
+  expect(text()).not.toContain("pricing.list.loadFailed");
   expect(text()).toContain("pricing.list.rates.one · pricing.list.perNight");
   const links = view.root
     .findAllByType("a")

@@ -24,6 +24,7 @@ import {
 } from "../domains/agencyStayPrices.js";
 import {
   readLiveAccountBookingPageStays,
+  readPublicAccountBookingPage,
   readStaysWithPromoCode,
 } from "../domains/accountBookingPages.js";
 import { readFreeWindows } from "../domains/agencyNextFreeDates.js";
@@ -84,6 +85,7 @@ import {
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { isVayadaPaymentAccountRef, stripeCallAccountRef } from "../domains/vayadaPaymentStripe.js";
+import { onlineCardReadySql } from "../domains/financeOnlineCardReadySql.js";
 import { createHash, randomBytes } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
@@ -268,6 +270,8 @@ export type BookingWebCheckoutCommandContext = {
 export type BookingWebCheckoutAdapter = {
   getPricingOffers?(slug: string): Promise<unknown>;
   getPricingStayPrices?(slug: string, query: unknown): Promise<unknown>;
+  /** VAY-2459: a live agency page with its stays' cards. */
+  getAgencyPage?(slug: string): Promise<unknown>;
   /** VAY-2458: every stay of a live agency page, for one search. */
   getAgencyStayPrices?(
     slug: string,
@@ -546,6 +550,14 @@ export async function registerBookingWebPublicRoutes(
       return checkoutAdapter.getPricingStayPrices(request.params.slug, request.query);
     },
   );
+
+  // VAY-2459: an agency page (one page for all stays of an account) and its stays' cards.
+  app.get<{ Params: BookingWebHotelParams }>("/agency-pages/:slug", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-agency-page-read");
+    if (!checkoutAdapter.getAgencyPage) throw createHttpError(404, "Agency page not found.");
+    return checkoutAdapter.getAgencyPage(request.params.slug);
+  });
 
   // VAY-2458: availability and prices of every stay on an agency page. Guests' browsers call it
   // directly, so the limit counts each guest (see BOOKING_LOOKUP_PATH).
@@ -1542,6 +1554,23 @@ export function createTargetBookingWebCheckoutAdapter(
     freeWindows: (slug, dates, slots, offered) =>
       readFreeWindows(displayPool, slug, dates, slots, offered, NEXT_FREE_TRIES),
   });
+  // VAY-2459: agency pages, kept 30 s each (an absent one too): every view of a page checks each
+  // stay's readiness.
+  const agencyPages = new Map<
+    string,
+    { at: number; value: Promise<Awaited<ReturnType<typeof readPublicAccountBookingPage>>> }
+  >();
+  const agencyPage = (slug: string) => {
+    const at = Date.now(),
+      hit = agencyPages.get(slug);
+    if (hit && at - hit.at < 30_000) return hit.value;
+    const value = readPublicAccountBookingPage(stayPricesPool, slug);
+    agencyPages.delete(slug);
+    agencyPages.set(slug, { at, value });
+    value.catch(() => agencyPages.get(slug)?.value === value && agencyPages.delete(slug));
+    while (agencyPages.size > 500) agencyPages.delete(agencyPages.keys().next().value!);
+    return value;
+  };
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
@@ -2052,6 +2081,18 @@ export function createTargetBookingWebCheckoutAdapter(
       }
       if (!prices) throw createHttpError(404, "Stay prices unavailable.");
       return prices;
+    },
+    async getAgencyPage(slug) {
+      let page;
+      try {
+        page = await agencyPage(slug);
+      } catch (error) {
+        throw Object.assign(new Error("Agency page temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (!page) throw createHttpError(404, "Agency page not found.");
+      return page;
     },
     async getAgencyStayPrices(slug, query, context) {
       const search = parseAgencyStayPricesQuery(query);
@@ -2987,11 +3028,11 @@ export async function loadTargetCheckoutConfig(
        account.id::text AS "providerAccountId",
        account.provider_account_id AS "providerAccountRef",
        COALESCE(
-         readiness.online_card_ready
+         ${onlineCardReadySql("readiness", "fs")}
          AND upper(trim(fs.default_currency)) = upper(trim(bs.default_currency)),
          FALSE
        ) AS "onlineCardReady",
-       COALESCE(readiness.online_card_ready, FALSE) AS "bookingPageCardReady"
+       ${onlineCardReadySql("readiness", "fs")} AS "bookingPageCardReady"
      FROM hotel_catalog.properties p
      LEFT JOIN booking.booking_settings bs ON bs.property_id = p.id
      LEFT JOIN hotel_catalog.property_policy_summaries policy ON policy.property_id = p.id

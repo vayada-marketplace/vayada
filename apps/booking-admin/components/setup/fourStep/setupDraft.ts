@@ -3,11 +3,21 @@ import type {
   PropertyProfileContact,
   PropertyProfilePatch,
 } from "@vayada/domain-hotels";
+import { LANGUAGE_OPTIONS } from "@vayada/locale-constants";
 import { isValidSharedAccountPhone } from "@vayada/product-onboarding";
 
 import { quickHotelCurrency } from "../quick/quickHotelCurrency";
 import { quickHotelErrors, type QuickHotelDraft } from "../quick/quickHotelDraft";
 import { quickHotelDraftFromProfile, quickHotelProfilePatch } from "../quick/quickHotelEdit";
+
+/** The new hotel's language: the browser's first one the booking page offers, else English. */
+export function setupLanguage(browser: readonly string[] | undefined): string {
+  for (const tag of browser ?? []) {
+    const code = tag.toLowerCase().split("-")[0];
+    if (code && LANGUAGE_OPTIONS.some((option) => option.code === code)) return code;
+  }
+  return "en";
+}
 
 /** VAY-2451 step 2's four social links, in the mockup's order. */
 export const SETUP_SOCIALS = [

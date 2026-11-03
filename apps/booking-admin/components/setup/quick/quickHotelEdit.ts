@@ -4,7 +4,7 @@ import type {
   PropertyProfilePatch,
 } from "@vayada/domain-hotels";
 
-import { quickHotelCurrency, type QuickHotelCurrency } from "./quickHotelCurrency";
+import { quickHotelCurrency } from "./quickHotelCurrency";
 import { EMPTY_QUICK_HOTEL_DRAFT, type QuickHotelDraft } from "./quickHotelDraft";
 
 /**
@@ -67,16 +67,4 @@ export function quickHotelProfilePatch(
     },
     contacts,
   };
-}
-
-/**
- * Whether the edit changes the hotel's pricing currency: before the first run saved one, only an own
- * choice is saved (as at creation; the first run takes the country's); after, any difference is.
- */
-export function quickHotelCurrencyToSave(
-  currency: QuickHotelCurrency,
-  savedCurrency: string | null,
-): string | null {
-  if (savedCurrency === null) return currency.fromCountry ? null : currency.code;
-  return savedCurrency === currency.code ? null : currency.code;
 }

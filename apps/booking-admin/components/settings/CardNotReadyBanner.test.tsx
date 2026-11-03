@@ -36,7 +36,6 @@ describe("Payments card banner (VAY-2424)", () => {
     for (const [reason, why] of [
       ["account_not_ready", "The connected account can't take card payments yet."],
       ["currency", "Card payments can't be taken in your hotel's current currency yet."],
-      ["not_approved", "Vayada still has to approve card payments for your hotel."],
       ["switch_off", "Vayada hasn't switched on card payments for guests yet."],
     ] as const) {
       const view = render(reason);

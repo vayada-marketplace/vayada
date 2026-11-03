@@ -1,16 +1,17 @@
 import { apiClient } from "./client";
 
-/** A hotel's card state for Vayada finance (VAY-2205): its Stripe account, Finance's readiness and
- * Vayada's approval (ONB-25A) in force. */
+/** A hotel's card state for Vayada finance (VAY-2205): its payment account and Finance's
+ * readiness. Since VAY-2442 (Flamur, 2026-11-03) card works as soon as the hotel's own settings
+ * are complete; Vayada no longer approves it, so this is read only. */
 export type HotelCardPaymentsState = {
   propertyId: string;
-  /** The hotel's Stripe account, when linked. `ready`: charges, payouts and card payments on. */
+  /** The hotel's payment account, when linked: its own Stripe account, or vayada Payment with its
+   * payout bank account saved. `ready`: it can take cards. */
   providerAccount: { ready: boolean; cardCapabilityRevision: number } | null;
   propertyReadinessRevision: number | null;
   /** What card also needs from the hotel's Payment settings. */
   paymentSettings: { paymentsOn: boolean; cardChosen: boolean; currencyEligible: boolean } | null;
-  /** Vayada's approval in force; turning card off withdraws it. `current`: given for today's
-   * Stripe account and Payment settings. */
+  /** A Vayada approval from before VAY-2442, kept as history. It no longer decides anything. */
   evidence: {
     evidenceId: string;
     acceptedAt: string;
@@ -23,36 +24,19 @@ export type HotelCardPaymentsState = {
   prices?: "current" | "save_needed" | "not_published";
 };
 
-/** What the Payments tab shows (VAY-2205 P2.2, approved by Flamur 2026-10-18). Card is on only
- * while Finance says it is ready; an approval given for an earlier Stripe account or Payment
- * settings is out of date, and only turning card off and on again gives a new one. */
+/** What the Payments tab shows: card is on while Finance says it is ready, which needs only the
+ * hotel's own steps below. */
 export function hotelCardPaymentsView(state: HotelCardPaymentsState) {
-  const linked = state.providerAccount !== null;
-  const stripeReady = state.providerAccount?.ready === true;
-  const approved = state.evidence !== null;
   const settings = state.paymentSettings;
   return {
-    on: approved && state.cardReady,
-    approvalOutOfDate: approved && state.evidence?.current === false,
-    linked,
-    stripeReady,
+    on: state.cardReady,
+    linked: state.providerAccount !== null,
+    accountReady: state.providerAccount?.ready === true,
     /** The hotel's own choice: payments on, card among them, in a currency card can take. */
     hotelChoseCard:
       settings?.paymentsOn === true && settings.cardChosen && settings.currencyEligible,
     currencyEligible: settings?.currencyEligible !== false,
-    approval: state.evidence,
     pricesSaveNeeded: state.prices === "save_needed",
-    // Vayada approves a ready Stripe account once the hotel chose card (choosing it later changes
-    // the revisions and leaves the approval out of date), against the revisions it checked.
-    canTurnOn:
-      !approved &&
-      stripeReady &&
-      settings?.paymentsOn === true &&
-      settings.cardChosen &&
-      settings.currencyEligible &&
-      !!state.providerAccount?.cardCapabilityRevision &&
-      !!state.propertyReadinessRevision &&
-      state.propertyReadinessRevision > 0,
   };
 }
 
@@ -61,23 +45,4 @@ const path = (propertyId: string) =>
 
 export const hotelCardPaymentsService = {
   read: (propertyId: string) => apiClient.get<HotelCardPaymentsState>(path(propertyId)),
-
-  /** Vayada's approval: the operator attests that they checked the hotel's Stripe account. The
-   * server records the time and fingerprints the attestation with the revisions it names. */
-  turnOn: async (state: HotelCardPaymentsState) => {
-    if (!state.providerAccount || !state.propertyReadinessRevision)
-      throw new Error("The hotel's Stripe account isn't ready.");
-    return apiClient.post<unknown>(path(state.propertyId), {
-      commandId: globalThis.crypto.randomUUID(),
-      idempotencyKey: globalThis.crypto.randomUUID(),
-      expectedCardCapabilityRevision: state.providerAccount.cardCapabilityRevision,
-      expectedPropertyReadinessRevision: state.propertyReadinessRevision,
-    });
-  },
-
-  turnOff: (propertyId: string, evidenceId: string) =>
-    apiClient.post<unknown>(`${path(propertyId)}/${encodeURIComponent(evidenceId)}/revoke`, {
-      commandId: globalThis.crypto.randomUUID(),
-      idempotencyKey: globalThis.crypto.randomUUID(),
-    }),
 };

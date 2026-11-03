@@ -1,19 +1,20 @@
-import { buildHotelSetupChecklist, type HotelSetupChecklistFacts } from "@vayada/domain-hotels";
+import { buildHotelGoLiveChecklist, type HotelGoLiveChecklistFacts } from "@vayada/domain-hotels";
 import type { Page, Route } from "@playwright/test";
 
-/** A live hotel four of nine in: setup's four done, the five improvements left (Paper rev 4 c01-1). */
-export function liveChecklistFacts(propertyId: string): HotelSetupChecklistFacts {
+/**
+ * VAY-2451: a hotel that finished the four-step setup with a priced, photographed room. Three of six are
+ * done: the booking rules are still the defaults, the property photos and publishing are left.
+ */
+export function goLiveChecklistFacts(propertyId: string): HotelGoLiveChecklistFacts {
   return {
     propertyId,
-    nextSetupStep: null,
-    hotelBasics: true,
-    firstRoom: true,
-    guestPayment: true,
-    bookingPublished: true,
-    photos: false,
-    style: false,
-    calendar: "default",
-    guestTerms: "default",
+    propertyDetails: true,
+    setupFinished: true,
+    roomTypes: [{ name: "Classic Double", rooms: 2, maxGuests: 2, photos: 1, priced: true }],
+    placeholderPrices: false,
+    bookingRules: "default",
+    propertyPhotos: false,
+    bookingPublished: false,
     onlineCardReady: false,
     onlineCardsOffered: false,
     viewer: { hidden: false, dismissed: false },
@@ -21,12 +22,12 @@ export function liveChecklistFacts(propertyId: string): HotelSetupChecklistFacts
 }
 
 const CHECKLIST_API = /\/api\/hotel-setup\/properties\/[^/]+\/checklist(\/v2)?(\/[a-z]+)?$/;
-/** VAY-2451: the go-live list (HOTEL_GO_LIVE_CHECKLIST_ENABLED), not served unless a spec says so. */
+/** The go-live list both dashboards read. */
 const GO_LIVE_PATH = /\/checklist\/v2(\/[a-z]+)?$/;
 
 /**
  * The checklist API as production has it while the server's first run is off: not mounted (404). The
- * dashboards then keep what they show today. Specs that show the checklist register `mockSetupChecklist`.
+ * dashboards then keep what they show today. Specs that show the cards register `mockSetupChecklist`.
  */
 export async function mockSetupChecklistUnavailable(page: Page): Promise<void> {
   await page.route(CHECKLIST_API, (route) => {
@@ -39,12 +40,15 @@ export async function mockSetupChecklistUnavailable(page: Page): Promise<void> {
 export type SetupChecklistWrite = { method: string; path: string; body: unknown };
 
 /**
- * VAY-2247 wave 2: answers the setup checklist API (GET, Looks good, Hide for now) from `facts`, keeping
- * each write, as the server would. The dashboards call it cross-origin, so preflights are answered too.
+ * VAY-2247 wave 2, VAY-2451: answers the go-live checklist API (GET, Review booking rules, Dismiss) from
+ * `facts`, keeping each write, as the server would. The dashboards call it cross-origin, so preflights are
+ * answered too. The first checklist (no /v2) isn't read by the dashboards any more: it answers 404.
+ * `now` changes facts at answer time, as when the booking page was published meanwhile.
  */
 export async function mockSetupChecklist(
   page: Page,
-  facts: HotelSetupChecklistFacts,
+  facts: HotelGoLiveChecklistFacts,
+  now: () => Partial<HotelGoLiveChecklistFacts> = () => ({}),
 ): Promise<SetupChecklistWrite[]> {
   const writes: SetupChecklistWrite[] = [];
   let current = facts;
@@ -53,22 +57,18 @@ export async function mockSetupChecklist(
     const headers = corsHeaders(route);
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     const path = new URL(request.url()).pathname;
-    // Today's checklist: the go-live list is switched off (404), as in production.
-    if (GO_LIVE_PATH.test(path))
+    if (!GO_LIVE_PATH.test(path))
       return route.fulfill({ status: 404, headers, json: { error: "Not Found" } });
     if (request.method() !== "GET") {
       const body = request.postDataJSON() as Record<string, unknown>;
       writes.push({ method: request.method(), path, body });
-      if (path.endsWith("/acknowledgements")) {
-        current = {
-          ...current,
-          [body["item"] === "calendar" ? "calendar" : "guestTerms"]: "acknowledged",
-        };
+      if (path.endsWith("/acknowledgements") && body["item"] === "guest_terms") {
+        current = { ...current, bookingRules: "acknowledged" };
       } else if (path.endsWith("/viewer")) {
         current = { ...current, viewer: { ...current.viewer, ...body } };
       }
     }
-    return route.fulfill({ headers, json: buildHotelSetupChecklist(current) });
+    return route.fulfill({ headers, json: buildHotelGoLiveChecklist({ ...current, ...now() }) });
   });
   return writes;
 }

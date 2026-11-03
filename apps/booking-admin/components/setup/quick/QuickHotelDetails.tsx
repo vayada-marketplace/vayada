@@ -1,6 +1,6 @@
 "use client";
 
-import { EyeIcon, UserCircleIcon } from "@heroicons/react/24/outline";
+import { UserCircleIcon } from "@heroicons/react/24/outline";
 
 import { QUICK_SETUP_INPUT } from "./QuickSetupField";
 import { currencyChoices } from "./quickHotelCurrency";
@@ -32,16 +32,6 @@ export function QuickUseMyDetails({
         </span>
       </span>
     </button>
-  );
-}
-
-/** Under the contacts once they were copied from the account. */
-export function QuickContactsFromAccountNote() {
-  return (
-    <p className="flex gap-3 rounded-xl border border-primary-100 bg-primary-50 px-4 py-3 text-[13px] leading-5 text-primary-800">
-      <EyeIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      Filled from your account. Guests will see these — change them if your reception uses others.
-    </p>
   );
 }
 

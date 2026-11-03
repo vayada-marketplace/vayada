@@ -71,9 +71,7 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     const deposit = (payment: Record<string, unknown>) =>
       f.read({ terms: [{ ...f.input.terms[0], payment } as ReplacementOfferTerms] });
     const cardDeposit = { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 0, acceptedMethods: ["card"] };
-    // Without card the deposit rate is published but can't take card; pay at property sells as before.
-    expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property"] });
-    await f.executionEvidence();
+    // VAY-2442: the hotel's verified Stripe account takes the card deposit, with no Vayada approval.
     expect(await deposit(cardDeposit)).toMatchObject({ kind: "ready", methods: ["pay_at_property", "card"] });
     // No other deposit shape runs (a later balance, other methods, none named, or the whole stay), but
     // such a rate only stops itself (pricingRateSells); the hotel stays ready (VAY-2304).
@@ -112,19 +110,21 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     expect(await paypalOnly.read()).toMatchObject({ kind: "ready", methods: ["paypal"] });
     // A card hotel without Stripe readiness still fails, even with bank details.
     const cardAndBank = await fixture(["card", "bank_transfer"]);
+    await pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE id=$1", [cardAndBank.accountId]);
     await destination(cardAndBank.propertyId);
     expect(await cardAndBank.read()).toMatchObject({ reason: "method_unavailable" });
   });
-  it("requires actual scoped execution evidence and invalidates it when provider capability changes", async () => {
-    const f = await fixture(["card"]), other = await fixture(["card"]);
-    await other.executionEvidence();
-    expect(await f.read()).toMatchObject({ reason: "method_unavailable" });
-    await f.executionEvidence();
+  it("takes card from the hotel's own Stripe account with no Vayada approval, and follows its capability (VAY-2442)", async () => {
+    const f = await fixture(["card"]);
     expect(await f.read()).toMatchObject({ kind: "ready", methods: ["card"] });
     await pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE id=$1", [f.accountId]);
     expect(await f.read()).toMatchObject({ reason: "method_unavailable" });
+    // Back on: ready again, without anyone approving it again.
     await pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=true WHERE id=$1", [f.accountId]);
-    expect(await f.read()).toMatchObject({ reason: "method_unavailable" });
+    expect(await f.read()).toMatchObject({ kind: "ready", methods: ["card"] });
+    // An approval from before VAY-2442 neither adds nor takes anything away.
+    await f.executionEvidence();
+    expect(await f.read()).toMatchObject({ kind: "ready", methods: ["card"] });
   });
   it("respects Finance currency limitations without suppressing independent pay-at-property", async () => {
     const f = await fixture(["card", "pay_at_property"], "KWD");
@@ -146,7 +146,8 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
       ]) await expect(concurrent.query(sql, [id])).rejects.toMatchObject({ code: "57014" });
       await client.query("ROLLBACK");
       await concurrent.query("UPDATE finance.online_card_execution_evidence SET revoked_at=now() WHERE id=$1", [evidenceId]);
-      expect(await f.read()).toMatchObject({ reason: "method_unavailable" });
+      // VAY-2442: revoking an old approval no longer takes card away.
+      expect(await f.read()).toMatchObject({ kind: "ready", methods: ["card"] });
     } finally { await client.query("ROLLBACK"); await concurrent.query("RESET statement_timeout"); client.release(); concurrent.release(); }
   });
 });

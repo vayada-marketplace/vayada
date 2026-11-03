@@ -1,12 +1,10 @@
 import {
-  calculateReplacementRoomStay,
   parsePricingConfiguration,
   pricingAmountStep,
   pricingCurrencyScale,
   projectReplacementRoomNights,
   type PricingConfiguration,
   type RoomNightProjectionResult,
-  type RoomStayPricingResult,
 } from "@vayada/domain-pms/replacement-pricing";
 import {
   parseBookingPricingOfferTerms,
@@ -577,7 +575,7 @@ export function moreOptionsSummary(room: Room, t: Translate) {
 /** `date` (YYYY-MM-DD) moved by `days`, in UTC like the engine's calendar. */
 export const addDays = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
-/** The guest preview's sample stay: the main option's minimum nights (at least 2), from the next Friday after
+/** The price calendar's sample stay: the main option's minimum nights (at least 2), from the next Friday after
  * `today`, so weekend prices show. */
 export function sampleStay(room: Room, today: string) {
   const main = mainOffer(room);
@@ -588,28 +586,6 @@ export function sampleStay(room: Room, today: string) {
   const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
   const checkIn = addDays(today, (5 - weekday + 7) % 7 || 7);
   return { checkIn, checkOut: addDays(checkIn, nights) };
-}
-/** Each option's total for a stay of the sample guests: the engine's stay calculation, as in the stay check. */
-export function stayTotals(
-  room: Room,
-  checkIn: string,
-  checkOut: string,
-): Record<string, RoomStayPricingResult> {
-  return Object.fromEntries(
-    room.offers.map((offer) => [
-      offer.id,
-      calculateReplacementRoomStay(room, {
-        propertyId: room.propertyId,
-        roomTypeId: room.roomTypeId,
-        offerId: offer.id,
-        expectedRevision: room.revision,
-        expectedTermsRevisions: termsRevisions(room),
-        checkIn,
-        checkOut,
-        guests: { adults: sampleAdults(room), childAgesAtCheckIn: [] },
-      }),
-    ]),
-  );
 }
 /** Every night of a month (`month` is "YYYY-MM") for one option and `adults` (the sample guests unless given): the
  * engine's night evaluator, the one Channex nightly prices use. Each night also carries its own stay rules. */
@@ -626,7 +602,17 @@ export function monthNights(
     { length: days },
     (_, day) => `${month}-${String(day + 1).padStart(2, "0")}`,
   );
-  const nights = projectReplacementRoomNights(
+  const nights = datesNights(room, offerId, dates, adults);
+  return dates.map((date, index) => ({ date, night: nights[index] }));
+}
+/** The engine's night evaluator for one option and number of adults on each of `dates`, in one call. */
+export function datesNights(
+  room: Room,
+  offerId: string,
+  dates: readonly string[],
+  adults: number,
+): RoomNightProjectionResult[] {
+  return projectReplacementRoomNights(
     room,
     {
       propertyId: room.propertyId,
@@ -638,5 +624,4 @@ export function monthNights(
     },
     dates,
   );
-  return dates.map((date, index) => ({ date, night: nights[index] }));
 }

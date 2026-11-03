@@ -1,8 +1,4 @@
-import {
-  buildHotelGoLiveChecklist,
-  buildHotelSetupChecklist,
-  type HotelSetupChecklistFacts,
-} from "@vayada/domain-hotels";
+import { buildHotelGoLiveChecklist } from "@vayada/domain-hotels";
 import React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
@@ -25,10 +21,9 @@ vi.mock("@/lib/i18n", async () => {
 
 import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
 import {
-  BOOKING_ADMIN_CHECKLIST_PAGES,
+  BOOKING_PAGE_ONLINE_EVENT,
   PUBLISH_BOOKING_PAGE_EVENT,
   DashboardSetupChecklistCard,
-  DashboardSetupChecklistChip,
   useDashboardSetupChecklist,
 } from "./DashboardSetupChecklist";
 
@@ -36,211 +31,9 @@ import {
 vi.stubGlobal("window", new EventTarget());
 
 const PROPERTY = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
-const LIVE: HotelSetupChecklistFacts = {
-  propertyId: PROPERTY,
-  nextSetupStep: null,
-  hotelBasics: true,
-  firstRoom: true,
-  guestPayment: true,
-  bookingPublished: true,
-  photos: false,
-  style: false,
-  calendar: "default",
-  guestTerms: "default",
-  onlineCardReady: false,
-  onlineCardsOffered: false,
-  viewer: { hidden: false, dismissed: false },
-};
-const checklist = (facts: Partial<HotelSetupChecklistFacts> = {}) =>
-  buildHotelSetupChecklist({ ...LIVE, ...facts });
-
-class NotFound extends Error {
-  status = 404;
-}
 
 const textOf = (node: ReactTestInstance): string =>
   node.children.map((child) => (typeof child === "string" ? child : textOf(child))).join("");
-
-async function mount(
-  load: () => Promise<unknown>,
-  {
-    navigate = vi.fn(),
-    resolvePropertyId = async (): Promise<string | null> => PROPERTY,
-    hotelName = "Hotel Alpenrose",
-  }: {
-    navigate?: (path: string) => void;
-    resolvePropertyId?: () => Promise<string | null>;
-    hotelName?: string;
-  } = {},
-) {
-  const client = {
-    load: vi.fn(load),
-    looksGood: vi.fn(async () => checklist({ guestTerms: "acknowledged" })),
-    setViewer: vi.fn(async (_id: string, change: { hidden?: boolean }) =>
-      checklist({ viewer: { hidden: change.hidden === true, dismissed: false } }),
-    ),
-  };
-  let ready = "";
-  function Dashboard() {
-    const setup = useDashboardSetupChecklist({ client: client as never, resolvePropertyId });
-    ready = setup.state.kind;
-    return (
-      <div>
-        <DashboardSetupChecklistChip setup={setup} />
-        <DashboardSetupChecklistCard setup={setup} hotelName={hotelName} navigate={navigate} />
-      </div>
-    );
-  }
-  let renderer: ReactTestRenderer | undefined;
-  await act(async () => {
-    renderer = create(<Dashboard />);
-  });
-  await act(async () => undefined);
-  const click = async (label: string) => {
-    const button = renderer!.root.findAll(
-      (node) => node.type === "button" && textOf(node).includes(label),
-    )[0]!;
-    await act(async () => button.props.onClick());
-  };
-  return {
-    renderer: renderer!,
-    client,
-    click,
-    state: () => ready,
-    text: () => textOf(renderer!.root),
-  };
-}
-
-describe("Booking Admin dashboard setup checklist (VAY-2247 wave 2)", () => {
-  it("shows nothing while the checklist API isn't mounted (404)", async () => {
-    const dashboard = await mount(async () => Promise.reject(new NotFound("Not Found")));
-    expect(dashboard.state()).toBe("unavailable");
-    expect(dashboard.renderer.toJSON()).toEqual({ type: "div", props: {}, children: null });
-    dashboard.renderer.unmount();
-  });
-
-  it("shows the shared checklist once the server answers (c02-0)", async () => {
-    const navigate = vi.fn();
-    const dashboard = await mount(async () => checklist(), { navigate });
-    expect(dashboard.client.load).toHaveBeenCalledWith(PROPERTY);
-    expect(dashboard.text()).toContain("Finish setting up Hotel Alpenrose");
-    expect(dashboard.text()).toContain(
-      "Same checklist in the PMS and Booking Admin. Progress is shared.",
-    );
-    expect(dashboard.text()).toContain("all rooms bookable");
-
-    await dashboard.click("Style");
-    expect(navigate).toHaveBeenLastCalledWith("/design-studio");
-    await dashboard.click("Connect");
-    expect(navigate).toHaveBeenLastCalledWith("/settings/payments");
-    // Calendar's Looks good comes first; Guest terms' second.
-    const looksGood = dashboard.renderer.root.findAll(
-      (node) => node.type === "button" && textOf(node).includes("Looks good"),
-    );
-    await act(async () => looksGood[looksGood.length - 1]!.props.onClick());
-    expect(dashboard.client.looksGood).toHaveBeenCalledWith(PROPERTY, "guest_terms");
-    expect(dashboard.text()).toContain("5 of 9 done");
-    dashboard.renderer.unmount();
-  });
-
-  it("continues setup in Booking Admin before the page is live (c01-0)", async () => {
-    const navigate = vi.fn();
-    const dashboard = await mount(
-      async () =>
-        checklist({
-          nextSetupStep: "guest_payment",
-          guestPayment: false,
-          bookingPublished: false,
-        }),
-      { navigate },
-    );
-    expect(dashboard.text()).toContain("Your booking page isn't live yet");
-    await dashboard.click("Continue setup");
-    const [path] = navigate.mock.lastCall!;
-    const url = new URL(path, "https://admin.example");
-    expect(url.pathname).toBe("/setup");
-    expect(url.searchParams.get("entryProduct")).toBe("booking");
-    expect(url.searchParams.get("returnTo")).toBe("/dashboard");
-    expect(url.searchParams.get("propertyId")).toBe(PROPERTY);
-    dashboard.renderer.unmount();
-  });
-
-  it("hides the card for this person, leaving the Setup pill to bring it back", async () => {
-    const dashboard = await mount(async () => checklist());
-    await dashboard.click("Hide for now");
-    expect(dashboard.client.setViewer).toHaveBeenLastCalledWith(PROPERTY, { hidden: true });
-    expect(dashboard.text()).not.toContain("Finish setting up");
-    expect(dashboard.text()).toContain("Setup 4 of 9");
-    await dashboard.click("Setup 4 of 9");
-    expect(dashboard.client.setViewer).toHaveBeenLastCalledWith(PROPERTY, { hidden: false });
-    expect(dashboard.text()).toContain("Finish setting up");
-    dashboard.renderer.unmount();
-  });
-
-  it("waits for the header to pick a hotel, then loads once", async () => {
-    let selected: string | null = null;
-    const dashboard = await mount(async () => checklist(), {
-      resolvePropertyId: async () => selected,
-    });
-    expect(dashboard.state()).toBe("loading");
-    expect(dashboard.client.load).not.toHaveBeenCalled();
-    selected = PROPERTY;
-    await act(async () => {
-      window.dispatchEvent(new Event(SELECTED_HOTEL_CHANGED_EVENT));
-      window.dispatchEvent(new Event(SELECTED_HOTEL_CHANGED_EVENT));
-    });
-    await act(async () => undefined);
-    expect(dashboard.state()).toBe("ready");
-    expect(dashboard.client.load).toHaveBeenCalledTimes(1);
-    dashboard.renderer.unmount();
-  });
-
-  it("speaks the admin's language from Booking Admin's catalogs", async () => {
-    i18n.lang = "de";
-    try {
-      const dashboard = await mount(async () => checklist());
-      expect(dashboard.text()).toContain("Hotel Alpenrose fertig einrichten");
-      expect(dashboard.text()).toContain(
-        "Dieselbe Checkliste im PMS und im Booking Admin. Der Fortschritt wird geteilt.",
-      );
-      expect(dashboard.text()).toContain("4 von 9 erledigt");
-      expect(dashboard.text()).toContain("alle Zimmer buchbar");
-      expect(dashboard.text()).toContain("Passt so");
-      expect(dashboard.text()).toContain("öffnet Booking Admin → Designstudio");
-      await dashboard.click("Vorerst ausblenden");
-      expect(dashboard.text()).toContain("Einrichtung 4 von 9");
-      dashboard.renderer.unmount();
-    } finally {
-      i18n.lang = "en";
-    }
-  });
-
-  it("names the hotel generically until its settings answer", async () => {
-    const dashboard = await mount(async () => checklist(), { hotelName: "" });
-    expect(dashboard.text()).toContain("Finish setting up your hotel");
-    dashboard.renderer.unmount();
-  });
-
-  it("sends the PMS's items to the PMS and Booking Admin's to Booking Admin", () => {
-    expect(BOOKING_ADMIN_CHECKLIST_PAGES.photos).toEqual({ app: "pms", path: "/rooms" });
-    expect(BOOKING_ADMIN_CHECKLIST_PAGES.calendar).toEqual({
-      app: "pms",
-      path: "/settings/calendar",
-    });
-    expect(BOOKING_ADMIN_CHECKLIST_PAGES.style).toEqual({
-      app: "booking_admin",
-      path: "/design-studio",
-    });
-    expect(BOOKING_ADMIN_CHECKLIST_PAGES.guest_terms).toEqual({
-      app: "booking_admin",
-      path: "/settings/policies",
-    });
-    expect(BOOKING_ADMIN_CHECKLIST_PAGES.online_cards).toEqual({
-      app: "booking_admin",
-      path: "/settings/payments",
-    });
-  });
-});
 
 describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
   const goLive = (
@@ -263,34 +56,30 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
       ...extra,
     });
 
-  async function mountGoLive(answer: ReturnType<typeof goLive>, navigate = vi.fn()) {
+  async function mountGoLive(
+    answer: ReturnType<typeof goLive> | null | (() => Promise<ReturnType<typeof goLive> | null>),
+    navigate = vi.fn(),
+    {
+      resolvePropertyId = async (): Promise<string | null> => PROPERTY,
+      hotelName = "Lumansa Hiriketiya",
+    }: { resolvePropertyId?: () => Promise<string | null>; hotelName?: string } = {},
+  ) {
+    const load = typeof answer === "function" ? answer : async () => answer;
     const client = {
-      // Asked at the same time; its answer isn't used once the go-live list answers.
-      load: vi.fn(async () => {
-        throw new Error("today's checklist isn't shown");
-      }),
-      looksGood: vi.fn(),
-      setViewer: vi.fn(),
-      loadGoLive: vi.fn(async () => answer),
-      looksGoodGoLive: vi.fn(async () => answer),
+      loadGoLive: vi.fn(load),
+      looksGoodGoLive: vi.fn(async () => (await load())!),
       setGoLiveViewer: vi.fn(async () => ({
-        ...answer,
+        ...(await load())!,
         viewer: { hidden: false, dismissed: true },
       })),
     };
+    let kind = "";
     function Dashboard() {
-      const setup = useDashboardSetupChecklist({
-        client: client as never,
-        resolvePropertyId: async () => PROPERTY,
-      });
+      const setup = useDashboardSetupChecklist({ client, resolvePropertyId });
+      kind = setup.state.kind;
       return (
         <div>
-          <DashboardSetupChecklistChip setup={setup} />
-          <DashboardSetupChecklistCard
-            setup={setup}
-            hotelName="Lumansa Hiriketiya"
-            navigate={navigate}
-          />
+          <DashboardSetupChecklistCard setup={setup} hotelName={hotelName} navigate={navigate} />
         </div>
       );
     }
@@ -299,15 +88,66 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
       renderer = create(<Dashboard />);
     });
     await act(async () => undefined);
-    return { renderer: renderer!, client, navigate };
+    return { renderer: renderer!, client, navigate, state: () => kind };
   }
 
-  it("shows the go-live list in place of today's checklist (both asked at once)", async () => {
+  it("shows nothing while the API isn't mounted (404) or fails", async () => {
+    const missing = await mountGoLive(null);
+    expect(missing.state()).toBe("unavailable");
+    expect(textOf(missing.renderer.root)).toBe("");
+    missing.renderer.unmount();
+    const failing = await mountGoLive(async () => {
+      throw new Error("offline");
+    });
+    expect(failing.state()).toBe("unavailable");
+    expect(textOf(failing.renderer.root)).toBe("");
+    failing.renderer.unmount();
+  });
+
+  it("waits for the header to pick a hotel, then loads once", async () => {
+    let selected: string | null = null;
+    const dashboard = await mountGoLive(goLive(true), vi.fn(), {
+      resolvePropertyId: async () => selected,
+    });
+    expect(dashboard.state()).toBe("loading");
+    expect(dashboard.client.loadGoLive).not.toHaveBeenCalled();
+    selected = PROPERTY;
+    await act(async () => {
+      window.dispatchEvent(new Event(SELECTED_HOTEL_CHANGED_EVENT));
+      window.dispatchEvent(new Event(SELECTED_HOTEL_CHANGED_EVENT));
+    });
+    await act(async () => undefined);
+    expect(dashboard.state()).toBe("go_live");
+    expect(dashboard.client.loadGoLive).toHaveBeenCalledTimes(1);
+    dashboard.renderer.unmount();
+  });
+
+  it("speaks the admin's language from Booking Admin's catalogs", async () => {
+    i18n.lang = "de";
+    try {
+      const setup = await mountGoLive(goLive(false), vi.fn(), { hotelName: "Hotel Alpenrose" });
+      expect(textOf(setup.renderer.root)).toContain("Hotel Alpenrose fertig einrichten");
+      expect(textOf(setup.renderer.root)).toContain("Einrichtung fortsetzen");
+      setup.renderer.unmount();
+      const finished = await mountGoLive(goLive(true));
+      expect(textOf(finished.renderer.root)).toContain("Livegang vorbereiten");
+      expect(textOf(finished.renderer.root)).toContain("Veröffentlichen");
+      finished.renderer.unmount();
+    } finally {
+      i18n.lang = "en";
+    }
+  });
+
+  it("names the property generically until its settings answer", async () => {
+    const dashboard = await mountGoLive(goLive(false), vi.fn(), { hotelName: "" });
+    expect(textOf(dashboard.renderer.root)).toContain("Finish setting up your property");
+    dashboard.renderer.unmount();
+  });
+
+  it("shows the go-live list once setup is finished", async () => {
     const { renderer, client, navigate } = await mountGoLive(goLive(true));
-    const text = textOf(renderer.root);
-    expect(text).toContain("Get ready to go live");
-    expect(text).not.toContain("Setup ");
-    expect(client.load).toHaveBeenCalledWith(PROPERTY);
+    expect(textOf(renderer.root)).toContain("Get ready to go live");
+    expect(client.loadGoLive).toHaveBeenCalledWith(PROPERTY);
     // Publish is locked on the placeholder; Review says Looks good, then opens the policies.
     const button = (label: string) =>
       renderer.root.find((node) => node.type === "button" && textOf(node) === label);
@@ -331,6 +171,25 @@ describe("the go-live cards on the Booking Admin dashboard (VAY-2451)", () => {
     expect(published).toHaveBeenCalledOnce();
     window.removeEventListener(PUBLISH_BOOKING_PAGE_EVENT, published);
     renderer.unmount();
+  });
+
+  it("reads the list again once the booking page card says the page went online", async () => {
+    const ready = goLive(true, false);
+    const live = goLive(true, false, { bookingPublished: true });
+    let published = false;
+    const { renderer, client } = await mountGoLive(async () => (published ? live : ready));
+    expect(textOf(renderer.root)).toContain("Get ready to go live");
+    published = true;
+    await act(async () => {
+      window.dispatchEvent(new Event(BOOKING_PAGE_ONLINE_EVENT));
+    });
+    await act(async () => undefined);
+    expect(client.loadGoLive).toHaveBeenCalledTimes(2);
+    expect(textOf(renderer.root)).toContain("Your booking page is live");
+    // Once unmounted (its effects cleaned up), the event reads nothing.
+    await act(async () => renderer.unmount());
+    window.dispatchEvent(new Event(BOOKING_PAGE_ONLINE_EVENT));
+    expect(client.loadGoLive).toHaveBeenCalledTimes(2);
   });
 
   it("before Finish setup: continue where setup stopped", async () => {

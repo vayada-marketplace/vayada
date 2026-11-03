@@ -69,7 +69,7 @@ test("an owner adds the bank account vayada Payment pays out to, and removes it 
 
   await page.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(
-    page.getByText(/Guests can't pay by card until you add another one and Vayada has checked it/),
+    page.getByText(/Guests can't pay by card until you add another one\./),
   ).toBeVisible();
   await page.getByRole("button", { name: "Remove", exact: true }).last().click();
   await expect(page.getByText("Bank account removed.")).toBeVisible();

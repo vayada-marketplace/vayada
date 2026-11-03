@@ -292,6 +292,73 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
     }
   });
 
+  it("VAY-2442: online card payments are done once the hotel's own steps are, with no Vayada approval", async () => {
+    const t = await setUp();
+    try {
+      /** A hotel with payments on and card chosen, on a provider account it saved. */
+      async function cardHotel(
+        provider: "stripe" | "vayada",
+        change: { payoutsEnabled?: boolean; cardChosen?: boolean; ready?: boolean } = {},
+      ) {
+        const propertyId = await t.hotel();
+        const accountId = randomUUID();
+        const stripe = provider === "stripe";
+        await t.fixture(async () => {
+          await t.admin.query(
+            `INSERT INTO finance.payment_provider_accounts (id, property_id, account_scope, provider,
+               provider_account_id, status, onboarding_status, charges_enabled, payouts_enabled,
+               capabilities, card_capability_revision, account_metadata)
+             VALUES ($1, $2, 'property', $3, $4, 'active', 'completed', TRUE, $5,
+               ARRAY['card_payments'], 1, $6::jsonb)`,
+            [
+              accountId,
+              propertyId,
+              provider,
+              stripe ? `acct_synthetic_${accountId}` : `vayada:${propertyId}`,
+              change.payoutsEnabled ?? true,
+              JSON.stringify(
+                stripe
+                  ? {
+                      detailsSubmitted: true,
+                      cardPaymentsStatus: change.ready === false ? "inactive" : "active",
+                    }
+                  : { source: "payout_destination" },
+              ),
+            ],
+          );
+          await t.admin.query(
+            `INSERT INTO finance.payment_settings (property_id, provider_account_id, payments_enabled,
+               accepted_methods, default_currency, payment_readiness_contract_version,
+               payment_methods_revision, source_pricing_currency_revision)
+             VALUES ($1, $2, TRUE, $3, $4, 'finance-payment-readiness.v1', 1, 1)`,
+            [
+              propertyId,
+              accountId,
+              change.cardChosen === false ? ["pay_at_property"] : ["card", "pay_at_property"],
+              stripe ? "EUR" : "IDR",
+            ],
+          );
+        });
+        return propertyId;
+      }
+      const cards = async (propertyId: string) => ({
+        goLive: (await t.repository.goLiveFacts.read(t.actor(propertyId)))?.onlineCardReady,
+        checklist: (await t.repository.facts.read(t.actor(propertyId)))?.onlineCardReady,
+      });
+      const done = { goLive: true, checklist: true };
+      const open = { goLive: false, checklist: false };
+      // Neither hotel has an approval row: the go-live card's "Online card payments" is done.
+      expect(await cards(await cardHotel("stripe"))).toEqual(done);
+      expect(await cards(await cardHotel("vayada"))).toEqual(done);
+      // Still open while one of the hotel's own steps is missing.
+      expect(await cards(await cardHotel("stripe", { ready: false }))).toEqual(open);
+      expect(await cards(await cardHotel("vayada", { payoutsEnabled: false }))).toEqual(open);
+      expect(await cards(await cardHotel("vayada", { cardChosen: false }))).toEqual(open);
+    } finally {
+      await t.close();
+    }
+  });
+
   it("counts only a logo as style, not a hotel photo", async () => {
     const t = await setUp();
     try {

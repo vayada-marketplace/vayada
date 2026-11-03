@@ -41,7 +41,6 @@ import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
 import {
   PmsDashboardSetupBanner,
   PmsDashboardSetupCard,
-  PmsDashboardSetupChip,
   usePmsSetupChecklist,
 } from "@/components/dashboard/PmsDashboardSetup";
 
@@ -385,15 +384,8 @@ export default function DashboardPage() {
         setup={setupChecklist}
         incompleteSetupPropertyId={incompleteSetupPropertyId}
       />
-      <PageHeader
-        title={t("dashboard.title")}
-        subtitle={dateLabel}
-        actions={<PmsDashboardSetupChip setup={setupChecklist} />}
-      />
-      <PmsDashboardSetupCard
-        setup={setupChecklist}
-        roomCount={tonightOccupancy.sellableUnits || null}
-      />
+      <PageHeader title={t("dashboard.title")} subtitle={dateLabel} />
+      <PmsDashboardSetupCard setup={setupChecklist} />
 
       {/* Stat cards */}
       <div

@@ -130,9 +130,7 @@ export default function HotelConfigPage() {
           {activeSection === "design" && <DesignStudioSection hotelId={hotelId} />}
           {activeSection === "booking" && <BookingFlowSection hotelId={hotelId} />}
           {activeSection === "settings" && <HotelSettingsSection hotelId={hotelId} />}
-          {activeSection === "payments" && (
-            <CardPaymentsSection hotelId={hotelId} hotelName={hotel?.name ?? "this hotel"} />
-          )}
+          {activeSection === "payments" && <CardPaymentsSection hotelId={hotelId} />}
           {activeSection === "address" && (
             <BookingAddressSection hotelId={hotelId} currentSlug={hotel?.slug} />
           )}

@@ -5,7 +5,7 @@ import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricin
 import { PriceCalendar } from "./PriceCalendar";
 import {
   calendarNights,
-  lowestNightMinor,
+  guestsFromMinor,
   nightsWithoutPrice,
   seasonGroups,
   seasonTones,
@@ -270,7 +270,7 @@ it("groups seasons stored with the same name and tier (VAY-2280)", () => {
   ]);
 });
 
-it("counts the nights no price covers and finds the lowest night guests pay (VAY-2280)", () => {
+it("counts the nights no price covers (VAY-2280)", () => {
   expect(nightsWithoutPrice(room(), "flex", 2, "2026-09-01")).toBe(0);
   // From today through the same date next year (366 nights here). Without a standard price only Oktoberfest
   // (19 Sep – 4 Oct) and the own price on 12 Sep are priced.
@@ -279,9 +279,104 @@ it("counts the nights no price covers and finds the lowest night guests pay (VAY
   expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-15")).toBe(366 - 16);
   // The window's end counts: 20 Sep 2026 – 20 Sep 2027 holds 15 Oktoberfest nights of 2026 and 19–20 Sep 2027.
   expect(nightsWithoutPrice(room("none"), "flex", 2, "2026-09-20")).toBe(366 - 17);
-  // The non-refundable rate's weekday standard night, 10% under €100.
-  expect(lowestNightMinor(room(), ["flex", "nonref"], 2, "2026")).toBe("9000");
-  expect(lowestNightMinor(room(), ["flex"], 2, "2026")).toBe("10000");
+});
+
+type Sale = "channels_only" | "not_sold";
+/** The room with other own prices of single dates, and its rates sold as `sales` says (by position). */
+function priced(
+  dates: { date: string; amountMinor: string }[],
+  sales: (Sale | undefined)[] = [],
+  mode?: "occupancy",
+): PricingConfiguration {
+  const value = room(mode);
+  return {
+    ...value,
+    offers: value.offers.map((offer, index) => {
+      const sale = sales[index];
+      const dated =
+        offer.price.kind === "independent"
+          ? {
+              ...offer,
+              price: {
+                ...offer.price,
+                calendar: {
+                  ...offer.price.calendar,
+                  dates: dates.map(({ date, amountMinor }) => ({ date, price: flat(amountMinor) })),
+                },
+              },
+            }
+          : offer;
+      return sale ? { ...dated, sale } : dated;
+    }),
+  };
+}
+it("finds the lowest night guests can book from today through the same date next year (VAY-2466)", () => {
+  // The non-refundable rate's weekday standard night, 10% under €100; Oktoberfest (€180) and the own price on 12 Sep
+  // (€130) are higher.
+  expect(guestsFromMinor(room(), "2026-09-01")).toBe("9000");
+  // Only the rates on the booking page count: without the non-refundable one, the flexible rate's €100.
+  expect(guestsFromMinor(priced([], [undefined, "channels_only"]), "2026-09-01")).toBe("10000");
+  expect(guestsFromMinor(priced([], [undefined, "not_sold"]), "2026-09-01")).toBe("10000");
+  // A single date's own price under the rest counts (€70, 10% off for the non-refundable rate) until it is past.
+  expect(guestsFromMinor(priced([{ date: "2026-09-09", amountMinor: "7000" }]), "2026-09-01")).toBe(
+    "6300",
+  );
+  expect(guestsFromMinor(priced([{ date: "2026-09-09", amountMinor: "7000" }]), "2026-09-09")).toBe(
+    "6300",
+  );
+  expect(guestsFromMinor(priced([{ date: "2026-09-09", amountMinor: "7000" }]), "2026-09-10")).toBe(
+    "9000",
+  );
+  // The same date next year is the last night that counts.
+  expect(guestsFromMinor(priced([{ date: "2027-09-01", amountMinor: "5000" }]), "2026-09-01")).toBe(
+    "4500",
+  );
+  expect(guestsFromMinor(priced([{ date: "2027-09-02", amountMinor: "5000" }]), "2026-09-01")).toBe(
+    "9000",
+  );
+  // A closed night's price doesn't count: 8 Sep is closed.
+  expect(guestsFromMinor(priced([{ date: "2026-09-08", amountMinor: "5000" }]), "2026-09-01")).toBe(
+    "9000",
+  );
+  // A price per number of adults counts every number: 1 adult pays €85 (€76.50 non-refundable), not 2 adults' €100.
+  expect(guestsFromMinor(priced([], [], "occupancy"), "2026-09-01")).toBe("7650");
+  // Seasons count on their dates next year: without a standard price, from 5 Oct only Oktoberfest 2027 is priced.
+  expect(guestsFromMinor(room("none"), "2026-10-05")).toBe("16200");
+  // Rates the booking page can't sell now (VAY-2304) don't count either.
+  expect(guestsFromMinor(room(), "2026-09-01", ["nonref"])).toBe("10000");
+  // A price per number of adults in any rate counts every number: a second rate's €60 for 1 adult.
+  const [flex] = room().offers;
+  const second = {
+    ...flex,
+    id: "second",
+    price: {
+      kind: "independent" as const,
+      calendar: {
+        base: { mode: "occupancy" as const, amountsMinor: ["6000", "7000", "8000"] },
+        months: [],
+        seasons: [],
+        weekdays: [],
+        dates: [],
+      },
+    },
+  };
+  expect(guestsFromMinor({ ...room(), offers: [flex, second] }, "2026-09-01")).toBe("6000");
+  // No open night ahead: closed all year, so no price.
+  const closed = {
+    ...room(),
+    offers: [
+      {
+        ...flex,
+        restrictions: {
+          kind: "own" as const,
+          rules,
+          seasons: [{ from: "01-01", through: "12-31", rules: { ...rules, stopSell: true } }],
+          dates: [],
+        },
+      },
+    ],
+  };
+  expect(guestsFromMinor(closed, "2026-09-01")).toBeNull();
 });
 
 it("shows a room without prices as nights waiting for one, with nothing to pick (VAY-2280)", () => {

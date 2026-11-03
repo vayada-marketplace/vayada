@@ -15,10 +15,11 @@ export type VayadaPayoutAccount = {
   savedAt: string;
   /** The hotel had an account before this one. */
   replaced: boolean;
-  /** Vayada staff approved it (or the hotel's first card approval did, for a first account). */
+  /** Vayada staff approved it with "Approve bank account" (an account approved before 2026-11-03
+   * may carry the hotel's first card approval instead). */
   approved: boolean;
   approvedAt: string | null;
-  /** How: staff's "Approve bank account", or the hotel's first card approval (first account). */
+  /** How: staff's "Approve bank account", or (before 2026-11-03 only) the first card approval. */
   approvedVia: "payout_account" | "card_approval" | null;
 };
 /** Money in the ledger's minor units, as strings (BIGINT never passes through a JS number). */

@@ -66,8 +66,7 @@ const blockerCopy: Record<FinancePaymentReadinessBlocker, string> = {
   payment_settings_uncommitted: "Save your payment selection.",
   pricing_currency_unavailable: "Choose the hotel currency before saving payment methods.",
   pricing_currency_mismatch: "Your property currency changed. Refresh and review this selection.",
-  online_card_execution_unavailable:
-    "Online card payments are waiting for verified payment execution.",
+  online_card_execution_unavailable: "Online card payments need a connected payment account.",
   online_card_currency_unsupported: "Online cards do not support the property's current currency.",
   provider_restricted:
     "Stripe has restricted this account. Review your Stripe account requirements.",

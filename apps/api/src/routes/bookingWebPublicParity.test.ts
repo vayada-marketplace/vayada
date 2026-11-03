@@ -18,6 +18,7 @@ import {
   type BookingWebCheckoutAdapter,
   type BookingWebQueryExecutor,
 } from "./bookingWebPublic.js";
+import { onlineCardReadySql } from "../domains/financeOnlineCardReadySql.js";
 import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js";
 
 type LegacyHotelResponse = {
@@ -1444,8 +1445,12 @@ describe("Booking Web public bootstrap parity", () => {
     expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
       "upper(trim(fs.default_currency)) = upper(trim(bs.default_currency))",
     );
+    // VAY-2442: card readiness without a Vayada approval, never the views' approval-based column.
     expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).toContain(
-      'COALESCE(readiness.online_card_ready, FALSE) AS "bookingPageCardReady"',
+      `${onlineCardReadySql("readiness", "fs")} AS "bookingPageCardReady"`,
+    );
+    expect(calls.find((call) => call.includes("FROM hotel_catalog.properties p"))).not.toMatch(
+      /readiness\.online_card_ready\b/,
     );
   });
 

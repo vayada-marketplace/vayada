@@ -274,6 +274,54 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS physical-room reconciliation
     });
   });
 
+  it("gives a room removed by lowering total rooms its number back when rooms are added again", async () => {
+    // VAY-2467: the retired room used to keep its number taken for good.
+    const added = await repository.reconcilePhysicalRoomUnits(reconcileCommand("reuse-seed", 1, 3));
+    if (!added.ok) throw new Error("Expected physical units to be added");
+    let revision = added.response.capacity.roomUnitsRevision;
+    for (const [index, unit] of added.response.addedUnits.entries()) {
+      const labeled = await labelRepository.setPhysicalRoomOperationalLabel(
+        labelCommand(`reuse-label-${index}`, unit.roomUnitId, revision, `Studio ${index + 1}`),
+      );
+      if (!labeled.ok) throw new Error("Expected generated label to be verified");
+      revision = labeled.response.roomUnitsRevision;
+    }
+    const decreased = await repository.reconcilePhysicalRoomUnits(
+      reconcileCommand("reuse-decrease", revision, 2),
+    );
+    if (!decreased.ok) throw new Error("Expected one room to be retired");
+    const retired = await admin.query<{ label: string }>(
+      "SELECT room_number AS label FROM pms.rooms WHERE id = $1::uuid AND status = 'retired'",
+      [decreased.response.retiredUnitIds[0]],
+    );
+    const label = retired.rows[0]!.label;
+    expect(label).toMatch(/^Studio [123]$/);
+
+    const increased = await repository.reconcilePhysicalRoomUnits(
+      reconcileCommand("reuse-increase", decreased.response.capacity.roomUnitsRevision, 3),
+    );
+    if (!increased.ok) throw new Error("Expected one room to be added again");
+    const newUnitId = increased.response.addedUnits[0]!.roomUnitId;
+    await expect(
+      labelRepository.setPhysicalRoomOperationalLabel(
+        labelCommand(
+          "reuse-label",
+          newUnitId,
+          increased.response.capacity.roomUnitsRevision,
+          label,
+        ),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      response: {
+        roomUnitId: newUnitId,
+        operationalLabel: label,
+        operationalLabelStatus: "verified",
+      },
+    });
+    await expect(activeUnitCount()).resolves.toBe(3);
+  });
+
   it("serializes concurrent expected revisions so exactly one target wins", async () => {
     const [first, second] = await Promise.all([
       repository.reconcilePhysicalRoomUnits(reconcileCommand("concurrent-two", 1, 2)),

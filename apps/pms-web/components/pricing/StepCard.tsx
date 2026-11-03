@@ -6,15 +6,14 @@ import * as ui from "./pricingStyles";
 
 /** One numbered question card (the first-price form), or, without `number`, one section of the simple Prices card
  * (VAY-2188): a title, "Optional" when it is, and a short hint. `step` makes it a step of "Pricing setup" (VAY-2305,
- * the CEO's design): the number, title, hint and `aside` on the left, the step's card on the right, and `side` beside
- * the card (step 4's booking-page preview). `plain`: the step's children are cards themselves. Phones stack them. */
+ * the CEO's design): the number, title, hint and `aside` on the left, the step's card on the right. `plain`: the step's
+ * children are cards themselves. Phones stack them. */
 export function StepCard({
   number,
   step,
   title,
   hint,
   optional = false,
-  side,
   aside,
   plain = false,
   children,
@@ -24,7 +23,6 @@ export function StepCard({
   title: string;
   hint?: string;
   optional?: boolean;
-  side?: ReactNode;
   aside?: ReactNode;
   plain?: boolean;
   children: ReactNode;
@@ -50,10 +48,7 @@ export function StepCard({
           {hint && <p className={ui.stepHint}>{hint}</p>}
           {aside}
         </div>
-        <div className="min-w-0 flex-1 space-y-4 xl:flex xl:items-start xl:gap-4 xl:space-y-0">
-          <div className={plain ? "min-w-0 flex-1 space-y-4" : ui.setupStepCard}>{children}</div>
-          {side && <div className="min-w-0 xl:w-[320px] xl:shrink-0">{side}</div>}
-        </div>
+        <div className={plain ? "min-w-0 flex-1 space-y-4" : ui.setupStepCard}>{children}</div>
       </section>
     );
   const heading = (

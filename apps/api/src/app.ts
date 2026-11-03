@@ -324,8 +324,6 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelFirstRun?: import("./routes/hotelFirstRun.js").HotelFirstRunRouteOptions["createService"];
   /** VAY-2247 wave 2: the setup checklist; mounted with the first run (it reads the first run's state). */
   hotelSetupChecklist?: import("./routes/hotelSetupChecklist.js").HotelSetupChecklistRouteOptions["createService"];
-  /** VAY-2451: also mount the go-live checklist (/checklist/v2); unset or false: only v1. */
-  hotelGoLiveChecklist?: boolean;
   /** VAY-2246: the hotel account's terms and DPA acceptance (GET/POST /api/hotel-account/agreements). */
   hotelAccountAgreements?: import("./routes/hotelAccountAgreements.js").HotelAccountAgreementsRouteOptions["repository"];
   /** VAY-2444: resolve Google Maps short links for signed-in hotel accounts (POST /api/maps-links/resolve). */
@@ -706,7 +704,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/hotel-setup",
       createService: options.hotelSetupChecklist,
       propertyAccessRepository: options.auth.propertyAccessRepository,
-      goLive: options.hotelGoLiveChecklist === true,
     });
   }
   if (options.hotelAccountAgreements) {

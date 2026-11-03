@@ -45,6 +45,8 @@ export type GoLiveChecklistMessages = {
     photos: number;
   }) => string;
   ratesPlaceholder: string;
+  /** Under room types, done without a photo: a suggestion, tagged Recommended (VAY-2451). */
+  roomPhotosMissing: string;
   publishTitle: string;
   publishLocked: string;
   publishReady: string;
@@ -120,6 +122,7 @@ export const GO_LIVE_CHECKLIST_MESSAGES: GoLiveChecklistMessages = {
   roomTypesDone: (room) =>
     `${room.name} · ${plural(room.rooms, "room")} · up to ${room.maxGuests} guests · ${plural(room.photos, "photo")}`,
   ratesPlaceholder: "Your room shows a placeholder price. Set real prices before you go live.",
+  roomPhotosMissing: "Add a photo to each room type. Guests book rooms they can see.",
   publishTitle: "Publish your booking page",
   publishLocked: "Available once your room types and rates are in",
   publishReady: "All set. Guests can book as soon as you publish.",
@@ -344,14 +347,20 @@ export function GoLiveChecklistCard({
       <ul className="mt-4 divide-y divide-gray-100">
         {rows.map(({ id, done }) => {
           const words = messages.items[id];
-          const tag =
-            id === "room_types" || id === "rates"
-              ? messages.required
-              : id === "property_photos"
-                ? messages.recommended
-                : null;
-          const description =
-            id === "room_types" && done && checklist.firstRoomType
+          // Room types count once they have rooms; a room type without a photo only gets a suggestion.
+          const photoHint = id === "room_types" && done && checklist.roomPhotosMissing;
+          const tag = photoHint
+            ? messages.recommended
+            : done
+              ? null
+              : id === "room_types" || id === "rates"
+                ? messages.required
+                : id === "property_photos"
+                  ? messages.recommended
+                  : null;
+          const description = photoHint
+            ? messages.roomPhotosMissing
+            : id === "room_types" && done && checklist.firstRoomType
               ? messages.roomTypesDone(checklist.firstRoomType)
               : id === "rates" && !done && checklist.placeholderPrices
                 ? messages.ratesPlaceholder
@@ -383,7 +392,7 @@ export function GoLiveChecklistCard({
                   >
                     {done && words.doneTitle ? words.doneTitle : words.title}
                   </span>
-                  {!done && tag ? (
+                  {tag ? (
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                         tag === messages.required

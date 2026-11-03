@@ -81,6 +81,7 @@ export function pmsGoLiveMessages(t: Translate): GoLiveChecklistMessages {
         name: room.name,
       }),
     ratesPlaceholder: t("dashboard.goLive.ratesPlaceholder"),
+    roomPhotosMissing: t("dashboard.goLive.roomPhotosMissing"),
     publishTitle: t("dashboard.goLive.publishTitle"),
     publishLocked: t("dashboard.goLive.publishLocked"),
     publishReady: t("dashboard.goLive.publishReady"),
