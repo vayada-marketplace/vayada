@@ -8,37 +8,26 @@ import {
 } from "./hotelFirstRunSteps.js";
 
 /**
- * VAY-2247 first run, step 7: the vayada plan the hotel picked in "How guests pay". Commission is selected
- * at once. Fixed Fee starts the Stripe checkout and waits: the plan only becomes active when Stripe confirms
- * the payment (invoice.paid), so the step reports the checkout link instead of "done".
+ * VAY-2247 first run, the plan step: the four-step setup asks for no plan (VAY-2451), so every new hotel gets
+ * Commission (Settings › Billing changes it). A plan the hotel already has is kept, and a Fixed Fee checkout
+ * the 7-step setup started is left to Stripe.
  */
 
 export type HotelFirstRunPlanPorts = Readonly<{
-  plans: Pick<
-    FinanceSubscriptionService,
-    "getPlanStatus" | "selectCommissionPlan" | "createFixedPlanCheckout"
-  >;
+  plans: Pick<FinanceSubscriptionService, "getPlanStatus" | "selectCommissionPlan">;
 }>;
-
-export type HotelFirstRunPlanChoice = "commission" | "fixed_fee";
-
-export type HotelFirstRunPlanOutcome =
-  | HotelFirstRunStepOutcome
-  | Readonly<{ ok: true; wrote: boolean; checkoutUrl: string }>;
 
 export async function runFirstRunPlan(
   ports: HotelFirstRunPlanPorts,
   actor: HotelFirstRunActor,
-  /** `plan: null` (VAY-2451, the four-step setup asks for none): Commission, unless a Fixed Fee checkout is open. */
-  input: Readonly<{ plan: HotelFirstRunPlanChoice | null; customerEmail: string | null }>,
-): Promise<HotelFirstRunPlanOutcome> {
+): Promise<HotelFirstRunStepOutcome> {
   const status = await ports.plans.getPlanStatus(actor.propertyId);
   // A plan the hotel already has is kept, whichever it is.
   if (status.plan) return Object.freeze({ ok: true, wrote: false });
   // Selecting Commission would expire a Fixed Fee checkout the hotel started; the plan waits for Stripe.
-  if (input.plan === null && status.checkoutPending)
-    return Object.freeze({ ok: true, wrote: false });
-  const plan = input.plan ?? "commission";
+  if (status.checkoutPending) return Object.freeze({ ok: true, wrote: false });
+  // The same command id and key as when the 7-step setup could pick a plan.
+  const plan = "commission";
   const context = (reason: string) => ({
     commandId: firstRunUuid(actor.propertyId, "first_run_plan_command", plan),
     idempotencyKey: firstRunIdempotencyKey(actor.propertyId, "plan", plan),
@@ -53,22 +42,10 @@ export async function runFirstRunPlan(
     },
   });
 
-  if (plan === "commission") {
-    const result = await ports.plans.selectCommissionPlan(
-      context("Select Commission Plan (hotel first run)"),
-    );
-    return result.ok
-      ? Object.freeze({ ok: true, wrote: true })
-      : Object.freeze({ ok: false, code: `first_run_plan_${result.code}`, cause: result });
-  }
-  if (!input.customerEmail)
-    return Object.freeze({ ok: false, code: "first_run_plan_email_missing" });
-  const result = await ports.plans.createFixedPlanCheckout({
-    ...context("Start Fixed Plan checkout (hotel first run)"),
-    customerEmail: input.customerEmail,
-    returnSurface: "booking-admin",
-  });
+  const result = await ports.plans.selectCommissionPlan(
+    context("Select Commission Plan (hotel first run)"),
+  );
   return result.ok
-    ? Object.freeze({ ok: true, wrote: true, checkoutUrl: result.value.checkoutUrl })
+    ? Object.freeze({ ok: true, wrote: true })
     : Object.freeze({ ok: false, code: `first_run_plan_${result.code}`, cause: result });
 }

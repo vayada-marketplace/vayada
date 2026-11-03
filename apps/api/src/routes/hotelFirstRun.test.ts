@@ -12,16 +12,15 @@ import { registerHotelFirstRunRoutes, type HotelFirstRunRouteService } from "./h
 
 const propertyId = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
 const organizationId = "9a8b7c6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d";
-const body = {
+/** All the four-step setup sends (VAY-2451). */
+const body = { guestPayment: "pay_at_property" };
+/** The 7-step setup's body, refused since the four-step setup replaced it. */
+const sevenStep = {
   room: { name: "Classic Double", numberOfRooms: 8, maxGuests: 2, pricePerNight: "145" },
   pricesIncludeMandatoryCharges: true,
   guestPayment: "pay_at_property",
   plan: "commission",
 };
-/** The same body as `rooms` (VAY-2247 1.12). */
-const { room: classicDouble, ...shared } = body;
-/** Without `cancellation` and `bed` (1.12b) the first run keeps its defaults. */
-const defaults = { freeCancellationDays: 3, bed: "double" };
 const state = { contractVersion: "hotel-first-run.v1", propertyId, steps: [], nextStep: null };
 
 function ownerContext(overrides: { roleKey?: string; sessionId?: string | null } = {}) {
@@ -90,134 +89,52 @@ describe("hotel first run routes (VAY-2247)", () => {
     });
   });
 
-  it("POST runs the first run with the owner's email and returns the state, the steps that wrote and the checkout", async () => {
-    const run = vi.fn(async () => ({
-      ok: true as const,
-      state,
-      ran: ["currency"],
-      checkoutUrl: "https://stripe.example/c",
-    }));
+  it("POST runs the first run and returns the state and the steps that wrote", async () => {
+    const run = vi.fn(async () => ({ ok: true as const, state, ran: ["currency"] }));
     const response = await call("POST", { run } as never, body);
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+    expect(response.json()).toEqual({ state, ran: ["currency"] });
+    expect(run.mock.calls[0]).toEqual([expect.objectContaining({ propertyId }), body]);
+  });
+
+  it("POST answers a step that stopped with 409, its code, step and state", async () => {
+    const run = vi.fn(async () => ({
+      ok: false as const,
+      code: "first_run_pricing_stale",
+      step: "pricing" as const,
       state,
       ran: ["currency"],
-      checkout: { url: "https://stripe.example/c" },
-    });
-    const [, sent, email] = run.mock.calls[0] as unknown as [unknown, unknown, unknown];
-    // The first version's single `room` arrives as one room type.
-    expect(sent).toEqual({ ...shared, rooms: [classicDouble], ...defaults });
-    expect(email).toBe("owner@example.com");
-  });
-
-  it("POST takes several room types (VAY-2247 1.12)", async () => {
-    const run = vi.fn(async () => ({ ok: true as const, state, ran: [], checkoutUrl: null }));
-    const rooms = [
-      classicDouble,
-      { name: "Alpine Suite", numberOfRooms: 4, maxGuests: 3, pricePerNight: "210" },
-    ];
-    expect((await call("POST", { run } as never, { ...shared, rooms })).statusCode).toBe(200);
-    expect((run.mock.calls[0] as unknown as [unknown, unknown])[1]).toEqual({
-      ...shared,
-      rooms,
-      ...defaults,
-    });
-  });
-
-  it("POST takes the owner's cancellation and bed for every room type (VAY-2247 1.12b)", async () => {
-    const run = vi.fn(async () => ({ ok: true as const, state, ran: [], checkoutUrl: null }));
-    const chosen = {
-      ...shared,
-      rooms: [classicDouble],
-      cancellation: { kind: "free_until_days_before_arrival", days: 7 },
-      bed: "twin",
-    };
-    expect((await call("POST", { run } as never, chosen)).statusCode).toBe(200);
-    expect((run.mock.calls[0] as unknown as [unknown, unknown])[1]).toEqual({
-      ...shared,
-      rooms: [classicDouble],
-      freeCancellationDays: 7,
-      bed: "twin",
-    });
-  });
-
-  it("POST takes the four-step setup's body: no room types, price or plan (VAY-2451)", async () => {
-    const run = vi.fn(async () => ({ ok: true as const, state, ran: [], checkoutUrl: null }));
-    expect(
-      (await call("POST", { run } as never, { guestPayment: "pay_at_property" })).statusCode,
-    ).toBe(200);
-    expect((run.mock.calls[0] as unknown as [unknown, unknown])[1]).toEqual({
-      rooms: [],
-      pricesIncludeMandatoryCharges: false,
-      guestPayment: "pay_at_property",
-      plan: null,
-      ...defaults,
-    });
-  });
-
-  it("POST tells a request it can't use (422) from a step that conflicts (409)", async () => {
-    const stopped = (code: string) =>
-      vi.fn(async () => ({
-        ok: false as const,
-        code,
-        step: "pricing" as const,
-        state,
-        ran: ["currency"],
-      }));
-    const unusable = await call(
-      "POST",
-      { run: stopped("mandatory_charges_declaration_required") } as never,
-      body,
-    );
-    expect(unusable.statusCode).toBe(422);
-    expect(unusable.json()).toMatchObject({
-      code: "mandatory_charges_declaration_required",
+    }));
+    const response = await call("POST", { run } as never, body);
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      code: "first_run_pricing_stale",
       step: "pricing",
+      state,
+      ran: ["currency"],
     });
-    expect(
-      (await call("POST", { run: stopped("first_run_pricing_stale") } as never, body)).statusCode,
-    ).toBe(409);
   });
 
   it.each([
-    { ...body, plan: "card" },
-    { ...body, guestPayment: "card" },
-    { ...body, room: { ...body.room, numberOfRooms: "8" } },
-    { ...body, extra: true },
-    { room: body.room },
-    // VAY-2247 1.12: rooms instead of room, never both; 1–10 room types with different names.
-    { ...body, rooms: [body.room] },
-    { ...shared, rooms: [] },
+    // The 7-step setup's body, in its forms: one room, several, with cancellation and bed.
+    sevenStep,
+    { ...sevenStep, room: undefined, rooms: [sevenStep.room] },
     {
-      ...shared,
-      rooms: Array.from({ length: 11 }, (_, index) => ({
-        ...body.room,
-        name: `Room type ${index}`,
-      })),
+      ...sevenStep,
+      cancellation: { kind: "free_until_days_before_arrival", days: 7 },
+      bed: "twin",
     },
-    {
-      ...shared,
-      rooms: [body.room, { ...body.room, name: " classic double " }],
-    },
-    // VAY-2247 1.12b: free cancellation until 1, 3, 7 or 14 days; non-refundable is paid in advance
-    // (VAY-2280), which the first run can't set up yet. Beds from the first run's five.
-    { ...body, cancellation: { kind: "non_refundable" } },
-    { ...body, cancellation: { kind: "free_until_days_before_arrival", days: 5 } },
-    { ...body, cancellation: { kind: "free_until_days_before_arrival", days: "7" } },
-    { ...body, cancellation: { kind: "free_until_days_before_arrival", days: 7, extra: 1 } },
-    { ...body, cancellation: 7 },
-    { ...body, bed: "bunk_bed" },
-    { ...body, bed: "Double" },
-    { ...body, bed: null },
-    // VAY-2451: the four-step setup's body is exactly { guestPayment: "pay_at_property" }.
-    { guestPayment: "card" },
+    { guestPayment: "pay_at_property", plan: null },
+    { guestPayment: "pay_at_property", rooms: [] },
     { guestPayment: "pay_at_property", plan: "fixed_fee" },
     { guestPayment: "pay_at_property", pricesIncludeMandatoryCharges: true },
+    { guestPayment: "card" },
     {},
   ])("POST refuses a body that isn't exactly what the setup sends: %j", async (invalid) => {
     const run = vi.fn();
     const response = await call("POST", { run } as never, invalid);
     expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ code: "invalid_first_run_request" });
     expect(run).not.toHaveBeenCalled();
   });
 

@@ -16,9 +16,10 @@ import type { createReplacementPricingCommands } from "./replacementPricingComma
 import { PricingStorageError } from "./replacementPricingStore.js";
 
 /**
- * VAY-2247 first run, step 4: the first room type's price, published the way the setup screen does it
- * (publishFirstPricing): stage the offer's terms in a draft → prepare → save the draft → review the charges →
- * the hotel's "my prices include all mandatory taxes and fees" declaration → attach it → publish.
+ * VAY-2247 first run, the pricing step: the placeholder price for the setup's room type (VAY-2451), published
+ * the way the setup screen did it (publishFirstPricing): stage the offer's terms in a draft → prepare → save the
+ * draft → review the charges → the "prices include all mandatory taxes and fees" declaration, made by the
+ * first run for the placeholder only → attach it → publish.
  *
  * Retries replay: the draft id, the offer id and every request id are derived from the property and the
  * input. Draft saves carry no key, so the draft is read back before saving again.
@@ -39,31 +40,19 @@ export type HotelFirstRunPricingPorts = Readonly<{
   >;
 }>;
 
-export type HotelFirstRunPricingInput = Readonly<
-  {
-    roomTypeId: string;
-    capacity: PricingCapacity;
-    currency: string;
-    /** The owner's cancellation choice (1.12b); 3 when not given. */
-    freeCancellationDays?: FirstRunFreeCancellationDays;
-  } & (
-    | {
-        pricePerNight: string;
-        /** The tick under the price; the owner's own declaration, never assumed. */
-        pricesIncludeMandatoryCharges: boolean;
-        placeholder?: false;
-      }
-    | {
-        /**
-         * VAY-2451: the new setup asks for no price. The room gets FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT, and
-         * the system makes the taxes declaration for that price only (recorded as made by the first run); any
-         * real price needs the owner's own declaration in Prices. Its publish carries the placeholder step in
-         * its request id, which keeps the booking page from being published until real prices replace it.
-         */
-        placeholder: true;
-      }
-  )
->;
+/**
+ * VAY-2451: the four-step setup asks for no price. The setup's room type gets FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT,
+ * and the system makes the taxes declaration for that price only (recorded as made by the first run); any real
+ * price needs the owner's own declaration in Prices. Its publish carries the placeholder step in its request id,
+ * which keeps the booking page from being published until real prices replace it.
+ */
+export type HotelFirstRunPricingInput = Readonly<{
+  roomTypeId: string;
+  capacity: PricingCapacity;
+  currency: string;
+  /** Free cancellation until this many days before arrival (the first run's default, 3). */
+  freeCancellationDays?: FirstRunFreeCancellationDays;
+}>;
 
 /** The request-id step of the placeholder price's publish (VAY-2451); the old first run used "pricing_publish". */
 export const FIRST_RUN_PLACEHOLDER_PUBLISH_STEP = "pricing_placeholder_publish";
@@ -91,8 +80,6 @@ export async function runFirstRunPricing(
   actor: HotelFirstRunActor,
   input: HotelFirstRunPricingInput,
 ): Promise<HotelFirstRunStepOutcome> {
-  if (!input.placeholder && !input.pricesIncludeMandatoryCharges)
-    return fail("mandatory_charges_declaration_required");
   try {
     return await publish(ports.pricing, actor.propertyId, input);
   } catch (error) {
@@ -106,18 +93,10 @@ async function publish(
   propertyId: string,
   input: HotelFirstRunPricingInput,
 ): Promise<HotelFirstRunStepOutcome> {
-  const current = await pricing.read(propertyId);
-  if (
-    current?.rooms.some((room) => room.roomTypeId === input.roomTypeId && room.offers.length > 0)
-  ) {
-    return Object.freeze({ ok: true, wrote: false });
-  }
   // VAY-2451: the placeholder only ever comes first. A hotel with prices keeps them and its setup room waits
   // for the owner's own price, so the system's declaration never covers prices the owner set.
-  if (input.placeholder && current) return Object.freeze({ ok: true, wrote: false });
-  if (current && current.currency !== input.currency)
-    return fail("first_run_pricing_currency_mismatch");
-  const baseRevision = current?.revision ?? 0;
+  if (await pricing.read(propertyId)) return Object.freeze({ ok: true, wrote: false });
+  const baseRevision = 0;
   const offerId = firstRunUuid(propertyId, "first_run_offer", input.roomTypeId);
   const built = firstRunPricing({
     propertyId,
@@ -125,7 +104,7 @@ async function publish(
     roomTypeId: input.roomTypeId,
     capacity: input.capacity,
     currency: input.currency,
-    pricePerNight: input.placeholder ? FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT : input.pricePerNight,
+    pricePerNight: FIRST_RUN_PLACEHOLDER_PRICE_PER_NIGHT,
     freeCancellationDays: input.freeCancellationDays,
   });
   if (!built) return fail("first_run_price_invalid");
@@ -137,8 +116,8 @@ async function publish(
     baseRevision,
     built.configuration,
     built.terms.cancellation,
-    // An owner's own price of 100 must not replay the placeholder's draft (VAY-2451).
-    ...(input.placeholder ? ["placeholder"] : []),
+    // Kept from when the 7-step setup's own prices shared this path: the same draft id as before (VAY-2451).
+    "placeholder",
   );
   const draftContext = { draftId, baseRevision };
   const key = (step: string) => firstRunIdempotencyKey(propertyId, step, [draftId]);
@@ -150,14 +129,14 @@ async function publish(
     draftContext,
   );
   const rooms = [
-    ...(current?.rooms ?? []),
     {
       ...built.configuration,
       offers: built.configuration.offers.map((offer) =>
         offer.id === offerId ? { ...offer, termsRevision: staged.revision } : offer,
       ),
+      revision: baseRevision + 1,
     },
-  ].map((room) => ({ ...room, revision: baseRevision + 1 }));
+  ];
   const prepared = await pricing.prepare(
     propertyId,
     { currency: input.currency, rooms },
@@ -183,7 +162,7 @@ async function publish(
       expectedDraftRevision: review.revision,
       claimedFingerprint: review.fingerprint,
       declaration: review.declaration,
-      declaredVia: input.placeholder ? "first_run_placeholder" : "save_prices",
+      declaredVia: "first_run_placeholder",
       requestId: key("pricing_charges"),
     });
     snapshot = {
@@ -205,7 +184,7 @@ async function publish(
     ...effective,
     snapshot,
     draft: { id: draftId, revision: draftRevision },
-    requestId: key(input.placeholder ? FIRST_RUN_PLACEHOLDER_PUBLISH_STEP : "pricing_publish"),
+    requestId: key(FIRST_RUN_PLACEHOLDER_PUBLISH_STEP),
   });
   return Object.freeze({ ok: true, wrote: true });
 }

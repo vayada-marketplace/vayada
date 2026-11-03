@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const steps = vi.hoisted(() => ({
   currency: vi.fn(),
-  rooms: vi.fn(),
   payments: vi.fn(),
   pricing: vi.fn(),
   calendar: vi.fn(),
@@ -11,7 +10,6 @@ const steps = vi.hoisted(() => ({
 vi.mock("./hotelFirstRunSteps.js", async (original) => ({
   ...(await original<typeof import("./hotelFirstRunSteps.js")>()),
   runFirstRunCurrency: steps.currency,
-  runFirstRunRooms: steps.rooms,
   runFirstRunPayments: steps.payments,
 }));
 vi.mock("./hotelFirstRunPricing.js", async (original) => ({
@@ -27,7 +25,7 @@ import {
   type HotelFirstRunPorts,
   type HotelFirstRunWriteFacts,
 } from "./hotelFirstRunService.js";
-import type { HotelFirstRunActor } from "./hotelFirstRunSteps.js";
+import { firstRunIdempotencyKey, type HotelFirstRunActor } from "./hotelFirstRunSteps.js";
 
 const propertyId = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
 const roomTypeId = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f70819203";
@@ -39,20 +37,8 @@ const actor: HotelFirstRunActor = {
   correlationId: null,
   requestedAt: "2026-10-20T09:00:00.000Z",
 };
-const classicDouble = {
-  name: "Classic Double",
-  numberOfRooms: 8,
-  maxGuests: 2,
-  pricePerNight: "145",
-};
-const request = {
-  rooms: [classicDouble],
-  pricesIncludeMandatoryCharges: true,
-  guestPayment: "pay_at_property" as const,
-  plan: "commission" as const,
-  freeCancellationDays: 3 as const,
-  bed: "double" as const,
-};
+/** All the four-step setup sends (VAY-2451). */
+const request = { guestPayment: "pay_at_property" as const };
 const facts: HotelFirstRunWriteFacts = {
   propertyId,
   firstRunRoomTypeIds: [roomTypeId],
@@ -97,11 +83,6 @@ function service(
   const plans = {
     getPlanStatus: vi.fn(async () => ({ plan: null })),
     selectCommissionPlan: vi.fn(async () => ({ ok: true, status: "created", value: {} })),
-    createFixedPlanCheckout: vi.fn(async () => ({
-      ok: true,
-      status: "created",
-      value: { checkoutUrl: "https://stripe.example/checkout" },
-    })),
     ...options.plan,
   };
   const ports = {
@@ -129,24 +110,25 @@ beforeEach(() => {
     step.mockReset().mockResolvedValue({ ok: true, wrote: true });
 });
 
-describe("hotel first run (VAY-2247)", () => {
-  it("runs the seven steps in order and reports which ones wrote", async () => {
+describe("hotel first run (VAY-2247, VAY-2451)", () => {
+  it("runs the steps in order and reports which ones wrote", async () => {
     steps.payments.mockResolvedValue({ ok: true, wrote: false });
-    const result = await service().first.run(actor, request, "owner@example.com");
-    expect(result).toMatchObject({
+    const result = await service().first.run(actor, request);
+    expect(result).toEqual({
       ok: true,
-      ran: ["currency", "rooms", "pricing", "calendar", "guest_rules", "plan"],
-      checkoutUrl: null,
+      state: expect.anything(),
+      ran: ["currency", "pricing", "calendar", "guest_rules", "plan"],
     });
     expect(steps.currency).toHaveBeenCalledWith(expect.anything(), actor, "DE");
+    // The setup's room type gets the placeholder price, sized to its own guests.
+    expect(steps.pricing).toHaveBeenCalledTimes(1);
     expect(steps.pricing).toHaveBeenCalledWith(expect.anything(), actor, {
       roomTypeId,
-      capacity: { total: 2, adults: 2, children: 1 },
+      capacity: { total: 3, adults: 3, children: 2 },
       currency: "EUR",
-      pricePerNight: "145",
-      pricesIncludeMandatoryCharges: true,
       freeCancellationDays: 3,
     });
+    expect(steps.calendar).toHaveBeenCalled();
     expect(steps.guestRules).toHaveBeenCalledWith(expect.anything(), actor, {
       language: "de",
       hasCity: true,
@@ -155,13 +137,13 @@ describe("hotel first run (VAY-2247)", () => {
   });
 
   it("stops at the first step that fails, so nothing runs on top of it", async () => {
-    steps.pricing.mockResolvedValue({ ok: false, code: "mandatory_charges_declaration_required" });
-    const result = await service().first.run(actor, request, null);
+    steps.pricing.mockResolvedValue({ ok: false, code: "first_run_pricing_stale" });
+    const result = await service().first.run(actor, request);
     expect(result).toMatchObject({
       ok: false,
-      code: "mandatory_charges_declaration_required",
+      code: "first_run_pricing_stale",
       step: "pricing",
-      ran: ["currency", "rooms", "payments"],
+      ran: ["currency", "payments"],
     });
     expect(steps.calendar).not.toHaveBeenCalled();
     expect(steps.guestRules).not.toHaveBeenCalled();
@@ -169,145 +151,41 @@ describe("hotel first run (VAY-2247)", () => {
 
   it("makes the hotel live once every step is saved, and only then (1.5)", async () => {
     const done = service();
-    expect(await done.first.run(actor, request, null)).toMatchObject({ ok: true });
+    expect(await done.first.run(actor, request)).toMatchObject({ ok: true });
     expect(done.activation.activateWhenComplete).toHaveBeenCalledWith(actor);
 
     steps.calendar.mockResolvedValue({ ok: false, code: "first_run_calendar_failed" });
     const stopped = service();
-    await stopped.first.run(actor, request, null);
+    await stopped.first.run(actor, request);
     expect(stopped.activation.activateWhenComplete).not.toHaveBeenCalled();
   });
 
   it("reports a hotel it could not make live", async () => {
     const result = await service({
       activation: { ok: false, code: "first_run_profile_incomplete" },
-    }).first.run(actor, request, null);
+    }).first.run(actor, request);
     expect(result).toMatchObject({
       ok: false,
       code: "first_run_profile_incomplete",
       step: null,
-      ran: ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"],
+      ran: ["currency", "payments", "pricing", "calendar", "guest_rules", "plan"],
     });
   });
 
   it("refuses a second run for the same hotel while one is running", async () => {
-    expect(await service({ busy: true }).first.run(actor, request, null)).toMatchObject({
+    expect(await service({ busy: true }).first.run(actor, request)).toMatchObject({
       ok: false,
       code: "first_run_in_progress",
     });
     expect(steps.currency).not.toHaveBeenCalled();
   });
 
-  it("returns the Stripe checkout link for Fixed Fee", async () => {
-    const fixed = service();
-    const result = await fixed.first.run(
-      actor,
-      { ...request, plan: "fixed_fee" },
-      "owner@example.com",
-    );
-    expect(result).toMatchObject({ ok: true, checkoutUrl: "https://stripe.example/checkout" });
-    expect(fixed.plans.createFixedPlanCheckout).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customerEmail: "owner@example.com",
-        returnSurface: "booking-admin",
-      }),
-    );
-  });
-
-  it("doesn't price the owner's own rooms", async () => {
-    await service({ facts: { ...facts, firstRunRoomTypeIds: [] } }).first.run(actor, request, null);
-    expect(steps.pricing).not.toHaveBeenCalled();
-    expect(steps.calendar).toHaveBeenCalled();
-  });
-
-  it.each([
-    ["an invalid room", [{ ...classicDouble, maxGuests: 0 }]],
-    [
-      "two room types with the same name",
-      [classicDouble, { ...classicDouble, name: "classic double" }],
-    ],
-    [
-      "more than ten room types",
-      Array.from({ length: 11 }, (_, index) => ({ ...classicDouble, name: `Type ${index}` })),
-    ],
-  ])("refuses %s before any step", async (_case, rooms) => {
-    const result = await service().first.run(actor, { ...request, rooms }, null);
-    expect(result).toMatchObject({ ok: false, code: "first_run_room_invalid", step: "rooms" });
-    expect(steps.currency).not.toHaveBeenCalled();
-  });
-
-  it("prices each of its room types with its own price and guests (1.12)", async () => {
-    const suiteTypeId = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
-    const suite = { name: "Alpine Suite", numberOfRooms: 4, maxGuests: 3, pricePerNight: "210" };
-    steps.pricing.mockResolvedValue({ ok: true, wrote: true });
-    await service({
-      facts: { ...facts, firstRunRoomTypeIds: [roomTypeId, suiteTypeId] },
-    }).first.run(actor, { ...request, rooms: [classicDouble, suite] }, null);
-    expect(steps.rooms).toHaveBeenCalledWith(
-      expect.anything(),
-      actor,
-      [classicDouble, suite],
-      "double",
-    );
-    expect(steps.pricing.mock.calls.map((call) => call[2])).toEqual([
-      expect.objectContaining({
-        roomTypeId,
-        pricePerNight: "145",
-        capacity: { total: 2, adults: 2, children: 1 },
-      }),
-      expect.objectContaining({
-        roomTypeId: suiteTypeId,
-        pricePerNight: "210",
-        capacity: { total: 3, adults: 3, children: 2 },
-      }),
-    ]);
-  });
-
-  it("gives every room type the owner's bed and every price the owner's cancellation (1.12b)", async () => {
-    const suiteTypeId = "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f";
-    const suite = { name: "Alpine Suite", numberOfRooms: 4, maxGuests: 3, pricePerNight: "210" };
-    steps.pricing.mockResolvedValue({ ok: true, wrote: true });
-    await service({
-      facts: { ...facts, firstRunRoomTypeIds: [roomTypeId, suiteTypeId] },
-    }).first.run(
-      actor,
-      { ...request, rooms: [classicDouble, suite], freeCancellationDays: 14, bed: "twin" },
-      null,
-    );
-    expect(steps.rooms).toHaveBeenCalledWith(
-      expect.anything(),
-      actor,
-      [classicDouble, suite],
-      "twin",
-    );
-    expect(steps.pricing.mock.calls.map((call) => call[2].freeCancellationDays)).toEqual([14, 14]);
-  });
-});
-
-describe("the four-step setup's first run (VAY-2451)", () => {
-  const fourStep = { ...request, rooms: [], pricesIncludeMandatoryCharges: false, plan: null };
-
-  it("gives the room type the setup made the placeholder price, sized to its own guests", async () => {
-    const result = await service().first.run(actor, fourStep, null);
-    expect(result).toMatchObject({ ok: true });
-    expect(steps.rooms).toHaveBeenCalledWith(expect.anything(), actor, [], "double");
-    expect(steps.pricing).toHaveBeenCalledTimes(1);
-    expect(steps.pricing).toHaveBeenCalledWith(expect.anything(), actor, {
-      roomTypeId,
-      capacity: { total: 3, adults: 3, children: 2 },
-      currency: "EUR",
-      freeCancellationDays: 3,
-      placeholder: true,
-    });
-    expect(steps.calendar).toHaveBeenCalled();
-  });
-
   it("finishes without a room: no price, no calendar, and the hotel still goes live", async () => {
     const done = service({ facts: { ...facts, firstRunRoomTypeIds: [], roomTypes: [] } });
-    const result = await done.first.run(actor, fourStep, null);
+    const result = await done.first.run(actor, request);
     expect(result).toMatchObject({
       ok: true,
-      ran: ["currency", "rooms", "payments", "guest_rules", "plan"],
+      ran: ["currency", "payments", "guest_rules", "plan"],
     });
     expect(steps.pricing).not.toHaveBeenCalled();
     expect(steps.calendar).not.toHaveBeenCalled();
@@ -316,96 +194,57 @@ describe("the four-step setup's first run (VAY-2451)", () => {
   });
 
   it("leaves the owner's own room types to them", async () => {
-    await service({ facts: { ...facts, firstRunRoomTypeIds: [] } }).first.run(
-      actor,
-      fourStep,
-      null,
-    );
+    await service({ facts: { ...facts, firstRunRoomTypeIds: [] } }).first.run(actor, request);
     expect(steps.pricing).not.toHaveBeenCalled();
   });
 });
 
-describe("first run step 7: the plan (VAY-2247)", () => {
+describe("first run plan step: Commission (VAY-2247, VAY-2451)", () => {
   const ports = (plan: object = {}) =>
     ({
       plans: {
         getPlanStatus: vi.fn(async () => ({ plan: null })),
         selectCommissionPlan: vi.fn(async () => ({ ok: true, status: "created", value: {} })),
-        createFixedPlanCheckout: vi.fn(async () => ({
-          ok: true,
-          status: "created",
-          value: { checkoutUrl: "https://stripe.example/c" },
-        })),
         ...plan,
       },
     }) as unknown as HotelFirstRunPlanPorts;
+  const commissionCommand = (port: HotelFirstRunPlanPorts) =>
+    (port.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 
-  it("selects Commission with a stable command id and key", async () => {
+  it("selects Commission with the same command key as before", async () => {
     const commission = ports();
-    expect(
-      await runFirstRunPlan(commission, actor, { plan: "commission", customerEmail: null }),
-    ).toEqual({ ok: true, wrote: true });
-    const [command] = (commission.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock
-      .calls[0]!;
-    expect(command).toMatchObject({
+    expect(await runFirstRunPlan(commission, actor)).toEqual({ ok: true, wrote: true });
+    expect(commissionCommand(commission)).toMatchObject({
       propertyId,
-      idempotencyKey: expect.stringMatching(/^first-run:v1:plan:/),
+      idempotencyKey: firstRunIdempotencyKey(propertyId, "plan", "commission"),
     });
   });
 
-  it("VAY-2451: without a chosen plan, Commission, unless a Fixed Fee checkout is open", async () => {
-    const none = ports();
-    expect(await runFirstRunPlan(none, actor, { plan: null, customerEmail: null })).toEqual({
-      ok: true,
-      wrote: true,
-    });
+  it("waits for Stripe while a Fixed Fee checkout the 7-step setup started is open", async () => {
     const checkout = ports({
       getPlanStatus: vi.fn(async () => ({ plan: null, checkoutPending: true })),
     });
-    expect(await runFirstRunPlan(checkout, actor, { plan: null, customerEmail: null })).toEqual({
-      ok: true,
-      wrote: false,
-    });
+    expect(await runFirstRunPlan(checkout, actor)).toEqual({ ok: true, wrote: false });
     expect(checkout.plans.selectCommissionPlan).not.toHaveBeenCalled();
-    // The same key as an owner's own Commission choice: a retry from either replays.
-    const chosen = ports();
-    await runFirstRunPlan(chosen, actor, { plan: "commission", customerEmail: null });
-    expect(
-      (chosen.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock.calls[0]![0]
-        .idempotencyKey,
-    ).toBe(
-      (none.plans.selectCommissionPlan as ReturnType<typeof vi.fn>).mock.calls[0]![0]
-        .idempotencyKey,
-    );
   });
 
   it("keeps a plan the hotel already has", async () => {
     const existing = ports({ getPlanStatus: vi.fn(async () => ({ plan: "fixed" })) });
-    expect(
-      await runFirstRunPlan(existing, actor, { plan: "commission", customerEmail: null }),
-    ).toEqual({ ok: true, wrote: false });
+    expect(await runFirstRunPlan(existing, actor)).toEqual({ ok: true, wrote: false });
     expect(existing.plans.selectCommissionPlan).not.toHaveBeenCalled();
   });
 
-  it("needs the owner's email for the Stripe checkout and reports finance refusals", async () => {
-    expect(
-      await runFirstRunPlan(ports(), actor, { plan: "fixed_fee", customerEmail: null }),
-    ).toMatchObject({
-      ok: false,
-      code: "first_run_plan_email_missing",
-    });
+  it("reports a finance refusal", async () => {
     const refused = ports({
-      createFixedPlanCheckout: vi.fn(async () => ({
+      selectCommissionPlan: vi.fn(async () => ({
         ok: false,
-        code: "stripe_not_configured",
-        statusCode: 503,
+        code: "plan_change_blocked",
+        statusCode: 409,
       })),
     });
-    expect(
-      await runFirstRunPlan(refused, actor, { plan: "fixed_fee", customerEmail: "o@example.com" }),
-    ).toMatchObject({
+    expect(await runFirstRunPlan(refused, actor)).toMatchObject({
       ok: false,
-      code: "first_run_plan_stripe_not_configured",
+      code: "first_run_plan_plan_change_blocked",
     });
   });
 });

@@ -16,8 +16,6 @@ const input = {
   roomTypeId,
   capacity: { total: 2, adults: 2, children: 1 },
   currency: "EUR",
-  pricePerNight: "145",
-  pricesIncludeMandatoryCharges: true,
 };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -99,7 +97,7 @@ function fakePricing(
   return { ports: { pricing }, calls, draft: () => draft };
 }
 
-describe("first run step 4: the first price (VAY-2247)", () => {
+describe("first run pricing step: the placeholder price (VAY-2247, VAY-2451)", () => {
   it("stages terms, prepares, saves, declares the taxes, attaches the declaration and publishes", async () => {
     const fake = fakePricing();
     expect(await runFirstRunPricing(fake.ports, actor, input)).toEqual({ ok: true, wrote: true });
@@ -135,7 +133,7 @@ describe("first run step 4: the first price (VAY-2247)", () => {
     expect(fake.calls[6]![1]).toMatchObject({
       expectedDraftRevision: 1,
       declaration: "all_mandatory_charges_included",
-      declaredVia: "save_prices",
+      declaredVia: "first_run_placeholder",
     });
     expect(fake.calls[8]![1]).toMatchObject({
       expectedRevision: 0,
@@ -144,30 +142,9 @@ describe("first run step 4: the first price (VAY-2247)", () => {
     });
   });
 
-  it("never declares the taxes on the hotel's behalf", async () => {
-    const fake = fakePricing();
-    expect(
-      await runFirstRunPricing(fake.ports, actor, {
-        ...input,
-        pricesIncludeMandatoryCharges: false,
-      }),
-    ).toEqual({
-      ok: false,
-      code: "mandatory_charges_declaration_required",
-      cause: undefined,
-    });
-    expect(fake.calls).toEqual([]);
-  });
-
   it("publishes the placeholder price with the first run's own declaration and its marker (VAY-2451)", async () => {
     const fake = fakePricing();
-    const placeholder = {
-      roomTypeId,
-      capacity: input.capacity,
-      currency: input.currency,
-      placeholder: true as const,
-    };
-    expect(await runFirstRunPricing(fake.ports, actor, placeholder)).toEqual({
+    expect(await runFirstRunPricing(fake.ports, actor, input)).toEqual({
       ok: true,
       wrote: true,
     });
@@ -182,44 +159,13 @@ describe("first run step 4: the first price (VAY-2247)", () => {
         new RegExp(`^first-run:v1:${FIRST_RUN_PLACEHOLDER_PUBLISH_STEP}:[0-9a-f]{64}$`),
       ),
     });
-    // The old first run's own price keeps its request id, so the booking page treats it as real.
-    const owned = fakePricing();
-    await runFirstRunPricing(owned.ports, actor, input);
-    expect(owned.calls[8]![1]).toMatchObject({
-      requestId: expect.stringMatching(/^first-run:v1:pricing_publish:/),
-    });
   });
 
   it("never puts the placeholder next to prices the hotel already has (VAY-2451)", async () => {
     // Another room type is priced: the setup's room waits for the owner's own price.
     const fake = fakePricing({ otherPriced: true });
-    expect(
-      await runFirstRunPricing(fake.ports, actor, {
-        roomTypeId,
-        capacity: input.capacity,
-        currency: "EUR",
-        placeholder: true,
-      }),
-    ).toEqual({ ok: true, wrote: false });
+    expect(await runFirstRunPricing(fake.ports, actor, input)).toEqual({ ok: true, wrote: false });
     expect(fake.calls.map(([name]) => name)).toEqual(["read"]);
-  });
-
-  it("stages the owner's cancellation days, in their own draft (1.12b)", async () => {
-    const draftOf = async (freeCancellationDays?: 1 | 3 | 7 | 14) => {
-      const fake = fakePricing();
-      await runFirstRunPricing(fake.ports, actor, { ...input, freeCancellationDays });
-      return fake.calls[1]![1] as {
-        command: { terms: { cancellation: { terms: { freeCancellationDeadlineDays: number } } } };
-        context: { draftId: string };
-      };
-    };
-    const seven = await draftOf(7);
-    expect(seven.command.terms.cancellation.terms.freeCancellationDeadlineDays).toBe(7);
-    const standard = await draftOf();
-    expect(standard.command.terms.cancellation.terms.freeCancellationDeadlineDays).toBe(3);
-    // A retry with another choice can't replay the first one's terms request.
-    expect(seven.context.draftId).not.toBe(standard.context.draftId);
-    expect((await draftOf(3)).context.draftId).toBe(standard.context.draftId);
   });
 
   it("leaves a room type alone that already has a price", async () => {

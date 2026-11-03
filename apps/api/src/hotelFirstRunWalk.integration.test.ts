@@ -32,12 +32,12 @@ import {
   createHotelFirstRunRuntime,
 } from "./domains/hotelFirstRunRuntime.js";
 import type { HotelFirstRunRequest } from "./domains/hotelFirstRunService.js";
+import type { HotelFirstRunActor } from "./domains/hotelFirstRunSteps.js";
+import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
 import {
   runFirstRunRooms,
-  type HotelFirstRunActor,
-  type HotelFirstRunSetupPorts,
-} from "./domains/hotelFirstRunSteps.js";
-import { createPgHotelSetupChecklistRepository } from "./domains/hotelSetupChecklistRepository.js";
+  type FirstRunSetupRoomPorts,
+} from "./hotelFirstRunSetupRoomTestSupport.js";
 import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPmsCalendarAutoOpenSettingsRepository } from "./domains/pmsCalendarAutoOpenSettingsRepository.js";
@@ -85,14 +85,8 @@ const serving: PlatformMediaServingConfig = {
   privateDownloadTtlSeconds: 300,
   privateDownloadMaxTtlSeconds: 900,
 };
-const request: HotelFirstRunRequest = {
-  rooms: [{ name: "Garden Suite", numberOfRooms: 3, maxGuests: 2, pricePerNight: "14500" }],
-  pricesIncludeMandatoryCharges: true,
-  guestPayment: "pay_at_property",
-  plan: "commission",
-  freeCancellationDays: 3,
-  bed: "double",
-};
+/** All Booking Admin's four-step setup sends (VAY-2451); it makes its room type itself (`setupRoom`). */
+const request: HotelFirstRunRequest = { guestPayment: "pay_at_property" };
 
 function blockerCodes(readiness: ProductReadinessResult | ReadinessProviderFailure): string[] {
   if (readiness.outcome !== "evaluated") return [`provider_failure:${readiness.error.code}`];
@@ -358,9 +352,6 @@ describe.skipIf(!url)(
           }),
         ),
         roomRead: roomFacts,
-        roomFacts: roomCommands,
-        units,
-        labels,
         paymentRead: financeRead,
         payments: {
           replacePaymentMethods: (command) =>
@@ -466,7 +457,7 @@ describe.skipIf(!url)(
               roomFacts: roomCommands,
               units,
               labels,
-            } as unknown as HotelFirstRunSetupPorts,
+            } as unknown as FirstRunSetupRoomPorts,
             actor,
             [{ name, numberOfRooms, maxGuests, pricePerNight: "1" }],
           ),
@@ -489,14 +480,71 @@ describe.skipIf(!url)(
       };
     }
 
+    /** The owner's own price (18,500.00 a night) in Prices, replacing the placeholder: draft, declaration, publish. */
+    const saveRealPrices = async (h: Awaited<ReturnType<typeof hotel>>) => {
+      const pricing = h.pricing();
+      const current = (await pricing.read(h.propertyId))!;
+      const draftId = randomUUID();
+      const draft = { draftId, baseRevision: current.revision };
+      const prepared = await pricing.prepare(
+        h.propertyId,
+        {
+          currency: current.currency,
+          rooms: current.rooms.map((room) => ({
+            ...JSON.parse(
+              JSON.stringify(room).replace('"amountMinor":"10000"', '"amountMinor":"1850000"'),
+            ),
+            revision: current.revision + 1,
+          })),
+        },
+        draft,
+      );
+      await pricing.saveDraft(h.propertyId, {
+        draftId,
+        expectedDraftRevision: 0,
+        baseRevision: current.revision,
+        ...prepared,
+      });
+      const review = (await pricing.reviewCharges(h.propertyId, draftId))!;
+      const charges = await pricing.confirmCharges(h.propertyId, {
+        draftId,
+        expectedDraftRevision: review.revision,
+        claimedFingerprint: review.fingerprint,
+        declaration: review.declaration,
+        declaredVia: "save_prices",
+        requestId: randomUUID(),
+      });
+      const snapshot = {
+        ...review.snapshot,
+        ownerReferences: { ...review.snapshot.ownerReferences, charges: charges.id },
+      };
+      const saved = await pricing.saveDraft(h.propertyId, {
+        draftId,
+        expectedDraftRevision: review.revision,
+        baseRevision: current.revision,
+        sources: review.sources,
+        ...(review.effectiveSources ? { effectiveSources: review.effectiveSources } : {}),
+        snapshot,
+      });
+      await pricing.publish(h.propertyId, {
+        requestId: randomUUID(),
+        expectedRevision: current.revision,
+        sources: review.sources,
+        ...(review.effectiveSources ? { effectiveSources: review.effectiveSources } : {}),
+        snapshot,
+        draft: { id: draftId, revision: saved },
+      });
+    };
+
     it("saves every default a new hotel needs, then a second run writes nothing", async () => {
       const h = await hotel();
       try {
-        const result = await h.service().run(h.actor, request, h.email);
+        // The four-step setup made its room type before Finish setup (VAY-2451).
+        expect(await h.setupRoom("Garden Suite", 3, 2)).toMatchObject({ ok: true, wrote: true });
+        const result = await h.service().run(h.actor, request);
         expect(result, JSON.stringify(result)).toMatchObject({
           ok: true,
-          ran: ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"],
-          checkoutUrl: null,
+          ran: ["currency", "payments", "pricing", "calendar", "guest_rules", "plan"],
         });
         if (!result.ok) return;
         expect(result.state.nextStep).toBeNull();
@@ -578,11 +626,11 @@ describe.skipIf(!url)(
           await autoOpen.close();
         }
 
-        // Nothing the first run owns still blocks publishing; what's left is exactly what the held
-        // wave 1 PRs relax, and each of them shortens this list.
-        // VAY-2247 wave 1 done: a hotel with only its basics, one room and one price can publish
-        // (photos, a description and an amenities review are optional; the first run made it live).
-        expect(blockerCodes(await h.readiness())).toEqual([]);
+        // Only the placeholder price keeps the page from going live: the owner sets the real price in
+        // Prices (the four-step tests below). Photos, a description and an amenities review are optional.
+        expect(blockerCodes(await h.readiness())).toEqual([
+          expect.stringMatching(/:pricing_rates_placeholder$/),
+        ]);
         const property = (
           await h.admin.query(
             `SELECT property.lifecycle_status AS lifecycle, property.profile_status AS profile,
@@ -606,7 +654,7 @@ describe.skipIf(!url)(
         });
 
         // A second run finds everything in place.
-        const again = await h.service().run(h.actor, request, h.email);
+        const again = await h.service().run(h.actor, request);
         expect(again).toMatchObject({ ok: true, ran: [] });
       } finally {
         await h.close();
@@ -617,7 +665,10 @@ describe.skipIf(!url)(
       const h = await hotel();
       const closers: Array<() => Promise<unknown>> = [];
       try {
-        expect(await h.service().run(h.actor, request, h.email)).toMatchObject({ ok: true });
+        expect(await h.setupRoom("Garden Suite", 3, 2)).toMatchObject({ ok: true, wrote: true });
+        expect(await h.service().run(h.actor, request)).toMatchObject({ ok: true });
+        // The owner's own price replaces the placeholder, so the page can be published.
+        await saveRealPrices(h);
         const scope = { organizationId: h.organizationId, propertyId: h.propertyId };
         const audit = (name: string) => ({
           requestId: `${name}-${h.propertyId}`,
@@ -710,148 +761,8 @@ describe.skipIf(!url)(
       }
     });
 
-    it("creates several room types, numbers their rooms on across them and prices each (1.12)", async () => {
-      const h = await hotel();
-      try {
-        const rooms = [
-          ...request.rooms,
-          { name: "Ocean Villa", numberOfRooms: 2, maxGuests: 4, pricePerNight: "26000" },
-        ];
-        const result = await h.service().run(h.actor, { ...request, rooms }, h.email);
-        expect(result, JSON.stringify(result)).toMatchObject({ ok: true, checkoutUrl: null });
-        if (!result.ok) return;
-        expect(new Set(result.state.steps.map((step) => step.state))).toEqual(new Set(["done"]));
-
-        // Room names are unique in a hotel: the villas continue after the suites.
-        const { roomFacts } = h.ports;
-        const types = await roomFacts.listRoomTypeFacts(h.propertyId);
-        const byName = new Map(types.map((type) => [type.facts.name, type]));
-        expect([...byName.keys()].sort()).toEqual(["Garden Suite", "Ocean Villa"]);
-        expect(byName.get("Ocean Villa")?.facts.occupancy).toEqual({
-          maxGuests: 4,
-          maxAdults: 4,
-          maxChildren: 3,
-        });
-        const labels = async (name: string) =>
-          (
-            await roomFacts.listPhysicalRoomUnitIdentities(
-              h.propertyId,
-              byName.get(name)!.roomTypeId,
-            )
-          )
-            .map((unit) => `${unit.operationalLabel}:${unit.operationalLabelStatus}`)
-            .sort();
-        expect(await labels("Garden Suite")).toEqual([
-          "Room 1:verified",
-          "Room 2:verified",
-          "Room 3:verified",
-        ]);
-        expect(await labels("Ocean Villa")).toEqual(["Room 4:verified", "Room 5:verified"]);
-
-        // Both are priced and on the calendar, so nothing blocks publishing; a second run writes nothing.
-        expect(blockerCodes(await h.readiness())).toEqual([]);
-        expect(await h.service().run(h.actor, { ...request, rooms }, h.email)).toMatchObject({
-          ok: true,
-          ran: [],
-        });
-      } finally {
-        await h.close();
-      }
-    });
-
-    it("gives every room type the owner's bed and every price the owner's cancellation (1.12b)", async () => {
-      const h = await hotel();
-      try {
-        const rooms = [
-          ...request.rooms,
-          { name: "Ocean Villa", numberOfRooms: 2, maxGuests: 4, pricePerNight: "26000" },
-        ];
-        const chosen = {
-          ...request,
-          rooms,
-          freeCancellationDays: 7 as const,
-          bed: "twin" as const,
-        };
-        const result = await h.service().run(h.actor, chosen, h.email);
-        expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
-
-        const types = await h.ports.roomFacts.listRoomTypeFacts(h.propertyId);
-        expect(types.map((type) => [type.facts.name, type.facts.beds]).sort()).toEqual([
-          ["Garden Suite", [{ type: "twin", quantity: 2 }]],
-          ["Ocean Villa", [{ type: "twin", quantity: 2 }]],
-        ]);
-        const terms = await h.admin.query<{
-          room_type_id: string;
-          cancellation: unknown;
-          payment: unknown;
-        }>(
-          `SELECT DISTINCT room_type_id, terms->'cancellation' AS cancellation, terms->'payment' AS payment
-             FROM booking.pricing_v2_offer_terms WHERE property_id = $1`,
-          [h.propertyId],
-        );
-        expect(terms.rows).toHaveLength(2);
-        for (const row of terms.rows) {
-          expect(row.cancellation).toEqual({
-            kind: "flexible",
-            terms: {
-              type: "free_until_days_before_arrival",
-              freeCancellationDeadlineDays: 7,
-              afterDeadlinePenalty: "full_booking_amount",
-              noShowPenalty: "full_booking_amount",
-            },
-          });
-          expect(row.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property"] });
-        }
-        // Still a refundable rate paid at the hotel, so nothing blocks publishing.
-        expect(blockerCodes(await h.readiness())).toEqual([]);
-      } finally {
-        await h.close();
-      }
-    });
-
-    it("stops before pricing without the taxes tick and resumes there with it", async () => {
-      const h = await hotel();
-      try {
-        const stopped = await h
-          .service()
-          .run(h.actor, { ...request, pricesIncludeMandatoryCharges: false }, h.email);
-        expect(stopped).toMatchObject({
-          ok: false,
-          code: "mandatory_charges_declaration_required",
-          step: "pricing",
-          ran: ["currency", "rooms", "payments"],
-        });
-        expect((await h.service().read(h.actor)).nextStep).toBe("pricing");
-        expect(await h.service().readSetupProgress(h.actor)).toEqual({
-          guestPayment: false,
-        });
-        // A first run that stopped leaves the hotel being set up; finishing it makes it live.
-        const lifecycle = async () =>
-          (
-            await h.admin.query(
-              "SELECT lifecycle_status AS lifecycle FROM hotel_catalog.properties WHERE id=$1",
-              [h.propertyId],
-            )
-          ).rows[0]?.lifecycle;
-        expect(await lifecycle()).toBe("provisioning");
-        const resumed = await h.service().run(h.actor, request, h.email);
-        expect(resumed).toMatchObject({
-          ok: true,
-          ran: ["pricing", "calendar", "guest_rules", "plan"],
-        });
-        expect(await lifecycle()).toBe("active");
-      } finally {
-        await h.close();
-      }
-    });
-
     describe("the four-step setup (VAY-2451)", () => {
-      const fourStep: HotelFirstRunRequest = {
-        ...request,
-        rooms: [],
-        pricesIncludeMandatoryCharges: false,
-        plan: null,
-      };
+      const fourStep = request;
       /** The dashboards' go-live list, read on the ordinary login like the API does. */
       const goLive = (h: Awaited<ReturnType<typeof hotel>>) =>
         createHotelSetupChecklistService({
@@ -874,7 +785,7 @@ describe.skipIf(!url)(
         const h = await hotel();
         try {
           expect(await h.setupRoom("Pool Villa", 2, 4)).toMatchObject({ ok: true, wrote: true });
-          const result = await h.service().run(h.actor, fourStep, h.email);
+          const result = await h.service().run(h.actor, fourStep);
           expect(result, JSON.stringify(result)).toMatchObject({
             ok: true,
             ran: ["currency", "payments", "pricing", "calendar", "guest_rules", "plan"],
@@ -912,7 +823,7 @@ describe.skipIf(!url)(
           expect(lifecycle.rows[0]?.lifecycle_status).toBe("active");
 
           // A second run leaves the placeholder alone.
-          expect(await h.service().run(h.actor, fourStep, h.email)).toMatchObject({
+          expect(await h.service().run(h.actor, fourStep)).toMatchObject({
             ok: true,
             ran: [],
           });
@@ -932,58 +843,7 @@ describe.skipIf(!url)(
             firstRoomType: { name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 0, priced: true },
           });
           // ...until the owner saves real prices, the way the Prices page does.
-          const pricing = h.pricing();
-          const current = (await pricing.read(h.propertyId))!;
-          const draftId = randomUUID();
-          const draft = { draftId, baseRevision: current.revision };
-          const prepared = await pricing.prepare(
-            h.propertyId,
-            {
-              currency: current.currency,
-              rooms: current.rooms.map((room) => ({
-                ...JSON.parse(
-                  JSON.stringify(room).replace('"amountMinor":"10000"', '"amountMinor":"1850000"'),
-                ),
-                revision: current.revision + 1,
-              })),
-            },
-            draft,
-          );
-          await pricing.saveDraft(h.propertyId, {
-            draftId,
-            expectedDraftRevision: 0,
-            baseRevision: current.revision,
-            ...prepared,
-          });
-          const review = (await pricing.reviewCharges(h.propertyId, draftId))!;
-          const charges = await pricing.confirmCharges(h.propertyId, {
-            draftId,
-            expectedDraftRevision: review.revision,
-            claimedFingerprint: review.fingerprint,
-            declaration: review.declaration,
-            declaredVia: "save_prices",
-            requestId: randomUUID(),
-          });
-          const snapshot = {
-            ...review.snapshot,
-            ownerReferences: { ...review.snapshot.ownerReferences, charges: charges.id },
-          };
-          const saved = await pricing.saveDraft(h.propertyId, {
-            draftId,
-            expectedDraftRevision: review.revision,
-            baseRevision: current.revision,
-            sources: review.sources,
-            ...(review.effectiveSources ? { effectiveSources: review.effectiveSources } : {}),
-            snapshot,
-          });
-          await pricing.publish(h.propertyId, {
-            requestId: randomUUID(),
-            expectedRevision: current.revision,
-            sources: review.sources,
-            ...(review.effectiveSources ? { effectiveSources: review.effectiveSources } : {}),
-            snapshot,
-            draft: { id: draftId, revision: saved },
-          });
+          await saveRealPrices(h);
           expect(await pricingHead(h)).not.toMatch(/^first-run:/);
           expect(blockerCodes(await h.readiness())).toEqual([]);
           const after = await goLive(h);
@@ -1000,7 +860,7 @@ describe.skipIf(!url)(
       it("finishes without a room: no price and no calendar until the hotel has a room type", async () => {
         const h = await hotel();
         try {
-          const result = await h.service().run(h.actor, fourStep, h.email);
+          const result = await h.service().run(h.actor, fourStep);
           expect(result, JSON.stringify(result)).toMatchObject({
             ok: true,
             ran: ["currency", "payments", "guest_rules", "plan"],
@@ -1120,7 +980,7 @@ describe.skipIf(!url)(
       try {
         h = await hotel();
         const { actor, pool, readiness } = h;
-        expect((await h.service().run(actor, request, h.email)).ok).toBe(true);
+        expect((await h.service().run(actor, request)).ok).toBe(true);
         const checklist = createHotelSetupChecklistService({
           firstRun: h.service(),
           ...createPgHotelSetupChecklistRepository(pool),
@@ -1173,7 +1033,8 @@ describe.skipIf(!url)(
     it("a pricing read and the booking readiness that wait on each other give up within seconds; a sign-in still lands (VAY-2247 incident)", async () => {
       const h = await hotel();
       try {
-        expect((await h.service().run(h.actor, request, h.email)).ok).toBe(true);
+        expect(await h.setupRoom("Garden Suite", 3, 2)).toMatchObject({ ok: true, wrote: true });
+        expect((await h.service().run(h.actor, request)).ok).toBe(true);
         const settled = (work: Promise<unknown>) =>
           work.then(
             () => "done",
@@ -1243,8 +1104,8 @@ describe.skipIf(!url)(
       const h = await hotel();
       try {
         const [first, second] = await Promise.all([
-          h.service().run(h.actor, request, h.email),
-          h.service().run(h.actor, request, h.email),
+          h.service().run(h.actor, request),
+          h.service().run(h.actor, request),
         ]);
         const codes = [first, second].map((result) => (result.ok ? "ok" : result.code)).sort();
         expect(codes).toEqual(["first_run_in_progress", "ok"]);
