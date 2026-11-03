@@ -309,6 +309,7 @@
   "dashboard.goLive.photos.one": "{count} Foto",
   "dashboard.goLive.photos.other": "{count} Fotos",
   "dashboard.goLive.ratesPlaceholder": "Ihr Zimmer zeigt einen Platzhalterpreis. Legen Sie echte Preise fest, bevor Sie live gehen.",
+  "dashboard.goLive.roomPhotosMissing": "Fügen Sie jedem Zimmertyp ein Foto hinzu. Gäste buchen Zimmer, die sie sehen können.",
   "dashboard.goLive.publishTitle": "Buchungsseite veröffentlichen",
   "dashboard.goLive.publishLocked": "Verfügbar, sobald Zimmertypen und Preise eingetragen sind",
   "dashboard.goLive.publishReady": "Alles bereit. Gäste können buchen, sobald Sie veröffentlichen.",

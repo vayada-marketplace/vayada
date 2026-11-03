@@ -43,10 +43,12 @@ export type SetupChecklistWrite = { method: string; path: string; body: unknown 
  * VAY-2247 wave 2, VAY-2451: answers the go-live checklist API (GET, Review booking rules, Dismiss) from
  * `facts`, keeping each write, as the server would. The dashboards call it cross-origin, so preflights are
  * answered too. The first checklist (no /v2) isn't read by the dashboards any more: it answers 404.
+ * `now` changes facts at answer time, as when the booking page was published meanwhile.
  */
 export async function mockSetupChecklist(
   page: Page,
   facts: HotelGoLiveChecklistFacts,
+  now: () => Partial<HotelGoLiveChecklistFacts> = () => ({}),
 ): Promise<SetupChecklistWrite[]> {
   const writes: SetupChecklistWrite[] = [];
   let current = facts;
@@ -66,7 +68,7 @@ export async function mockSetupChecklist(
         current = { ...current, viewer: { ...current.viewer, ...body } };
       }
     }
-    return route.fulfill({ headers, json: buildHotelGoLiveChecklist(current) });
+    return route.fulfill({ headers, json: buildHotelGoLiveChecklist({ ...current, ...now() }) });
   });
   return writes;
 }

@@ -193,10 +193,22 @@ describe("the go-live checklist (VAY-2451)", () => {
   it("offers Publish once room types and real rates are in", () => {
     const real = { ...FINISHED, placeholderPrices: false };
     expect(buildHotelGoLiveChecklist(real)).toMatchObject({ canPublish: true, done: 3 });
-    // A room type without a photo, or one without prices, isn't enough.
+    expect(buildHotelGoLiveChecklist(real).roomPhotosMissing).toBe(false);
+    // A room type without a photo is enough (publishing needs none); the list suggests one.
     const noPhoto = { ...real, roomTypes: [{ ...real.roomTypes[0]!, photos: 0 }] };
-    expect(buildHotelGoLiveChecklist(noPhoto).canPublish).toBe(false);
-    expect(goLiveStates(noPhoto).room_types).toBe("todo");
+    expect(buildHotelGoLiveChecklist(noPhoto)).toMatchObject({
+      canPublish: true,
+      done: 3,
+      roomPhotosMissing: true,
+    });
+    expect(goLiveStates(noPhoto).room_types).toBe("done");
+    // A room type without rooms isn't; one without prices isn't either.
+    const noRooms = { ...real, roomTypes: [{ ...real.roomTypes[0]!, rooms: 0 }] };
+    expect(goLiveStates(noRooms).room_types).toBe("todo");
+    expect(buildHotelGoLiveChecklist(noRooms)).toMatchObject({
+      canPublish: false,
+      roomPhotosMissing: false,
+    });
     const unpriced = {
       ...real,
       roomTypes: [
@@ -249,6 +261,14 @@ describe("the go-live checklist (VAY-2451)", () => {
       later: [...checklist.later, { id: "something_new", state: "later" }],
     };
     expect(parseHotelGoLiveChecklist(newer)).toEqual(checklist);
+    // The photo hint, and an older server's answer without it (no hint).
+    const noPhoto = buildHotelGoLiveChecklist({
+      ...FINISHED,
+      roomTypes: [{ ...FINISHED.roomTypes[0]!, photos: 0 }],
+    });
+    expect(parseHotelGoLiveChecklist(JSON.parse(JSON.stringify(noPhoto)))).toEqual(noPhoto);
+    const { roomPhotosMissing: _hint, ...older } = JSON.parse(JSON.stringify(noPhoto));
+    expect(parseHotelGoLiveChecklist(older)?.roomPhotosMissing).toBe(false);
     expect(
       parseHotelGoLiveChecklist({ ...checklist, contractVersion: "hotel-setup-checklist.v1" }),
     ).toBeNull();

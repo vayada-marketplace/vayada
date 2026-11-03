@@ -309,6 +309,7 @@
   "dashboard.goLive.photos.one": "{count} foto",
   "dashboard.goLive.photos.other": "{count} fotos",
   "dashboard.goLive.ratesPlaceholder": "Su habitación muestra un precio provisional. Defina precios reales antes de publicar.",
+  "dashboard.goLive.roomPhotosMissing": "Añada una foto a cada tipo de habitación. Los huéspedes reservan habitaciones que pueden ver.",
   "dashboard.goLive.publishTitle": "Publicar la página de reservas",
   "dashboard.goLive.publishLocked": "Disponible en cuanto haya tipos de habitación y tarifas",
   "dashboard.goLive.publishReady": "Todo listo. Los huéspedes podrán reservar en cuanto la publique.",

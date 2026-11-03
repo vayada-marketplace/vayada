@@ -4107,6 +4107,7 @@
   "dashboard.goLive.photos.one": "{count} photo",
   "dashboard.goLive.photos.other": "{count} photos",
   "dashboard.goLive.ratesPlaceholder": "Your room shows a placeholder price. Set real prices before you go live.",
+  "dashboard.goLive.roomPhotosMissing": "Add a photo to each room type. Guests book rooms they can see.",
   "dashboard.goLive.publishTitle": "Publish your booking page",
   "dashboard.goLive.publishLocked": "Available once your room types and rates are in",
   "dashboard.goLive.publishReady": "All set. Guests can book as soon as you publish.",

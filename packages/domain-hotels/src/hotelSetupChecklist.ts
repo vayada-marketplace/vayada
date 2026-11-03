@@ -252,14 +252,19 @@ export type HotelGoLiveChecklist = Readonly<{
   total: number;
   /** Publish is offered once room types and real rates are in; readiness still has the last word. */
   canPublish: boolean;
+  /**
+   * A room type with rooms has no photo yet: the room types row stays done (publishing needs none) and
+   * suggests adding one.
+   */
+  roomPhotosMissing: boolean;
   /** The first room type, for "Deluxe Double · 2 rooms · up to 2 guests · 3 photos"; null without one. */
   firstRoomType: HotelGoLiveRoomType | null;
   placeholderPrices: boolean;
   viewer: Readonly<{ hidden: boolean; dismissed: boolean }>;
 }>;
 
-/** A room type the page can sell: it has rooms and at least one photo. */
-const sellable = (room: HotelGoLiveRoomType) => room.rooms > 0 && room.photos > 0;
+/** A room type the page can sell: it has rooms. A photo isn't needed to publish, only suggested. */
+const sellable = (room: HotelGoLiveRoomType) => room.rooms > 0;
 
 export function buildHotelGoLiveChecklist(facts: HotelGoLiveChecklistFacts): HotelGoLiveChecklist {
   const roomTypesDone = facts.roomTypes.some(sellable);
@@ -302,6 +307,7 @@ export function buildHotelGoLiveChecklist(facts: HotelGoLiveChecklistFacts): Hot
     done: items.filter((item) => item.state === "done").length,
     total: items.length,
     canPublish: roomTypesDone && ratesDone,
+    roomPhotosMissing: facts.roomTypes.some((room) => sellable(room) && room.photos === 0),
     firstRoomType: first ? Object.freeze({ ...first }) : null,
     placeholderPrices: facts.placeholderPrices,
     viewer: Object.freeze({ hidden: facts.viewer.hidden, dismissed: facts.viewer.dismissed }),
@@ -367,6 +373,8 @@ export function parseHotelGoLiveChecklist(value: unknown): HotelGoLiveChecklist 
     done,
     total,
     canPublish: value.canPublish === true,
+    // Older servers don't send it: no hint.
+    roomPhotosMissing: value.roomPhotosMissing === true,
     firstRoomType,
     placeholderPrices: value.placeholderPrices === true,
     viewer: Object.freeze({

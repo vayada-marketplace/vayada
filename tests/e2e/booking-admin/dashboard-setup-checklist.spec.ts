@@ -6,6 +6,12 @@ import {
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
+import {
+  BOOKING_PUBLICATION_PATH,
+  bookingPublicationReviewMock,
+  fulfillPublication,
+  publicationOperationMock,
+} from "../support/bookingPublicationMocks";
 import { watchPageHealth } from "../support/pageHealth";
 import { goLiveChecklistFacts, mockSetupChecklist } from "../support/setupChecklistMocks";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
@@ -97,8 +103,11 @@ test("replaces the resume banner after Exit setup, and continues setup here", as
 });
 
 test("a live hotel's card says so, and Dismiss keeps it away", async ({ page }) => {
+  const facts = goLiveChecklistFacts(BOOKING_ADMIN_PROPERTY_ID);
   const writes = await mockSetupChecklist(page, {
-    ...goLiveChecklistFacts(BOOKING_ADMIN_PROPERTY_ID),
+    ...facts,
+    // Its room has no photo: done all the same (publishing needs none), with a suggestion.
+    roomTypes: [{ ...facts.roomTypes[0]!, photos: 0 }],
     bookingRules: "acknowledged",
     bookingPublished: true,
   });
@@ -106,11 +115,57 @@ test("a live hotel's card says so, and Dismiss keeps it away", async ({ page }) 
 
   const card = page.getByRole("region", { name: "Your booking page is live" });
   await expect(card).toBeVisible();
+  const rooms = card.getByRole("listitem").filter({ hasText: "Room types" });
+  await expect(rooms.getByText("Recommended")).toBeVisible();
+  await expect(
+    rooms.getByText("Add a photo to each room type. Guests book rooms they can see."),
+  ).toBeVisible();
+  await expect(rooms.getByText("Required")).toHaveCount(0);
   await card.getByRole("button", { name: "Dismiss" }).click();
   await expect(card).toHaveCount(0);
   expect(
     writes.map(({ method, path, body }) => [method, path.split("/checklist")[1], body]),
   ).toEqual([["PUT", "/v2/viewer", { dismissed: true }]]);
+});
+
+test("Publish on the go-live list publishes, and the list then says the page is live", async ({
+  page,
+}) => {
+  let published = false;
+  await mockSetupChecklist(page, goLiveChecklistFacts(BOOKING_ADMIN_PROPERTY_ID), () => ({
+    bookingPublished: published,
+  }));
+  await page.route(BOOKING_PUBLICATION_PATH, async (route) => {
+    if (route.request().method() === "POST") {
+      published = true;
+      return fulfillPublication(route, {
+        json: publicationOperationMock(BOOKING_ADMIN_PROPERTY_ID),
+      });
+    }
+    const review = await bookingPublicationReviewMock(
+      BOOKING_ADMIN_PROPERTY_ID,
+      published ? "online" : "ready",
+    );
+    return fulfillPublication(route, {
+      json: {
+        ...review,
+        publishedUrl: published ? "https://hotel-alpenrose.next-booking.vayada.com" : null,
+      },
+    });
+  });
+  await page.goto("/dashboard");
+
+  const card = page.getByRole("region", { name: "Get ready to go live" });
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Publish", exact: true }).click();
+  // The booking page card publishes; once it says online, the list reads again (VAY-2451).
+  await expect(
+    page.getByRole("region", { name: "Your booking page", exact: true }).getByRole("link", {
+      name: "Open booking page",
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Your booking page is live" })).toBeVisible();
+  await expect(card).toHaveCount(0);
 });
 
 test("lays the go-live list out for phones", async ({ page }, testInfo) => {

@@ -309,6 +309,7 @@
   "dashboard.goLive.photos.one": "{count} foto",
   "dashboard.goLive.photos.other": "{count} foto",
   "dashboard.goLive.ratesPlaceholder": "Kamar Anda menampilkan harga sementara. Atur harga sebenarnya sebelum tayang.",
+  "dashboard.goLive.roomPhotosMissing": "Tambahkan foto ke setiap tipe kamar. Tamu memesan kamar yang bisa mereka lihat.",
   "dashboard.goLive.publishTitle": "Terbitkan halaman pemesanan Anda",
   "dashboard.goLive.publishLocked": "Tersedia setelah tipe kamar dan tarif Anda terisi",
   "dashboard.goLive.publishReady": "Semua siap. Tamu bisa memesan begitu Anda menerbitkannya.",

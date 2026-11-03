@@ -854,6 +854,7 @@
   "dashboard.goLive.photos.one": "{count} foto",
   "dashboard.goLive.photos.other": "{count} foto",
   "dashboard.goLive.ratesPlaceholder": "La tua camera mostra un prezzo provvisorio. Imposta prezzi reali prima di andare online.",
+  "dashboard.goLive.roomPhotosMissing": "Aggiungi una foto a ogni tipologia di camera. Gli ospiti prenotano le camere che possono vedere.",
   "dashboard.goLive.publishTitle": "Pubblica la tua pagina di prenotazione",
   "dashboard.goLive.publishLocked": "Disponibile dopo aver inserito tipologie di camera e tariffe",
   "dashboard.goLive.publishReady": "Tutto pronto. Gli ospiti possono prenotare appena pubblichi.",

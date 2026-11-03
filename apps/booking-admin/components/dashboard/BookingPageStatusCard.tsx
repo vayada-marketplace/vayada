@@ -27,7 +27,7 @@ import {
   getSelectedBookingHotelId,
   SELECTED_HOTEL_CHANGED_EVENT,
 } from "@/services/api/bookingHotelScope";
-import { PUBLISH_BOOKING_PAGE_EVENT } from "./DashboardSetupChecklist";
+import { BOOKING_PAGE_ONLINE_EVENT, PUBLISH_BOOKING_PAGE_EVENT } from "./DashboardSetupChecklist";
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_LIMIT = 15;
@@ -129,6 +129,15 @@ export function BookingPageStatusCard() {
 
   const status = review ? bookingPageStatus(review) : null;
   const publishing = status?.kind === "publishing";
+
+  // VAY-2451: tell the go-live list when the page goes online here, so it doesn't stay on "Get ready".
+  const lastKind = useRef<BookingPageStatus["kind"] | null>(null);
+  const kind = status?.kind ?? null;
+  useEffect(() => {
+    if (kind === "online" && lastKind.current !== null && lastKind.current !== "online")
+      window.dispatchEvent(new Event(BOOKING_PAGE_ONLINE_EVENT));
+    if (kind !== null) lastKind.current = kind;
+  }, [kind]);
 
   useEffect(() => {
     if (!publishing || polls >= POLL_LIMIT) return;

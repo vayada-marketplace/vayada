@@ -66,6 +66,7 @@ export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
   useEffect(() => {
     let active = true;
     let started = false;
+    let loadedPropertyId: string | null = null;
     const load = async () => {
       if (started) return;
       try {
@@ -73,6 +74,7 @@ export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
         // With several hotels the header may store the selection after the dashboard mounted.
         if (!propertyId || started || !active) return;
         started = true;
+        loadedPropertyId = propertyId;
         const checklist = await deps.client.loadGoLive(propertyId);
         if (active)
           setState(
@@ -85,12 +87,26 @@ export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
     };
     void load();
     const onSelected = () => void load();
+    // The booking page card saw the page go online (its Publish, the list's, or a check): read the list
+    // again, so it says the page is live instead of "Get ready to go live".
+    const onOnline = () => {
+      const propertyId = loadedPropertyId;
+      if (!propertyId) return;
+      void deps.client
+        .loadGoLive(propertyId)
+        .then((checklist) => {
+          if (active && checklist) setState({ kind: "go_live", propertyId, checklist });
+        })
+        .catch(() => undefined);
+    };
     window.addEventListener(SELECTED_HOTEL_CHANGED_EVENT, onSelected);
+    window.addEventListener(BOOKING_PAGE_ONLINE_EVENT, onOnline);
     return () => {
       active = false;
       window.removeEventListener(SELECTED_HOTEL_CHANGED_EVENT, onSelected);
+      window.removeEventListener(BOOKING_PAGE_ONLINE_EVENT, onOnline);
     };
-    // Loaded once per visit: the dependencies only change in tests.
+    // Loaded once per visit, and again once the page goes online: the dependencies only change in tests.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -146,6 +162,8 @@ export const BOOKING_ADMIN_GO_LIVE_PAGES: Record<
 
 /** The booking page card publishes; the go-live list's Publish asks it to (one publish path). */
 export const PUBLISH_BOOKING_PAGE_EVENT = "vayada:publish-booking-page";
+/** The booking page card says the page went online while the dashboard was open; the list reads again. */
+export const BOOKING_PAGE_ONLINE_EVENT = "vayada:booking-page-online";
 
 /** "Setup complete…" once, when Finish setup sent the owner here (?setupFinished=1). */
 function useSetupFinishedToast() {

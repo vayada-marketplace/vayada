@@ -854,6 +854,7 @@
   "dashboard.goLive.photos.one": "{count} фото",
   "dashboard.goLive.photos.other": "{count} фото",
   "dashboard.goLive.ratesPlaceholder": "Сейчас у номера временная цена. Укажите реальные цены перед публикацией.",
+  "dashboard.goLive.roomPhotosMissing": "Добавьте фото к каждому типу номеров. Гости бронируют номера, которые могут увидеть.",
   "dashboard.goLive.publishTitle": "Опубликуйте страницу бронирования",
   "dashboard.goLive.publishLocked": "Станет доступно, когда вы добавите типы номеров и цены",
   "dashboard.goLive.publishReady": "Всё готово. Гости смогут бронировать сразу после публикации.",

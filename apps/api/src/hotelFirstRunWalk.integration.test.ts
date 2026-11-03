@@ -924,11 +924,13 @@ describe.skipIf(!url)(
           expect(blockerCodes(await h.readiness())).toEqual([
             expect.stringMatching(/:pricing_rates_placeholder$/),
           ]);
-          // ...and the go-live list says so: rates wait on real prices, the room on its photo.
+          // ...and the go-live list says so: rates wait on real prices. The room is in; its missing photo
+          // is only suggested.
           expect(await goLive(h)).toMatchObject({
             phase: "go_live",
             setup: { done: 4, total: 4, next: null },
             canPublish: false,
+            roomPhotosMissing: true,
             placeholderPrices: true,
             firstRoomType: { name: "Pool Villa", rooms: 2, maxGuests: 4, photos: 0, priced: true },
           });
@@ -990,6 +992,9 @@ describe.skipIf(!url)(
           const after = await goLive(h);
           expect(after?.placeholderPrices).toBe(false);
           expect(after?.items.find((item) => item.id === "rates")?.state).toBe("done");
+          // Publish is offered without a room photo, as readiness has no blocker left.
+          expect(after?.items.find((item) => item.id === "room_types")?.state).toBe("done");
+          expect(after?.canPublish).toBe(true);
         } finally {
           await h.close();
         }
