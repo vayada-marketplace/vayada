@@ -15,7 +15,6 @@ import { usePricingRooms } from "./usePricingRooms";
  * "Create Room Type" saves them. The property's rooms are read for its currency and the room names. */
 export function NewRoomPricesTab({
   room,
-  facts,
   take,
   actions,
   locked,
@@ -23,7 +22,6 @@ export function NewRoomPricesTab({
   onAttention,
 }: {
   room: SetupRoom;
-  facts: { size: number | null; photo: string | null };
   take: MutableRefObject<(() => NewRoomPrices | null) | null>;
   actions: ReactNode;
   locked: boolean;
@@ -57,7 +55,6 @@ export function NewRoomPricesTab({
       key={rooms.propertyId}
       client={client}
       roomNames={{ ...rooms.names, [room.roomTypeId]: room.name }}
-      roomFacts={{ [room.roomTypeId]: facts }}
       setup={{ propertyId: rooms.propertyId, rooms: [room] }}
       roomTypeId={room.roomTypeId}
       onAttention={onAttention}

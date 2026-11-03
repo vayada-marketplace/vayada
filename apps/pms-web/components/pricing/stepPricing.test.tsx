@@ -16,7 +16,6 @@ import {
   normalNight,
   presetOption,
   sampleStay,
-  stayTotals,
   optionNames,
   optionSummary,
   otherWeekdays,
@@ -554,7 +553,7 @@ describe("option card counts", () => {
   });
 });
 
-describe("guest preview and price calendar", () => {
+describe("sample stay and price calendar", () => {
   it("starts the sample stay on the next Friday for at least two nights", () => {
     expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
     expect(sampleStay(design, "2026-10-11")).toEqual({
@@ -569,26 +568,6 @@ describe("guest preview and price calendar", () => {
     expect(sampleStay(three, "2026-10-14")).toEqual({
       checkIn: "2026-10-16",
       checkOut: "2026-10-19",
-    });
-  });
-  it("totals each option for the sample stay with the engine (the design's July weekend)", () => {
-    const totals = stayTotals(design, "2026-07-18", "2026-07-20");
-    expect(
-      Object.fromEntries(
-        Object.entries(totals).map(([id, result]) => [
-          id,
-          result.kind === "priced" ? result.totalMinor : result.reason,
-        ]),
-      ),
-    ).toEqual({
-      flexible: "30100",
-      nonrefundable: "27090",
-      breakfast: "33100",
-    });
-    // Two nights against a three-night minimum: the engine refuses the stay.
-    expect(stayTotals(setMinimumNights(design, 3), "2026-07-18", "2026-07-20").flexible).toEqual({
-      kind: "unavailable",
-      reason: "restriction",
     });
   });
   it("prices every night of a month with the night evaluator, weekends and seasons included", () => {

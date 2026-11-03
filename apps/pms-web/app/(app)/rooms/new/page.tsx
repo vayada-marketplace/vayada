@@ -295,7 +295,6 @@ export default function NewRoomPage() {
               name: form.name.trim() || t("rooms.new.title"),
               capacity: lastCapacity,
             }}
-            facts={{ size: form.size && form.size > 0 ? form.size : null, photo: null }}
             take={takePrices}
             locked={!!step}
             onPrices={setPricesEntered}
