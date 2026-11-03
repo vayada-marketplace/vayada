@@ -1017,7 +1017,7 @@
       "recommended": "Recommended"
     },
     "checking": "Checking {total, plural, one {# stay} other {# stays}} for {dates}…",
-    "count": "{available} of {total, plural, one {# stay is} other {# stays are}} available for {dates} and fit {guests}",
+    "count": "{available} of {total, plural, one {# stay is available for {dates} and fits {guests}} other {# stays are available for {dates} and fit {guests}}}",
     "adults": "{count, plural, one {# adult} other {# adults}}",
     "children": "{count, plural, one {# child} other {# children}}",
     "party": "{adults} and {children}",
@@ -1052,6 +1052,8 @@
       "vacation_rental": "Vacation rental",
       "motel": "Motel",
       "other": "Other"
-    }
+    },
+    "adultsOnly": "Adults only",
+    "approximateMixed": "Each stay charges in its own currency. Amounts marked ≈ are approximate conversions."
   }
 }

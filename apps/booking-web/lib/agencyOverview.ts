@@ -26,15 +26,16 @@ export type AgencyResults = {
 
 /**
  * The overview's cards for one search: available stays sorted as the guest chose (cheapest
- * first by default, comparing `comparable` amounts so stays in other currencies line up),
- * stays without a price after them in the page's "Recommended" order, and full stays apart.
- * The "Lowest price" badge marks the cheapest of two or more priced stays.
+ * first by default), stays without a comparable price after them in the page's "Recommended"
+ * order, and full stays apart. The "Lowest price" badge marks the cheapest of two or more
+ * compared stays. Stays in one currency compare as they are; across currencies through
+ * `comparable` (one currency for all), which is null where no rate converts.
  */
 export function agencyResults(
   stays: AgencyStay[],
   prices: AgencyStayPrices | null,
   sort: AccountBookingPageSort,
-  options: { badge: boolean; comparable: (amount: number, currency: string) => number },
+  options: { badge: boolean; comparable: (amount: number, currency: string) => number | null },
 ): AgencyResults {
   if (!prices)
     return {
@@ -49,12 +50,21 @@ export function agencyResults(
     const price = byId.get(stay.propertyId);
     return price ? [{ stay, price }] : [];
   });
-  const nightly = (price: AgencyStayPrice) =>
-    price.price ? options.comparable(price.price.nightly, price.price.currency) : null;
   const open = read.filter(
     ({ price }) => price.status === "available" || price.status === "unknown",
   );
-  const priced = open.filter(({ price }) => price.status === "available" && price.price);
+  const currencies = new Set(
+    open.flatMap(({ price }) =>
+      price.status === "available" && price.price ? [price.price.currency] : [],
+    ),
+  );
+  const nightly = (price: AgencyStayPrice) =>
+    price.status !== "available" || !price.price
+      ? null
+      : currencies.size === 1
+        ? price.price.nightly
+        : options.comparable(price.price.nightly, price.price.currency);
+  const priced = open.filter(({ price }) => nightly(price) !== null);
   const cheapest = priced.reduce<(typeof priced)[number] | null>(
     (best, card) => (best && nightly(best.price)! <= nightly(card.price)! ? best : card),
     null,

@@ -67,11 +67,29 @@ describe("agencyResults", () => {
     expect(recommended.cards.find((card) => card.lowest)?.stay.propertyId).toBe("mertha");
   });
 
-  it("compares prices in other currencies once converted", () => {
-    const mixed = answer([priced("mertha", 38), priced("escape", 30, "EUR")]);
-    const toUsd = (amount: number, currency: string) => (currency === "EUR" ? amount * 2 : amount);
+  it("compares prices in other currencies once converted, and leaves out what can't be", () => {
+    const mixed = answer([
+      priced("mertha", 38),
+      priced("escape", 30, "EUR"),
+      priced("mandala", 500_000, "IDR"),
+    ]);
+    const toUsd = (amount: number, currency: string) =>
+      currency === "USD" ? amount : currency === "EUR" ? amount * 2 : null;
     const results = agencyResults(stays, mixed, "price_low", { ...options, comparable: toUsd });
-    expect(ids(results.cards)).toEqual(["mertha", "escape"]);
+    // IDR has no rate: it keeps its card and price, after the compared stays, without the badge.
+    expect(ids(results.cards)).toEqual(["mertha", "escape", "mandala"]);
+    expect(results.cards.map((card) => card.lowest)).toEqual([true, false, false]);
+    const cheaper = answer([priced("mertha", 38), priced("mandala", 100, "IDR")]);
+    const none = agencyResults(stays, cheaper, "price_low", { ...options, comparable: toUsd });
+    // One compared stay is no "lowest".
+    expect(none.cards.some((card) => card.lowest)).toBe(false);
+  });
+
+  it("compares one currency as it is, with no rates at all", () => {
+    const idr = answer([priced("mertha", 900_000, "IDR"), priced("escape", 500_000, "IDR")]);
+    const results = agencyResults(stays, idr, "price_low", { ...options, comparable: () => null });
+    expect(ids(results.cards)).toEqual(["escape", "mertha"]);
+    expect(results.cards[0]!.lowest).toBe(true);
   });
 
   it("shows no badge when it's off, or for a single priced stay", () => {

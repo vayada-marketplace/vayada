@@ -64,7 +64,8 @@ export default function AnalyticsConsent() {
       document.removeEventListener("keydown", escape);
     };
   }, [open]);
-  if (!slug || !open) return null;
+  // VAY-2459: an agency's overview records no analytics, so it asks nothing.
+  if (!slug || !open || agency) return null;
   const save = (enabled: boolean) => {
     const saved = saveAnalyticsChoice(slug, enabled);
     setError(!saved);
@@ -87,7 +88,7 @@ export default function AnalyticsConsent() {
       <p className="mt-3 text-sm">{t("description")}</p>
       <p className="mb-3 mt-2 text-sm">
         {t.rich("controller", {
-          hotel: hotel?.name ?? agency?.name ?? "",
+          hotel: hotel?.name ?? "",
           policy: (chunks) => (
             <a
               href={PRIVACY_NOTICE_URL}

@@ -156,6 +156,8 @@ export function HotelProvider({
           try {
             const page = await getAgencyPage(slug);
             if (canceled) return;
+            // A page without a ready stay has nothing to show yet.
+            if (!page.stays.length) throw new ApiError("No stays yet.", 404, null);
             agencySlug.current = slug;
             setAgency(page);
             setLoading(false);

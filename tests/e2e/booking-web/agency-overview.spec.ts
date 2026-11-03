@@ -70,8 +70,8 @@ test("shows the agency's stays for the search, cheapest first, full stays at the
   await expect(first).toContainText("Mertha Carik Guest House");
   await expect(first).toContainText("Ubud");
   await expect(first).toContainText("2 room types free · fits 2 adults");
-  await expect(first).toContainText("from $38 / night");
-  await expect(first).toContainText("from $76 total");
+  await expect(first).toContainText("from US$38 / night");
+  await expect(first).toContainText("from US$76 total");
   await expect(first).toContainText("View rooms");
   // Its own page, with the search.
   const host = new URL(page.url()).host.replace(/^the-travel-ubud\./, `${staySlug("mertha")}.`);
@@ -137,7 +137,7 @@ test("opens with the agency's default sort, and only the header switches it has 
 
   await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("recommended");
   await expect(cards(page).first()).toContainText("The Escape Villa Ubud");
-  await expect(cards(page).first()).toContainText("from $95 / night");
+  await expect(cards(page).first()).toContainText("from US$95 / night");
   await expect(cards(page).filter({ hasText: "Lowest price" })).toHaveCount(0);
   await expect(page.getByTestId("agency-full-stays")).toHaveCount(0);
   const nav = page.getByRole("navigation");
@@ -157,7 +157,7 @@ test("Use these dates searches a full stay's next free dates", async ({ page, ba
     `9 of 10 stays are available for ${await range(page, next.checkIn, next.checkOut)} and fit 2 adults`,
   );
   await expect(page.getByTestId(`agency-stay-${staySlug("uma")}`)).toContainText(
-    "from $90 / night",
+    "from US$90 / night",
   );
   expect(requests.at(-1)?.searchParams.get("checkIn")).toBe(next.checkIn);
   // The search card and the address follow.
@@ -187,7 +187,7 @@ test("searches again for more guests in more rooms, and with a promo code", asyn
   await expect(page.getByTestId("agency-count")).toContainText("and fit 4 adults in 2 rooms");
   const escape = page.getByTestId(`agency-stay-${staySlug("escape")}`);
   await expect(escape).toContainText("fits 4 adults in 2 rooms");
-  await expect(escape).toContainText("from $190 / night");
+  await expect(escape).toContainText("from US$190 / night");
   await expect(escape).toHaveAttribute("href", /&adults=4&children=0&rooms=2$/);
   expect(Object.fromEntries(requests.at(-1)!.searchParams)).toMatchObject({
     adults: "4",
@@ -199,7 +199,7 @@ test("searches again for more guests in more rooms, and with a promo code", asyn
   await page.getByPlaceholder("Enter code").fill("AUTUMN");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#stay-search")).toContainText("AUTUMN");
-  await expect(escape).toContainText("from $171 / night");
+  await expect(escape).toContainText("from US$171 / night");
   await expect(escape).toHaveAttribute("href", /&rooms=2&promoCode=AUTUMN$/);
   await expect(page.getByTestId(`agency-stay-${staySlug("mertha")}`)).not.toHaveAttribute(
     "href",
@@ -214,6 +214,29 @@ test("searches again for more guests in more rooms, and with a promo code", asyn
   await expect(
     page.getByText("This code doesn't apply to any stay for these dates."),
   ).toBeVisible();
+  expect(requests.at(-1)?.searchParams.get("promoCode")).toBe("NOPE");
+  // It leaves the address, and no card carries it.
+  await expect.poll(() => new URL(page.url()).searchParams.has("promoCode")).toBe(false);
+  await expect(page.locator('[data-testid^="agency-stay-"][href*="promoCode"]')).toHaveCount(0);
+});
+
+test("a stay that takes no children is read and opened for the adults alone", async ({
+  page,
+  baseURL,
+}) => {
+  await mockAgencyPage(page, { page: agencyPage({ adultsOnly: ["mertha"] }) });
+  await page.goto(agencyUrl(baseURL, `/${search.replace("children=0", "children=1")}`));
+
+  await expect(page.getByTestId("agency-count")).toContainText("and fit 2 adults and 1 child");
+  await expect(
+    page.getByText("Prices are for the adults; each stay prices children on its own page."),
+  ).toBeVisible();
+  const mertha = page.getByTestId(`agency-stay-${staySlug("mertha")}`);
+  await expect(mertha).toContainText("2 room types free · fits 2 adults · Adults only");
+  await expect(mertha).toHaveAttribute("href", /&adults=2&children=0$/);
+  const escape = page.getByTestId(`agency-stay-${staySlug("escape")}`);
+  await expect(escape).toContainText("fits 2 adults and 1 child");
+  await expect(escape).toHaveAttribute("href", /&adults=2&children=1$/);
 });
 
 test("says when searches are busy, and Try again searches again", async ({ page, baseURL }) => {
@@ -226,15 +249,14 @@ test("says when searches are busy, and Try again searches again", async ({ page,
   });
   await page.goto(agencyUrl(baseURL, `/${search}`));
 
-  await expect(page.getByRole("alert")).toContainText(
-    "Too many searches right now. Please try again in a moment.",
-  );
+  const alert = page.locator("#stays").getByRole("alert");
+  await expect(alert).toContainText("Too many searches right now. Please try again in a moment.");
   // The stays are listed meanwhile, without prices.
   await expect(cards(page)).toHaveCount(10);
   busy = false;
   await page.getByRole("button", { name: "Try again" }).click();
-  await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(cards(page).first()).toContainText("from $38 / night");
+  await expect(alert).toHaveCount(0);
+  await expect(cards(page).first()).toContainText("from US$38 / night");
 });
 
 test("an agency page that is off isn't reachable", async ({ page, baseURL }) => {

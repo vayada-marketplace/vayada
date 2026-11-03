@@ -1017,7 +1017,7 @@
       "recommended": "Empfohlen"
     },
     "checking": "{total, plural, one {# Unterkunft wird} other {# Unterkünfte werden}} für {dates} geprüft…",
-    "count": "{available} von {total, plural, one {# Unterkunft ist} other {# Unterkünften sind}} für {dates} frei und passen für {guests}",
+    "count": "{available} von {total, plural, one {# Unterkunft ist für {dates} frei und passt für {guests}} other {# Unterkünften sind für {dates} frei und passen für {guests}}}",
     "adults": "{count, plural, one {# Erwachsenen} other {# Erwachsene}}",
     "children": "{count, plural, one {# Kind} other {# Kinder}}",
     "party": "{adults} und {children}",
@@ -1033,7 +1033,7 @@
     "nextFree": "Nächste freie Daten: {dates}",
     "noNextFree": "In den nächsten 60 Tagen keine freien Daten dieser Länge",
     "tooSmall": "Kein Zimmer passt für {guests}",
-    "useDates": "Diese Daten nehmen",
+    "useDates": "Diese Daten übernehmen",
     "busy": "Gerade gibt es zu viele Suchen. Bitte versuchen Sie es gleich noch einmal.",
     "failed": "Wir konnten die Preise nicht prüfen. Bitte versuchen Sie es noch einmal.",
     "retry": "Erneut versuchen",
@@ -1052,6 +1052,8 @@
       "vacation_rental": "Ferienunterkunft",
       "motel": "Motel",
       "other": "Sonstige"
-    }
+    },
+    "adultsOnly": "Nur Erwachsene",
+    "approximateMixed": "Jede Unterkunft berechnet in ihrer eigenen Währung. Mit ≈ markierte Beträge sind ungefähre Umrechnungen."
   }
 }

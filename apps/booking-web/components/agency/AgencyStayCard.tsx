@@ -4,10 +4,10 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import type { AgencyCard } from "@/lib/agencyOverview";
-import type { AgencyStayPrice } from "@/services/api/agencyPage";
 
 export type AgencyCardText = {
-  facts: (price: AgencyStayPrice) => string;
+  /** What is free for the search, for an available stay. */
+  facts: (card: AgencyCard) => string;
   href: (card: AgencyCard) => string;
 };
 
@@ -101,7 +101,7 @@ export default function AgencyStayCard({
           ) : (
             price &&
             price.status === "available" && (
-              <span className="text-sm text-gray-500">{text.facts(price)}</span>
+              <span className="text-sm text-gray-500">{text.facts(card)}</span>
             )
           )}
           <div className="mt-auto flex items-end justify-between gap-2 pt-2">

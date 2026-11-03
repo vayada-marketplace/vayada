@@ -15,6 +15,8 @@ import { bookingWebPublic } from "@/services/api/client";
 export type RateAttribution = { label: string; url: string };
 
 interface CurrencyContextValue {
+  /** The currency `rates` start from: the hotel's (an agency's: its design stay's). */
+  baseCurrency: string;
   selectedCurrency: string;
   setSelectedCurrency: (currency: string) => void;
   /** The hotel currency plus each display currency that has a rate. */
@@ -30,6 +32,7 @@ interface CurrencyContextValue {
 }
 
 const CurrencyContext = createContext<CurrencyContextValue>({
+  baseCurrency: "EUR",
   selectedCurrency: "EUR",
   setSelectedCurrency: () => {},
   availableCurrencies: ["EUR"],
@@ -195,6 +198,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   return (
     <CurrencyContext.Provider
       value={{
+        baseCurrency,
         selectedCurrency,
         setSelectedCurrency,
         availableCurrencies,

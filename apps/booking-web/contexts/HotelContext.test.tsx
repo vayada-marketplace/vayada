@@ -42,11 +42,15 @@ async function renderProvider(children: ReactNode, slug?: string) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   const root = createRoot(container);
+  // The guest's language, which a test may switch before rendering again.
+  const props = { locale: "en" };
   const render = () =>
     act(async () => {
       root.render(
         <NextIntlClientProvider locale="en" messages={enMessages}>
-          <HotelProvider slug={slug}>{children}</HotelProvider>
+          <HotelProvider slug={slug} locale={props.locale}>
+            {children}
+          </HotelProvider>
         </NextIntlClientProvider>,
       );
     });
@@ -54,6 +58,7 @@ async function renderProvider(children: ReactNode, slug?: string) {
   return {
     container,
     render,
+    props,
     cleanup() {
       act(() => root.unmount());
       vi.unstubAllGlobals();
@@ -195,6 +200,7 @@ const agency = {
   slug: "the-travel-ubud",
   name: "The Travel Ubud",
   design: { primaryColor: "#2b3033", fontPairing: "high-end-serif" },
+  stays: [{ propertyId: "escape" }],
 } as AgencyPage;
 
 // VAY-2459: hotels and agency pages share one address space.
@@ -207,16 +213,19 @@ it("shows an agency's page, in its design stay's look, at an address no hotel ha
     return createElement("p", null, agency?.name ?? "no agency");
   }
 
-  const { container, render, cleanup } = await renderProvider(<Probe />, "the-travel-ubud");
+  const { container, render, props, cleanup } = await renderProvider(<Probe />, "the-travel-ubud");
   try {
     expect(getAgencyPage).toHaveBeenCalledWith("the-travel-ubud");
     expect(container.textContent).toBe("The Travel Ubud");
     const root = document.documentElement.style;
     expect(root.getPropertyValue("--font-heading")).toBe("'Heading', serif");
     expect(root.getPropertyValue("--color-primary-600")).not.toBe("");
-    // Its page doesn't change with the language: no second read.
+    // Its page doesn't change with the language: neither read runs again.
+    props.locale = "de";
     await render();
+    expect(getHotel).toHaveBeenCalledTimes(1);
     expect(getAgencyPage).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toBe("The Travel Ubud");
   } finally {
     cleanup();
   }
@@ -248,6 +257,22 @@ it("offers Retry when the agency page can't be read", async () => {
   try {
     expect(container.querySelector("h2")?.textContent).toBe("Unable to Load Hotel");
     expect(container.querySelector("button")?.textContent).toBe("Retry");
+  } finally {
+    cleanup();
+  }
+});
+
+it("shows an agency page without a ready stay as not online", async () => {
+  getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockResolvedValue({ ...agency, stays: [] });
+
+  const { container, cleanup } = await renderProvider(<p>Overview</p>, "the-travel-ubud");
+  try {
+    expect(container.querySelector("h2")?.textContent).toBe(
+      "This booking page isn't online right now",
+    );
+    expect(container.querySelector("button")).toBeNull();
   } finally {
     cleanup();
   }

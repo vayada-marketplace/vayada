@@ -97,6 +97,8 @@ export function agencyPage(
   overrides: {
     header?: Record<string, unknown>;
     results?: Record<string, unknown>;
+    /** Stays (ids) whose page takes no children. */
+    adultsOnly?: string[];
   } = {},
 ) {
   return {
@@ -147,7 +149,7 @@ export function agencyPage(
       ],
       currency: "USD",
       location: null,
-      childrenEnabled: true,
+      childrenEnabled: !overrides.adultsOnly?.includes(stay.id),
     })),
   };
 }

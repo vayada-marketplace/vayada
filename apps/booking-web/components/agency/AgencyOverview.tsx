@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import type { AccountBookingPageSort } from "@vayada/domain-booking/account-booking-page";
@@ -19,7 +19,13 @@ import {
   type AgencySearch,
   type AgencyStayPrices,
 } from "@/services/api/agencyPage";
-import { agencyResults, formatStayRange, stayHref, stayNights } from "@/lib/agencyOverview";
+import {
+  agencyResults,
+  formatStayRange,
+  stayHref,
+  stayNights,
+  type AgencyCard,
+} from "@/lib/agencyOverview";
 import { mostRooms } from "@/lib/roomPicker";
 import { ensureMinOneNight } from "@/lib/utils";
 
@@ -27,6 +33,13 @@ import { ensureMinOneNight } from "@/lib/utils";
 const MAX_NIGHTS = 30;
 const SORTS: AccountBookingPageSort[] = ["price_low", "price_high", "recommended"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const sameSearch = (a: AgencySearch, b: AgencySearch) =>
+  a.checkIn === b.checkIn &&
+  a.checkOut === b.checkOut &&
+  a.adults === b.adults &&
+  a.children === b.children &&
+  a.rooms === b.rooms &&
+  a.promoCode === b.promoCode;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 function localDate(daysFromToday: number) {
@@ -69,7 +82,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
   const th = useTranslations("home");
   const locale = useLocale();
   const searchParams = useSearchParams();
-  const { convertPrice } = useCurrency();
+  const { baseCurrency, rates, approximate } = useCurrency();
   const childrenEnabled = agency.stays.some((stay) => stay.childrenEnabled);
   const [initial] = useState(() => searchFromUrl(searchParams, childrenEnabled));
   // What the card shows, and the search the stays were read for.
@@ -87,10 +100,13 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
   const [sort, setSort] = useState(agency.results.defaultSort);
   const [panel, setPanel] = useState<SearchPanel>(null);
   const [promoInput, setPromoInput] = useState(initial.promoCode ?? "");
-  // A code waiting for its first answer, then the one that applies to at least one stay.
-  const [promoPending, setPromoPending] = useState(initial.promoCode);
+  // The search a newly applied code went out with, until its answer says whether a stay takes it.
+  const [promoSearch, setPromoSearch] = useState<AgencySearch | null>(
+    initial.promoCode ? initial : null,
+  );
   const [appliedPromo, setAppliedPromo] = useState<string | null>(null);
   const [promoError, setPromoError] = useState("");
+  const handled = useRef<object | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -126,48 +142,68 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
     return () => controller.abort();
   }, [agency.slug, search]);
 
-  // A promo code is kept once some stay takes it for these dates.
+  // A code stays while some stay takes it for the search. Otherwise it leaves the search (and the
+  // address) and the promo field says why.
   useEffect(() => {
-    if (!promoPending) return;
-    if (failure?.search.promoCode === promoPending) {
-      setPromoPending(null);
+    if (!answer || handled.current === answer) return;
+    handled.current = answer;
+    const sent = answer.search === promoSearch;
+    if (sent) setPromoSearch(null);
+    const code = answer.search.promoCode;
+    if (code && answer.prices.stays.some((stay) => stay.price?.promoApplied)) {
+      setAppliedPromo(code);
+      if (sent) setPanel((open) => (open === "promo" ? null : open));
       return;
     }
-    if (answer?.search.promoCode !== promoPending) return;
-    if (answer.prices.stays.some((stay) => stay.price?.promoApplied)) {
-      setAppliedPromo(promoPending);
-      setPanel((open) => (open === "promo" ? null : open));
-    } else {
-      setPromoError(t("promoNoStay"));
-      setForm((current) => ({ ...current, promoCode: null }));
-    }
-    setPromoPending(null);
-  }, [answer, failure, promoPending, t]);
+    setAppliedPromo(null);
+    if (!code) return;
+    setPromoError(t("promoNoStay"));
+    setForm((current) => (current.promoCode === code ? { ...current, promoCode: null } : current));
+    const params = new URLSearchParams(window.location.search);
+    params.delete("promoCode");
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params}`);
+  }, [answer, promoSearch, t]);
 
-  const run = (next: AgencySearch, scroll = true) => {
+  /** Searches `next` (unless it is the search shown, which a failed search or `force` repeats)
+   * and returns the search object sent. */
+  const run = (
+    next: AgencySearch,
+    { scroll = true, force = false }: { scroll?: boolean; force?: boolean } = {},
+  ): AgencySearch | null => {
     setForm(next);
     if (stayNights(next.checkIn, next.checkOut) > MAX_NIGHTS) {
       setFormError(t("tooLong", { count: MAX_NIGHTS }));
-      return;
+      return null;
     }
     setFormError("");
-    setSearch({ ...next });
     if (scroll)
       document.getElementById("stays")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!force && !failure && sameSearch(next, search)) return null;
+    const sent = { ...next };
+    setSearch(sent);
+    return sent;
+  };
+  const retry = () => {
+    const sent = { ...search };
+    if (promoSearch === search) setPromoSearch(sent);
+    setSearch(sent);
   };
   // New dates search at once (the calendar closes with them); new guests once their panel closes.
   const changePanel = (next: SearchPanel) => {
     const party = (s: AgencySearch) => `${s.adults}/${s.children}/${s.rooms}`;
-    if (panel === "guests" && next !== "guests" && party(form) !== party(search)) run(form, false);
+    if (panel === "guests" && next !== "guests" && party(form) !== party(search))
+      run(form, { scroll: false });
     setPanel(next);
   };
   const results = useMemo(
     () =>
       agencyResults(agency.stays, answer?.prices ?? null, sort, {
         badge: agency.results.lowestPriceBadge,
-        comparable: convertPrice,
+        // In the rates' own currency; null where no rate converts it.
+        comparable: (amount, currency) =>
+          currency === baseCurrency ? amount : rates[currency] ? amount / rates[currency] : null,
       }),
-    [agency.stays, agency.results.lowestPriceBadge, answer, sort, convertPrice],
+    [agency.stays, agency.results.lowestPriceBadge, answer, sort, baseCurrency, rates],
   );
   const shown = answer?.search ?? search;
   const dates = formatStayRange(shown.checkIn, shown.checkOut, locale);
@@ -185,22 +221,36 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
     typeof window === "undefined"
       ? { protocol: "https:", host: "", pathname: "/" }
       : window.location;
+  // A stay that takes no children is read (and opened) for the adults alone, as its page does.
+  const adultsOnly = (card: AgencyCard) => shown.children > 0 && !card.stay.childrenEnabled;
   const text: AgencyCardText = {
-    facts: (price) =>
-      t("facts", { count: price.roomTypesFree, guests: guests(shown, price.rooms) }),
+    facts: (card) =>
+      [
+        t("facts", {
+          count: card.price!.roomTypesFree,
+          guests: guests(adultsOnly(card) ? { ...shown, children: 0 } : shown, card.price!.rooms),
+        }),
+        adultsOnly(card) && t("adultsOnly"),
+      ]
+        .filter(Boolean)
+        .join(" · "),
     href: (card) =>
       stayHref(
         location,
         agency.slug,
         card.stay.slug,
-        shown,
+        adultsOnly(card) ? { ...shown, children: 0 } : shown,
         card.price && {
           rooms: card.price.rooms,
           promoApplied: !!card.price.price?.promoApplied,
         },
       ),
   };
-  const anyCurrency = answer?.prices.stays.find((stay) => stay.price)?.price?.currency;
+  const currencies = Array.from(
+    new Set(
+      answer?.prices.stays.flatMap((stay) => (stay.price ? [stay.price.currency] : [])) ?? [],
+    ),
+  );
 
   return (
     <div className="min-h-screen bg-white overflow-x-hidden">
@@ -218,7 +268,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
         checkIn={form.checkIn}
         checkOut={form.checkOut}
         nights={stayNights(form.checkIn, form.checkOut)}
-        onDates={(checkIn, checkOut) => run({ ...form, checkIn, checkOut }, false)}
+        onDates={(checkIn, checkOut) => run({ ...form, checkIn, checkOut }, { scroll: false })}
         adults={form.adults}
         childCount={form.children}
         guestsNote={th("roomsCount", { count: form.rooms })}
@@ -251,7 +301,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
               setAppliedPromo(null);
               setPromoInput("");
               setPromoError("");
-              run({ ...form, promoCode: null }, false);
+              run({ ...form, promoCode: null }, { scroll: false });
             }}
             open={panel === "promo"}
             onOpen={() => changePanel("promo")}
@@ -265,10 +315,9 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
               const code = promoInput.trim();
               if (!code) return;
               setPromoError("");
-              setPromoPending(code);
-              run({ ...form, promoCode: code }, false);
+              setPromoSearch(run({ ...form, promoCode: code }, { scroll: false, force: true }));
             }}
-            loading={!!promoPending && searching}
+            loading={!!promoSearch && promoSearch === search && searching}
             error={promoError}
           />
         }
@@ -329,7 +378,13 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           {answer && !answer.prices.childrenPriced && (
             <p className="text-sm text-gray-500">{t("childrenNote")}</p>
           )}
-          {anyCurrency && <ApproximateAmountsNote currency={anyCurrency} />}
+          {currencies.length === 1 ? (
+            <ApproximateAmountsNote currency={currencies[0]!} />
+          ) : (
+            currencies.some((currency) => approximate(1_000_000, currency)) && (
+              <p className="text-xs text-gray-500">{t("approximateMixed")}</p>
+            )
+          )}
         </div>
 
         {(formError || failure) && (
@@ -341,7 +396,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
             {!formError && (
               <button
                 type="button"
-                onClick={() => setSearch({ ...search })}
+                onClick={retry}
                 className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-white hover:bg-primary-700"
               >
                 {t("retry")}
@@ -372,7 +427,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
             dates={dates}
             stays={results.full}
             tooSmall={(price) => t("tooSmall", { guests: guests(shown, price.rooms) })}
-            onUse={(next) => run({ ...shown, ...next })}
+            onUse={(next) => run({ ...form, ...next })}
           />
         )}
       </section>

@@ -1051,6 +1051,8 @@
       "vacation_rental": "Rumah liburan",
       "motel": "Motel",
       "other": "Lainnya"
-    }
+    },
+    "adultsOnly": "Khusus dewasa",
+    "approximateMixed": "Setiap penginapan menagih dalam mata uangnya sendiri. Jumlah bertanda ≈ adalah konversi perkiraan."
   }
 }
