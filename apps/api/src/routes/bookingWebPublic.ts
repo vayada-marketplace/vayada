@@ -15,6 +15,18 @@ import {
   createPublicPricingStayPrices,
   parseStayPricesQuery,
 } from "../domains/publicPricingStayPrices.js";
+import { createPublicPricingDisplayPool } from "../domains/publicPricingDisplayPool.js";
+import {
+  AgencyStayPricesBusy,
+  NEXT_FREE_TRIES,
+  createAgencyStayPrices,
+  parseAgencyStayPricesQuery,
+} from "../domains/agencyStayPrices.js";
+import {
+  readLiveAccountBookingPageStays,
+  readStaysWithPromoCode,
+} from "../domains/accountBookingPages.js";
+import { readFreeWindows } from "../domains/agencyNextFreeDates.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
 import type { VayadaPaymentCharges } from "../domains/pricingCardPayment.js";
@@ -256,6 +268,12 @@ export type BookingWebCheckoutCommandContext = {
 export type BookingWebCheckoutAdapter = {
   getPricingOffers?(slug: string): Promise<unknown>;
   getPricingStayPrices?(slug: string, query: unknown): Promise<unknown>;
+  /** VAY-2458: every stay of a live agency page, for one search. */
+  getAgencyStayPrices?(
+    slug: string,
+    query: unknown,
+    context?: { log?: { warn(fields: object, message: string): void } },
+  ): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
   acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
@@ -446,6 +464,10 @@ export async function registerBookingWebPublicRoutes(
   const now = options.now ?? (() => new Date());
   const eventRateLimit = createBookingWebEventRateLimit({ now: () => now().getTime() });
   const lookupRateLimit = createBookingLookupRateLimit({ now: () => now().getTime() });
+  const agencyRateLimit = createBookingLookupRateLimit({
+    now: () => now().getTime(),
+    limit: AGENCY_STAY_PRICES_LIMIT,
+  });
   const checkoutAdapter = options.checkoutAdapter;
 
   app.addHook("onRequest", async (request, reply) => {
@@ -522,6 +544,41 @@ export async function registerBookingWebPublicRoutes(
       if (!checkoutAdapter.getPricingStayPrices)
         throw createHttpError(404, "Stay prices unavailable.");
       return checkoutAdapter.getPricingStayPrices(request.params.slug, request.query);
+    },
+  );
+
+  // VAY-2458: availability and prices of every stay on an agency page. Guests' browsers call it
+  // directly, so the limit counts each guest (see BOOKING_LOOKUP_PATH).
+  app.get<{ Params: BookingWebHotelParams; Querystring: Record<string, string> }>(
+    "/agency-pages/:slug/stay-prices",
+    {
+      // Fastify's own lines for this route are off: they would carry the guest's address.
+      onError: async (request, _reply, error) => {
+        if (error.code === AGENCY_STAY_PRICES_BUSY) request.log.warn("Agency stay prices busy");
+        else if ((error.statusCode ?? 500) >= 500)
+          request.log.error({ err: error }, "Agency stay prices failed");
+      },
+    },
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-agency-stay-prices-read");
+      const limit = agencyRateLimit(request.ip || "unknown");
+      if (!limit.allowed) {
+        reply.header("Retry-After", String(limit.retryAfterSeconds));
+        throw createHttpError(429, "Too many searches. Please try again in a minute.");
+      }
+      if (!checkoutAdapter.getAgencyStayPrices)
+        throw createHttpError(404, "Agency stay prices unavailable.");
+      try {
+        return await checkoutAdapter.getAgencyStayPrices(request.params.slug, request.query, {
+          log: request.log,
+        });
+      } catch (error) {
+        if ((error as { code?: unknown }).code === AGENCY_STAY_PRICES_BUSY)
+          reply.header("Retry-After", "5");
+        throw error;
+      }
     },
   );
 
@@ -1044,6 +1101,12 @@ export async function registerBookingWebPublicRoutes(
  */
 export const BOOKING_LOOKUP_PATH = /^\/api\/booking-web\/hotels\/([^/]+)\/bookings\/lookup\/?$/;
 
+/** VAY-2458: guests' browsers also read agency page prices directly; its path and per-address
+ * searches per minute. */
+export const AGENCY_STAY_PRICES_PATH = /^\/api\/booking-web\/agency-pages\/[^/]+\/stay-prices\/?$/;
+const AGENCY_STAY_PRICES_LIMIT = 30;
+const AGENCY_STAY_PRICES_BUSY = "AGENCY_STAY_PRICES_BUSY";
+
 /** A hotel's verified custom domain may read that hotel's lookups, and no other hotel's. */
 async function isOwnCustomDomainLookup(
   request: FastifyRequest,
@@ -1433,7 +1496,7 @@ export function createTargetBookingWebCheckoutAdapter(
     });
 
   const manualMethods = bookingPageManualMethods(config);
-  const pricingOffers = createPublicPricingOfferCatalog(pool, {
+  const catalogOptions = {
     mediaServing: config.mediaServing,
     // VAY-2304: only rates guests can pay with what this booking page accepts now.
     payments: {
@@ -1444,7 +1507,8 @@ export function createTargetBookingWebCheckoutAdapter(
       deposits: config.replacementPricingDepositAcceptanceEnabled === true,
       manual: manualMethods,
     },
-  });
+  };
+  const pricingOffers = createPublicPricingOfferCatalog(pool, catalogOptions);
   const pricingAddons = createPublicPricingAddonCatalog(pool);
   // Room cards price every offer for each page view (VAY-2190). A small pool of their own keeps
   // guests' browsing from using up the booking flow's connections; a busy pool fails fast.
@@ -1456,6 +1520,28 @@ export function createTargetBookingWebCheckoutAdapter(
       })
     : pool;
   const stayPrices = createPublicPricingStayPrices(stayPricesPool, pricingOffers);
+  // VAY-2458: an agency page prices all its stays at once. Its read-only pool runs the same
+  // calculation without the pricing locks, so the account's quotes and bookings never wait on it.
+  // (Production's pool runtime gives every pool without session settings 8 connections.)
+  const displayPool = createPublicPricingDisplayPool({
+    connectionString: config.connectionString,
+    max: 4,
+  });
+  // Cards need no room photos: the catalog skips them without `mediaServing`.
+  const displayOffers = createPublicPricingOfferCatalog(displayPool, {
+    payments: catalogOptions.payments,
+  });
+  const displayPrices = createPublicPricingStayPrices(displayPool, displayOffers);
+  const agencyStayPrices = createAgencyStayPrices({
+    // Guests' browsing, so on the stay prices pool rather than the booking flow's.
+    pageStays: (slug) => readLiveAccountBookingPageStays(stayPricesPool, slug),
+    promoStays: (propertyIds, code) => readStaysWithPromoCode(stayPricesPool, propertyIds, code),
+    offers: (slug) => displayOffers.read(slug),
+    stayPrices: (slug, query, offered, budget) =>
+      displayPrices.readOffered(slug, query, offered, budget),
+    freeWindows: (slug, dates, slots, offered) =>
+      readFreeWindows(displayPool, slug, dates, slots, offered, NEXT_FREE_TRIES),
+  });
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
@@ -1965,6 +2051,26 @@ export function createTargetBookingWebCheckoutAdapter(
         });
       }
       if (!prices) throw createHttpError(404, "Stay prices unavailable.");
+      return prices;
+    },
+    async getAgencyStayPrices(slug, query, context) {
+      const search = parseAgencyStayPricesQuery(query);
+      if (!search) throw createHttpError(400, "Invalid search.");
+      let prices;
+      try {
+        prices = await agencyStayPrices.read(slug, search, context);
+      } catch (error) {
+        if (error instanceof AgencyStayPricesBusy)
+          throw createHttpError(
+            503,
+            "Too many searches right now. Please try again in a moment.",
+            AGENCY_STAY_PRICES_BUSY,
+          );
+        throw Object.assign(new Error("Stay prices temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (!prices) throw createHttpError(404, "Agency page not found.");
       return prices;
     },
     async quoteBooking(slug, request, context) {
@@ -2603,6 +2709,7 @@ export function createTargetBookingWebCheckoutAdapter(
       });
     },
     async close() {
+      await displayPool.end();
       if (ownsPool) {
         await pool.end();
         await stayPricesPool.end();

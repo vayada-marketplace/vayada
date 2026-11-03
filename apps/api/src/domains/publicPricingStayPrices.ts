@@ -5,15 +5,14 @@ import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 
 type Occupancy = { maxGuests: number; maxAdults: number; maxChildren: number };
-type OfferCatalog = {
-  read(slug: string): Promise<{
-    rooms: {
-      roomTypeId: string;
-      occupancy: Occupancy;
-      offers: { publicOfferKey: string; currency: string }[];
-    }[];
-  } | null>;
+export type Offered = {
+  rooms: {
+    roomTypeId: string;
+    occupancy: Occupancy;
+    offers: { publicOfferKey: string; currency: string }[];
+  }[];
 };
+type OfferCatalog = { read(slug: string): Promise<Offered | null> };
 
 export type StayPricesQuery = {
   checkIn: string;
@@ -161,125 +160,145 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
   return {
     async read(slug: string, requested: StayPricesQuery) {
       const offered = await catalog.read(slug);
-      if (!offered) return null;
-      const scoped = await short(pool, async (client) => {
-        const scope = await lockPublicPricingAuthority(client, slug);
-        if (!scope) return null;
-        return {
-          free: await freeRooms(
-            client,
-            scope.propertyId,
-            offered.rooms.map(({ roomTypeId }) => roomTypeId),
-            requested,
-          ),
-          // VAY-2200: with Promos off a code is ignored, so cards show the plain price.
-          promoCodes: (await readGuestModuleSwitches(client, scope.propertyId)).promoCodes,
-        };
-      });
-      if (!scoped) return null;
-      const { free } = scoped;
-      const query = scoped.promoCodes ? requested : { ...requested, promoCode: null };
-      let budget = MAX_PRICED_OFFERS;
-      const rooms = [];
-      const one = query.room;
-      // The booking page asks for its whole party as one room until the guest picks rooms one
-      // by one (VAY-2320).
-      const wholeParty = !!one && one.adults === query.adults && one.children === query.children;
-      const parts: { index: number; room: (typeof offered.rooms)[number]; adults: number }[] = [];
-      const partOffers = new Map<number, { adults: number; offers: OfferPrice[] }>();
-      const suggestedRooms = fewestRooms(
-        offered.rooms.filter((room) => (free.get(room.roomTypeId) ?? 0) >= 1),
-        query,
-      );
-      for (const room of offered.rooms) {
-        const roomCount = one
-          ? oneRoomFits(room.occupancy, one)
-            ? 1
-            : null
-          : roomsForParty(room.occupancy, query.adults, query.children);
-        const left = free.get(room.roomTypeId) ?? 0;
-        const available = roomCount !== null && left >= roomCount;
-        const offers = [];
-        for (const offer of room.offers) {
-          // Past the per-request cap an offer is "unpriced": still bookable, priced on /book.
-          if (available && budget-- <= 0) {
-            offers.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
-            continue;
-          }
-          const adults = one ? [one.adults] : splitAdults(query.adults, roomCount ?? 1);
-          const price =
-            available && roomCount !== null
-              ? await short(pool, (client) => stayTotal(client, slug, query, offer, adults))
-              : null;
-          offers.push(
-            price
-              ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
-              : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
-          );
-        }
-        // Additive (VAY-2393): a free room too small for the whole party takes part of it, so
-        // the guest can book it and pick a second room for the rest; priced below. Only while
-        // the rest (with every child) fits a free room: this type's second one, or another's.
-        const partAdults =
-          wholeParty && roomCount === null && left >= 1
-            ? adultsForPart(room.occupancy, query)
-            : null;
-        if (partAdults !== null) {
-          const rest = { adults: query.adults - partAdults, children: query.children };
-          if (
-            offered.rooms.some(
-              (other) =>
-                (free.get(other.roomTypeId) ?? 0) >= (other === room ? 2 : 1) &&
-                oneRoomFits(other.occupancy, rest),
-            )
-          )
-            parts.push({ index: rooms.length, room, adults: partAdults });
-        }
-        rooms.push({
-          roomTypeId: room.roomTypeId,
-          roomCount,
-          availability: available ? ("available" as const) : ("sold_out" as const),
-          roomsLeft: available && left <= FEW_LEFT ? left : null,
-          // Additive (VAY-2320), room by room only: free rooms of this type, up to the most a
-          // party books, so the group can tell when its own choices used them up.
-          ...(one && { roomsFree: Math.min(left, MAX_ROOMS) }),
-          offers,
-        });
-      }
-      // Parts are priced with what the whole party's offers left of the budget, so rooms that
-      // fit the party always come first (VAY-2393).
-      for (const { index, room, adults } of parts) {
-        const part: OfferPrice[] = [];
-        for (const offer of room.offers) {
-          if (budget-- <= 0) {
-            part.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
-            continue;
-          }
-          const price = await short(pool, (client) =>
-            stayTotal(client, slug, query, offer, [adults]),
-          );
-          part.push(
-            price
-              ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
-              : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
-          );
-        }
-        partOffers.set(index, { adults, offers: part });
-      }
-      return {
-        version: "public-pricing-stay-prices.v1" as const,
-        checkIn: query.checkIn,
-        checkOut: query.checkOut,
-        childrenPriced: (one ? one.children : query.children) === 0,
-        // Additive (VAY-2320).
-        suggestedRooms,
-        rooms: rooms.map((room, index) => {
-          const part = partOffers.get(index);
-          return { ...room, ...(part && { part }) };
-        }),
-      };
+      return offered ? prices(slug, requested, offered, true) : null;
+    },
+    /** VAY-2458: the same read over a catalog read the caller already has (the agency page reads
+     * a stay's catalog once for all its searches), without pricing parts of a group. `budget` is
+     * shared by every read of one agency search: past it, offers are "unpriced" as past the cap. */
+    readOffered(
+      slug: string,
+      requested: StayPricesQuery,
+      offered: Offered,
+      budget?: { left: number },
+    ) {
+      return prices(slug, requested, offered, false, budget);
     },
   };
+
+  async function prices(
+    slug: string,
+    requested: StayPricesQuery,
+    offered: Offered,
+    withParts: boolean,
+    shared?: { left: number },
+  ) {
+    const scoped = await short(pool, async (client) => {
+      const scope = await lockPublicPricingAuthority(client, slug);
+      if (!scope) return null;
+      return {
+        free: await freeRooms(
+          client,
+          scope.propertyId,
+          offered.rooms.map(({ roomTypeId }) => roomTypeId),
+          requested,
+        ),
+        // VAY-2200: with Promos off a code is ignored, so cards show the plain price.
+        promoCodes: (await readGuestModuleSwitches(client, scope.propertyId)).promoCodes,
+      };
+    });
+    if (!scoped) return null;
+    const { free } = scoped;
+    const query = scoped.promoCodes ? requested : { ...requested, promoCode: null };
+    let budget = MAX_PRICED_OFFERS;
+    const rooms = [];
+    const one = query.room;
+    // The booking page asks for its whole party as one room until the guest picks rooms one
+    // by one (VAY-2320).
+    const wholeParty = !!one && one.adults === query.adults && one.children === query.children;
+    const parts: { index: number; room: (typeof offered.rooms)[number]; adults: number }[] = [];
+    const partOffers = new Map<number, { adults: number; offers: OfferPrice[] }>();
+    const suggestedRooms = fewestRooms(
+      offered.rooms.filter((room) => (free.get(room.roomTypeId) ?? 0) >= 1),
+      query,
+    );
+    for (const room of offered.rooms) {
+      const roomCount = one
+        ? oneRoomFits(room.occupancy, one)
+          ? 1
+          : null
+        : roomsForParty(room.occupancy, query.adults, query.children);
+      const left = free.get(room.roomTypeId) ?? 0;
+      const available = roomCount !== null && left >= roomCount;
+      const offers = [];
+      for (const offer of room.offers) {
+        // Past the per-request cap an offer is "unpriced": still bookable, priced on /book.
+        if (available && (budget-- <= 0 || (shared && shared.left-- <= 0))) {
+          offers.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
+          continue;
+        }
+        const adults = one ? [one.adults] : splitAdults(query.adults, roomCount ?? 1);
+        const price =
+          available && roomCount !== null
+            ? await short(pool, (client) => stayTotal(client, slug, query, offer, adults))
+            : null;
+        offers.push(
+          price
+            ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
+            : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
+        );
+      }
+      // Additive (VAY-2393): a free room too small for the whole party takes part of it, so
+      // the guest can book it and pick a second room for the rest; priced below. Only while
+      // the rest (with every child) fits a free room: this type's second one, or another's.
+      const partAdults =
+        withParts && wholeParty && roomCount === null && left >= 1
+          ? adultsForPart(room.occupancy, query)
+          : null;
+      if (partAdults !== null) {
+        const rest = { adults: query.adults - partAdults, children: query.children };
+        if (
+          offered.rooms.some(
+            (other) =>
+              (free.get(other.roomTypeId) ?? 0) >= (other === room ? 2 : 1) &&
+              oneRoomFits(other.occupancy, rest),
+          )
+        )
+          parts.push({ index: rooms.length, room, adults: partAdults });
+      }
+      rooms.push({
+        roomTypeId: room.roomTypeId,
+        roomCount,
+        availability: available ? ("available" as const) : ("sold_out" as const),
+        roomsLeft: available && left <= FEW_LEFT ? left : null,
+        // Additive (VAY-2320), room by room only: free rooms of this type, up to the most a
+        // party books, so the group can tell when its own choices used them up.
+        ...(one && { roomsFree: Math.min(left, MAX_ROOMS) }),
+        offers,
+      });
+    }
+    // Parts are priced with what the whole party's offers left of the budget, so rooms that
+    // fit the party always come first (VAY-2393).
+    for (const { index, room, adults } of parts) {
+      const part: OfferPrice[] = [];
+      for (const offer of room.offers) {
+        if (budget-- <= 0) {
+          part.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
+          continue;
+        }
+        const price = await short(pool, (client) =>
+          stayTotal(client, slug, query, offer, [adults]),
+        );
+        part.push(
+          price
+            ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
+            : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
+        );
+      }
+      partOffers.set(index, { adults, offers: part });
+    }
+    return {
+      version: "public-pricing-stay-prices.v1" as const,
+      checkIn: query.checkIn,
+      checkOut: query.checkOut,
+      childrenPriced: (one ? one.children : query.children) === 0,
+      // Additive (VAY-2320).
+      suggestedRooms,
+      rooms: rooms.map((room, index) => {
+        const part = partOffers.get(index);
+        return { ...room, ...(part && { part }) };
+      }),
+    };
+  }
 }
 
 /** One short read transaction that always rolls back, with timeouts so a guest's page view
