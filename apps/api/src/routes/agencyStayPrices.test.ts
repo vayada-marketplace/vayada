@@ -161,3 +161,61 @@ it("is missing without the read, refuses an invalid search and hides database er
     await adapter.close?.();
   }
 });
+
+it("serves a live agency page through the public no-store route, and hides database errors (VAY-2459)", async () => {
+  const body = { version: "agency-page.v1", slug: "the-travel-ubud", stays: [] };
+  const app = buildApp({
+    logger: false,
+    publicHotelProfileRepository: { findProfileBySlug: async () => null },
+    bookingWebCheckoutAdapter: {
+      ...unusedBookingWebCheckoutAdapter,
+      getAgencyPage: async (slug) => {
+        expect(slug).toBe("the-travel-ubud");
+        return body;
+      },
+    },
+  });
+  try {
+    const reply = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/agency-pages/the-travel-ubud",
+    });
+    expect(reply.statusCode).toBe(200);
+    expect(reply.json()).toEqual(body);
+    expect(reply.headers["cache-control"]).toBe("no-store");
+  } finally {
+    await app.close();
+  }
+  let failures = 0;
+  const pool = {
+    connect: async () => {
+      throw new Error("private database detail");
+    },
+    query: async () => {
+      failures++;
+      throw new Error("private database detail");
+    },
+  } as unknown as Pool;
+  const adapter = createTargetBookingWebCheckoutAdapter({
+    externalChanges: externalBookingChanges,
+    connectionString: "postgresql://unused",
+    pool,
+    inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+  });
+  try {
+    await expect(adapter.getAgencyPage!("the-travel-ubud")).rejects.toMatchObject({
+      statusCode: 503,
+      message: "Agency page temporarily unavailable.",
+    });
+    // A failed read isn't kept: the next view reads again.
+    await expect(adapter.getAgencyPage!("the-travel-ubud")).rejects.toMatchObject({
+      statusCode: 503,
+    });
+    expect(failures).toBe(2);
+    // An address that can't be an agency page's is simply not found, without a read.
+    await expect(adapter.getAgencyPage!("Not A Page")).rejects.toMatchObject({ statusCode: 404 });
+    expect(failures).toBe(2);
+  } finally {
+    await adapter.close?.();
+  }
+});

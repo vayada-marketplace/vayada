@@ -3,12 +3,12 @@
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import HotelHeroImage from "@/components/booking/HotelHeroImage";
+import StayHero from "@/components/booking/StayHero";
+import StaySearchCard, { type SearchPanel } from "@/components/booking/StaySearchCard";
+import PromoField from "@/components/booking/PromoField";
 import { useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
-import DatePickerCalendar from "@/components/booking/DatePickerCalendar";
-import GuestSelector from "@/components/booking/GuestSelector";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
 import { useAddons, useHotel, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
@@ -70,64 +70,6 @@ interface AppliedPromo {
   discountValue: number;
 }
 
-function PromoPopover({
-  open,
-  onClose,
-  value,
-  onChange,
-  onApply,
-  loading,
-  error,
-  t,
-}: {
-  open: boolean;
-  onClose: () => void;
-  value: string;
-  onChange: (v: string) => void;
-  onApply: () => void;
-  loading: boolean;
-  error: string;
-  t: (key: string) => string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    if (open) document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  return (
-    <div
-      ref={ref}
-      className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-100 p-4 z-50 w-64"
-    >
-      <p className="text-sm font-semibold text-gray-900 mb-2.5">{t("promoTitle")}</p>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value.toUpperCase())}
-          placeholder={t("enterCode")}
-          className="flex-1 min-w-0 px-3 py-1.5 rounded-full border border-gray-300 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-        />
-        <button
-          onClick={onApply}
-          disabled={loading || !value.trim()}
-          className="px-4 py-1.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-xs disabled:opacity-50"
-        >
-          {loading ? "..." : t("apply")}
-        </button>
-      </div>
-      {error && <p className="text-[11px] text-red-500 mt-1.5">{error}</p>}
-    </div>
-  );
-}
-
 function HomePageContent() {
   const router = useRouter();
   const locale = useLocale();
@@ -177,9 +119,8 @@ function HomePageContent() {
   };
   const effectiveChildren = guestTypeSettings.childrenEnabled ? children : 0;
 
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  const [guestsOpen, setGuestsOpen] = useState(false);
-  const [promoOpen, setPromoOpen] = useState(false);
+  // The search card's open panel (dates, guests or promo).
+  const [panel, setPanel] = useState<SearchPanel>(null);
   const [promoCode, setPromoCode] = useState("");
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
   const [promoLoading, setPromoLoading] = useState(false);
@@ -663,8 +604,7 @@ function HomePageContent() {
   });
   // "Who sleeps where" lives in the guests picker, above the cards.
   const openGuests = () => {
-    setCalendarOpen(false);
-    setGuestsOpen(true);
+    setPanel("guests");
     document.getElementById("stay-search")?.scrollIntoView({ block: "start" });
   };
   // VAY-2448: the sort sits on the heading's row: its icon, "Sort by" and the select.
@@ -835,288 +775,113 @@ function HomePageContent() {
     <div className="min-h-screen bg-white overflow-x-hidden">
       <PublicStructuredData hotel={hotel} rooms={[]} locale={locale} />
 
-      {/* Hero Section: about 55% of the window, 400–640px (VAY-2448). */}
-      <div className="relative h-[clamp(400px,55vh,640px)] w-full">
-        <HotelHeroImage src={heroImage} alt={hotel.name} quality={90} sizes="100vw" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
+      <StayHero
+        image={heroImage}
+        alt={hotel.name}
+        heading={heroHeading}
+        subtext={heroSubtext}
+        navigation={<BookingNavigation showGallery />}
+      />
 
-        <BookingNavigation showGallery />
-
-        {/* Hero Content */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
-          <h1 className="text-5xl md:text-6xl lg:text-7xl font-heading italic text-white mb-4">
-            {heroHeading}
-          </h1>
-          {/* The hero can be 400px: a long description stays clear of the search card. */}
-          <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed line-clamp-3">
-            {heroSubtext}
-          </p>
-        </div>
-      </div>
-
-      {/* Search Bar — sticky on scroll */}
-      <div id="stay-search" className="sticky top-4 z-30 max-w-5xl mx-auto px-4 -mt-10">
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-row flex-wrap items-center gap-4 md:gap-6">
-          {/* Dates — clickable to open calendar */}
-          <div className="relative flex-1 min-w-[120px]">
-            <button
-              onClick={() => {
-                setCalendarOpen(!calendarOpen);
-                setGuestsOpen(false);
-              }}
-              className="flex items-center gap-3 w-full text-left hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
-            >
-              <div className="w-10 h-10 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
-                <svg
-                  className="w-5 h-5 text-primary-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                  />
-                </svg>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  {t("yourStay")}
-                </p>
-                <p className="text-base font-semibold text-gray-900">
-                  {formatDateShort(checkIn, locale)} — {formatDate(checkOut, locale)}
-                </p>
-                <p className="text-sm text-gray-500">{tc("nights", { count: nights })}</p>
-              </div>
-            </button>
-            <DatePickerCalendar
-              open={calendarOpen}
-              onClose={() => setCalendarOpen(false)}
-              checkIn={checkIn}
-              checkOut={checkOut}
-              onSelect={(ci, co) => {
-                setCheckIn(ci);
-                setCheckOut(co);
-              }}
-            />
-          </div>
-
-          {/* Divider */}
-          <div className="w-px h-12 bg-gray-200" />
-
-          {/* Guests — clickable to open selector */}
-          <div className="relative w-auto min-w-[100px]">
-            <button
-              onClick={() => {
-                setGuestsOpen(!guestsOpen);
-                setCalendarOpen(false);
-              }}
-              className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
-            >
-              <div className="hidden md:flex w-10 h-10 rounded-full bg-primary-50 items-center justify-center flex-shrink-0">
-                <svg
-                  className="w-5 h-5 text-primary-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-              </div>
-              <div className="text-left">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  {tc("guests")}
-                </p>
-                <p className="text-base font-semibold text-gray-900 whitespace-nowrap">
-                  {tc("adults", { count: adults })}
-                  {effectiveChildren > 0 && `, ${tc("children", { count: effectiveChildren })}`}
-                </p>
-                <p className="text-sm text-gray-500">
-                  {pickMode ? t("roomsCount", { count: roomCount }) : tc("guests")}
-                </p>
-              </div>
-            </button>
-            <GuestSelector
-              open={guestsOpen}
-              onClose={() => setGuestsOpen(false)}
-              adults={adults}
-              childCount={effectiveChildren}
-              adultAgeThreshold={guestTypeSettings.adultAgeThreshold}
-              childrenEnabled={guestTypeSettings.childrenEnabled}
-              onUpdate={(a, c) => {
-                setAdults(a);
-                setChildren(c);
-              }}
-              rooms={
-                rooms?.length
-                  ? {
-                      count: roomCount,
-                      fewest: fewestRooms,
-                      onChange: changeRoomCount,
-                      split: slots,
-                      onSplit: (next) => {
-                        setChanging(null);
-                        saveDraft({ split: next, picks });
-                      },
-                    }
-                  : undefined
+      <StaySearchCard
+        panel={panel}
+        onPanel={setPanel}
+        checkIn={checkIn}
+        checkOut={checkOut}
+        nights={nights}
+        onDates={(ci, co) => {
+          setCheckIn(ci);
+          setCheckOut(co);
+        }}
+        adults={adults}
+        childCount={effectiveChildren}
+        guestsNote={pickMode ? t("roomsCount", { count: roomCount }) : tc("guests")}
+        guests={{
+          adultAgeThreshold: guestTypeSettings.adultAgeThreshold,
+          childrenEnabled: guestTypeSettings.childrenEnabled,
+          onUpdate: (a, c) => {
+            setAdults(a);
+            setChildren(c);
+          },
+          rooms: rooms?.length
+            ? {
+                count: roomCount,
+                fewest: fewestRooms,
+                onChange: changeRoomCount,
+                split: slots,
+                onSplit: (next) => {
+                  setChanging(null);
+                  saveDraft({ split: next, picks });
+                },
               }
+            : undefined,
+        }}
+        promo={
+          // VAY-2200: no promo field while the hotel has Promos off or no live code.
+          promoCodesEnabled && (
+            <PromoField
+              applied={
+                appliedPromo && {
+                  code: appliedPromo.code,
+                  discount:
+                    appliedPromo.discountType === "percentage"
+                      ? ` (-${appliedPromo.discountValue}%)`
+                      : ` (-${appliedPromo.discountValue})`,
+                }
+              }
+              onRemove={() => {
+                setAppliedPromo(null);
+                setPromoCode("");
+                setPromoError("");
+                const params = new URLSearchParams(window.location.search);
+                if (params.has("promoCode")) {
+                  params.delete("promoCode");
+                  window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+                }
+              }}
+              open={panel === "promo"}
+              onOpen={() => setPanel("promo")}
+              onClose={() => setPanel(null)}
+              value={promoCode}
+              onChange={(v) => {
+                setPromoCode(v);
+                setPromoError("");
+              }}
+              onApply={async () => {
+                if (!promoCode.trim() || !slug) return;
+                setPromoLoading(true);
+                setPromoError("");
+                try {
+                  const result = await hotelService.validatePromoCode(slug, promoCode, {
+                    checkIn: checkIn || undefined,
+                  });
+                  if (result.valid) {
+                    setAppliedPromo({
+                      code: result.code,
+                      discountType: result.discountType!,
+                      discountValue: result.discountValue!,
+                    });
+                    setPanel(null);
+                  } else {
+                    setPromoError(result.message);
+                  }
+                } catch {
+                  setPromoError("Failed to validate promo code");
+                } finally {
+                  setPromoLoading(false);
+                }
+              }}
+              loading={promoLoading}
+              error={promoError}
             />
-          </div>
-
-          {/* VAY-2200: no promo field while the hotel has Promos off or no live code. */}
-          {promoCodesEnabled && (
-            <>
-              {/* Divider */}
-              <div className="hidden md:block w-px h-12 bg-gray-200" />
-
-              {/* Promo */}
-              <div className="relative flex justify-center md:justify-start w-full md:w-auto">
-                {appliedPromo ? (
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
-                      <svg
-                        className="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                      {appliedPromo.code}
-                      {appliedPromo.discountType === "percentage"
-                        ? ` (-${appliedPromo.discountValue}%)`
-                        : ` (-${appliedPromo.discountValue})`}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setAppliedPromo(null);
-                        setPromoCode("");
-                        setPromoError("");
-                        const params = new URLSearchParams(window.location.search);
-                        if (params.has("promoCode")) {
-                          params.delete("promoCode");
-                          window.history.replaceState(
-                            null,
-                            "",
-                            `${window.location.pathname}?${params}`,
-                          );
-                        }
-                      }}
-                      className="text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => {
-                        setPromoOpen(!promoOpen);
-                        setCalendarOpen(false);
-                        setGuestsOpen(false);
-                      }}
-                      className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
-                    >
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                        />
-                      </svg>
-                      <span className="text-sm font-medium">{t("addPromo")}</span>
-                    </button>
-                    {promoOpen && (
-                      <PromoPopover
-                        open={promoOpen}
-                        onClose={() => setPromoOpen(false)}
-                        value={promoCode}
-                        onChange={(v) => {
-                          setPromoCode(v);
-                          setPromoError("");
-                        }}
-                        onApply={async () => {
-                          if (!promoCode.trim() || !slug) return;
-                          setPromoLoading(true);
-                          setPromoError("");
-                          try {
-                            const result = await hotelService.validatePromoCode(slug, promoCode, {
-                              checkIn: checkIn || undefined,
-                            });
-                            if (result.valid) {
-                              setAppliedPromo({
-                                code: result.code,
-                                discountType: result.discountType!,
-                                discountValue: result.discountValue!,
-                              });
-                              setPromoOpen(false);
-                            } else {
-                              setPromoError(result.message);
-                            }
-                          } catch {
-                            setPromoError("Failed to validate promo code");
-                          } finally {
-                            setPromoLoading(false);
-                          }
-                        }}
-                        loading={promoLoading}
-                        error={promoError}
-                        t={t}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Check Availability Button */}
-          <button
-            onClick={() => {
-              setCalendarOpen(false);
-              setGuestsOpen(false);
-              setPromoOpen(false);
-              // The cards already show this stay; without them, try loading them again.
-              if (roomsFailed) reloadCatalog();
-              document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
-            }}
-            className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2"
-          >
-            {tc("checkAvailability")}
-          </button>
-        </div>
-      </div>
+          )
+        }
+        onCheck={() => {
+          // The cards already show this stay; without them, try loading them again.
+          if (roomsFailed) reloadCatalog();
+          document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+        }}
+      />
 
       {/* Main Content */}
       {/* VAY-2448: no stepper while choosing; the sort shares the heading's row. */}
@@ -1156,8 +921,7 @@ function HomePageContent() {
                   .join(", ")}`,
                 // Back to the search, with the dates open and focused.
                 onEdit: () => {
-                  setGuestsOpen(false);
-                  setCalendarOpen(true);
+                  setPanel("calendar");
                   const search = document.getElementById("stay-search");
                   search?.scrollIntoView({ block: "start" });
                   search?.querySelector("button")?.focus({ preventScroll: true });

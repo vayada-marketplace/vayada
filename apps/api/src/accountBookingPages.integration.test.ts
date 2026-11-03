@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPgAccountBookingPagesRepository,
+  readPublicAccountBookingPage,
   type AccountBookingPagesRepository,
 } from "./domains/accountBookingPages.js";
 import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
@@ -358,6 +359,103 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     } finally {
       await pricing.query("ROLLBACK").catch(() => undefined);
       pricing.release();
+    }
+  });
+
+  it("shows guests a live page with its stays' cards, and nothing while it is off (VAY-2459)", async () => {
+    const { organizationId, stays } = await travelUbud();
+    // Public pricing needs the account to own each stay's PMS property too.
+    for (const stay of [stays.escape, stays.mandala, stays.mansion])
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1::uuid, 'pms', 'pms_property', $2, 'owner', 'active')`,
+        [organizationId, stay],
+      );
+    const settings = customSettings(stays.escape!);
+    const slug = `agency-${randomUUID().slice(0, 8)}`;
+    const image = await headerImage(organizationId, "https://cdn.example/agency-hero-large.jpg");
+    expect(
+      await repository.save(
+        command(
+          organizationId,
+          update(stays, {
+            slug,
+            live: true,
+            settings,
+            propertyIds: [stays.mandala!, stays.escape!],
+            headerImageMediaId: image,
+          }),
+        ),
+      ),
+    ).toMatchObject({ ok: true });
+    // Included but no longer ready (no location), as when a stay stops being ready after a save:
+    // guests don't see it.
+    await admin.query(
+      `INSERT INTO booking.account_booking_page_properties (organization_id, property_id, position)
+       VALUES ($1::uuid, $2::uuid, 99)`,
+      [organizationId, stays.mansion],
+    );
+    // Read as the API reads it: the runtime login.
+    const runtime = new pg.Pool({ connectionString: fixture.connectionString, max: 1 });
+    try {
+      const page = await readPublicAccountBookingPage(runtime, slug);
+      expect(page).toMatchObject({
+        version: "agency-page.v1",
+        slug,
+        name: "The Travel Ubud",
+        page: { title: "The Travel Ubud", description: "13 villas, guest houses and resorts" },
+        header: {
+          topLeft: "name",
+          gallery: true,
+          language: true,
+          currency: true,
+          contact: { email: null, whatsapp: "+6281234567890" },
+          imageUrl: "https://cdn.example/agency-hero-large.jpg",
+        },
+        layout: settings.layout,
+        results: settings.results,
+        filters: settings.filters,
+      });
+      expect(page!.stays.map((stay) => [stay.propertyId, stay.name, stay.propertyType])).toEqual([
+        [stays.mandala, "Mandala Resort", "resort"],
+        [stays.escape, "Escape Villa", "villa"],
+      ]);
+      expect(page!.stays[0]).toMatchObject({
+        slug: `${PUBLIC_ID_PREFIX}${stays.mandala}`,
+        area: "Ubud",
+        currency: "EUR",
+        photos: [
+          expect.objectContaining({ url: "https://cdn.vayada.example/hotels/alpenrose/front.jpg" }),
+        ],
+        location: { latitude: 47.2692, longitude: expect.any(Number) },
+        childrenEnabled: expect.any(Boolean),
+      });
+      expect(page!.locales).toEqual({ default: "en", supported: ["en", "de"] });
+      // Nothing Booking Admin-only.
+      expect(JSON.stringify(page)).not.toMatch(/designPropertyId|contactEmail|organizationId/);
+
+      // Contact off: no contact details; no own image: the design stay's header (or its photo).
+      await admin.query(
+        `UPDATE booking.account_booking_pages
+         SET settings = jsonb_set(settings, '{header,contact}', 'false'),
+             header_image_media_object_id = NULL
+         WHERE organization_id = $1::uuid`,
+        [organizationId],
+      );
+      const plain = await readPublicAccountBookingPage(runtime, slug);
+      expect(plain?.header.contact).toBeNull();
+      expect(plain?.header.imageUrl).toMatch(/^https:\/\//);
+
+      // Off, or not an address: nothing.
+      await admin.query(
+        "UPDATE booking.account_booking_pages SET live = false WHERE organization_id = $1::uuid",
+        [organizationId],
+      );
+      expect(await readPublicAccountBookingPage(runtime, slug)).toBeNull();
+      expect(await readPublicAccountBookingPage(runtime, "Not A Page")).toBeNull();
+    } finally {
+      await runtime.end();
     }
   });
 
