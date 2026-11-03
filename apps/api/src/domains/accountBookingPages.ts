@@ -445,38 +445,49 @@ async function readinessOf(
   return readiness;
 }
 
-/**
- * VAY-2458: the stays guests see on a live agency page, in the page's order, each with its booking
- * address: included, ready by the rule above, and still the account's own. That is, the account
- * is the single organization linked as owner or operator to both the PMS and the catalog property,
- * as public pricing requires (`owningOrganization`). Null when no live page has this address.
- */
-export async function readLiveAccountBookingPageStays(
-  client: Queryable,
-  slug: string,
-): Promise<{
-  organizationId: string;
-  stays: { propertyId: string; slug: string; childrenEnabled: boolean }[];
-} | null> {
+/** A live agency page by its address: its account (an active hotel group), name, settings and own
+ * header image. */
+async function livePage(client: Queryable, slug: string) {
   if (!parseAccountBookingPageSlug(slug)) return null;
-  const page = (
-    await client.query<{ organizationId: string }>(
-      `SELECT page.organization_id::text AS "organizationId"
-       FROM booking.account_booking_pages page
-       JOIN identity.organizations account
-         ON account.id = page.organization_id AND account.kind = 'hotel_group'
-        AND account.status = 'active'
-       WHERE page.slug = $1 AND page.live`,
-      [slug],
-    )
-  ).rows[0];
-  if (!page) return null;
-  const rows = await propertyRows(client, page.organizationId, true);
+  return (
+    (
+      await client.query<{
+        organizationId: string;
+        name: string;
+        settings: unknown;
+        headerImageUrl: string | null;
+      }>(
+        `SELECT page.organization_id::text AS "organizationId", account.name, page.settings,
+                image.url AS "headerImageUrl"
+         FROM booking.account_booking_pages page
+         JOIN identity.organizations account
+           ON account.id = page.organization_id AND account.kind = 'hotel_group'
+          AND account.status = 'active'
+         LEFT JOIN LATERAL (${HEADER_IMAGE_SQL("page.header_image_media_object_id", "account.id")})
+           image ON TRUE
+         WHERE page.slug = $1 AND page.live`,
+        [slug],
+      )
+    ).rows[0] ?? null
+  );
+}
+
+/**
+ * The stays guests see on a live agency page, in the page's order, each with its booking address:
+ * included, ready by the rule above, and still the account's own. That is, the account is the
+ * single organization linked as owner or operator to both the PMS and the catalog property, as
+ * public pricing requires (`owningOrganization`).
+ */
+async function liveStays(
+  client: Queryable,
+  organizationId: string,
+): Promise<(PropertyRow & { slug: string })[]> {
+  const rows = await propertyRows(client, organizationId, true);
   const readiness = await readinessOf(client, rows);
   const ready = rows
     .filter((row) => readiness.get(row.propertyId)?.ready)
     .sort((a, b) => a.position! - b.position!);
-  if (!ready.length) return { organizationId: page.organizationId, stays: [] };
+  if (!ready.length) return [];
   const ids = ready.map((row) => row.propertyId);
   const [addresses, owners] = await Promise.all([
     client.query<{ propertyId: string; slug: string }>(
@@ -505,23 +516,133 @@ export async function readLiveAccountBookingPageStays(
   const address = new Map(addresses.rows.map((row) => [row.propertyId, row.slug]));
   const owned = new Set(
     owners.rows
-      .filter((row) => row.owners.length === 1 && row.owners[0] === page.organizationId)
+      .filter((row) => row.owners.length === 1 && row.owners[0] === organizationId)
       .map((row) => row.propertyId),
   );
+  return ready.flatMap((row) => {
+    const slug = address.get(row.propertyId);
+    return slug && owned.has(row.propertyId) ? [{ ...row, slug }] : [];
+  });
+}
+
+/** VAY-2458: the stays of a live agency page (`liveStays`). Null when no live page has this
+ * address. */
+export async function readLiveAccountBookingPageStays(
+  client: Queryable,
+  slug: string,
+): Promise<{
+  organizationId: string;
+  stays: { propertyId: string; slug: string; childrenEnabled: boolean }[];
+} | null> {
+  const page = await livePage(client, slug);
+  if (!page) return null;
   return {
     organizationId: page.organizationId,
-    stays: ready.flatMap((row) => {
-      const slug = address.get(row.propertyId);
-      return slug && owned.has(row.propertyId)
-        ? [
-            {
-              propertyId: row.propertyId,
-              slug,
-              childrenEnabled: childrenEnabled(row.publicContent),
-            },
-          ]
-        : [];
-    }),
+    stays: (await liveStays(client, page.organizationId)).map((row) => ({
+      propertyId: row.propertyId,
+      slug: row.slug,
+      childrenEnabled: childrenEnabled(row.publicContent),
+    })),
+  };
+}
+
+/** Photos of one stay shown in the agency page's gallery. */
+const GALLERY_PHOTOS = 24;
+
+/**
+ * VAY-2459: a live agency page as guests see it: its settings (without the Booking Admin-only
+ * contact details when Contact is off), its header image (its own upload; else the design stay's
+ * header, else its first photo), the design stay's colours, fonts and languages, and each live stay's
+ * card (`liveStays`), all from the stays' published booking pages. Null when no live page has this
+ * address.
+ */
+export async function readPublicAccountBookingPage(client: Queryable, slug: string) {
+  const page = await livePage(client, slug);
+  if (!page) return null;
+  const settings = readAccountBookingPageSettings(
+    page.settings,
+    defaultAccountBookingPageSettings(page.name),
+  );
+  const stays = (await liveStays(client, page.organizationId)).map((row) => ({
+    row,
+    hotel: publishedHotel(row.publicContent),
+  }));
+  const design =
+    stays.find(({ row }) => row.propertyId === settings.header.designPropertyId) ?? stays[0];
+  const { header } = settings;
+  const contact = header.contact && !!(header.contactEmail || header.contactWhatsapp);
+  return {
+    version: "agency-page.v1" as const,
+    slug,
+    name: page.name,
+    page: settings.page,
+    header: {
+      topLeft: header.topLeft,
+      gallery: header.gallery,
+      language: header.language,
+      currency: header.currency,
+      // Contact details only while Contact is on.
+      contact: contact ? { email: header.contactEmail, whatsapp: header.contactWhatsapp } : null,
+      imageUrl: page.headerImageUrl ?? design?.hotel.heroImage ?? design?.row.photoUrl ?? null,
+    },
+    design: {
+      primaryColor: design?.hotel.primaryColor ?? null,
+      fontPairing: design?.hotel.fontPairing ?? null,
+    },
+    locales: design?.hotel.locales ?? null,
+    layout: settings.layout,
+    results: settings.results,
+    filters: settings.filters,
+    stayPage: settings.stayPage,
+    stays: stays.map(({ row, hotel }) => ({
+      propertyId: row.propertyId,
+      slug: row.slug,
+      name: row.name,
+      propertyType: row.propertyType,
+      area: row.area,
+      photoUrl: row.photoUrl,
+      photos: hotel.photos.slice(0, GALLERY_PHOTOS),
+      currency: hotel.currency,
+      location: hotel.location,
+      childrenEnabled: childrenEnabled(row.publicContent),
+    })),
+  };
+}
+
+/** What the agency page shows from a stay's published booking page (`profile.hotel`). */
+function publishedHotel(publicContent: unknown) {
+  const hotel = (publicContent as { profile?: { hotel?: Record<string, unknown> } } | null)?.profile
+    ?.hotel;
+  const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+  const https = (value: unknown) =>
+    typeof value === "string" && value.startsWith("https://") ? value : null;
+  const branding = (hotel?.["branding"] ?? {}) as Record<string, unknown>;
+  const location = (hotel?.["location"] ?? {}) as Record<string, unknown>;
+  const latitude = location["latitude"],
+    longitude = location["longitude"];
+  const supported = hotel?.["supportedLocales"];
+  return {
+    heroImage: https(branding["heroImage"]),
+    primaryColor: text(branding["primaryColor"]),
+    fontPairing: text(branding["fontPairing"]),
+    locales:
+      text(hotel?.["defaultLocale"]) && Array.isArray(supported)
+        ? {
+            default: text(hotel?.["defaultLocale"])!,
+            supported: supported.filter((locale): locale is string => typeof locale === "string"),
+          }
+        : null,
+    currency: text(hotel?.["defaultCurrency"]),
+    photos: (Array.isArray(hotel?.["images"]) ? (hotel["images"] as unknown[]) : []).flatMap(
+      (image) => {
+        const { url, alt } = (image ?? {}) as { url?: unknown; alt?: unknown };
+        return https(url) ? [{ url: https(url)!, alt: text(alt) }] : [];
+      },
+    ),
+    location:
+      typeof latitude === "number" && typeof longitude === "number"
+        ? { latitude, longitude }
+        : null,
   };
 }
 
