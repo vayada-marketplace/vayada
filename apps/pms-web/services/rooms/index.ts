@@ -1010,8 +1010,11 @@ async function preparePhysicalRooms(
   if (activeUnits.length !== targetActiveUnitCount) {
     throw new Error("Physical room capacity changed. Reload the room and try again.");
   }
+  // A deleted (retired) room no longer holds its number, so new rooms can reuse it (VAY-2467).
   const usedLabels = new Set(
-    units.flatMap((unit) => (unit?.operationalLabel ? [unit.operationalLabel.toLowerCase()] : [])),
+    activeUnits.flatMap((unit) =>
+      unit?.operationalLabel ? [unit.operationalLabel.toLowerCase()] : [],
+    ),
   );
   for (let index = 0; index < activeUnits.length; index += 1) {
     const unit = activeUnits[index]!;
