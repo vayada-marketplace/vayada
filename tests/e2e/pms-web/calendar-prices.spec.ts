@@ -398,6 +398,16 @@ async function addRiceFieldVilla(page: Page) {
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guest-stay-times`, (route) =>
     route.fulfill({ json: pmsWebStayTimes({ checkInTime: "14:30", checkOutTime: "11:00" }) }),
   );
+  // New Booking's reads, for the sheets' New Booking.
+  const manualBookings = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/manual-bookings`;
+  await page.route(`${manualBookings}/capabilities`, (route) =>
+    route.fulfill({
+      json: { contractVersion: "pms-manual-booking.v1", canRecordPaidPayment: false },
+    }),
+  );
+  await page.route(`${manualBookings}/addons`, (route) =>
+    route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: [] } }),
+  );
 }
 
 test.describe("PMS phone calendar rooms and prices", () => {

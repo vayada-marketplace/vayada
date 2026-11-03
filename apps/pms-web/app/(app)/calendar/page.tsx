@@ -811,7 +811,8 @@ export default function CalendarPage() {
       {roomShuffleNotice && <RoomShuffleNotice {...roomShuffleNotice} />}
       {/* Mobile Calendar */}
       <div className="md:hidden flex-1 flex flex-col">
-        {loading && !data ? (
+        {/* Mounted on phones only: its room list would otherwise sit, hidden, beside the timeline's rows (VAY-2470). */}
+        {!isMobileViewport || (loading && !data) ? (
           <div className="p-6 animate-pulse">
             <div className="h-64 bg-gray-200 rounded" />
           </div>
