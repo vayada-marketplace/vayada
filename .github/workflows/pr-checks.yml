@@ -450,8 +450,9 @@ jobs:
           done
           curl --silent --fail --max-time 10 http://127.0.0.1:3003/login >/dev/null || { tail -50 "$server_log"; exit 1; }
           # The first run (VAY-2247) is a per-request server switch: a second server from the same
-          # build has it on for the quick-setup specs, which include the live next-stack smoke's
-          # click helpers (VAY-2357). The first shard runs them before its share of the rest.
+          # build has it on for the four-step setup specs (VAY-2451), which include the live
+          # next-stack smoke's click helpers (VAY-2357). The first shard runs them before its share
+          # of the rest.
           if [ "${{ matrix.shard }}" = 1 ]; then
             first_run_log="$RUNNER_TEMP/booking-admin-first-run-server.log"
             ONBOARDING_V2_ENABLED=true npm --workspace vayada-booking-engine-frontend-admin exec -- \
@@ -465,7 +466,7 @@ jobs:
             done
             curl --silent --fail --max-time 10 http://127.0.0.1:3013/login >/dev/null || { tail -50 "$first_run_log"; exit 1; }
             E2E_ONBOARDING_V2=1 E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3013 \
-              npm run e2e:booking-admin -- tests/e2e/booking-admin/setup-quick-*.spec.ts --workers=1 --retries=1
+              npm run e2e:booking-admin -- tests/e2e/booking-admin/setup-four-step-*.spec.ts --workers=1 --retries=1
           fi
           npm run e2e:booking-admin -- --workers=1 --retries=1 --shard=${{ matrix.shard }}/2
         env:

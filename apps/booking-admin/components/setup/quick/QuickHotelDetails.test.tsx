@@ -1,12 +1,7 @@
-import { renderToStaticMarkup } from "react-dom/server";
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  QuickContactsFromAccountNote,
-  QuickCurrencyPicker,
-  QuickUseMyDetails,
-} from "./QuickHotelDetails";
+import { QuickCurrencyPicker, QuickUseMyDetails } from "./QuickHotelDetails";
 import { currencyChoices, currencySymbol, quickHotelCurrency } from "./quickHotelCurrency";
 
 describe("quickHotelCurrency (VAY-2247)", () => {
@@ -63,12 +58,6 @@ describe("Your hotel details (VAY-2247)", () => {
     await act(async () => renderer.root.findByType("button").props.onClick());
     expect(onUse).toHaveBeenCalledOnce();
     renderer.unmount();
-  });
-
-  it("says where the contacts came from", () => {
-    expect(renderToStaticMarkup(<QuickContactsFromAccountNote />)).toContain(
-      "Filled from your account. Guests will see these — change them if your reception uses others.",
-    );
   });
 
   it("lets the owner pick another currency", async () => {

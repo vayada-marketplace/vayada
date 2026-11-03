@@ -1,15 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockGoogleMaps, type FakeGeocode } from "../support/googleMapsFake";
-import { mockBookingDashboardExit } from "../support/setupExitHandoff";
-import {
-  QUICK_SETUP_PROPERTY_ID,
-  mockQuickSetupExistingHotel,
-  primeQuickSetupBrowserState,
-  quickSetupUrl,
-} from "../support/quickSetupMocks";
 
-// VAY-2444: onboarding's "Where it is" takes a Google Maps link, as the room editor does: the pin, the address
-// Google gives it, the time zone and currency, the room editor's map and "Guests will see". The quick setup sits
+import {
+  FOUR_STEP_HOTEL,
+  FOUR_STEP_PROPERTY_ID as propertyId,
+  OLDER_HOTEL,
+  fourStepSetupUrl,
+  mockFourStepOwner,
+  primeSetupBrowserState,
+} from "../support/fourStepSetupMocks";
+import { mockGoogleMaps, type FakeGeocode } from "../support/googleMapsFake";
+import { mockRoomOwnerApis } from "../support/roomOwnerMocks";
+
+// VAY-2444, VAY-2451: the four-step setup's "Location & contact" takes a Google Maps link, as the room editor
+// does: the pin, the address Google gives it, the time zone and currency, and "Guests will see". The setup sits
 // behind ONBOARDING_V2_ENABLED (PR Checks' first shard runs a server with it on).
 test.skip(
   process.env.E2E_ONBOARDING_V2 !== "1",
@@ -17,7 +20,6 @@ test.skip(
 );
 
 const heading = (page: Page, name: string) => page.getByRole("heading", { name, level: 1 });
-const back = (page: Page) => page.getByRole("button", { name: "Back" }).first();
 const proceed = (page: Page) => page.getByRole("button", { name: "Continue", exact: true });
 const part = (long_name: string, types: string[], short_name = long_name) => ({
   long_name,
@@ -56,43 +58,52 @@ const MUNICH: FakeGeocode = {
   ],
 };
 
-/** The existing hotel's "Where it is" edit, opened on the address search (the hotel already has an address). */
-async function openWhereItIs(page: Page, baseURL: string | undefined, geocode: FakeGeocode) {
-  await primeQuickSetupBrowserState(page);
-  const state = await mockQuickSetupExistingHotel(page);
+/** A hotel with its address, contacts and pin; its first room isn't saved yet. */
+const HOTEL_PROFILE = {
+  ...OLDER_HOTEL,
+  location: {
+    ...OLDER_HOTEL.location,
+    streetAddress: FOUR_STEP_HOTEL.streetAddress,
+    postalCode: FOUR_STEP_HOTEL.postalCode,
+    timezone: "Europe/Berlin",
+    latitude: 48.137,
+    longitude: 11.575,
+  },
+};
+
+/** The hotel's "Location & contact", opened on the address search (the hotel already has an address). */
+async function openLocation(page: Page, baseURL: string | undefined, geocode: FakeGeocode) {
+  await primeSetupBrowserState(page);
+  const writes = await mockFourStepOwner(page, { profile: HOTEL_PROFILE });
+  await mockRoomOwnerApis(page);
   await mockGoogleMaps(page, { geocode, placeAutocompleteElement: true });
-  await page.goto(quickSetupUrl(baseURL));
-  await expect(heading(page, "Your first room and price")).toBeVisible();
-  await back(page).click();
-  await expect(heading(page, "How guests reach you")).toBeVisible();
-  await back(page).click();
-  await expect(heading(page, "Where it is")).toBeVisible();
+  await page.goto(fourStepSetupUrl(baseURL, `&propertyId=${propertyId}&step=location`));
+  await expect(heading(page, "Location & contact")).toBeVisible();
   // The saved address shows first; Change opens the search.
   await page.getByRole("button", { name: "Change", exact: true }).first().click();
   await expect(page.getByRole("button", { name: "Paste a Google Maps link" })).toBeVisible();
-  return state;
+  return writes;
 }
 
 test("a pasted Google Maps link sets the pin, the address, the time zone and the currency", async ({
   page,
   baseURL,
 }) => {
-  await openWhereItIs(page, baseURL, HIRIKETIYA);
+  const writes = await openLocation(page, baseURL, HIRIKETIYA);
   await page.getByRole("button", { name: "Paste a Google Maps link" }).click();
   await page.getByLabel("Google Maps link").fill(HIRIKETIYA_LINK);
 
-  // The address Google gives the pin, the room editor's map with the pin, and "Guests will see".
+  // The address Google gives the pin, the map with the pin, and "Guests will see".
   await expect(page.getByText("4th Lane, 81200 Dikwella, Sri Lanka").first()).toBeVisible();
-  await expect(page.getByText("Pin placed on the map")).toBeVisible();
+  await expect(page.getByText("Pin placed", { exact: false })).toBeVisible();
+  await expect(page.getByText("Guests will see", { exact: false })).toBeVisible();
   const map = page.getByTestId("google-address-map-canvas");
   await expect(map).toHaveAttribute("data-marker", "5.9762,80.7063");
   await expect(map).toHaveAttribute("data-marker-draggable", "true");
-  await expect(page.getByRole("group", { name: "Map type" })).toBeVisible();
-  await expect(page.getByText("Guests will see")).toBeVisible();
   await expect(page.getByText("Asia/Colombo")).toBeVisible();
   // The currency follows the country (this hotel never chose another).
   await expect(page.getByText(/^LKR/)).toBeVisible();
-  await expect(page.getByText("From Sri Lanka · used for every price")).toBeVisible();
+  await expect(page.getByText("Detected from your address")).toBeVisible();
   expect(
     await page.evaluate(
       () => (window as unknown as { vayadaE2eGeocodeQueries: string[] }).vayadaE2eGeocodeQueries,
@@ -107,27 +118,36 @@ test("a pasted Google Maps link sets the pin, the address, the time zone and the
   );
   await expect(map).toHaveAttribute("data-marker", "5.9765,80.7068");
 
-  // The live preview names the address, and Continue goes on (step 3 is done).
-  await expect(page.getByText("4th Lane, Dikwella").first()).toBeVisible();
+  // Continue saves the hotel and its currency, then goes on to the first room.
   await proceed(page).click();
-  await expect(heading(page, "How guests reach you")).toBeVisible();
+  await expect(heading(page, "Your first room type")).toBeVisible();
+  expect(writes.profilePatch).toMatchObject({
+    patch: { location: { countryCode: "LK", latitude: 5.9765, longitude: 80.7068 } },
+  });
+  expect(writes.currency).toMatchObject({ currency: "LKR" });
 });
 
 test("a link's pin is saved with the address, for the room editor's Same as property", async ({
   page,
   baseURL,
 }) => {
-  const state = await openWhereItIs(page, baseURL, MUNICH);
-  const exitUrl = await mockBookingDashboardExit(page, baseURL, QUICK_SETUP_PROPERTY_ID);
+  const writes = await openLocation(page, baseURL, MUNICH);
+  // Save & exit leaves for the dashboard.
+  await page.route(
+    (url) => url.pathname === "/dashboard",
+    (route) =>
+      route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Dashboard</title>" }),
+  );
   await page.getByRole("button", { name: "Paste a Google Maps link" }).click();
   await page
     .getByLabel("Google Maps link")
     .fill("https://www.google.com/maps/@48.15634,11.58242,17z");
   await expect(page.getByText("Leopoldstraße 12, 80802 München, Germany").first()).toBeVisible();
-  await page.getByRole("button", { name: "Save & exit" }).click();
-  await expect.poll(() => page.url()).toBe(exitUrl);
-  expect(state.profileWrites).toHaveLength(1);
-  expect(state.profileWrites[0]).toMatchObject({
+  await page.getByRole("button", { name: "Save & exit" }).first().click();
+  await page.waitForURL(
+    (url) => url.pathname === "/dashboard" && url.searchParams.get("propertyId") === propertyId,
+  );
+  expect(writes.profilePatch).toMatchObject({
     patch: {
       location: {
         streetAddress: "Leopoldstraße 12",
@@ -146,7 +166,7 @@ test("without reverse geocoding the pin stays and the host types the rest, from 
   page,
   baseURL,
 }) => {
-  await openWhereItIs(page, baseURL, "denied");
+  await openLocation(page, baseURL, "denied");
   await page.getByRole("button", { name: "Paste a Google Maps link" }).click();
   await page.getByLabel("Google Maps link").fill(HIRIKETIYA_LINK);
   // The manual fields, with the country guessed from the pin's time zone, next to the pin.
@@ -161,14 +181,14 @@ test("without reverse geocoding the pin stays and the host types the rest, from 
   // Typing keeps the link's pin.
   await expect(map).toHaveAttribute("data-marker", "5.9762,80.7063");
   await proceed(page).click();
-  await expect(heading(page, "How guests reach you")).toBeVisible();
+  await expect(heading(page, "Your first room type")).toBeVisible();
 });
 
 test("a short share link is read through the API; a link without a place says so", async ({
   page,
   baseURL,
 }) => {
-  await openWhereItIs(page, baseURL, HIRIKETIYA);
+  await openLocation(page, baseURL, HIRIKETIYA);
   const asked: string[] = [];
   await page.route("**/api/maps-links/resolve", (route) => {
     const { url } = route.request().postDataJSON() as { url: string };

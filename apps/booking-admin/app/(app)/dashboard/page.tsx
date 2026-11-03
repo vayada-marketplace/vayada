@@ -8,7 +8,6 @@ import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusC
 import { ResumeSetupBanner } from "@/components/dashboard/ResumeSetupBanner";
 import {
   DashboardSetupChecklistCard,
-  DashboardSetupChecklistChip,
   useDashboardSetupChecklist,
 } from "@/components/dashboard/DashboardSetupChecklist";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
@@ -227,10 +226,7 @@ export default function DashboardPage() {
 
   return (
     <PageLayout className="space-y-3 md:space-y-4">
-      <PageHeader
-        title={t("dashboard.title")}
-        actions={<DashboardSetupChecklistChip setup={setupChecklist} />}
-      />
+      <PageHeader title={t("dashboard.title")} />
 
       {/* Only when the checklist can't say what's left; not while it loads, so it doesn't flash. */}
       <ResumeSetupBanner hidden={setupChecklist.state.kind !== "unavailable"} />

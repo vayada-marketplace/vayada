@@ -6,9 +6,9 @@ import {
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
 } from "../support/pmsWebMocks";
-import { liveChecklistFacts, mockSetupChecklist } from "../support/setupChecklistMocks";
+import { goLiveChecklistFacts, mockSetupChecklist } from "../support/setupChecklistMocks";
 
-// VAY-2247 wave 2: the setup checklist on the PMS dashboard, shown only where the server offers it.
+// VAY-2247 wave 2, VAY-2451: the go-live cards on the PMS dashboard, shown only where the server offers them.
 const EXIT_URL = `/dashboard?setup=incomplete&propertyId=${PMS_WEB_PROPERTY_ID}`;
 
 test.beforeEach(async ({ page }) => {
@@ -34,49 +34,35 @@ test("keeps today's amber banner while the checklist API isn't mounted (404)", a
   await assertHealthy();
 });
 
-test("shows the checklist instead of the banner once the server answers (c01-1)", async ({
+test("shows the go-live list instead of the banner once the server answers", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
-  const writes = await mockSetupChecklist(page, liveChecklistFacts(PMS_WEB_PROPERTY_ID));
+  // Setup is finished, the room still has the first run's placeholder price.
+  await mockSetupChecklist(page, {
+    ...goLiveChecklistFacts(PMS_WEB_PROPERTY_ID),
+    placeholderPrices: true,
+  });
   await page.goto(EXIT_URL);
 
-  const card = page.getByRole("region", { name: /Finish setting up/ });
+  const card = page.getByRole("region", { name: "Get ready to go live" });
   await expect(card).toBeVisible();
-  await expect(card.getByText("4 of 9 done").filter({ visible: true })).toBeVisible();
-  await expect(page.getByText("Your property setup isn't complete")).toHaveCount(0);
-  // The mocked hotel sells one room tonight.
+  await expect(card.getByText("2 of 6 done")).toBeVisible();
   await expect(
-    card.getByText(/Open all year · 1 room bookable/).filter({ visible: true }),
+    card.getByText("Your room shows a placeholder price. Set real prices before you go live."),
   ).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("pms-dashboard-checklist-d.png") });
-
-  await card.getByRole("button", { name: "Looks good" }).first().click();
-  await expect(page.getByText("Calendar confirmed — your defaults stay.")).toBeVisible();
-  await expect(card.getByText("5 of 9 done").filter({ visible: true })).toBeVisible();
-
-  await card.getByRole("button", { name: "Hide for now" }).click();
-  await expect(card).toHaveCount(0);
-  const pill = page.getByRole("button", { name: "Setup 5 of 9" });
-  await expect(pill).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("pms-dashboard-checklist-hidden-d.png") });
-  await pill.click();
-  await expect(page.getByRole("region", { name: /Finish setting up/ })).toBeVisible();
-
-  expect(
-    writes.map(({ method, path, body }) => [method, path.split("/checklist")[1], body]),
-  ).toEqual([
-    ["POST", "/acknowledgements", { item: "calendar" }],
-    ["PUT", "/viewer", { hidden: true }],
-    ["PUT", "/viewer", { hidden: false }],
-  ]);
+  await expect(page.getByText("Your property setup isn't complete")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("pms-dashboard-go-live-d.png") });
   await assertHealthy();
+
+  await card.getByRole("button", { name: "Add rates" }).click();
+  await expect(page).toHaveURL(/\/rooms$/);
 });
 
-test("lays the checklist out for phones (c01-1m)", async ({ page }, testInfo) => {
+test("lays the go-live list out for phones", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 2400 });
-  await mockSetupChecklist(page, liveChecklistFacts(PMS_WEB_PROPERTY_ID));
+  await mockSetupChecklist(page, goLiveChecklistFacts(PMS_WEB_PROPERTY_ID));
   await page.goto("/dashboard");
-  await expect(page.getByRole("region", { name: /Finish setting up/ })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("pms-dashboard-checklist-m.png") });
+  await expect(page.getByRole("region", { name: "Get ready to go live" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("pms-dashboard-go-live-m.png") });
 });

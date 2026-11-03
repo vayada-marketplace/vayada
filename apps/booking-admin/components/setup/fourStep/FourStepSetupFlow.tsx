@@ -15,7 +15,6 @@ import { QuickAboutYouStep } from "../quick/QuickAboutYouStep";
 import { QuickBookingPagePreview } from "../quick/QuickBookingPagePreview";
 import { QuickUseMyDetails } from "../quick/QuickHotelDetails";
 import { QuickHotelAddress } from "../quick/QuickHotelAddress";
-import { quickSetupLanguage } from "../quick/QuickSetupFlow";
 import { QuickSetupPreviewCard } from "../quick/QuickSetupPreviewCard";
 import { quickHotelCurrency } from "../quick/quickHotelCurrency";
 import {
@@ -30,7 +29,7 @@ import { SetupFrame, type SetupStepId } from "./SetupFrame";
 import { SetupLocationStep } from "./SetupLocationStep";
 import { SetupPropertyStep } from "./SetupPropertyStep";
 import { SetupWelcome } from "./SetupWelcome";
-import { locationStepHint, propertyStepHint } from "./setupDraft";
+import { locationStepHint, propertyStepHint, setupLanguage } from "./setupDraft";
 
 /** The same draft as the 7-step setup keeps, so switching setups never loses what the owner typed. */
 const DRAFT_STORAGE_KEY = "vayada.quickSetup.v1.hotel";
@@ -103,7 +102,7 @@ const newKey = () =>
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 /**
- * VAY-2451: the four-step setup (behind FOUR_STEP_SETUP_ENABLED with ONBOARDING_V2). About you when the
+ * VAY-2451: the four-step setup (behind ONBOARDING_V2). About you when the
  * account's name or phone is missing, the welcome card, then "Your property" and "Location & contact" kept
  * on this device until the last one's Continue creates the hotel; steps 3 and 4 follow for the hotel.
  */
@@ -352,7 +351,7 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
           // WhatsApp is the phone until the owner unticks "Same as phone" (the box starts ticked).
           draft: { ...draft, whatsappSameAsPhone: draft.whatsappSameAsPhone !== false },
           currency,
-          language: quickSetupLanguage(typeof navigator === "undefined" ? [] : navigator.languages),
+          language: setupLanguage(typeof navigator === "undefined" ? [] : navigator.languages),
           logo: logo?.file ?? null,
           organization: status.organization,
           draftKey: stored.draftKey,

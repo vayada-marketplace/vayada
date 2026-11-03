@@ -6,6 +6,7 @@ import {
   locationStepHint,
   propertyStepHint,
   setupDraftFromProfile,
+  setupLanguage,
   setupProfilePatch,
   socialLinkValid,
 } from "./setupDraft";
@@ -162,5 +163,13 @@ describe("steps 1–2 of a hotel that exists (VAY-2451 resume)", () => {
     expect(hotelDetailsStepToFinish({ ...draft, propertyType: "" })).toBe("property");
     expect(hotelDetailsStepToFinish({ ...draft, streetAddress: "" })).toBe("location");
     expect(hotelDetailsStepToFinish({ ...draft, phone: "" })).toBe("location");
+  });
+});
+
+describe("setupLanguage", () => {
+  it("takes the browser's first language the booking page offers, else English", () => {
+    expect(setupLanguage(["de-DE", "en"])).toBe("de");
+    expect(setupLanguage(["xx-YY"])).toBe("en");
+    expect(setupLanguage(undefined)).toBe("en");
   });
 });
