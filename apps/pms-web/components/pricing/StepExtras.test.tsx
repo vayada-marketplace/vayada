@@ -2,7 +2,7 @@ import React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { expect, it, vi } from "vitest";
 import { parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import { GuestPreview } from "./GuestPreview";
+import * as ui from "./pricingStyles";
 import { simpleRoom } from "./simplePricing";
 import type { OptionTerms } from "./stepPricing";
 import { StepExtras } from "./StepExtras";
@@ -111,30 +111,31 @@ it("lets the hotel write what guests read about breakfast, holding Save while it
   expect(onPending).toHaveBeenLastCalledWith(false);
 });
 
-it("shows what guests read under the meal's option in the guest card (VAY-2281)", () => {
+it("shows the saved text of what guests read about breakfast (VAY-2281)", () => {
+  const value = room("Buffet breakfast in the Stube, 7:00–10:30");
   let view!: ReactTestRenderer;
   act(() => {
     view = create(
-      <GuestPreview
-        room={room("Buffet breakfast in the Stube, 7:00–10:30")}
-        facts={{ name: "Alpine Suite", size: null, photo: null }}
-        names={{ flexible: "Free cancellation", breakfast: "With breakfast" }}
-        terms={terms}
-        stay={{ checkIn: "2099-07-17", checkOut: "2099-07-19" }}
-        today="2099-01-01"
-        selected="flexible"
-        onSelect={vi.fn()}
+      <StepExtras
+        room={value}
+        simple={simpleRoom(value, terms)!}
+        prices={{}}
+        only="breakfast"
+        disabled={false}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onChange={vi.fn()}
+        onPending={vi.fn()}
       />,
     );
   });
-  const radios = view.root.findAll((node) => node.type === "button" && node.props.role === "radio");
-  expect(textOf(radios[1])).toContain("Buffet breakfast in the Stube, 7:00–10:30");
-  expect(textOf(radios[0])).not.toContain("Buffet");
+  expect(
+    view.root.findByProps({ placeholder: "e.g. Breakfast buffet every morning" }).props.value,
+  ).toBe("Buffet breakfast in the Stube, 7:00–10:30");
 });
 
-it("shows the guest card beside step Meals, and keeps it when the room has no breakfast switch (VAY-2305)", () => {
+it("shows step Meal plans on its own, and nothing when the room has no breakfast switch (VAY-2468)", () => {
   const value = room();
-  const preview = <p>What guests see here</p>;
   const render = (optionTerms: typeof terms) => {
     let view!: ReactTestRenderer;
     act(() => {
@@ -149,7 +150,6 @@ it("shows the guest card beside step Meals, and keeps it when the room has no br
           onRemove={vi.fn()}
           onChange={vi.fn()}
           onPending={vi.fn()}
-          preview={preview}
         />,
       );
     });
@@ -157,8 +157,11 @@ it("shows the guest card beside step Meals, and keeps it when the room has no br
   };
   const step = render(terms);
   expect(textOf(step.root)).toContain("Meal plans");
-  expect(textOf(step.root)).toContain("What guests see here");
-  // A partial refund puts breakfast in the option's window, so step Meals has no switch; the guest card stays.
+  // No column beside the step's card any more: the card itself sits next to the step's intro and takes the rest.
+  const section = step.root.findByType("section");
+  expect(section.children).toHaveLength(2);
+  expect((section.children[1] as ReactTestInstance).props.className).toBe(ui.setupStepCard);
+  // A partial refund puts breakfast in the option's window, so step Meals has no switch and shows nothing.
   const partial = {
     ...flexible,
     cancellation: {
@@ -173,7 +176,7 @@ it("shows the guest card beside step Meals, and keeps it when the room has no br
     },
   } as OptionTerms;
   const own = render({ flexible: partial, breakfast: partial });
-  expect(textOf(own.root)).toBe("What guests see here");
+  expect(own.toJSON()).toBeNull();
 });
 
 it("charges breakfast per guest or for the room and says what it adds a night (VAY-2305)", () => {

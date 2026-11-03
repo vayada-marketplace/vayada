@@ -43,8 +43,7 @@ const typedMinor = (text: string, currency: string) => {
 
 /** The card's two switches: a non-refundable option some percent cheaper, and an option with breakfast. On adds the
  * option (based on the main option, with its stay rules and payment); off asks to delete it. An amount that doesn't
- * parse holds Save until it does, while its option is on. `preview` (step "Meals") sits beside the card, and stays when
- * the room offers no breakfast switch. */
+ * parse holds Save until it does, while its option is on. */
 export function StepExtras({
   room,
   simple,
@@ -55,7 +54,6 @@ export function StepExtras({
   onRemove,
   onChange,
   onPending,
-  preview,
 }: {
   room: PricingConfiguration;
   simple: SimpleRoom;
@@ -69,7 +67,6 @@ export function StepExtras({
   onRemove: (offerId: string) => void;
   onChange: (room: PricingConfiguration) => void;
   onPending: (pending: boolean) => void;
-  preview?: ReactNode;
 }) {
   const { t } = useTranslation();
   const { nonRefundable, breakfast, mainTerms } = simple;
@@ -255,8 +252,7 @@ export function StepExtras({
   );
   const showNonRefundable = only !== "breakfast" && simple.cancellation.kind === "free",
     showBreakfast = only !== "non_refundable" && simple.cancellation.kind !== "own";
-  if (!showNonRefundable && !showBreakfast)
-    return preview ? <div className="border-t border-gray-200 py-7">{preview}</div> : null;
+  if (!showNonRefundable && !showBreakfast) return null;
   // Just breakfast is step "Meal plans" of "Pricing setup" (VAY-2280, the CEO's design in VAY-2305): its switch, its
   // price a night per guest or for the room, what guests read, and what it adds for the sample guests.
   if (only === "breakfast") {
@@ -276,13 +272,7 @@ export function StepExtras({
               total: money(String(Number(minor) * adults), room.currency),
             });
     return (
-      <StepCard
-        step={4}
-        title={t("pricing.meals.title")}
-        hint={t("pricing.meals.hint")}
-        optional
-        side={preview}
-      >
+      <StepCard step={4} title={t("pricing.meals.title")} hint={t("pricing.meals.hint")} optional>
         <div className="flex items-center gap-3.5">
           <button
             type="button"
@@ -385,7 +375,6 @@ export function StepExtras({
       title={t("pricing.simple.extras.title")}
       hint={t("pricing.simple.extras.hint")}
       optional
-      side={preview}
     >
       <div>
         {showNonRefundable &&

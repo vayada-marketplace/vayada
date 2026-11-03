@@ -397,15 +397,11 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  // "Pricing setup" (VAY-2280, VAY-2305): opening times, prices and seasons, rates and meal plans; "On your booking
-  // page" sits beside step Meal plans.
+  // "Pricing setup" (VAY-2280, VAY-2305): opening times, prices and seasons, rates and meal plans. No "On your
+  // booking page" card beside step Meal plans any more (VAY-2468).
   for (const heading of ["Pricing setup", "Prices and seasons", "Rates", "Meal plans"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
-  await expect(
-    main(page)
-      .getByRole("region", { name: /^Meal plans/ })
-      .getByRole("region", { name: "On your booking page" }),
-  ).toBeVisible();
+  await expect(main(page).getByRole("region", { name: "On your booking page" })).toHaveCount(0);
   // "Prices by date" comes first (VAY-2280), showing the main option's nightly prices.
   const calendar = main(page).getByRole("region", { name: "Prices by date" });
   await expect(calendar).toBeVisible();
@@ -454,7 +450,6 @@ test("edits a priced room on the simple card and publishes only what changed (VA
       exact: true,
     }),
   ).toBeVisible();
-  await expect(main(page).getByText("Save 10%")).toBeVisible();
 
   await main(page).getByRole("button", { name: "+10%" }).click();
   await expect(main(page).getByRole("button", { name: "+10%" })).toHaveAttribute(
@@ -533,9 +528,7 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await assertHealthy();
 });
 
-test("writes what guests read about breakfast and shows it in the guest card (VAY-2281)", async ({
-  page,
-}, testInfo) => {
+test("writes what guests read about breakfast (VAY-2281)", async ({ page }, testInfo) => {
   await openPms(page);
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
@@ -548,12 +541,6 @@ test("writes what guests read about breakfast and shows it in the guest card (VA
   await expect(
     main(page).getByText("2 adults add €30 a night (€15 per adult).", { exact: true }),
   ).toBeVisible();
-  await expect(
-    main(page)
-      .getByRole("radiogroup", { name: "Options for this stay" })
-      .getByRole("radio")
-      .filter({ hasText: text }),
-  ).toHaveCount(1);
   await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
@@ -586,12 +573,6 @@ test("writes what guests read about a half board option in its window (VAY-2281)
   const text = "Three-course dinner from 18:30";
   await dialog(page).getByRole("textbox", { name: "What guests read" }).fill(text);
   await dialog(page).getByRole("button", { name: "Close" }).click();
-  await expect(
-    main(page)
-      .getByRole("radiogroup", { name: "Options for this stay" })
-      .getByRole("radio")
-      .filter({ hasText: text }),
-  ).toHaveCount(1);
   await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
@@ -600,6 +581,36 @@ test("writes what guests read about a half board option in its window (VAY-2281)
   expect(deluxe.offers.find((offer: Room) => offer.meal.kind === "half_board").meal).toMatchObject({
     description: text,
   });
+  await assertHealthy();
+});
+
+test("shows step Meal plans across the whole column, with no booking-page card beside it (VAY-2468)", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPms(page);
+  await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await prices(page, DELUXE);
+  const meals = main(page).getByRole("region", { name: /^Meal plans/ });
+  await expect(meals.getByRole("button", { name: "Per adult", exact: true })).toBeVisible();
+  await expect(main(page).getByRole("region", { name: "On your booking page" })).toHaveCount(0);
+  await expect(main(page).getByRole("radiogroup", { name: "Options for this stay" })).toHaveCount(
+    0,
+  );
+  // The Meal plans card is as wide as step Rates' card above it: no empty column on the right. (On main
+  // it was the "On your booking page" card's 320px plus the gap narrower.)
+  const rates = main(page).getByRole("region", { name: "Rates", exact: true });
+  const ratesCard = (await rates.locator("div.rounded-2xl").first().boundingBox())!;
+  const mealsCard = (await meals.locator("div.rounded-2xl").first().boundingBox())!;
+  expect(Math.abs(mealsCard.x - ratesCard.x)).toBeLessThan(1);
+  expect(Math.abs(mealsCard.width - ratesCard.width)).toBeLessThan(1);
+  // The bar's line about the booking page stays.
+  await expect(
+    main(page).getByText("Guests from €72 a night on your booking page.", { exact: true }),
+  ).toBeVisible();
+  await meals.evaluate((node) => node.scrollIntoView({ block: "center" }));
+  await page.screenshot({ path: testInfo.outputPath("meal-plans-full-width.png") });
   await assertHealthy();
 });
 
@@ -1207,11 +1218,8 @@ test("turns the Flexible rate off and sells an option on channels only, keeping 
     "Keep at least one rate on. Turn on the Flexible rate before you turn this one off.",
   );
   await expect(extra(page, "Non-refundable")).toBeDisabled();
-  // The calendar and the guest card show only what guests can book.
+  // The calendar shows only what guests can book.
   await expect(main(page).getByRole("button", { name: "Show prices for Flexible" })).toHaveCount(0);
-  const guests = main(page).getByRole("radiogroup", { name: "Options for this stay" });
-  await expect(guests.getByRole("radio")).toHaveCount(2);
-  await expect(guests.getByRole("radio", { checked: true })).toContainText("Non-refundable");
   await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
   const deluxe = (pricing.publishes[0].snapshot.rooms as Room[]).find(
