@@ -113,17 +113,17 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
     const t = await setUp();
     try {
       const propertyId = await t.hotel();
-      expect(await t.repository.facts.read(t.actor(propertyId))).toEqual({
-        hotelBasics: true,
+      expect(await t.repository.goLiveFacts.read(t.actor(propertyId))).toEqual({
+        propertyDetails: true,
         bookingPublished: false,
-        photos: false,
-        style: false,
-        calendar: "default",
-        guestTerms: "default",
+        propertyPhotos: false,
+        bookingRules: "default",
         onlineCardReady: false,
+        roomTypes: [],
+        placeholderPrices: false,
         viewer: { hidden: false, dismissed: false },
       });
-      expect(await t.repository.facts.read(t.actor(randomUUID()))).toBeNull();
+      expect(await t.repository.goLiveFacts.read(t.actor(randomUUID()))).toBeNull();
     } finally {
       await t.close();
     }
@@ -136,9 +136,8 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
       await t.repository.store.acknowledge(t.actor(propertyId), "calendar");
       await t.repository.store.acknowledge(t.actor(propertyId, t.manager), "calendar");
       await t.repository.store.acknowledge(t.actor(propertyId), "guest_terms");
-      expect(await t.repository.facts.read(t.actor(propertyId, t.manager))).toMatchObject({
-        calendar: "acknowledged",
-        guestTerms: "acknowledged",
+      expect(await t.repository.goLiveFacts.read(t.actor(propertyId, t.manager))).toMatchObject({
+        bookingRules: "acknowledged",
       });
       expect(
         (
@@ -164,26 +163,28 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
       const propertyId = await t.hotel();
       await t.repository.store.setViewer(t.actor(propertyId), { hidden: true });
       await t.repository.store.setViewer(t.actor(propertyId), { dismissed: true });
-      expect((await t.repository.facts.read(t.actor(propertyId)))?.viewer).toEqual({
+      expect((await t.repository.goLiveFacts.read(t.actor(propertyId)))?.viewer).toEqual({
         hidden: true,
         dismissed: true,
       });
       await t.repository.store.setViewer(t.actor(propertyId), { hidden: false });
-      expect((await t.repository.facts.read(t.actor(propertyId)))?.viewer).toEqual({
+      expect((await t.repository.goLiveFacts.read(t.actor(propertyId)))?.viewer).toEqual({
         hidden: false,
         dismissed: true,
       });
       // Another person on the same hotel still sees the checklist.
-      expect((await t.repository.facts.read(t.actor(propertyId, t.manager)))?.viewer).toEqual({
-        hidden: false,
-        dismissed: false,
-      });
+      expect((await t.repository.goLiveFacts.read(t.actor(propertyId, t.manager)))?.viewer).toEqual(
+        {
+          hidden: false,
+          dismissed: false,
+        },
+      );
     } finally {
       await t.close();
     }
   });
 
-  it("sees photos, a logo, other terms, a saved auto-open and a published page", async () => {
+  it("sees hotel photos, other terms and a published page", async () => {
     const t = await setUp();
     try {
       const propertyId = await t.hotel();
@@ -193,18 +194,14 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
          VALUES ($1, $2)`,
         [propertyId, ` ${FIRST_RUN_GUEST_TERMS} `],
       );
-      expect((await t.repository.facts.read(t.actor(propertyId)))?.guestTerms).toBe("default");
+      expect((await t.repository.goLiveFacts.read(t.actor(propertyId)))?.bookingRules).toBe(
+        "default",
+      );
       await t.admin.query(
         "UPDATE hotel_catalog.property_policy_summaries SET terms_and_conditions = $2 WHERE property_id = $1",
         [propertyId, "Our own house rules."],
       );
-      await t.admin.query(
-        `INSERT INTO pms.calendar_auto_open_settings (property_id, revision, enabled, mode, rolling_months)
-         VALUES ($1, 1, TRUE, 'rolling', 18)`,
-        [propertyId],
-      );
       await t.publicImage(propertyId, "hero_image");
-      await t.publicImage(propertyId, "logo");
       await t.fixture(() =>
         t.admin.query(
           `INSERT INTO distribution.active_public_booking_revision
@@ -213,12 +210,10 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
           [propertyId, randomUUID(), t.owner],
         ),
       );
-      expect(await t.repository.facts.read(t.actor(propertyId))).toMatchObject({
+      expect(await t.repository.goLiveFacts.read(t.actor(propertyId))).toMatchObject({
         bookingPublished: true,
-        photos: true,
-        style: true,
-        calendar: "changed",
-        guestTerms: "changed",
+        propertyPhotos: true,
+        bookingRules: "changed",
       });
     } finally {
       await t.close();
@@ -341,12 +336,10 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
         });
         return propertyId;
       }
-      const cards = async (propertyId: string) => ({
-        goLive: (await t.repository.goLiveFacts.read(t.actor(propertyId)))?.onlineCardReady,
-        checklist: (await t.repository.facts.read(t.actor(propertyId)))?.onlineCardReady,
-      });
-      const done = { goLive: true, checklist: true };
-      const open = { goLive: false, checklist: false };
+      const cards = async (propertyId: string) =>
+        (await t.repository.goLiveFacts.read(t.actor(propertyId)))?.onlineCardReady;
+      const done = true;
+      const open = false;
       // Neither hotel has an approval row: the go-live card's "Online card payments" is done.
       expect(await cards(await cardHotel("stripe"))).toEqual(done);
       expect(await cards(await cardHotel("vayada"))).toEqual(done);
@@ -359,20 +352,18 @@ describe.skipIf(!url)("hotel setup checklist on the real database (VAY-2247)", (
     }
   });
 
-  it("counts only a logo as style, not a hotel photo", async () => {
+  it("counts hotel photos as property photos, not the logo", async () => {
     const t = await setUp();
     try {
       const withPhoto = await t.hotel();
       await t.publicImage(withPhoto, "hero_image");
-      expect(await t.repository.facts.read(t.actor(withPhoto))).toMatchObject({
-        photos: true,
-        style: false,
+      expect(await t.repository.goLiveFacts.read(t.actor(withPhoto))).toMatchObject({
+        propertyPhotos: true,
       });
       const withLogo = await t.hotel();
       await t.publicImage(withLogo, "logo");
-      expect(await t.repository.facts.read(t.actor(withLogo))).toMatchObject({
-        photos: false,
-        style: true,
+      expect(await t.repository.goLiveFacts.read(t.actor(withLogo))).toMatchObject({
+        propertyPhotos: false,
       });
     } finally {
       await t.close();

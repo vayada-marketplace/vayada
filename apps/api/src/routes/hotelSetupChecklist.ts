@@ -18,12 +18,11 @@ import type { HotelFirstRunActor } from "../domains/hotelFirstRunSteps.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 /**
- * VAY-2247 wave 2: the setup checklist both dashboards show.
- *   GET  /api/hotel-setup/properties/:propertyId/checklist
- *   POST /api/hotel-setup/properties/:propertyId/checklist/acknowledgements  { item }   ("Looks good")
- *   PUT  /api/hotel-setup/properties/:propertyId/checklist/viewer  { hidden?, dismissed? }
- * VAY-2451: the same three under /checklist/v2 answer with the four-step setup's go-live list, which both
- * dashboards show. v1 stays for dashboards loaded before the switch-on.
+ * VAY-2247 wave 2, VAY-2451: the go-live list both dashboards show.
+ *   GET  /api/hotel-setup/properties/:propertyId/checklist/v2
+ *   POST /api/hotel-setup/properties/:propertyId/checklist/v2/acknowledgements  { item }   ("Looks good")
+ *   PUT  /api/hotel-setup/properties/:propertyId/checklist/v2/viewer  { hidden?, dismissed? }
+ * The first checklist (the same three without /v2) is gone since the four-step setup went live.
  * For anyone who may manage the hotel's setup, on a property in their scope, with their own session:
  * "Looks good" is for the whole hotel, Hide for now and Dismiss only for the signed-in person.
  */
@@ -31,7 +30,7 @@ import { enforceRoutePolicy } from "./policy.js";
 export type HotelSetupChecklistRouteOptions = {
   createService(
     context: RequestContext,
-  ): Pick<HotelSetupChecklistService, "read" | "readGoLive" | "acknowledge" | "setViewer">;
+  ): Pick<HotelSetupChecklistService, "readGoLive" | "acknowledge" | "setViewer">;
   propertyAccessRepository: PropertyAccessRepository;
 };
 
@@ -106,41 +105,26 @@ export async function registerHotelSetupChecklistRoutes(
       ? reply.status(200).send(checklist)
       : reply.status(404).send({ code: "property_not_found" });
 
-  const views = [
-    ["/properties/:propertyId/checklist", "v1"],
-    ["/properties/:propertyId/checklist/v2", "v2"],
-  ] as const;
-  for (const [path, view] of views) {
-    app.get(path, async (request, reply) => {
-      const member = await checklistActor(request, reply, options.propertyAccessRepository);
-      if (!member) return reply;
-      const service = options.createService(member.context);
-      return send(
-        reply,
-        await (view === "v2" ? service.readGoLive(member.actor) : service.read(member.actor)),
-      );
-    });
+  const path = "/properties/:propertyId/checklist/v2";
+  app.get(path, async (request, reply) => {
+    const member = await checklistActor(request, reply, options.propertyAccessRepository);
+    if (!member) return reply;
+    return send(reply, await options.createService(member.context).readGoLive(member.actor));
+  });
 
-    app.post(`${path}/acknowledgements`, async (request, reply) => {
-      const member = await checklistActor(request, reply, options.propertyAccessRepository);
-      if (!member) return reply;
-      const item = parseChecklistAcknowledgement(request.body);
-      if (!item) return reply.status(400).send({ code: "invalid_checklist_acknowledgement" });
-      return send(
-        reply,
-        await options.createService(member.context).acknowledge(member.actor, item, view),
-      );
-    });
+  app.post(`${path}/acknowledgements`, async (request, reply) => {
+    const member = await checklistActor(request, reply, options.propertyAccessRepository);
+    if (!member) return reply;
+    const item = parseChecklistAcknowledgement(request.body);
+    if (!item) return reply.status(400).send({ code: "invalid_checklist_acknowledgement" });
+    return send(reply, await options.createService(member.context).acknowledge(member.actor, item));
+  });
 
-    app.put(`${path}/viewer`, async (request, reply) => {
-      const member = await checklistActor(request, reply, options.propertyAccessRepository);
-      if (!member) return reply;
-      const change = parseChecklistViewerChange(request.body);
-      if (!change) return reply.status(400).send({ code: "invalid_checklist_viewer_change" });
-      return send(
-        reply,
-        await options.createService(member.context).setViewer(member.actor, change, view),
-      );
-    });
-  }
+  app.put(`${path}/viewer`, async (request, reply) => {
+    const member = await checklistActor(request, reply, options.propertyAccessRepository);
+    if (!member) return reply;
+    const change = parseChecklistViewerChange(request.body);
+    if (!change) return reply.status(400).send({ code: "invalid_checklist_viewer_change" });
+    return send(reply, await options.createService(member.context).setViewer(member.actor, change));
+  });
 }

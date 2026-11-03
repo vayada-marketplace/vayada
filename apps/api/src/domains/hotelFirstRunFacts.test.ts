@@ -67,9 +67,6 @@ function ports(hotel: Hotel = {}): HotelFirstRunFactsPorts {
           : null,
     },
     pricing: { read: async () => (set ? { rooms: [{ roomTypeId, offers: [{}] }] } : null) },
-    unlockedPricing: {
-      read: async () => (set ? { rooms: [{ roomTypeId, offers: [{}] }] } : null),
-    },
     calendarRead: {
       getCurrentOperatingCalendarConfiguration: async () =>
         set ? { sourceStatus: "current" } : null,
@@ -205,11 +202,11 @@ describe("first-run setup progress for the checklist (VAY-2247 incident)", () =>
   const progress = (hotel?: Hotel, override: Partial<HotelFirstRunFactsPorts> = {}) =>
     createHotelFirstRunFactsReader({ ...ports(hotel), ...override }).readSetupProgress(actor);
 
-  it("says neither is done on a fresh hotel", async () => {
-    expect(await progress()).toEqual({ firstRoom: false, guestPayment: false });
+  it("says how guests pay isn't done on a fresh hotel", async () => {
+    expect(await progress()).toEqual({ guestPayment: false });
   });
 
-  it("says both are done after a complete first run, without the readiness or the locking pricing read", async () => {
+  it("says it is done after a complete first run, without the readiness or any pricing or room read", async () => {
     const readiness = {
       getBookingReadiness: async () => {
         throw new Error("the checklist must not evaluate the booking readiness");
@@ -221,15 +218,19 @@ describe("first-run setup progress for the checklist (VAY-2247 incident)", () =>
         throw new Error("the checklist must not take the pricing owner locks");
       },
     } as unknown as HotelFirstRunFactsPorts["pricing"];
-    expect(await progress({ set: true }, { readiness, pricing })).toEqual({
-      firstRoom: true,
+    // Only whether setup is finished: the room types aren't read on dashboard loads.
+    const roomRead = {
+      listRoomTypeFacts: async () => {
+        throw new Error("the go-live list's setup progress reads no room types");
+      },
+    } as unknown as HotelFirstRunFactsPorts["roomRead"];
+    expect(await progress({ set: true }, { readiness, pricing, roomRead })).toEqual({
       guestPayment: true,
     });
   });
 
   it("keeps how guests pay open while the Fixed Fee checkout is pending", async () => {
     expect(await progress({ set: true, plan: { plan: null, checkoutPending: true } })).toEqual({
-      firstRoom: true,
       guestPayment: false,
     });
   });
