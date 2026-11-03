@@ -1,9 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 
 import type { HotelSite } from "@/sites/types";
+
+import { Photo } from "./Photo";
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
@@ -28,7 +29,7 @@ export function Gallery({ gallery }: { gallery: HotelSite["gallery"] }) {
         </p>
       </div>
       <div className="gallery-slide">
-        <Image
+        <Photo
           src={slide.image.src}
           alt={slide.image.alt}
           fill
@@ -49,7 +50,7 @@ export function Gallery({ gallery }: { gallery: HotelSite["gallery"] }) {
             aria-pressed={index === active}
             onClick={() => setActive(index)}
           >
-            <Image src={item.image.src} alt="" sizes="136px" />
+            <Photo src={item.image.src} alt="" sizes="136px" />
             <span>
               {pad(index + 1)} {item.label}
             </span>

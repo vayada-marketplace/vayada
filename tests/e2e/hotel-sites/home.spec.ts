@@ -2,6 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 // VAY-2422: the hotel website template, with Animals Ahangama's homepage.
 const BOOKING_URL = "https://test-only-animals-ahangama.next-booking.vayada.com";
+// hero.<hash>.jpg at 640px wide, quality 75, as AVIF (apps/hotel-sites/components/photo-files.mjs).
+// Next's hashes can hold dots and tildes.
+const PHOTO_FILE = /^\/_next\/static\/media\/[^/]+\.\d+w\.q75\.avif$/;
 
 for (const width of [1440, 390]) {
   test(`shows the homepage and sends every booking button to the booking page at ${width}px`, async ({
@@ -36,6 +39,12 @@ for (const width of [1440, 390]) {
       width,
     );
     await loadEveryImage(page);
+    // Every photo is a file the build converted, the AVIF one at a srcset width: no image server.
+    const photos = await page.evaluate(() =>
+      Array.from(document.images, (image) => new URL(image.currentSrc).pathname),
+    );
+    expect(photos.length).toBeGreaterThan(0);
+    for (const photo of photos) expect(photo).toMatch(PHOTO_FILE);
     await page.screenshot({
       path: testInfo.outputPath(`hotel-site-${width}.png`),
       fullPage: true,
@@ -58,7 +67,7 @@ test("tells search engines and link previews what the page is, and keeps placeho
     /^https:\/\/animals-ahangama\.site\.vayada\.com\/?$/,
   );
   expect(await meta('meta[property="og:image"]')).toMatch(
-    /^https:\/\/animals-ahangama\.site\.vayada\.com\/_next\/static\/media\/hero\.[\w-]+\.jpg$/,
+    /^https:\/\/animals-ahangama\.site\.vayada\.com\/_next\/static\/media\/hero\.[^/]+\.jpg$/,
   );
   const structured = JSON.parse(
     (await page.locator('script[type="application/ld+json"]').textContent()) ?? "{}",
@@ -71,23 +80,20 @@ test("tells search engines and link previews what the page is, and keeps placeho
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
 });
 
-test("answers only on a hotel's own host, except the load balancer's health check", async ({
+test("serves the hotel's page at / of its own address, and a 404 for anything else", async ({
   page,
   request,
   baseURL,
 }) => {
+  // The build has one folder per hotel address; another address has none.
   const other = new URL(baseURL!);
-  // Behind portless, 127.0.0.1 reaches the proxy rather than the app.
-  test.skip(other.protocol === "https:", "needs the app's own port");
   other.hostname = "127.0.0.1";
   expect((await request.get(other.href)).status()).toBe(404);
-  other.pathname = "/api/health";
-  const health = await request.get(other.href);
-  expect(health.status()).toBe(200);
-  expect(await health.json()).toEqual({ status: "ok" });
   // The slug is not a path on the site: one address per page. (Through the browser: Node may not
   // resolve *.localhost subdomains.)
   expect((await page.goto("/animals-ahangama"))?.status()).toBe(404);
+  expect((await page.goto("/no-such-page"))?.status()).toBe(404);
+  await expect(page.getByText("This page could not be found.")).toBeVisible();
 });
 
 test("shows the four rooms, each card leading to its details, and books through the room list", async ({
@@ -132,6 +138,16 @@ test("switches the gallery's big slide from its thumbnails", async ({ page }) =>
     gallery.getByRole("heading", { level: 3, name: /^\[evenings headline\]$/i }),
   ).toBeVisible();
   await expect(gallery.getByRole("img", { name: "Evenings" })).toBeVisible();
+  // The new slide's photo loads: the build made its AVIF file at every width the slide asks for.
+  const slide = gallery.locator(".gallery-slide img");
+  await slide.scrollIntoViewIfNeeded();
+  await expect
+    .poll(() =>
+      slide.evaluate((image: HTMLImageElement) =>
+        image.complete && image.naturalWidth > 0 ? new URL(image.currentSrc).pathname : "",
+      ),
+    )
+    .toMatch(/\/beach\.[^/]+\.\d+w\.q75\.avif$/);
   await expect(thumb("^08 evenings$")).toHaveAttribute("aria-pressed", "true");
   await expect(thumb("^01 pool$")).toHaveAttribute("aria-pressed", "false");
 });
@@ -168,6 +184,8 @@ test("lays the rooms and gallery out for laptop, tablet and phone", async ({ pag
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   expect(await cardRows()).toBe(1);
+  // The photo's <picture> adds no box or gap: the card starts with its photo.
+  expect((await box('#stay a[href="#tiger"] img')).y).toBe((await box('#stay a[href="#tiger"]')).y);
   const thumbs = page.locator(".gallery-thumbs");
   expect(await thumbs.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
   expect((await box("#tiger img")).x).toBeLessThan((await box("#tiger h3")).x);

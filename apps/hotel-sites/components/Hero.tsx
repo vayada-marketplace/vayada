@@ -1,16 +1,16 @@
-import Image from "next/image";
-
 import type { HotelSite } from "@/sites/types";
+
+import { Photo } from "./Photo";
 
 export function Hero({ site }: { site: HotelSite }) {
   const { hero } = site;
   return (
     <header id="top" className="hero">
-      <Image
+      <Photo
         src={hero.image.src}
         alt={hero.image.alt}
         fill
-        priority
+        preload
         sizes="100vw"
         className="hero-image"
       />

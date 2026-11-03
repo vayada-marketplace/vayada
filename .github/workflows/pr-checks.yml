@@ -185,14 +185,15 @@ jobs:
           E2E_LANDING_BASE_URL: http://127.0.0.1:3006
           E2E_LANDING_ANALYTICS: "1"
 
-      # A hotel site answers only on its own host; the health check answers on any (VAY-2422).
+      # The hotel sites' static build, one folder per address, served as the static host will
+      # serve it (VAY-2422). Each folder answers only on its own address.
       - name: Hotel site browser specs
         run: |
-          npm --workspace vayada-hotel-sites run start -- --port 3007 &
+          PORT=3007 npm --workspace vayada-hotel-sites run start &
           sites_pid=$!
           trap 'kill "$sites_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do
-            if curl --silent --fail http://127.0.0.1:3007/api/health >/dev/null; then break; fi
+            if curl --silent --fail -H "Host: animals-ahangama.site.localhost" http://127.0.0.1:3007/ >/dev/null; then break; fi
             sleep 1
           done
           npm run e2e:hotel-sites
