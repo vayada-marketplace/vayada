@@ -310,7 +310,13 @@ function RoomTypeCard({
         {/* A long price keeps its line; the actions then wrap below it. */}
         <div className="flex flex-wrap items-center gap-2 lg:contents">
           <div className="min-w-0 flex-1 lg:w-[200px] lg:flex-none">
-            {prices && <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />}
+            {prices && (
+              <RoomPriceSummary
+                roomTypeId={room.id}
+                publication={prices.publication}
+                notSelling={prices.notSelling}
+              />
+            )}
           </div>
           <div className="ml-auto flex shrink-0 items-center justify-end gap-2 lg:ml-0 lg:w-[240px]">
             <RoomPricesLink roomTypeId={room.id} publication={prices?.publication} />

@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { pricingCurrencyScale } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+import { localToday } from "@/lib/guests/guestDisplay";
 import {
   createReplacementPricingClient,
-  type PricingSnapshot,
+  type PricingRateNotSelling,
 } from "@/services/api/replacementPricingClient";
 
+import { guestsFromMinor } from "./priceCalendarModel";
 import { decimalAmount } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
 import * as ui from "./pricingStyles";
@@ -18,12 +20,17 @@ import * as ui from "./pricingStyles";
 type Client = ReturnType<typeof createReplacementPricingClient>;
 type Publication = Awaited<ReturnType<Client["read"]>>;
 export type PropertyPrices = {
-  prices: { client: Client; publication: Publication } | null;
+  prices: {
+    client: Client;
+    publication: Publication;
+    notSelling: readonly PricingRateNotSelling[];
+  } | null;
   error: unknown;
   reload: () => Promise<void>;
 };
 
-/** The selected property's published prices for the Rooms list. A failed read leaves the list usable. */
+/** The selected property's published prices for the Rooms list, with the rates guests can't book now (VAY-2304; none
+ * when that read fails, as on the Prices tab). A failed read leaves the list usable. */
 export function usePropertyPrices(): PropertyPrices {
   const [prices, setPrices] = useState<PropertyPrices["prices"]>(null),
     [error, setError] = useState<unknown>(null);
@@ -34,8 +41,11 @@ export function usePropertyPrices(): PropertyPrices {
       const client = createReplacementPricingClient(
         await resolveSelectedPmsPropertyId("loading prices"),
       );
-      const publication = await client.read();
-      if (alive.current) setPrices({ client, publication });
+      const [publication, notSelling] = await Promise.all([
+        client.read(),
+        client.notSellingRates().catch(() => []),
+      ]);
+      if (alive.current) setPrices({ client, publication, notSelling });
     } catch (e) {
       if (alive.current) setError(e);
     }
@@ -48,25 +58,6 @@ export function usePropertyPrices(): PropertyPrices {
     };
   }, [reload]);
   return { prices, error, reload };
-}
-
-/** The lowest base nightly amount among the room's independently priced offers (minor units), if any. */
-export function lowestBaseMinor(room: PricingSnapshot["rooms"][number]): string | null {
-  const minors = room.offers.flatMap((offer) => {
-    const base = offer.price.kind === "independent" ? offer.price.calendar.base : null;
-    return !base
-      ? []
-      : base.mode === "flat"
-        ? [base.amountMinor]
-        : base.mode === "occupancy"
-          ? base.amountsMinor
-          : base.mode === "per_person"
-            ? [base.unitMinor]
-            : [base.baseMinor];
-  });
-  return minors.length
-    ? minors.reduce((lowest, minor) => (BigInt(minor) < BigInt(lowest) ? minor : lowest))
-    : null;
 }
 
 /** A price for the Rooms list: the currency code and the locale's digit grouping, with no ".00" on a whole
@@ -89,17 +80,30 @@ function publishedRoom(publication: Publication, roomTypeId: string) {
   );
 }
 
+const allSelling: readonly PricingRateNotSelling[] = [];
 /** A room's published prices in its Rooms list row: "from IDR 875,000" over "2 rates · per night", or that guests
- * can't book it yet. */
+ * can't book it yet. "From" is the lowest night guests can book, as the Prices tab's "Guests from" (VAY-2466). */
 export function RoomPriceSummary({
   roomTypeId,
   publication,
+  notSelling = allSelling,
 }: {
   roomTypeId: string;
   publication: Publication;
+  notSelling?: readonly PricingRateNotSelling[];
 }) {
   const { t, locale } = useTranslation();
   const room = publishedRoom(publication, roomTypeId);
+  const lowest = useMemo(() => {
+    const stopped = notSelling
+      .filter((rate) => rate.roomTypeId.toLowerCase() === roomTypeId.toLowerCase())
+      .map((rate) => rate.offerId);
+    try {
+      return room ? guestsFromMinor(room, localToday(), stopped) : null;
+    } catch {
+      return null; // A room the engine can't read shows its rates without a price, as the Prices tab's bar.
+    }
+  }, [room, notSelling, roomTypeId]);
   if (!room)
     return (
       <>
@@ -107,7 +111,6 @@ export function RoomPriceSummary({
         <p className="text-[13px] text-amber-700">{t("pricing.list.cantBook")}</p>
       </>
     );
-  const lowest = lowestBaseMinor(room);
   const rates = t(
     room.offers.length === 1 ? "pricing.list.rates.one" : "pricing.list.rates.other",
     {

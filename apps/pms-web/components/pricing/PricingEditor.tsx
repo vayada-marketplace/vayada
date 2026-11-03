@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration, pricingOfferOnBookingPage } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { localToday } from "@/lib/guests/guestDisplay";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import { samePricingValue, type createReplacementPricingClient, type PricingGuestDisplay, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
@@ -35,7 +36,7 @@ import { MoreOptions } from "./MoreOptions";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
 import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, money, normalNight, optionNames, sampleAdults, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
-import { lowestNightMinor, nightsWithoutPrice } from "./priceCalendarModel";
+import { guestsFromMinor, nightsWithoutPrice } from "./priceCalendarModel";
 import { setOfferSale, simpleRoom } from "./simplePricing";
 import { StepRates } from "./StepRates";
 import { StepExtras } from "./StepExtras";
@@ -375,23 +376,22 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const firstCurrency = display ? (holdFirst ? undefined : relabeled?.snapshot.currency ?? display.currency) : paymentDefaults?.currency ?? undefined;
   const firstMethods = holdFirst ? undefined : defaultMethods;
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
-  // The Save bar's "Guests pay from" (VAY-2280): the focused room's lowest standard or season night this year, over the
-  // rates guests can book (VAY-2285).
+  // The Save bar's "Guests from" (VAY-2280): the focused room's lowest night guests can book, as the Rooms list's "from"
+  // (VAY-2466: `guestsFromMinor`).
   // The CEO's bar (VAY-2305) also counts the open nights no price covers, as "Pricing setup" does.
   // VAY-2390: guests start in Localization's display currency when it isn't the prices' own, so the bar also says what
   // they see first, in whole units as the booking page shows it ("≈ US$73"). Desktop only, as the board.
+  // This room's published rates guests can't book now (VAY-2304); their cards say why, and the bar leaves them out.
+  const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
   let guestsFrom = "", seeFirst = "", barGaps = 0;
   if (display && editing) try {
-    const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, rate = simpleRoom(shown, optionTerms)?.nonRefundable;
-    const booked = [mainOffer(shown), ...(rate ? [rate] : [])].filter(pricingOfferOnBookingPage).map((offer) => offer.id);
-    const minor = lowestNightMinor(shown, booked, sampleAdults(shown), String(new Date().getFullYear()));
+    const shown = editedSnapshot(display, inputs).rooms[focusIndex]!, today = localToday();
+    const minor = guestsFromMinor(shown, today, stopped.map((rate) => rate.offerId));
     if (minor) guestsFrom = t("pricing.bar.from", { amount: money(minor, shown.currency) });
     if (minor && guestDisplay?.base === shown.currency) seeFirst = t("pricing.bar.seeFirst", { amount: new Intl.NumberFormat("en-GB", { style: "currency", currency: guestDisplay.currency, minimumFractionDigits: 0, maximumFractionDigits: 0 })
       .format(Number(minor) / 10 ** (pricingCurrencyScale(shown.currency) ?? 2) * guestDisplay.rate) });
-    barGaps = nightsWithoutPrice(shown, mainOffer(shown).id, sampleAdults(shown), localToday());
+    barGaps = nightsWithoutPrice(shown, mainOffer(shown).id, sampleAdults(shown), today);
   } catch { guestsFrom = ""; seeFirst = ""; }
-  // This room's published rates guests can't book now (VAY-2304); their cards say why.
-  const stopped = notSelling.filter((rate) => rate.roomTypeId === focus);
   const status = firstForm ? { key: "pricing.bar.noPrice", tone: "text-amber-700", icon: <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> }
     : busy ? { key: "pricing.editor.saving", tone: "text-primary-700", icon: <ArrowPathIcon aria-hidden="true" className="h-4 w-4 animate-spin" /> }
     : done || (!dirty && !stale) ? { key: done ? "pricing.editor.statusSaved" : "pricing.editor.statusCurrent", tone: "text-green-700", icon: <CheckIcon aria-hidden="true" className="h-4 w-4" /> }
@@ -638,8 +638,6 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
   </section></PricingNotSellingProvider></PricingCardReadinessProvider></PricingManualMethodsProvider>;
 }
-/** Today's date on this device (YYYY-MM-DD), as the calendar counts nights. */
-const localToday = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 /** A room's prices without what a save assigns (its revision and its options' terms revisions). */
 const savedPrices = (room: Room) => ({ ...room, revision: 0, offers: room.offers.map((offer) => ({ ...offer, termsRevision: "" })) });
 /** The New room page's kept prices as edits kept over a reload: a new room has no saved prices to compare with. */
