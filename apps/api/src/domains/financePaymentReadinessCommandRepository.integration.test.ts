@@ -263,7 +263,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-readiness comman
     await expect(eventOutcomes()).resolves.toEqual(["selection_changed"]);
   });
 
-  it("requires new execution evidence after moving to a supported currency", async () => {
+  it("takes card right after moving to a supported currency, with no Vayada approval (VAY-2442)", async () => {
     await seedOnlineCardState({ financeCurrency: "KWD", pmsCurrency: "EUR", pmsRevision: 7 });
     const result = await repository.replacePaymentMethods({
       command: command("currency-becomes-supported", {
@@ -277,19 +277,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-readiness comman
       ok: true,
       response: {
         paymentReadiness: {
-          bookingPaymentReady: false,
+          bookingPaymentReady: true,
           methods: expect.arrayContaining([
             expect.any(Object),
-            expect.objectContaining({
-              method: "card",
-              readiness: "unready",
-              blockers: ["online_card_execution_unavailable"],
-            }),
+            expect.objectContaining({ method: "card", readiness: "ready", blockers: [] }),
           ]),
         },
       },
     });
-    await expect(eventOutcomes()).resolves.toEqual(["selection_changed"]);
+    await expect(eventOutcomes()).resolves.toEqual(["readiness_gained"]);
   });
 
   it("suppresses a published card in the same transaction when canonical selection removes it", async () => {

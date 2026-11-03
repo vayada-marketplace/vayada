@@ -4,19 +4,12 @@ import type {
   HotelGoLiveChecklist,
   HotelGoLiveItemId,
   HotelGoLiveSetupStep,
-  HotelSetupChecklist,
-  HotelSetupChecklistAcknowledgeable,
-  HotelSetupChecklistItemId,
 } from "@vayada/domain-hotels";
 import {
   buildSharedHotelSetupRedirectPath,
   createBrowserAuthHandoff,
   crossAppReauthenticationUrl,
 } from "@vayada/product-onboarding";
-import {
-  HotelSetupChecklistCard,
-  HotelSetupChecklistChip,
-} from "@vayada/product-onboarding/HotelSetupChecklistCard";
 import {
   GoLiveChecklistCard,
   type GoLiveChecklistMessages,
@@ -26,7 +19,7 @@ import {
   SetupFinishedToast,
 } from "@vayada/product-onboarding/GoLiveChecklistCard";
 import type { HotelSetupChecklistClient } from "@vayada/product-onboarding/hotelSetupChecklistApi";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useTranslation } from "@/lib/i18n";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
@@ -37,7 +30,6 @@ import {
 import { hotelSetupChecklistApi } from "@/services/api/hotelSetupChecklistClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 
-import { bookingAdminChecklistMessages } from "./bookingAdminChecklistMessages";
 import { bookingAdminGoLiveMessages } from "./bookingAdminGoLiveMessages";
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
@@ -46,13 +38,11 @@ export type DashboardSetupChecklistState =
   | Readonly<{ kind: "loading" }>
   /** No checklist (the API isn't mounted while HOTEL_FIRST_RUN_ENABLED is off, or it failed). */
   | Readonly<{ kind: "unavailable" }>
-  | Readonly<{ kind: "ready"; propertyId: string; checklist: HotelSetupChecklist }>
-  /** VAY-2451: the four-step setup's cards (HOTEL_GO_LIVE_CHECKLIST_ENABLED). */
+  /** VAY-2451: the four-step setup's cards. */
   | Readonly<{ kind: "go_live"; propertyId: string; checklist: HotelGoLiveChecklist }>;
 
 type Deps = {
-  client: Pick<HotelSetupChecklistClient, "load" | "looksGood" | "setViewer"> &
-    Partial<Pick<HotelSetupChecklistClient, "loadGoLive" | "looksGoodGoLive" | "setGoLiveViewer">>;
+  client: Pick<HotelSetupChecklistClient, "loadGoLive" | "looksGoodGoLive" | "setGoLiveViewer">;
   /** The selected hotel's property, or null while the header hasn't stored a selection yet. */
   resolvePropertyId: () => Promise<string | null>;
 };
@@ -66,9 +56,9 @@ const DEFAULT_DEPS: Deps = {
 };
 
 /**
- * VAY-2247 wave 2: the setup checklist on the Booking Admin dashboard. It shows whenever the checklist
- * API answers; the API is mounted only with the server's first run (HOTEL_FIRST_RUN_ENABLED), so until
- * then the dashboard stays as it is today.
+ * VAY-2247 wave 2, VAY-2451: the four-step setup's cards on the Booking Admin dashboard. They show whenever
+ * the go-live checklist answers; the API is mounted only with the server's first run
+ * (HOTEL_FIRST_RUN_ENABLED), so until then the dashboard stays as it is today.
  */
 export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
   const [state, setState] = useState<DashboardSetupChecklistState>({ kind: "loading" });
@@ -83,16 +73,11 @@ export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
         // With several hotels the header may store the selection after the dashboard mounted.
         if (!propertyId || started || !active) return;
         started = true;
-        // Both at once: the go-live list when it's served; otherwise (switched off, failed) today's.
-        const today = deps.client.load(propertyId);
-        today.catch(() => undefined);
-        const goLive = (await deps.client.loadGoLive?.(propertyId).catch(() => null)) ?? null;
-        if (goLive) {
-          if (active) setState({ kind: "go_live", propertyId, checklist: goLive });
-          return;
-        }
-        const checklist = await today;
-        if (active) setState({ kind: "ready", propertyId, checklist });
+        const checklist = await deps.client.loadGoLive(propertyId);
+        if (active)
+          setState(
+            checklist ? { kind: "go_live", propertyId, checklist } : { kind: "unavailable" },
+          );
       } catch {
         started = true;
         if (active) setState({ kind: "unavailable" });
@@ -109,38 +94,20 @@ export function useDashboardSetupChecklist(deps: Deps = DEFAULT_DEPS) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const update = useCallback(
-    async (write: (propertyId: string) => Promise<HotelSetupChecklist>) => {
-      if (state.kind !== "ready") return;
-      const checklist = await write(state.propertyId);
-      setState({ ...state, checklist });
-    },
-    [state],
-  );
-
   /** "Review booking rules" on the go-live list: the guest terms' Looks good. */
   const reviewRules = async () => {
-    if (state.kind !== "go_live" || !deps.client.looksGoodGoLive) return;
+    if (state.kind !== "go_live") return;
     const checklist = await deps.client.looksGoodGoLive(state.propertyId, "guest_terms");
     setState({ ...state, checklist });
   };
-  /** The live card's Dismiss: it stays away (the same viewer flags as today's checklist). */
+  /** The live card's Dismiss: it stays away (the same viewer flags as the first checklist's). */
   const dismissGoLive = async () => {
-    if (state.kind !== "go_live" || !deps.client.setGoLiveViewer) return;
+    if (state.kind !== "go_live") return;
     const checklist = await deps.client.setGoLiveViewer(state.propertyId, { dismissed: true });
     setState({ ...state, checklist });
   };
 
-  return {
-    state,
-    reviewRules,
-    dismissGoLive,
-    looksGood: (item: HotelSetupChecklistAcknowledgeable) =>
-      update((propertyId) => deps.client.looksGood(propertyId, item)),
-    hide: () => update((propertyId) => deps.client.setViewer(propertyId, { hidden: true })),
-    show: () => update((propertyId) => deps.client.setViewer(propertyId, { hidden: false })),
-    dismiss: () => update((propertyId) => deps.client.setViewer(propertyId, { dismissed: true })),
-  };
+  return { state, reviewRules, dismissGoLive };
 }
 
 export type DashboardSetupChecklist = ReturnType<typeof useDashboardSetupChecklist>;
@@ -164,22 +131,6 @@ async function openPms(targetPath: string, propertyId: string) {
   }
   window.location.href = crossAppReauthenticationUrl(PMS_FRONTEND_URL, targetPath);
 }
-
-/** Where each item opens from Booking Admin: its own pages here, the PMS's through the handoff. */
-export const BOOKING_ADMIN_CHECKLIST_PAGES: Record<
-  HotelSetupChecklistItemId,
-  { app: "pms" | "booking_admin"; path: string }
-> = {
-  hotel_basics: { app: "booking_admin", path: "/settings/general" },
-  first_room: { app: "pms", path: "/rooms" },
-  guest_payment: { app: "booking_admin", path: "/settings/payments" },
-  booking_published: { app: "booking_admin", path: "/dashboard" },
-  photos: { app: "pms", path: "/rooms" },
-  style: { app: "booking_admin", path: "/design-studio" },
-  calendar: { app: "pms", path: "/settings/calendar" },
-  guest_terms: { app: "booking_admin", path: "/settings/policies" },
-  online_cards: { app: "booking_admin", path: "/settings/payments" },
-};
 
 /** VAY-2451: where the go-live rows and done setup steps open from Booking Admin. */
 export const BOOKING_ADMIN_GO_LIVE_PAGES: Record<
@@ -234,7 +185,7 @@ function GoLiveCards({
       propertyId: state.propertyId,
     })}${step ? `&step=${goLiveSetupStepParam(step)}` : ""}`;
   const { checklist } = state;
-  // A live hotel's card goes once dismissed or hidden (also when today's checklist was).
+  // A live hotel's card goes once dismissed or hidden (also when the first checklist was).
   if (checklist.phase === "live" && (checklist.viewer.dismissed || checklist.viewer.hidden))
     return toast.shown ? (
       <SetupFinishedToast onDismiss={toast.dismiss} messages={messages} />
@@ -295,7 +246,6 @@ export function DashboardSetupChecklistCard({
   navigate?: (path: string) => void;
 }) {
   const { t } = useTranslation();
-  const messages = useMemo(() => bookingAdminChecklistMessages(t), [t]);
   const goLiveMessages = useMemo(() => bookingAdminGoLiveMessages(t), [t]);
   const { state } = setup;
   if (state.kind === "go_live")
@@ -308,46 +258,5 @@ export function DashboardSetupChecklistCard({
         messages={goLiveMessages}
       />
     );
-  if (state.kind !== "ready") return null;
-  const open = (item: HotelSetupChecklistItemId) => {
-    const page = BOOKING_ADMIN_CHECKLIST_PAGES[item];
-    if (page.app === "booking_admin") navigate(page.path);
-    else void openPms(page.path, state.propertyId);
-  };
-  return (
-    <HotelSetupChecklistCard
-      checklist={state.checklist}
-      hotelName={hotelName}
-      product="booking_admin"
-      onContinueSetup={() =>
-        navigate(
-          buildSharedHotelSetupRedirectPath({
-            entryProduct: "booking",
-            returnProduct: "booking",
-            returnTo: "/dashboard",
-            propertyId: state.propertyId,
-          }),
-        )
-      }
-      onOpen={open}
-      onLooksGood={setup.looksGood}
-      onHide={setup.hide}
-      onDismiss={setup.dismiss}
-      messages={messages}
-    />
-  );
-}
-
-/** The "Setup N of 9" pill while the checklist is hidden; it brings the card back. */
-export function DashboardSetupChecklistChip({ setup }: { setup: DashboardSetupChecklist }) {
-  const { t } = useTranslation();
-  const messages = useMemo(() => bookingAdminChecklistMessages(t), [t]);
-  if (setup.state.kind !== "ready") return null;
-  return (
-    <HotelSetupChecklistChip
-      checklist={setup.state.checklist}
-      onShow={() => void setup.show()}
-      messages={messages}
-    />
-  );
+  return null;
 }

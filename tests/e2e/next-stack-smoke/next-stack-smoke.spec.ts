@@ -41,7 +41,6 @@ import {
 } from "./booking-lifecycle";
 import { cleanupSmokeResources, recoverSmokeProperty, type HotelResource } from "./cleanup";
 import {
-  completeFirstRun,
   completeFourStepSetup,
   publishFromDashboard,
   setRoomPriceInPms,
@@ -557,10 +556,9 @@ async function runHotelFlow(
       expect(result.session.organizationKind).toBe("hotel_group");
       return result;
     });
-  // New hotels set up through Booking Admin's first run (VAY-2247, ONBOARDING_V2_ENABLED), or its
-  // four-step setup once FOUR_STEP_SETUP_ENABLED is on (VAY-2451).
-  expect(flow, "Booking Admin opened the old setup wizard instead of the first run.").not.toBe(
-    "wizard",
+  // New hotels set up through Booking Admin's four-step setup (VAY-2451, ONBOARDING_V2_ENABLED).
+  expect(flow, "Booking Admin opened the old setup wizard instead of the four-step setup.").toBe(
+    "four_step",
   );
 
   const owner = {
@@ -581,26 +579,22 @@ async function runHotelFlow(
     room,
   };
   const onPropertyCreated = (id: string) => registerHotel({ ...owner, propertyId: id });
-  const { propertyId, bookingUrl } =
-    flow === "four_step"
-      ? await (async () => {
-          // VAY-2451: setup leaves the room on a placeholder price; the owner prices it in the PMS and
-          // publishes from the dashboard.
-          const setup = await completeFourStepSetup(page, firstRunHotel, onPropertyCreated);
-          await page.screenshot({
-            path: testInfo.outputPath("four-step-dashboard.png"),
-            fullPage: true,
-          });
-          await loginPms(page, user, environment.password);
-          await setRoomPriceInPms(page, NEXT_STACK_ORIGINS.pms, {
-            roomTypeId: setup.roomTypeId,
-            name: room.name,
-            pricePerNight: room.pricePerNight,
-          });
-          const url = await publishFromDashboard(page, NEXT_STACK_ORIGINS.bookingAdmin);
-          return { propertyId: setup.propertyId, bookingUrl: url };
-        })()
-      : await completeFirstRun(page, firstRunHotel, onPropertyCreated);
+  // VAY-2451: setup leaves the room on a placeholder price; the owner prices it in the PMS and publishes
+  // from the dashboard.
+  const setup = await completeFourStepSetup(page, firstRunHotel, onPropertyCreated);
+  // The dashboard's go-live list: setup is finished, the placeholder price still blocks Publish.
+  await expect(page.getByRole("region", { name: "Get ready to go live" })).toBeVisible({
+    timeout: 45_000,
+  });
+  await page.screenshot({ path: testInfo.outputPath("four-step-dashboard.png"), fullPage: true });
+  await loginPms(page, user, environment.password);
+  await setRoomPriceInPms(page, NEXT_STACK_ORIGINS.pms, {
+    roomTypeId: setup.roomTypeId,
+    name: room.name,
+    pricePerNight: room.pricePerNight,
+  });
+  const bookingUrl = await publishFromDashboard(page, NEXT_STACK_ORIGINS.bookingAdmin);
+  const { propertyId } = setup;
   await page.screenshot({ path: testInfo.outputPath("first-run-live.png"), fullPage: true });
 
   const slug =
@@ -643,10 +637,9 @@ async function runHotelFlow(
     });
 
   await test.step("the owner's dashboard opens on the new hotel", async () => {
-    // Before any booking exists, so no new-booking notice covers the page. The four-step setup's owner
-    // published from the dashboard and is there already.
-    if (flow === "four_step") await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/dashboard`);
-    else await page.getByRole("button", { name: "Go to my dashboard" }).click();
+    // Before any booking exists, so no new-booking notice covers the page. The owner published from the
+    // dashboard and opens it again.
+    await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/dashboard`);
     await page.waitForURL(
       (url) => url.origin === NEXT_STACK_ORIGINS.bookingAdmin && url.pathname === "/dashboard",
       { timeout: 45_000 },

@@ -149,14 +149,19 @@ describe.skipIf(!url)("re-publishing prices after a payment change", () => {
     expect((await requestIds()).at(-1)).toBe("pricing.v2.payment-republish:5");
   });
 
-  it("follows Vayada card off and on again, each time with the methods the hotel can take", async () => {
+  it("follows card off and on again, each time with the methods the hotel can take", async () => {
+    // VAY-2442: card follows the hotel's own Stripe account, with no Vayada approval.
     const f = await fixture(["card", "pay_at_property"], true),
       id = f.propertyId;
-    const approval = await f.cardOn();
+    const stripeCharges = (on: boolean) =>
+      pool.query("UPDATE finance.payment_provider_accounts SET charges_enabled=$2 WHERE id=$1", [
+        f.accountId,
+        on,
+      ]);
     expect(await (await f.save(0))()).toEqual({ revision: 1, replayed: false });
     expect((await f.served())?.finance).toMatchObject({ methods: ["pay_at_property", "card"] });
 
-    await f.cardOff(approval);
+    await stripeCharges(false);
     expect(await f.served()).toBeNull();
     expect(await republishPricingAfterPaymentChange(pool, id)).toMatchObject({
       outcome: "republished",
@@ -164,7 +169,7 @@ describe.skipIf(!url)("re-publishing prices after a payment change", () => {
     });
     expect((await f.served())?.finance).toMatchObject({ methods: ["pay_at_property"] });
 
-    await f.cardOn();
+    await stripeCharges(true);
     expect(await f.served()).toBeNull();
     expect(await republishPricingAfterPaymentChange(pool, id)).toMatchObject({
       outcome: "republished",

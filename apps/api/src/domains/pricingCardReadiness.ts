@@ -1,15 +1,15 @@
 import type { FinancePaymentReadinessReadPort } from "@vayada/domain-finance";
 
 /** Whether a rate can take card (and deposits) on the booking page now, for the PMS rate screens (VAY-2205):
- * - ready only when Finance's own card readiness (Stripe account, currency, Vayada's card approval) is ready and
- *   card acceptance is switched on;
- * - `reason` names the first thing missing: the hotel's Stripe account, its currency, Vayada's approval, the switch;
+ * - ready only when Finance's own card readiness (the hotel's payment account and currency) is ready and card
+ *   acceptance is switched on; no Vayada approval since VAY-2442 (Flamur, 2026-11-03);
+ * - `reason` names the first thing missing: the hotel's payment account, its currency, the switch;
  * - `charge` is when the guest's card is charged: at booking (instant book) or when the hotel accepts (request);
  * - deposits (a share by card when booking, the rest at the property) need card ready and deposits switched on. */
 export type PricingCardReadiness = Readonly<{
   card: Readonly<{
     ready: boolean;
-    reason: "not_connected" | "currency" | "not_approved" | "switch_off" | null;
+    reason: "not_connected" | "currency" | "switch_off" | null;
     charge: "at_booking" | "on_accept";
   }>;
   deposits: Readonly<{ ready: boolean }>;
@@ -30,12 +30,8 @@ export function createPricingCardReadinessReader(config: {
     async read({ organizationId, propertyId }) {
       const [snapshot, local] = await Promise.all([
         config.finance.getPaymentReadiness({ organizationId, propertyId }),
-        // Finance reports a missing Stripe account and missing approval alike; the linked account tells them apart.
         config.pool.query(
-          `SELECT (SELECT acceptance_mode FROM booking.booking_settings WHERE property_id=$1) AS mode,
-            EXISTS(SELECT 1 FROM finance.payment_settings settings JOIN finance.payment_provider_accounts account
-              ON account.id=settings.provider_account_id AND account.property_id=settings.property_id
-              WHERE settings.property_id=$1) AS linked`,
+          `SELECT (SELECT acceptance_mode FROM booking.booking_settings WHERE property_id=$1) AS mode`,
           [propertyId],
         ),
       ]);
@@ -57,9 +53,7 @@ export function createPricingCardReadinessReader(config: {
               blocked("pricing_currency_mismatch")
             ? "currency"
             : card.readiness !== "ready"
-              ? local.rows[0]?.linked === true
-                ? "not_approved"
-                : "not_connected"
+              ? "not_connected"
               : config.cardAcceptanceEnabled
                 ? null
                 : "switch_off";

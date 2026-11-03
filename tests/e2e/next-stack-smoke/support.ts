@@ -244,9 +244,8 @@ function syntheticIdentity(
 /**
  * Signs a hotel owner up the way a new hotel does (VAY-2270): Booking Admin /signup, the email
  * code (read from WorkOS, which sent it), then the account details step of /setup. The signup
- * creates the owner's hotel group. Stops on the four-step setup's Welcome (VAY-2451,
- * FOUR_STEP_SETUP_ENABLED), the first run's "Your hotel" step (VAY-2247, ONBOARDING_V2_ENABLED), or the
- * older setup wizard's track choice, and says which.
+ * creates the owner's hotel group. Stops on the four-step setup's Welcome (VAY-2451, with
+ * ONBOARDING_V2_ENABLED) or the older setup wizard's track choice, and says which.
  */
 export async function signUpSyntheticHotelOwner(
   page: Page,
@@ -257,7 +256,7 @@ export async function signUpSyntheticHotelOwner(
 ): Promise<{
   user: SyntheticUser;
   session: AuthSession;
-  flow: "four_step" | "first_run" | "wizard";
+  flow: "four_step" | "wizard";
 }> {
   const identity = syntheticIdentity(environment, "hotel", qualifier);
   await page.goto(`${NEXT_STACK_ORIGINS.bookingAdmin}/signup`);
@@ -303,20 +302,14 @@ export async function signUpSyntheticHotelOwner(
   await fillSecret(page.getByLabel("Verification code"), stringField(verification, "code"));
   await page.getByRole("button", { name: "Verify email", exact: true }).click();
 
-  // The first run asks for the same details on its own first step, then opens "Your hotel"
-  // instead of the wizard's track choice; the four-step setup opens its Welcome there.
-  let flow: "four_step" | "first_run" | "wizard" = await submitAccountDetails(
-    page,
-    identity,
-    phone,
-  );
-  if (flow === "first_run") {
-    const welcome = page.getByRole("heading", { name: "Welcome to vayada", level: 1 });
+  // The four-step setup (VAY-2451) asks for the same details on its own first step, then opens its
+  // Welcome instead of the older wizard's track choice.
+  const flow =
+    (await submitAccountDetails(page, identity, phone)) === "first_run" ? "four_step" : "wizard";
+  if (flow === "four_step") {
     await page
-      .getByRole("heading", { name: "Your hotel", level: 1 })
-      .or(welcome)
+      .getByRole("heading", { name: "Welcome to vayada", level: 1 })
       .waitFor({ timeout: 45_000 });
-    if (await welcome.isVisible()) flow = "four_step";
   } else {
     await page
       .getByRole("heading", { name: "Choose how you’ll use vayada" })
@@ -335,7 +328,7 @@ export async function signUpSyntheticHotelOwner(
 
 /**
  * Fills the account details a new hotel owner gives after the email code and submits them: the
- * first run's "Hi! Who's setting up the hotel?" step (VAY-2247), or the older setup wizard's form.
+ * new setup's "Hi! Who's setting up the hotel?" step (VAY-2247, VAY-2451), or the older setup wizard's form.
  * Returns which one it was, so the caller waits for that flow's next step.
  */
 export async function submitAccountDetails(

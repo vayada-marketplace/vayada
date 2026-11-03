@@ -1,7 +1,6 @@
 import {
   FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
   FINANCE_PAYMENT_READINESS_METHODS,
-  FINANCE_ONLINE_CARD_EXECUTION_EVIDENCE_CONTRACT_VERSION,
   FINANCE_ONLINE_CARD_READINESS_DECISIONS,
   type FinancePaymentMethodReadiness,
   type FinancePaymentNextAction,
@@ -165,14 +164,11 @@ export function resolveFinanceOnlineCardReadiness(
   ) {
     return "provider_capability_lost";
   }
-  return evidence &&
-    evidence.contractVersion === FINANCE_ONLINE_CARD_EXECUTION_EVIDENCE_CONTRACT_VERSION &&
-    evidence.providerAccountId === account.id &&
-    evidence.providerCapabilityRevision === account.cardCapabilityRevision &&
-    evidence.propertyReadinessRevision === input.propertyReadinessRevision &&
-    evidence.revokedAt === null
-    ? "ready"
-    : "execution_unavailable";
+  // VAY-2442 (Flamur, 2026-11-03): card is ready as soon as the hotel's own settings and its
+  // provider account are, with no Vayada approval. An approval row is still validated above,
+  // because the price fingerprint reads it, but it no longer decides anything. The SQL twin of
+  // this rule is apps/api/src/domains/financeOnlineCardReadySql.ts.
+  return "ready";
 }
 
 /** What each provider adds to the shared account checks above. Stripe Connect: the hotel's own

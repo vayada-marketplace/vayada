@@ -5,6 +5,7 @@ import type {
 import pg from "pg";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
+import { onlineCardReadySql } from "../domains/financeOnlineCardReadySql.js";
 import { APPROVED_PUBLIC_PROPERTY_MEDIA_OBJECT_PREDICATE } from "./propertyMediaPublicationJob.js";
 
 type PublicationPool = {
@@ -361,7 +362,7 @@ export const PROJECT_PUBLIC_BOOKABILITY_PROFILE = `
       finance.deposit_policy AS finance_deposit_policy,
       finance.refund_policy AS finance_refund_policy,
       finance.updated_at AS finance_updated_at,
-      online_card.online_card_ready AS finance_online_card_ready,
+      ${onlineCardReadySql("online_card", "finance")} AS finance_online_card_ready,
       EXISTS (
         SELECT 1
         FROM finance.billing_entitlements entitlement

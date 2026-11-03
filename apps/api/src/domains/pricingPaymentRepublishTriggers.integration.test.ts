@@ -72,48 +72,30 @@ describe.skipIf(!url)("payment changes re-publish prices", () => {
     expect(await f.served()).toMatchObject({ publication: { revision: 2 } });
   });
 
-  it("re-publishes when Vayada Admin turns card off and on, each time with the methods it can take", async () => {
+  it("re-publishes when the hotel turns card off and on, each time with the methods it can take", async () => {
+    // VAY-2442 (Flamur, 2026-11-03): no Vayada approval; card follows the hotel's own settings.
     const f = await paymentRepublishFixture(pool, ["card", "pay_at_property"], true);
-    const approval = await f.cardOn();
     await (
       await f.save(0)
     )();
-    await expect(
-      finance.revokeOnlineCardExecutionEvidence!({
-        commandType: "finance.online_card_execution_evidence.revoke",
+    expect((await f.served())?.finance).toMatchObject({ methods: ["pay_at_property", "card"] });
+    // Payment at the property names how (cash here), as the hotel's own save does.
+    const settings = (acceptedMethods: ("card" | "pay_at_property" | "cash")[]) =>
+      finance.updatePaymentSettings!({
+        commandType: "finance.payment_settings.update",
         commandId: randomUUID(),
         idempotencyKey: randomUUID(),
         propertyId: f.propertyId,
-        audit: actor(f.actorUserId, platformOrganizationId),
-        payload: { evidenceId: approval },
-      }),
-    ).resolves.toMatchObject({ ok: true });
+        audit: actor(f.actorUserId, f.organizationId),
+        payload: { paymentsEnabled: true, acceptedMethods },
+      });
+    await expect(settings(["pay_at_property", "cash"])).resolves.toMatchObject({ ok: true });
     expect(await latest(f.propertyId)).toEqual({ revision: 2, actor_type: "system" });
     expect((await f.served())?.finance).toMatchObject({ methods: ["pay_at_property"] });
 
-    const revisions = (
-      await pool.query(
-        `SELECT a.card_capability_revision::int AS card, s.online_card_readiness_revision::int AS property
-        FROM finance.payment_settings s JOIN finance.payment_provider_accounts a ON a.id=s.provider_account_id
-        WHERE s.property_id=$1`,
-        [f.propertyId],
-      )
-    ).rows[0];
-    await expect(
-      finance.acceptOnlineCardExecutionEvidence!({
-        commandType: "finance.online_card_execution_evidence.accept",
-        commandId: randomUUID(),
-        idempotencyKey: randomUUID(),
-        propertyId: f.propertyId,
-        audit: actor(f.actorUserId, platformOrganizationId),
-        payload: {
-          expectedCardCapabilityRevision: revisions.card,
-          expectedPropertyReadinessRevision: revisions.property,
-          evidenceFingerprintHash: "b".repeat(64),
-          executedAt: new Date(Date.now() - 60_000).toISOString(),
-        },
-      }),
-    ).resolves.toMatchObject({ ok: true });
+    await expect(settings(["card", "pay_at_property", "cash"])).resolves.toMatchObject({
+      ok: true,
+    });
     expect(await latest(f.propertyId)).toEqual({ revision: 3, actor_type: "system" });
     expect((await f.served())?.finance).toMatchObject({ methods: ["pay_at_property", "card"] });
   });

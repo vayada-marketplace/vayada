@@ -10,7 +10,6 @@ export type CardNotReadyReason =
   | "setup_incomplete"
   | "account_not_ready"
   | "currency"
-  | "not_approved"
   | "switch_off"
   /** VAY-2442: vayada Payment chosen, but no bank account to pay the hotel out to yet. */
   | "payout_account_missing";
@@ -20,7 +19,6 @@ const REASON_TEXT: Record<CardNotReadyReason, string> = {
   setup_incomplete: "settings.billing.cardNotReadySetupIncomplete",
   account_not_ready: "settings.billing.cardNotReadyAccountNotReady",
   currency: "settings.billing.cardNotReadyCurrency",
-  not_approved: "settings.billing.cardNotReadyNotApproved",
   switch_off: "settings.billing.cardNotReadySwitchOff",
   payout_account_missing: "settings.billing.cardNotReadyPayoutAccount",
 };

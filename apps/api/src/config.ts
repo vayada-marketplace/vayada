@@ -229,11 +229,6 @@ export type ApiConfig = {
   replacementPricingPaypalAcceptanceEnabled: boolean;
   /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
   hotelFirstRunEnabled: boolean;
-  /**
-   * VAY-2451: mounts the go-live checklist (/api/hotel-setup/properties/:id/checklist/v2) with the first run.
-   * The dashboards show the four-step setup's cards when it answers, today's card when it doesn't. Off by default.
-   */
-  hotelGoLiveChecklistEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -457,9 +452,11 @@ export function replacementPricingManualPaymentMethods(
 }
 
 /** VAY-2442: whether a hotel gets vayada Payment: the switch is on, its Stripe (test) keys are
- * set and the hotel is on VAYADA_PAYMENT_PROPERTY_IDS. Choosing it, the payout account, Vayada's
- * approval and new card charges all ask this, so a hotel can't be set up for charges that would
- * fail; refunds, disputes and payouts of money already taken do not. */
+ * set and the hotel is on VAYADA_PAYMENT_PROPERTY_IDS. Choosing it, the payout account and new
+ * card charges all ask this, so a hotel can't be set up for charges that would fail; refunds,
+ * disputes and payouts of money already taken do not. Card readiness doesn't (no Vayada approval
+ * since 2026-11-03): a hotel taken off the list keeps showing card until it turns card off, and
+ * its card checkouts are refused before any money is taken. */
 export function vayadaPaymentOpenFor(
   config: Pick<
     ApiConfig,
@@ -1397,7 +1394,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "REPLACEMENT_PRICING_PAYPAL_ACCEPTANCE_ENABLED",
     ),
     hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
-    hotelGoLiveChecklistEnabled: readBooleanEnv(env, "HOTEL_GO_LIVE_CHECKLIST_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),

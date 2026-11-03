@@ -1,8 +1,6 @@
 import {
   parseHotelGoLiveChecklist,
-  parseHotelSetupChecklist,
   type HotelGoLiveChecklist,
-  type HotelSetupChecklist,
   type HotelSetupChecklistAcknowledgeable,
 } from "@vayada/domain-hotels";
 
@@ -14,15 +12,6 @@ type Http = {
 
 const path = (propertyId: string, suffix = "") =>
   `/api/hotel-setup/properties/${encodeURIComponent(propertyId)}/checklist${suffix}`;
-
-function checklist(value: unknown, propertyId: string): HotelSetupChecklist {
-  const parsed = parseHotelSetupChecklist(value);
-  if (!parsed || parsed.propertyId !== propertyId.toLowerCase())
-    throw new Error(
-      "The setup checklist is invalid or belongs to another hotel. Refresh and try again.",
-    );
-  return parsed;
-}
 
 function goLive(value: unknown, propertyId: string): HotelGoLiveChecklist {
   const parsed = parseHotelGoLiveChecklist(value);
@@ -40,38 +29,15 @@ const notFound = (error: unknown) =>
   (error as { status: unknown }).status === 404;
 
 /**
- * VAY-2247 wave 2: the setup checklist API (apps/api routes/hotelSetupChecklist.ts) for both dashboards.
- * The API is mounted only with the server's first run (HOTEL_FIRST_RUN_ENABLED); until then every call
- * fails (404) and the dashboards keep what they show today.
+ * VAY-2247 wave 2, VAY-2451: the go-live checklist API (apps/api routes/hotelSetupChecklist.ts,
+ * /checklist/v2) for both dashboards. The API is mounted only with the server's first run
+ * (HOTEL_FIRST_RUN_ENABLED); until then every call fails (404) and the dashboards keep what they show today.
  */
 export function createHotelSetupChecklistClient(http: Http) {
   return {
-    async load(propertyId: string, options?: RequestInit): Promise<HotelSetupChecklist> {
-      return checklist(
-        await http.get<unknown>(path(propertyId), { ...options, cache: "no-store" }),
-        propertyId,
-      );
-    },
-    /** "Looks good" on calendar or guest terms, for the whole hotel. */
-    async looksGood(
-      propertyId: string,
-      item: HotelSetupChecklistAcknowledgeable,
-    ): Promise<HotelSetupChecklist> {
-      return checklist(
-        await http.post<unknown>(path(propertyId, "/acknowledgements"), { item }),
-        propertyId,
-      );
-    },
-    /** The signed-in person's own Hide for now (or showing it again) and Dismiss. */
-    async setViewer(
-      propertyId: string,
-      change: Readonly<{ hidden?: boolean; dismissed?: boolean }>,
-    ): Promise<HotelSetupChecklist> {
-      return checklist(await http.put<unknown>(path(propertyId, "/viewer"), change), propertyId);
-    },
     /**
-     * VAY-2451: the four-step setup's go-live list, or null when the API answers 404 (it is mounted only
-     * with HOTEL_GO_LIVE_CHECKLIST_ENABLED), in which case the dashboard keeps today's checklist.
+     * VAY-2451: the four-step setup's go-live list, or null when the API answers 404 (it isn't mounted, or the
+     * hotel isn't there), in which case the dashboards keep what they show today.
      */
     async loadGoLive(
       propertyId: string,

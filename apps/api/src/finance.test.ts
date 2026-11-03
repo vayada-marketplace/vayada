@@ -1055,15 +1055,16 @@ describe("finance route contracts", () => {
     expect(cardSwitchPrices([{ propertyId, error: "lock_timeout" }])).toBeUndefined();
   });
 
-  it("wires ONB-25A acceptance next to the revoke: a Vayada finance operator's attestation (VAY-2205 D3)", () => {
+  it("offers Vayada finance the hotel's card state, read only since VAY-2442", () => {
     const repository = createTargetFinancePropertySettingsRepository({
       connectionString: "postgresql://finance-target",
       pool: targetStripeProviderAccountPool().pool,
     });
 
     expect(repository.readOnlineCardExecutionState).toEqual(expect.any(Function));
-    expect(repository.acceptOnlineCardExecutionEvidence).toEqual(expect.any(Function));
-    expect(repository.revokeOnlineCardExecutionEvidence).toEqual(expect.any(Function));
+    // VAY-2442: card needs no Vayada approval, so neither write is offered.
+    expect(repository.acceptOnlineCardExecutionEvidence).toBeUndefined();
+    expect(repository.revokeOnlineCardExecutionEvidence).toBeUndefined();
   });
 
   it("persists target Stripe provider accounts by owner scope and replays without duplicate provider accounts", async () => {

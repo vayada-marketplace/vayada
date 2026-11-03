@@ -22,13 +22,11 @@ const snapshot = (method: ReturnType<typeof card> | null, paymentsEnabled = true
 
 function reader(
   finance: FinancePaymentReadinessSnapshot | null,
-  local: { mode?: string | null; linked?: boolean } = {},
+  local: { mode?: string | null } = {},
   cardAcceptanceEnabled = true,
   depositAcceptanceEnabled = false,
 ) {
-  const query = vi
-    .fn()
-    .mockResolvedValue({ rows: [{ mode: local.mode ?? null, linked: local.linked ?? true }] });
+  const query = vi.fn().mockResolvedValue({ rows: [{ mode: local.mode ?? null }] });
   const getPaymentReadiness = vi.fn().mockResolvedValue(finance);
   const read = createPricingCardReadinessReader({
     pool: { query },
@@ -62,14 +60,9 @@ describe("pricing card readiness", () => {
     expect(await reason(snapshot(card("ready"), false))).toBe("not_connected");
     expect(await reason(snapshot(null))).toBe("not_connected");
     expect(await reason(snapshot(card("unready", [], false)))).toBe("not_connected");
-    // Finance says "execution unavailable" both without a Stripe account and without Vayada's approval.
-    expect(
-      await reason(snapshot(card("unready", ["online_card_execution_unavailable"])), {
-        linked: false,
-      }),
-    ).toBe("not_connected");
+    // VAY-2442: no Vayada approval any more, so "execution unavailable" means no payment account.
     expect(await reason(snapshot(card("unready", ["online_card_execution_unavailable"])))).toBe(
-      "not_approved",
+      "not_connected",
     );
     expect(await reason(snapshot(card("unready", ["provider_capability_lost"])))).toBe(
       "not_connected",
@@ -81,7 +74,7 @@ describe("pricing card readiness", () => {
     expect(await reason(snapshot(card("unready", ["pricing_currency_mismatch"])))).toBe("currency");
     expect(
       await reason(snapshot(card("unready", ["online_card_execution_unavailable"])), {}, false),
-    ).toBe("not_approved");
+    ).toBe("not_connected");
   });
 
   it("offers deposits only with card ready and deposits switched on (VAY-2205)", async () => {
@@ -98,14 +91,6 @@ describe("pricing card readiness", () => {
         true,
       ),
     ).toBe(false);
-  });
-
-  it("trusts Finance's ready answer over the linked-account check", async () => {
-    expect((await reader(snapshot(card("ready")), { linked: false }).read).card).toEqual({
-      ready: true,
-      reason: null,
-      charge: "at_booking",
-    });
   });
 
   it("charges request-mode hotels when they accept", async () => {

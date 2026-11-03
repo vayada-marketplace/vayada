@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ArrowTopRightOnSquareIcon,
   CheckCircleIcon,
@@ -12,7 +12,6 @@ import {
   hotelCardPaymentsView,
   type HotelCardPaymentsState,
 } from "@/services/api/cardPayments";
-import { usersService } from "@/services/api/users";
 
 // The next PMS, as the image build passes it (VAY-2205); the legacy pms.vayada.com is frozen.
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://next-pms.vayada.com";
@@ -21,25 +20,6 @@ const status = (value: unknown) =>
   value && typeof value === "object" && typeof (value as { status?: unknown }).status === "number"
     ? (value as { status: number }).status
     : null;
-
-/** Why a turn on or off failed, in the server's words when it gave any (VAY-2205). */
-function changeError(cause: unknown): string {
-  const data =
-    cause && typeof cause === "object" && "data" in cause
-      ? ((cause as { data?: { message?: unknown; code?: unknown } }).data ?? {})
-      : {};
-  const message = typeof data.message === "string" && data.message.trim() ? data.message : null;
-  const code = typeof data.code === "string" ? data.code : null;
-  if (status(cause) === 403)
-    return "Turning card payments on or off needs Vayada finance manage rights.";
-  // The two revision conflicts in operator words; any other conflict as the server put it.
-  if (code === "property_readiness_revision_conflict")
-    return "The hotel's payment settings changed meanwhile. Check them again, then retry.";
-  if (code === "provider_capability_revision_conflict" || (status(cause) === 409 && !message))
-    return "The hotel's Stripe account changed meanwhile. Check it again, then retry.";
-  if (!message) return "That didn't go through. Try again in a moment.";
-  return `That didn't go through: ${message}${code ? ` (${code})` : ""}`;
-}
 
 function Item({
   state,
@@ -71,30 +51,13 @@ function Item({
   );
 }
 
-/** Card payments for one hotel, for Vayada finance (VAY-2205 P2.2, as drawn in Paper and approved
- * by Flamur on 2026-10-18): what the card needs, Vayada's approval, and turning card on or off.
- * Either change publishes the hotel's prices again by itself, with the new payment terms
- * (VAY-2304); only rates nobody can pay then stop selling. */
-export default function CardPaymentsSection({
-  hotelId,
-  hotelName,
-}: {
-  hotelId: string;
-  hotelName: string;
-}) {
+/** Card payments for one hotel, for Vayada finance (VAY-2205 P2.2). Read only since VAY-2442
+ * (Flamur, 2026-11-03): card works as soon as the hotel's own steps are done, with no Vayada
+ * approval. The hotel's settings change publishes its prices again by itself (VAY-2304); this
+ * page says when that couldn't happen. */
+export default function CardPaymentsSection({ hotelId }: { hotelId: string }) {
   const [state, setState] = useState<HotelCardPaymentsState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Kept apart from the read's error: the reload after a failed change must not wipe it.
-  const [changeFailed, setChangeFailed] = useState<string | null>(null);
-  const [approver, setApprover] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<"on" | "off" | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [changed, setChanged] = useState<"on" | "off" | null>(null);
-  const dialog = useRef<HTMLDivElement>(null);
-  // The confirm takes focus, so Escape and the keyboard reach it at once.
-  useEffect(() => {
-    if (confirm) dialog.current?.focus();
-  }, [confirm]);
 
   const load = useCallback(async () => {
     try {
@@ -112,16 +75,6 @@ export default function CardPaymentsSection({
     void load();
   }, [load]);
 
-  const approverId = state?.evidence?.acceptedByUserId ?? null;
-  useEffect(() => {
-    setApprover(null);
-    if (!approverId) return;
-    usersService
-      .getUserById(approverId)
-      .then((user) => setApprover(user.name || user.email))
-      .catch(() => setApprover(null));
-  }, [approverId]);
-
   if (error && !state)
     return (
       <div className="max-w-3xl rounded-lg border border-gray-200 bg-white p-5 text-sm text-gray-600">
@@ -131,52 +84,12 @@ export default function CardPaymentsSection({
   if (!state) return <p className="text-sm text-gray-500">Loading…</p>;
 
   const view = hotelCardPaymentsView(state);
-  const change = async (to: "on" | "off") => {
-    setConfirm(null);
-    setBusy(true);
-    setChangeFailed(null);
-    try {
-      if (to === "on") await hotelCardPaymentsService.turnOn(state);
-      else await hotelCardPaymentsService.turnOff(state.propertyId, state.evidence!.evidenceId);
-      setChanged(to);
-    } catch (cause) {
-      setChangeFailed(changeError(cause));
-    } finally {
-      setBusy(false);
-      await load();
-    }
-  };
-  const when = (iso: string) =>
-    new Date(iso).toLocaleString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-  // The server publishes the prices again before it answers a change (VAY-2304). They stay stale
-  // only when it couldn't: rooms or rates changed too, or no way to pay is left.
+  // The system publishes the prices again after a payment change (VAY-2304). They stay stale only
+  // when it couldn't: rooms or rates changed too, or no way to pay is left.
   const saveNeeded = view.pricesSaveNeeded;
 
   return (
     <div className="max-w-3xl space-y-4">
-      {changed !== null && !saveNeeded && (
-        <div
-          role="status"
-          className="flex gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm"
-        >
-          <CheckCircleIcon className="h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
-          <p className="font-semibold text-emerald-900">
-            {changed === "on" ? "Card payments are on." : "Card payments are off."}
-            {/* Only when the server confirms the prices are current, not for unpublished or unknown. */}
-            {state.prices === "current" &&
-              (changed === "on"
-                ? " The hotel's prices are published again, now with card."
-                : " The hotel's prices are published again; rates with no other ready payment method stopped selling.")}
-          </p>
-        </div>
-      )}
       {saveNeeded && (
         <div
           role="status"
@@ -215,7 +128,7 @@ export default function CardPaymentsSection({
                 ? "Card is on, but this hotel's booking page takes no bookings until its prices are saved again."
                 : view.on
                   ? "Guests can pay by card on this hotel's booking page. Card is charged when booking, or held and charged when the hotel accepts a request."
-                  : "Guests can pay by card on this hotel's booking page once its Stripe account is ready, the hotel chooses card, and vayada approves it."}
+                  : "Guests can pay by card on this hotel's booking page as soon as the hotel finishes these steps. vayada doesn't need to approve it."}
             </p>
           </div>
           <span
@@ -229,20 +142,20 @@ export default function CardPaymentsSection({
         <ul className="mt-4 divide-y divide-gray-200 rounded-lg border border-gray-200">
           <Item
             state={view.linked ? "done" : "open"}
-            title="Stripe account linked"
+            title="Payment account linked"
             note={
               view.linked
-                ? "The hotel connected its own Stripe account in its payment settings."
-                : "Not yet. The hotel connects it in its payment settings."
+                ? "The hotel connected its Stripe account, or saved its bank account for vayada Payment, in its payment settings."
+                : "Not yet. The hotel does this in its payment settings."
             }
           />
           <Item
-            state={view.stripeReady ? "done" : view.linked ? "waiting" : "open"}
-            title="Charges, payouts and card payments on in Stripe"
+            state={view.accountReady ? "done" : view.linked ? "waiting" : "open"}
+            title="Ready to take cards"
             note={
-              view.stripeReady
+              view.accountReady
                 ? "All on."
-                : "Not yet. The hotel still has to finish its Stripe setup."
+                : "Not yet. The hotel still has to finish its Stripe setup, or save its bank account for vayada Payment."
             }
           />
           <Item
@@ -256,115 +169,17 @@ export default function CardPaymentsSection({
                   : "Not yet. The hotel turns on payments with card in its payment settings."
             }
           />
-          <Item
-            state={view.approvalOutOfDate ? "waiting" : view.approval ? "done" : "open"}
-            title="vayada's approval"
-            note={
-              view.approval
-                ? `Given ${when(view.approval.acceptedAt)}${approver ? ` by ${approver}` : ""}.${
-                    view.approvalOutOfDate
-                      ? " Out of date: the hotel's Stripe account or payment settings changed since. Turn card payments off, then on, to approve it again."
-                      : ""
-                  }`
-                : changed === "off"
-                  ? "Not given. Turning card payments on gives it again."
-                  : "Not given. You give it by turning card payments on."
-            }
-          />
         </ul>
-        {(changeFailed ?? error) && (
+        {error && (
           <p role="alert" className="mt-3 text-sm text-red-700">
-            {changeFailed ?? error}
+            {error}
           </p>
         )}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          {view.approval ? (
-            <>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setConfirm("off")}
-                className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-              >
-                Turn off card payments
-              </button>
-              <span className="text-xs text-gray-500">
-                Bookings already paid keep their payments, and their refunds still work.
-              </span>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                disabled={busy || !view.canTurnOn}
-                onClick={() => setConfirm("on")}
-                className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-40"
-              >
-                Turn on card payments
-              </button>
-              <span className="text-xs text-gray-500">
-                {view.canTurnOn
-                  ? "You'll confirm it as vayada's approval."
-                  : !view.stripeReady
-                    ? "Possible once the hotel's Stripe account is ready."
-                    : "Possible once the hotel chooses card in its payment settings."}
-              </span>
-            </>
-          )}
-        </div>
+        <p className="mt-4 text-xs text-gray-500">
+          To stop card payments for this hotel, the hotel turns card off in its payment settings.
+          Bookings already paid keep their payments, and their refunds still work.
+        </p>
       </section>
-      {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div
-            ref={dialog}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Turn ${confirm} card payments for ${hotelName}?`}
-            tabIndex={-1}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setConfirm(null);
-            }}
-            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl outline-none"
-          >
-            <h3 className="text-lg font-semibold text-gray-900">
-              Turn {confirm} card payments for {hotelName}?
-            </h3>
-            <p className="mt-2 text-sm text-gray-600">
-              {confirm === "on"
-                ? "This is vayada's approval. You confirm that you checked the hotel's Stripe account and that it may take card payments on its booking page. Your name and the time are recorded."
-                : "Guests can no longer pay by card. Bookings already paid keep their payments, and their refunds still work. vayada's approval is withdrawn; turning card on again needs a new one."}
-            </p>
-            <div className="mt-4 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-              <ExclamationTriangleIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
-              <p>
-                {confirm === "on"
-                  ? "The system then publishes the hotel's prices again by itself, now with card. If it can't, this page says so and the hotel saves them. Tell the hotel that card is on."
-                  : "The system then publishes the hotel's prices again by itself. Rates with no other ready payment method stop selling. If it can't publish them, this page says so and the hotel saves them."}
-              </p>
-            </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setConfirm(null)}
-                className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => change(confirm)}
-                className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${
-                  confirm === "on"
-                    ? "bg-primary-600 hover:bg-primary-700"
-                    : "bg-red-600 hover:bg-red-700"
-                }`}
-              >
-                Turn {confirm} card payments
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

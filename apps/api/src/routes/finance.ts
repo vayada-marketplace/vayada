@@ -57,8 +57,6 @@ import {
   type FinanceStripeConnectProvider,
   type IssueStripeOnboardingLinkCommand,
   type ReconcileStripePropertyAccountCommand,
-  type AcceptFinanceOnlineCardExecutionEvidenceCommand,
-  type RevokeFinanceOnlineCardExecutionEvidenceCommand,
   StripeConnectAccountNotFoundError,
   StripeConnectCountryUnsupportedError,
   type StripeConnectProviderAccountSnapshot,
@@ -1227,8 +1225,9 @@ export function createTargetFinancePropertySettingsRepository(config: {
     if (result.ok) await config.afterPaymentChange?.(pool as unknown as pg.Pool, propertyId);
     return result;
   };
-  // VAY-2205 (D3, approved 2026-10-18): a Vayada finance operator accepts the hotel's card
-  // approval as an attestation and revokes it to turn card off; both need platform finance rights.
+  // VAY-2205: a hotel's card payments for Vayada finance, read only. Since VAY-2442 (Flamur,
+  // 2026-11-03) card works as soon as the hotel's own settings are complete; Vayada no longer
+  // approves it, so the accept and revoke writes are not offered.
   const onlineCardEvidenceWrites = onlineCardEvidenceRepository
     ? {
         // The switch also says whether the hotel's prices must still be saved (VAY-2304).
@@ -1242,21 +1241,6 @@ export function createTargetFinancePropertySettingsRepository(config: {
           const prices = report && cardSwitchPrices(report);
           return prices ? { ...state, prices } : state;
         },
-        // VAY-2304: either change re-publishes the hotel's prices with the new payment terms.
-        acceptOnlineCardExecutionEvidence: async (
-          command: AcceptFinanceOnlineCardExecutionEvidenceCommand,
-        ) =>
-          afterPaymentChange(
-            command.propertyId,
-            await onlineCardEvidenceRepository.acceptOnlineCardExecutionEvidence(command),
-          ),
-        revokeOnlineCardExecutionEvidence: async (
-          command: RevokeFinanceOnlineCardExecutionEvidenceCommand,
-        ) =>
-          afterPaymentChange(
-            command.propertyId,
-            await onlineCardEvidenceRepository.revokeOnlineCardExecutionEvidence(command),
-          ),
       }
     : {};
 
