@@ -598,10 +598,13 @@ test("shows step Meal plans across the whole column, with no booking-page card b
   await expect(main(page).getByRole("radiogroup", { name: "Options for this stay" })).toHaveCount(
     0,
   );
-  // The Meal plans card ends where its step ends: no empty column on the right.
-  const step = (await meals.boundingBox())!;
-  const card = (await meals.locator(":scope > div").last().boundingBox())!;
-  expect(Math.abs(card.x + card.width - (step.x + step.width))).toBeLessThan(1);
+  // The Meal plans card is as wide as step Rates' card above it: no empty column on the right. (On main
+  // it was the "On your booking page" card's 320px plus the gap narrower.)
+  const rates = main(page).getByRole("region", { name: "Rates", exact: true });
+  const ratesCard = (await rates.locator("div.rounded-2xl").first().boundingBox())!;
+  const mealsCard = (await meals.locator("div.rounded-2xl").first().boundingBox())!;
+  expect(Math.abs(mealsCard.x - ratesCard.x)).toBeLessThan(1);
+  expect(Math.abs(mealsCard.width - ratesCard.width)).toBeLessThan(1);
   // The bar's line about the booking page stays.
   await expect(
     main(page).getByText("Guests from €72 a night on your booking page.", { exact: true }),

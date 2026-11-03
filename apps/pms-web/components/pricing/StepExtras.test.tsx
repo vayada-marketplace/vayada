@@ -2,6 +2,7 @@ import React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { expect, it, vi } from "vitest";
 import { parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import * as ui from "./pricingStyles";
 import { simpleRoom } from "./simplePricing";
 import type { OptionTerms } from "./stepPricing";
 import { StepExtras } from "./StepExtras";
@@ -156,10 +157,10 @@ it("shows step Meal plans on its own, and nothing when the room has no breakfast
   };
   const step = render(terms);
   expect(textOf(step.root)).toContain("Meal plans");
-  // No "On your booking page" card beside the step: the Meal plans card is the step's only column.
-  expect(textOf(step.root)).not.toContain("On your booking page");
+  // No column beside the step's card any more: the card itself sits next to the step's intro and takes the rest.
   const section = step.root.findByType("section");
   expect(section.children).toHaveLength(2);
+  expect((section.children[1] as ReactTestInstance).props.className).toBe(ui.setupStepCard);
   // A partial refund puts breakfast in the option's window, so step Meals has no switch and shows nothing.
   const partial = {
     ...flexible,
