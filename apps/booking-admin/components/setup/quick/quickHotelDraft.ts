@@ -46,17 +46,6 @@ export const EMPTY_QUICK_HOTEL_DRAFT: QuickHotelDraft = Object.freeze({
   currency: "",
 });
 
-/** The pills shown first, in this order; every other type sits behind "More…". */
-export const QUICK_PROPERTY_TYPE_ORDER = [
-  "hotel",
-  "guesthouse",
-  "bed_and_breakfast",
-  "apartment",
-  "resort",
-  "hostel",
-  "villa",
-] as const;
-
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** What blocks Continue on "Your hotel" (the logo is optional). */
