@@ -108,6 +108,13 @@ export async function registerReplacementPricingRoutes(
       request: FastifyRequest<{ Params: Params }>,
     ) => Promise<unknown>,
   ) {
+    // Every refusal and failure is logged with its step, code and reason, so failed saves can be counted (VAY-2471).
+    const step = `${method} pricing-v2${suffix}`;
+    const refused = (request: FastifyRequest<{ Params: Params }>, code: string, reason?: string) =>
+      request.log.warn(
+        { pricingStep: step, propertyId: request.params.propertyId, code, ...(reason ? { reason } : {}) },
+        "pricing request refused",
+      );
     app.route<{ Params: Params }>({
       method,
       url: `/properties/:propertyId/pricing-v2${suffix}`,
@@ -115,8 +122,10 @@ export async function registerReplacementPricingRoutes(
         try {
           const permission = method === "GET" ? "pms.rooms_rates.read" : "pms.rooms_rates.manage";
           const base = enforceRoutePolicy(request, { permission });
-          if (base.selectedOrganization.kind !== "hotel_group")
+          if (base.selectedOrganization.kind !== "hotel_group") {
+            refused(request, "forbidden");
             return reply.code(403).send({ code: "forbidden" });
+          }
           if (
             !uuid(request.params.propertyId) ||
             (request.params.draftId !== undefined && !uuid(request.params.draftId)) ||
@@ -144,8 +153,10 @@ export async function registerReplacementPricingRoutes(
         } catch (error) {
           if (error instanceof UnauthorizedError)
             return reply.code(401).send({ code: "unauthenticated" });
-          if (error instanceof AuthorizationError)
+          if (error instanceof AuthorizationError) {
+            refused(request, "forbidden");
             return reply.code(403).send({ code: "forbidden" });
+          }
           if (error instanceof PricingStorageError)
             return reply.code(400).send({ code: "invalid" });
           throw error;
@@ -160,7 +171,8 @@ export async function registerReplacementPricingRoutes(
             ? reply.code(404).send({ code: "not_found" })
             : reply.code(200).send(result);
         } catch (error) {
-          if (error instanceof PricingStorageError)
+          if (error instanceof PricingStorageError) {
+            refused(request, error.code, error.reason);
             return reply
               .code(
                 error.code === "invalid" || payloadRule(error.code)
@@ -170,6 +182,11 @@ export async function registerReplacementPricingRoutes(
                     : 409,
               )
               .send({ code: error.code, ...(error.reason ? { reason: error.reason } : {}) });
+          }
+          request.log.error(
+            { err: error, pricingStep: step, propertyId: request.params.propertyId },
+            "pricing request failed",
+          );
           return reply.code(503).send({ code: "pricing_unavailable" });
         }
       },

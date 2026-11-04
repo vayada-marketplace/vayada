@@ -18,7 +18,10 @@ import {
   replacementChargeFingerprint,
 } from "./replacementChargeDeclarations.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
-import { lockReplacementPricingDraftOwners } from "./replacementPricingOfferOwners.js";
+import {
+  lockReplacementPricingDraftOwners,
+  type ReplacementPricingOfferOwners,
+} from "./replacementPricingOfferOwners.js";
 import {
   createReplacementPricingStorageGuard,
   lockReplacementPricingSources,
@@ -42,6 +45,14 @@ const uuid = (value: unknown): value is string =>
 const fail = (code: "invalid" | "denied"): never => {
   throw new PricingStorageError(code);
 };
+/** Why the price owners refused (VAY-2471): 403 only without access, or with Finance's reason; a room, terms or
+ * source that changed since the page read the prices is 409, so the page says to reload rather than "no access". */
+function ownersRefusal(owners: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>) {
+  if (owners.reason === "denied" || owners.reason === "invalid") return new PricingStorageError(owners.reason);
+  if (owners.reason === "finance_unavailable")
+    return new PricingStorageError("denied", owners.financeReason);
+  return new PricingStorageError("stale", owners.reason);
+}
 
 /** Server boundary: bind an authenticated context, never body-supplied identity.
  * Route policy enforcement is still required at the HTTP boundary. */
@@ -155,7 +166,8 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
           : await lockBookingPricingOfferTerms(client, currentScope.propertyId, references);
         const effectiveSources =
           draft && projected ? { ...sources, terms: projected.source } : sources;
-        if (!terms) return fail("denied");
+        // Access was checked with the sources: these terms are no longer current (VAY-2471).
+        if (!terms) throw new PricingStorageError("stale", "terms_stale");
         const finance = await lockFinanceReplacementPricingReadiness(client, {
           propertyId: currentScope.propertyId,
           currency,
@@ -177,6 +189,7 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
           effectiveSources,
           draft,
         );
+        if (owners.kind === "unavailable") throw ownersRefusal(owners);
         if (owners.kind !== "awaiting_charge_confirmation") return fail("denied");
         await client.query("COMMIT");
         return { sources, snapshot, ...(draft ? { effectiveSources } : {}) };
