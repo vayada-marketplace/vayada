@@ -163,7 +163,7 @@ export default function FindBookingModal({
           <button
             type="submit"
             disabled={loading || !reference.trim() || !email.trim()}
-            className="w-full rounded-full bg-primary-600 py-3 font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-full bg-primary-600 py-3 font-semibold text-primary-on-600 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? tc("loading") : t("findBooking")}
           </button>

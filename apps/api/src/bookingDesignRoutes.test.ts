@@ -210,6 +210,19 @@ describe("Booking design routes", () => {
     expect(created.body).toEqual({ outcome: "created", design: design() });
   });
 
+  it("saves and reads back a light brand colour such as Aether's #C19A76 (VAY-2475)", async () => {
+    const ports = fakePorts();
+    app = await testApp(ports);
+    const choices = { primaryColor: "#C19A76", fontPairing: "imperial-serif" } as const;
+
+    const saved = await put(app, { expectedRevision: 1, ...choices }, "light-key");
+    expect(saved.statusCode).toBe(200);
+    expect(saved.body).toEqual({ outcome: "updated", design: design(2, { choices }) });
+
+    ports.readValue = design(2, { choices });
+    expect(await get(app)).toMatchObject({ statusCode: 200, body: design(2, { choices }) });
+  });
+
   it("returns an exact replay without changing the response projection", async () => {
     const ports = fakePorts();
     ports.commandValue = { ok: true, outcome: "idempotent_replay", design: design() };
@@ -293,7 +306,7 @@ describe("Booking design routes", () => {
     const responses = await Promise.all([
       put(app, requestBody(), "key", "not-a-uuid"),
       put(app, { ...requestBody(), extra: true }),
-      put(app, { ...requestBody(), primaryColor: "#FF7F50" }),
+      put(app, { ...requestBody(), primaryColor: "#ff7f50" }),
       put(app, { ...requestBody(), fontPairing: "custom-font" }),
       put(app, requestBody(), null),
       put(app, requestBody(), "   "),

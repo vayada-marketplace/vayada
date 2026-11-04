@@ -7,7 +7,6 @@ import {
   BOOKING_DESIGN_FONT_PAIRINGS,
   BOOKING_DESIGN_OUTBOX_DESTINATION,
   BOOKING_DESIGN_PRIMARY_COLORS,
-  createBookingDesignButtonColors,
   createBookingDesignSourceRevision,
   isBookingDesignPrimaryColor,
   parseBookingDesignRevision,
@@ -17,11 +16,15 @@ import {
   type BookingDesignChangedEvent,
   type UpsertBookingDesignCommand,
 } from "./bookingDesign.js";
+import {
+  bookingDesignTextColorOn,
+  createBookingDesignButtonColors,
+} from "./bookingDesignColors.js";
 
 const propertyId = "abcdef00-0000-4000-8000-000000000002";
 
 describe("Booking design contract", () => {
-  it("resolves explicit server defaults and rejects unreadable or unknown choices", () => {
+  it("resolves explicit server defaults and rejects malformed or unknown choices", () => {
     expect(
       parseUpsertBookingDesignRequest({
         expectedRevision: 0,
@@ -41,11 +44,10 @@ describe("Booking design contract", () => {
     );
     for (const invalid of [
       { expectedRevision: 2_147_483_647, primaryColor: null, fontPairing: null },
-      { expectedRevision: 0, primaryColor: "#D4A017", fontPairing: null },
-      { expectedRevision: 0, primaryColor: "#E76F51", fontPairing: null },
       { expectedRevision: 0, primaryColor: "#ffffff", fontPairing: null },
-      { expectedRevision: 0, primaryColor: "#FFFF00", fontPairing: null },
       { expectedRevision: 0, primaryColor: "#5e0000", fontPairing: null },
+      { expectedRevision: 0, primaryColor: "#C19A7", fontPairing: null },
+      { expectedRevision: 0, primaryColor: "#GGGGGG", fontPairing: null },
       { expectedRevision: 0, primaryColor: "5E0000", fontPairing: null },
       { expectedRevision: 0, primaryColor: null, fontPairing: "comic-sans" },
       { expectedRevision: 0, primaryColor: undefined, fontPairing: null },
@@ -145,7 +147,7 @@ describe("Booking design contract", () => {
     expectTypeOf<BookingDesignChangedEvent>().not.toHaveProperty("choices");
   });
 
-  it("takes any readable Design Studio colour, not only the setup swatches (VAY-2318)", () => {
+  it("takes any Design Studio colour, not only the setup swatches (VAY-2318)", () => {
     expect(
       parseUpsertBookingDesignRequest({
         expectedRevision: 3,
@@ -165,12 +167,63 @@ describe("Booking design contract", () => {
         createdAt: "2026-10-23T12:00:00.000Z",
       })?.choices.primaryColor,
     ).toBe("#5E0000");
-    // The lightest setup swatch and the darker Design Studio presets pass; the old Tropical Gold
-    // and Sunset Coral did not.
-    for (const readable of ["#0077B6", "#000000", "#A67D12", "#E35734"])
-      expect(isBookingDesignPrimaryColor(readable), readable).toBe(true);
-    expect(isBookingDesignPrimaryColor("#D4A017")).toBe(false);
-    expect(isBookingDesignPrimaryColor("#E76F51")).toBe(false);
+    for (const colour of ["#0077B6", "#000000", "#A67D12", "#E35734"])
+      expect(isBookingDesignPrimaryColor(colour), colour).toBe(true);
+  });
+
+  it("takes light brand colours too, such as Aether's #C19A76 (VAY-2475)", () => {
+    for (const colour of ["#C19A76", "#F5F5F5", "#FFFFFF", "#D4A017", "#E76F51", "#FFFF00"]) {
+      expect(isBookingDesignPrimaryColor(colour), colour).toBe(true);
+      expect(
+        parseUpsertBookingDesignRequest({
+          expectedRevision: 1,
+          primaryColor: colour,
+          fontPairing: "imperial-serif",
+        })?.choices.primaryColor,
+      ).toBe(colour);
+      // A saved light colour must also read back, or the live page would refuse it.
+      expect(
+        parseBookingDesignRevision({
+          contractVersion: "booking-design.v1",
+          propertyId,
+          revision: 2,
+          choices: { primaryColor: colour, fontPairing: "imperial-serif" },
+          createdAt: "2026-11-04T12:00:00.000Z",
+        })?.choices.primaryColor,
+      ).toBe(colour);
+    }
+    for (const malformed of ["#c19a76", "#C19A7", "C19A76", "#C19A766", "#GGGGGG", "", 0, null])
+      expect(isBookingDesignPrimaryColor(malformed), String(malformed)).toBe(false);
+  });
+
+  it("gives light brand colours dark button text, and keeps white wherever it was readable", () => {
+    expect(createBookingDesignButtonColors("#C19A76")).toEqual({
+      backgroundColor: "#aa8868",
+      hoverBackgroundColor: "#8b6f55",
+      foregroundColor: "#111827",
+    });
+    expect(createBookingDesignButtonColors("#F5F5F5").foregroundColor).toBe("#111827");
+    expect(createBookingDesignButtonColors("#FFFFFF").foregroundColor).toBe("#111827");
+    // On Aether's darker shade (the confirmation page's buttons) white reads better again.
+    expect(bookingDesignTextColorOn("#8b6f55")).toBe("#FFFFFF");
+    // Every colour the old rule took (white text at 4.5:1 on the button) keeps white text, so no
+    // live hotel's buttons change; and the chosen text always reaches at least 4.2:1.
+    const steps = Array.from({ length: 18 }, (_, step) => step * 15);
+    for (const red of steps)
+      for (const green of steps)
+        for (const blue of steps) {
+          const colour = `#${[red, green, blue]
+            .map((channel) => channel.toString(16).padStart(2, "0"))
+            .join("")}`.toUpperCase();
+          const button = createBookingDesignButtonColors(colour);
+          if (contrastWithWhite(button.backgroundColor) >= 4.5) {
+            expect(button.foregroundColor, colour).toBe("#FFFFFF");
+            expect(bookingDesignTextColorOn(button.hoverBackgroundColor), colour).toBe("#FFFFFF");
+          }
+          expect(contrast(button.backgroundColor, button.foregroundColor), colour).toBeGreaterThan(
+            4.2,
+          );
+        }
   });
 
   it("keeps every generated Booking button palette WCAG AA-safe with white text", () => {
@@ -195,12 +248,21 @@ describe("Booking design contract", () => {
   });
 });
 
-function contrastWithWhite(hex: string): number {
+function luminance(hex: string): number {
   const channels = [1, 3, 5].map(
     (offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255,
   );
-  const luminance = channels.map((value) =>
+  const linear = channels.map((value) =>
     value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
   );
-  return 1.05 / (0.2126 * luminance[0]! + 0.7152 * luminance[1]! + 0.0722 * luminance[2]! + 0.05);
+  return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
+}
+
+function contrast(first: string, second: string): number {
+  const [lighter, darker] = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
+function contrastWithWhite(hex: string): number {
+  return contrast(hex, "#FFFFFF");
 }

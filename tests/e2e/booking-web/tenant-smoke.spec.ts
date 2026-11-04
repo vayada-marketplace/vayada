@@ -71,6 +71,7 @@ test.describe("booking-web tenant smoke", () => {
     const contact = page.locator("nav").getByRole("button", { name: "Contact", exact: true });
     // primary-600 is the colour 12% darker, as the Booking Admin preview draws it.
     await expect(contact).toHaveCSS("background-color", "rgb(83, 0, 0)");
+    await expect(contact).toHaveCSS("color", "rgb(255, 255, 255)");
     await expect(page.getByRole("button", { name: /Check Availability/i })).toHaveCSS(
       "background-color",
       "rgb(83, 0, 0)",
@@ -87,6 +88,58 @@ test.describe("booking-web tenant smoke", () => {
       "rgb(83, 0, 0)",
     );
     await page.screenshot({ path: testInfo.outputPath("brand-colour-5e0000-390.png") });
+  });
+
+  test("keeps buttons readable on a light brand colour with dark text (VAY-2475)", async ({
+    page,
+  }, testInfo) => {
+    const dark = "rgb(17, 24, 39)";
+    const white = "rgb(255, 255, 255)";
+    // The text colour a class gets on this page, for shades no element on it uses.
+    const textColourOf = (className: string) =>
+      page.evaluate((name) => {
+        const probe = document.createElement("span");
+        probe.className = name;
+        document.body.append(probe);
+        const colour = getComputedStyle(probe).color;
+        probe.remove();
+        return colour;
+      }, className);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Aether Hilltop Villas' brand colour.
+    await mockBookingApis(page, { primaryColor: "#C19A76" });
+    await page.goto("/");
+    const contact = page.locator("nav").getByRole("button", { name: "Contact", exact: true });
+    const search = page.getByRole("button", { name: /Check Availability/i });
+    for (const button of [contact, search]) {
+      await expect(button).toHaveCSS("background-color", "rgb(170, 136, 104)");
+      await expect(button).toHaveCSS("color", dark);
+    }
+    await expect(page.locator("footer")).toHaveCSS("color", dark);
+    // The darker confirmation-page buttons keep white text, which reads better there.
+    expect(await textColourOf("text-primary-on-700")).toBe(white);
+    const reject = page.getByRole("button", { name: "Reject analytics" });
+    await reject.waitFor({ state: "visible", timeout: 4000 }).then(
+      () => reject.click(),
+      () => undefined,
+    );
+    await page.screenshot({ path: testInfo.outputPath("brand-colour-c19a76-1440.png") });
+    await page.locator("footer").scrollIntoViewIfNeeded();
+    await page.locator("footer").screenshot({
+      path: testInfo.outputPath("brand-colour-c19a76-footer.png"),
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(search).toHaveCSS("color", dark);
+    await page.screenshot({ path: testInfo.outputPath("brand-colour-c19a76-390.png") });
+
+    // A very light colour gets dark text on every brand shade.
+    await mockBookingApis(page, { primaryColor: "#F5F5F5" });
+    await page.reload();
+    await expect(search).toHaveCSS("background-color", "rgb(216, 216, 216)");
+    await expect(search).toHaveCSS("color", dark);
+    expect(await textColourOf("text-primary-on-700")).toBe(dark);
   });
 
   test("shows WhatsApp only when the hotel publishes a WhatsApp number", async ({ page }) => {

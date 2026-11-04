@@ -31,6 +31,27 @@ describe("BookingPagePreview", () => {
     expect(text).toContain("Available Accommodations");
   });
 
+  it("shows the live page's button text: dark on a light brand colour, white on a dark one (VAY-2475)", () => {
+    const buttonText = (primaryColor: string) =>
+      create(
+        <BookingPagePreview
+          currency="USD"
+          defaultLanguage="en"
+          font={font}
+          heroHeading="Aether Hilltop Villas"
+          heroImage=""
+          heroSubtext=""
+          primaryColor={primaryColor}
+          propertyName="Aether Hilltop Villas"
+        />,
+      )
+        .root.findAll((node) => node.props.style?.backgroundColor === primaryColor)
+        .map((node) => node.props.style.color);
+
+    expect(buttonText("#c19a76")).toEqual(["#111827", "#111827"]);
+    expect(buttonText("#2D6A4F")).toEqual(["#FFFFFF", "#FFFFFF"]);
+  });
+
   it("reflects hidden header controls immediately", () => {
     const renderer = create(
       <BookingPagePreview

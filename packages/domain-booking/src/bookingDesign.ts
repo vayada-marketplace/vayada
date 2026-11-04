@@ -2,8 +2,7 @@ import type { SourceEntityRevision } from "@vayada/domain-hotels";
 
 export const BOOKING_DESIGN_CONTRACT_VERSION = "booking-design.v1" as const;
 export const BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR = "#4F46E5" as const;
-export const BOOKING_DESIGN_BUTTON_FOREGROUND_COLOR = "#FFFFFF" as const;
-/** The setup step's curated swatches. Design Studio also takes any other readable colour (VAY-2318). */
+/** The setup step's curated swatches. Design Studio also takes any other colour (VAY-2318, VAY-2475). */
 export const BOOKING_DESIGN_PRIMARY_COLORS = Object.freeze([
   BOOKING_DESIGN_DEFAULT_PRIMARY_COLOR,
   "#0077B6",
@@ -40,7 +39,7 @@ export const BOOKING_DESIGN_FONT_PAIRINGS = Object.freeze({
 } as const);
 
 export type BookingDesignPresetColor = (typeof BOOKING_DESIGN_PRIMARY_COLORS)[number];
-/** An uppercase #RRGGBB whose button colour keeps white text at WCAG AA; see isBookingDesignPrimaryColor. */
+/** An uppercase #RRGGBB; see isBookingDesignPrimaryColor. */
 export type BookingDesignPrimaryColor = string;
 export type BookingDesignFontPairing = keyof typeof BOOKING_DESIGN_FONT_PAIRINGS;
 export type BookingDesignSourceRevision = Readonly<
@@ -194,40 +193,11 @@ export function createBookingDesignSourceRevision(
 }
 
 /**
- * Any uppercase #RRGGBB whose button colour (and so its darker hover) keeps white text at the WCAG AA
- * 4.5:1 contrast. Too-light colours such as #D4A017 or #FFFFFF are refused.
+ * Any uppercase #RRGGBB. Light colours are allowed too: their buttons get dark text instead of
+ * white (VAY-2475), so a hotel can use its real brand colour.
  */
 export function isBookingDesignPrimaryColor(value: unknown): value is BookingDesignPrimaryColor {
-  return (
-    typeof value === "string" &&
-    /^#[0-9A-F]{6}$/.test(value) &&
-    contrastWithWhite(createBookingDesignButtonColors(value).backgroundColor) >= 4.5
-  );
-}
-
-/** Matches Booking Web's primary-600/default and primary-700/hover palette tokens. */
-export function createBookingDesignButtonColors(primaryColor: BookingDesignPrimaryColor) {
-  return Object.freeze({
-    backgroundColor: mixWithBlack(primaryColor, 0.12),
-    hoverBackgroundColor: mixWithBlack(primaryColor, 0.28),
-    foregroundColor: BOOKING_DESIGN_BUTTON_FOREGROUND_COLOR,
-  });
-}
-
-function contrastWithWhite(hex: string): number {
-  const [red, green, blue] = [1, 3, 5].map((offset) => {
-    const channel = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
-    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-  });
-  return 1.05 / (0.2126 * red! + 0.7152 * green! + 0.0722 * blue! + 0.05);
-}
-
-function mixWithBlack(hex: string, amount: number): string {
-  const component = (offset: number) =>
-    Math.round(Number.parseInt(hex.slice(offset, offset + 2), 16) * (1 - amount))
-      .toString(16)
-      .padStart(2, "0");
-  return `#${component(1)}${component(3)}${component(5)}`;
+  return typeof value === "string" && /^#[0-9A-F]{6}$/.test(value);
 }
 
 function exact(value: unknown, keys: readonly string[]): value is Record<string, unknown> {

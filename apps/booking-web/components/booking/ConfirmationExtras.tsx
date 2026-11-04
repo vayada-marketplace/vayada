@@ -167,7 +167,7 @@ export default function ConfirmationExtras({
             type="button"
             onClick={send}
             disabled={sending}
-            className="h-10 shrink-0 rounded-full bg-primary-700 px-5 text-sm font-semibold text-white hover:bg-primary-800 disabled:opacity-60"
+            className="h-10 shrink-0 rounded-full bg-primary-700 px-5 text-sm font-semibold text-primary-on-700 hover:bg-primary-800 disabled:opacity-60"
           >
             {sending ? t("sending") : t("send")}
           </button>

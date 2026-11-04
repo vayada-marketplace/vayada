@@ -190,7 +190,7 @@ export function RoomsHelp({
         <button
           type="button"
           onClick={onContinue}
-          className="min-h-[44px] rounded-full bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700"
+          className="min-h-[44px] rounded-full bg-primary-600 px-5 text-sm font-semibold text-primary-on-600 hover:bg-primary-700"
         >
           {t(hasExtras ? "continueToExtras" : "continueToDetails")}
         </button>

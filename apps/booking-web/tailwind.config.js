@@ -25,6 +25,10 @@ module.exports = {
           700: "var(--color-primary-700, #162FB8)",
           800: "var(--color-primary-800, #0F2095)",
           900: "var(--color-primary-900, #081172)",
+          // Text on primary-600 / primary-700: white, or dark on a light brand colour (VAY-2475).
+          // "r g b" channels, so opacity modifiers such as text-primary-on-600/70 work.
+          "on-600": "rgb(var(--color-primary-on-600, 255 255 255) / <alpha-value>)",
+          "on-700": "rgb(var(--color-primary-on-700, 255 255 255) / <alpha-value>)",
         },
         // Semantic - Status Colors
         success: {

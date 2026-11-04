@@ -314,7 +314,7 @@ export default function RequestChangePage({
             <button
               onClick={handleSubmit}
               disabled={submitDisabled}
-              className="w-full py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors disabled:opacity-50"
+              className="w-full py-3 bg-primary-600 text-primary-on-600 font-semibold rounded-full hover:bg-primary-700 transition-colors disabled:opacity-50"
             >
               {submitting
                 ? t("submitting") || "Submitting…"

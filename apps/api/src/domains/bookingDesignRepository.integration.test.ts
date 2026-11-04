@@ -174,7 +174,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking design repository", () =
       revision: 1,
       choices: { primaryColor: "#5E0000", fontPairing: "grand-classic" },
     });
-    // The domain refuses unreadable colours; the table still takes only uppercase hex.
+    // Any colour is allowed (light ones get dark button text); the table takes only uppercase hex.
     const constraint = await admin.query<{ definition: string }>(
       `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
        WHERE conname = 'chk_booking_design_primary_color'`,

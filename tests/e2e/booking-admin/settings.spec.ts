@@ -847,34 +847,33 @@ test.describe("booking-admin settings no-legacy guard", () => {
     const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
     await expect(hex).toHaveValue("#0077B6");
 
-    // A colour too light for white button text is explained and never saved.
-    const tooLight = "Too light for white button text. Choose a darker shade.";
-    await hex.fill("#d4a017");
-    await expect(hex).toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByText(tooLight)).toHaveCount(1);
-    await page.getByRole("button", { name: "Save Changes" }).click();
-    await expect(page.getByText(tooLight)).toHaveCount(2);
-    expect(order).toEqual([]);
-    await page.screenshot({ path: testInfo.outputPath("design-studio-too-light.png") });
-    // The Tropical Gold preset is a darker, readable gold now.
+    // The preview's buttons show the live page's text colour: white on a dark brand colour...
+    const checkAvailability = page
+      .getByLabel("Live booking page preview")
+      .getByText("Check Availability", { exact: true });
     await page.getByRole("button", { name: "Tropical Gold" }).click();
     await expect(hex).toHaveValue("#A67D12");
-    await expect(hex).toHaveAttribute("aria-invalid", "false");
+    await expect(checkAvailability).toHaveCSS("color", "rgb(255, 255, 255)");
 
-    await hex.fill("#5e0000");
+    // ...and dark on a light one such as Aether's, which saves without a warning (VAY-2475).
+    await hex.fill("#c19a76");
+    await expect(checkAvailability).toHaveCSS("color", "rgb(17, 24, 39)");
+    await expect(page.getByText(/too light/i)).toHaveCount(0);
+    await expect(hex).not.toHaveAttribute("aria-invalid");
     await page.getByRole("button", { name: "Typography" }).click();
     await page.getByRole("button", { name: /Grand Classic/ }).click();
     await page.getByRole("button", { name: "Save Changes" }).click();
 
     await expect(page.getByText("Design settings saved successfully")).toBeVisible();
+    await expect(page.getByText(/too light/i)).toHaveCount(0);
     expect(bookingDesignRequests.filter(({ method }) => method === "PUT")).toEqual([
       {
         method: "PUT",
-        body: { expectedRevision: 1, primaryColor: "#5E0000", fontPairing: "grand-classic" },
+        body: { expectedRevision: 1, primaryColor: "#C19A76", fontPairing: "grand-classic" },
       },
     ]);
     expect(requests.find(({ method }) => method === "PATCH")?.body).toMatchObject({
-      primaryColor: "#5E0000",
+      primaryColor: "#C19A76",
       fontPairing: "grand-classic",
     });
     expect(order).toEqual(["settings", "design", "publish"]);
@@ -905,7 +904,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     });
     await mockBookingAdminAuthenticatedSession(page);
     await mockBookingAdminShellRoutes(page);
-    // No booking design yet, and the settings row still holds the old, too-light Tropical Gold.
+    // No booking design yet, and the settings row still holds the old, light Tropical Gold.
     const { requests, bookingDesignRequests } = await mockBookingAdminDesignSettings(
       page,
       { ...defaultBookingAdminDesignSettings, primaryColor: "#D4A017" },
@@ -916,9 +915,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.goto("/design-studio?tab=colors");
     const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
     await expect(hex).toHaveValue("#D4A017");
-    await expect(
-      page.getByText("Too light for white button text. Choose a darker shade."),
-    ).toBeVisible();
+    // A light colour is fine now (VAY-2475): no warning.
+    await expect(page.getByText(/too light/i)).toHaveCount(0);
     // Saving the other settings works and leaves the booking design alone.
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Design settings saved successfully")).toBeVisible();

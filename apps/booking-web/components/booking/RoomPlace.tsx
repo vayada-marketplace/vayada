@@ -153,7 +153,7 @@ export default function RoomPlace({
                 chooseMaps();
                 setRequested(true);
               }}
-              className="rounded-full bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700"
+              className="rounded-full bg-primary-600 px-4 py-2 text-sm font-semibold text-primary-on-600 hover:bg-primary-700"
             >
               {tm("showMap")}
             </button>

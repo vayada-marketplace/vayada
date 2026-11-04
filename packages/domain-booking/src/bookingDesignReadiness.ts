@@ -12,7 +12,6 @@ import {
 
 import {
   BOOKING_DESIGN_FONT_PAIRINGS,
-  createBookingDesignButtonColors,
   createBookingDesignSourceRevision,
   isBookingDesignPrimaryColor,
   parseBookingDesignRevision,
@@ -21,6 +20,7 @@ import {
   type BookingDesignPrimaryColor,
   type BookingDesignSourceRevision,
 } from "./bookingDesign.js";
+import { createBookingDesignButtonColors } from "./bookingDesignColors.js";
 import {
   BOOKING_DESIGN_COVER_FALLBACK_PATH,
   BOOKING_DESIGN_SNAPSHOT_CONTRACT_VERSION,

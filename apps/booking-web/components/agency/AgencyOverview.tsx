@@ -506,7 +506,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
               <button
                 type="button"
                 onClick={retry}
-                className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-white hover:bg-primary-700"
+                className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-primary-on-600 hover:bg-primary-700"
               >
                 {t("retry")}
               </button>
