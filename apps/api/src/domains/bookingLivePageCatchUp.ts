@@ -31,7 +31,8 @@ export type BookingLivePageCatchUpResult = {
  * (VAY-2472). Pages that still match their sources are left alone. Like the guest-policy refresh
  * (VAY-2350), it runs as the user who made the page live, re-checked first, never as someone
  * else; the organization is the one that published the live page. Failures are reported, never
- * thrown: the next run tries again. */
+ * thrown: the next run tries again. Every live page is checked each run; one that already shows
+ * its sources costs a readiness read. */
 export async function catchUpLiveBookingPages(
   config: {
     pool: CatchUpPool;
@@ -40,7 +41,6 @@ export async function catchUpLiveBookingPages(
   },
   input: {
     runId: string;
-    limit: number;
     /** Only these hotels (a run limited to some of them); all live pages when left out. */
     propertyIds?: readonly string[];
   },
@@ -67,10 +67,9 @@ export async function catchUpLiveBookingPages(
            AND result_content_revision_id = active.content_revision_id
          ORDER BY requested_at DESC LIMIT 1
        ) attempt ON TRUE
-       WHERE $2::uuid[] IS NULL OR active.property_id = ANY($2::uuid[])
-       ORDER BY active.activated_at
-       LIMIT $1`,
-      [input.limit, input.propertyIds ?? null],
+       WHERE $1::uuid[] IS NULL OR active.property_id = ANY($1::uuid[])
+       ORDER BY active.activated_at`,
+      [input.propertyIds ?? null],
     )
   ).rows;
   const result: BookingLivePageCatchUpResult = {

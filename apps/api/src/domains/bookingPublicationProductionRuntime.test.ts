@@ -350,7 +350,7 @@ describe("Booking publication refresh", () => {
     const done = { operationId: "33333333-3333-4333-8333-333333333333", status: "succeeded" };
     const getBookingReadiness = vi.fn().mockResolvedValue(blocked);
     const requestPublication = vi.fn().mockResolvedValue({ ok: true, operation: done });
-    const wait = vi.fn(async (_ms: number) => undefined);
+    const wait = vi.fn(async () => undefined);
     const refresh = createBookingPublicationRefresh(
       {
         readinessProvider: { getBookingReadiness },

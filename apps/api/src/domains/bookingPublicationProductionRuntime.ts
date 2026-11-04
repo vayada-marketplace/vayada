@@ -138,7 +138,8 @@ export function createBookingPublicationRefresh(
           `Booking publication readiness is incomplete. (${readinessSummary(readiness)})`,
         );
       }
-      if (skipIfSourceManifestHash === readiness.sourceManifestHash) return null;
+      const ready = readiness as ReadyBookingPublicationEvidence;
+      if (skipIfSourceManifestHash === ready.sourceManifestHash) return null;
       let requested: Awaited<
         ReturnType<BookingPublicationRefreshDependencies["repository"]["requestPublication"]>
       >;
@@ -149,7 +150,7 @@ export function createBookingPublicationRefresh(
             ? `${input.idempotencyKey}:retry-${attempt}`
             : input.idempotencyKey,
           expectedActiveContentRevisionId: active?.revisionId ?? null,
-          readiness: readiness as ReadyBookingPublicationEvidence,
+          readiness: ready,
         });
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;

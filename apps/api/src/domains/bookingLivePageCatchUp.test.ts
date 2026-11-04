@@ -65,11 +65,11 @@ describe("live booking page catch-up (VAY-2472)", () => {
 
     const result = await catchUpLiveBookingPages(
       { pool: { query }, refresh, now: () => now },
-      { runId: "run-1", limit: 50, propertyIds: pages.map(({ propertyId }) => propertyId) },
+      { runId: "run-1", propertyIds: pages.map(({ propertyId }) => propertyId) },
     );
 
     expect(query).toHaveBeenCalledOnce();
-    expect(query.mock.calls[0]![1]).toEqual([50, pages.map(({ propertyId }) => propertyId)]);
+    expect(query.mock.calls[0]![1]).toEqual([pages.map(({ propertyId }) => propertyId)]);
     expect(result).toEqual({
       livePages: 6,
       unchanged: 1,
@@ -111,7 +111,7 @@ describe("live booking page catch-up (VAY-2472)", () => {
     const refresh = vi.fn();
 
     await expect(
-      catchUpLiveBookingPages({ pool: { query }, refresh }, { runId: "run-2", limit: 50 }),
+      catchUpLiveBookingPages({ pool: { query }, refresh }, { runId: "run-2" }),
     ).resolves.toEqual({
       livePages: 0,
       unchanged: 0,
@@ -120,7 +120,7 @@ describe("live booking page catch-up (VAY-2472)", () => {
       noAccess: [],
       failed: [],
     });
-    expect(query.mock.calls[0]![1]).toEqual([50, null]);
+    expect(query.mock.calls[0]![1]).toEqual([null]);
     expect(refresh).not.toHaveBeenCalled();
   });
 });

@@ -1791,7 +1791,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         const catchUp = (runId: string) =>
           catchUpLiveBookingPages(
             { pool, refresh: runtime.refresh },
-            { runId: `${runId}-${suffix}`, limit: 50, propertyIds: [propertyId] },
+            { runId: `${runId}-${suffix}`, propertyIds: [propertyId] },
           );
         const liveContent = async () =>
           (

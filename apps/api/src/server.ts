@@ -2956,22 +2956,26 @@ const runCalendarAutoOpenSchedule = () => {
           );
         }
       }
-      // VAY-2472: then republish live booking pages that saves couldn't refresh while something
-      // blocked them, e.g. the calendars repaired above. In the same locked run, so the two
-      // never collide; pages that already show what the hotel saved are left alone.
+      const run = await runPmsCalendarAutoOpenScheduler(session, {
+        workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
+      });
+      // VAY-2472: last, republish live booking pages that saves couldn't refresh while something
+      // blocked them, e.g. the calendars repaired above. In the same locked run, so the two never
+      // collide; pages that already show what the hotel saved are left alone.
       if (config.publicHotelProfileSource === "active_publication" && bookingPublicationRuntime) {
         const catchUp = await catchUpLiveBookingPages(
           {
             pool: propertySetupOwnerPool,
             refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime),
           },
-          { runId: `booking.live-page-catch-up:${new Date().toISOString()}`, limit: 50 },
+          { runId: `booking.live-page-catch-up:${new Date().toISOString()}` },
         ).catch((error: unknown) => {
           app.log.warn({ err: error }, "Live booking page catch-up failed");
           return null;
         });
+        // A page whose activator lost access waits for its next save; never run as someone else.
         if (catchUp && catchUp.unchanged < catchUp.livePages) {
-          app.log[catchUp.failed.length > 0 ? "warn" : "info"](
+          app.log[catchUp.failed.length + catchUp.noAccess.length > 0 ? "warn" : "info"](
             {
               livePages: catchUp.livePages,
               unchanged: catchUp.unchanged,
@@ -2984,9 +2988,6 @@ const runCalendarAutoOpenSchedule = () => {
           );
         }
       }
-      const run = await runPmsCalendarAutoOpenScheduler(session, {
-        workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
-      });
       // The counts only explain the run; failing to read them must not hide its result.
       const stats = await session.readSelectionStats().catch(() => null);
       return { run, stats };
