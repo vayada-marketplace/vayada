@@ -566,7 +566,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         expect.objectContaining({ propertyId: stays.mandala, timezone: "Asia/Makassar" }),
       ]);
 
-      // Hidden on the map, or the Private pool filter switched off: at once.
+      // Hidden on the map, or the Private pool filter switched off: at once. (The guest route
+      // keeps each page 30 s.)
       await admin.query(
         "UPDATE hotel_catalog.property_locations SET map_display_mode = 'hidden' WHERE property_id = $1::uuid",
         [stays.escape],
@@ -578,6 +579,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         map: null,
         privatePool: false,
       });
+      // Exact, but the location itself private: no pin either.
+      await admin.query(
+        `UPDATE hotel_catalog.property_locations
+         SET map_display_mode = 'exact', geo_public = FALSE WHERE property_id = $1::uuid`,
+        [stays.escape],
+      );
+      expect((await facts())[0]!.map).toBeNull();
     } finally {
       await runtime.end();
     }
