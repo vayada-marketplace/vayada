@@ -1077,6 +1077,11 @@
     "mapLabel": "Map of the stays",
     "noMapStays": "None of these stays shows where it is on a map.",
     "fromPerNight": "from {amount} / night",
-    "pinName": "{name}, from {amount} per night"
+    "pinName": "{name}, from {amount} per night",
+    "allStays": "All stays",
+    "stayRooms": "Rooms",
+    "units": "{count, plural, one {# room} other {# rooms}}",
+    "villas": "{count, plural, one {# villa} other {# villas}}",
+    "roomLine": "Room {number}: {name}"
   }
 }

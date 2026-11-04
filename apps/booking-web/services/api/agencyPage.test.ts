@@ -89,9 +89,17 @@ describe("readAgencyPage", () => {
           childrenEnabled: false,
           privatePool: true,
           map: null,
+          units: null,
         },
       ],
     });
+  });
+
+  it("keeps each stay's rooms in use, for its stay page (VAY-2461)", () => {
+    const units = (value: unknown) =>
+      readAgencyPage({ ...page, stays: [{ ...page.stays[0], units: value }] }).stays[0]!.units;
+    expect(units(2)).toBe(2);
+    for (const value of [0, -1, 1.5, "2", null]) expect(units(value)).toBeNull();
   });
 
   it("keeps the layouts allowed (List always) and each stay's pin (VAY-2460)", () => {

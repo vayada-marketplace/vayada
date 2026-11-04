@@ -1076,6 +1076,11 @@
     "mapLabel": "Carte des hébergements",
     "noMapStays": "Aucun de ces hébergements n'indique son emplacement sur une carte.",
     "fromPerNight": "à partir de {amount} / nuit",
-    "pinName": "{name}, à partir de {amount} par nuit"
+    "pinName": "{name}, à partir de {amount} par nuit",
+    "allStays": "Tous les hébergements",
+    "stayRooms": "Chambres",
+    "units": "{count, plural, one {# chambre} other {# chambres}}",
+    "villas": "{count, plural, one {# villa} other {# villas}}",
+    "roomLine": "Chambre {number} : {name}"
   }
 }

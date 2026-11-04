@@ -23,6 +23,8 @@ type Stay = {
   flexible?: number;
   /** Its map pin (VAY-2460): latitude, longitude, shown as an area; none keeps it off the map. */
   pin?: [number, number, boolean?];
+  /** Its rooms in use (VAY-2461), for "3 villas" on its stay page. */
+  units?: number;
 };
 
 // The page's "Recommended" order (Settings › Included properties).
@@ -38,6 +40,7 @@ export const AGENCY_STAYS: Stay[] = [
     breakfast: 115,
     flexible: 105,
     pin: [-8.5069, 115.2625],
+    units: 3,
   },
   {
     id: "mandala",
@@ -190,6 +193,7 @@ export function agencyPage(
         ? { latitude: stay.pin[0], longitude: stay.pin[1], approximate: !!stay.pin[2] }
         : null,
       privatePool: !!stay.pool,
+      units: stay.units ?? null,
       childrenEnabled: !overrides.adultsOnly?.includes(stay.id),
     })),
   };

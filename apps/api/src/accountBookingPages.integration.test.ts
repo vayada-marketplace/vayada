@@ -545,6 +545,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
           map: stay.map,
           privatePool: stay.privatePool,
         }));
+      // VAY-2461: each stay's rooms in use, for "2 villas" on its stay page. Escape has one room
+      // in use; Mandala's are retired or of a room type it stopped selling (which still count).
+      expect(
+        (await readPublicAccountBookingPage(runtime, slug))!.stays.map((stay) => stay.units),
+      ).toEqual([1, 1]);
       expect(await facts()).toEqual([
         {
           propertyId: stays.escape,

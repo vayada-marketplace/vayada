@@ -34,12 +34,15 @@ export default function StayRooms({
   onEditDates,
   onEditGuests,
   heading: headingText,
+  intro,
 }: {
   model: StayRoomsModel;
   onEditDates: () => void;
   onEditGuests: () => void;
   /** The section's title; "Available Accommodations" unless given. */
   heading?: ReactNode;
+  /** Shown above the rooms, such as the agency's stay box (VAY-2461). */
+  intro?: ReactNode;
 }) {
   const locale = useLocale();
   const t = useTranslations("home");
@@ -253,6 +256,7 @@ export default function StayRooms({
   return (
     // VAY-2448: no stepper while choosing; the sort shares the heading's row.
     <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-12 scroll-mt-36">
+      {intro}
       {rooms === null && !roomsFailed ? (
         <>
           <div className="mb-9">{heading}</div>

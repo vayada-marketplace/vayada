@@ -1076,6 +1076,11 @@
     "mapLabel": "Peta penginapan",
     "noMapStays": "Tidak ada penginapan ini yang menampilkan lokasinya di peta.",
     "fromPerNight": "mulai {amount} / malam",
-    "pinName": "{name}, mulai {amount} per malam"
+    "pinName": "{name}, mulai {amount} per malam",
+    "allStays": "Semua penginapan",
+    "stayRooms": "Kamar",
+    "units": "{count, plural, other {# kamar}}",
+    "villas": "{count, plural, other {# vila}}",
+    "roomLine": "Kamar {number}: {name}"
   }
 }

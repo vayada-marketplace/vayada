@@ -75,11 +75,10 @@ test("shows the agency's stays for the search, cheapest first, full stays at the
   await expect(first).toContainText("from US$38 / night");
   await expect(first).toContainText("from US$76 total");
   await expect(first).toContainText("View rooms");
-  // Its own page, with the search.
-  const host = new URL(page.url()).host.replace(/^the-travel-ubud\./, `${staySlug("mertha")}.`);
+  // Its page on the agency's address, with the search (VAY-2461).
   await expect(first).toHaveAttribute(
     "href",
-    `http://${host}/?checkIn=${checkIn}&checkOut=${checkOut}&adults=2&children=0`,
+    `/stays/${staySlug("mertha")}?checkIn=${checkIn}&checkOut=${checkOut}&adults=2&children=0`,
   );
   await expect(cards(page).filter({ hasText: "Lowest price" })).toHaveCount(1);
   await expect(cards(page).nth(1)).toContainText("Adhidrawa Ubud");

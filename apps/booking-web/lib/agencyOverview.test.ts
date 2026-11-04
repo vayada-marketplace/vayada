@@ -3,7 +3,10 @@ import {
   agencyFilterOptions,
   agencyResults,
   formatStayRange,
+  localePrefix,
   NO_FILTERS,
+  overviewHref,
+  stayCheckoutUrl,
   stayHref,
   stayNights,
   type AgencyFilters,
@@ -21,6 +24,7 @@ const stay = (id: string): AgencyStay => ({
   childrenEnabled: true,
   privatePool: false,
   map: null,
+  units: null,
 });
 const stays = ["mertha", "escape", "mandala", "uma", "wiswan", "dewari"].map(stay);
 const priced = (id: string, nightly: number, currency = "USD"): AgencyStayPrice => ({
@@ -261,7 +265,7 @@ describe("filters (VAY-2460)", () => {
   });
 });
 
-describe("stayHref", () => {
+describe("stay links (VAY-2461)", () => {
   const search = {
     checkIn: "2026-11-12",
     checkOut: "2026-11-14",
@@ -270,18 +274,20 @@ describe("stayHref", () => {
     rooms: 1,
     promoCode: "AUTUMN",
   };
+  const agencyHost = {
+    protocol: "https:",
+    host: "the-travel-ubud.next-booking.vayada.com",
+    pathname: "/de",
+  };
 
-  it("opens the stay's own address with the search on a booking host", () => {
+  it("opens the stay's page on the agency's address, in the guest's language, with the search", () => {
     expect(
-      stayHref(
-        { protocol: "https:", host: "the-travel-ubud.next-booking.vayada.com", pathname: "/de" },
-        "the-travel-ubud",
-        "escape-villa",
-        search,
-        { rooms: 2, promoApplied: true },
-      ),
+      stayHref(agencyHost, "the-travel-ubud", "escape-villa", search, {
+        rooms: 2,
+        promoApplied: true,
+      }),
     ).toBe(
-      "https://escape-villa.next-booking.vayada.com/de?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&promoCode=AUTUMN",
+      "/de/stays/escape-villa?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&promoCode=AUTUMN",
     );
   });
 
@@ -294,12 +300,10 @@ describe("stayHref", () => {
         search,
         { rooms: 1, promoApplied: false },
       ),
-    ).toBe(
-      "http://uma.booking.localhost:3002/?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1",
-    );
+    ).toBe("/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1");
   });
 
-  it("uses ?slug= on a development host", () => {
+  it("keeps the agency with ?slug= on a development host", () => {
     expect(
       stayHref(
         { protocol: "http:", host: "localhost:3002", pathname: "/" },
@@ -308,7 +312,39 @@ describe("stayHref", () => {
         { ...search, rooms: 2 },
         null,
       ),
-    ).toBe("/?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&slug=uma");
+    ).toBe(
+      "/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&slug=the-travel-ubud",
+    );
+  });
+
+  it("opens checkout on the stay's own address until it runs on the agency's (VAY-2462)", () => {
+    const stayPage = { ...agencyHost, pathname: "/de/stays/escape-villa" };
+    expect(
+      stayCheckoutUrl(stayPage, "the-travel-ubud", "escape-villa", "?checkIn=2026-11-12&offer=a1"),
+    ).toBe("https://escape-villa.next-booking.vayada.com/de/book?checkIn=2026-11-12&offer=a1");
+    expect(
+      stayCheckoutUrl(
+        { protocol: "http:", host: "localhost:3002", pathname: "/stays/uma" },
+        "the-travel-ubud",
+        "uma",
+        "?offer=a1",
+      ),
+    ).toBe("/book?offer=a1&slug=uma");
+  });
+
+  it("goes back to all stays with the same search", () => {
+    expect(
+      overviewHref(
+        { host: agencyHost.host, pathname: "/de/stays/escape-villa" },
+        "the-travel-ubud",
+        "?checkIn=2026-11-12&adults=2",
+      ),
+    ).toBe("/de?checkIn=2026-11-12&adults=2");
+    expect(
+      overviewHref({ host: "localhost:3002", pathname: "/stays/uma" }, "the-travel-ubud", ""),
+    ).toBe("/?slug=the-travel-ubud");
+    expect(localePrefix("/stays/uma")).toBe("");
+    expect(localePrefix("/fr/stays/uma")).toBe("/fr");
   });
 });
 

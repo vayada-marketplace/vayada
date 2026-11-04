@@ -24,6 +24,8 @@ export type AgencyStay = {
   privatePool: boolean;
   /** Its pin as its own page shows it (rounded when approximate); null keeps it off the map. */
   map: { latitude: number; longitude: number; approximate: boolean } | null;
+  /** Its rooms (or villas) in use, for the stay page (VAY-2461); null when unknown. */
+  units: number | null;
 };
 
 /** A live agency booking page (`GET /api/booking-web/agency-pages/:slug`, VAY-2459). */
@@ -216,6 +218,10 @@ export function readAgencyPage(raw: unknown): AgencyPage {
           childrenEnabled: stay.childrenEnabled !== false,
           privatePool: stay.privatePool === true,
           map: pin(stay.map),
+          units:
+            typeof stay.units === "number" && Number.isSafeInteger(stay.units) && stay.units > 0
+              ? stay.units
+              : null,
         },
       ];
     }),

@@ -643,6 +643,8 @@ export async function readPublicAccountBookingPage(client: Queryable, slug: stri
         row.mapDisplayMode,
       ),
       privatePool: pools.has(row.propertyId),
+      // VAY-2461: "2 villas" on the stay page: its rooms in the PMS, retired ones left out.
+      units: row.units,
       childrenEnabled: childrenEnabled(row.publicContent),
     })),
   };
