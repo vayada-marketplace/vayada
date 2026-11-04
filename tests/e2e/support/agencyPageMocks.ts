@@ -140,6 +140,8 @@ export function agencyPage(
     filters?: Record<string, boolean>;
     /** The layouts allowed and the first one (VAY-2460); all, starting on List, unless given. */
     layout?: { allowed: string[]; default: string };
+    /** A stay page's nearby stays and map (VAY-2461); both on unless given. */
+    stayPage?: { nearby: boolean; map: boolean };
   } = {},
 ) {
   return {
@@ -176,7 +178,7 @@ export function agencyPage(
       ...overrides.results,
     },
     filters: overrides.filters ?? {},
-    stayPage: { nearby: true, map: true },
+    stayPage: overrides.stayPage ?? { nearby: true, map: true },
     stays: AGENCY_STAYS.map((stay) => ({
       propertyId: `property-${stay.id}`,
       slug: staySlug(stay.id),

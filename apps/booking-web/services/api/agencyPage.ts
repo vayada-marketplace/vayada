@@ -61,6 +61,8 @@ export type AgencyPage = {
   filters: Record<AccountBookingPageFilter, boolean>;
   /** The layouts guests can switch between (List always) and the one they see first. */
   layout: { allowed: AccountBookingPageLayout[]; default: AccountBookingPageLayout };
+  /** A stay's page (VAY-2461): "Other stays nearby" and its map. */
+  stayPage: { nearby: boolean; map: boolean };
   stays: AgencyStay[];
 };
 
@@ -136,6 +138,7 @@ export function readAgencyPage(raw: unknown): AgencyPage {
   const results = object(raw.results) ? raw.results : {};
   const filters = object(raw.filters) ? raw.filters : {};
   const layout = object(raw.layout) ? raw.layout : {};
+  const stayPage = object(raw.stayPage) ? raw.stayPage : {};
   const allowed = ACCOUNT_BOOKING_PAGE_LAYOUTS.filter(
     (one) => one === "list" || (Array.isArray(layout.allowed) && layout.allowed.includes(one)),
   );
@@ -186,6 +189,7 @@ export function readAgencyPage(raw: unknown): AgencyPage {
     filters: Object.fromEntries(
       ACCOUNT_BOOKING_PAGE_FILTERS.map((key) => [key, filters[key] === true]),
     ) as Record<AccountBookingPageFilter, boolean>,
+    stayPage: { nearby: stayPage.nearby !== false, map: stayPage.map !== false },
     layout: {
       allowed,
       default: allowed.includes(layout.default as AccountBookingPageLayout)

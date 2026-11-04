@@ -4,6 +4,7 @@ import {
   agencyResults,
   formatStayRange,
   localePrefix,
+  nearbyStays,
   NO_FILTERS,
   overviewHref,
   stayCheckoutUrl,
@@ -356,6 +357,43 @@ describe("stay links (VAY-2461)", () => {
     ).toBe("/?slug=the-travel-ubud");
     expect(localePrefix("/stays/uma")).toBe("");
     expect(localePrefix("/fr/stays/uma")).toBe("/fr");
+  });
+});
+
+describe("nearby stays (VAY-2461)", () => {
+  const at = (id: string, latitude: number | null, approximate = false): AgencyStay => ({
+    ...stay(id),
+    map: latitude === null ? null : { latitude, longitude: 115.26, approximate },
+  });
+  const names = (list: { stay: AgencyStay }[]) => list.map((one) => one.stay.propertyId);
+
+  it("lists the page's other stays closest first, those without a pin after, at most 8", () => {
+    const here = at("escape", -8.5);
+    const page = [
+      at("far", -8.7),
+      here,
+      at("unpinned", null),
+      at("near", -8.501),
+      at("area", -8.52, true),
+      ...Array.from({ length: 8 }, (_, i) => at(`more-${i}`, -8.53 - i * 0.01)),
+    ];
+    const nearby = nearbyStays(page, here);
+    expect(nearby).toHaveLength(8);
+    expect(names(nearby).slice(0, 3)).toEqual(["near", "area", "more-0"]);
+    expect(nearby[0]!.metres).toBeGreaterThan(100);
+    expect(nearby[0]!.metres).toBeLessThan(120);
+    // Measured to a spot rounded to its area: said as approximate.
+    expect(nearby[1]!.approximate).toBe(true);
+    expect(names(nearbyStays(page, here, 20)).slice(-2)).toEqual(["far", "unpinned"]);
+  });
+
+  it("keeps the page's order when the stay itself has no pin", () => {
+    const here = at("escape", null);
+    const page = [at("b", -8.6), here, at("a", -8.5)];
+    expect(nearbyStays(page, here).map((one) => [one.stay.propertyId, one.metres])).toEqual([
+      ["b", null],
+      ["a", null],
+    ]);
   });
 });
 
