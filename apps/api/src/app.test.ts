@@ -4709,6 +4709,39 @@ describe("vayada-api", () => {
     expect(published).toEqual([pmsPropertyId]);
   });
 
+  it("refreshes a live booking page after a Localization save without failing the save (VAY-2474)", async () => {
+    const refreshInputs: Parameters<BookingPublicationRefreshPort["refresh"]>[0][] = [];
+    let unavailable = false;
+    app = buildAuthenticatedApp({
+      bookingPublicationRefresh: {
+        async refresh(input) {
+          refreshInputs.push(input);
+          if (unavailable) throw new Error("Booking publication readiness is incomplete.");
+          return null;
+        },
+      },
+    });
+    const localization = settingsWriteCases.find((writeCase) => writeCase.name === "localization")!;
+
+    for (const failing of [false, true]) {
+      unavailable = failing;
+      const response = await injectJson(app, {
+        method: "PUT",
+        url: localization.url,
+        headers: { authorization: "Bearer valid-token" },
+        payload: localization.payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual(localization.expected);
+    }
+    await vi.waitFor(() =>
+      expect(refreshInputs).toMatchObject([
+        { organizationId: "org_hotel_group", propertyId: pmsPropertyId, onlyIfLive: true },
+        { organizationId: "org_hotel_group", propertyId: pmsPropertyId, onlyIfLive: true },
+      ]),
+    );
+  });
+
   it("refreshes the booking page after a guest-form save without failing the save (VAY-2129)", async () => {
     const refreshed: string[] = [];
     let unavailable = false;
