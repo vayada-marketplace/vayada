@@ -244,11 +244,13 @@ async function previewLocked(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // The inventory lock before any row lock, in the order every inventory and price path uses,
+    // as the calendar save does (VAY-2469).
+    await lockPmsInventoryMutationScope(client, command.propertyId);
     if (!(await lockAuthorizedScope(client, command, generatedAt))) {
       await rollbackQuietly(client);
       return previewFailure({ code: "setup_scope_unavailable" });
     }
-    await lockPmsInventoryMutationScope(client, command.propertyId);
     return await config.propertyProfileEvidence.runWithPropertyProfileEvidence(
       {
         propertyId: command.propertyId,

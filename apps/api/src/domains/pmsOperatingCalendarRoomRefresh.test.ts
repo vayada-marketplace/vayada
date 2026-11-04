@@ -421,7 +421,7 @@ describe("the hourly repair (VAY-2469)", () => {
         runId: "run-1",
         propertyIds: [propertyId],
       }),
-    ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, failed: [] });
+    ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, retried: 0, failed: [] });
     expect(calls[0]).toEqual([
       "candidates",
       { values: [25, [propertyId], "pms.operations.manage"] },
@@ -442,7 +442,151 @@ describe("the hourly repair (VAY-2469)", () => {
       candidates: 1,
       refreshed: 0,
       unchanged: 0,
+      retried: 0,
       failed: [{ propertyId, outcome: "not_room_change", detail: "room_capacity_unavailable" }],
     });
   });
+
+  // Production, 2026-11-04: the save deadlocked with the 5-minute price re-publish.
+  it("tries a hotel once more after a deadlock or lock wait with another writer", async () => {
+    const lockConflict = (code: string) =>
+      Object.assign(new Error(code === "40P01" ? "deadlock detected" : "lock timeout"), { code });
+    for (const code of ["40P01", "55P03"]) {
+      const { ports, calls } = failingSaves([lockConflict(code)]);
+      expect(
+        await repairPmsOperatingCalendarRooms(ports, {
+          limit: 25,
+          runId: "run-3",
+          retryPauseMs: 0,
+        }),
+      ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, retried: 1, failed: [] });
+      // The second try starts over, checks included.
+      expect(calls.map(([step]) => step)).toEqual([
+        "candidates",
+        "crowded",
+        "preview",
+        "save",
+        "crowded",
+        "preview",
+        "save",
+        "materialize",
+      ]);
+    }
+  });
+
+  it("leaves a second lock conflict, and any other error, for the next hour", async () => {
+    const deadlock = Object.assign(new Error("deadlock detected"), { code: "40P01" });
+    const twice = failingSaves([deadlock, deadlock]);
+    expect(
+      await repairPmsOperatingCalendarRooms(twice.ports, {
+        limit: 25,
+        runId: "run-4",
+        retryPauseMs: 0,
+      }),
+    ).toEqual({
+      candidates: 1,
+      refreshed: 0,
+      unchanged: 0,
+      retried: 1,
+      failed: [{ propertyId, outcome: "error", detail: "deadlock detected" }],
+    });
+    const other = failingSaves([new Error("connection terminated")]);
+    expect(
+      await repairPmsOperatingCalendarRooms(other.ports, {
+        limit: 25,
+        runId: "run-5",
+        retryPauseMs: 0,
+      }),
+    ).toEqual({
+      candidates: 1,
+      refreshed: 0,
+      unchanged: 0,
+      retried: 0,
+      failed: [{ propertyId, outcome: "error", detail: "connection terminated" }],
+    });
+    expect(other.calls.filter(([step]) => step === "save")).toHaveLength(1);
+  });
+
+  it("only prepares the nights on the second try when the save had landed", async () => {
+    const { ports, calls } = fake({ candidates: [{ propertyId, organizationId, userId }] });
+    const savedConfiguration = {
+      ...configuration,
+      calendarRevision: 5,
+      sourceInputs: {
+        ...configuration.sourceInputs,
+        roomBindings: [binding(studio, 5, 3, 3), binding(garden, 3, 1, 1), binding(villa, 4, 2, 2)],
+      },
+    };
+    let saved = false;
+    let preparations = 0;
+    const repaired = {
+      ...ports,
+      calendarRead: {
+        getCurrentOperatingCalendarConfiguration: async (id: string) =>
+          saved
+            ? { configuration: savedConfiguration, sourceStatus: "current", sourceConflicts: [] }
+            : ports.calendarRead.getCurrentOperatingCalendarConfiguration(id),
+      },
+      calendar: {
+        upsertOperatingCalendar: async (command: Record<string, unknown>) => {
+          const result = await ports.calendar.upsertOperatingCalendar(command as never);
+          saved = true;
+          return result;
+        },
+      },
+      materialization: {
+        materializeInventory: async (command: Record<string, unknown>) => {
+          preparations += 1;
+          if (preparations === 1) {
+            calls.push(["materialize", command]);
+            throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+          }
+          return ports.materialization.materializeInventory(command as never);
+        },
+      },
+    } as unknown as PmsOperatingCalendarRoomRefreshPorts;
+    expect(
+      await repairPmsOperatingCalendarRooms(repaired, {
+        limit: 25,
+        runId: "run-6",
+        retryPauseMs: 0,
+      }),
+    ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, retried: 1, failed: [] });
+    // One save; the second try finds the calendar current and checks every room type's nights.
+    expect(calls.map(([step]) => step)).toEqual([
+      "candidates",
+      "crowded",
+      "preview",
+      "save",
+      "materialize",
+      "crowded",
+      "crowded",
+      "crowded",
+      "materialize",
+    ]);
+    expect(calls.at(-1)![1]["expectedMaterializedRevision"]).toBe(5);
+  });
 });
+
+/** A repair candidate whose first saves throw these errors, then save as usual. */
+function failingSaves(errors: readonly Error[]) {
+  const { ports, calls } = fake({ candidates: [{ propertyId, organizationId, userId }] });
+  const pending = [...errors];
+  const save = ports.calendar.upsertOperatingCalendar.bind(ports.calendar);
+  return {
+    calls,
+    ports: {
+      ...ports,
+      calendar: {
+        upsertOperatingCalendar: async (command: Parameters<typeof save>[0]) => {
+          const error = pending.shift();
+          if (error) {
+            calls.push(["save", command as unknown as Record<string, unknown>]);
+            throw error;
+          }
+          return save(command);
+        },
+      },
+    } as PmsOperatingCalendarRoomRefreshPorts,
+  };
+}

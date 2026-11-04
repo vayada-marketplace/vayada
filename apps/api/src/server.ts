@@ -2947,6 +2947,7 @@ const runCalendarAutoOpenSchedule = () => {
               candidates: repair.candidates,
               refreshed: repair.refreshed,
               unchanged: repair.unchanged,
+              retried: repair.retried,
               failed: repair.failed.length,
               failedProperties: repair.failed.slice(0, 10),
             },
@@ -2996,13 +2997,20 @@ const runCalendarAutoOpenSchedule = () => {
       activeCalendarAutoOpenSchedule = undefined;
     });
 };
-// Hourly; the first run waits a minute so it stays out of startup and deploy health checks.
-const calendarAutoOpenScheduleTimer = pmsCalendarAutoOpenSchedulerStore
-  ? setInterval(runCalendarAutoOpenSchedule, config.pmsCalendarAutoOpenSchedulerIntervalMs)
-  : undefined;
-calendarAutoOpenScheduleTimer?.unref();
+// Hourly from 90 s after boot: that stays out of startup and deploy health checks, and off the beat
+// of this instance's price re-publish (every 5 minutes) and price freshness check (hourly), which
+// start 60 s after boot. VAY-2469: started together, the repair's calendar save deadlocked with the
+// re-publish. The fix for that is the calendar save's lock order; this only keeps the runs apart.
+let calendarAutoOpenScheduleTimer: ReturnType<typeof setInterval> | undefined;
 const calendarAutoOpenScheduleStart = pmsCalendarAutoOpenSchedulerStore
-  ? setTimeout(runCalendarAutoOpenSchedule, 60_000)
+  ? setTimeout(() => {
+      calendarAutoOpenScheduleTimer = setInterval(
+        runCalendarAutoOpenSchedule,
+        config.pmsCalendarAutoOpenSchedulerIntervalMs,
+      );
+      calendarAutoOpenScheduleTimer.unref();
+      runCalendarAutoOpenSchedule();
+    }, 90_000)
   : undefined;
 calendarAutoOpenScheduleStart?.unref();
 app.addHook("onClose", async () => {

@@ -1785,7 +1785,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             runId: `repair-${suffix}`,
             propertyIds: [propertyId],
           }),
-        ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, failed: [] });
+        ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, retried: 0, failed: [] });
         expect(await findPmsOperatingCalendarRoomRefreshCandidates(pool, 25, [propertyId])).toEqual(
           [],
         );
@@ -2006,7 +2006,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             runId: `repair-unprepared-${suffix}`,
             propertyIds: [propertyId],
           }),
-        ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, failed: [] });
+        ).toEqual({ candidates: 1, refreshed: 1, unchanged: 0, retried: 0, failed: [] });
         expect(
           (
             await admin.query(
