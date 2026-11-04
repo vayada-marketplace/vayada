@@ -18,13 +18,32 @@ const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 type Fixture = {
   run: string;
-  workosIds: Record<"update" | "sync" | "missing" | "deleted" | "unlinked" | "smoke", string>;
-  userIds: Record<"update" | "sync" | "missing" | "deleted" | "smoke", string>;
+  workosIds: Record<
+    | "update"
+    | "sync"
+    | "missing"
+    | "deleted"
+    | "unlinked"
+    | "smoke"
+    | "unlinkedSmoke"
+    | "erasedSmoke",
+    string
+  >;
+  userIds: Record<"update" | "sync" | "missing" | "deleted" | "smoke" | "erasedSmoke", string>;
   emails: string[];
   names: string[];
   receiptIds: string[];
   deadLetters: Record<
-    "update" | "sync" | "missing" | "deleted" | "unlinked" | "smoke" | "otherSummary" | "resolved",
+    | "update"
+    | "sync"
+    | "missing"
+    | "deleted"
+    | "unlinked"
+    | "smoke"
+    | "unlinkedSmoke"
+    | "erasedSmoke"
+    | "otherSummary"
+    | "resolved",
     string[]
   >;
   workosNow: Map<string, Record<string, unknown> | null>;
@@ -58,6 +77,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
 
     const plan = await planWorkosUserResync({ pool, workos: reader });
 
+    expectOnlyOwnRows(plan, fixture);
     expect(await snapshot(fixture)).toEqual(before);
     expect(ownUsers(plan, fixture)).toEqual([
       { key: "deleted", outcome: "user_deleted", changes: [], deadLetters: 1 },
@@ -71,8 +91,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
         deadLetters: 2,
       },
     ]);
-    expect(plan.smoke.deadLetterIds).toEqual([...fixture.deadLetters.smoke].sort());
-    expect(plan.smoke.users).toBe(1);
+    // Smoke: our email ends in .test, or (unlinked, or an erased account) every webhook email does.
+    expect(plan.smoke.deadLetterIds).toEqual(smokeDeadLetters(fixture).sort());
+    expect(plan.smoke.users).toBe(3);
     expect(plan.smoke.usersNotDeleted).toBe(0);
     // Only the open guard dead letters are in the plan.
     const planned = new Set(
@@ -95,13 +116,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
     const fixture = await createFixture();
     const reader = fakeWorkos(fixture);
     const plan = await planWorkosUserResync({ pool, workos: reader });
+    expectOnlyOwnRows(plan, fixture);
     const before = await snapshot(fixture);
+    const progress: unknown[] = [];
 
     const result = await applyWorkosUserResync({
       pool,
       workos: reader,
       planSha256: plan.planSha256,
       approvalRef: "VAY-2479",
+      onProgress: (line) => progress.push(line),
     });
 
     expect(result).toEqual({
@@ -110,8 +134,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
       usersDeleted: 1,
       usersSkipped: 2,
       deadLettersResolved: 4,
-      deadLettersAcknowledged: 2,
+      deadLettersAcknowledged: 4,
     });
+    // One progress line per committed user, by short reference only.
+    expect(progress).toEqual([
+      { ref: ref(fixture.workosIds.deleted), outcome: "user_deleted", deadLettersResolved: 1 },
+      { ref: ref(fixture.workosIds.sync), outcome: "in_sync", deadLettersResolved: 1 },
+      { ref: ref(fixture.workosIds.update), outcome: "update", deadLettersResolved: 2 },
+    ]);
     const after = await snapshot(fixture);
 
     // The out-of-date user now matches WorkOS, through the webhook's own update.
@@ -125,7 +155,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
     });
     expect(updated.rawProfile).toEqual(fixture.workosNow.get(fixture.workosIds.update));
     // Users that need no write are left exactly as they were.
-    for (const key of ["sync", "missing", "deleted", "smoke"] as const) {
+    for (const key of ["sync", "missing", "deleted", "smoke", "erasedSmoke"] as const) {
       expect(after.users[fixture.userIds[key]]).toEqual(before.users[fixture.userIds[key]]);
     }
     // No user, link or membership was created; nothing exists for the unlinked WorkOS ID.
@@ -142,8 +172,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
       for (const id of fixture.deadLetters[key])
         expect(after.deadLetters[id]!.resolvedAt).toBe(true);
     }
-    expect(status(fixture.deadLetters.smoke)).toEqual(["acknowledged", "acknowledged"]);
-    for (const id of fixture.deadLetters.smoke)
+    expect(status(smokeDeadLetters(fixture))).toEqual(
+      smokeDeadLetters(fixture).map(() => "acknowledged"),
+    );
+    for (const id of smokeDeadLetters(fixture))
       expect(after.deadLetters[id]!.acknowledgedAt).toBe(true);
     for (const key of ["missing", "unlinked", "otherSummary"] as const) {
       expect(status(fixture.deadLetters[key])).toEqual(["open"]);
@@ -178,9 +210,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
     // Second run: only the skipped users remain, and applying that plan writes nothing.
     const second = await planWorkosUserResync({ pool, workos: reader });
     expect(ownUsers(second, fixture).map((user) => user.key)).toEqual(["missing", "unlinked"]);
-    expect(
-      second.smoke.deadLetterIds.filter((id) => fixture.deadLetters.smoke.includes(id)),
-    ).toEqual([]);
+    expect(second.smoke.deadLetterIds).toEqual([]);
     await expect(
       applyWorkosUserResync({
         pool,
@@ -203,6 +233,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
     const fixture = await createFixture();
     const reader = fakeWorkos(fixture);
     const plan = await planWorkosUserResync({ pool, workos: reader });
+    expectOnlyOwnRows(plan, fixture);
     const before = await snapshot(fixture);
 
     await expect(
@@ -234,6 +265,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
     const fixture = await createFixture();
     const reader = fakeWorkos(fixture);
     const plan = await planWorkosUserResync({ pool, workos: reader });
+    expectOnlyOwnRows(plan, fixture);
     let applying = false;
     const racingReader: WorkosUserReader = {
       async getUser(workosUserId) {
@@ -256,7 +288,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
         planSha256: plan.planSha256,
         approvalRef: "VAY-2479",
       }),
-    ).rejects.toMatchObject({ code: "user_changed_since_plan" });
+    ).rejects.toMatchObject({
+      code: "user_changed_since_plan",
+      ref: ref(fixture.workosIds.update),
+    });
     const after = await snapshot(fixture);
     expect(after.users[fixture.userIds.update]).toMatchObject({
       name: `Edited ${fixture.run}`,
@@ -266,6 +301,25 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
       expect(after.deadLetters[id]!.recoveryStatus).toBe("open");
     }
   });
+
+  // Apply acts on every open guard dead letter in the database, so stop before touching any row
+  // another suite left behind.
+  function expectOnlyOwnRows(plan: WorkosUserResyncPlan, fixture: Fixture): void {
+    const ownUsers = new Set(Object.values(fixture.workosIds));
+    const ownDeadLetters = new Set(Object.values(fixture.deadLetters).flat());
+    expect(plan.users.map((user) => user.workosUserId).filter((id) => !ownUsers.has(id))).toEqual(
+      [],
+    );
+    expect(plan.smoke.deadLetterIds.filter((id) => !ownDeadLetters.has(id))).toEqual([]);
+  }
+
+  function smokeDeadLetters(fixture: Fixture): string[] {
+    return [
+      ...fixture.deadLetters.smoke,
+      ...fixture.deadLetters.unlinkedSmoke,
+      ...fixture.deadLetters.erasedSmoke,
+    ];
+  }
 
   function fakeWorkos(fixture: Fixture): WorkosUserReader & { calls: string[] } {
     const calls: string[] = [];
@@ -302,11 +356,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
       deleted: workosId("deleted"),
       unlinked: workosId("unlinked"),
       smoke: workosId("smoke"),
+      unlinkedSmoke: workosId("unlinkedSmoke"),
+      erasedSmoke: workosId("erasedSmoke"),
     };
     const fixture: Fixture = {
       run,
       workosIds,
-      userIds: { update: "", sync: "", missing: "", deleted: "", smoke: "" },
+      userIds: { update: "", sync: "", missing: "", deleted: "", smoke: "", erasedSmoke: "" },
       emails: [],
       names: [],
       receiptIds: [],
@@ -317,6 +373,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
         deleted: [],
         unlinked: [],
         smoke: [],
+        unlinkedSmoke: [],
+        erasedSmoke: [],
         otherSummary: [],
         resolved: [],
       },
@@ -330,6 +388,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
       ["missing", `resync-${run}-missing@example.com`, `Cy ${run}`, false],
       ["deleted", `resync-${run}-deleted@example.com`, `Di ${run}`, false],
       ["smoke", `resync-${run}-smoke@example.test`, `Smoke ${run}`, false],
+      // Privacy erasure rewrites the email, so only the webhook emails still say "smoke".
+      ["erasedSmoke", `deleted+${run}@deleted.vayada.local`, `Erased ${run}`, false],
     ] as const;
     for (const [key, email, name, verified] of linkedUsers) {
       const userId = await store.upsertWorkosUser({
@@ -345,7 +405,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
       fixture.names.push(name);
     }
     await admin.query("UPDATE identity.users SET status = 'deleted' WHERE id = ANY($1::uuid[])", [
-      [fixture.userIds.deleted, fixture.userIds.smoke],
+      [fixture.userIds.deleted, fixture.userIds.smoke, fixture.userIds.erasedSmoke],
     ]);
 
     fixture.workosNow.set(
@@ -370,6 +430,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS user resync (VAY-2479)", 
     await guard("unlinked", workosIds.unlinked, `resync-${run}-unlinked@example.com`);
     await guard("smoke", workosIds.smoke, `resync-${run}-smoke@example.test`);
     await guard("smoke", workosIds.smoke, `resync-${run}-smoke@example.test`);
+    await guard("unlinkedSmoke", workosIds.unlinkedSmoke, `resync-${run}-unlinked@example.test`);
+    await guard("erasedSmoke", workosIds.erasedSmoke, `resync-${run}-erased@example.test`);
     // Another cause, and a guard dead letter that is already resolved: neither is touched.
     await deadLetter(
       fixture,
@@ -531,6 +593,11 @@ function workosUser(
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-11-04T00:00:00.000Z",
   };
+}
+
+// The plan's short reference: the last 8 characters of the WorkOS user ID.
+function ref(workosUserId: string): string {
+  return `…${workosUserId.slice(-8)}`;
 }
 
 function assertSafeTestDatabase(connectionString: string): void {

@@ -59,6 +59,8 @@ async function main(): Promise<number> {
       workos,
       planSha256: applyPlanSha256,
       approvalRef,
+      // One line per committed user (short reference only), so a stopped run shows how far it got.
+      onProgress: (progress) => print({ progress }),
     });
     print({ planSha256: applyPlanSha256, applied: true, approvalRef, result });
     process.stdout.write(
@@ -76,7 +78,7 @@ try {
   process.exitCode = await main();
 } catch (error) {
   if (error instanceof WorkosUserResyncRefusal) {
-    print({ status: "REFUSED", code: error.code }, process.stderr);
+    print({ status: "REFUSED", code: error.code, ref: error.ref }, process.stderr);
     process.exitCode = 64;
   } else {
     // Error names and codes only: database and WorkOS messages can carry personal data.

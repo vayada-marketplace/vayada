@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import type pg from "pg";
 
 import { workosUserPayloadFromData, type WorkosUserPayload } from "../routes/workosWebhooks.js";
-import { assertNotBootstrapProtectedUser } from "./legacyOwnerSignupGuard.js";
 import { lockWorkosProviderIdentity } from "./workosIdentityLock.js";
 import { updateLinkedWorkosUser } from "./workosWebhooks.js";
 
@@ -84,11 +83,21 @@ export type WorkosUserResyncResult = {
 };
 
 export class WorkosUserResyncRefusal extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    /** The short reference of the user the refusal is about, when there is one. */
+    readonly ref?: string,
+  ) {
     super(code);
     this.name = "WorkosUserResyncRefusal";
   }
 }
+
+export type WorkosUserResyncProgress = {
+  ref: string;
+  outcome: WorkosUserResyncOutcome;
+  deadLettersResolved: number;
+};
 
 export function parseWorkosUserResyncArgs(argv: string[]): {
   approvalRef: string;
@@ -108,7 +117,7 @@ export function parseWorkosUserResyncArgs(argv: string[]): {
     }
     index += 1;
   }
-  if (!approvalRef || !/^[A-Za-z0-9][A-Za-z0-9 ._:-]{1,63}$/.test(approvalRef)) {
+  if (!approvalRef || !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$/.test(approvalRef)) {
     throw new WorkosUserResyncRefusal("approval_ref_invalid");
   }
   if (applyPlanSha256 !== null && !/^[0-9a-f]{64}$/.test(applyPlanSha256)) {
@@ -117,22 +126,27 @@ export function parseWorkosUserResyncArgs(argv: string[]): {
   return { approvalRef, applyPlanSha256 };
 }
 
-/** Read-only: the database work runs in a READ ONLY transaction that is rolled back. */
+/**
+ * Read-only: the database reads run in one READ ONLY transaction that is rolled back before any
+ * WorkOS call, and WorkOS is only read. The apply re-checks each user under a lock anyway.
+ */
 export async function planWorkosUserResync(input: {
   pool: pg.Pool;
   workos: WorkosUserReader;
 }): Promise<WorkosUserResyncPlan> {
   const client = await input.pool.connect();
+  let cohort: Cohort;
   try {
     await client.query("BEGIN TRANSACTION READ ONLY");
     try {
-      return await buildPlan(client, input.workos);
+      cohort = await readCohort(client);
     } finally {
       await client.query("ROLLBACK");
     }
   } finally {
     client.release();
   }
+  return buildPlan(cohort, input.workos);
 }
 
 export async function applyWorkosUserResync(input: {
@@ -140,6 +154,8 @@ export async function applyWorkosUserResync(input: {
   workos: WorkosUserReader;
   planSha256: string;
   approvalRef: string;
+  /** Called after each user's transaction commits, so a stopped run shows how far it got. */
+  onProgress?: (progress: WorkosUserResyncProgress) => void;
 }): Promise<WorkosUserResyncResult> {
   const plan = await planWorkosUserResync(input);
   if (plan.planSha256 !== input.planSha256) throw new WorkosUserResyncRefusal("plan_changed");
@@ -158,6 +174,11 @@ export async function applyWorkosUserResync(input: {
       continue;
     }
     await applyUser(input.pool, user, input.approvalRef);
+    input.onProgress?.({
+      ref: shortRef(user.workosUserId),
+      outcome: user.outcome,
+      deadLettersResolved: user.deadLetters.length,
+    });
     result.deadLettersResolved += user.deadLetters.length;
     if (user.outcome === "update") result.usersUpdated += 1;
     else if (user.outcome === "in_sync") result.usersResolvedWithoutChange += 1;
@@ -204,10 +225,23 @@ export function summarizeWorkosUserResyncPlan(plan: WorkosUserResyncPlan) {
   };
 }
 
-async function buildPlan(
-  client: pg.PoolClient,
-  workos: WorkosUserReader,
-): Promise<WorkosUserResyncPlan> {
+type LinkedRow = {
+  workos_user_id: string;
+  user_id: string;
+  email: string;
+  name: string | null;
+  status: string;
+  provider_email: string | null;
+  provider_email_verified: boolean | null;
+};
+
+type Cohort = {
+  groups: Map<string, { deadLetters: DeadLetter[]; smokePayload: boolean }>;
+  linked: Map<string, LinkedRow>;
+  protectedUserIds: Set<string>;
+};
+
+async function readCohort(client: pg.PoolClient): Promise<Cohort> {
   const deadLetterRows = await client.query<{
     dead_letter_id: string;
     receipt_id: string;
@@ -241,15 +275,7 @@ async function buildPlan(
     groups.set(row.workos_user_id, group);
   }
 
-  const linkedRows = await client.query<{
-    workos_user_id: string;
-    user_id: string;
-    email: string;
-    name: string | null;
-    status: string;
-    provider_email: string | null;
-    provider_email_verified: boolean | null;
-  }>(
+  const linkedRows = await client.query<LinkedRow>(
     `SELECT external.provider_user_id AS workos_user_id,
             users.id::text AS user_id,
             users.email,
@@ -265,6 +291,33 @@ async function buildPlan(
   );
   const linked = new Map(linkedRows.rows.map((row) => [row.workos_user_id, row]));
 
+  // The guard's own read, but a read error refuses the run instead of reading as "protected":
+  // an unreadable receipts table is how VAY-2478 started.
+  let protectedRows: pg.QueryResult<{ user_id: string }>;
+  try {
+    protectedRows = await client.query<{ user_id: string }>(
+      `SELECT candidate::text AS user_id
+       FROM unnest($1::uuid[]) AS candidate
+       WHERE EXISTS (
+         SELECT 1 FROM platform.legacy_owner_bootstrap_receipts
+         WHERE candidate = ANY(owner_user_ids)
+       )`,
+      [linkedRows.rows.map((row) => row.user_id)],
+    );
+  } catch {
+    throw new WorkosUserResyncRefusal("legacy_owner_guard_unreadable");
+  }
+  return {
+    groups,
+    linked,
+    protectedUserIds: new Set(protectedRows.rows.map((row) => row.user_id)),
+  };
+}
+
+async function buildPlan(
+  { groups, linked, protectedUserIds }: Cohort,
+  workos: WorkosUserReader,
+): Promise<WorkosUserResyncPlan> {
   const users: WorkosUserResyncPlannedUser[] = [];
   const smokeDeadLetterIds: string[] = [];
   let smokeUsers = 0;
@@ -272,7 +325,8 @@ async function buildPlan(
   for (const workosUserId of [...groups.keys()].sort()) {
     const group = groups.get(workosUserId)!;
     const row = linked.get(workosUserId);
-    if (row ? SMOKE_EMAIL.test(row.email) : group.smokePayload) {
+    // Smoke: our email, or every webhook email, ends in .test (an erased account's email is rewritten).
+    if (group.smokePayload || (row !== undefined && SMOKE_EMAIL.test(row.email))) {
       smokeUsers += 1;
       if (row && row.status !== "deleted") smokeUsersNotDeleted += 1;
       smokeDeadLetterIds.push(...group.deadLetters.map((deadLetter) => deadLetter.deadLetterId));
@@ -312,7 +366,7 @@ async function buildPlan(
     if (payload.workosUserId !== workosUserId) {
       throw new WorkosUserResyncRefusal("workos_returned_another_user");
     }
-    if (!(await guardAllows(client, row.user_id))) {
+    if (protectedUserIds.has(row.user_id)) {
       planned.outcome = "legacy_owner_protected";
       continue;
     }
@@ -360,20 +414,6 @@ async function buildPlan(
   };
 }
 
-// The guard throws on a protected user and on any read error; a savepoint keeps the plan's
-// transaction usable either way.
-async function guardAllows(client: pg.PoolClient, userId: string): Promise<boolean> {
-  await client.query("SAVEPOINT workos_user_resync_guard");
-  try {
-    await assertNotBootstrapProtectedUser(client, userId);
-    await client.query("RELEASE SAVEPOINT workos_user_resync_guard");
-    return true;
-  } catch {
-    await client.query("ROLLBACK TO SAVEPOINT workos_user_resync_guard");
-    return false;
-  }
-}
-
 // One transaction per user: the provider lock the webhook takes, a re-read that must still match
 // the plan, the webhook update, and the dead letters resolved with one audit row per receipt.
 async function applyUser(
@@ -414,11 +454,11 @@ async function applyUser(
         providerEmailVerified: row.provider_email_verified,
       }) !== user.before
     ) {
-      throw new WorkosUserResyncRefusal("user_changed_since_plan");
+      throw new WorkosUserResyncRefusal("user_changed_since_plan", shortRef(user.workosUserId));
     }
     if (user.outcome === "update") {
       if (!user.payload || !(await updateLinkedWorkosUser(client, row.user_id, user.payload))) {
-        throw new WorkosUserResyncRefusal("user_changed_since_plan");
+        throw new WorkosUserResyncRefusal("user_changed_since_plan", shortRef(user.workosUserId));
       }
     }
     const resolved = await client.query(
@@ -436,7 +476,10 @@ async function applyUser(
       ],
     );
     if (resolved.rowCount !== user.deadLetters.length) {
-      throw new WorkosUserResyncRefusal("dead_letters_changed_since_plan");
+      throw new WorkosUserResyncRefusal(
+        "dead_letters_changed_since_plan",
+        shortRef(user.workosUserId),
+      );
     }
     // Same audit shape as markReceiptProcessed: a deleted user's event is "ignored" there too.
     const status = user.outcome === "user_deleted" ? "ignored" : "normalized";

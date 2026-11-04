@@ -24,6 +24,7 @@ describe("WorkOS user resync arguments (VAY-2479)", () => {
     [[], "approval_ref_invalid"],
     [["--approval-ref", "x"], "approval_ref_invalid"],
     [["--approval-ref", "VAY-2479\nother"], "approval_ref_invalid"],
+    [["--approval-ref", "VAY 2479"], "approval_ref_invalid"],
     [["--approval-ref", "VAY-2479", "--apply"], "arguments_invalid"],
     [["--approval-ref", "VAY-2479", "--apply", "abc"], "plan_sha256_invalid"],
     [["--approval-ref", "VAY-2479", "--apply", sha.toUpperCase()], "plan_sha256_invalid"],

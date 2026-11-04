@@ -480,7 +480,7 @@ async function insertReceipt(
   };
 }
 
-export async function findUserIdByWorkosUserId(
+async function findUserIdByWorkosUserId(
   pool: pg.Pool | pg.PoolClient,
   workosUserId: string,
 ): Promise<string | null> {
