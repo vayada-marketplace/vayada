@@ -131,6 +131,7 @@ import {
 import { loadStayPlaces, type StayPlace } from "../domains/stayPlaces.js";
 import {
   enqueueBookingLifecycleEmailJob,
+  enqueueBookingTransitionNotifications,
   loadBookingNotificationSnapshot,
   normalizeEmail,
 } from "../jobs/bookingEmails.js";
@@ -3791,6 +3792,30 @@ async function withGuestLifecycleMutation(
     // a cancelled one; a withdrawn request needs the same (VAY-2099).
     if (objectValue(updated.bookingMetadata)["targetSource"] !== "pricing_quote_draft")
       await enqueuePmsReservationHandoff(client, property.propertyId, updated, context, "cancel");
+    // VAY-2476: the guest and the hotel hear of the cancel, with the money as the preview showed
+    // it, in this transaction: a rollback sends nothing, and a cancelled stay can't cancel again.
+    if (mutation.action === "cancel")
+      await enqueueBookingTransitionNotifications(client, {
+        propertyId: updated.propertyId,
+        guestBookingId: updated.guestBookingId,
+        occurredAt: context.occurredAt.toISOString(),
+        correlationId: context.correlationId,
+        causationId: context.requestId,
+        actor: { type: "system" },
+        source: "apps/api-booking-guest-cancel",
+        transition: {
+          eventType: mutation.eventType,
+          fromStatus: booking.lifecycleStatus,
+          toStatus: updated.lifecycleStatus,
+          reason: "guest_cancellation",
+        },
+        cancellationMoney: {
+          currency: updated.currency,
+          paidMinor: String(cardMoney?.paidMinor ?? 0n),
+          refundMinor: String(cardMoney?.refundMinor ?? 0n),
+          feeMinor: bookedOutcome?.retainedMinor ?? "0",
+        },
+      });
     const body = serializeTargetBookingStatus(updated);
     await recordTargetCheckoutCommand(client, {
       propertyId: property.propertyId,

@@ -1460,6 +1460,7 @@ describe("Booking Web public bootstrap parity", () => {
     const calls: string[] = [];
     let inventoryWriteValues: readonly unknown[] | undefined;
     let addOnEvidenceValues: readonly unknown[] | undefined;
+    const emailJobs: Array<Record<string, string>> = [];
     let lifecycleStatus = "confirmed";
     let policySnapshot: Record<string, unknown> = {
       type: "free_until_days_before_arrival",
@@ -1541,6 +1542,31 @@ describe("Booking Web public bootstrap parity", () => {
         if (text.includes("INSERT INTO booking.addon_revenue_evidence")) {
           addOnEvidenceValues = values;
           return { rows: [] };
+        }
+        // VAY-2476: the cancel emails' booking snapshot, event and job.
+        if (text.includes('AS "hostEmail"')) {
+          return {
+            rows: [
+              {
+                ...booking(),
+                bookingReference: "B-CANCEL951",
+                guestEmail: "guest@example.test",
+                guestName: "Ada Guest",
+                hostEmail: "host@example.test",
+                propertyName: "Hotel Alpenrose",
+              },
+            ],
+          };
+        }
+        if (
+          text.includes("INSERT INTO platform.domain_events") &&
+          String(values?.[1]).startsWith("booking.notification.")
+        ) {
+          return { rows: [{ eventId: "e9fccec2-eb4c-4c35-bfd3-02a748c2e951" }] };
+        }
+        if (text.includes("INSERT INTO platform.jobs") && values?.[1] === "platform.email") {
+          emailJobs.push(JSON.parse(String(values[8])) as Record<string, string>);
+          return { rows: [{ jobId: `email-job-${emailJobs.length}`, replay: false }] };
         }
         if (text.includes("FROM booking.guest_bookings b")) {
           return { rows: [booking()] };
@@ -1691,6 +1717,14 @@ describe("Booking Web public bootstrap parity", () => {
         fingerprint: "e".repeat(64),
       }),
     ).rejects.toThrow("Booking can no longer be changed");
+    // VAY-2476: one email to the guest and one to the hotel; the refused repeat queues none.
+    expect(emailJobs.map((job) => [job["notificationType"], job["to"]])).toEqual([
+      ["booking_canceled", "guest@example.test"],
+      ["host_booking_canceled", "host@example.test"],
+    ]);
+    expect(emailJobs[0]!["text"]).toContain(
+      "You canceled your booking at Hotel Alpenrose.\n\nNo payment was collected, so there is nothing to refund.",
+    );
 
     const inventoryWrites = calls.filter((text) => text.includes("UPDATE pms.inventory_days"));
     expect(inventoryWrites).toHaveLength(1);
@@ -1805,6 +1839,7 @@ describe("Booking Web public bootstrap parity", () => {
 
     expect(calls.some((text) => text.includes("WITH updated AS"))).toBe(false);
     expect(calls.some((text) => text.includes("UPDATE pms.inventory_days"))).toBe(false);
+    expect(calls.some((text) => text.includes("INSERT INTO platform.jobs"))).toBe(false);
   });
 
   it("fails closed for a booking without persisted inventory and cancellation policy markers", async () => {
