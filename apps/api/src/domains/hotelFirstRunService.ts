@@ -1,9 +1,4 @@
-import {
-  firstRunRoomFacts,
-  type FirstRunBedChoice,
-  type FirstRunFreeCancellationDays,
-  type FirstRunRoomInput,
-} from "@vayada/domain-booking";
+import { FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS } from "@vayada/domain-booking";
 
 import { runFirstRunCalendar, type HotelFirstRunCalendarPorts } from "./hotelFirstRunCalendar.js";
 import type { HotelFirstRunSetupProgress } from "./hotelFirstRunFacts.js";
@@ -11,11 +6,7 @@ import {
   runFirstRunGuestRules,
   type HotelFirstRunGuestRulesPorts,
 } from "./hotelFirstRunGuestRules.js";
-import {
-  runFirstRunPlan,
-  type HotelFirstRunPlanChoice,
-  type HotelFirstRunPlanPorts,
-} from "./hotelFirstRunPlan.js";
+import { runFirstRunPlan, type HotelFirstRunPlanPorts } from "./hotelFirstRunPlan.js";
 import { runFirstRunPricing, type HotelFirstRunPricingPorts } from "./hotelFirstRunPricing.js";
 import {
   hotelFirstRunState,
@@ -26,37 +17,25 @@ import {
 import {
   runFirstRunCurrency,
   runFirstRunPayments,
-  runFirstRunRooms,
-  FIRST_RUN_MAX_ROOM_TYPES,
   type HotelFirstRunActor,
   type HotelFirstRunSetupPorts,
 } from "./hotelFirstRunSteps.js";
 
 /**
- * VAY-2247: the server's first run. It takes what the setup collects (the room types and their prices, the
- * taxes tick, how guests pay and the plan), saves every default the hotel needs to go live, and resumes
- * where it stopped. Steps run in order and stop at the first one that fails, so later steps never run on
- * top of a half-written earlier one. Concurrent runs for the same property are refused.
+ * VAY-2247: the server's first run, for Booking Admin's four-step setup (VAY-2451). The setup makes its room
+ * type itself under the first run's draft id (or skips it) and asks for no price or plan; the first run saves
+ * every default the hotel needs to go live: the currency, paying at the property, the placeholder price for
+ * the setup's room type, the calendar once there is a room type, the guest rules and the Commission plan. It
+ * resumes where it stopped. Steps run in order and stop at the first one that fails, so later steps never run
+ * on top of a half-written earlier one. Concurrent runs for the same property are refused.
  *
- * VAY-2451: the four-step setup sends no room types, prices or plan. It makes its room type itself under the
- * first run's draft id (or skips it); the first run gives that room type the placeholder price and the hotel
- * the Commission plan, and leaves the calendar until the hotel has a room type.
+ * The 7-step setup's request (room types, prices, the taxes tick and a plan) is gone since the four-step
+ * setup replaced it; hotels it set up keep what it saved.
  */
 
 export type HotelFirstRunRequest = Readonly<{
-  /**
-   * The room types to create, in order: 1 to FIRST_RUN_MAX_ROOM_TYPES, with different names. None from the
-   * four-step setup (VAY-2451): its room type, if it made one, gets the placeholder price instead.
-   */
-  rooms: readonly FirstRunRoomInput[];
-  pricesIncludeMandatoryCharges: boolean;
   /** Online card comes later (VAY-2205): the first run only sets up paying at the property. */
   guestPayment: "pay_at_property";
-  /** Null from the four-step setup (VAY-2451): Commission unless the hotel has a plan or a Fixed Fee checkout. */
-  plan: HotelFirstRunPlanChoice | null;
-  /** The owner's choices for every room type the first run makes (1.12b): free cancellation and beds. */
-  freeCancellationDays: FirstRunFreeCancellationDays;
-  bed: FirstRunBedChoice;
 }>;
 
 /** The state facts plus what the steps need to write: the first run's room types and the hotel's language. */
@@ -88,7 +67,6 @@ export type HotelFirstRunResult =
       ok: true;
       state: HotelFirstRunState;
       ran: readonly HotelFirstRunStepId[];
-      checkoutUrl: string | null;
     }>
   | Readonly<{
       ok: false;
@@ -111,11 +89,11 @@ export function createHotelFirstRunService(ports: HotelFirstRunPorts) {
 
     async run(
       actor: HotelFirstRunActor,
-      request: HotelFirstRunRequest,
-      customerEmail: string | null,
+      // Only `{ guestPayment: "pay_at_property" }`: nothing in it changes what the steps do.
+      _request: HotelFirstRunRequest,
     ): Promise<HotelFirstRunResult> {
       const result = await ports.lock.withPropertyLock(actor.propertyId, () =>
-        runSteps(ports, actor, request, customerEmail),
+        runSteps(ports, actor),
       );
       return result === "busy"
         ? Object.freeze({
@@ -133,35 +111,12 @@ export function createHotelFirstRunService(ports: HotelFirstRunPorts) {
 async function runSteps(
   ports: HotelFirstRunPorts,
   actor: HotelFirstRunActor,
-  request: HotelFirstRunRequest,
-  customerEmail: string | null,
 ): Promise<HotelFirstRunResult> {
   const ran: HotelFirstRunStepId[] = [];
-  let checkoutUrl: string | null = null;
-  const occupancies = request.rooms.map(
-    (room) => firstRunRoomFacts(room, request.bed)?.occupancy ?? null,
-  );
-  const names = new Set(request.rooms.map((room) => room.name.trim().toLowerCase()));
-  const placeholder = request.rooms.length === 0;
-  if (
-    request.rooms.length > FIRST_RUN_MAX_ROOM_TYPES ||
-    names.size !== request.rooms.length ||
-    occupancies.some((occupancy) => !occupancy)
-  ) {
-    return Object.freeze({
-      ok: false,
-      code: "first_run_room_invalid",
-      step: "rooms",
-      state: null,
-      ran,
-    });
-  }
-
   const steps: ReadonlyArray<
     [HotelFirstRunStepId, (facts: HotelFirstRunWriteFacts) => ReturnType<typeof runFirstRunPlan>]
   > = [
     ["currency", (facts) => runFirstRunCurrency(ports, actor, facts.profile?.countryCode ?? null)],
-    ["rooms", () => runFirstRunRooms(ports, actor, request.rooms, request.bed)],
     ["payments", () => runFirstRunPayments(ports, actor)],
     [
       "pricing",
@@ -169,28 +124,7 @@ async function runSteps(
         // The owner's own rooms (no first-run room types) are priced by the owner, not by the first run.
         if (!facts.currency || facts.firstRunRoomTypeIds.length === 0)
           return Object.freeze({ ok: true as const, wrote: false });
-        if (placeholder) return priceWithPlaceholder(ports, actor, facts, request);
-        let wrote = false;
-        for (const [index, roomTypeId] of facts.firstRunRoomTypeIds.entries()) {
-          const room = request.rooms[index];
-          const occupancy = occupancies[index];
-          if (!room || !occupancy) break;
-          const outcome = await runFirstRunPricing(ports, actor, {
-            roomTypeId,
-            capacity: {
-              total: occupancy.maxGuests,
-              adults: occupancy.maxAdults,
-              children: occupancy.maxChildren,
-            },
-            currency: facts.currency.code,
-            pricePerNight: room.pricePerNight,
-            pricesIncludeMandatoryCharges: request.pricesIncludeMandatoryCharges,
-            freeCancellationDays: request.freeCancellationDays,
-          });
-          if (!outcome.ok) return outcome;
-          wrote ||= outcome.wrote;
-        }
-        return Object.freeze({ ok: true as const, wrote });
+        return priceWithPlaceholder(ports, actor, facts);
       },
     ],
     [
@@ -220,7 +154,7 @@ async function runSteps(
           localityPublic: facts.profile?.localityPublic ?? false,
         }),
     ],
-    ["plan", () => runFirstRunPlan(ports, actor, { plan: request.plan, customerEmail })],
+    ["plan", () => runFirstRunPlan(ports, actor)],
   ];
 
   for (const [step, run] of steps) {
@@ -236,7 +170,6 @@ async function runSteps(
       });
     }
     if (outcome.wrote) ran.push(step);
-    if ("checkoutUrl" in outcome) checkoutUrl = outcome.checkoutUrl;
   }
   // VAY-2247 1.5: everything is saved, so the hotel goes live (its profile is complete with its basics);
   // a later run finds it live already. Publishing still waits for the owner on Go live.
@@ -254,7 +187,6 @@ async function runSteps(
     ok: true,
     state: hotelFirstRunState(await ports.facts.read(actor)),
     ran,
-    checkoutUrl,
   });
 }
 
@@ -266,7 +198,6 @@ async function priceWithPlaceholder(
   ports: HotelFirstRunPorts,
   actor: HotelFirstRunActor,
   facts: HotelFirstRunWriteFacts,
-  request: HotelFirstRunRequest,
 ): Promise<Readonly<{ ok: true; wrote: boolean }> | Readonly<{ ok: false; code: string }>> {
   const occupancies = new Map(
     (await ports.roomRead.listRoomTypeFacts(actor.propertyId)).map((room) => [
@@ -286,8 +217,7 @@ async function priceWithPlaceholder(
         children: occupancy.maxChildren,
       },
       currency: facts.currency.code,
-      freeCancellationDays: request.freeCancellationDays,
-      placeholder: true,
+      freeCancellationDays: FIRST_RUN_DEFAULT_FREE_CANCELLATION_DAYS,
     });
     if (!outcome.ok) return outcome;
     wrote ||= outcome.wrote;
