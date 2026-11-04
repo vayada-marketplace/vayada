@@ -490,7 +490,7 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     const foreignRoom = { ...other.proposed.rooms[0], propertyId: id };
     await expect(
       f.commands.prepare(id, { ...f.proposed, rooms: [foreignRoom] }),
-    ).rejects.toMatchObject({ code: "stale", reason: "terms_stale" });
+    ).rejects.toMatchObject({ code: "stale", reason: "room_unavailable" });
     const stale = structuredClone(f.proposed);
     stale.rooms[0].offers[0].termsRevision = randomUUID();
     await expect(f.commands.prepare(id, stale)).rejects.toMatchObject({
@@ -528,6 +528,10 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       code: "stale",
       reason: "room_unavailable",
     });
+    // The PMS prepares with a draft context; its terms projection must not hide the reason.
+    await expect(
+      f.commands.prepare(id, before, { draftId: randomUUID(), baseRevision: 1 }),
+    ).rejects.toMatchObject({ code: "stale", reason: "room_unavailable" });
     const read = (await f.commands.read(id))!;
     expect(read).toMatchObject({ revision: 1, stale: false });
     expect(read.rooms.map((room) => room.roomTypeId)).toEqual([kept!.roomTypeId]);
@@ -547,9 +551,9 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       [id],
     );
     expect(stored.rows[0].room_count).toBe(1);
-    // With every priced room gone the read stays whole, as before: there is nothing left to save.
+    // With every priced room deleted the page starts from no rooms at this revision, so a new room can be priced.
     await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [kept!.roomTypeId]);
-    expect((await f.commands.read(id))?.rooms).toHaveLength(1);
+    expect(await f.commands.read(id)).toMatchObject({ revision: 2, rooms: [] });
   });
   it("executes the protected HTTP flow against real pricing owners and storage", async () => {
     const f = await fixture(),

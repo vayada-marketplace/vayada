@@ -2202,7 +2202,7 @@
   "pricing.editor.errorNewOfferSettings": "Prüfen Sie das übergeordnete Angebot und die Preiseinstellungen des neuen Angebots.",
   "pricing.editor.errorChanged": "Die Preise oder ihre Einstellungen haben sich geändert. Laden Sie die Preise neu, bevor Sie fortfahren.",
   "pricing.editor.errorForbidden": "Sie haben keine Berechtigung, die Preise dieser Unterkunft zu ändern. Bitten Sie den Inhaber der Unterkunft um Zugriff auf „Zimmer & Preise“.",
-  "pricing.editor.errorUnavailable": "Die Preise können gerade nicht gespeichert werden. Ihre Änderungen sind noch da. Versuchen Sie es in ein paar Minuten erneut.",
+  "pricing.editor.errorUnavailable": "Die Preise sind vorübergehend nicht verfügbar. Versuchen Sie es in ein paar Minuten erneut.",
   "pricing.editor.errorSaveFailed": "Die Preise konnten nicht gespeichert werden. Versuchen Sie es erneut.",
   "pricing.room.title": "Preise",
   "pricing.room.subtitle": "Legen Sie die Tarife dieses Zimmers fest. Beim Speichern werden die Preise der ganzen Unterkunft veröffentlicht; andere Zimmer bleiben unverändert.",

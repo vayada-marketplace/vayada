@@ -2188,7 +2188,7 @@
   "pricing.editor.errorNewOfferSettings": "Check the new offer’s parent and pricing settings.",
   "pricing.editor.errorChanged": "Pricing or its settings changed. Reload pricing before continuing.",
   "pricing.editor.errorForbidden": "You do not have access to change prices for this property. Ask the property owner to give you Rooms & Rates access.",
-  "pricing.editor.errorUnavailable": "Prices can’t be saved right now. Your changes are still here. Try again in a few minutes.",
+  "pricing.editor.errorUnavailable": "Pricing is temporarily unavailable. Try again in a few minutes.",
   "pricing.editor.errorSaveFailed": "Pricing could not be saved. Try again.",
   "pricing.room.title": "Prices",
   "pricing.room.subtitle": "Set this room's rates. Saving publishes the prices for the whole property; other rooms stay as they are.",

@@ -1,4 +1,4 @@
-import { lockReplacementPricingDraftOwners } from "./replacementPricingOfferOwners.js";
+import { lockReplacementPricingDraftOwners, pricingOwnersRefusal } from "./replacementPricingOfferOwners.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -80,10 +80,10 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
         if (draft.effective_source_revisions) {
           const owners = await lockReplacementPricingDraftOwners(client, context, scope, draft.snapshot, draft.effective_source_revisions,
             { draftId: command.draftId, baseRevision: draft.base_revision });
-          if (owners.kind === "unavailable") return fail("denied");
+          if (owners.kind === "unavailable") throw pricingOwnersRefusal(owners);
         }
         for (const room of draft.snapshot.rooms as PricingStorageSnapshot["rooms"]) {
-          if (!await lockPmsPricingRoomScope(client, scope.propertyId, room.roomTypeId)) return fail("denied");
+          if (!await lockPmsPricingRoomScope(client, scope.propertyId, room.roomTypeId)) throw new PricingStorageError("stale", "room_unavailable");
           if (!draft.effective_source_revisions && !await lockBookingPricingOfferTerms(client, scope.propertyId, room.offers.map((o) => ({ roomTypeId: room.roomTypeId, offerId: o.id, revision: o.termsRevision })))) return fail("stale");
         }
         if (!currentSources.room || !currentSources.terms || !currentSources.finance ||

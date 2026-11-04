@@ -70,10 +70,9 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         const result = await current(client, scope.propertyId);
         if (!result) return null;
         // A deleted (inactive) room stays in the prices it was published with, but no save can include it: the editor
-        // gets the others, so its next save publishes without it (VAY-2471). Unless no room would be left.
+        // gets the others (maybe none), so its next save publishes without it (VAY-2471).
         const active = new Set((await client.query("SELECT id FROM pms.room_types WHERE property_id=$1 AND active", [scope.propertyId])).rows.map((row) => row.id as string));
-        const rooms = result.rooms.filter((room) => active.has(room.roomTypeId));
-        return { ...result, rooms: rooms.length ? rooms : result.rooms, stale: canonical(result.sources) !== canonical(sources) };
+        return { ...result, rooms: result.rooms.filter((room) => active.has(room.roomTypeId)), stale: canonical(result.sources) !== canonical(sources) };
       });
     },
     save(scope: PricingStorageScope, input: { requestId: string; expectedRevision: number; sources: PricingStorageSources; effectiveSources?: PricingStorageSources; snapshot: unknown;

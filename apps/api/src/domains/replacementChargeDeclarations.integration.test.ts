@@ -104,15 +104,16 @@ describe.skipIf(!url)("Replacement mandatory-charge declarations PostgreSQL owne
     await expect(store.confirm(f.context, f.scope, f.command())).rejects.toMatchObject({ code: "stale" });
     expect((await pool.query("SELECT count(*)::int AS n FROM pms.pricing_v2_charge_declarations WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(0);
   });
-  it("denies unauthenticated, foreign-scope, inactive and foreign-room confirmations", async () => {
+  it("denies unauthenticated and foreign-scope confirmations, and refuses inactive or foreign rooms as changed", async () => {
     const f = await fixture(), other = await fixture();
     await expect(store.confirm(null, f.scope, f.command())).rejects.toMatchObject({ code: "denied" });
     await expect(store.confirm(f.context, other.scope, f.command())).rejects.toMatchObject({ code: "denied" });
     await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.terms.roomTypeId]);
-    await expect(store.confirm(f.context, f.scope, f.command())).rejects.toMatchObject({ code: "denied" });
+    // A room this hotel can't price (deleted, or not its own) is "changed, reload", never "no access" (VAY-2471).
+    await expect(store.confirm(f.context, f.scope, f.command())).rejects.toMatchObject({ code: "stale", reason: "room_unavailable" });
     const foreign = { ...f.snapshot, rooms: f.snapshot.rooms.map((r) => ({ ...r, roomTypeId: other.terms.roomTypeId })) };
     await pool.query("UPDATE pms.pricing_v2_drafts SET snapshot=$2 WHERE property_id=$1", [f.scope.propertyId, foreign]);
-    await expect(store.confirm(f.context, f.scope, { ...f.command(), claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, foreign, f.sources)! })).rejects.toMatchObject({ code: "denied" });
+    await expect(store.confirm(f.context, f.scope, { ...f.command(), claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, foreign, f.sources)! })).rejects.toMatchObject({ code: "stale", reason: "room_unavailable" });
   });
   it("rolls back the declaration and events if auditing fails", async () => {
     const f = await fixture(), command = f.command(), key = `pricing.v2.charges:${f.scope.propertyId}:${command.requestId}`;
