@@ -37,6 +37,8 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   host_request_expired: "email.booking-host-request-expired",
   host_payment_pending: "email.booking-host-payment-pending",
   host_payment_expired: "email.booking-host-payment-expired",
+  // VAY-2476: the guest cancelled on the booking page.
+  host_booking_canceled: "email.booking-host-booking-canceled",
   payment_reminder: "email.booking-payment-reminder",
   // VAY-2360: extras a booked guest asks for, and the hotel's answer.
   host_extras_requested: "email.booking-host-extras-requested",
@@ -73,6 +75,8 @@ export type BookingLifecycleEmailInput = {
     currency: string;
   };
   resendKey?: string;
+  /** VAY-2476: what the guest's own cancel does with their money. */
+  cancellationMoney?: BookingCancellationMoney;
   kind: BookingLifecycleEmailKind;
   occurredAt: string;
   correlationId?: string | null;
@@ -119,8 +123,20 @@ export type BookingEmailCancellation = BookedStayCancellation & {
   timeZone: string;
 };
 
+/** VAY-2476: a guest's own cancel, in the stay currency's minor units, as its cancel preview showed it. */
+export type BookingCancellationMoney = {
+  currency: string;
+  /** Paid by card when booking; "0" when nothing was paid online. */
+  paidMinor: string;
+  /** What goes back to the card. */
+  refundMinor: string;
+  /** What the booked terms keep: with nothing paid, a fee the hotel may charge. */
+  feeMinor: string;
+};
+
 export type BookingTransitionNotificationInput = {
   guestMessage?: string;
+  cancellationMoney?: BookingCancellationMoney;
   propertyId: string;
   guestBookingId: string;
   occurredAt: string;
@@ -601,6 +617,7 @@ export async function enqueueBookingTransitionNotifications(
     const queued = await enqueueBookingLifecycleEmailJob(queryable, {
       kind: notification.kind,
       guestMessage: input.guestMessage,
+      cancellationMoney: input.cancellationMoney,
       occurredAt: input.occurredAt,
       correlationId: input.correlationId,
       causationId: input.causationId,
@@ -789,12 +806,16 @@ function emailCopy(input: BookingLifecycleEmailInput) {
   }
   if (input.kind === "booking_canceled") {
     const message = input.guestMessage?.replace(/\r\n?/g, "\n").trim();
+    const byGuest = input.transition?.reason === "guest_cancellation";
     return {
       template: "booking_canceled",
       subject: `Booking canceled - ${booking.bookingReference}`,
       text: [
         `Hi ${name},`,
-        `We've canceled your booking at ${property}.`,
+        byGuest
+          ? `You canceled your booking at ${property}.`
+          : `We've canceled your booking at ${property}.`,
+        ...(byGuest && input.cancellationMoney ? [guestRefundText(input.cancellationMoney)] : []),
         ...(message ? [`Message from us:\n${message}`] : []),
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Booking reference: ${booking.bookingReference}`,
@@ -843,6 +864,20 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
         "If the guest's payment arrives after all, refund it or make a new booking for them.",
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "host_booking_canceled") {
+    return {
+      template: "booking_host_booking_canceled",
+      subject: `Booking canceled by the guest - ${booking.bookingReference}`,
+      text: [
+        "A guest canceled their booking on your booking page. The rooms are available again.",
+        `Guest: ${name}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
+        `Total: ${money(booking.totalAmount, booking.currency)}`,
+        ...(input.cancellationMoney ? hostRefundLines(input.cancellationMoney) : []),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -938,6 +973,54 @@ export const CANCEL_LINE_TEXT: Readonly<Partial<Record<string, string>>> = {
   "room.noRefund": "{rooms}: no refund any more.",
   "room.nonRefundable": "{rooms}: non-refundable.",
 };
+
+/** The cancel preview's money line (booking-web `myBooking`) in English, so the guest's cancellation email says
+ * what the preview said (VAY-2476). */
+export const REFUND_LINE_TEXT = {
+  fullRefund: "You will receive a full refund of {amount}.",
+  partialRefund: "You will receive a partial refund of {amount} ({percentage}%).",
+  noRefund: "No refund will be issued for this cancellation.",
+  noPaymentToRefund: "No payment was collected, so there is nothing to refund.",
+  unpaidCancellationFee:
+    "No payment was collected, so there is nothing to refund. Under your booking terms, the property may charge a cancellation fee of {amount}.",
+} as const;
+
+/** The preview's choice of line, from the same amounts (booking-web MyBookingPageClient). */
+function guestRefundText(m: BookingCancellationMoney): string {
+  const paid = BigInt(m.paidMinor),
+    refund = BigInt(m.refundMinor);
+  const amount = (minor: string) => minorMoney(minor, m.currency);
+  if (paid === 0n)
+    return BigInt(m.feeMinor) === 0n
+      ? REFUND_LINE_TEXT.noPaymentToRefund
+      : REFUND_LINE_TEXT.unpaidCancellationFee.replace("{amount}", () => amount(m.feeMinor));
+  if (refund >= paid)
+    return REFUND_LINE_TEXT.fullRefund.replace("{amount}", () => amount(m.refundMinor));
+  if (refund === 0n) return REFUND_LINE_TEXT.noRefund;
+  // A part refund never reads 0% or 100% (VAY-2205).
+  const percentage = Math.min(99, Math.max(1, Math.round((Number(refund) / Number(paid)) * 100)));
+  return REFUND_LINE_TEXT.partialRefund
+    .replace("{amount}", () => amount(m.refundMinor))
+    .replace("{percentage}", String(percentage));
+}
+
+/** The hotel's side of the same cancel: what the card paid, what goes back and what it keeps. */
+function hostRefundLines(m: BookingCancellationMoney): string[] {
+  const paid = BigInt(m.paidMinor),
+    refund = BigInt(m.refundMinor);
+  const amount = (minor: bigint | string) => minorMoney(String(minor), m.currency);
+  if (paid === 0n)
+    return BigInt(m.feeMinor) === 0n
+      ? ["Nothing was paid online, so there is nothing to refund."]
+      : [
+          `Nothing was paid online. Under the booking's terms you may charge a cancellation fee of ${amount(m.feeMinor)}.`,
+        ];
+  return [
+    `Paid by card: ${amount(paid)}`,
+    `Refund to the guest's card: ${amount(refund)}`,
+    ...(paid > refund ? [`You keep: ${amount(paid - refund)}`] : []),
+  ];
+}
 
 /** VAY-2392: the confirmed stay's cancellation as its confirmation page words it, judged on the hotel's date when
  * the email is written. Nothing without trusted pricing terms. */
@@ -1136,6 +1219,15 @@ function notificationsForTransition(
         ]
       : [{ kind: "booking_expired", role: "guest" }];
   }
+  // VAY-2476: the guest cancelled on the booking page; the hotel hears of it too.
+  if (
+    transition.eventType === "guest_booking.canceled" &&
+    transition.reason === "guest_cancellation"
+  )
+    return [
+      { kind: "booking_canceled", role: "guest" },
+      { kind: "host_booking_canceled", role: "host" },
+    ];
   if (
     transition.eventType === "guest_booking.canceled" &&
     (transition.reason === "property_cancellation" || transition.reason === "guest_request")

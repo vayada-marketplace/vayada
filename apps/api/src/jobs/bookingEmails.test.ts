@@ -7,6 +7,7 @@ import {
   CANCEL_LINE_TEXT,
   BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE,
   BOOKING_RESERVED_PENDING_PAYMENT_EMAIL_JOB_TYPE,
+  REFUND_LINE_TEXT,
   bookedAddonsText,
   bookingLifecycleEmailJobKey,
   enqueueBookingLifecycleEmailJob,
@@ -445,6 +446,140 @@ describe("booking lifecycle email jobs", () => {
       if (guestMessage?.trim())
         expect(payload.text).toContain(`Message from us:\n${guestMessage.replace(/\r\n/g, "\n")}`);
       else expect(payload.text).not.toContain("Message from us:");
+    },
+  );
+
+  // VAY-2476: the guest cancelled on the booking page.
+  const guestCancel = async (
+    cancellationMoney: { paidMinor: string; refundMinor: string; feeMinor: string },
+    currency = "EUR",
+  ) => {
+    const target = createTargetEmailStore({ currency });
+    const enqueue = () =>
+      enqueueBookingTransitionNotifications(target, {
+        propertyId: "f2000000-0000-0000-0000-000000000951",
+        guestBookingId: "book_bank_001",
+        occurredAt: "2026-09-01T10:00:00.000Z",
+        transition: {
+          eventType: "guest_booking.canceled",
+          fromStatus: "confirmed",
+          toStatus: "canceled",
+          reason: "guest_cancellation",
+        },
+        cancellationMoney: { currency, ...cancellationMoney },
+      });
+    const enqueued = await enqueue();
+    const retried = await enqueue();
+    // Node's en-GB short September is "Sep" or "Sept", by ICU version.
+    const [guest, host] = target.calls
+      .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
+      .map((call) => JSON.parse(String(call.values?.[8])) as Record<string, string>)
+      .map((payload) => ({ ...payload, text: payload.text!.replace(/\bSept\b/g, "Sep") }));
+    return { enqueued, retried, guest: guest!, host: host! };
+  };
+
+  it("tells a guest who cancelled online what happens to their money, and tells the hotel (VAY-2476)", async () => {
+    const full = await guestCancel({ paidMinor: "60000", refundMinor: "60000", feeMinor: "0" });
+    expect(full.enqueued.map((job) => [job.jobType, job.status])).toEqual([
+      ["email.booking-canceled", "queued"],
+      ["email.booking-host-booking-canceled", "queued"],
+    ]);
+    // A retried cancel queues nothing new: the same jobs, by their keys.
+    expect(full.retried.map((job) => [job.jobKey, job.status])).toEqual(
+      full.enqueued.map((job) => [job.jobKey, "idempotent_replay"]),
+    );
+    expect(full.guest).toMatchObject({
+      to: "guest@example.test",
+      recipientRole: "guest",
+      subject: "Booking canceled - B-BANK-001",
+    });
+    expect(full.guest.text).toBe(
+      [
+        "Hi Ada Guest,",
+        "You canceled your booking at Hotel Alpenrose.",
+        "You will receive a full refund of 600.00 EUR.",
+        "Stay: Sat, 12 Sep 2026 to Tue, 15 Sep 2026",
+        "Booking reference: B-BANK-001",
+      ].join("\n\n"),
+    );
+    expect(full.host).toMatchObject({
+      to: "reservations@alpenrose.test",
+      recipientRole: "host",
+      subject: "Booking canceled by the guest - B-BANK-001",
+    });
+    expect(full.host.text).toBe(
+      [
+        "A guest canceled their booking on your booking page. The rooms are available again.",
+        "Guest: Ada Guest",
+        "Stay: Sat, 12 Sep 2026 to Tue, 15 Sep 2026",
+        "Total: 600.00 EUR",
+        "Paid by card: 600.00 EUR",
+        "Refund to the guest's card: 600.00 EUR",
+        "Booking reference: B-BANK-001",
+      ].join("\n\n"),
+    );
+
+    const partial = await guestCancel(
+      { paidMinor: "50000000", refundMinor: "12500000", feeMinor: "37500000" },
+      "IDR",
+    );
+    expect(partial.guest.text).toContain(
+      "You will receive a partial refund of 125000.00 IDR (25%).",
+    );
+    expect(partial.host.text).toContain(
+      "Paid by card: 500000.00 IDR\n\nRefund to the guest's card: 125000.00 IDR\n\nYou keep: 375000.00 IDR",
+    );
+
+    const kept = await guestCancel({ paidMinor: "60000", refundMinor: "0", feeMinor: "60000" });
+    expect(kept.guest.text).toContain("No refund will be issued for this cancellation.");
+    expect(kept.host.text).toContain(
+      "Refund to the guest's card: 0.00 EUR\n\nYou keep: 600.00 EUR",
+    );
+
+    // Pay at the hotel: nothing was paid online, so nothing goes back; the terms may leave a fee.
+    const unpaid = await guestCancel({ paidMinor: "0", refundMinor: "0", feeMinor: "0" });
+    expect(unpaid.guest.text).toContain(
+      "You canceled your booking at Hotel Alpenrose.\n\nNo payment was collected, so there is nothing to refund.\n\nStay:",
+    );
+    expect(unpaid.host.text).toContain("Nothing was paid online, so there is nothing to refund.");
+    const fee = await guestCancel({ paidMinor: "0", refundMinor: "0", feeMinor: "81000" });
+    expect(fee.guest.text).toContain(
+      "No payment was collected, so there is nothing to refund. Under your booking terms, the property may charge a cancellation fee of 810.00 EUR.",
+    );
+    expect(fee.host.text).toContain(
+      "Nothing was paid online. Under the booking's terms you may charge a cancellation fee of 810.00 EUR.",
+    );
+  });
+
+  it("keeps the guest's cancellation money line in the cancel preview's English words (VAY-2476)", () => {
+    const preview = JSON.parse(
+      readFileSync(new URL("../../../booking-web/messages/en.json", import.meta.url), "utf8"),
+    ).myBooking;
+    for (const [key, words] of Object.entries(REFUND_LINE_TEXT))
+      expect(preview[key], key).toBe(words);
+  });
+
+  it.each(["property_cancellation", "guest_request"])(
+    "still tells only the guest when the hotel cancels (%s)",
+    async (reason) => {
+      const target = createTargetEmailStore();
+      const enqueued = await enqueueBookingTransitionNotifications(target, {
+        propertyId: "f2000000-0000-0000-0000-000000000951",
+        guestBookingId: "book_bank_001",
+        occurredAt: "2026-09-01T10:00:00.000Z",
+        transition: {
+          eventType: "guest_booking.canceled",
+          fromStatus: "confirmed",
+          toStatus: "canceled",
+          reason,
+        },
+      });
+      expect(enqueued.map((job) => job.jobType)).toEqual(["email.booking-canceled"]);
+      const { text } = JSON.parse(
+        String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+      ) as { text: string };
+      expect(text).toContain("We've canceled your booking at Hotel Alpenrose.");
+      expect(text).not.toMatch(/You canceled|refund/);
     },
   );
 

@@ -30,6 +30,24 @@ import {
 
 const url = process.env.TEST_DATABASE_URL;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+/** VAY-2476: a booking's cancellation emails, guest's first. */
+const cancelEmails = async (db: pg.PoolClient, bookingId: string) =>
+  (
+    await db.query<{ type: string; to: string | null; text: string }>(
+      `SELECT job_type AS type, payload->>'to' AS "to", payload->>'text' AS text FROM platform.jobs
+       WHERE resource_id=$1 AND queue_name='platform.email'
+         AND job_type IN ('email.booking-canceled','email.booking-host-booking-canceled')
+       ORDER BY job_type`,
+      [bookingId],
+    )
+  ).rows;
+const hostContact = (db: pg.PoolClient, propertyId: string) =>
+  db.query(
+    `INSERT INTO hotel_catalog.property_contact_channels
+       (property_id,channel_type,value,source_system,purpose)
+     VALUES($1,'email','host@example.test','platform','operations')`,
+    [propertyId],
+  );
 
 /** The same rooms at the same nightly prices on new dates: a stored quote that decodes like
  * a real repricing (one priced night per date, matching request key, lines and totals). */
@@ -1384,6 +1402,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
               keptAmount: 270,
             },
           ]);
+        await hostContact(db, propertyId);
         await expect(
           adapter.cancel(
             propertyId,
@@ -1392,12 +1411,42 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             context("stale"),
           ),
         ).rejects.toMatchObject({ statusCode: 409 });
-        await adapter.cancel(
-          propertyId,
-          bookingId,
-          { ...guest, expected_cancellation_fee_minor: fee },
-          context("c"),
-        );
+        // VAY-2476: the refused cancel queued no email.
+        expect(await cancelEmails(db, bookingId)).toEqual([]);
+        for (const key of ["c", "c"])
+          await adapter.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: fee },
+            context(key),
+          );
+        await expect(
+          adapter.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: fee },
+            context("c2"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409, code: "BOOKING_NOT_CHANGEABLE" });
+        // VAY-2476: one email each to the guest and the hotel, however often the cancel is sent.
+        // Nothing was paid online: what the terms keep is a fee the hotel may charge.
+        const feeText = `${(Number(fee) / 100).toFixed(2)} EUR`;
+        expect(await cancelEmails(db, bookingId)).toEqual([
+          {
+            type: "email.booking-canceled",
+            to: "jane@example.test",
+            text: expect.stringContaining(
+              `You canceled your booking at Synthetic adoption.\n\nNo payment was collected, so there is nothing to refund. Under your booking terms, the property may charge a cancellation fee of ${feeText}.`,
+            ),
+          },
+          {
+            type: "email.booking-host-booking-canceled",
+            to: "host@example.test",
+            text: expect.stringContaining(
+              `Nothing was paid online. Under the booking's terms you may charge a cancellation fee of ${feeText}.`,
+            ),
+          },
+        ]);
         // The adapter commit became a savepoint release: run the deferred checks a commit would.
         await db.query("SET CONSTRAINTS ALL IMMEDIATE");
         const event = await db.query(
@@ -1555,6 +1604,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           cancellationFeeAmount: kept / 100,
           bookedTermsOutcome: { retainedMinor: String(kept), refundMinor: String(back) },
         });
+        await hostContact(db, propertyId);
         const cancel = adapter(true);
         for (const key of ["c", "c"])
           await cancel.cancel(
@@ -1563,7 +1613,33 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { ...guest, expected_cancellation_fee_minor: String(kept) },
             context(key),
           );
+        await expect(
+          cancel.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: String(kept) },
+            context("c2"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409, code: "BOOKING_NOT_CHANGEABLE" });
         await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        // VAY-2476: the guest reads the refund the cancel staged, the hotel what it keeps; once.
+        const eur = (minor: number) => `${(minor / 100).toFixed(2)} EUR`;
+        expect(await cancelEmails(db, bookingId)).toEqual([
+          {
+            type: "email.booking-canceled",
+            to: "jane@example.test",
+            text: expect.stringContaining(
+              `You will receive a partial refund of ${eur(back)} (${Math.round((back / 108000) * 100)}%).`,
+            ),
+          },
+          {
+            type: "email.booking-host-booking-canceled",
+            to: "host@example.test",
+            text: expect.stringContaining(
+              `Paid by card: ${eur(108000)}\n\nRefund to the guest's card: ${eur(back)}\n\nYou keep: ${eur(kept)}`,
+            ),
+          },
+        ]);
         expect(
           (
             await db.query(
@@ -1676,6 +1752,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(kept.rows).toEqual([{ status: "confirmed", assignments: "{pending}" }]);
+        // VAY-2476: a refused cancel tells nobody.
+        expect(await cancelEmails(db, bookingId)).toEqual([]);
       } else if (scenario === "repository-stay-cancel-host-guest-request") {
         // VAY-2100: PMS staff cancel an adopted v2 stay because the guest asked.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
@@ -1729,6 +1807,13 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(cancelled.rows).toEqual([{ reason: "guest_request", fee: "81000" }]);
+        // VAY-2476: a hotel cancel still emails only the guest, as before.
+        expect(await cancelEmails(db, bookingId)).toEqual([
+          expect.objectContaining({
+            type: "email.booking-canceled",
+            text: expect.stringContaining("We've canceled your booking at Synthetic adoption."),
+          }),
+        ]);
         const assignments = await db.query(
           "SELECT DISTINCT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
           [bookingId],
