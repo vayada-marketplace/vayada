@@ -21,6 +21,7 @@
     "finance:ota-commission:preactivation:dist": "node dist/cli/financeOtaCommissionPreactivation.js",
     "pms:pricing:publication-freshness": "tsx src/cli/pricingPublicationFreshness.ts",
     "pms:pricing:publication-freshness:dist": "node dist/cli/pricingPublicationFreshness.js",
+    "identity:workos-user-resync:dist": "node dist/cli/workosUserResync.js",
     "pretypecheck": "npm run build:backend-packages",
     "typecheck": "tsc --noEmit"
   },

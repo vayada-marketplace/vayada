@@ -453,21 +453,24 @@ function toStaffInvitationAcceptanceEvent(
 }
 
 function toWorkosUserPayload(event: WorkosWebhookEvent): WorkosUserPayload {
-  const firstName =
-    optionalString(event.data, "firstName") ?? optionalString(event.data, "first_name");
-  const lastName =
-    optionalString(event.data, "lastName") ?? optionalString(event.data, "last_name");
+  return workosUserPayloadFromData(event.data);
+}
+
+/** A WorkOS user (webhook event data or a fetched user) as the identity update reads it. */
+export function workosUserPayloadFromData(
+  data: Record<string, unknown> | undefined,
+): WorkosUserPayload {
+  const firstName = optionalString(data, "firstName") ?? optionalString(data, "first_name");
+  const lastName = optionalString(data, "lastName") ?? optionalString(data, "last_name");
   const structuredName = [firstName, lastName].filter(Boolean).join(" ");
   return {
-    workosUserId: requiredString(event.data, "id"),
-    email: requiredString(event.data, "email"),
-    name: structuredName || optionalString(event.data, "name"),
+    workosUserId: requiredString(data, "id"),
+    email: requiredString(data, "email"),
+    name: structuredName || optionalString(data, "name"),
     emailVerified:
-      optionalBoolean(event.data, "emailVerified") ??
-      optionalBoolean(event.data, "email_verified") ??
-      false,
+      optionalBoolean(data, "emailVerified") ?? optionalBoolean(data, "email_verified") ?? false,
     status: "active",
-    rawProfile: event.data ?? {},
+    rawProfile: data ?? {},
   };
 }
 

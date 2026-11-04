@@ -480,7 +480,7 @@ async function insertReceipt(
   };
 }
 
-async function findUserIdByWorkosUserId(
+export async function findUserIdByWorkosUserId(
   pool: pg.Pool | pg.PoolClient,
   workosUserId: string,
 ): Promise<string | null> {
@@ -522,35 +522,9 @@ async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promis
     await lockWorkosProviderIdentity(client, input.workosUserId);
     const existingUserId = await findUserIdByWorkosUserId(client, input.workosUserId);
     if (existingUserId) {
-      await assertNotBootstrapProtectedUser(client, existingUserId);
-      const updated = await client.query(
-        `UPDATE identity.users
-         SET email = $1,
-             name = COALESCE($2, name),
-             status = CASE
-               WHEN status = 'suspended' AND $3 = 'active' THEN status
-               ELSE $3
-             END,
-             updated_at = now()
-         WHERE id = $4 AND status <> 'deleted'`,
-        [input.email, input.name ?? null, input.status, existingUserId],
-      );
-      // A deleted account keeps its blanked details: late WorkOS events change nothing (VAY-2272).
-      if (updated.rowCount === 0) {
-        await client.query("COMMIT");
-        return null;
-      }
-      await client.query(
-        `UPDATE identity.external_identities
-         SET provider_email = $1,
-             provider_email_verified = $2,
-             raw_profile = $3,
-             updated_at = now()
-         WHERE provider = 'workos' AND provider_user_id = $4`,
-        [input.email, input.emailVerified, JSON.stringify(input.rawProfile), input.workosUserId],
-      );
+      const updated = await updateLinkedWorkosUser(client, existingUserId, input);
       await client.query("COMMIT");
-      return existingUserId;
+      return updated ? existingUserId : null;
     }
 
     const created = await client.query<{ id: string }>(
@@ -581,6 +555,43 @@ async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promis
   } finally {
     client.release();
   }
+}
+
+/**
+ * The webhook's update of a user already linked to this WorkOS user. Runs inside the caller's
+ * transaction, after lockWorkosProviderIdentity. Also used by the WorkOS user resync (VAY-2479).
+ * Returns false for a deleted account: it keeps its blanked details, and late WorkOS events
+ * change nothing (VAY-2272).
+ */
+export async function updateLinkedWorkosUser(
+  client: pg.PoolClient,
+  existingUserId: string,
+  input: WorkosUserPayload,
+): Promise<boolean> {
+  await assertNotBootstrapProtectedUser(client, existingUserId);
+  const updated = await client.query(
+    `UPDATE identity.users
+     SET email = $1,
+         name = COALESCE($2, name),
+         status = CASE
+           WHEN status = 'suspended' AND $3 = 'active' THEN status
+           ELSE $3
+         END,
+         updated_at = now()
+     WHERE id = $4 AND status <> 'deleted'`,
+    [input.email, input.name ?? null, input.status, existingUserId],
+  );
+  if (updated.rowCount === 0) return false;
+  await client.query(
+    `UPDATE identity.external_identities
+     SET provider_email = $1,
+         provider_email_verified = $2,
+         raw_profile = $3,
+         updated_at = now()
+     WHERE provider = 'workos' AND provider_user_id = $4`,
+    [input.email, input.emailVerified, JSON.stringify(input.rawProfile), input.workosUserId],
+  );
+  return true;
 }
 
 async function upsertWorkosOrganization(
