@@ -105,6 +105,12 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
   const [formError, setFormError] = useState("");
   const [sort, setSort] = useState(agency.results.defaultSort);
   const [filters, setFilters] = useState(NO_FILTERS);
+  // A price range is in the display currency it was typed in: another currency starts without one.
+  const [priceCurrency, setPriceCurrency] = useState(selectedCurrency);
+  if (priceCurrency !== selectedCurrency) {
+    setPriceCurrency(selectedCurrency);
+    setFilters((current) => ({ ...current, price: { min: null, max: null } }));
+  }
   const [panel, setPanel] = useState<SearchPanel>(null);
   const [promoInput, setPromoInput] = useState(initial.promoCode ?? "");
   // The search a newly applied code went out with, until its answer says whether a stay takes it.
@@ -483,21 +489,25 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           ))}
         </ul>
 
-        {answer && filtersActive(filters) && results.cards.length === 0 && (
-          <p
-            role="status"
-            className="mt-6 rounded-[20px] border border-dashed border-gray-300 p-8 text-center text-base text-gray-500"
-          >
-            {t("noMatch")}{" "}
-            <button
-              type="button"
-              onClick={() => setFilters(NO_FILTERS)}
-              className="min-h-[44px] font-semibold text-gray-900 underline hover:text-black"
+        {/* Not while full stays of the chosen kind are listed below: some do match. */}
+        {answer &&
+          filtersActive(filters) &&
+          results.cards.length === 0 &&
+          !(agency.results.showFullStays && results.full.length > 0) && (
+            <p
+              role="status"
+              className="mt-6 rounded-[20px] border border-dashed border-gray-300 p-8 text-center text-base text-gray-500"
             >
-              {t("resetFilters")}
-            </button>
-          </p>
-        )}
+              {t("noMatch")}{" "}
+              <button
+                type="button"
+                onClick={() => setFilters(NO_FILTERS)}
+                className="min-h-[44px] font-semibold text-gray-900 underline hover:text-black"
+              >
+                {t("resetFilters")}
+              </button>
+            </p>
+          )}
 
         {agency.results.showFullStays && results.full.length > 0 && (
           <AgencyFullStays

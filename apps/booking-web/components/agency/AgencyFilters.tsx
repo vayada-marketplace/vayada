@@ -147,7 +147,13 @@ function PriceBox({
   // Opened near the window's right edge, the box lines up with the chip's right side instead.
   const [alignEnd, setAlignEnd] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const chipRef = useRef<HTMLButtonElement>(null);
   const id = useId();
+  // Closed from inside (Escape, Done), the focus goes back to the chip, not to the page.
+  const close = () => {
+    setOpen(false);
+    chipRef.current?.focus();
+  };
   const active = value.min !== null || value.max !== null;
 
   useEffect(() => {
@@ -156,7 +162,9 @@ function PriceBox({
       if (!box.current?.contains(event.target as Node)) setOpen(false);
     };
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      chipRef.current?.focus();
     };
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", escape);
@@ -197,6 +205,7 @@ function PriceBox({
   return (
     <div ref={box} className="sm:relative">
       <button
+        ref={chipRef}
         type="button"
         aria-expanded={open}
         aria-controls={id}
@@ -251,7 +260,7 @@ function PriceBox({
             </button>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={close}
               className="min-h-[44px] rounded-full bg-primary-600 px-5 text-[15px] font-semibold text-white hover:bg-primary-700"
             >
               {t("priceDone")}

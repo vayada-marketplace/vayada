@@ -156,6 +156,8 @@ test("the price box keeps a range per night, and Reset filters ends an empty res
   await expect(chip(page, "Up to US$80")).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("Escape");
   await expect(box).toHaveCount(0);
+  // The focus goes back to the chip.
+  await expect(chip(page, "Up to US$80")).toBeFocused();
 
   await chip(page, "Private pool").click();
   expect(await order(page)).toEqual(slugs("wiswan"));
@@ -170,6 +172,16 @@ test("the price box keeps a range per night, and Reset filters ends an empty res
   await expect(chip(page, "Price")).toBeVisible();
   await expect(chip(page, "Private pool")).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByText("No stay matches these filters.")).toHaveCount(0);
+
+  // A range belongs to the currency it was typed in: another display currency starts without.
+  await chip(page, "Price").click();
+  await box.getByLabel("Maximum").fill("80");
+  await expect(cards(page)).toHaveCount(3);
+  const nav = page.getByRole("navigation");
+  await nav.getByRole("button", { name: "USD", exact: true }).click();
+  await nav.getByRole("button", { name: /Euro/ }).click();
+  await expect(chip(page, "Price")).toBeVisible();
+  await expect(cards(page)).toHaveCount(8);
   await assertHealthy();
 });
 
