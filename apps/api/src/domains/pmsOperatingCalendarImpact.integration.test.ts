@@ -468,6 +468,59 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
     ).resolves.toMatchObject({ configuration: { calendarRevision: 1 } });
   });
 
+  // VAY-2469 (production, 2026-11-04): the price re-publish, like every price path, holds the
+  // inventory lock and then locks the hotel row FOR UPDATE (lockFinanceReplacementPricingSource).
+  // The save locked that row first, through its idempotency row's foreign key, and only then
+  // waited for the inventory lock, so the two deadlocked.
+  it("saves without deadlocking a price path that holds the inventory lock, then the hotel row (VAY-2469)", async () => {
+    const preview = await requiredPreview(previewCommand("price-path-order"));
+    const pricePath = new pg.Client({ connectionString });
+    await pricePath.connect();
+    try {
+      await pricePath.query("BEGIN");
+      await pricePath.query("SET LOCAL lock_timeout = '5s'");
+      await lockPmsInventoryMutationScope(pricePath, propertyId);
+      const saved = calendar
+        .upsertOperatingCalendar(finalCommand("price-path-order", preview.confirmation))
+        .catch((error: unknown) => error);
+      await waitForAdvisoryWaiters(1);
+      await pricePath.query("SELECT id FROM hotel_catalog.properties WHERE id = $1 FOR UPDATE", [
+        propertyId,
+      ]);
+      await pricePath.query("ROLLBACK");
+      await expect(saved).resolves.toMatchObject({
+        ok: true,
+        response: { configuration: { calendarRevision: 1 } },
+      });
+    } finally {
+      await pricePath.query("ROLLBACK").catch(() => undefined);
+      await pricePath.end();
+    }
+  });
+
+  it("previews without deadlocking a writer that holds the inventory lock, then a scope row (VAY-2469)", async () => {
+    const writer = new pg.Client({ connectionString });
+    await writer.connect();
+    try {
+      await writer.query("BEGIN");
+      await writer.query("SET LOCAL lock_timeout = '5s'");
+      await lockPmsInventoryMutationScope(writer, propertyId);
+      const previewed = impact
+        .previewOperatingCalendarImpact(previewCommand("writer-order"))
+        .catch((error: unknown) => error);
+      await waitForAdvisoryWaiters(1);
+      // The preview's staff-scope check share-locks the hotel group; it must not hold that yet.
+      await writer.query("SELECT id FROM identity.organizations WHERE id = $1 FOR UPDATE", [
+        organizationId,
+      ]);
+      await writer.query("ROLLBACK");
+      await expect(previewed).resolves.toMatchObject({ ok: true });
+    } finally {
+      await writer.query("ROLLBACK").catch(() => undefined);
+      await writer.end();
+    }
+  });
+
   it("holds the shared inventory lock through final recomputation and safely replays acceptance", async () => {
     await configureAndSeedInventory();
     const preview = await requiredPreview(

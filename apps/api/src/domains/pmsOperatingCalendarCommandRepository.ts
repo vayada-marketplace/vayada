@@ -167,6 +167,10 @@ async function runGuardedCommand(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // The inventory lock first, as night preparation and every price path take it (VAY-2469). The
+    // idempotency row below locks the hotel row through its foreign key, and the price paths ask
+    // for that row FOR UPDATE while they hold this lock: taken later, the two deadlocked.
+    await lockPmsInventoryMutationScope(client, command.propertyId);
     if (!(await lockAuthorizedScope(client, command, acceptedAt))) {
       await rollbackQuietly(client);
       return failure({ code: "setup_scope_unavailable" });
@@ -196,7 +200,6 @@ async function runGuardedCommand(
       await rollbackQuietly(client);
       return concurrent ?? failure({ code: "command_in_progress" });
     }
-    await lockPmsInventoryMutationScope(client, command.propertyId);
     const worked = await profileEvidencePort.runWithPropertyProfileEvidence(
       {
         propertyId: command.propertyId,

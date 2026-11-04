@@ -344,13 +344,22 @@ export type PmsOperatingCalendarRoomRepairSummary = Readonly<{
   candidates: number;
   refreshed: number;
   unchanged: number;
+  /** Hotels tried a second time after a deadlock or lock wait with another writer. */
+  retried: number;
   failed: readonly Readonly<{ propertyId: string; outcome: string; detail: unknown }>[];
 }>;
+
+const LOCK_CONFLICT_RETRY_PAUSE_MS = 2_000;
 
 /** The hourly self-repair: brings each candidate hotel's calendar up to its rooms, one at a time. */
 export async function repairPmsOperatingCalendarRooms(
   ports: PmsOperatingCalendarRoomRefreshPorts,
-  input: { limit: number; runId: string; propertyIds?: readonly string[] },
+  input: {
+    limit: number;
+    runId: string;
+    propertyIds?: readonly string[];
+    retryPauseMs?: number;
+  },
 ): Promise<PmsOperatingCalendarRoomRepairSummary> {
   const candidates = await findPmsOperatingCalendarRoomRefreshCandidates(
     ports.pool,
@@ -359,14 +368,30 @@ export async function repairPmsOperatingCalendarRooms(
   );
   let refreshed = 0;
   let unchanged = 0;
+  let retried = 0;
   const failed: { propertyId: string; outcome: string; detail: unknown }[] = [];
   for (const candidate of candidates) {
-    try {
-      const result = await refreshPmsOperatingCalendarRooms(ports, {
+    const refresh = () =>
+      refreshPmsOperatingCalendarRooms(ports, {
         ...candidate,
         requestId: `pms.calendar-room-refresh.scheduler:${input.runId}:${candidate.propertyId}`,
         correlationId: input.runId,
       });
+    try {
+      let result: PmsOperatingCalendarRoomRefreshResult;
+      try {
+        result = await refresh();
+      } catch (error) {
+        // A deadlock or lock wait with another writer (VAY-2469: the 5-minute price re-publish)
+        // left nothing behind, so the hotel gets one more try after a short pause. A second one,
+        // or any other error, waits for the next hour.
+        if (!lockConflict(error)) throw error;
+        retried += 1;
+        await new Promise((resolve) =>
+          setTimeout(resolve, input.retryPauseMs ?? LOCK_CONFLICT_RETRY_PAUSE_MS),
+        );
+        result = await refresh();
+      }
       if (result.outcome === "refreshed") refreshed += 1;
       else if (result.outcome === "failed") {
         failed.push({
@@ -389,7 +414,13 @@ export async function repairPmsOperatingCalendarRooms(
       });
     }
   }
-  return Object.freeze({ candidates: candidates.length, refreshed, unchanged, failed });
+  return Object.freeze({ candidates: candidates.length, refreshed, unchanged, retried, failed });
+}
+
+/** PostgreSQL's deadlock_detected and lock_not_available (lock_timeout). */
+function lockConflict(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "40P01" || code === "55P03";
 }
 
 export type PmsRoomChangeCommand = Readonly<{
