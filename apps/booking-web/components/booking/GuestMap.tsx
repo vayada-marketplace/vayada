@@ -19,6 +19,9 @@ export type GuestMapPlace = {
   latitude: number;
   longitude: number;
   approximate: boolean;
+  /** The pill's accessible name when its label alone doesn't say what it is, such as a price
+   * (VAY-2460). */
+  name?: string;
 };
 
 type LatLng = { lat: () => number; lng: () => number };
@@ -39,7 +42,10 @@ type OverlayViewBase = {
 };
 type MapsLibrary = {
   Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
-  Circle: new (options: Record<string, unknown>) => { setMap: (map: GoogleMap | null) => void };
+  Circle: new (options: Record<string, unknown>) => {
+    setMap: (map: GoogleMap | null) => void;
+    setVisible?: (visible: boolean) => void;
+  };
   OverlayView: (new () => OverlayViewBase) & {
     preventMapHitsAndGesturesFrom?: (element: HTMLElement) => void;
   };
@@ -79,6 +85,9 @@ export default function GuestMap({
   fitPadding = 72,
   gestureHandling = "cooperative",
   nearby,
+  highlighted = null,
+  onHover,
+  hidden,
 }: {
   places: GuestMapPlace[];
   /** The selected place's index in places. */
@@ -100,6 +109,14 @@ export default function GuestMap({
     onSelect: (id: string) => void;
     numbers?: Readonly<Record<string, number>>;
   };
+  /** A place shown as selected while something else points at it, such as its card under the
+   * mouse (VAY-2460). */
+  highlighted?: number | null;
+  /** The mouse or the focus is on a place's pill (its index), or left it (null). */
+  onHover?: (index: number | null) => void;
+  /** Places (keys) kept off the map for now, such as stays a filter hides (VAY-2460): hiding one
+   * doesn't draw the map again, so the guest's view stays. */
+  hidden?: readonly string[];
 }) {
   const t = useTranslations("locationMap");
   const mapRef = useRef<HTMLDivElement>(null);
@@ -111,6 +128,9 @@ export default function GuestMap({
     map: GoogleMap;
     positions: LatLng[];
     pills: HTMLButtonElement[];
+    /** Each pill's label, and each approximate place's area (null for an exact place). */
+    texts: HTMLSpanElement[];
+    areas: ({ setVisible?: (visible: boolean) => void } | null)[];
     /** Puts page content on the map, centred on a spot; setMap(null) takes it off. */
     overlay: (
       latitude: number,
@@ -127,13 +147,26 @@ export default function GuestMap({
   } | null>(null);
   const [nearbySlots, setNearbySlots] = useState<{ id: string; element: HTMLDivElement }[]>([]);
   const onSelectRef = useRef(onSelect);
+  const onHoverRef = useRef(onHover);
   // Read when the map is drawn: cards drawn over the map are measured after it mounts.
   const fitPaddingRef = useRef(fitPadding);
   useEffect(() => {
     onSelectRef.current = onSelect;
+    onHoverRef.current = onHover;
     fitPaddingRef.current = fitPadding;
   });
-  const placesKey = JSON.stringify(places);
+  // The map is drawn again only when the places' spots change. Their labels (a price, say) are
+  // updated on the pills as they are.
+  const placesKey = JSON.stringify(
+    places.map(({ key, latitude, longitude, approximate }) => [
+      key,
+      latitude,
+      longitude,
+      approximate,
+    ]),
+  );
+  const labelsKey = JSON.stringify(places.map(({ label, name }) => [label, name ?? null]));
+  const hiddenKey = JSON.stringify(hidden ?? []);
   const ready = draws > 0;
 
   useEffect(() => {
@@ -207,7 +240,10 @@ export default function GuestMap({
           }
         }
 
+        const texts: HTMLSpanElement[] = [];
+        const areas: ({ setVisible?: (visible: boolean) => void } | null)[] = [];
         const pills = places.map((place, index) => {
+          areas.push(null);
           if (place.approximate) {
             // Only the area: no pin on a spot that isn't the room's.
             const area = new Circle({
@@ -222,6 +258,7 @@ export default function GuestMap({
               clickable: false,
             });
             shapes.push(area);
+            areas[index] = area;
           }
           const button = document.createElement("button");
           button.type = "button";
@@ -229,10 +266,19 @@ export default function GuestMap({
           const text = document.createElement("span");
           text.className = "truncate";
           text.textContent = place.label;
+          texts.push(text);
           // A pin icon for an exact place; an area's name sits on its circle.
           button.replaceChildren(...(place.approximate ? [] : [pinIcon()]), text);
-          button.title = place.label;
+          button.title = place.name ?? place.label;
+          if (place.name) button.setAttribute("aria-label", place.name);
           button.addEventListener("click", () => onSelectRef.current(index));
+          for (const [event, value] of [
+            ["mouseenter", index],
+            ["focus", index],
+            ["mouseleave", null],
+            ["blur", null],
+          ] as const)
+            button.addEventListener(event, () => onHoverRef.current?.(value));
           // Dragging or double-clicking a pill doesn't move or zoom the map under it.
           OverlayView.preventMapHitsAndGesturesFrom?.(button);
           const pill = new Pill(positions[index], button, place.approximate);
@@ -254,6 +300,8 @@ export default function GuestMap({
           map,
           positions,
           pills,
+          texts,
+          areas,
           fit,
           latLng: (latitude: number, longitude: number) => new LatLng(latitude, longitude),
           touched: false,
@@ -295,18 +343,54 @@ export default function GuestMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKey, placesKey]);
 
-  // The selected place's pill stands out, and comes into view.
+  // Labels as they are now (a stay's price comes with the search, VAY-2460).
+  useEffect(() => {
+    const current = drawn.current;
+    if (draws === 0 || !current) return;
+    places.forEach((place, index) => {
+      const pill = current.pills[index];
+      const text = current.texts[index];
+      if (!pill || !text) return;
+      text.textContent = place.label;
+      pill.title = place.name ?? place.label;
+      if (place.name) pill.setAttribute("aria-label", place.name);
+      else pill.removeAttribute("aria-label");
+    });
+    // labelsKey stands for the places' labels.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draws, labelsKey]);
+
+  // Places kept off the map for now: their pills and areas go, the map stays as the guest left it.
+  useEffect(() => {
+    const current = drawn.current;
+    if (draws === 0 || !current) return;
+    const off = new Set(hidden ?? []);
+    places.forEach((place, index) => {
+      const pill = current.pills[index];
+      if (pill) pill.style.display = off.has(place.key) ? "none" : "";
+      current.areas[index]?.setVisible?.(!off.has(place.key));
+    });
+    // hiddenKey stands for hidden; places are the ones drawn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draws, hiddenKey]);
+
+  // The selected place's pill stands out, and comes into view. A highlighted one stands out too,
+  // in front of the others, without moving the map.
   useEffect(() => {
     const current = drawn.current;
     if (draws === 0 || !current) return;
     current.pills.forEach((pill, index) => {
-      pill.className = `${PILL} ${index === selected ? PILL_SELECTED : PILL_IDLE}`;
+      const lit = index === selected || index === highlighted;
+      pill.className = `${PILL} ${lit ? PILL_SELECTED : PILL_IDLE}`;
       if (index === selected) pill.setAttribute("aria-current", "true");
       else pill.removeAttribute("aria-current");
       // Above the nearby places' markers where they overlap (VAY-2327).
-      pill.style.zIndex = index === selected ? "3" : "2";
+      pill.style.zIndex = index === highlighted ? "4" : index === selected ? "3" : "2";
     });
-    if (selected === null) return;
+  }, [draws, selected, highlighted]);
+  useEffect(() => {
+    const current = drawn.current;
+    if (draws === 0 || !current || selected === null) return;
     const position = current.positions[selected];
     if (position && !current.map.getBounds?.()?.contains(position)) current.map.panTo(position);
   }, [draws, selected]);

@@ -1,6 +1,8 @@
 import {
   ACCOUNT_BOOKING_PAGE_FILTERS,
+  ACCOUNT_BOOKING_PAGE_LAYOUTS,
   type AccountBookingPageFilter,
+  type AccountBookingPageLayout,
   type AccountBookingPageSort,
 } from "@vayada/domain-booking/account-booking-page";
 import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
@@ -20,6 +22,8 @@ export type AgencyStay = {
   childrenEnabled: boolean;
   /** Room Filters mark one of its rooms "Private pool" (VAY-2460). */
   privatePool: boolean;
+  /** Its pin as its own page shows it (rounded when approximate); null keeps it off the map. */
+  map: { latitude: number; longitude: number; approximate: boolean } | null;
 };
 
 /** A live agency booking page (`GET /api/booking-web/agency-pages/:slug`, VAY-2459). */
@@ -53,6 +57,8 @@ export type AgencyPage = {
   /** The filter chips the agency lets guests use (VAY-2460); each still hides itself when it
    * wouldn't split the stays. */
   filters: Record<AccountBookingPageFilter, boolean>;
+  /** The layouts guests can switch between (List always) and the one they see first. */
+  layout: { allowed: AccountBookingPageLayout[]; default: AccountBookingPageLayout };
   stays: AgencyStay[];
 };
 
@@ -127,6 +133,10 @@ export function readAgencyPage(raw: unknown): AgencyPage {
   const design = object(raw.design) ? raw.design : {};
   const results = object(raw.results) ? raw.results : {};
   const filters = object(raw.filters) ? raw.filters : {};
+  const layout = object(raw.layout) ? raw.layout : {};
+  const allowed = ACCOUNT_BOOKING_PAGE_LAYOUTS.filter(
+    (one) => one === "list" || (Array.isArray(layout.allowed) && layout.allowed.includes(one)),
+  );
   const locales = object(raw.locales) ? raw.locales : null;
   const contact = object(header.contact) ? header.contact : null;
   return {
@@ -174,6 +184,12 @@ export function readAgencyPage(raw: unknown): AgencyPage {
     filters: Object.fromEntries(
       ACCOUNT_BOOKING_PAGE_FILTERS.map((key) => [key, filters[key] === true]),
     ) as Record<AccountBookingPageFilter, boolean>,
+    layout: {
+      allowed,
+      default: allowed.includes(layout.default as AccountBookingPageLayout)
+        ? (layout.default as AccountBookingPageLayout)
+        : "list",
+    },
     stays: raw.stays.flatMap((stay): AgencyStay[] => {
       if (
         !object(stay) ||
@@ -199,10 +215,23 @@ export function readAgencyPage(raw: unknown): AgencyPage {
           photos,
           childrenEnabled: stay.childrenEnabled !== false,
           privatePool: stay.privatePool === true,
+          map: pin(stay.map),
         },
       ];
     }),
   };
+}
+
+/** A stay's pin; anything but two coordinates in range is no pin. */
+function pin(value: unknown): AgencyStay["map"] {
+  if (!object(value)) return null;
+  const { latitude, longitude } = value;
+  return typeof latitude === "number" &&
+    typeof longitude === "number" &&
+    Math.abs(latitude) <= 90 &&
+    Math.abs(longitude) <= 180
+    ? { latitude, longitude, approximate: value.approximate === true }
+    : null;
 }
 
 /** Availability and the lowest price of every stay for one search (VAY-2458). Straight to the
