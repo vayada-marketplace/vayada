@@ -87,6 +87,28 @@ describe("vayada Payment's Stripe webhook (VAY-2442)", () => {
     expect(stayCurrencyFee({ currency: "eur" }, 0, "IDR")).toBe(0);
   });
 
+  it("converts a dispute's fee at the rate of the dispute's own amounts when Stripe gives none", () => {
+    // Test run C (2026-11-03): an IDR 500,000 dispute was withdrawn from Vayada's EUR account as
+    // EUR -24.64 with Stripe's EUR 20.00 fee and no exchange rate. The fee is IDR 405,844.16.
+    const withdrawal = { currency: "eur", exchange_rate: null, amount: -2464, fee: 2000 };
+    expect(stayCurrencyFee(withdrawal, 2000, "IDR", 50_000_000)).toBe(40_584_416);
+    // Won: Stripe kept its fee, so nothing comes back; a fee given back converts the same way.
+    const reversal = { currency: "eur", exchange_rate: null, amount: 2464, fee: 0 };
+    expect(stayCurrencyFee(reversal, 0, "IDR", 50_000_000)).toBe(0);
+    expect(stayCurrencyFee(reversal, 2000, "IDR", 50_000_000)).toBe(40_584_416);
+    // JPY has no minor unit: a JPY 2,500 dispute withdrawn as EUR -15.00 makes EUR 15.00 JPY 2,500.
+    expect(stayCurrencyFee({ currency: "eur", amount: -1500 }, 1500, "JPY", 2500)).toBe(2500);
+    // Stripe's own rate wins when it sends one.
+    expect(
+      stayCurrencyFee({ ...withdrawal, exchange_rate: 0.0000575 }, 1500, "IDR", 50_000_000),
+    ).toBe(26086957);
+    // Without both amounts the fee stays unknown (logged for a person, recorded as 0).
+    expect(stayCurrencyFee(withdrawal, 2000, "IDR")).toBeNull();
+    expect(stayCurrencyFee(withdrawal, 2000, "IDR", 0)).toBeNull();
+    expect(stayCurrencyFee({ ...withdrawal, amount: 0 }, 2000, "IDR", 50_000_000)).toBeNull();
+    expect(stayCurrencyFee({ ...withdrawal, amount: "-2464" }, 2000, "IDR", 50_000_000)).toBeNull();
+  });
+
   it("takes the webhook secret only as a Stripe signing secret", () => {
     const keys = {
       VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_abc",
