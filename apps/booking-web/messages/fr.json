@@ -1080,6 +1080,7 @@
     "allStays": "Tous les hébergements",
     "units": "{count, plural, one {# chambre} other {# chambres}}",
     "villas": "{count, plural, one {# villa} other {# villas}}",
-    "roomLine": "Chambre {number} : {name}"
+    "roomLine": "Chambre {number} : {name}",
+    "yourChoice": "Votre choix"
   }
 }

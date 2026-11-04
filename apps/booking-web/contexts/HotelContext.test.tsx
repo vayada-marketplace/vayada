@@ -398,3 +398,26 @@ it("offers Retry when a stay can't be loaded", async () => {
     cleanup();
   }
 });
+
+it("says a stay gone since the agency's read is not online, without Retry", async () => {
+  getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockResolvedValue(withStay);
+  path.current = "/stays/escape-ubud";
+
+  const { container, cleanup } = await renderProvider(
+    <StayHotelProvider slug="escape-ubud">
+      <p>Rooms</p>
+    </StayHotelProvider>,
+    "the-travel-ubud",
+  );
+  try {
+    expect(container.querySelector("[role=alert] h2")?.textContent).toBe(
+      "This booking page isn't online right now",
+    );
+    expect(container.querySelector("[role=alert] button")).toBeNull();
+    expect(container.textContent).not.toContain("Rooms");
+  } finally {
+    cleanup();
+  }
+});

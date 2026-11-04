@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -18,6 +18,7 @@ import { overviewHref, stayCheckoutUrl, stayTypeName } from "@/lib/agencyOvervie
 import { calculateNights, ensureMinOneNight } from "@/lib/utils";
 import { hotelService } from "@/services/api/hotel";
 import { quoteMoneyAmount } from "@/services/api/replacementOffers";
+import { encodePick } from "@/lib/roomPicker";
 import type { AgencyPage, AgencyStay } from "@/services/api/agencyPage";
 
 interface AppliedPromo {
@@ -43,7 +44,8 @@ const localDate = (daysFromToday: number) => {
 export default function AgencyStayPage({ agency, stay }: { agency: AgencyPage; stay: AgencyStay }) {
   return (
     // Clipped, not hidden, as on the overview: a hidden overflow would stop sticky parts.
-    <div className="min-h-screen bg-white overflow-x-clip">
+    // The bottom padding keeps the page's end clear of the choice bar while it is up.
+    <div className="min-h-screen bg-white overflow-x-clip pb-[var(--fixed-bottom-bar,0px)]">
       <StayHero
         image={agency.header.imageUrl}
         alt={agency.name}
@@ -75,6 +77,15 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
   );
   const [checkIn, setCheckIn] = useState(initialDates.checkIn);
   const [checkOut, setCheckOut] = useState(initialDates.checkOut);
+  // The agency's own search, for "All stays" and the nearby stays: its room count and code when
+  // this stay needed others (`stayHref`'s agencyRooms, agencyPromo).
+  const [agencySearch] = useState(() => {
+    const rooms = Number(searchParams.get("agencyRooms") ?? searchParams.get("rooms") ?? "1");
+    return {
+      rooms: Number.isInteger(rooms) && rooms >= 1 && rooms <= 9 ? rooms : 1,
+      promoCode: (searchParams.get("agencyPromo") ?? searchParams.get("promoCode"))?.trim() || null,
+    };
+  });
   const [adults, setAdults] = useState(() => parseInt(searchParams.get("adults") || "2"));
   const [children, setChildren] = useState(() => parseInt(searchParams.get("children") || "0"));
   const guestTypeSettings = hotel.guestTypeSettings ?? {
@@ -158,9 +169,32 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
     typeof window === "undefined"
       ? { protocol: "https:", host: "", pathname: "/" }
       : window.location;
-  const search = new URLSearchParams({ checkIn, checkOut, adults: String(adults) });
-  if (effectiveChildren > 0) search.set("children", String(effectiveChildren));
-  if (roomCount > 1) search.set("rooms", String(roomCount));
+  // Back to all stays with the agency's search: this page's dates and guests (its children too,
+  // where this stay takes none), the agency's room count and its code.
+  const overview = new URLSearchParams({ checkIn, checkOut, adults: String(adults) });
+  if (children > 0) overview.set("children", String(children));
+  const overviewRooms = Math.min(agencySearch.rooms, adults);
+  if (overviewRooms > 1) overview.set("rooms", String(overviewRooms));
+  const overviewPromo = appliedPromo?.code ?? agencySearch.promoCode;
+  if (overviewPromo) overview.set("promoCode", overviewPromo);
+  // The bar shows a choice only while it is the one on screen: one room, or every room of the
+  // group chosen with these guests (another room count, split or room makes it stale).
+  const current = (choice: string | null) => {
+    if (!choice) return null;
+    const params = new URLSearchParams(choice);
+    const picks = params.getAll("pick");
+    if (!picks.length) return model.pickMode ? null : choice;
+    if (!model.pickMode || !model.allChosen || params.get("rooms") !== String(roomCount))
+      return null;
+    const onScreen = model.picks.map(
+      (pick, index) =>
+        pick && encodePick({ ...model.slots[index]!, publicOfferKey: pick.publicOfferKey }),
+    );
+    return onScreen.length === picks.length && onScreen.every((pick, i) => pick === picks[i])
+      ? choice
+      : null;
+  };
+  const shownChoice = current(chosen);
 
   return (
     <>
@@ -264,21 +298,19 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         intro={
           <StayBox
             stay={stay}
-            back={overviewHref(location, agency.slug, `?${search}`)}
+            back={overviewHref(location, agency.slug, `?${overview}`)}
             hotelName={hotel.name}
           />
         }
       />
 
-      {chosen && (
-        <ChoiceBar
-          stay={stay}
-          model={model}
-          chosen={chosen}
-          approximate={approximate}
-          href={stayCheckoutUrl(location, agency.slug, stay.slug, chosen)}
-        />
-      )}
+      <ChoiceBar
+        stay={stay}
+        model={model}
+        chosen={shownChoice}
+        approximate={approximate}
+        href={shownChoice && stayCheckoutUrl(location, agency.slug, stay.slug, shownChoice)}
+      />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </>
   );
@@ -327,9 +359,9 @@ function StayBox({ stay, back, hotelName }: { stay: AgencyStay; back: string; ho
           {t("allStays")}
         </a>
         <div className="flex flex-wrap items-center gap-2.5">
-          <h3 id="stay-name" className="text-2xl font-bold text-gray-900">
+          <h2 id="stay-name" className="text-2xl font-bold text-gray-900">
             {stay.name}
-          </h3>
+          </h2>
           {type && (
             <span className="rounded-full border border-gray-300 bg-gray-100 px-2.5 py-0.5 text-sm text-gray-700">
               {type}
@@ -350,7 +382,8 @@ function StayBox({ stay, back, hotelName }: { stay: AgencyStay; back: string; ho
   );
 }
 
-/** The choice made, with its total when the cards priced it, and Continue (Timo's dark bar). */
+/** The choice made, with its total when the cards priced it, and Continue (Timo's dark bar). Its
+ * announcement stays on the page, so a screen reader says each choice as it is made. */
 function ChoiceBar({
   stay,
   model,
@@ -360,14 +393,12 @@ function ChoiceBar({
 }: {
   stay: AgencyStay;
   model: StayRoomsModel;
-  chosen: string;
+  chosen: string | null;
   approximate: (amount: number, currency: string) => string | null;
-  href: string;
+  href: string | null;
 }) {
   const t = useTranslations("agency");
-  const th = useTranslations("home");
-  const tc = useTranslations("common");
-  const params = new URLSearchParams(chosen);
+  const params = new URLSearchParams(chosen ?? "");
   const offer = params.get("offer");
   const room = offer
     ? model.rooms?.find((one) => one.offers.some((rate) => rate.publicOfferKey === offer))
@@ -399,12 +430,63 @@ function ChoiceBar({
         })
         .join(" · ");
   return (
-    <div
+    <>
+      <p role="status" className="sr-only">
+        {chosen ? [stay.name, line, total].filter(Boolean).join(", ") : ""}
+      </p>
+      {chosen && href && (
+        <Bar name={stay.name} line={line} total={total} hasAddons={model.hasAddons} href={href} />
+      )}
+    </>
+  );
+}
+
+function Bar({
+  name,
+  line,
+  total,
+  hasAddons,
+  href,
+}: {
+  name: string;
+  line: string | undefined;
+  total: string | null;
+  hasAddons: boolean;
+  href: string;
+}) {
+  const t = useTranslations("agency");
+  const th = useTranslations("home");
+  const tc = useTranslations("common");
+  // While the bar is up, other pinned things (the cookie prompt, a toast) sit above it, and the
+  // page keeps a focused field clear of it (WCAG 2.4.11), as the checkout summary does.
+  const bar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = bar.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const update = () => {
+      // Its height and the 20px it floats above the page's bottom.
+      root.style.setProperty("--fixed-bottom-bar", `${element.offsetHeight + 20}px`);
+      root.style.setProperty("scroll-padding-bottom", `${element.offsetHeight + 20}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--fixed-bottom-bar");
+      root.style.removeProperty("scroll-padding-bottom");
+    };
+  }, []);
+  return (
+    <section
+      ref={bar}
+      aria-label={t("yourChoice")}
       data-testid="agency-choice-bar"
       className="fixed inset-x-4 bottom-5 z-50 mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-4 rounded-[20px] bg-gray-900 px-5 py-3.5 text-white shadow-[0_12px_32px_rgba(0,0,0,0.25)] sm:inset-x-6"
     >
       <div className="flex min-w-0 flex-col gap-0.5">
-        <strong className="text-base">{stay.name}</strong>
+        <strong className="text-base">{name}</strong>
         {line && <span className="text-sm text-gray-300">{line}</span>}
       </div>
       <div className="flex items-center gap-4">
@@ -413,9 +495,9 @@ function ChoiceBar({
           href={href}
           className="flex min-h-[48px] items-center rounded-full bg-white px-[22px] text-base font-semibold text-gray-900 hover:bg-gray-100"
         >
-          {model.hasAddons ? th("roomsProgress.continueToExtras") : tc("continue")}
+          {hasAddons ? th("roomsProgress.continueToExtras") : tc("continue")}
         </a>
       </div>
-    </div>
+    </section>
   );
 }

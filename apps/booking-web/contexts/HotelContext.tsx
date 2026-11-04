@@ -306,11 +306,13 @@ export function HotelProvider({
 export function StayHotelProvider({ slug, children }: { slug: string; children: ReactNode }) {
   const outer = useContext(HotelContext);
   const t = useTranslations("error");
+  const tc = useTranslations("common");
   const [state, setState] = useState<{
     slug: string;
     hotel?: Hotel;
     addons?: Addon[];
     error?: string;
+    notOnline?: boolean;
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -327,6 +329,8 @@ export function StayHotelProvider({ slug, children }: { slug: string; children: 
           setState({
             slug,
             error: err instanceof Error ? err.message : "Failed to load hotel data",
+            // Gone between the agency's read and this one: retrying can't help.
+            notOnline: err instanceof ApiError && err.status === 404,
           });
       });
     return () => {
@@ -337,24 +341,34 @@ export function StayHotelProvider({ slug, children }: { slug: string; children: 
   if (current?.error)
     return (
       <div role="alert" className="mx-auto max-w-md px-4 py-16 text-center">
-        <h2 className="mb-2 text-lg font-bold text-gray-900">{t("unableToLoad")}</h2>
-        <p className="mb-4 text-sm text-gray-600">{t("tryAgainLater")}</p>
-        <button
-          type="button"
-          onClick={() => {
-            setState(null);
-            setAttempt((value) => value + 1);
-          }}
-          className="rounded-full bg-gray-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
-        >
-          {t("retry")}
-        </button>
+        <h2 className="mb-2 text-lg font-bold text-gray-900">
+          {current.notOnline ? t("notOnline") : t("unableToLoad")}
+        </h2>
+        <p className="mb-4 text-sm text-gray-600">
+          {current.notOnline ? t("checkBackLater") : t("tryAgainLater")}
+        </p>
+        {!current.notOnline && (
+          <button
+            type="button"
+            onClick={() => {
+              setState(null);
+              setAttempt((value) => value + 1);
+            }}
+            className="rounded-full bg-gray-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+          >
+            {t("retry")}
+          </button>
+        )}
       </div>
     );
   if (!current?.hotel)
     return (
-      <div className="flex justify-center py-24" aria-busy="true">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-gray-900" />
+      <div role="status" className="flex justify-center py-24" aria-busy="true">
+        <span className="sr-only">{tc("loading")}</span>
+        <div
+          aria-hidden="true"
+          className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-gray-900"
+        />
       </div>
     );
   return (

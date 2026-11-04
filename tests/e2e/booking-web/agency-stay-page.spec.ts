@@ -93,7 +93,10 @@ test("a chosen rate shows the dark bar, whose Continue opens the stay's own chec
   await assertHealthy();
 });
 
-test("two rooms choose room by room, with the room tabs", async ({ page, baseURL }, testInfo) => {
+test("two rooms choose room by room, with the room tabs, and the bar names both", async ({
+  page,
+  baseURL,
+}, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo, { expectedMissingUrls });
   await open(page);
   await page.goto(
@@ -101,6 +104,37 @@ test("two rooms choose room by room, with the room tabs", async ({ page, baseURL
   );
   await expect(page.getByTestId("room-tab-1")).toBeVisible();
   await expect(page.getByTestId("room-tab-2")).toBeVisible();
+  const suite = page.getByTestId("room-card-suite");
+  await suite.getByRole("button", { name: "Select for Room 1" }).click();
+  await suite.getByRole("button", { name: "Select for Room 2" }).click();
+
+  // Both rooms chosen: the bar names them, and Continue takes both to the stay's checkout.
+  const bar = page.getByRole("region", { name: "Your choice" });
+  await expect(bar).toContainText("Room 1: Suite · Room 2: Suite");
+  await expect(
+    page.getByRole("status").filter({
+      hasText: /^The Escape Villa Ubud, Room 1: Suite · Room 2: Suite$/,
+    }),
+  ).toHaveCount(1);
+  const href = await bar.getByRole("link", { name: "Continue" }).getAttribute("href");
+  const url = new URL(href!);
+  expect(url.searchParams.get("rooms")).toBe("2");
+  expect(url.searchParams.getAll("pick")).toHaveLength(2);
+  // The bar keeps the page's end clear of it.
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.style.getPropertyValue("--fixed-bottom-bar")),
+    )
+    .toMatch(/^\d+px$/);
+
+  // A room taken out makes the choice stale: the bar goes until the rooms are chosen again.
+  await page.getByRole("button", { name: "Remove Room 2 from booking" }).click();
+  await expect(bar).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.style.getPropertyValue("--fixed-bottom-bar")),
+    )
+    .toBe("");
   await assertHealthy();
 });
 

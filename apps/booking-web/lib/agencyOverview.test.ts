@@ -287,11 +287,11 @@ describe("stay links (VAY-2461)", () => {
         promoApplied: true,
       }),
     ).toBe(
-      "/de/stays/escape-villa?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&promoCode=AUTUMN",
+      "/de/stays/escape-villa?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&agencyRooms=1&promoCode=AUTUMN",
     );
   });
 
-  it("leaves out one room and a code the stay doesn't take", () => {
+  it("leaves out one room, and keeps a code the stay doesn't take as the agency's", () => {
     expect(
       stayHref(
         { protocol: "http:", host: "the-travel-ubud.booking.localhost:3002", pathname: "/" },
@@ -300,7 +300,9 @@ describe("stay links (VAY-2461)", () => {
         search,
         { rooms: 1, promoApplied: false },
       ),
-    ).toBe("/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1");
+    ).toBe(
+      "/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&agencyPromo=AUTUMN",
+    );
   });
 
   it("keeps the agency with ?slug= on a development host", () => {
@@ -313,7 +315,7 @@ describe("stay links (VAY-2461)", () => {
         null,
       ),
     ).toBe(
-      "/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&slug=the-travel-ubud",
+      "/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&agencyPromo=AUTUMN&slug=the-travel-ubud",
     );
   });
 
@@ -330,6 +332,15 @@ describe("stay links (VAY-2461)", () => {
         "?offer=a1",
       ),
     ).toBe("/book?offer=a1&slug=uma");
+    // `<slug>.localhost`, as the middleware reads it.
+    expect(
+      stayCheckoutUrl(
+        { protocol: "http:", host: "the-travel-ubud.localhost:3002", pathname: "/stays/uma" },
+        "the-travel-ubud",
+        "uma",
+        "?offer=a1",
+      ),
+    ).toBe("http://uma.localhost:3002/book?offer=a1");
   });
 
   it("goes back to all stays with the same search", () => {

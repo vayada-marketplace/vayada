@@ -290,8 +290,8 @@ export function agencyFilterOptions(
   };
 }
 
-const BOOKING_HOST =
-  /\.(?:next-booking\.vayada\.com|booking\.vayada\.com|booking\.localhost)(?::\d+)?$/;
+// A host whose first label is the page's slug, as the middleware reads it (`<slug>.localhost` too).
+const BOOKING_HOST = /\.(?:next-booking\.vayada\.com|booking\.vayada\.com|localhost)(?::\d+)?$/;
 
 /** The address's language prefix ("/de"), or "" for the default language. */
 export function localePrefix(pathname: string): string {
@@ -307,7 +307,9 @@ const devSlug = (host: string, agencySlug: string, params: URLSearchParams) => {
 /**
  * A stay's page on the agency's address for this search (VAY-2461): `/stays/<slug>`, in the
  * guest's language. `rooms` is said only past one, as the stay page reads it; a promo code only
- * where it applies.
+ * where it applies. The children go as searched (a stay that takes none reads them as 0), and the
+ * agency's own room count and code ride along where the stay's differ (`agencyRooms`,
+ * `agencyPromo`), so "All stays" and the nearby stays keep the agency's search.
  */
 export function stayHref(
   location: { protocol: string; host: string; pathname: string },
@@ -324,7 +326,9 @@ export function stayHref(
   });
   const rooms = stay?.rooms ?? search.rooms;
   if (rooms > 1) params.set("rooms", String(rooms));
-  if (search.promoCode && stay?.promoApplied) params.set("promoCode", search.promoCode);
+  if (rooms !== search.rooms) params.set("agencyRooms", String(search.rooms));
+  if (search.promoCode)
+    params.set(stay?.promoApplied ? "promoCode" : "agencyPromo", search.promoCode);
   devSlug(location.host, agencySlug, params);
   return `${localePrefix(location.pathname)}/stays/${encodeURIComponent(staySlug)}?${params}`;
 }

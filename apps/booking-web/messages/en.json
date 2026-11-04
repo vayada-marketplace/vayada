@@ -1081,6 +1081,7 @@
     "allStays": "All stays",
     "units": "{count, plural, one {# room} other {# rooms}}",
     "villas": "{count, plural, one {# villa} other {# villas}}",
-    "roomLine": "Room {number}: {name}"
+    "roomLine": "Room {number}: {name}",
+    "yourChoice": "Your choice"
   }
 }
