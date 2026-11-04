@@ -122,8 +122,10 @@ async function mockPricing(page: Page) {
         body.rooms.some((room: { roomTypeId: string }) => room.roomTypeId === GARDEN)
       )
         return route.fulfill({ status: 409, json: { code: "stale", reason: "room_unavailable" } });
+      // The page prepares with a draft context, so it expects the draft-projected terms sources too.
       return ok(route, {
         sources,
+        effectiveSources: sources,
         snapshot: {
           currency: body.currency,
           rooms: body.rooms,
@@ -140,13 +142,14 @@ async function mockPricing(page: Page) {
       return ok(route, { revision: state.draft.revision });
     }
     if (/^\/drafts\/[^/]+\/charge-review$/.test(suffix) && state.draft) {
-      const { draftId, snapshot, revision, baseRevision } = state.draft;
+      const { draftId, snapshot, revision, baseRevision, effectiveSources } = state.draft;
       return ok(route, {
         draftId,
         snapshot,
         revision,
         baseRevision,
         sources,
+        effectiveSources,
         stale: false,
         fingerprint: token("2"),
         declaration: "all_mandatory_charges_included",
