@@ -1053,6 +1053,29 @@
       "other": "Lainnya"
     },
     "adultsOnly": "Khusus dewasa",
-    "approximateMixed": "Setiap penginapan menagih dalam mata uangnya sendiri. Jumlah bertanda ≈ adalah konversi perkiraan."
+    "approximateMixed": "Setiap penginapan menagih dalam mata uangnya sendiri. Jumlah bertanda ≈ adalah konversi perkiraan.",
+    "filters": "Filter",
+    "filterType": "Jenis properti",
+    "filterArea": "Area",
+    "filterAll": "Semua",
+    "filterAllAreas": "Semua area",
+    "filterPrice": "Harga",
+    "priceRange": "{min} – {max}",
+    "priceFrom": "Mulai {min}",
+    "priceUpTo": "Hingga {max}",
+    "pricePerNight": "Harga per malam dalam {currency}",
+    "priceMin": "Minimum",
+    "priceMax": "Maksimum",
+    "priceClear": "Hapus",
+    "priceDone": "Selesai",
+    "privatePool": "Kolam renang pribadi",
+    "breakfast": "Termasuk sarapan",
+    "freeCancellation": "Pembatalan gratis",
+    "noMatch": "Tidak ada penginapan yang cocok dengan filter ini.",
+    "resetFilters": "Atur ulang filter",
+    "mapLabel": "Peta penginapan",
+    "noMapStays": "Tidak ada penginapan ini yang menampilkan lokasinya di peta.",
+    "fromPerNight": "mulai {amount} / malam",
+    "pinName": "{name}, mulai {amount} per malam"
   }
 }

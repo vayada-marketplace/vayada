@@ -1053,6 +1053,29 @@
       "other": "Autre"
     },
     "adultsOnly": "Adultes uniquement",
-    "approximateMixed": "Chaque hébergement facture dans sa propre devise. Les montants marqués ≈ sont des conversions approximatives."
+    "approximateMixed": "Chaque hébergement facture dans sa propre devise. Les montants marqués ≈ sont des conversions approximatives.",
+    "filters": "Filtres",
+    "filterType": "Type d'hébergement",
+    "filterArea": "Zone",
+    "filterAll": "Tous",
+    "filterAllAreas": "Toutes les zones",
+    "filterPrice": "Prix",
+    "priceRange": "{min} – {max}",
+    "priceFrom": "À partir de {min}",
+    "priceUpTo": "Jusqu'à {max}",
+    "pricePerNight": "Prix par nuit en {currency}",
+    "priceMin": "Minimum",
+    "priceMax": "Maximum",
+    "priceClear": "Effacer",
+    "priceDone": "OK",
+    "privatePool": "Piscine privée",
+    "breakfast": "Petit-déjeuner inclus",
+    "freeCancellation": "Annulation gratuite",
+    "noMatch": "Aucun hébergement ne correspond à ces filtres.",
+    "resetFilters": "Réinitialiser les filtres",
+    "mapLabel": "Carte des hébergements",
+    "noMapStays": "Aucun de ces hébergements n'indique son emplacement sur une carte.",
+    "fromPerNight": "à partir de {amount} / nuit",
+    "pinName": "{name}, à partir de {amount} par nuit"
   }
 }

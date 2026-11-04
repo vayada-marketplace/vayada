@@ -16,6 +16,13 @@ type Stay = {
   hue: number;
   /** Full on every other date: free only on its `nextFree` nights, `days` after the search. */
   full?: { days: number };
+  /** VAY-2460: Room Filters mark a room "Private pool". */
+  pool?: boolean;
+  /** USD a night with only breakfast rates, or only rates free to cancel; none without. */
+  breakfast?: number;
+  flexible?: number;
+  /** Its map pin (VAY-2460): latitude, longitude, shown as an area; none keeps it off the map. */
+  pin?: [number, number, boolean?];
 };
 
 // The page's "Recommended" order (Settings › Included properties).
@@ -27,6 +34,10 @@ export const AGENCY_STAYS: Stay[] = [
     area: "Ubud",
     nightly: 95,
     hue: 160,
+    pool: true,
+    breakfast: 115,
+    flexible: 105,
+    pin: [-8.5069, 115.2625],
   },
   {
     id: "mandala",
@@ -35,6 +46,8 @@ export const AGENCY_STAYS: Stay[] = [
     area: "Peliatan",
     nightly: 110,
     hue: 30,
+    breakfast: 130,
+    pin: [-8.5245, 115.278],
   },
   {
     id: "mertha",
@@ -43,6 +56,8 @@ export const AGENCY_STAYS: Stay[] = [
     area: "Ubud",
     nightly: 38,
     hue: 90,
+    breakfast: 45,
+    pin: [-8.51, 115.258],
   },
   {
     id: "wiswan",
@@ -51,6 +66,9 @@ export const AGENCY_STAYS: Stay[] = [
     area: "Penestanan",
     nightly: 72,
     hue: 200,
+    pool: true,
+    flexible: 80,
+    pin: [-8.505, 115.247],
   },
   { id: "adhi", name: "Adhidrawa Ubud", type: "guesthouse", area: "Ubud", nightly: 45, hue: 260 },
   {
@@ -60,6 +78,10 @@ export const AGENCY_STAYS: Stay[] = [
     area: "Tegallalang road",
     nightly: 160,
     hue: 120,
+    pool: true,
+    breakfast: 175,
+    flexible: 170,
+    pin: [-8.47, 115.278],
   },
   {
     id: "tamarin",
@@ -68,8 +90,18 @@ export const AGENCY_STAYS: Stay[] = [
     area: "Penestanan",
     nightly: 128,
     hue: 10,
+    pin: [-8.5, 115.25, true],
   },
-  { id: "ranes", name: "Rane's Villa", type: "villa", area: "Ubud", nightly: 84, hue: 300 },
+  {
+    id: "ranes",
+    name: "Rane's Villa",
+    type: "villa",
+    area: "Ubud",
+    nightly: 84,
+    hue: 300,
+    breakfast: 92,
+    pin: [-8.515, 115.265],
+  },
   {
     id: "uma",
     name: "Uma Nature Villa",
@@ -78,6 +110,7 @@ export const AGENCY_STAYS: Stay[] = [
     nightly: 90,
     hue: 140,
     full: { days: 4 },
+    pin: [-8.498, 115.27],
   },
   {
     id: "dewari",
@@ -87,6 +120,7 @@ export const AGENCY_STAYS: Stay[] = [
     nightly: 100,
     hue: 40,
     full: { days: 7 },
+    pin: [-8.52, 115.255],
   },
 ];
 
@@ -99,6 +133,10 @@ export function agencyPage(
     results?: Record<string, unknown>;
     /** Stays (ids) whose page takes no children. */
     adultsOnly?: string[];
+    /** The filter chips switched on (VAY-2460); none unless given. */
+    filters?: Record<string, boolean>;
+    /** The layouts allowed and the first one (VAY-2460); all, starting on List, unless given. */
+    layout?: { allowed: string[]; default: string };
   } = {},
 ) {
   return {
@@ -127,14 +165,14 @@ export function agencyPage(
       displayDefaultCurrency: null,
     },
     locales: { default: "en", supported: ["en", "de"] },
-    layout: { allowed: ["list", "split", "map"], default: "list" },
+    layout: overrides.layout ?? { allowed: ["list", "split", "map"], default: "list" },
     results: {
       defaultSort: "price_low",
       lowestPriceBadge: true,
       showFullStays: true,
       ...overrides.results,
     },
-    filters: {},
+    filters: overrides.filters ?? {},
     stayPage: { nearby: true, map: true },
     stays: AGENCY_STAYS.map((stay) => ({
       propertyId: `property-${stay.id}`,
@@ -148,7 +186,10 @@ export function agencyPage(
         { url: photo(stay.id, 2), alt: null },
       ],
       currency: "USD",
-      location: null,
+      map: stay.pin
+        ? { latitude: stay.pin[0], longitude: stay.pin[1], approximate: !!stay.pin[2] }
+        : null,
+      privatePool: !!stay.pool,
       childrenEnabled: !overrides.adultsOnly?.includes(stay.id),
     })),
   };
@@ -169,7 +210,9 @@ export function searchDates(days = 10, nights = 2) {
 }
 
 /** What the API answers for one agency search: every stay priced for the search's rooms, a full
- * stay free only on its next free dates (`full.days` after `from`), AUTUMN off 10% at The Escape. */
+ * stay free only on its next free dates (`full.days` after `from`), AUTUMN off 10% at The Escape.
+ * Breakfast and free-cancellation prices (VAY-2460) where the stay has them; both together cost
+ * the breakfast price plus what free cancellation adds. */
 export function stayPricesAnswer(url: URL, from: string) {
   const query = url.searchParams;
   const checkIn = query.get("checkIn")!;
@@ -194,20 +237,39 @@ export function stayPricesAnswer(url: URL, from: string) {
         pricesComplete: true,
       };
       if (free && free.checkIn !== checkIn)
-        return { ...base, status: "unavailable", roomTypesFree: 0, price: null, nextFree: free };
+        return {
+          ...base,
+          status: "unavailable",
+          roomTypesFree: 0,
+          price: null,
+          nextFree: free,
+          rateFilters: null,
+        };
       const promoApplied = promo === "AUTUMN" && stay.id === "escape";
-      const nightly = stay.nightly * rooms * (promoApplied ? 90 : 100);
-      return {
-        ...base,
-        status: "available",
-        roomTypesFree: stay.id === "wiswan" ? 1 : 2,
-        price: {
+      const price = (usd: number) => {
+        const nightly = usd * rooms * (promoApplied ? 90 : 100);
+        return {
           totalMinor: String(nightly * nights),
           nightlyMinor: String(nightly),
           currency: "USD",
           promoApplied,
-        },
+        };
+      };
+      const only = (usd: number | null) =>
+        usd === null ? null : { roomTypesFree: 1, price: price(usd), pricesComplete: true };
+      return {
+        ...base,
+        status: "available",
+        roomTypesFree: stay.id === "wiswan" ? 1 : 2,
+        price: price(stay.nightly),
         nextFree: null,
+        rateFilters: {
+          breakfast: only(stay.breakfast ?? null),
+          freeCancellation: only(stay.flexible ?? null),
+          both: only(
+            stay.breakfast && stay.flexible ? stay.breakfast + stay.flexible - stay.nightly : null,
+          ),
+        },
       };
     }),
   };

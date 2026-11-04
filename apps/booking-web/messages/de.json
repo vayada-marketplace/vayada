@@ -1054,6 +1054,29 @@
       "other": "Sonstige"
     },
     "adultsOnly": "Nur Erwachsene",
-    "approximateMixed": "Jede Unterkunft berechnet in ihrer eigenen Währung. Mit ≈ markierte Beträge sind ungefähre Umrechnungen."
+    "approximateMixed": "Jede Unterkunft berechnet in ihrer eigenen Währung. Mit ≈ markierte Beträge sind ungefähre Umrechnungen.",
+    "filters": "Filter",
+    "filterType": "Art der Unterkunft",
+    "filterArea": "Gegend",
+    "filterAll": "Alle",
+    "filterAllAreas": "Alle Gegenden",
+    "filterPrice": "Preis",
+    "priceRange": "{min} – {max}",
+    "priceFrom": "Ab {min}",
+    "priceUpTo": "Bis {max}",
+    "pricePerNight": "Preis pro Nacht in {currency}",
+    "priceMin": "Mindestens",
+    "priceMax": "Höchstens",
+    "priceClear": "Zurücksetzen",
+    "priceDone": "Fertig",
+    "privatePool": "Privater Pool",
+    "breakfast": "Frühstück inklusive",
+    "freeCancellation": "Kostenlose Stornierung",
+    "noMatch": "Keine Unterkunft passt zu diesen Filtern.",
+    "resetFilters": "Filter zurücksetzen",
+    "mapLabel": "Karte der Unterkünfte",
+    "noMapStays": "Keine dieser Unterkünfte zeigt ihre Lage auf einer Karte.",
+    "fromPerNight": "ab {amount} / Nacht",
+    "pinName": "{name}, ab {amount} pro Nacht"
   }
 }

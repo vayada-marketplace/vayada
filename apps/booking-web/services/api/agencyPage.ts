@@ -1,4 +1,10 @@
-import type { AccountBookingPageSort } from "@vayada/domain-booking/account-booking-page";
+import {
+  ACCOUNT_BOOKING_PAGE_FILTERS,
+  ACCOUNT_BOOKING_PAGE_LAYOUTS,
+  type AccountBookingPageFilter,
+  type AccountBookingPageLayout,
+  type AccountBookingPageSort,
+} from "@vayada/domain-booking/account-booking-page";
 import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
 import { bookingWebDirect, bookingWebPublic } from "./client";
 
@@ -14,6 +20,10 @@ export type AgencyStay = {
   /** For the agency's gallery, grouped by stay. */
   photos: string[];
   childrenEnabled: boolean;
+  /** Room Filters mark one of its rooms "Private pool" (VAY-2460). */
+  privatePool: boolean;
+  /** Its pin as its own page shows it (rounded when approximate); null keeps it off the map. */
+  map: { latitude: number; longitude: number; approximate: boolean } | null;
 };
 
 /** A live agency booking page (`GET /api/booking-web/agency-pages/:slug`, VAY-2459). */
@@ -44,6 +54,11 @@ export type AgencyPage = {
     lowestPriceBadge: boolean;
     showFullStays: boolean;
   };
+  /** The filter chips the agency lets guests use (VAY-2460); each still hides itself when it
+   * wouldn't split the stays. */
+  filters: Record<AccountBookingPageFilter, boolean>;
+  /** The layouts guests can switch between (List always) and the one they see first. */
+  layout: { allowed: AccountBookingPageLayout[]; default: AccountBookingPageLayout };
   stays: AgencyStay[];
 };
 
@@ -68,7 +83,14 @@ export type AgencyStayPrice = {
   /** Major units (e.g. 120.5), in `currency`. */
   price: { total: number; nightly: number; currency: string; promoApplied: boolean } | null;
   nextFree: { checkIn: string; checkOut: string } | null;
+  /** For an available stay (VAY-2460): the same rooms with only breakfast rates, only rates
+   * still free to cancel, or both; null for one without such a rate. Null for other stays. */
+  rateFilters: Record<AgencyRateFilter, AgencyFilteredPrice | null> | null;
 };
+
+export const AGENCY_RATE_FILTERS = ["breakfast", "freeCancellation", "both"] as const;
+export type AgencyRateFilter = (typeof AGENCY_RATE_FILTERS)[number];
+export type AgencyFilteredPrice = Pick<AgencyStayPrice, "roomTypesFree" | "price">;
 
 export type AgencyStayPrices = {
   checkIn: string;
@@ -110,6 +132,11 @@ export function readAgencyPage(raw: unknown): AgencyPage {
   const header = raw.header;
   const design = object(raw.design) ? raw.design : {};
   const results = object(raw.results) ? raw.results : {};
+  const filters = object(raw.filters) ? raw.filters : {};
+  const layout = object(raw.layout) ? raw.layout : {};
+  const allowed = ACCOUNT_BOOKING_PAGE_LAYOUTS.filter(
+    (one) => one === "list" || (Array.isArray(layout.allowed) && layout.allowed.includes(one)),
+  );
   const locales = object(raw.locales) ? raw.locales : null;
   const contact = object(header.contact) ? header.contact : null;
   return {
@@ -153,6 +180,16 @@ export function readAgencyPage(raw: unknown): AgencyPage {
       lowestPriceBadge: results.lowestPriceBadge !== false,
       showFullStays: results.showFullStays !== false,
     },
+    // Only the chips the agency switched on.
+    filters: Object.fromEntries(
+      ACCOUNT_BOOKING_PAGE_FILTERS.map((key) => [key, filters[key] === true]),
+    ) as Record<AccountBookingPageFilter, boolean>,
+    layout: {
+      allowed,
+      default: allowed.includes(layout.default as AccountBookingPageLayout)
+        ? (layout.default as AccountBookingPageLayout)
+        : "list",
+    },
     stays: raw.stays.flatMap((stay): AgencyStay[] => {
       if (
         !object(stay) ||
@@ -177,10 +214,24 @@ export function readAgencyPage(raw: unknown): AgencyPage {
           photoUrl: https(stay.photoUrl),
           photos,
           childrenEnabled: stay.childrenEnabled !== false,
+          privatePool: stay.privatePool === true,
+          map: pin(stay.map),
         },
       ];
     }),
   };
+}
+
+/** A stay's pin; anything but two coordinates in range is no pin. */
+function pin(value: unknown): AgencyStay["map"] {
+  if (!object(value)) return null;
+  const { latitude, longitude } = value;
+  return typeof latitude === "number" &&
+    typeof longitude === "number" &&
+    Math.abs(latitude) <= 90 &&
+    Math.abs(longitude) <= 180
+    ? { latitude, longitude, approximate: value.approximate === true }
+    : null;
 }
 
 /** Availability and the lowest price of every stay for one search (VAY-2458). Straight to the
@@ -247,6 +298,27 @@ function stayPrice(stay: unknown): AgencyStayPrice {
       DATE.test(next.checkOut)
         ? { checkIn: next.checkIn, checkOut: next.checkOut }
         : null,
+    rateFilters: object(stay.rateFilters) ? rateFilters(stay.rateFilters) : null,
+  };
+}
+
+/** A filtered price that can't be read counts as none: the stay hides under that filter. */
+function rateFilters(raw: Record<string, unknown>): AgencyStayPrice["rateFilters"] {
+  const one = (value: unknown): AgencyFilteredPrice | null => {
+    if (!object(value) || !count(value.roomTypesFree, 1)) return null;
+    try {
+      return {
+        roomTypesFree: value.roomTypesFree as number,
+        price: value.price === null || value.price === undefined ? null : money(value.price),
+      };
+    } catch {
+      return null;
+    }
+  };
+  return {
+    breakfast: one(raw.breakfast),
+    freeCancellation: one(raw.freeCancellation),
+    both: one(raw.both),
   };
 }
 

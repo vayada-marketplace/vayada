@@ -25,7 +25,7 @@ const page = {
   locales: { default: "en", supported: ["en", "de"] },
   layout: { allowed: ["list"], default: "list" },
   results: { defaultSort: "recommended", lowestPriceBadge: false, showFullStays: true },
-  filters: {},
+  filters: { propertyType: true, price: true, privatePool: false, breakfast: "yes" },
   stayPage: { nearby: true, map: true },
   stays: [
     {
@@ -37,7 +37,8 @@ const page = {
       photoUrl: "https://images.vayada.com/escape.jpg",
       photos: [{ url: "https://images.vayada.com/escape.jpg", alt: null }, { url: "/local.jpg" }],
       currency: "USD",
-      location: null,
+      map: null,
+      privatePool: true,
       childrenEnabled: false,
     },
     { propertyId: "p2", slug: 7, name: "Broken" },
@@ -65,6 +66,17 @@ describe("readAgencyPage", () => {
       design: page.design,
       locales: { default: "en", supported: ["en", "de"] },
       results: { defaultSort: "recommended", lowestPriceBadge: false, showFullStays: true },
+      // Only chips switched on; anything else is off.
+      filters: {
+        propertyType: true,
+        area: false,
+        price: true,
+        privatePool: false,
+        breakfast: false,
+        freeCancellation: false,
+        bedrooms: false,
+      },
+      layout: { allowed: ["list"], default: "list" },
       stays: [
         {
           propertyId: "p1",
@@ -75,9 +87,37 @@ describe("readAgencyPage", () => {
           photoUrl: "https://images.vayada.com/escape.jpg",
           photos: ["https://images.vayada.com/escape.jpg"],
           childrenEnabled: false,
+          privatePool: true,
+          map: null,
         },
       ],
     });
+  });
+
+  it("keeps the layouts allowed (List always) and each stay's pin (VAY-2460)", () => {
+    const read = (layout: unknown, map: unknown) =>
+      readAgencyPage({ ...page, layout, stays: [{ ...page.stays[0], map }] });
+    expect(
+      read(
+        { allowed: ["map", "split"], default: "map" },
+        {
+          latitude: -8.51,
+          longitude: 115.27,
+          approximate: true,
+        },
+      ),
+    ).toMatchObject({
+      layout: { allowed: ["list", "split", "map"], default: "map" },
+      stays: [{ map: { latitude: -8.51, longitude: 115.27, approximate: true } }],
+    });
+    // A default it doesn't allow, or none: List.
+    expect(read({ allowed: ["split"], default: "map" }, null).layout).toEqual({
+      allowed: ["list", "split"],
+      default: "list",
+    });
+    expect(read(undefined, null).layout).toEqual({ allowed: ["list"], default: "list" });
+    for (const map of [{ latitude: 91, longitude: 0 }, { latitude: "-8.5", longitude: 115 }, {}])
+      expect(read(undefined, map).stays[0]!.map).toBeNull();
   });
 
   it("falls back to the defaults for missing settings, and rejects another version", () => {
@@ -126,6 +166,21 @@ describe("getAgencyStayPrices", () => {
         price: { totalMinor: "19000", nightlyMinor: "9500", currency: "USD", promoApplied: true },
         pricesComplete: true,
         nextFree: null,
+        rateFilters: {
+          breakfast: {
+            roomTypesFree: 1,
+            price: {
+              totalMinor: "23000",
+              nightlyMinor: "11500",
+              currency: "USD",
+              promoApplied: false,
+            },
+            pricesComplete: true,
+          },
+          freeCancellation: null,
+          // Unreadable: as none.
+          both: { roomTypesFree: 1, price: { totalMinor: "1.5" } },
+        },
       },
       {
         propertyId: "p2",
@@ -156,6 +211,14 @@ describe("getAgencyStayPrices", () => {
           roomTypesFree: 1,
           price: { total: 190, nightly: 95, currency: "USD", promoApplied: true },
           nextFree: null,
+          rateFilters: {
+            breakfast: {
+              roomTypesFree: 1,
+              price: { total: 230, nightly: 115, currency: "USD", promoApplied: false },
+            },
+            freeCancellation: null,
+            both: null,
+          },
         },
         {
           propertyId: "p2",
@@ -164,6 +227,7 @@ describe("getAgencyStayPrices", () => {
           roomTypesFree: 0,
           price: null,
           nextFree: { checkIn: "2026-11-16", checkOut: "2026-11-18" },
+          rateFilters: null,
         },
       ],
     });
