@@ -3,7 +3,11 @@ import {
   agencyFilterOptions,
   agencyResults,
   formatStayRange,
+  localePrefix,
+  nearbyStays,
   NO_FILTERS,
+  overviewHref,
+  stayCheckoutUrl,
   stayHref,
   stayNights,
   type AgencyFilters,
@@ -21,6 +25,7 @@ const stay = (id: string): AgencyStay => ({
   childrenEnabled: true,
   privatePool: false,
   map: null,
+  units: null,
 });
 const stays = ["mertha", "escape", "mandala", "uma", "wiswan", "dewari"].map(stay);
 const priced = (id: string, nightly: number, currency = "USD"): AgencyStayPrice => ({
@@ -261,7 +266,7 @@ describe("filters (VAY-2460)", () => {
   });
 });
 
-describe("stayHref", () => {
+describe("stay links (VAY-2461)", () => {
   const search = {
     checkIn: "2026-11-12",
     checkOut: "2026-11-14",
@@ -270,22 +275,24 @@ describe("stayHref", () => {
     rooms: 1,
     promoCode: "AUTUMN",
   };
+  const agencyHost = {
+    protocol: "https:",
+    host: "the-travel-ubud.next-booking.vayada.com",
+    pathname: "/de",
+  };
 
-  it("opens the stay's own address with the search on a booking host", () => {
+  it("opens the stay's page on the agency's address, in the guest's language, with the search", () => {
     expect(
-      stayHref(
-        { protocol: "https:", host: "the-travel-ubud.next-booking.vayada.com", pathname: "/de" },
-        "the-travel-ubud",
-        "escape-villa",
-        search,
-        { rooms: 2, promoApplied: true },
-      ),
+      stayHref(agencyHost, "the-travel-ubud", "escape-villa", search, {
+        rooms: 2,
+        promoApplied: true,
+      }),
     ).toBe(
-      "https://escape-villa.next-booking.vayada.com/de?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&promoCode=AUTUMN",
+      "/de/stays/escape-villa?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&agencyRooms=1&promoCode=AUTUMN",
     );
   });
 
-  it("leaves out one room and a code the stay doesn't take", () => {
+  it("leaves out one room, and keeps a code the stay doesn't take as the agency's", () => {
     expect(
       stayHref(
         { protocol: "http:", host: "the-travel-ubud.booking.localhost:3002", pathname: "/" },
@@ -295,11 +302,11 @@ describe("stayHref", () => {
         { rooms: 1, promoApplied: false },
       ),
     ).toBe(
-      "http://uma.booking.localhost:3002/?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1",
+      "/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&agencyPromo=AUTUMN",
     );
   });
 
-  it("uses ?slug= on a development host", () => {
+  it("keeps the agency with ?slug= on a development host", () => {
     expect(
       stayHref(
         { protocol: "http:", host: "localhost:3002", pathname: "/" },
@@ -308,7 +315,85 @@ describe("stayHref", () => {
         { ...search, rooms: 2 },
         null,
       ),
-    ).toBe("/?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&slug=uma");
+    ).toBe(
+      "/stays/uma?checkIn=2026-11-12&checkOut=2026-11-14&adults=4&children=1&rooms=2&agencyPromo=AUTUMN&slug=the-travel-ubud",
+    );
+  });
+
+  it("opens checkout on the stay's own address until it runs on the agency's (VAY-2462)", () => {
+    const stayPage = { ...agencyHost, pathname: "/de/stays/escape-villa" };
+    expect(
+      stayCheckoutUrl(stayPage, "the-travel-ubud", "escape-villa", "?checkIn=2026-11-12&offer=a1"),
+    ).toBe("https://escape-villa.next-booking.vayada.com/de/book?checkIn=2026-11-12&offer=a1");
+    expect(
+      stayCheckoutUrl(
+        { protocol: "http:", host: "localhost:3002", pathname: "/stays/uma" },
+        "the-travel-ubud",
+        "uma",
+        "?offer=a1",
+      ),
+    ).toBe("/book?offer=a1&slug=uma");
+    // `<slug>.localhost`, as the middleware reads it.
+    expect(
+      stayCheckoutUrl(
+        { protocol: "http:", host: "the-travel-ubud.localhost:3002", pathname: "/stays/uma" },
+        "the-travel-ubud",
+        "uma",
+        "?offer=a1",
+      ),
+    ).toBe("http://uma.localhost:3002/book?offer=a1");
+  });
+
+  it("goes back to all stays with the same search", () => {
+    expect(
+      overviewHref(
+        { host: agencyHost.host, pathname: "/de/stays/escape-villa" },
+        "the-travel-ubud",
+        "?checkIn=2026-11-12&adults=2",
+      ),
+    ).toBe("/de?checkIn=2026-11-12&adults=2");
+    expect(
+      overviewHref({ host: "localhost:3002", pathname: "/stays/uma" }, "the-travel-ubud", ""),
+    ).toBe("/?slug=the-travel-ubud");
+    expect(localePrefix("/stays/uma")).toBe("");
+    expect(localePrefix("/fr/stays/uma")).toBe("/fr");
+  });
+});
+
+describe("nearby stays (VAY-2461)", () => {
+  const at = (id: string, latitude: number | null, approximate = false): AgencyStay => ({
+    ...stay(id),
+    map: latitude === null ? null : { latitude, longitude: 115.26, approximate },
+  });
+  const names = (list: { stay: AgencyStay }[]) => list.map((one) => one.stay.propertyId);
+
+  it("lists the page's other stays closest first, those without a pin after, at most 8", () => {
+    const here = at("escape", -8.5);
+    const page = [
+      at("far", -8.7),
+      here,
+      at("unpinned", null),
+      at("near", -8.501),
+      at("area", -8.52, true),
+      ...Array.from({ length: 8 }, (_, i) => at(`more-${i}`, -8.53 - i * 0.01)),
+    ];
+    const nearby = nearbyStays(page, here);
+    expect(nearby).toHaveLength(8);
+    expect(names(nearby).slice(0, 3)).toEqual(["near", "area", "more-0"]);
+    expect(nearby[0]!.metres).toBeGreaterThan(100);
+    expect(nearby[0]!.metres).toBeLessThan(120);
+    // Measured to a spot rounded to its area: said as approximate.
+    expect(nearby[1]!.approximate).toBe(true);
+    expect(names(nearbyStays(page, here, 20)).slice(-2)).toEqual(["far", "unpinned"]);
+  });
+
+  it("keeps the page's order when the stay itself has no pin", () => {
+    const here = at("escape", null);
+    const page = [at("b", -8.6), here, at("a", -8.5)];
+    expect(nearbyStays(page, here).map((one) => [one.stay.propertyId, one.metres])).toEqual([
+      ["b", null],
+      ["a", null],
+    ]);
   });
 });
 

@@ -1077,6 +1077,18 @@
     "mapLabel": "Map of the stays",
     "noMapStays": "None of these stays shows where it is on a map.",
     "fromPerNight": "from {amount} / night",
-    "pinName": "{name}, from {amount} per night"
+    "pinName": "{name}, from {amount} per night",
+    "allStays": "All stays",
+    "units": "{count, plural, one {# room} other {# rooms}}",
+    "villas": "{count, plural, one {# villa} other {# villas}}",
+    "roomLine": "Room {number}: {name}",
+    "yourChoice": "Your choice",
+    "nearbyHeading": "Other stays nearby",
+    "nearbyHintMap": "Hover a stay to see where it is on the map below. Scroll sideways for more.",
+    "nearbyHint": "Scroll sideways for more.",
+    "distanceAway": "{distance} away",
+    "aboutAway": "about {distance} away",
+    "notAvailable": "Not available for these dates",
+    "stayMapLabel": "Map of this stay and the stays nearby"
   }
 }

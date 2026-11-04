@@ -49,6 +49,19 @@ const DEV_SLUG_STORAGE_KEY = "dev-hotel-slug";
 
 // An agency page has only its overview so far ("/", "/de"); its checkout comes with VAY-2462.
 const HOME_PATH = new RegExp(`^/(?:(?:${routing.locales.join("|")})/?)?$`);
+// VAY-2461: one of an agency's stays on its address.
+const STAY_PATH = new RegExp(`^/(?:(?:${routing.locales.join("|")})/)?stays/([^/]+)/?$`);
+
+/** The stay a path names on an agency's address (`/stays/<slug>`), else null. */
+export function stayPathSlug(pathname: string): string | null {
+  const match = STAY_PATH.exec(pathname);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return null;
+  }
+}
 
 function resolveSlug(slugProp?: string): string | null {
   if (slugProp) return slugProp;
@@ -206,8 +219,14 @@ export function HotelProvider({
     }
   }, [fontPairing]);
 
-  // An agency page has no other pages yet.
-  const offline = notOnline || (!!agency && !home);
+  // An agency's address has its overview and its stays' pages (VAY-2461), only for the stays it
+  // shows; a hotel's has no stay pages.
+  const staySlug = stayPathSlug(pathname);
+  const offline =
+    notOnline ||
+    (agency
+      ? !home && !(staySlug && agency.stays.some((stay) => stay.slug === staySlug))
+      : !!hotel && staySlug !== null);
   if (offline || error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
@@ -272,6 +291,95 @@ export function HotelProvider({
         error,
         locale,
         slug: slug ?? "",
+      }}
+    >
+      {children}
+    </HotelContext.Provider>
+  );
+}
+
+/**
+ * One stay of an agency's page, on the agency's address (VAY-2461): the stay's own profile and
+ * add-ons for its rooms, inside the agency's page, which keeps its look (no colours or fonts of
+ * the stay's) and its context (`useAgencyPage`). While the stay loads, a spinner stands in.
+ */
+export function StayHotelProvider({ slug, children }: { slug: string; children: ReactNode }) {
+  const outer = useContext(HotelContext);
+  const t = useTranslations("error");
+  const tc = useTranslations("common");
+  const [state, setState] = useState<{
+    slug: string;
+    hotel?: Hotel;
+    addons?: Addon[];
+    error?: string;
+    notOnline?: boolean;
+  } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let canceled = false;
+    Promise.all([
+      hotelService.getHotel(slug, outer.locale),
+      hotelService.getAddons(slug).catch(() => [] as Addon[]),
+    ])
+      .then(([hotel, addons]) => {
+        if (!canceled) setState({ slug, hotel, addons });
+      })
+      .catch((err) => {
+        if (!canceled)
+          setState({
+            slug,
+            error: err instanceof Error ? err.message : "Failed to load hotel data",
+            // Gone between the agency's read and this one: retrying can't help.
+            notOnline: err instanceof ApiError && err.status === 404,
+          });
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [slug, outer.locale, attempt]);
+  const current = state?.slug === slug ? state : null;
+  if (current?.error)
+    return (
+      <div role="alert" className="mx-auto max-w-md px-4 py-16 text-center">
+        <h2 className="mb-2 text-lg font-bold text-gray-900">
+          {current.notOnline ? t("notOnline") : t("unableToLoad")}
+        </h2>
+        <p className="mb-4 text-sm text-gray-600">
+          {current.notOnline ? t("checkBackLater") : t("tryAgainLater")}
+        </p>
+        {!current.notOnline && (
+          <button
+            type="button"
+            onClick={() => {
+              setState(null);
+              setAttempt((value) => value + 1);
+            }}
+            className="rounded-full bg-gray-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+          >
+            {t("retry")}
+          </button>
+        )}
+      </div>
+    );
+  if (!current?.hotel)
+    return (
+      <div role="status" className="flex justify-center py-24" aria-busy="true">
+        <span className="sr-only">{tc("loading")}</span>
+        <div
+          aria-hidden="true"
+          className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-gray-900"
+        />
+      </div>
+    );
+  return (
+    <HotelContext.Provider
+      value={{
+        ...outer,
+        hotel: current.hotel,
+        addons: current.addons ?? [],
+        loading: false,
+        error: null,
+        slug,
       }}
     >
       {children}

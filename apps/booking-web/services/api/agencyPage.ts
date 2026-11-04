@@ -24,6 +24,8 @@ export type AgencyStay = {
   privatePool: boolean;
   /** Its pin as its own page shows it (rounded when approximate); null keeps it off the map. */
   map: { latitude: number; longitude: number; approximate: boolean } | null;
+  /** Its rooms (or villas) in use, for the stay page (VAY-2461); null when unknown. */
+  units: number | null;
 };
 
 /** A live agency booking page (`GET /api/booking-web/agency-pages/:slug`, VAY-2459). */
@@ -59,6 +61,8 @@ export type AgencyPage = {
   filters: Record<AccountBookingPageFilter, boolean>;
   /** The layouts guests can switch between (List always) and the one they see first. */
   layout: { allowed: AccountBookingPageLayout[]; default: AccountBookingPageLayout };
+  /** A stay's page (VAY-2461): "Other stays nearby" and its map. */
+  stayPage: { nearby: boolean; map: boolean };
   stays: AgencyStay[];
 };
 
@@ -134,6 +138,7 @@ export function readAgencyPage(raw: unknown): AgencyPage {
   const results = object(raw.results) ? raw.results : {};
   const filters = object(raw.filters) ? raw.filters : {};
   const layout = object(raw.layout) ? raw.layout : {};
+  const stayPage = object(raw.stayPage) ? raw.stayPage : {};
   const allowed = ACCOUNT_BOOKING_PAGE_LAYOUTS.filter(
     (one) => one === "list" || (Array.isArray(layout.allowed) && layout.allowed.includes(one)),
   );
@@ -184,6 +189,7 @@ export function readAgencyPage(raw: unknown): AgencyPage {
     filters: Object.fromEntries(
       ACCOUNT_BOOKING_PAGE_FILTERS.map((key) => [key, filters[key] === true]),
     ) as Record<AccountBookingPageFilter, boolean>,
+    stayPage: { nearby: stayPage.nearby !== false, map: stayPage.map !== false },
     layout: {
       allowed,
       default: allowed.includes(layout.default as AccountBookingPageLayout)
@@ -216,6 +222,10 @@ export function readAgencyPage(raw: unknown): AgencyPage {
           childrenEnabled: stay.childrenEnabled !== false,
           privatePool: stay.privatePool === true,
           map: pin(stay.map),
+          units:
+            typeof stay.units === "number" && Number.isSafeInteger(stay.units) && stay.units > 0
+              ? stay.units
+              : null,
         },
       ];
     }),
