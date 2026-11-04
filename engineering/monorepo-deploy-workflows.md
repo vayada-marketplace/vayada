@@ -24,6 +24,13 @@ on relevant pushes to `main`.
 | Next Booking Admin  | `.github/workflows/deploy-next-booking-admin.yml` |
 | Next PMS Web        | `.github/workflows/deploy-next-pms-web.yml`       |
 
+The hotel websites (`apps/hotel-sites`, VAY-2422) are static files, not an ECS service:
+`.github/workflows/deploy-hotel-sites.yml` builds them on relevant pushes to `main` (or a manual
+dispatch) and publishes each hotel's folder to its own Cloudflare Pages project
+(`vayada-site-<slug>`) with the `CLOUDFLARE_PAGES_API_TOKEN` secret, a token limited to
+Cloudflare Pages. vayada-platform's Terraform keeps each address's DNS record. It runs outside the
+release train: it serves no API and holds no data.
+
 ECS-backed workflows publish a SHA-pinned image and send an
 `app-image-published` repository dispatch to `vayada-platform`, which owns the
 service update. GitHub Actions authenticates through
