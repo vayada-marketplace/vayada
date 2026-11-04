@@ -4,7 +4,7 @@
  */
 export const BOOKING_DESIGN_BUTTON_FOREGROUND_COLOR = "#FFFFFF" as const;
 /** Button text on light brand colours, where white would be hard to read (VAY-2475). */
-export const BOOKING_DESIGN_BUTTON_DARK_FOREGROUND_COLOR = "#111827" as const;
+export const BOOKING_DESIGN_BUTTON_DARK_FOREGROUND_COLOR = "#000000" as const;
 
 /** Matches Booking Web's primary-600/default and primary-700/hover palette tokens. */
 export function createBookingDesignButtonColors(primaryColor: string) {
@@ -17,15 +17,11 @@ export function createBookingDesignButtonColors(primaryColor: string) {
 }
 
 /**
- * White, or dark text when that reads better on the background (VAY-2475). Every colour that kept
- * white button text before stays white: white wins whenever it reaches about 4.2:1.
+ * White wherever white text reaches the WCAG AA 4.5:1 contrast (the old rule, so no colour that
+ * passed it changes), else black, which then always reaches at least 4.67:1 (VAY-2475).
  */
 export function bookingDesignTextColorOn(backgroundColor: string) {
-  const background = relativeLuminance(backgroundColor);
-  const white = 1.05 / (background + 0.05);
-  const dark =
-    (background + 0.05) / (relativeLuminance(BOOKING_DESIGN_BUTTON_DARK_FOREGROUND_COLOR) + 0.05);
-  return white >= dark
+  return 1.05 / (relativeLuminance(backgroundColor) + 0.05) >= 4.5
     ? BOOKING_DESIGN_BUTTON_FOREGROUND_COLOR
     : BOOKING_DESIGN_BUTTON_DARK_FOREGROUND_COLOR;
 }

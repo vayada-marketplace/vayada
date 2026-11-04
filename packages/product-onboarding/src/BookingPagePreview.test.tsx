@@ -48,7 +48,7 @@ describe("BookingPagePreview", () => {
         .root.findAll((node) => node.props.style?.backgroundColor === primaryColor)
         .map((node) => node.props.style.color);
 
-    expect(buttonText("#c19a76")).toEqual(["#111827", "#111827"]);
+    expect(buttonText("#c19a76")).toEqual(["#000000", "#000000"]);
     expect(buttonText("#2D6A4F")).toEqual(["#FFFFFF", "#FFFFFF"]);
   });
 

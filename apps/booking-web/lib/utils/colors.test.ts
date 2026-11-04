@@ -6,13 +6,10 @@ describe("generateOnColorPalette (VAY-2475)", () => {
   it("gives light brand colours dark button text, as r g b channels", () => {
     // Aether Hilltop Villas: dark on its button shade, white on the darker confirmation buttons.
     expect(generateOnColorPalette("#c19a76")).toEqual({
-      "on-600": "17 24 39",
+      "on-600": "0 0 0",
       "on-700": "255 255 255",
     });
-    expect(generateOnColorPalette("#F5F5F5")).toEqual({
-      "on-600": "17 24 39",
-      "on-700": "17 24 39",
-    });
+    expect(generateOnColorPalette("#F5F5F5")).toEqual({ "on-600": "0 0 0", "on-700": "0 0 0" });
   });
 
   it("keeps white button text on the setup colours", () => {

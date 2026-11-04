@@ -93,7 +93,7 @@ test.describe("booking-web tenant smoke", () => {
   test("keeps buttons readable on a light brand colour with dark text (VAY-2475)", async ({
     page,
   }, testInfo) => {
-    const dark = "rgb(17, 24, 39)";
+    const dark = "rgb(0, 0, 0)";
     const white = "rgb(255, 255, 255)";
     // The text colour a class gets on this page, for shades no element on it uses.
     const textColourOf = (className: string) =>

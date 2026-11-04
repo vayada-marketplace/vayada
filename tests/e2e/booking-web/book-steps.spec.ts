@@ -46,9 +46,11 @@ async function mockFlow(
       bookableWeekdays?: number[];
       price: number;
     }[],
+    // VAY-2475: the hotel's brand colour.
+    primaryColor = undefined as string | undefined,
   } = {},
 ) {
-  await mockBookingApis(page);
+  await mockBookingApis(page, primaryColor ? { primaryColor } : {});
   const config = {
     addons: [
       {
@@ -503,6 +505,25 @@ test("offers an extra with a lead time from its first bookable check-in date", a
   await expect(late.getByRole("button", { name: "Add Late check-out" })).toBeEnabled();
   await expect(late).not.toContainText("notice");
   await page.screenshot({ path: testInfo.outputPath("extras-enough-notice.png"), fullPage: true });
+});
+
+// VAY-2475: a light brand colour such as Aether's gets dark text on its buttons.
+test("gives an extra's Add button dark text on a light brand colour", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockFlow(page, { primaryColor: "#C19A76" });
+  await page.goto(STAY);
+  await page
+    .getByRole("article", { name: "Garden breakfast" })
+    .getByRole("button", { name: "See details" })
+    .click();
+  const add = page
+    .getByRole("dialog", { name: "Garden breakfast" })
+    .getByRole("button", { name: "Add", exact: true });
+  await expect(add).toHaveCSS("background-color", "rgb(170, 136, 104)");
+  await expect(add).toHaveCSS("color", "rgb(0, 0, 0)");
+  await page.screenshot({ path: testInfo.outputPath("extra-details-c19a76.png") });
 });
 
 // VAY-2231: a card's details: a popup from md up, a bottom sheet on phones.

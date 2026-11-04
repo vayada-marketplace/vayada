@@ -857,7 +857,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     // ...and dark on a light one such as Aether's, which saves without a warning (VAY-2475).
     await hex.fill("#c19a76");
-    await expect(checkAvailability).toHaveCSS("color", "rgb(17, 24, 39)");
+    await expect(checkAvailability).toHaveCSS("color", "rgb(0, 0, 0)");
     await expect(page.getByText(/too light/i)).toHaveCount(0);
     await expect(hex).not.toHaveAttribute("aria-invalid");
     await page.getByRole("button", { name: "Typography" }).click();

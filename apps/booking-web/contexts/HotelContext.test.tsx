@@ -137,7 +137,7 @@ it("gives buttons dark text on a light brand colour and white text on a dark one
   const root = document.documentElement.style;
   try {
     expect(root.getPropertyValue("--color-primary-600")).toBe("#aa8868");
-    expect(root.getPropertyValue("--color-primary-on-600")).toBe("17 24 39");
+    expect(root.getPropertyValue("--color-primary-on-600")).toBe("0 0 0");
     // The confirmation page's darker buttons keep white text, which reads better there.
     expect(root.getPropertyValue("--color-primary-on-700")).toBe("255 255 255");
   } finally {

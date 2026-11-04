@@ -200,14 +200,16 @@ describe("Booking design contract", () => {
     expect(createBookingDesignButtonColors("#C19A76")).toEqual({
       backgroundColor: "#aa8868",
       hoverBackgroundColor: "#8b6f55",
-      foregroundColor: "#111827",
+      foregroundColor: "#000000",
     });
-    expect(createBookingDesignButtonColors("#F5F5F5").foregroundColor).toBe("#111827");
-    expect(createBookingDesignButtonColors("#FFFFFF").foregroundColor).toBe("#111827");
+    expect(createBookingDesignButtonColors("#F5F5F5").foregroundColor).toBe("#000000");
+    expect(createBookingDesignButtonColors("#FFFFFF").foregroundColor).toBe("#000000");
+    // White would only reach 4.28:1 on this blue's button, so it gets black (6.0:1) instead.
+    expect(createBookingDesignButtonColors("#008CFF").foregroundColor).toBe("#000000");
     // On Aether's darker shade (the confirmation page's buttons) white reads better again.
     expect(bookingDesignTextColorOn("#8b6f55")).toBe("#FFFFFF");
     // Every colour the old rule took (white text at 4.5:1 on the button) keeps white text, so no
-    // live hotel's buttons change; and the chosen text always reaches at least 4.2:1.
+    // live hotel's buttons change; and the chosen text always reaches 4.5:1.
     const steps = Array.from({ length: 18 }, (_, step) => step * 15);
     for (const red of steps)
       for (const green of steps)
@@ -220,8 +222,14 @@ describe("Booking design contract", () => {
             expect(button.foregroundColor, colour).toBe("#FFFFFF");
             expect(bookingDesignTextColorOn(button.hoverBackgroundColor), colour).toBe("#FFFFFF");
           }
-          expect(contrast(button.backgroundColor, button.foregroundColor), colour).toBeGreaterThan(
-            4.2,
+          expect(
+            contrast(button.backgroundColor, button.foregroundColor),
+            colour,
+          ).toBeGreaterThanOrEqual(4.5);
+          // The darker shade (the confirmation page's buttons) picks its own text the same way.
+          const onDarker = bookingDesignTextColorOn(button.hoverBackgroundColor);
+          expect(contrast(button.hoverBackgroundColor, onDarker), colour).toBeGreaterThanOrEqual(
+            4.5,
           );
         }
   });
