@@ -117,21 +117,30 @@ export async function readGuestLocation(
   );
   const row = result.rows[0];
   if (!row) return null;
-  const enabled = row.enabled === true;
   const pin = roomPin({
     latitude: row.latitude === null ? null : Number(row.latitude),
     longitude: row.longitude === null ? null : Number(row.longitude),
   });
-  if (!pin || !row.geoPublic || row.mapDisplayMode === "hidden" || !row.mapDisplayMode)
-    return { enabled, map: { property: null }, propertyPin: pin };
   return {
-    enabled,
-    map:
-      row.mapDisplayMode === "approximate"
-        ? { property: { ...roundToArea(pin), approximate: true } }
-        : { property: { ...pin, approximate: false } },
+    enabled: row.enabled === true,
+    map: { property: guestPropertyPin(pin, row.geoPublic, row.mapDisplayMode) },
     propertyPin: pin,
   };
+}
+
+/** A property's pin as its "Guest map visibility" shows guests: rounded to its area for
+ * Approximate; none for Hidden, a private location or no pin. Also the agency page's stay pins
+ * (VAY-2460). */
+export function guestPropertyPin(
+  pin: MapPin | null,
+  geoPublic: boolean | null,
+  mapDisplayMode: MapDisplayMode | null,
+): GuestLocationMap["property"] {
+  if (!pin || !geoPublic || (mapDisplayMode !== "approximate" && mapDisplayMode !== "exact"))
+    return null;
+  return mapDisplayMode === "approximate"
+    ? { ...roundToArea(pin), approximate: true }
+    : { ...pin, approximate: false };
 }
 
 /** The same rounding the booking page publication applies to an approximate location: about 1 km. */

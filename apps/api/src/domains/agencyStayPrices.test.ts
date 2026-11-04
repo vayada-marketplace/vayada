@@ -183,6 +183,7 @@ describe("agency stay prices", () => {
           },
           pricesComplete: false,
           nextFree: null,
+          rateFilters: { breakfast: null, freeCancellation: null, both: null },
         },
         {
           propertyId: "id-full",
@@ -193,6 +194,7 @@ describe("agency stay prices", () => {
           price: null,
           pricesComplete: true,
           nextFree: null,
+          rateFilters: null,
         },
         // No room takes three: three rooms would, and they're taken.
         {
@@ -204,6 +206,7 @@ describe("agency stay prices", () => {
           price: null,
           pricesComplete: true,
           nextFree: null,
+          rateFilters: null,
         },
         // "gone" is no longer public, so it isn't shown.
         {
@@ -215,6 +218,7 @@ describe("agency stay prices", () => {
           price: null,
           pricesComplete: false,
           nextFree: null,
+          rateFilters: null,
         },
       ],
     });
@@ -250,6 +254,7 @@ describe("agency stay prices", () => {
       price: { totalMinor: "20000", nightlyMinor: "10000", currency: "EUR", promoApplied: false },
       pricesComplete: true,
       nextFree: null,
+      rateFilters: { breakfast: null, freeCancellation: null, both: null },
     });
     expect(queries[0]).toMatchObject({ children: 0, room: { adults: 2, children: 0 } });
   });
@@ -359,6 +364,7 @@ describe("agency stay prices", () => {
       },
       pricesComplete: true,
       nextFree: null,
+      rateFilters: { breakfast: null, freeCancellation: null, both: null },
     });
   });
 
@@ -509,6 +515,115 @@ describe("agency stay prices", () => {
     release();
     await Promise.all(slow);
     expect(await agency.read("again", search)).not.toBeNull();
+  });
+
+  it("prices the same rooms with only breakfast rates, only rates still free to cancel, or both (VAY-2460)", async () => {
+    // Free cancellation until 7 days before arrival, half board until 3 days, breakfast never.
+    const rates: StayOffers = {
+      rooms: [
+        {
+          roomTypeId: "double",
+          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+          offers: [
+            { key: "flex", meal: "room_only", free: 7 },
+            { key: "bb", meal: "breakfast", free: null },
+            { key: "hb", meal: "half_board", free: 3 },
+          ].map(({ key, meal, free }) => ({
+            publicOfferKey: key,
+            currency: "EUR",
+            paymentMethods: ["card"],
+            paymentSchedule: { kind: "full" },
+            mealPlan: meal,
+            cancellation:
+              free === null
+                ? { kind: "non_refundable" }
+                : { kind: "free_until_days_before_arrival", days: free },
+          })),
+        },
+      ],
+    };
+    // 3 Nov 17:00 UTC is already 4 Nov in Bali: half board's last free day (3 Nov) is past there.
+    let at = Date.parse("2026-11-03T17:00:00Z");
+    let timezone: string | null = "Asia/Makassar";
+    const stayPrices = vi.fn(async () => ({
+      rooms: [
+        room("double", [priced("flex", "20000"), priced("bb", "24000"), priced("hb", "30000")]),
+      ],
+    }));
+    const agency = createAgencyStayPrices({
+      pageStays: async () => ({ stays: [{ propertyId: "p1", slug: "villa", timezone }] }),
+      offers: async () => rates,
+      stayPrices,
+      now: () => at,
+    });
+    const search = parseAgencyStayPricesQuery({ ...STAY, adults: "2" })!;
+    const bali = (await agency.read("agency", search))?.stays[0];
+    expect(bali).toMatchObject({ status: "available", price: { totalMinor: "20000" } });
+    expect(bali?.rateFilters).toEqual({
+      breakfast: {
+        roomTypesFree: 1,
+        price: { totalMinor: "24000", nightlyMinor: "12000", currency: "EUR", promoApplied: false },
+        pricesComplete: true,
+      },
+      // Free cancellation until 7 days before arrival ended on 30 Oct; half board's on 3 Nov.
+      freeCancellation: null,
+      both: null,
+    });
+    // The stay's own price read, once: the filters reuse it.
+    expect(stayPrices).toHaveBeenCalledTimes(1);
+
+    // In UTC (a stay without a time zone) it is still 3 Nov: half board is free to cancel.
+    at += 60_000;
+    timezone = null;
+    const utc = (await agency.read("agency", search))?.stays[0];
+    expect(utc?.rateFilters).toMatchObject({
+      breakfast: { price: { totalMinor: "24000" } },
+      freeCancellation: { roomTypesFree: 1, price: { totalMinor: "30000" } },
+      both: { price: { totalMinor: "30000" } },
+    });
+  });
+
+  it("books every room of a group with a filtered rate, from the rooms that have one", async () => {
+    const rate = (key: string, meal: string) => ({
+      publicOfferKey: key,
+      currency: "EUR",
+      paymentMethods: ["card"],
+      paymentSchedule: { kind: "full" },
+      mealPlan: meal,
+      cancellation: { kind: "non_refundable" },
+    });
+    const agency = createAgencyStayPrices({
+      pageStays: async () => page,
+      offers: async () => ({
+        rooms: [
+          {
+            roomTypeId: "double",
+            occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+            offers: [rate("ro", "room_only"), rate("bb", "breakfast")],
+          },
+          {
+            roomTypeId: "twin",
+            occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+            offers: [rate("twin-ro", "room_only")],
+          },
+        ],
+      }),
+      stayPrices: async () => ({
+        rooms: [
+          room("double", [priced("ro", "10000"), priced("bb", "14000")], { roomsFree: 2 }),
+          room("twin", [priced("twin-ro", "9000")], { roomsFree: 1 }),
+        ],
+      }),
+    });
+    const two = parseAgencyStayPricesQuery({ ...STAY, adults: "4", rooms: "2" })!;
+    const stay = (await agency.read("agency", two))?.stays[0];
+    // The twin and a double; with breakfast, both doubles.
+    expect(stay).toMatchObject({ rooms: 2, roomTypesFree: 2, price: { totalMinor: "19000" } });
+    expect(stay?.rateFilters).toMatchObject({
+      breakfast: { roomTypesFree: 1, price: { totalMinor: "28000", nightlyMinor: "14000" } },
+      freeCancellation: null,
+      both: null,
+    });
   });
 
   it("is null without a live page", async () => {

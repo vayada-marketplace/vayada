@@ -14,6 +14,7 @@ import {
   activeBookingPublicationGateConfig,
   visibleActiveBookingPublication,
 } from "./activeBookingPublicationGate.js";
+import { guestPropertyPin, roomPin, type MapDisplayMode } from "./bookingLocationMap.js";
 
 /** What keeps a property off the agency page: no visible booking page, no property type, no map pin. */
 export type AccountBookingPageMissing = "setup" | "type" | "location";
@@ -125,8 +126,15 @@ type PropertyRow = {
   name: string;
   propertyType: string | null;
   area: string | null;
+  /** The location's "show locality" box (`address_public`). */
+  localityPublic: boolean;
   active: boolean;
   located: boolean;
+  latitude: string | null;
+  longitude: string | null;
+  geoPublic: boolean;
+  mapDisplayMode: MapDisplayMode | null;
+  timezone: string | null;
   photoUrl: string | null;
   units: number;
   publicContent: unknown;
@@ -383,8 +391,12 @@ async function propertyRows(
   const result = await client.query<PropertyRow>(
     `SELECT property.id::text AS "propertyId", property.display_name AS name,
             property.property_type AS "propertyType", location.area,
+            location.address_public IS TRUE AS "localityPublic",
             property.lifecycle_status = 'active' AS active,
             (location.latitude IS NOT NULL AND location.longitude IS NOT NULL) AS located,
+            location.latitude::text AS latitude, location.longitude::text AS longitude,
+            location.geo_public IS TRUE AS "geoPublic", location.map_display_mode AS "mapDisplayMode",
+            location.timezone,
             (SELECT photo FROM unnest(ARRAY[
                revision.public_content #>> '{profile,hotel,branding,heroImage}',
                revision.public_content #>> '{rooms,0,images,0,url}'
@@ -532,7 +544,13 @@ export async function readLiveAccountBookingPageStays(
   slug: string,
 ): Promise<{
   organizationId: string;
-  stays: { propertyId: string; slug: string; childrenEnabled: boolean }[];
+  stays: {
+    propertyId: string;
+    slug: string;
+    childrenEnabled: boolean;
+    /** VAY-2460: whose calendar decides whether a free cancellation is still free. */
+    timezone: string | null;
+  }[];
 } | null> {
   const page = await livePage(client, slug);
   if (!page) return null;
@@ -542,6 +560,7 @@ export async function readLiveAccountBookingPageStays(
       propertyId: row.propertyId,
       slug: row.slug,
       childrenEnabled: childrenEnabled(row.publicContent),
+      timezone: row.timezone,
     })),
   };
 }
@@ -554,7 +573,9 @@ const GALLERY_PHOTOS = 24;
  * contact details when Contact is off), its header image (its own upload; else the design stay's
  * header, else its first photo), the design stay's address, colours, fonts, languages and display
  * currencies, and each live stay's card (`liveStays`), all from the stays' published booking pages.
- * Null when no live page has this address.
+ * VAY-2460: each stay's filter facts and map pin, read live like its readiness: its area only
+ * while its locality is public, its pin as its own "Guest map visibility" shows it, and whether
+ * Room Filters mark one of its rooms "Private pool". Null when no live page has this address.
  */
 export async function readPublicAccountBookingPage(client: Queryable, slug: string) {
   const page = await livePage(client, slug);
@@ -563,10 +584,12 @@ export async function readPublicAccountBookingPage(client: Queryable, slug: stri
     page.settings,
     defaultAccountBookingPageSettings(page.name),
   );
-  const stays = (await liveStays(client, page.organizationId)).map((row) => ({
-    row,
-    hotel: publishedHotel(row.publicContent),
-  }));
+  const live = await liveStays(client, page.organizationId);
+  const pools = await staysWithPrivatePool(
+    client,
+    live.map((row) => row.propertyId),
+  );
+  const stays = live.map((row) => ({ row, hotel: publishedHotel(row.publicContent) }));
   const design =
     stays.find(({ row }) => row.propertyId === settings.header.designPropertyId) ?? stays[0];
   const { header } = settings;
@@ -605,11 +628,21 @@ export async function readPublicAccountBookingPage(client: Queryable, slug: stri
       slug: row.slug,
       name: row.name,
       propertyType: row.propertyType,
-      area: row.area,
+      // The hotel's own page shows no locality while it is private.
+      area: row.localityPublic ? row.area : null,
       photoUrl: row.photoUrl,
       photos: hotel.photos.slice(0, GALLERY_PHOTOS),
       currency: hotel.currency,
-      location: hotel.location,
+      // Null keeps the stay off the map.
+      map: guestPropertyPin(
+        roomPin({
+          latitude: row.latitude === null ? null : Number(row.latitude),
+          longitude: row.longitude === null ? null : Number(row.longitude),
+        }),
+        row.geoPublic,
+        row.mapDisplayMode,
+      ),
+      privatePool: pools.has(row.propertyId),
       childrenEnabled: childrenEnabled(row.publicContent),
     })),
   };
@@ -623,9 +656,6 @@ function publishedHotel(publicContent: unknown) {
   const https = (value: unknown) =>
     typeof value === "string" && value.startsWith("https://") ? value : null;
   const branding = (hotel?.["branding"] ?? {}) as Record<string, unknown>;
-  const location = (hotel?.["location"] ?? {}) as Record<string, unknown>;
-  const latitude = location["latitude"],
-    longitude = location["longitude"];
   const supported = hotel?.["supportedLocales"];
   return {
     heroImage: https(branding["heroImage"]),
@@ -651,11 +681,40 @@ function publishedHotel(publicContent: unknown) {
         return https(url) ? [{ url: https(url)!, alt: text(alt) }] : [];
       },
     ),
-    location:
-      typeof latitude === "number" && typeof longitude === "number"
-        ? { latitude, longitude }
-        : null,
   };
+}
+
+/**
+ * VAY-2460: the stays whose Room Filters mark at least one of their rooms in use "Private pool",
+ * only while that filter is on for the stay. Room Filters list PMS rooms (units); a retired room,
+ * or one whose room type is inactive or closed, no longer counts.
+ */
+async function staysWithPrivatePool(
+  client: Queryable,
+  propertyIds: string[],
+): Promise<ReadonlySet<string>> {
+  if (!propertyIds.length) return new Set();
+  const result = await client.query<{ propertyId: string }>(
+    `SELECT settings.property_id::text AS "propertyId"
+     FROM booking.booking_settings settings
+     WHERE settings.property_id = ANY($1::uuid[])
+       AND settings.booking_filters ? 'privatePool'
+       AND jsonb_typeof(settings.filter_rooms -> 'privatePool') = 'array'
+       AND EXISTS (
+         SELECT 1
+         FROM pms.rooms room
+         JOIN pms.room_types type
+           ON type.id = room.room_type_id AND type.property_id = room.property_id AND type.active
+         LEFT JOIN pms.room_type_closures closure
+           ON closure.property_id = room.property_id AND closure.room_type_id = room.room_type_id
+         WHERE room.property_id = settings.property_id
+           AND room.status <> 'retired'
+           AND closure.room_type_id IS NULL
+           AND settings.filter_rooms -> 'privatePool' ? room.id::text
+       )`,
+    [propertyIds],
+  );
+  return new Set(result.rows.map((row) => row.propertyId));
 }
 
 /** Whether the stay's published page takes children; its page counts none when it doesn't. */

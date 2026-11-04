@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPgAccountBookingPagesRepository,
+  readLiveAccountBookingPageStays,
   readPublicAccountBookingPage,
   type AccountBookingPagesRepository,
 } from "./domains/accountBookingPages.js";
@@ -423,12 +424,14 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
       ]);
       expect(page!.stays[0]).toMatchObject({
         slug: `${PUBLIC_ID_PREFIX}${stays.mandala}`,
-        area: "Ubud",
         currency: "EUR",
         photos: [
           expect.objectContaining({ url: "https://cdn.vayada.example/hotels/alpenrose/front.jpg" }),
         ],
-        location: { latitude: 47.2692, longitude: expect.any(Number) },
+        // Locality and pin private (the location's defaults), no Room Filters (VAY-2460).
+        area: null,
+        map: null,
+        privatePool: false,
         childrenEnabled: expect.any(Boolean),
       });
       expect(page!.locales).toEqual({ default: "en", supported: ["en", "de"] });
@@ -460,6 +463,121 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
       );
       expect(await readPublicAccountBookingPage(runtime, slug)).toBeNull();
       expect(await readPublicAccountBookingPage(runtime, "Not A Page")).toBeNull();
+    } finally {
+      await runtime.end();
+    }
+  });
+
+  it("gives each stay its area, map pin and private pool as the stay shows guests, read live (VAY-2460)", async () => {
+    const { organizationId, stays } = await travelUbud();
+    for (const stay of [stays.escape, stays.mandala])
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1::uuid, 'pms', 'pms_property', $2, 'owner', 'active')`,
+        [organizationId, stay],
+      );
+    const slug = `agency-${randomUUID().slice(0, 8)}`;
+    expect(
+      await repository.save(
+        command(
+          organizationId,
+          update(stays, { slug, live: true, propertyIds: [stays.escape!, stays.mandala!] }),
+        ),
+      ),
+    ).toMatchObject({ ok: true });
+    // Escape shows its locality and exact pin; Mandala hides its locality and shows an area.
+    await admin.query(
+      `UPDATE hotel_catalog.property_locations
+       SET address_public = TRUE, geo_public = TRUE, map_display_mode = 'exact',
+           latitude = -8.506512, longitude = 115.262481
+       WHERE property_id = $1::uuid`,
+      [stays.escape],
+    );
+    await admin.query(
+      `UPDATE hotel_catalog.property_locations
+       SET geo_public = TRUE, map_display_mode = 'approximate',
+           latitude = -8.51234, longitude = 115.26789
+       WHERE property_id = $1::uuid`,
+      [stays.mandala],
+    );
+    // Room Filters: Escape marks a room in use "Private pool"; Mandala only a retired one and a
+    // room of a room type it stopped selling.
+    const room = async (propertyId: string, status: string, active = true) => {
+      const roomType = randomUUID(),
+        roomId = randomUUID();
+      await admin.query(
+        "INSERT INTO pms.room_types (id, property_id, name, active) VALUES ($1, $2, 'Villa', $3)",
+        [roomType, propertyId, active],
+      );
+      await admin.query(
+        `INSERT INTO pms.rooms (id, property_id, room_type_id, operational_label_status, status)
+         VALUES ($1, $2, $3, 'unverified', $4)`,
+        [roomId, propertyId, roomType, status],
+      );
+      return roomId;
+    };
+    const filters = async (propertyId: string, rooms: string[], on = true) =>
+      admin.query(
+        `INSERT INTO booking.booking_settings (property_id, booking_filters, filter_rooms)
+         VALUES ($1::uuid, $2::jsonb, $3::jsonb)
+         ON CONFLICT (property_id) DO UPDATE
+           SET booking_filters = EXCLUDED.booking_filters, filter_rooms = EXCLUDED.filter_rooms`,
+        [
+          propertyId,
+          JSON.stringify(on ? ["privatePool"] : []),
+          JSON.stringify(on ? { privatePool: rooms } : {}),
+        ],
+      );
+    const pool = await room(stays.escape!, "available");
+    await filters(stays.escape!, [randomUUID(), pool]);
+    await filters(stays.mandala!, [
+      await room(stays.mandala!, "retired"),
+      await room(stays.mandala!, "available", false),
+    ]);
+
+    const runtime = new pg.Pool({ connectionString: fixture.connectionString, max: 1 });
+    try {
+      const facts = async () =>
+        (await readPublicAccountBookingPage(runtime, slug))!.stays.map((stay) => ({
+          propertyId: stay.propertyId,
+          area: stay.area,
+          map: stay.map,
+          privatePool: stay.privatePool,
+        }));
+      expect(await facts()).toEqual([
+        {
+          propertyId: stays.escape,
+          area: "Ubud",
+          map: { latitude: -8.506512, longitude: 115.262481, approximate: false },
+          privatePool: true,
+        },
+        {
+          propertyId: stays.mandala,
+          area: null,
+          // Rounded to about a kilometre, as the stay's own page shows it.
+          map: { latitude: -8.51, longitude: 115.27, approximate: true },
+          privatePool: false,
+        },
+      ]);
+      // The price read learns each stay's time zone, for free cancellation deadlines.
+      expect((await readLiveAccountBookingPageStays(runtime, slug))?.stays).toEqual([
+        expect.objectContaining({ propertyId: stays.escape, timezone: "Asia/Makassar" }),
+        expect.objectContaining({ propertyId: stays.mandala, timezone: "Asia/Makassar" }),
+      ]);
+
+      // Hidden on the map, or the Private pool filter switched off: at once.
+      await admin.query(
+        "UPDATE hotel_catalog.property_locations SET map_display_mode = 'hidden' WHERE property_id = $1::uuid",
+        [stays.escape],
+      );
+      await filters(stays.escape!, [pool], false);
+      expect((await facts())[0]).toEqual({
+        propertyId: stays.escape,
+        area: "Ubud",
+        map: null,
+        privatePool: false,
+      });
     } finally {
       await runtime.end();
     }
@@ -638,6 +756,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
         ["booking.account_booking_page_properties", "organization_id", organizations],
         ["booking.account_booking_pages", "organization_id", organizations],
         ["identity.organization_resource_links", "organization_id", organizations],
+        ["booking.booking_settings", "property_id", properties],
         ["pms.rooms", "property_id", properties],
         ["pms.room_types", "property_id", properties],
         ["distribution.active_public_booking_revision", "property_id", properties],
