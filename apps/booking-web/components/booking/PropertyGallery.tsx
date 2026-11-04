@@ -19,6 +19,10 @@ type PropertyGalleryProps = {
   groups?: { name: string; images: string[] }[];
   /** Phone nav: the grid icon alone, like the Contact button there, with a 44px tap area. */
   compact?: boolean;
+  /** On the page rather than the hero (VAY-2461, a stay's box): an outlined pill. */
+  outline?: boolean;
+  /** The button's name when the page has another gallery, such as "…: <stay>". */
+  label?: string;
 };
 
 const MAX_PROPERTY_GALLERY_PHOTOS = 10;
@@ -32,6 +36,8 @@ export default function PropertyGallery({
   images,
   groups,
   compact = false,
+  outline = false,
+  label,
 }: PropertyGalleryProps) {
   const t = useTranslations("home.gallery");
   // Each photo with the stay it shows and its number there.
@@ -115,13 +121,17 @@ export default function PropertyGallery({
           setOpen(true);
         }}
         // A white ring would merge into the white pill; the offset outline leaves a visible gap.
-        className={`flex items-center rounded-full bg-white text-[#1F2427] transition-colors hover:bg-[#F0F1F1] focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
+        className={`flex items-center rounded-full bg-white text-[#1F2427] transition-colors hover:bg-[#F0F1F1] focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+          outline
+            ? "border border-gray-300 focus-visible:outline-primary-500"
+            : "focus-visible:outline-white"
+        } ${
           compact
             ? // The tap area reaches 8px past the circle; mr-0.5 keeps it clear of Contact.
               "relative mr-0.5 h-7 w-7 justify-center before:absolute before:-inset-2 before:content-['']"
             : "h-10 gap-2 px-[18px] text-[15px] font-semibold"
         }`}
-        aria-label={t("open")}
+        aria-label={label ?? t("open")}
         aria-haspopup="dialog"
       >
         <Squares2X2Icon className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} aria-hidden="true" />

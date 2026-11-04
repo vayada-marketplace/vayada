@@ -1076,6 +1076,18 @@
     "mapLabel": "Mapa de los alojamientos",
     "noMapStays": "Ninguno de estos alojamientos muestra su ubicación en un mapa.",
     "fromPerNight": "desde {amount} / noche",
-    "pinName": "{name}, desde {amount} por noche"
+    "pinName": "{name}, desde {amount} por noche",
+    "allStays": "Todos los alojamientos",
+    "units": "{count, plural, one {# habitación} other {# habitaciones}}",
+    "villas": "{count, plural, one {# villa} other {# villas}}",
+    "roomLine": "Habitación {number}: {name}",
+    "yourChoice": "Tu elección",
+    "nearbyHeading": "Otros alojamientos cercanos",
+    "nearbyHintMap": "Pasa el ratón sobre un alojamiento para verlo en el mapa de abajo. Desplázate hacia los lados para ver más.",
+    "nearbyHint": "Desplázate hacia los lados para ver más.",
+    "distanceAway": "a {distance}",
+    "aboutAway": "a unos {distance}",
+    "notAvailable": "No disponible en estas fechas",
+    "stayMapLabel": "Mapa de este alojamiento y de los alojamientos cercanos"
   }
 }

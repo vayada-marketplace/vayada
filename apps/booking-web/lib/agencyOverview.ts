@@ -10,6 +10,8 @@ import type {
   AgencyStayPrices,
 } from "@/services/api/agencyPage";
 import { resolveLocale } from "@/lib/utils";
+import { routing } from "@/i18n/routing";
+import { metresBetween } from "@vayada/domain-hotels";
 
 /** What a guest narrowed the stays to (VAY-2460). Type, area and private pool are the stay's;
  * breakfast and free cancellation price each card with only such rates; the price range is per
@@ -289,10 +291,60 @@ export function agencyFilterOptions(
   };
 }
 
+/** "Other stays nearby" on a stay's page (VAY-2461). */
+export const NEARBY_STAYS = 8;
+
+export type NearbyStay = {
+  stay: AgencyStay;
+  /** Straight-line distance from the stay whose page this is; null without both pins. */
+  metres: number | null;
+  /** Measured from or to a spot rounded to its area. */
+  approximate: boolean;
+};
+
+/** The page's other stays, closest first (those without a pin after them, in the page's order),
+ * at most `most`. */
+export function nearbyStays(
+  stays: AgencyStay[],
+  current: AgencyStay,
+  most = NEARBY_STAYS,
+): NearbyStay[] {
+  const from = current.map;
+  return stays
+    .filter((stay) => stay.slug !== current.slug)
+    .map((stay) => ({
+      stay,
+      metres: from && stay.map ? metresBetween(from, stay.map) : null,
+      approximate: !!(from?.approximate || stay.map?.approximate),
+    }))
+    .sort((a, b) =>
+      a.metres === null || b.metres === null
+        ? Number(a.metres === null) - Number(b.metres === null)
+        : a.metres - b.metres,
+    )
+    .slice(0, most);
+}
+
+// A host whose first label is the page's slug, as the middleware reads it (`<slug>.localhost` too).
+const BOOKING_HOST = /\.(?:next-booking\.vayada\.com|booking\.vayada\.com|localhost)(?::\d+)?$/;
+
+/** The address's language prefix ("/de"), or "" for the default language. */
+export function localePrefix(pathname: string): string {
+  const first = pathname.split("/")[1] ?? "";
+  return (routing.locales as readonly string[]).includes(first) ? `/${first}` : "";
+}
+
+/** The agency's address on a booking host: kept for local development (`?slug=`) elsewhere. */
+const devSlug = (host: string, agencySlug: string, params: URLSearchParams) => {
+  if (!BOOKING_HOST.test(host) || host.split(".")[0] !== agencySlug) params.set("slug", agencySlug);
+};
+
 /**
- * A stay's own booking page for this search. On a booking host (`<agency>.next-booking…`) it is
- * the stay's host; elsewhere (local development) the same origin with `?slug=`. `rooms` is said
- * only past one, as the stay page reads it; a promo code only where it applies.
+ * A stay's page on the agency's address for this search (VAY-2461): `/stays/<slug>`, in the
+ * guest's language. `rooms` is said only past one, as the stay page reads it; a promo code only
+ * where it applies. The children go as searched (a stay that takes none reads them as 0), and the
+ * agency's own room count and code ride along where the stay's differ (`agencyRooms`,
+ * `agencyPromo`), so "All stays" and the nearby stays keep the agency's search.
  */
 export function stayHref(
   location: { protocol: string; host: string; pathname: string },
@@ -309,18 +361,45 @@ export function stayHref(
   });
   const rooms = stay?.rooms ?? search.rooms;
   if (rooms > 1) params.set("rooms", String(rooms));
-  if (search.promoCode && stay?.promoApplied) params.set("promoCode", search.promoCode);
+  if (rooms !== search.rooms) params.set("agencyRooms", String(search.rooms));
+  if (search.promoCode)
+    params.set(stay?.promoApplied ? "promoCode" : "agencyPromo", search.promoCode);
+  devSlug(location.host, agencySlug, params);
+  return `${localePrefix(location.pathname)}/stays/${encodeURIComponent(staySlug)}?${params}`;
+}
+
+/**
+ * The stay's own checkout for a choice made on its agency stay page (`search`: "?checkIn=…"), on
+ * the stay's address, until checkout runs on the agency's (VAY-2462). On a booking host the
+ * stay's host; elsewhere (local development) the same origin with `?slug=`.
+ */
+export function stayCheckoutUrl(
+  location: { protocol: string; host: string; pathname: string },
+  agencySlug: string,
+  staySlug: string,
+  search: string,
+): string {
+  const path = `${localePrefix(location.pathname)}/book`;
   const labels = location.host.split(".");
-  const bookingHost =
-    /\.(?:next-booking\.vayada\.com|booking\.vayada\.com|booking\.localhost)(?::\d+)?$/.test(
-      location.host,
-    );
-  if (bookingHost && labels[0] === agencySlug) {
+  if (BOOKING_HOST.test(location.host) && labels[0] === agencySlug) {
     labels[0] = staySlug;
-    return `${location.protocol}//${labels.join(".")}${location.pathname}?${params}`;
+    return `${location.protocol}//${labels.join(".")}${path}${search}`;
   }
+  const params = new URLSearchParams(search);
   params.set("slug", staySlug);
-  return `${location.pathname}?${params}`;
+  return `${path}?${params}`;
+}
+
+/** The agency's overview for the same search, from one of its stay pages. */
+export function overviewHref(
+  location: { host: string; pathname: string },
+  agencySlug: string,
+  search: string,
+): string {
+  const params = new URLSearchParams(search);
+  devSlug(location.host, agencySlug, params);
+  const query = params.toString();
+  return `${localePrefix(location.pathname) || "/"}${query ? `?${query}` : ""}`;
 }
 
 const day = (date: string) => new Date(`${date}T00:00:00Z`);

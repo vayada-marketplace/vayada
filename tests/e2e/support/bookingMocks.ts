@@ -314,6 +314,24 @@ type MockBookingApisOptions = {
   mapPin?: { latitude: number; longitude: number };
 };
 
+/**
+ * Another hotel's own reads, by its address (VAY-2461: a stay of an agency's page): the seeded
+ * hotel's profile under `slug` and `name`, without add-ons. Its rooms and prices are the routes
+ * `mockBookingApis` answers for every address.
+ */
+export async function mockStayHotel(page: Page, slug: string, name: string) {
+  const profile = {
+    ...publicHotelProfile,
+    hotel: { ...publicHotelProfile.hotel, slug, name },
+  };
+  await page.route(new RegExp(`/api/booking-web/hotels/${slug}(?:\\?.*)?$`), (route) =>
+    route.fulfill({ json: profile }),
+  );
+  await page.route(`**/api/booking-web/hotels/${slug}/checkout-config`, (route) =>
+    route.fulfill({ json: { addons: [], payAtPropertyEnabled: true } }),
+  );
+}
+
 export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
   const displayCurrencies = options.displayCurrencies ?? ["EUR", "USD"];
   const profile = {

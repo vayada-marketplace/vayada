@@ -23,6 +23,8 @@ type Stay = {
   flexible?: number;
   /** Its map pin (VAY-2460): latitude, longitude, shown as an area; none keeps it off the map. */
   pin?: [number, number, boolean?];
+  /** Its rooms in use (VAY-2461), for "3 villas" on its stay page. */
+  units?: number;
 };
 
 // The page's "Recommended" order (Settings › Included properties).
@@ -38,6 +40,7 @@ export const AGENCY_STAYS: Stay[] = [
     breakfast: 115,
     flexible: 105,
     pin: [-8.5069, 115.2625],
+    units: 3,
   },
   {
     id: "mandala",
@@ -137,6 +140,8 @@ export function agencyPage(
     filters?: Record<string, boolean>;
     /** The layouts allowed and the first one (VAY-2460); all, starting on List, unless given. */
     layout?: { allowed: string[]; default: string };
+    /** A stay page's nearby stays and map (VAY-2461); both on unless given. */
+    stayPage?: { nearby: boolean; map: boolean };
   } = {},
 ) {
   return {
@@ -173,7 +178,7 @@ export function agencyPage(
       ...overrides.results,
     },
     filters: overrides.filters ?? {},
-    stayPage: { nearby: true, map: true },
+    stayPage: overrides.stayPage ?? { nearby: true, map: true },
     stays: AGENCY_STAYS.map((stay) => ({
       propertyId: `property-${stay.id}`,
       slug: staySlug(stay.id),
@@ -190,6 +195,7 @@ export function agencyPage(
         ? { latitude: stay.pin[0], longitude: stay.pin[1], approximate: !!stay.pin[2] }
         : null,
       privatePool: !!stay.pool,
+      units: stay.units ?? null,
       childrenEnabled: !overrides.adultsOnly?.includes(stay.id),
     })),
   };

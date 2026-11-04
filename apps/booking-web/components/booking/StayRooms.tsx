@@ -34,12 +34,15 @@ export default function StayRooms({
   onEditDates,
   onEditGuests,
   heading: headingText,
+  intro,
 }: {
   model: StayRoomsModel;
   onEditDates: () => void;
   onEditGuests: () => void;
   /** The section's title; "Available Accommodations" unless given. */
   heading?: ReactNode;
+  /** Shown under the heading, above the rooms, such as the agency's stay box (VAY-2461). */
+  intro?: ReactNode;
 }) {
   const locale = useLocale();
   const t = useTranslations("home");
@@ -196,6 +199,7 @@ export default function StayRooms({
   );
   const notices = (
     <>
+      {intro}
       {stay.failed && (
         <div role="alert" className="mb-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {t("pricesFailed")}{" "}
@@ -256,6 +260,7 @@ export default function StayRooms({
       {rooms === null && !roomsFailed ? (
         <>
           <div className="mb-9">{heading}</div>
+          {intro}
           <div className="space-y-7" aria-hidden="true">
             {[0, 1].map((i) => (
               <div
@@ -309,6 +314,7 @@ export default function StayRooms({
       ) : (
         <>
           <div className="mb-9">{heading}</div>
+          {intro}
           {/* VAY-2446: no room cards (the catalog failed, or no room is bookable right now). */}
           <div
             role="alert"

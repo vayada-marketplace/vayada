@@ -5,8 +5,16 @@ import { NextIntlClientProvider } from "next-intl";
 import { beforeEach, expect, it, vi } from "vitest";
 import enMessages from "../messages/en.json";
 import { ApiError } from "@/services/api/client";
+import { generateColorPalette } from "@/lib/utils/colors";
 import type { AgencyPage } from "@/services/api/agencyPage";
-import { HotelProvider, useAddons, useAgencyPage, useHotel } from "./HotelContext";
+import {
+  HotelProvider,
+  StayHotelProvider,
+  useAddons,
+  useAgencyPage,
+  useHotel,
+  useSlug,
+} from "./HotelContext";
 
 const { getHotel, getAddons, getAgencyPage, path } = vi.hoisted(() => ({
   getHotel: vi.fn(),
@@ -273,6 +281,142 @@ it("shows an agency page without a ready stay as not online", async () => {
       "This booking page isn't online right now",
     );
     expect(container.querySelector("button")).toBeNull();
+  } finally {
+    cleanup();
+  }
+});
+
+// VAY-2461: an agency's address has a page for each stay it shows, `/stays/<slug>`.
+const withStay = {
+  ...agency,
+  stays: [{ propertyId: "escape", slug: "escape-ubud" }],
+} as AgencyPage;
+
+it("shows the page of a stay the agency shows, in any language, and not another", async () => {
+  getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockResolvedValue(withStay);
+  for (const [pathname, shown] of [
+    ["/stays/escape-ubud", true],
+    ["/de/stays/escape-ubud/", true],
+    ["/stays/other-hotel", false],
+    ["/stays/escape-ubud/book", false],
+  ] as const) {
+    path.current = pathname;
+    const { container, cleanup } = await renderProvider(<p>Stay page</p>, "the-travel-ubud");
+    try {
+      expect([pathname, container.textContent === "Stay page"]).toEqual([pathname, shown]);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+it("has no stay pages on a hotel's address", async () => {
+  getHotel.mockResolvedValue({ id: "hotel-1", slug: "hotel-alpenrose", name: "Alpenrose" });
+  getAddons.mockResolvedValue([]);
+  path.current = "/stays/escape-ubud";
+
+  const { container, cleanup } = await renderProvider(<p>Stay page</p>, "hotel-alpenrose");
+  try {
+    expect(container.querySelector("h2")?.textContent).toBe(
+      "This booking page isn't online right now",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+it("loads a stay inside its agency's page, which keeps the agency's look and context", async () => {
+  getHotel.mockImplementation(async (slug: string) => {
+    if (slug === "the-travel-ubud") throw notFound("Booking Web hotel profile not found.");
+    return {
+      id: "escape",
+      slug,
+      name: "The Escape Villa Ubud",
+      branding: { primaryColor: "#ff0000", fontPairing: "other-pairing" },
+    };
+  });
+  getAddons.mockImplementation(async (slug: string) =>
+    slug === "escape-ubud" ? [{ id: "breakfast" }] : [],
+  );
+  getAgencyPage.mockResolvedValue(withStay);
+  path.current = "/stays/escape-ubud";
+  function Probe() {
+    const { hotel } = useHotel();
+    const { agency } = useAgencyPage();
+    const { slug } = useSlug();
+    const { addons } = useAddons();
+    return createElement("p", null, `${hotel.name} / ${agency?.name} / ${slug} / ${addons.length}`);
+  }
+
+  const { container, cleanup } = await renderProvider(
+    <StayHotelProvider slug="escape-ubud">
+      <Probe />
+    </StayHotelProvider>,
+    "the-travel-ubud",
+  );
+  try {
+    expect(container.textContent).toBe("The Escape Villa Ubud / The Travel Ubud / escape-ubud / 1");
+    expect(getHotel).toHaveBeenCalledWith("escape-ubud", "en");
+    // The agency's design stays: the stay's own colours don't apply.
+    expect(document.documentElement.style.getPropertyValue("--color-primary-600")).toBe(
+      generateColorPalette("#2b3033")["600"],
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+it("offers Retry when a stay can't be loaded", async () => {
+  getHotel.mockImplementation(async (slug: string) => {
+    if (slug === "the-travel-ubud") throw notFound("Booking Web hotel profile not found.");
+    throw new ApiError("Something went wrong.", 503, null);
+  });
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockResolvedValue(withStay);
+  path.current = "/stays/escape-ubud";
+
+  const { container, cleanup } = await renderProvider(
+    <StayHotelProvider slug="escape-ubud">
+      <p>Rooms</p>
+    </StayHotelProvider>,
+    "the-travel-ubud",
+  );
+  try {
+    expect(container.querySelector("[role=alert] h2")?.textContent).toBe("Unable to Load Hotel");
+    expect(container.textContent).not.toContain("Rooms");
+    getHotel.mockImplementation(async (slug: string) => {
+      if (slug === "the-travel-ubud") throw notFound("Booking Web hotel profile not found.");
+      return { id: "escape", slug, name: "The Escape Villa Ubud" };
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>("[role=alert] button")!.click();
+    });
+    expect(container.textContent).toBe("Rooms");
+  } finally {
+    cleanup();
+  }
+});
+
+it("says a stay gone since the agency's read is not online, without Retry", async () => {
+  getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
+  getAddons.mockResolvedValue([]);
+  getAgencyPage.mockResolvedValue(withStay);
+  path.current = "/stays/escape-ubud";
+
+  const { container, cleanup } = await renderProvider(
+    <StayHotelProvider slug="escape-ubud">
+      <p>Rooms</p>
+    </StayHotelProvider>,
+    "the-travel-ubud",
+  );
+  try {
+    expect(container.querySelector("[role=alert] h2")?.textContent).toBe(
+      "This booking page isn't online right now",
+    );
+    expect(container.querySelector("[role=alert] button")).toBeNull();
+    expect(container.textContent).not.toContain("Rooms");
   } finally {
     cleanup();
   }

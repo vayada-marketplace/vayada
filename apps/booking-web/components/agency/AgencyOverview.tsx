@@ -306,7 +306,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
         location,
         agency.slug,
         card.stay.slug,
-        adultsOnly(card) ? { ...shown, children: 0 } : shown,
+        shown,
         card.price && {
           rooms: card.price.rooms,
           promoApplied: !!card.price.price?.promoApplied,

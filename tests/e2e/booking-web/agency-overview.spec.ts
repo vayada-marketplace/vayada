@@ -75,11 +75,10 @@ test("shows the agency's stays for the search, cheapest first, full stays at the
   await expect(first).toContainText("from US$38 / night");
   await expect(first).toContainText("from US$76 total");
   await expect(first).toContainText("View rooms");
-  // Its own page, with the search.
-  const host = new URL(page.url()).host.replace(/^the-travel-ubud\./, `${staySlug("mertha")}.`);
+  // Its page on the agency's address, with the search (VAY-2461).
   await expect(first).toHaveAttribute(
     "href",
-    `http://${host}/?checkIn=${checkIn}&checkOut=${checkOut}&adults=2&children=0`,
+    `/stays/${staySlug("mertha")}?checkIn=${checkIn}&checkOut=${checkOut}&adults=2&children=0`,
   );
   await expect(cards(page).filter({ hasText: "Lowest price" })).toHaveCount(1);
   await expect(cards(page).nth(1)).toContainText("Adhidrawa Ubud");
@@ -196,17 +195,17 @@ test("searches again for more guests in more rooms, and with a promo code", asyn
     rooms: "2",
   });
 
-  // A code only The Escape takes: it applies, and only The Escape's link carries it.
+  // A code only The Escape takes: it applies, and only The Escape's link carries it; the others
+  // keep it as the agency's, for their way back.
   await page.getByRole("button", { name: "Add promo" }).click();
   await page.getByPlaceholder("Enter code").fill("AUTUMN");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#stay-search")).toContainText("AUTUMN");
   await expect(escape).toContainText("from US$171 / night");
   await expect(escape).toHaveAttribute("href", /&rooms=2&promoCode=AUTUMN$/);
-  await expect(page.getByTestId(`agency-stay-${staySlug("mertha")}`)).not.toHaveAttribute(
-    "href",
-    /promoCode/,
-  );
+  const mertha = page.getByTestId(`agency-stay-${staySlug("mertha")}`);
+  await expect(mertha).not.toHaveAttribute("href", /promoCode/);
+  await expect(mertha).toHaveAttribute("href", /&agencyPromo=AUTUMN$/);
 
   // A code no stay takes says so.
   await page.getByRole("button", { name: "Remove promo code" }).click();
@@ -222,7 +221,7 @@ test("searches again for more guests in more rooms, and with a promo code", asyn
   await expect(page.locator('[data-testid^="agency-stay-"][href*="promoCode"]')).toHaveCount(0);
 });
 
-test("a stay that takes no children is read and opened for the adults alone", async ({
+test("a stay that takes no children is read for the adults alone, and opened with the search", async ({
   page,
   baseURL,
 }) => {
@@ -235,7 +234,8 @@ test("a stay that takes no children is read and opened for the adults alone", as
   ).toBeVisible();
   const mertha = page.getByTestId(`agency-stay-${staySlug("mertha")}`);
   await expect(mertha).toContainText("2 room types free · fits 2 adults · Adults only");
-  await expect(mertha).toHaveAttribute("href", /&adults=2&children=0$/);
+  // Its page reads the children as none, and keeps them for the way back.
+  await expect(mertha).toHaveAttribute("href", /&adults=2&children=1$/);
   const escape = page.getByTestId(`agency-stay-${staySlug("escape")}`);
   await expect(escape).toContainText("fits 2 adults and 1 child");
   await expect(escape).toHaveAttribute("href", /&adults=2&children=1$/);
