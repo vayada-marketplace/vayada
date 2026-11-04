@@ -36,7 +36,7 @@ function onWidthChange(onChange: () => void) {
 }
 
 /** Desktop widths, where the accommodations get their List | List + map | Map views (VAY-2324). */
-function useWideScreen(): boolean {
+export function useWideScreen(): boolean {
   return useSyncExternalStore(
     onWidthChange,
     () => window.matchMedia(WIDE).matches,

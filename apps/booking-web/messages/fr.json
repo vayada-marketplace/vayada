@@ -1072,6 +1072,10 @@
     "breakfast": "Petit-déjeuner inclus",
     "freeCancellation": "Annulation gratuite",
     "noMatch": "Aucun hébergement ne correspond à ces filtres.",
-    "resetFilters": "Réinitialiser les filtres"
+    "resetFilters": "Réinitialiser les filtres",
+    "mapLabel": "Carte des hébergements",
+    "noMapStays": "Aucun de ces hébergements n'indique son emplacement sur une carte.",
+    "fromPerNight": "à partir de {amount} / nuit",
+    "pinName": "{name}, à partir de {amount} par nuit"
   }
 }

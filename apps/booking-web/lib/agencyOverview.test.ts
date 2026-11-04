@@ -20,6 +20,7 @@ const stay = (id: string): AgencyStay => ({
   photos: [],
   childrenEnabled: true,
   privatePool: false,
+  map: null,
 });
 const stays = ["mertha", "escape", "mandala", "uma", "wiswan", "dewari"].map(stay);
 const priced = (id: string, nightly: number, currency = "USD"): AgencyStayPrice => ({

@@ -24,15 +24,20 @@ const exactMoney = (value: number, currency: string) =>
  * One stay on the agency overview (VAY-2459): its photo with its type and the "Lowest price"
  * badge, its name and area, what is free for the search, its lowest price per night and in
  * total, and a link to its own page. The guest's display currency leads, as on room cards.
+ * Next to a map (VAY-2460) it stands out while its pin is under the mouse, and says when it is.
  */
 export default function AgencyStayCard({
   card,
   text,
   loading,
+  highlighted = false,
+  onHover,
 }: {
   card: AgencyCard;
   text: AgencyCardText;
   loading: boolean;
+  highlighted?: boolean;
+  onHover?: (on: boolean) => void;
 }) {
   const t = useTranslations("agency");
   const { approximate } = useCurrency();
@@ -43,11 +48,20 @@ export default function AgencyStayCard({
   const priced = price?.status === "available" ? price.price : null;
 
   return (
-    <li className="min-w-0">
+    <li
+      className="min-w-0"
+      onMouseEnter={onHover && (() => onHover(true))}
+      onMouseLeave={onHover && (() => onHover(false))}
+    >
       <a
         href={text.href(card)}
         data-testid={`agency-stay-${stay.slug}`}
-        className="group flex h-full flex-col overflow-hidden rounded-[20px] border border-gray-200 bg-white text-gray-900 transition hover:border-gray-900 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+        data-highlighted={highlighted || undefined}
+        onFocus={onHover && (() => onHover(true))}
+        onBlur={onHover && (() => onHover(false))}
+        className={`group flex h-full flex-col overflow-hidden rounded-[20px] border bg-white text-gray-900 transition hover:border-gray-900 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 ${
+          highlighted ? "border-gray-900 shadow-[0_8px_24px_rgba(0,0,0,0.12)]" : "border-gray-200"
+        }`}
       >
         <div className="relative aspect-[4/3] w-full bg-gray-200">
           {stay.photoUrl && (

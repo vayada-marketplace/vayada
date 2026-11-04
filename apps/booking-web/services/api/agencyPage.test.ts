@@ -76,6 +76,7 @@ describe("readAgencyPage", () => {
         freeCancellation: false,
         bedrooms: false,
       },
+      layout: { allowed: ["list"], default: "list" },
       stays: [
         {
           propertyId: "p1",
@@ -87,9 +88,36 @@ describe("readAgencyPage", () => {
           photos: ["https://images.vayada.com/escape.jpg"],
           childrenEnabled: false,
           privatePool: true,
+          map: null,
         },
       ],
     });
+  });
+
+  it("keeps the layouts allowed (List always) and each stay's pin (VAY-2460)", () => {
+    const read = (layout: unknown, map: unknown) =>
+      readAgencyPage({ ...page, layout, stays: [{ ...page.stays[0], map }] });
+    expect(
+      read(
+        { allowed: ["map", "split"], default: "map" },
+        {
+          latitude: -8.51,
+          longitude: 115.27,
+          approximate: true,
+        },
+      ),
+    ).toMatchObject({
+      layout: { allowed: ["list", "split", "map"], default: "map" },
+      stays: [{ map: { latitude: -8.51, longitude: 115.27, approximate: true } }],
+    });
+    // A default it doesn't allow, or none: List.
+    expect(read({ allowed: ["split"], default: "map" }, null).layout).toEqual({
+      allowed: ["list", "split"],
+      default: "list",
+    });
+    expect(read(undefined, null).layout).toEqual({ allowed: ["list"], default: "list" });
+    for (const map of [{ latitude: 91, longitude: 0 }, { latitude: "-8.5", longitude: 115 }, {}])
+      expect(read(undefined, map).stays[0]!.map).toBeNull();
   });
 
   it("falls back to the defaults for missing settings, and rejects another version", () => {

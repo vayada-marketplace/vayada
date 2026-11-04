@@ -21,6 +21,8 @@ type Stay = {
   /** USD a night with only breakfast rates, or only rates free to cancel; none without. */
   breakfast?: number;
   flexible?: number;
+  /** Its map pin (VAY-2460): latitude, longitude, shown as an area; none keeps it off the map. */
+  pin?: [number, number, boolean?];
 };
 
 // The page's "Recommended" order (Settings › Included properties).
@@ -35,6 +37,7 @@ export const AGENCY_STAYS: Stay[] = [
     pool: true,
     breakfast: 115,
     flexible: 105,
+    pin: [-8.5069, 115.2625],
   },
   {
     id: "mandala",
@@ -44,6 +47,7 @@ export const AGENCY_STAYS: Stay[] = [
     nightly: 110,
     hue: 30,
     breakfast: 130,
+    pin: [-8.5245, 115.278],
   },
   {
     id: "mertha",
@@ -53,6 +57,7 @@ export const AGENCY_STAYS: Stay[] = [
     nightly: 38,
     hue: 90,
     breakfast: 45,
+    pin: [-8.51, 115.258],
   },
   {
     id: "wiswan",
@@ -63,6 +68,7 @@ export const AGENCY_STAYS: Stay[] = [
     hue: 200,
     pool: true,
     flexible: 80,
+    pin: [-8.505, 115.247],
   },
   { id: "adhi", name: "Adhidrawa Ubud", type: "guesthouse", area: "Ubud", nightly: 45, hue: 260 },
   {
@@ -75,6 +81,7 @@ export const AGENCY_STAYS: Stay[] = [
     pool: true,
     breakfast: 175,
     flexible: 170,
+    pin: [-8.47, 115.278],
   },
   {
     id: "tamarin",
@@ -83,6 +90,7 @@ export const AGENCY_STAYS: Stay[] = [
     area: "Penestanan",
     nightly: 128,
     hue: 10,
+    pin: [-8.5, 115.25, true],
   },
   {
     id: "ranes",
@@ -92,6 +100,7 @@ export const AGENCY_STAYS: Stay[] = [
     nightly: 84,
     hue: 300,
     breakfast: 92,
+    pin: [-8.515, 115.265],
   },
   {
     id: "uma",
@@ -101,6 +110,7 @@ export const AGENCY_STAYS: Stay[] = [
     nightly: 90,
     hue: 140,
     full: { days: 4 },
+    pin: [-8.498, 115.27],
   },
   {
     id: "dewari",
@@ -110,6 +120,7 @@ export const AGENCY_STAYS: Stay[] = [
     nightly: 100,
     hue: 40,
     full: { days: 7 },
+    pin: [-8.52, 115.255],
   },
 ];
 
@@ -124,6 +135,8 @@ export function agencyPage(
     adultsOnly?: string[];
     /** The filter chips switched on (VAY-2460); none unless given. */
     filters?: Record<string, boolean>;
+    /** The layouts allowed and the first one (VAY-2460); all, starting on List, unless given. */
+    layout?: { allowed: string[]; default: string };
   } = {},
 ) {
   return {
@@ -152,7 +165,7 @@ export function agencyPage(
       displayDefaultCurrency: null,
     },
     locales: { default: "en", supported: ["en", "de"] },
-    layout: { allowed: ["list", "split", "map"], default: "list" },
+    layout: overrides.layout ?? { allowed: ["list", "split", "map"], default: "list" },
     results: {
       defaultSort: "price_low",
       lowestPriceBadge: true,
@@ -173,7 +186,9 @@ export function agencyPage(
         { url: photo(stay.id, 2), alt: null },
       ],
       currency: "USD",
-      map: null,
+      map: stay.pin
+        ? { latitude: stay.pin[0], longitude: stay.pin[1], approximate: !!stay.pin[2] }
+        : null,
       privatePool: !!stay.pool,
       childrenEnabled: !overrides.adultsOnly?.includes(stay.id),
     })),

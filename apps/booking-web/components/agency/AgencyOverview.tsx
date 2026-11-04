@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import type { AccountBookingPageSort } from "@vayada/domain-booking/account-booking-page";
+import type {
+  AccountBookingPageLayout,
+  AccountBookingPageSort,
+} from "@vayada/domain-booking/account-booking-page";
 import StayHero from "@/components/booking/StayHero";
 import StaySearchCard, { type SearchPanel } from "@/components/booking/StaySearchCard";
 import PromoField from "@/components/booking/PromoField";
@@ -12,6 +15,8 @@ import BookingNavigation from "@/components/layout/BookingNavigation";
 import AgencyStayCard, { type AgencyCardText } from "@/components/agency/AgencyStayCard";
 import AgencyFullStays from "@/components/agency/AgencyFullStays";
 import AgencyFilters from "@/components/agency/AgencyFilters";
+import AgencyStayMap, { AgencyLayoutSwitch } from "@/components/agency/AgencyStayMap";
+import { useWideScreen } from "@/components/booking/AccommodationViews";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { ApiError } from "@/services/api/client";
 import {
@@ -31,10 +36,13 @@ import {
   stayNights,
   stayTypeName,
   type AgencyCard,
+  type AgencyFilters as Filters,
 } from "@/lib/agencyOverview";
 import { mostRooms } from "@/lib/roomPicker";
 import { ensureMinOneNight } from "@/lib/utils";
 
+/** Google Maps' browser key; without one, the agency page has only its list. */
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 /** The longest search the agency price read takes (VAY-2458 `AGENCY_MAX_NIGHTS`). */
 const MAX_NIGHTS = 30;
 const SORTS: AccountBookingPageSort[] = ["price_low", "price_high", "recommended"];
@@ -111,6 +119,18 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
     setPriceCurrency(selectedCurrency);
     setFilters((current) => ({ ...current, price: { min: null, max: null } }));
   }
+  // VAY-2460: the layout, on the agency's default each time; the map's stay under the mouse (from
+  // either side) and the stay whose pill was clicked.
+  const [chosenLayout, setLayout] = useState<AccountBookingPageLayout>(agency.layout.default);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  const wide = useWideScreen();
+  // New filters start the map afresh: no stay stays lit or open that may have left the list.
+  const changeFilters = (next: Filters) => {
+    setFilters(next);
+    setHovered(null);
+    setPicked(null);
+  };
   const [panel, setPanel] = useState<SearchPanel>(null);
   const [promoInput, setPromoInput] = useState(initial.promoCode ?? "");
   // The search a newly applied code went out with, until its answer says whether a stay takes it.
@@ -293,6 +313,22 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
         },
       ),
   };
+  // Maps need Google's key and a wide screen; phones keep the list (their layouts are VAY-2463).
+  const layouts: AccountBookingPageLayout[] = wide && MAPS_KEY ? agency.layout.allowed : ["list"];
+  const layout = layouts.includes(chosenLayout) ? chosenLayout : "list";
+  const showChips = hasFilterChips(filterOptions);
+  // A pill says the price per night in whole units, the guest's display currency first.
+  const pinPrice = (card: AgencyCard) => {
+    const price = card.price?.status === "available" ? card.price.price : null;
+    return price
+      ? (approximate(price.nightly, price.currency) ??
+          new Intl.NumberFormat("en-GB", {
+            style: "currency",
+            currency: price.currency,
+            maximumFractionDigits: 0,
+          }).format(price.nightly))
+      : null;
+  };
   const currencies = Array.from(
     new Set(
       answer?.prices.stays.flatMap((stay) => (stay.price ? [stay.price.currency] : [])) ?? [],
@@ -300,7 +336,8 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
   );
 
   return (
-    <div className="min-h-screen bg-white overflow-x-hidden">
+    // Clipped, not hidden: a hidden overflow would stop the map next to the list from sticking.
+    <div className="min-h-screen bg-white overflow-x-clip">
       <StayHero
         image={agency.header.imageUrl}
         alt={agency.name}
@@ -434,23 +471,28 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           )}
         </div>
 
-        {hasFilterChips(filterOptions) && (
-          <div className="mt-6 border-b border-gray-200 pb-5">
-            <AgencyFilters
-              options={filterOptions}
-              filters={filters}
-              onChange={setFilters}
-              typeLabel={(type) => stayTypeName(type, t)}
-              currency={selectedCurrency}
-              formatPrice={(value) =>
-                new Intl.NumberFormat("en-GB", {
-                  style: "currency",
-                  currency: selectedCurrency,
-                  minimumFractionDigits: 0,
-                  maximumFractionDigits: 0,
-                }).format(value)
-              }
-            />
+        {(showChips || layouts.length > 1) && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4">
+            {showChips && (
+              <AgencyFilters
+                options={filterOptions}
+                filters={filters}
+                onChange={changeFilters}
+                typeLabel={(type) => stayTypeName(type, t)}
+                currency={selectedCurrency}
+                formatPrice={(value) =>
+                  new Intl.NumberFormat("en-GB", {
+                    style: "currency",
+                    currency: selectedCurrency,
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  }).format(value)
+                }
+              />
+            )}
+            {layouts.length > 1 && (
+              <AgencyLayoutSwitch layouts={layouts} layout={layout} onChange={setLayout} />
+            )}
           </div>
         )}
 
@@ -472,28 +514,11 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           </div>
         )}
 
-        <ul
-          aria-busy={searching}
-          data-testid="agency-stays"
-          className={`mt-6 grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5 transition-opacity ${
-            searching && answer ? "opacity-60" : ""
-          }`}
-        >
-          {results.cards.map((card) => (
-            <AgencyStayCard
-              key={card.stay.propertyId}
-              card={card}
-              text={text}
-              loading={!answer && searching}
-            />
-          ))}
-        </ul>
-
-        {/* Not while full stays of the chosen kind are listed below: some do match. */}
+        {/* Not while full stays of the chosen kind are listed below (not on Map): some match. */}
         {answer &&
           filtersActive(filters) &&
           results.cards.length === 0 &&
-          !(agency.results.showFullStays && results.full.length > 0) && (
+          !(agency.results.showFullStays && results.full.length > 0 && layout !== "map") && (
             <p
               role="status"
               className="mt-6 rounded-[20px] border border-dashed border-gray-300 p-8 text-center text-base text-gray-500"
@@ -501,7 +526,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
               {t("noMatch")}{" "}
               <button
                 type="button"
-                onClick={() => setFilters(NO_FILTERS)}
+                onClick={() => changeFilters(NO_FILTERS)}
                 className="min-h-[44px] font-semibold text-gray-900 underline hover:text-black"
               >
                 {t("resetFilters")}
@@ -509,14 +534,74 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
             </p>
           )}
 
-        {agency.results.showFullStays && results.full.length > 0 && (
-          <AgencyFullStays
-            dates={dates}
-            stays={results.full}
-            tooSmall={(price) => t("tooSmall", { guests: guests(shown, price.rooms) })}
-            onUse={(next) => run({ ...form, ...next })}
-          />
-        )}
+        {/* List + map: the list beside a map that stays in view while the page scrolls. */}
+        <div className={`mt-6 ${layout === "split" ? "flex items-start gap-7" : ""}`}>
+          {layout !== "map" && (
+            <div className={layout === "split" ? "min-w-0 flex-[999_1_560px]" : ""}>
+              <ul
+                aria-busy={searching}
+                data-testid="agency-stays"
+                className={`grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5 transition-opacity ${
+                  searching && answer ? "opacity-60" : ""
+                }`}
+              >
+                {results.cards.map((card) => (
+                  <AgencyStayCard
+                    key={card.stay.propertyId}
+                    card={card}
+                    text={text}
+                    loading={!answer && searching}
+                    highlighted={layout === "split" && hovered === card.stay.propertyId}
+                    onHover={
+                      layout === "split"
+                        ? (on) =>
+                            setHovered((current) =>
+                              on
+                                ? card.stay.propertyId
+                                : current === card.stay.propertyId
+                                  ? null
+                                  : current,
+                            )
+                        : undefined
+                    }
+                  />
+                ))}
+              </ul>
+
+              {agency.results.showFullStays && results.full.length > 0 && (
+                <AgencyFullStays
+                  dates={dates}
+                  stays={results.full}
+                  tooSmall={(price) => t("tooSmall", { guests: guests(shown, price.rooms) })}
+                  onUse={(next) => run({ ...form, ...next })}
+                />
+              )}
+            </div>
+          )}
+          {layout !== "list" && (
+            <AgencyStayMap
+              stays={agency.stays}
+              cards={results.cards}
+              apiKey={MAPS_KEY}
+              hovered={hovered}
+              onHover={setHovered}
+              picked={picked}
+              onPick={setPicked}
+              price={pinPrice}
+              typeName={(card) =>
+                card.stay.propertyType ? stayTypeName(card.stay.propertyType, t) : null
+              }
+              href={text.href}
+              compact={layout === "split"}
+              className={
+                layout === "split"
+                  ? // Under the search card, which sticks to the top too (`top-4`, about 110 px).
+                    "sticky top-36 h-[min(760px,calc(100vh-10rem))] min-w-0 flex-[1_1_380px]"
+                  : "h-[720px]"
+              }
+            />
+          )}
+        </div>
       </section>
     </div>
   );

@@ -1072,6 +1072,10 @@
     "breakfast": "Desayuno incluido",
     "freeCancellation": "Cancelación gratuita",
     "noMatch": "Ningún alojamiento coincide con estos filtros.",
-    "resetFilters": "Restablecer filtros"
+    "resetFilters": "Restablecer filtros",
+    "mapLabel": "Mapa de los alojamientos",
+    "noMapStays": "Ninguno de estos alojamientos muestra su ubicación en un mapa.",
+    "fromPerNight": "desde {amount} / noche",
+    "pinName": "{name}, desde {amount} por noche"
   }
 }

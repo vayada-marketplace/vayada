@@ -1073,6 +1073,10 @@
     "breakfast": "Frühstück inklusive",
     "freeCancellation": "Kostenlose Stornierung",
     "noMatch": "Keine Unterkunft passt zu diesen Filtern.",
-    "resetFilters": "Filter zurücksetzen"
+    "resetFilters": "Filter zurücksetzen",
+    "mapLabel": "Karte der Unterkünfte",
+    "noMapStays": "Keine dieser Unterkünfte zeigt ihre Lage auf einer Karte.",
+    "fromPerNight": "ab {amount} / Nacht",
+    "pinName": "{name}, ab {amount} pro Nacht"
   }
 }

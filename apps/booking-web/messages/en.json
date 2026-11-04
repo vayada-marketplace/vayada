@@ -1073,6 +1073,10 @@
     "breakfast": "Breakfast included",
     "freeCancellation": "Free cancellation",
     "noMatch": "No stay matches these filters.",
-    "resetFilters": "Reset filters"
+    "resetFilters": "Reset filters",
+    "mapLabel": "Map of the stays",
+    "noMapStays": "None of these stays shows where it is on a map.",
+    "fromPerNight": "from {amount} / night",
+    "pinName": "{name}, from {amount} per night"
   }
 }
