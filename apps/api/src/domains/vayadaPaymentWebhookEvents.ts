@@ -97,12 +97,26 @@ async function handle(
     // Withdrawn: Stripe's dispute fee is charged (fee > 0). Reinstated: a fee given back is < 0.
     const charged = withdrawn ? Math.max(fee, 0) : Math.max(-fee, 0);
     const stripeFeeMinor = transaction
-      ? stayCurrencyFee(transaction, charged, payment.currency)
+      ? stayCurrencyFee(transaction, charged, payment.currency, amountMinor)
       : null;
     if (stripeFeeMinor === null)
       log.warn(
         { propertyId: payment.propertyId, paymentId: payment.id, disputeId, type },
         "vayada Payment: dispute fee unknown in the stay's currency; adjust the hotel's balance by hand",
+      );
+    else if (charged > 0)
+      // The ledger keeps only the stay's currency; this keeps Stripe's own fee for reconciling.
+      log.info(
+        {
+          propertyId: payment.propertyId,
+          paymentId: payment.id,
+          disputeId,
+          type,
+          stripeFeeMinor: charged,
+          stripeFeeCurrency: text(transaction?.["currency"]),
+          stayFeeMinor: stripeFeeMinor,
+        },
+        "vayada Payment: Stripe's dispute fee in the stay's currency",
       );
     let recorded: Awaited<ReturnType<typeof recordVayadaPaymentDispute>>;
     try {
@@ -284,20 +298,33 @@ async function findPayment(client: Pick<pg.PoolClient, "query">, paymentIntentId
 }
 
 /** Stripe's fee comes in the account's settlement currency; the hotel's balance is in the stay's.
- * Convert with the balance transaction's own rate (stay amount × rate = settlement amount).
- * Null when it can't be converted. */
+ * Convert with the balance transaction's own rate (stay amount × rate = settlement amount). A
+ * dispute's balance transactions come without one (exchange_rate null, VAY-2442 test run C), so
+ * then the rate is the one between the same money in both currencies: the dispute's amount in the
+ * stay's currency and the transaction's amount in the settlement currency. Null when it can't be
+ * converted. */
 export function stayCurrencyFee(
   transaction: Record<string, unknown>,
   feeMinor: number,
   stayCurrency: string,
+  /** The stay-currency amount the transaction moved (the dispute's amount). */
+  stayAmountMinor?: number,
 ): number | null {
   if (feeMinor === 0) return 0;
   const settlement = text(transaction["currency"])?.toUpperCase();
   if (!settlement) return null;
   if (settlement === stayCurrency) return feeMinor;
   const rate = Number(transaction["exchange_rate"]);
-  if (!Number.isFinite(rate) || rate <= 0) return null;
-  const scale = (currency: string) => (stripeCurrencyHasZeroDecimals(currency) ? 1 : 100);
-  const converted = Math.round(((feeMinor / scale(settlement)) * scale(stayCurrency)) / rate);
+  let converted: number;
+  if (Number.isFinite(rate) && rate > 0) {
+    const scale = (currency: string) => (stripeCurrencyHasZeroDecimals(currency) ? 1 : 100);
+    converted = Math.round(((feeMinor / scale(settlement)) * scale(stayCurrency)) / rate);
+  } else {
+    // Both amounts are in minor units, so the ratio already accounts for decimals. Below one
+    // unit of the settlement currency, Stripe's rounding of it distorts the rate too much.
+    const settled = Math.abs(minor(transaction["amount"]) ?? 0);
+    if (settled < 100 || !stayAmountMinor || stayAmountMinor < 0) return null;
+    converted = Math.round((feeMinor * stayAmountMinor) / settled);
+  }
   return Number.isSafeInteger(converted) && converted >= 0 ? converted : null;
 }

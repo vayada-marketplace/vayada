@@ -989,6 +989,99 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
+  it("charges the hotel Stripe's dispute fee from Vayada's account in another currency (VAY-2442)", async () => {
+    const { fixture, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    try {
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const provider = routeVayadaPaymentStripe({} as never, {
+        provider: { createPaymentIntent, retrievePaymentIntent } as never,
+        publishableKey: "pk_test_writer",
+      });
+      await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { open: () => true, feePercent: 6 },
+      });
+      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+      const lower = fixture.f.current.quote.stay.currency.toLowerCase();
+      const log = { info: vi.fn(), warn: vi.fn() };
+      const event = (type: string, object: Record<string, unknown>) =>
+        handleVayadaPaymentWebhookEvent(
+          fixture.pool,
+          { id: `evt_${type}_${String(object.id)}`, type, livemode: false, data: { object } },
+          log,
+        );
+      await event("payment_intent.succeeded", {
+        id: "pi_writer_test",
+        amount_received: amountMinor,
+        currency: lower,
+      });
+      // Vayada's account settles in another currency, and Stripe sends a dispute's balance
+      // transactions without an exchange rate (test run C). The guest disputes half the payment,
+      // which moved twice as much in the settlement currency: Stripe's fee of 1500 is 750 for the
+      // stay. (Converting against the whole payment would make it 1500.)
+      const disputed = Math.floor(amountMinor / 2);
+      const settlement = lower === "usd" ? "eur" : "usd";
+      const dispute = (bt: Record<string, unknown>) => ({
+        id: "dp_other_currency",
+        amount: disputed,
+        currency: lower,
+        payment_intent: "pi_writer_test",
+        balance_transactions: [{ currency: settlement, exchange_rate: null, ...bt }],
+      });
+      await expect(
+        event("charge.dispute.funds_withdrawn", dispute({ amount: -2 * disputed, fee: 1500 })),
+      ).resolves.toBe("handled");
+      // Won, and here Stripe gives its fee back: it converts the same way.
+      await expect(
+        event("charge.dispute.funds_reinstated", dispute({ amount: 2 * disputed, fee: -1500 })),
+      ).resolves.toBe("handled");
+      expect(log.warn).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining("dispute fee unknown"),
+      );
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          disputeId: "dp_other_currency",
+          stripeFeeMinor: 1500,
+          stripeFeeCurrency: settlement,
+          stayFeeMinor: 750,
+        }),
+        expect.stringContaining("dispute fee"),
+      );
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT entry_kind,gross_minor::int AS gross,fee_minor::int AS fee,source_key
+             FROM finance.hotel_payout_ledger WHERE property_id=$1 AND entry_kind<>'charge'
+             ORDER BY source_key`,
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          entry_kind: "dispute_reversal",
+          gross: disputed,
+          fee: -750,
+          source_key: "dispute:dp_other_currency:reinstated",
+        },
+        {
+          entry_kind: "dispute",
+          gross: -disputed,
+          fee: 750,
+          source_key: "dispute:dp_other_currency:withdrawn",
+        },
+      ]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("takes a deposit by card and leaves the rest to pay at the property, with deposits on (VAY-2205)", async () => {
     const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
       await cardFixture(undefined, "EUR", "instant", (quote) => {
