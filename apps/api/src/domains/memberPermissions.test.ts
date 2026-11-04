@@ -16,6 +16,8 @@ const GRANT_ROW_CHECKS: Record<string, readonly string[]> = {
     "pmsManageScope.ts",
     "pmsMandatoryChargeConfirmationCommandRepository.ts",
     "pmsOperatingCalendarImpact.ts",
+    // VAY-2469: who the hourly repair may run as; the calendar save checks again.
+    "pmsOperatingCalendarRoomRefresh.ts",
     "pmsPhysicalRoomUnitReconcileRepository.ts",
     "pmsPricingCommandRepository.ts",
     "pmsRoomFactsCommandRepository.ts",

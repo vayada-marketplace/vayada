@@ -446,6 +446,73 @@ describe("PMS inventory materialization planner", () => {
     }
   });
 
+  it("gives nights from an earlier calendar the new room count and keeps what is on them (VAY-2469)", () => {
+    const earlier = (overrides: Partial<PmsInventoryDaySnapshot>) =>
+      currentDay(ROOM_A, "2026-12-20", {
+        calendarRevision: 1,
+        sourceRevisions: { generated: 1, channel: 0, manual: 1, block: 1, booking: 1 },
+        physicalCapacityCount: 4,
+        generatedSellableLimitCount: 4,
+        manualSellableLimitCount: 3,
+        effectiveSellableLimitCount: 3,
+        assignedCount: 1,
+        blockedCount: 1,
+        availableCount: 1,
+        ...overrides,
+      });
+    const roomB = currentDay(ROOM_B, "2026-12-20", {
+      calendarRevision: 1,
+      sourceRevisions: { generated: 1, channel: 0, manual: 0, block: 0, booking: 0 },
+    });
+    const plan = planPmsInventoryMaterialization({
+      ...baseInput,
+      horizon: { from: "2026-12-20", through: "2026-12-20" },
+      currentDays: [earlier({}), roomB],
+    });
+    expect(plan).toMatchObject({ ok: true, outcome: "rematerialized" });
+    if (!plan.ok) return;
+    // Four rooms became ten: the booking, the block and the manual limit of three stay.
+    expect(plan.days.find(({ roomTypeId }) => roomTypeId === ROOM_A)).toEqual({
+      ...earlier({}),
+      calendarRevision: 2,
+      inventoryRevision: 2,
+      sourceRevisions: { generated: 2, channel: 0, manual: 1, block: 1, booking: 1 },
+      physicalCapacityCount: 10,
+      generatedSellableLimitCount: 8,
+    });
+    // Twelve rooms became ten: a night whose bookings and blocks, or channel limit, no longer fit
+    // fails closed.
+    for (const overflow of [
+      earlier({
+        physicalCapacityCount: 12,
+        generatedSellableLimitCount: 12,
+        manualSellableLimitCount: null,
+        effectiveSellableLimitCount: 12,
+        assignedCount: 9,
+        blockedCount: 2,
+        availableCount: 1,
+      }),
+      earlier({
+        physicalCapacityCount: 12,
+        generatedSellableLimitCount: 12,
+        channelSellableLimitCount: 11,
+        manualSellableLimitCount: 5,
+        effectiveSellableLimitCount: 5,
+        assignedCount: 0,
+        blockedCount: 0,
+        availableCount: 5,
+      }),
+    ]) {
+      expect(
+        planPmsInventoryMaterialization({
+          ...baseInput,
+          horizon: { from: "2026-12-20", through: "2026-12-20" },
+          currentDays: [overflow, roomB],
+        }),
+      ).toMatchObject({ ok: false, error: { code: "inventory_invariant_violation" } });
+    }
+  });
+
   it("rejects malformed civil horizons and hostile current-day containers", () => {
     for (const horizon of [
       { from: "2026-02-30", through: "2026-03-01" },

@@ -345,7 +345,18 @@ function planExistingDay(
   if (current.sourceRevisions.generated > configuration.calendarRevision) {
     return { error: { code: "generated_revision_conflict", ...errorKey } };
   }
-  if (!validCurrentInvariant(current, binding)) {
+  // VAY-2469: a night prepared under an earlier calendar takes the room count this calendar holds,
+  // when its bookings, blocks and limits still fit. A night already on this calendar must match it.
+  const recounted =
+    current.calendarRevision < configuration.calendarRevision &&
+    current.physicalCapacityCount !== binding.physicalCapacityCount;
+  if (
+    !validCurrentInvariant(
+      current,
+      recounted ? { ...binding, physicalCapacityCount: current.physicalCapacityCount } : binding,
+    ) ||
+    current.assignedCount + current.blockedCount > binding.physicalCapacityCount
+  ) {
     return { error: { code: "inventory_invariant_violation", ...errorKey } };
   }
   const operatingStatus = operatingStatusFor(configuration.schedule, stayDate);
@@ -353,7 +364,10 @@ function planExistingDay(
     current.manualSellableLimitCount ??
     current.channelSellableLimitCount ??
     generatedSellableLimitCount;
-  if (effectiveSellableLimitCount > binding.physicalCapacityCount) {
+  if (
+    effectiveSellableLimitCount > binding.physicalCapacityCount ||
+    (current.channelSellableLimitCount ?? 0) > binding.physicalCapacityCount
+  ) {
     return { error: { code: "inventory_invariant_violation", ...errorKey } };
   }
   const availableCount =
@@ -361,6 +375,7 @@ function planExistingDay(
       ? 0
       : Math.max(0, effectiveSellableLimitCount - current.assignedCount - current.blockedCount);
   const changed =
+    recounted ||
     current.calendarRevision !== configuration.calendarRevision ||
     current.sourceRevisions.generated !== configuration.calendarRevision ||
     current.operatingStatus !== operatingStatus ||
@@ -379,6 +394,7 @@ function planExistingDay(
       inventoryRevision: current.inventoryRevision + 1,
       sourceRevisions: { ...current.sourceRevisions, generated: configuration.calendarRevision },
       operatingStatus,
+      physicalCapacityCount: binding.physicalCapacityCount,
       generatedSellableLimitCount,
       effectiveSellableLimitCount,
       availableCount,
