@@ -1079,7 +1079,6 @@
     "fromPerNight": "from {amount} / night",
     "pinName": "{name}, from {amount} per night",
     "allStays": "All stays",
-    "stayRooms": "Rooms",
     "units": "{count, plural, one {# room} other {# rooms}}",
     "villas": "{count, plural, one {# villa} other {# villas}}",
     "roomLine": "Room {number}: {name}"

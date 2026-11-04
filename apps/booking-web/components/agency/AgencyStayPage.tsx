@@ -59,7 +59,6 @@ export default function AgencyStayPage({ agency, stay }: { agency: AgencyPage; s
 }
 
 function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay }) {
-  const t = useTranslations("agency");
   const th = useTranslations("home");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
@@ -262,7 +261,6 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         model={model}
         onEditDates={editDates}
         onEditGuests={openGuests}
-        heading={t("stayRooms")}
         intro={
           <StayBox
             stay={stay}
@@ -302,7 +300,7 @@ function StayBox({ stay, back, hotelName }: { stay: AgencyStay; back: string; ho
     <section
       aria-labelledby="stay-name"
       data-testid="agency-stay-box"
-      className="mb-12 flex flex-wrap items-center gap-5 rounded-[20px] border border-gray-200 p-4"
+      className="mb-7 flex flex-wrap items-center gap-5 rounded-[20px] border border-gray-200 p-4"
     >
       <div className="relative h-[104px] w-[148px] shrink-0 overflow-hidden rounded-[14px] bg-gray-200">
         {stay.photoUrl && (

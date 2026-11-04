@@ -55,7 +55,7 @@ test("a stay card opens the stay's page on the agency's address, with the same s
   );
 
   // The stay's rooms, as on its own page: one room, no room tabs.
-  await expect(page.getByRole("heading", { name: "Rooms", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
   await expect(page.getByTestId("room-card-suite")).toBeVisible();
   await expect(page.getByTestId("room-tab-1")).toHaveCount(0);
   await assertHealthy();

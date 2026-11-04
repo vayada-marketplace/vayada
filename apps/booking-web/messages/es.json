@@ -1078,7 +1078,6 @@
     "fromPerNight": "desde {amount} / noche",
     "pinName": "{name}, desde {amount} por noche",
     "allStays": "Todos los alojamientos",
-    "stayRooms": "Habitaciones",
     "units": "{count, plural, one {# habitación} other {# habitaciones}}",
     "villas": "{count, plural, one {# villa} other {# villas}}",
     "roomLine": "Habitación {number}: {name}"
