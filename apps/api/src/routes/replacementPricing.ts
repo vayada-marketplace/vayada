@@ -112,7 +112,12 @@ export async function registerReplacementPricingRoutes(
     const step = `${method} pricing-v2${suffix}`;
     const refused = (request: FastifyRequest<{ Params: Params }>, code: string, reason?: string) =>
       request.log.warn(
-        { pricingStep: step, propertyId: request.params.propertyId, code, ...(reason ? { reason } : {}) },
+        {
+          pricingStep: step,
+          propertyId: request.params.propertyId,
+          code,
+          ...(reason ? { reason } : {}),
+        },
         "pricing request refused",
       );
     app.route<{ Params: Params }>({

@@ -512,12 +512,18 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
   it("leaves a deleted room out of the editor's read, so the next save publishes without it (VAY-2471)", async () => {
     const f = await fixture(),
       id = f.scope.propertyId;
-    expect(await f.commands.publish(id, await confirmed(f))).toEqual({ revision: 1, replayed: false });
+    expect(await f.commands.publish(id, await confirmed(f))).toEqual({
+      revision: 1,
+      replayed: false,
+    });
     const [kept, removed] = f.proposed.rooms;
     // Room type Delete and Retire only switch the room off; the published revision keeps its prices.
     await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [removed!.roomTypeId]);
     // The copy the page read before the delete is refused as changed (409, reload), not as no access.
-    const before = { currency: "EUR", rooms: f.proposed.rooms.map((room) => ({ ...room, revision: 2 })) };
+    const before = {
+      currency: "EUR",
+      rooms: f.proposed.rooms.map((room) => ({ ...room, revision: 2 })),
+    };
     await expect(f.commands.prepare(id, before)).rejects.toMatchObject({
       code: "stale",
       reason: "room_unavailable",
@@ -533,7 +539,9 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     const draft = { draftId: randomUUID(), expectedDraftRevision: 0, baseRevision: 1, ...prepared };
     const next = await confirmed({ ...f, prepared, draft });
     expect(await f.commands.publish(id, next)).toEqual({ revision: 2, replayed: false });
-    expect((await f.commands.read(id))?.rooms.map((room) => room.roomTypeId)).toEqual([kept!.roomTypeId]);
+    expect((await f.commands.read(id))?.rooms.map((room) => room.roomTypeId)).toEqual([
+      kept!.roomTypeId,
+    ]);
     const stored = await pool.query(
       "SELECT room_count FROM pms.pricing_v2_revisions WHERE property_id=$1 AND revision=2",
       [id],

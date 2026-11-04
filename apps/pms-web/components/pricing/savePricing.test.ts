@@ -49,9 +49,15 @@ describe("a refused or failed price save names its reason (VAY-2471)", () => {
   });
 
   it("says prices changed for a stale save, and try again later for an outage or an unnamed reason", () => {
-    const removed = new ApiErrorResponse(409, { code: "stale", reason: "room_unavailable" } as never);
+    const removed = new ApiErrorResponse(409, {
+      code: "stale",
+      reason: "room_unavailable",
+    } as never);
     expect(pricingSaveError(removed, english)).toBe(english("pricing.editor.errorChanged"));
-    for (const error of [new ApiErrorResponse(503, { code: "pricing_unavailable" } as never), denied("invalid")]) {
+    for (const error of [
+      new ApiErrorResponse(503, { code: "pricing_unavailable" } as never),
+      denied("invalid"),
+    ]) {
       expect(noPricingAccess(error)).toBe(false);
       expect(pricingSaveError(error, english)).toBe(english("pricing.editor.errorUnavailable"));
     }

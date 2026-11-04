@@ -48,7 +48,8 @@ const fail = (code: "invalid" | "denied"): never => {
 /** Why the price owners refused (VAY-2471): 403 only without access, or with Finance's reason; a room, terms or
  * source that changed since the page read the prices is 409, so the page says to reload rather than "no access". */
 function ownersRefusal(owners: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>) {
-  if (owners.reason === "denied" || owners.reason === "invalid") return new PricingStorageError(owners.reason);
+  if (owners.reason === "denied" || owners.reason === "invalid")
+    return new PricingStorageError(owners.reason);
   if (owners.reason === "finance_unavailable")
     return new PricingStorageError("denied", owners.financeReason);
   return new PricingStorageError("stale", owners.reason);

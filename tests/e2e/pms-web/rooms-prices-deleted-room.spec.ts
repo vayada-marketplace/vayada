@@ -76,18 +76,26 @@ async function mockPricing(page: Page) {
     const method = request.method();
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
-    if (suffix === "/payment-methods") return ok(route, { acceptanceEnabled: false, readyMethods: [] });
+    if (suffix === "/payment-methods")
+      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
     if (suffix === "/card-readiness")
       return ok(route, {
         card: { ready: false, reason: "switch_off", charge: "at_booking" },
         deposits: { ready: false },
       });
     if (suffix === "/not-selling")
-      return ok(route, { version: "pricing-rates-not-selling.v1", publishedRevision: 3, rates: [] });
+      return ok(route, {
+        version: "pricing-rates-not-selling.v1",
+        publishedRevision: 3,
+        rates: [],
+      });
     if (suffix === "/guest-display-rate") return ok(route, { guestDisplay: null });
     if (suffix === "" && method === "GET") {
       // The read leaves a deleted room out of the published prices.
-      const rooms = [pricedRoom(SUITE, "12000"), ...(state.gardenDeleted ? [] : [pricedRoom(GARDEN, "9000")])];
+      const rooms = [
+        pricedRoom(SUITE, "12000"),
+        ...(state.gardenDeleted ? [] : [pricedRoom(GARDEN, "9000")]),
+      ];
       return ok(route, {
         currency: "EUR",
         revision: 3,
@@ -109,7 +117,10 @@ async function mockPricing(page: Page) {
     if (suffix === "/prepare" && method === "POST") {
       state.prepares.push(body);
       // A copy that still has the deleted room no longer matches: changed, reload.
-      if (state.gardenDeleted && body.rooms.some((room: { roomTypeId: string }) => room.roomTypeId === GARDEN))
+      if (
+        state.gardenDeleted &&
+        body.rooms.some((room: { roomTypeId: string }) => room.roomTypeId === GARDEN)
+      )
         return route.fulfill({ status: 409, json: { code: "stale", reason: "room_unavailable" } });
       return ok(route, {
         sources,
@@ -121,7 +132,11 @@ async function mockPricing(page: Page) {
       });
     }
     if (/^\/drafts\/[^/]+$/.test(suffix) && method === "PUT") {
-      state.draft = { ...body, draftId: suffix.split("/")[2], revision: body.expectedDraftRevision + 1 };
+      state.draft = {
+        ...body,
+        draftId: suffix.split("/")[2],
+        revision: body.expectedDraftRevision + 1,
+      };
       return ok(route, { revision: state.draft.revision });
     }
     if (/^\/drafts\/[^/]+\/charge-review$/.test(suffix) && state.draft) {
@@ -177,7 +192,9 @@ async function openSuitePrices(page: Page) {
   );
   const pricing = await mockPricing(page);
   await page.goto(`/rooms/${SUITE}?tab=prices`);
-  await expect(page.locator("main").getByLabel("Alpine Suite Offer 1 Per room")).toHaveValue("120.00");
+  await expect(page.locator("main").getByLabel("Alpine Suite Offer 1 Per room")).toHaveValue(
+    "120.00",
+  );
   return pricing;
 }
 
@@ -205,7 +222,10 @@ test("a room deleted meanwhile: the page says reload, keeps the edit and saves w
   await expect(main.getByText("Prices saved.", { exact: false })).toBeVisible();
 
   expect(pricing.publishes).toHaveLength(1);
-  const published = pricing.publishes[0]!.snapshot.rooms as { roomTypeId: string; offers: unknown[] }[];
+  const published = pricing.publishes[0]!.snapshot.rooms as {
+    roomTypeId: string;
+    offers: unknown[];
+  }[];
   expect(published.map((room) => room.roomTypeId)).toEqual([SUITE]);
   expect(published[0]).toMatchObject({
     revision: 4,

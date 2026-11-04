@@ -108,7 +108,9 @@ async function fixture(
   logs?: { text: string },
 ) {
   const app = Fastify(
-    logs ? { logger: { level: "info", stream: { write: (chunk: string) => (logs.text += chunk) } } } : {},
+    logs
+      ? { logger: { level: "info", stream: { write: (chunk: string) => (logs.text += chunk) } } }
+      : {},
   );
   apps.push(app);
   app.decorateRequest("authContext", null);
