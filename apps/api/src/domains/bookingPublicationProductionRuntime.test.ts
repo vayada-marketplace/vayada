@@ -6,6 +6,7 @@ import {
 import { createProductReadinessResult } from "@vayada/domain-hotels";
 
 import {
+  BookingPublicationNotReadyError,
   createBookingPublicationRefresh,
   startBookingPublicationWorker,
   type BookingPublicationWorker,
@@ -305,6 +306,105 @@ describe("Booking publication refresh", () => {
     await expect(refresh(input)).rejects.toThrow(
       "Booking publication readiness is incomplete. (provider_failure: system/owner_read_failed)",
     );
+  });
+
+  it("names what a live page needs fixed, and leaves a page that already shows its sources (VAY-2472)", async () => {
+    const propertyId = "22222222-2222-4222-8222-222222222222";
+    const ready = await readyEvidence(propertyId);
+    const source = ready.groups[0]!.steps[0]!.entities[0]!.source;
+    // Tiga Lombok on 3 Nov: a duplicated room type left the calendar behind its rooms.
+    const blocked = {
+      ...ready,
+      status: "blocked" as const,
+      groups: [
+        {
+          groupId: "booking.calendar" as const,
+          status: "blocked" as const,
+          steps: [
+            {
+              owningStepId: "calendar" as const,
+              status: "blocked" as const,
+              entities: [
+                {
+                  source,
+                  status: "blocked" as const,
+                  blockers: [
+                    "operating_calendar_source_stale",
+                    "inventory_launch_readiness_incomplete",
+                  ].map((code) => ({
+                    code,
+                    message: `${code} message`,
+                    kind: "user_fixable" as const,
+                    product: "booking" as const,
+                    groupId: "booking.calendar" as const,
+                    owningStepId: "calendar" as const,
+                    source,
+                  })),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const done = { operationId: "33333333-3333-4333-8333-333333333333", status: "succeeded" };
+    const getBookingReadiness = vi.fn().mockResolvedValue(blocked);
+    const requestPublication = vi.fn().mockResolvedValue({ ok: true, operation: done });
+    const wait = vi.fn(async (_ms: number) => undefined);
+    const refresh = createBookingPublicationRefresh(
+      {
+        readinessProvider: { getBookingReadiness },
+        projection: {
+          getActive: vi
+            .fn()
+            .mockResolvedValue({ revisionId: "44444444-4444-4444-8444-444444444444" }),
+        },
+        repository: { requestPublication, getPublicationStatus: vi.fn().mockResolvedValue(done) },
+        projector: { projectPending: vi.fn().mockResolvedValue({}) },
+      },
+      wait,
+    );
+    const input = {
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      propertyId,
+      actorUserId: "44444444-4444-4444-8444-444444444444",
+      idempotencyKey: "req-gallery",
+      audit: { requestId: "req-gallery", source: "booking-admin" },
+      onlyIfLive: true,
+    };
+
+    // Not a server fault and nothing to retry: the hotel has to fix its calendar first.
+    const error = await refresh(input).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BookingPublicationNotReadyError);
+    expect((error as Error).message).toBe(
+      "Booking publication readiness is incomplete. (booking blocked: booking.calendar:operating_calendar_source_stale, booking.calendar:inventory_launch_readiness_incomplete)",
+    );
+    expect((error as BookingPublicationNotReadyError).blockers).toEqual([
+      {
+        groupId: "booking.calendar",
+        code: "operating_calendar_source_stale",
+        message: "operating_calendar_source_stale message",
+      },
+      {
+        groupId: "booking.calendar",
+        code: "inventory_launch_readiness_incomplete",
+        message: "inventory_launch_readiness_incomplete message",
+      },
+    ]);
+    expect(wait).not.toHaveBeenCalled();
+    expect(requestPublication).not.toHaveBeenCalled();
+
+    // Once fixed, a page whose live revision already hashes like its sources is left alone; a
+    // page behind its sources is republished.
+    getBookingReadiness.mockResolvedValue(ready);
+    await expect(
+      refresh({ ...input, skipIfSourceManifestHash: ready.sourceManifestHash }),
+    ).resolves.toBeNull();
+    expect(requestPublication).not.toHaveBeenCalled();
+    await expect(
+      refresh({ ...input, skipIfSourceManifestHash: `sha256:${"0".repeat(64)}` }),
+    ).resolves.toEqual(done);
+    expect(requestPublication).toHaveBeenCalledOnce();
   });
 
   it("asks again after a deadlock with another refresh, only for a live page (VAY-2344)", async () => {

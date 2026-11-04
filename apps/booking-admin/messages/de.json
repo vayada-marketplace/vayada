@@ -435,6 +435,8 @@
   "designStudio.feedback.saveSuccess": "Design-Einstellungen erfolgreich gespeichert",
   "designStudio.feedback.saveError": "Design-Einstellungen konnten nicht gespeichert werden",
   "designStudio.feedback.uploadError": "Bild-Upload fehlgeschlagen. Bitte versuchen Sie es erneut.",
+  "designStudio.feedback.livePageNotReady": "Ihre Änderungen sind gespeichert. Ihre Live-Buchungsseite wird aktualisiert, sobald dies behoben ist:",
+  "designStudio.feedback.seeWhatToFix": "Was zu beheben ist",
   "designStudio.media.heroImageTitle": "Hero-Bild",
   "designStudio.media.heroImageRecommended": "1920x1080 empfohlen",
   "designStudio.media.clickToUpload": "Zum Hochladen klicken",

@@ -37,7 +37,11 @@ import { createBookingGuestChoicePublicationReader } from "./domains/bookingGues
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { createBookingGuestTermsStore } from "./domains/bookingGuestTermsStore.js";
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
-import { createBookingPublicationProductionRuntime } from "./domains/bookingPublicationProductionRuntime.js";
+import { catchUpLiveBookingPages } from "./domains/bookingLivePageCatchUp.js";
+import {
+  BookingPublicationNotReadyError,
+  createBookingPublicationProductionRuntime,
+} from "./domains/bookingPublicationProductionRuntime.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
 import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
@@ -1766,6 +1770,57 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           available: 0,
         });
 
+        // VAY-2472, also as at Tiga Lombok: a Design Studio save (a second gallery photo) can't
+        // refresh the live page while the calendar is behind. The hotel is told what to fix
+        // instead of a server error, and the hourly catch-up finds the page blocked.
+        const gallerySave = await runtime
+          .refresh({
+            ...scope,
+            actorUserId: owner,
+            idempotencyKey: `studio-gallery-${suffix}`,
+            audit: { requestId: `studio-gallery-${suffix}`, source: "web" },
+            onlyIfLive: true,
+          })
+          .catch((error: unknown) => error);
+        expect(gallerySave).toBeInstanceOf(BookingPublicationNotReadyError);
+        expect((gallerySave as BookingPublicationNotReadyError).blockers).toContainEqual({
+          groupId: "booking.calendar",
+          code: "operating_calendar_source_stale",
+          message: "Your hotel or rooms changed. Review and save your calendar again.",
+        });
+        const catchUp = (runId: string) =>
+          catchUpLiveBookingPages(
+            { pool, refresh: runtime.refresh },
+            { runId: `${runId}-${suffix}`, limit: 50, propertyIds: [propertyId] },
+          );
+        const liveContent = async () =>
+          (
+            await admin.query<{ id: string; content: { rooms: { roomTypeId: string }[] } }>(
+              `SELECT active.content_revision_id::text AS id, revision.public_content AS content
+               FROM distribution.active_public_booking_revision active
+               JOIN distribution.public_booking_content_revisions revision
+                 ON revision.id = active.content_revision_id
+               WHERE active.property_id = $1`,
+              [propertyId],
+            )
+          ).rows[0]!;
+        const behind = await liveContent();
+        expect(await catchUp("catch-up-blocked")).toEqual({
+          livePages: 1,
+          unchanged: 0,
+          refreshed: [],
+          blocked: [
+            {
+              propertyId,
+              codes: expect.arrayContaining(["booking.calendar:operating_calendar_source_stale"]),
+            },
+          ],
+          noAccess: [],
+          failed: [],
+        });
+        expect((await liveContent()).id).toBe(behind.id);
+        expect(behind.content.rooms.map(({ roomTypeId }) => roomTypeId)).not.toContain(copy);
+
         // The hourly repair finds the hotel and saves its calendar again as the owner, who saved
         // it last: the same schedule and limits, with the copy and the Sea Suite's third room.
         const refreshPorts: PmsOperatingCalendarRoomRefreshPorts = {
@@ -1803,6 +1858,26 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect(blockerCodes(await readiness())).not.toContain(
           "booking.calendar:operating_calendar_source_stale",
         );
+        // VAY-2472: the catch-up after the repair republishes the live page once, as the owner
+        // who made it live, so guests get what was saved meanwhile (here: the copy). The next run
+        // finds nothing new and leaves the page alone.
+        expect(await catchUp("catch-up")).toEqual({
+          livePages: 1,
+          unchanged: 0,
+          refreshed: [propertyId],
+          blocked: [],
+          noAccess: [],
+          failed: [],
+        });
+        const caughtUp = await liveContent();
+        expect(caughtUp.id).not.toBe(behind.id);
+        expect(caughtUp.content.rooms.map(({ roomTypeId }) => roomTypeId)).toContain(copy);
+        expect(await catchUp("catch-up-again")).toMatchObject({
+          livePages: 1,
+          unchanged: 1,
+          refreshed: [],
+        });
+        expect((await liveContent()).id).toBe(caughtUp.id);
         // Every Sea Suite night counts three rooms and keeps its bookings, block and manual limit.
         const seaAfter = await nights(seaSuite);
         expect(seaAfter).toEqual(

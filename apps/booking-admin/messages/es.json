@@ -435,6 +435,8 @@
   "designStudio.feedback.saveSuccess": "Configuración de diseño guardada con éxito",
   "designStudio.feedback.saveError": "No se pudo guardar la configuración de diseño",
   "designStudio.feedback.uploadError": "Error al subir la imagen. Por favor, inténtelo de nuevo.",
+  "designStudio.feedback.livePageNotReady": "Tus cambios se han guardado. Tu página de reservas publicada se actualizará cuando esto se resuelva:",
+  "designStudio.feedback.seeWhatToFix": "Ver qué corregir",
   "designStudio.media.heroImageTitle": "Imagen principal",
   "designStudio.media.heroImageRecommended": "1920x1080 recomendado",
   "designStudio.media.clickToUpload": "Haga clic para subir",

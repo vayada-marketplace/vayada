@@ -435,6 +435,8 @@
   "designStudio.feedback.saveSuccess": "Designinstellingen succesvol opgeslagen",
   "designStudio.feedback.saveError": "Kon designinstellingen niet opslaan",
   "designStudio.feedback.uploadError": "Afbeelding uploaden mislukt. Probeer het opnieuw.",
+  "designStudio.feedback.livePageNotReady": "Uw wijzigingen zijn opgeslagen. Uw live boekingspagina wordt bijgewerkt zodra dit is opgelost:",
+  "designStudio.feedback.seeWhatToFix": "Bekijk wat er moet worden opgelost",
   "designStudio.media.heroImageTitle": "Hoofdafbeelding",
   "designStudio.media.heroImageRecommended": "1920x1080 aanbevolen",
   "designStudio.media.clickToUpload": "Klik om te uploaden",
