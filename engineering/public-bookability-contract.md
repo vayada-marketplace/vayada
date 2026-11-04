@@ -200,6 +200,10 @@ for display, `defaultCurrency` first. It appears only when Booking settings add 
 beyond the pricing currency. It is display only: `supportedCurrencies` and the quote
 parameters keep the pricing currency, and every quote and charge stays in it.
 
+`hotel.branding.displayDefaultCurrency` (optional, VAY-2390, sent since VAY-2474) is the guest
+display currency from Booking settings → Localization, which the page opens in. It is one of
+`displayCurrencies` and never `defaultCurrency`, and it is display only, like that list.
+
 ## Quote Endpoint
 
 > Status (2026-10-28): removed. After the old pricing model was retired (VAY-1543) this route only
