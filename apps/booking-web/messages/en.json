@@ -1054,6 +1054,25 @@
       "other": "Other"
     },
     "adultsOnly": "Adults only",
-    "approximateMixed": "Each stay charges in its own currency. Amounts marked ≈ are approximate conversions."
+    "approximateMixed": "Each stay charges in its own currency. Amounts marked ≈ are approximate conversions.",
+    "filters": "Filters",
+    "filterType": "Property type",
+    "filterArea": "Area",
+    "filterAll": "All",
+    "filterAllAreas": "All areas",
+    "filterPrice": "Price",
+    "priceRange": "{min} – {max}",
+    "priceFrom": "From {min}",
+    "priceUpTo": "Up to {max}",
+    "pricePerNight": "Price per night in {currency}",
+    "priceMin": "Minimum",
+    "priceMax": "Maximum",
+    "priceClear": "Clear",
+    "priceDone": "Done",
+    "privatePool": "Private pool",
+    "breakfast": "Breakfast included",
+    "freeCancellation": "Free cancellation",
+    "noMatch": "No stay matches these filters.",
+    "resetFilters": "Reset filters"
   }
 }

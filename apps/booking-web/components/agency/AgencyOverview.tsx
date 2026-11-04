@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import type { AccountBookingPageSort } from "@vayada/domain-booking/account-booking-page";
@@ -11,6 +11,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import AgencyStayCard, { type AgencyCardText } from "@/components/agency/AgencyStayCard";
 import AgencyFullStays from "@/components/agency/AgencyFullStays";
+import AgencyFilters from "@/components/agency/AgencyFilters";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { ApiError } from "@/services/api/client";
 import {
@@ -20,10 +21,15 @@ import {
   type AgencyStayPrices,
 } from "@/services/api/agencyPage";
 import {
+  agencyFilterOptions,
   agencyResults,
+  filtersActive,
   formatStayRange,
+  hasFilterChips,
+  NO_FILTERS,
   stayHref,
   stayNights,
+  stayTypeName,
   type AgencyCard,
 } from "@/lib/agencyOverview";
 import { mostRooms } from "@/lib/roomPicker";
@@ -82,7 +88,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
   const th = useTranslations("home");
   const locale = useLocale();
   const searchParams = useSearchParams();
-  const { baseCurrency, rates, approximate } = useCurrency();
+  const { baseCurrency, rates, approximate, selectedCurrency, convertPrice } = useCurrency();
   const childrenEnabled = agency.stays.some((stay) => stay.childrenEnabled);
   const [initial] = useState(() => searchFromUrl(searchParams, childrenEnabled));
   // What the card shows, and the search the stays were read for.
@@ -98,6 +104,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
   } | null>(null);
   const [formError, setFormError] = useState("");
   const [sort, setSort] = useState(agency.results.defaultSort);
+  const [filters, setFilters] = useState(NO_FILTERS);
   const [panel, setPanel] = useState<SearchPanel>(null);
   const [promoInput, setPromoInput] = useState(initial.promoCode ?? "");
   // The search a newly applied code went out with, until its answer says whether a stay takes it.
@@ -195,6 +202,18 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
       run(form, { scroll: false });
     setPanel(next);
   };
+  // The price filter works in the guest's display currency, as the cards show prices; a stay no
+  // rate converts can't be compared (null).
+  const priceValue = useCallback(
+    (amount: number, currency: string) =>
+      currency === selectedCurrency
+        ? amount
+        : (currency === baseCurrency || rates[currency]) &&
+            (selectedCurrency === baseCurrency || rates[selectedCurrency])
+          ? convertPrice(amount, currency)
+          : null,
+    [selectedCurrency, baseCurrency, rates, convertPrice],
+  );
   const results = useMemo(
     () =>
       agencyResults(agency.stays, answer?.prices ?? null, sort, {
@@ -202,8 +221,30 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
         // In the rates' own currency; null where no rate converts it.
         comparable: (amount, currency) =>
           currency === baseCurrency ? amount : rates[currency] ? amount / rates[currency] : null,
+        filters,
+        priceValue,
       }),
-    [agency.stays, agency.results.lowestPriceBadge, answer, sort, baseCurrency, rates],
+    [
+      agency.stays,
+      agency.results.lowestPriceBadge,
+      answer,
+      sort,
+      baseCurrency,
+      rates,
+      filters,
+      priceValue,
+    ],
+  );
+  const filterOptions = useMemo(
+    () =>
+      agencyFilterOptions(
+        agency.stays,
+        answer?.prices ?? null,
+        agency.filters,
+        filters,
+        priceValue,
+      ),
+    [agency.stays, agency.filters, answer, filters, priceValue],
   );
   const shown = answer?.search ?? search;
   const dates = formatStayRange(shown.checkIn, shown.checkOut, locale);
@@ -387,6 +428,26 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           )}
         </div>
 
+        {hasFilterChips(filterOptions) && (
+          <div className="mt-6 border-b border-gray-200 pb-5">
+            <AgencyFilters
+              options={filterOptions}
+              filters={filters}
+              onChange={setFilters}
+              typeLabel={(type) => stayTypeName(type, t)}
+              currency={selectedCurrency}
+              formatPrice={(value) =>
+                new Intl.NumberFormat("en-GB", {
+                  style: "currency",
+                  currency: selectedCurrency,
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0,
+                }).format(value)
+              }
+            />
+          </div>
+        )}
+
         {(formError || failure) && (
           <div
             role="alert"
@@ -421,6 +482,22 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
             />
           ))}
         </ul>
+
+        {answer && filtersActive(filters) && results.cards.length === 0 && (
+          <p
+            role="status"
+            className="mt-6 rounded-[20px] border border-dashed border-gray-300 p-8 text-center text-base text-gray-500"
+          >
+            {t("noMatch")}{" "}
+            <button
+              type="button"
+              onClick={() => setFilters(NO_FILTERS)}
+              className="min-h-[44px] font-semibold text-gray-900 underline hover:text-black"
+            >
+              {t("resetFilters")}
+            </button>
+          </p>
+        )}
 
         {agency.results.showFullStays && results.full.length > 0 && (
           <AgencyFullStays

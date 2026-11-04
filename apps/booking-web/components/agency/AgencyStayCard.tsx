@@ -3,28 +3,13 @@
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import type { AgencyCard } from "@/lib/agencyOverview";
+import { stayTypeName, type AgencyCard } from "@/lib/agencyOverview";
 
 export type AgencyCardText = {
   /** What is free for the search, for an available stay. */
   facts: (card: AgencyCard) => string;
   href: (card: AgencyCard) => string;
 };
-
-const KNOWN_TYPES = [
-  "hotel",
-  "resort",
-  "hostel",
-  "apartment",
-  "aparthotel",
-  "guesthouse",
-  "bed_and_breakfast",
-  "homestay",
-  "villa",
-  "vacation_rental",
-  "motel",
-  "other",
-];
 
 /** The charged amount in its own currency, with cents when it has them (as on room cards). */
 const exactMoney = (value: number, currency: string) =>
@@ -54,11 +39,7 @@ export default function AgencyStayCard({
   const { stay, price, lowest } = card;
   const money = (value: number, currency: string) =>
     approximate(value, currency) ?? exactMoney(value, currency);
-  const type = stay.propertyType
-    ? KNOWN_TYPES.includes(stay.propertyType)
-      ? t(`type.${stay.propertyType}`)
-      : stay.propertyType
-    : null;
+  const type = stay.propertyType ? stayTypeName(stay.propertyType, t) : null;
   const priced = price?.status === "available" ? price.price : null;
 
   return (

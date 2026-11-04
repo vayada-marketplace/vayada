@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { agencyResults, formatStayRange, stayHref, stayNights } from "./agencyOverview";
+import {
+  agencyFilterOptions,
+  agencyResults,
+  formatStayRange,
+  NO_FILTERS,
+  stayHref,
+  stayNights,
+  type AgencyFilters,
+} from "./agencyOverview";
 import type { AgencyStay, AgencyStayPrice, AgencyStayPrices } from "@/services/api/agencyPage";
 
 const stay = (id: string): AgencyStay => ({
@@ -11,6 +19,7 @@ const stay = (id: string): AgencyStay => ({
   photoUrl: null,
   photos: [],
   childrenEnabled: true,
+  privatePool: false,
 });
 const stays = ["mertha", "escape", "mandala", "uma", "wiswan", "dewari"].map(stay);
 const priced = (id: string, nightly: number, currency = "USD"): AgencyStayPrice => ({
@@ -20,6 +29,7 @@ const priced = (id: string, nightly: number, currency = "USD"): AgencyStayPrice 
   roomTypesFree: 2,
   price: { total: nightly * 2, nightly, currency, promoApplied: false },
   nextFree: null,
+  rateFilters: { breakfast: null, freeCancellation: null, both: null },
 });
 const answer = (list: AgencyStayPrice[]): AgencyStayPrices => ({
   checkIn: "2026-11-12",
@@ -106,6 +116,147 @@ describe("agencyResults", () => {
     const results = agencyResults(stays, answer([priced("escape", 95)]), "price_low", options);
     expect(ids(results.cards)).toEqual(["escape"]);
     expect(results.total).toBe(1);
+  });
+});
+
+describe("filters (VAY-2460)", () => {
+  // Villas in Ubud with pools, a guest house, a resort in Peliatan, a villa in Penestanan.
+  const facts: Record<string, Partial<AgencyStay>> = {
+    mertha: { propertyType: "guesthouse" },
+    escape: { privatePool: true },
+    mandala: { propertyType: "resort", area: "Peliatan" },
+    uma: { privatePool: true },
+    wiswan: { area: "Penestanan" },
+  };
+  const all = stays.map((one) => ({ ...one, ...facts[one.propertyId] }));
+  const rates = (filters: Partial<NonNullable<AgencyStayPrice["rateFilters"]>>) => ({
+    breakfast: null,
+    freeCancellation: null,
+    both: null,
+    ...filters,
+  });
+  const at = (nightly: number) => ({
+    roomTypesFree: 1,
+    price: { total: nightly * 2, nightly, currency: "USD", promoApplied: false },
+  });
+  // Breakfast at Mertha and The Escape; free cancellation only at The Escape.
+  const answered = answer(
+    read.stays.map((price) =>
+      price.propertyId === "mertha"
+        ? { ...price, rateFilters: rates({ breakfast: at(45) }) }
+        : price.propertyId === "escape"
+          ? {
+              ...price,
+              rateFilters: rates({ breakfast: at(120), freeCancellation: at(100), both: at(130) }),
+            }
+          : price,
+    ),
+  );
+  const filtered = (
+    filters: Partial<AgencyFilters>,
+    sort: "price_low" | "recommended" = "price_low",
+  ) =>
+    agencyResults(all, answered, sort, {
+      ...options,
+      filters: { ...NO_FILTERS, ...filters },
+      priceValue: (amount, currency) => (currency === "USD" ? amount : null),
+    });
+
+  it("narrows every list by type, area and private pool, and counts what is left", () => {
+    const villas = filtered({ type: "villa" });
+    expect(ids(villas.cards)).toEqual(["escape", "wiswan"]);
+    expect(ids(villas.full)).toEqual(["uma", "dewari"]);
+    expect([villas.available, villas.total]).toEqual([1, 4]);
+    // A single priced stay gets no badge.
+    expect(villas.cards.some((card) => card.lowest)).toBe(false);
+    expect(ids(filtered({ area: "Peliatan" }).cards)).toEqual(["mandala"]);
+    const pools = filtered({ privatePool: true });
+    expect([ids(pools.cards), ids(pools.full)]).toEqual([["escape"], ["uma"]]);
+  });
+
+  it("prices each card with only breakfast or free-cancellation rates, and drops the others", () => {
+    const breakfast = filtered({ breakfast: true });
+    expect(ids(breakfast.cards)).toEqual(["mertha", "escape"]);
+    expect(breakfast.cards.map((card) => card.price?.price?.nightly)).toEqual([45, 120]);
+    expect(breakfast.cards.map((card) => card.lowest)).toEqual([true, false]);
+    expect(breakfast.cards[0]!.price!.roomTypesFree).toBe(1);
+    // Full stays don't have rates for the dates: rate filters leave them be.
+    expect(ids(breakfast.full)).toEqual(["uma", "dewari"]);
+    expect([breakfast.available, breakfast.total]).toEqual([2, 6]);
+    const both = filtered({ breakfast: true, freeCancellation: true });
+    expect(both.cards.map((card) => [card.stay.propertyId, card.price?.price?.nightly])).toEqual([
+      ["escape", 130],
+    ]);
+  });
+
+  it("keeps the prices per night within the range, and a stay it can't compare", () => {
+    expect(ids(filtered({ price: { min: 50, max: 100 } }).cards)).toEqual([
+      "mandala",
+      "escape",
+      "wiswan",
+    ]);
+    expect(ids(filtered({ price: { min: null, max: 40 } }).cards)).toEqual(["mertha", "wiswan"]);
+    // With breakfast, The Escape costs 120.
+    expect(ids(filtered({ breakfast: true, price: { min: 100, max: null } }).cards)).toEqual([
+      "escape",
+    ]);
+    const idr = answer([priced("mertha", 38), priced("escape", 900_000, "IDR")]);
+    const results = agencyResults(all, idr, "price_low", {
+      ...options,
+      filters: { ...NO_FILTERS, price: { min: null, max: 40 } },
+      priceValue: (amount, currency) => (currency === "USD" ? amount : null),
+    });
+    expect(ids(results.cards)).toEqual(["mertha", "escape"]);
+  });
+
+  it("offers only the chips the agency switched on, while they split the stays", () => {
+    const enabled = {
+      propertyType: true,
+      area: true,
+      price: true,
+      privatePool: true,
+      breakfast: true,
+      freeCancellation: true,
+      bedrooms: true,
+    };
+    const value = (amount: number) => amount;
+    expect(agencyFilterOptions(all, answered, enabled, NO_FILTERS, value)).toEqual({
+      // Most stays first.
+      types: ["villa", "guesthouse", "resort"],
+      areas: ["Ubud", "Peliatan", "Penestanan"],
+      privatePool: true,
+      breakfast: true,
+      freeCancellation: true,
+      price: { min: 38, max: 95 },
+    });
+    const off = { ...enabled, area: false, privatePool: false, freeCancellation: false };
+    expect(agencyFilterOptions(all, answered, off, NO_FILTERS, value)).toMatchObject({
+      areas: [],
+      privatePool: false,
+      freeCancellation: false,
+    });
+    // Before the search answers there are no rates or prices to split by.
+    expect(agencyFilterOptions(all, null, enabled, NO_FILTERS, value)).toMatchObject({
+      breakfast: false,
+      freeCancellation: false,
+      price: null,
+    });
+    // One type, one area, a pool everywhere, breakfast at every available stay: nothing splits.
+    const alike = stays.map((one) => ({ ...one, privatePool: true }));
+    const everywhere = answer(
+      read.stays.map((price) => ({ ...price, rateFilters: rates({ breakfast: at(50) }) })),
+    );
+    expect(agencyFilterOptions(alike, everywhere, enabled, NO_FILTERS, value)).toMatchObject({
+      types: [],
+      areas: [],
+      privatePool: false,
+      breakfast: false,
+    });
+    // A chip in use stays, so it can be undone.
+    expect(
+      agencyFilterOptions(alike, everywhere, enabled, { ...NO_FILTERS, breakfast: true }, value)
+        .breakfast,
+    ).toBe(true);
   });
 });
 
