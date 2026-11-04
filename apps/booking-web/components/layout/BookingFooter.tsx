@@ -48,7 +48,7 @@ export default function BookingFooter() {
               <div className="flex items-center gap-3 mt-4">
                 {hotel.contact.whatsapp && (
                   <a
-                    href={`https://wa.me/${hotel.contact.whatsapp.replace(/\s+/g, "")}`}
+                    href={`https://wa.me/${hotel.contact.whatsapp.replace(/\D/g, "")}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-white/70 hover:text-white transition-colors"

@@ -83,6 +83,14 @@ export function phoneValue(country: CountryCode, national: string): string {
   return `+${getCountryCallingCode(country)} ${typed}`;
 }
 
+/** A whole international number in the spaced form setup stores ("+6282341963715" →
+ * "+62 823 4196 3715"); one that isn't a valid number stays as typed (VAY-2473). */
+export function internationalPhone(value: string): string {
+  const typed = value.trim();
+  const parsed = parsePhoneNumberFromString(typed);
+  return parsed?.isValid() ? parsed.formatInternational() : typed;
+}
+
 /** Whether an international number ("+49 30 1234567") has a possible length for its country
  * (libphonenumber's "possible"; not a check that the line exists). */
 export function phonePossible(value: string): boolean {

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CountryPhoneField,
   defaultPhoneCountry,
+  internationalPhone,
   matchPhoneCountries,
   orderedPhoneCountries,
   phoneParts,
@@ -25,6 +26,17 @@ describe("phone as country + number (VAY-2247)", () => {
     expect(phoneValue("DE", "+43 1 234567")).toBe("+43 1 234567");
     // Not a valid number yet: kept with the dial code, so the form can say what's wrong.
     expect(phoneValue("DE", "12")).toBe("+49 12");
+  });
+
+  it("spaces a whole international number as setup stores it (VAY-2473)", () => {
+    expect(internationalPhone("+6282341963715")).toBe("+62 823 4196 3715");
+    expect(internationalPhone(" +62 823-4196-3715 ")).toBe("+62 823 4196 3715");
+    expect(internationalPhone("+62 823 4196 3715")).toBe("+62 823 4196 3715");
+    expect(internationalPhone("+41791234567")).toBe("+41 79 123 45 67");
+    // Not a valid number, or no country code: kept as typed, only trimmed.
+    expect(internationalPhone(" +1 555 ")).toBe("+1 555");
+    expect(internationalPhone("082341963715")).toBe("082341963715");
+    expect(internationalPhone("  ")).toBe("");
   });
 
   it("starts in the hotel's country, else the browser's region, else Germany", () => {

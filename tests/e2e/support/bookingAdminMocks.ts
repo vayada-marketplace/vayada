@@ -37,6 +37,8 @@ export interface BookingAdminPropertySettingsFixture {
   id: string;
   slug: string;
   property_name?: string;
+  phone_number?: string;
+  whatsapp_number?: string;
   instagram?: string;
   facebook?: string;
   tiktok?: string;

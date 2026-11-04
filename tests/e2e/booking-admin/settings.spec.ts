@@ -407,6 +407,62 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(description).toBeDisabled();
   });
 
+  test("saves the phone and WhatsApp numbers spaced, as setup stores them (VAY-2473)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    // General stored "+6282341963715" as typed, so the booking page's Contact menu lost the
+    // spacing setup gives the same number ("+62 823 4196 3715").
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    const persisted = {
+      ...defaultBookingAdminPropertySettings,
+      property_name: "Alpenrose",
+      phone_number: "+62 823 4196 3715",
+      whatsapp_number: "",
+    };
+    await mockBookingAdminShellRoutes(page, { propertySettings: persisted });
+    const writes: Record<string, unknown>[] = [];
+    await page.route(`**${BOOKING_ADMIN_PROPERTY_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PATCH") {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        writes.push(body);
+        Object.assign(persisted, body);
+      }
+      await route.fulfill({ json: persisted });
+    });
+    const save = page.getByRole("button", { name: "Save property details", exact: true });
+
+    await page.goto("/settings/general");
+    const phone = page.getByPlaceholder("+62 370 123 4567");
+    const whatsapp = page.getByPlaceholder("+62 812 3456 7890");
+    await expect(phone).toHaveValue("+62 823 4196 3715");
+    await phone.fill("+6282341963715");
+    await whatsapp.fill(" +6282341963715 ");
+    await save.click();
+    await expect(page.getByText("Settings saved successfully")).toBeVisible();
+    await whatsapp.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("vay2473-general-contact-saved.png") });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      phone_number: "+62 823 4196 3715",
+      whatsapp_number: "+62 823 4196 3715",
+    });
+    await expect(phone).toHaveValue("+62 823 4196 3715");
+    await expect(whatsapp).toHaveValue("+62 823 4196 3715");
+
+    // A number that isn't valid yet is saved as typed, and a cleared one stays empty.
+    await phone.fill("+1 555");
+    await whatsapp.fill("");
+    await save.click();
+    await expect.poll(() => writes.length).toBe(2);
+    expect(writes[1]).toMatchObject({ phone_number: "+1 555", whatsapp_number: "" });
+    await assertHealthy();
+  });
+
   test("loads migrated settings surfaces without helper calls", async ({ page }, testInfo) => {
     test.skip(
       !PROD,
