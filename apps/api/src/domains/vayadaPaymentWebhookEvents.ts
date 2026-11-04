@@ -104,6 +104,20 @@ async function handle(
         { propertyId: payment.propertyId, paymentId: payment.id, disputeId, type },
         "vayada Payment: dispute fee unknown in the stay's currency; adjust the hotel's balance by hand",
       );
+    else if (charged > 0)
+      // The ledger keeps only the stay's currency; this keeps Stripe's own fee for reconciling.
+      log.info(
+        {
+          propertyId: payment.propertyId,
+          paymentId: payment.id,
+          disputeId,
+          type,
+          stripeFeeMinor: charged,
+          stripeFeeCurrency: text(transaction?.["currency"]),
+          stayFeeMinor: stripeFeeMinor,
+        },
+        "vayada Payment: Stripe's dispute fee in the stay's currency",
+      );
     let recorded: Awaited<ReturnType<typeof recordVayadaPaymentDispute>>;
     try {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
@@ -306,9 +320,10 @@ export function stayCurrencyFee(
     const scale = (currency: string) => (stripeCurrencyHasZeroDecimals(currency) ? 1 : 100);
     converted = Math.round(((feeMinor / scale(settlement)) * scale(stayCurrency)) / rate);
   } else {
-    // Both amounts are in minor units, so the ratio already accounts for decimals.
+    // Both amounts are in minor units, so the ratio already accounts for decimals. Below one
+    // unit of the settlement currency, Stripe's rounding of it distorts the rate too much.
     const settled = Math.abs(minor(transaction["amount"]) ?? 0);
-    if (!settled || !stayAmountMinor || stayAmountMinor < 0) return null;
+    if (settled < 100 || !stayAmountMinor || stayAmountMinor < 0) return null;
     converted = Math.round((feeMinor * stayAmountMinor) / settled);
   }
   return Number.isSafeInteger(converted) && converted >= 0 ? converted : null;

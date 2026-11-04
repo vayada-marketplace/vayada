@@ -1022,26 +1022,37 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         currency: lower,
       });
       // Vayada's account settles in another currency, and Stripe sends a dispute's balance
-      // transactions without an exchange rate (test run C). Here the dispute moved twice the
-      // stay's amount in the settlement currency, so Stripe's fee of 1500 is 750 for the stay.
+      // transactions without an exchange rate (test run C). The guest disputes half the payment,
+      // which moved twice as much in the settlement currency: Stripe's fee of 1500 is 750 for the
+      // stay. (Converting against the whole payment would make it 1500.)
+      const disputed = Math.floor(amountMinor / 2);
       const settlement = lower === "usd" ? "eur" : "usd";
       const dispute = (bt: Record<string, unknown>) => ({
         id: "dp_other_currency",
-        amount: amountMinor,
+        amount: disputed,
         currency: lower,
         payment_intent: "pi_writer_test",
         balance_transactions: [{ currency: settlement, exchange_rate: null, ...bt }],
       });
       await expect(
-        event("charge.dispute.funds_withdrawn", dispute({ amount: -2 * amountMinor, fee: 1500 })),
+        event("charge.dispute.funds_withdrawn", dispute({ amount: -2 * disputed, fee: 1500 })),
       ).resolves.toBe("handled");
-      // Won: Stripe keeps its fee, so only the amount comes back.
+      // Won, and here Stripe gives its fee back: it converts the same way.
       await expect(
-        event("charge.dispute.funds_reinstated", dispute({ amount: 2 * amountMinor, fee: 0 })),
+        event("charge.dispute.funds_reinstated", dispute({ amount: 2 * disputed, fee: -1500 })),
       ).resolves.toBe("handled");
       expect(log.warn).not.toHaveBeenCalledWith(
         expect.anything(),
         expect.stringContaining("dispute fee unknown"),
+      );
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          disputeId: "dp_other_currency",
+          stripeFeeMinor: 1500,
+          stripeFeeCurrency: settlement,
+          stayFeeMinor: 750,
+        }),
+        expect.stringContaining("dispute fee"),
       );
       expect(
         (
@@ -1055,13 +1066,13 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       ).toEqual([
         {
           entry_kind: "dispute_reversal",
-          gross: amountMinor,
-          fee: 0,
+          gross: disputed,
+          fee: -750,
           source_key: "dispute:dp_other_currency:reinstated",
         },
         {
           entry_kind: "dispute",
-          gross: -amountMinor,
+          gross: -disputed,
           fee: 750,
           source_key: "dispute:dp_other_currency:withdrawn",
         },

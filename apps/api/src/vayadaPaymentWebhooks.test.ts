@@ -106,6 +106,11 @@ describe("vayada Payment's Stripe webhook (VAY-2442)", () => {
     expect(stayCurrencyFee(withdrawal, 2000, "IDR")).toBeNull();
     expect(stayCurrencyFee(withdrawal, 2000, "IDR", 0)).toBeNull();
     expect(stayCurrencyFee({ ...withdrawal, amount: 0 }, 2000, "IDR", 50_000_000)).toBeNull();
+    // A dispute under one euro: EUR 0.99 is rounded too coarsely to price a EUR 20 fee.
+    expect(stayCurrencyFee({ ...withdrawal, amount: -99 }, 2000, "IDR", 2_000_000)).toBeNull();
+    expect(stayCurrencyFee({ ...withdrawal, amount: -100 }, 2000, "IDR", 2_000_000)).toBe(
+      40_000_000,
+    );
     expect(stayCurrencyFee({ ...withdrawal, amount: "-2464" }, 2000, "IDR", 50_000_000)).toBeNull();
   });
 
