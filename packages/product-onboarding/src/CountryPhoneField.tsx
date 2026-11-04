@@ -84,10 +84,11 @@ export function phoneValue(country: CountryCode, national: string): string {
 }
 
 /** A whole international number in the spaced form setup stores ("+6282341963715" →
- * "+62 823 4196 3715"); one that isn't a valid number stays as typed (VAY-2473). */
+ * "+62 823 4196 3715"); anything else, a note next to the number included, stays as typed
+ * (VAY-2473). */
 export function internationalPhone(value: string): string {
   const typed = value.trim();
-  const parsed = parsePhoneNumberFromString(typed);
+  const parsed = parsePhoneNumberFromString(typed, { extract: false });
   return parsed?.isValid() ? parsed.formatInternational() : typed;
 }
 

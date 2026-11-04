@@ -52,9 +52,12 @@ describe("BookingFooter", () => {
   });
 
   it("opens WhatsApp with the number's digits only, as the Contact menu does (VAY-2473)", () => {
-    hotel.whatsapp = "+62 823 4196 3715";
     try {
+      hotel.whatsapp = "+62 823 4196 3715";
       expect(renderFooter("")).toContain('href="https://wa.me/6282341963715"');
+      // No digits, no link: never a bare https://wa.me/.
+      hotel.whatsapp = "on request";
+      expect(renderFooter("")).not.toContain("wa.me");
     } finally {
       hotel.whatsapp = undefined;
     }

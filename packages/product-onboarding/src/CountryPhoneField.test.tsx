@@ -33,6 +33,10 @@ describe("phone as country + number (VAY-2247)", () => {
     expect(internationalPhone(" +62 823-4196-3715 ")).toBe("+62 823 4196 3715");
     expect(internationalPhone("+62 823 4196 3715")).toBe("+62 823 4196 3715");
     expect(internationalPhone("+41791234567")).toBe("+41 79 123 45 67");
+    expect(internationalPhone("+44 (0)20 7946 0958")).toBe("+44 20 7946 0958");
+    // A note next to the number is the hotel's text: kept, not cut down to the number.
+    expect(internationalPhone("+62 823 4196 3715 (WA only)")).toBe("+62 823 4196 3715 (WA only)");
+    expect(internationalPhone("WhatsApp: +6282341963715")).toBe("WhatsApp: +6282341963715");
     // Not a valid number, or no country code: kept as typed, only trimmed.
     expect(internationalPhone(" +1 555 ")).toBe("+1 555");
     expect(internationalPhone("082341963715")).toBe("082341963715");

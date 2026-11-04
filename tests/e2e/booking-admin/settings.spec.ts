@@ -444,7 +444,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await whatsapp.fill(" +6282341963715 ");
     await save.click();
     await expect(page.getByText("Settings saved successfully")).toBeVisible();
-    await whatsapp.scrollIntoViewIfNeeded();
+    await phone.evaluate((field) => field.scrollIntoView({ block: "center" }));
     await page.screenshot({ path: testInfo.outputPath("vay2473-general-contact-saved.png") });
     expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({
