@@ -42,7 +42,12 @@ export default function AgencyFilters({
     return null;
 
   return (
-    <div role="group" aria-label={t("filters")} className="flex flex-wrap items-center gap-2">
+    // Positioned: on a phone the price box opens under the whole row.
+    <div
+      role="group"
+      aria-label={t("filters")}
+      className="relative flex flex-wrap items-center gap-2"
+    >
       {options.types.length > 0 && (
         <Choices
           label={t("filterType")}
@@ -119,6 +124,9 @@ function Choices({
   );
 }
 
+/** The price box's width from tablets up (`sm:w-80`). */
+const BOX_WIDTH = 320;
+
 /** "Price": a small box with the lowest and highest price per night the guest wants. Empty
  * fields show the stays' own lowest and highest; changes apply as they are typed. */
 function PriceBox({
@@ -136,6 +144,8 @@ function PriceBox({
 }) {
   const t = useTranslations("agency");
   const [open, setOpen] = useState(false);
+  // Opened near the window's right edge, the box lines up with the chip's right side instead.
+  const [alignEnd, setAlignEnd] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const id = useId();
   const active = value.min !== null || value.max !== null;
@@ -190,7 +200,11 @@ function PriceBox({
         type="button"
         aria-expanded={open}
         aria-controls={id}
-        onClick={() => setOpen((shown) => !shown)}
+        onClick={(event) => {
+          const chip = event.currentTarget.getBoundingClientRect();
+          setAlignEnd(chip.left + BOX_WIDTH > window.innerWidth - 16);
+          setOpen((shown) => !shown);
+        }}
         className={chip(active)}
       >
         {label}
@@ -212,7 +226,9 @@ function PriceBox({
           id={id}
           role="group"
           aria-label={t("pricePerNight", { currency })}
-          className="fixed inset-x-4 z-30 mt-2 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] sm:absolute sm:inset-x-auto sm:left-0 sm:top-full sm:w-80"
+          className={`absolute inset-x-0 top-full z-30 mt-2 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] sm:inset-x-auto sm:w-80 ${
+            alignEnd ? "sm:right-0" : "sm:left-0"
+          }`}
         >
           <p className="text-[15px] font-semibold text-gray-900">
             {t("pricePerNight", { currency })}
