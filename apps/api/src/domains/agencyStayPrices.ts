@@ -1,3 +1,6 @@
+import { freeCancellationUntil } from "@vayada/domain-booking/replacement-pricing";
+
+import { propertyLocalDate } from "./pricingManualPaymentLead.js";
 import {
   fewestRooms,
   parseStayPricesQuery,
@@ -38,6 +41,9 @@ export type StayOffers = {
       currency: string;
       paymentMethods?: readonly string[] | null;
       paymentSchedule?: { kind: string; key?: string } | null;
+      /** VAY-2460: for the Breakfast included and Free cancellation filters. */
+      mealPlan?: string;
+      cancellation?: { kind: string; days?: number } | null;
     }[];
   }[];
 };
@@ -45,7 +51,13 @@ export type StayOffers = {
 /** The stays a live agency page shows, in its order (`readLiveAccountBookingPageStays`). A stay
  * whose page takes no children counts none, as its page does. */
 export type AgencyPageStays = {
-  stays: { propertyId: string; slug: string; childrenEnabled?: boolean }[];
+  stays: {
+    propertyId: string;
+    slug: string;
+    childrenEnabled?: boolean;
+    /** The stay's time zone: a free cancellation is free until its deadline on the stay's calendar. */
+    timezone?: string | null;
+  }[];
 } | null;
 
 /** An agency page search: the stay page's, with its room count (`rooms`, 1 unless asked). */
@@ -135,6 +147,18 @@ export type AgencyStayResult = {
   /** For an unavailable stay: the first later dates of the same length, within 60 days, when its
    * rooms take the party; null when there are none (or for any other status). */
   nextFree: { checkIn: string; checkOut: string } | null;
+  /** VAY-2460, for an available stay (else null): the same rooms booked only with rates that
+   * include breakfast (or half board, full board, all inclusive), only with rates still free to
+   * cancel for these dates, or with both. Null for one when no such rate can be booked. */
+  rateFilters: Record<AgencyRateFilter, AgencyFilteredStay | null> | null;
+};
+
+export const AGENCY_RATE_FILTERS = ["breakfast", "freeCancellation", "both"] as const;
+export type AgencyRateFilter = (typeof AGENCY_RATE_FILTERS)[number];
+
+/** The stay with only some rates: as the card shows it (`roomTypesFree`, `price`). */
+export type AgencyFilteredStay = Pick<AgencyStayResult, "roomTypesFree" | "pricesComplete"> & {
+  price: AgencyStayResult["price"];
 };
 
 /** Thrown while the most searches run at once; the route answers 503 with Retry-After. */
@@ -194,7 +218,7 @@ export function createAgencyStayPrices(options: {
   };
 
   async function outcome(
-    stay: { propertyId: string; slug: string },
+    stay: { propertyId: string; slug: string; timezone?: string | null },
     search: AgencySearch,
     budget: { left: number },
     log: Log | undefined,
@@ -202,9 +226,42 @@ export function createAgencyStayPrices(options: {
     const offered = await options.offers(stay.slug);
     // No longer public.
     if (!offered) return null;
-    const read: Read = (query, offers) => options.stayPrices(stay.slug, query, offers, budget);
+    // Each search is read once: the filtered views below reuse the reads of the stay's view.
+    const reads = new Map<StayOffers, Map<string, Promise<StayPrices | null>>>();
+    const read: Read = (query, offers) => {
+      const known = reads.get(offers) ?? new Map<string, Promise<StayPrices | null>>();
+      reads.set(offers, known);
+      const key = JSON.stringify(query);
+      if (!known.has(key)) known.set(key, options.stayPrices(stay.slug, query, offers, budget));
+      return known.get(key)!;
+    };
     const view = await stayView(read, search, offered);
     if (!view) return null;
+    const nights = BigInt(nightsOf(search));
+    let rateFilters: AgencyStayResult["rateFilters"] = null;
+    if (view.status === "available") {
+      const only = ratePredicates(offered, search.checkIn, stayToday(stay.timezone, now()));
+      const filtered = await Promise.all(
+        AGENCY_RATE_FILTERS.map((filter) =>
+          viewFor(read, search, view.rooms, offered, only[filter]),
+        ),
+      );
+      rateFilters = Object.fromEntries(
+        AGENCY_RATE_FILTERS.map((filter, index) => {
+          const one = filtered[index];
+          return [
+            filter,
+            one?.status === "available"
+              ? {
+                  roomTypesFree: one.roomTypesFree,
+                  price: withNightly(one.price, nights),
+                  pricesComplete: one.pricesComplete,
+                }
+              : null,
+          ];
+        }),
+      ) as NonNullable<AgencyStayResult["rateFilters"]>;
+    }
     let nextFree: AgencyStayResult["nextFree"] = null;
     if (view.status === "unavailable" && options.freeWindows) {
       try {
@@ -236,9 +293,10 @@ export function createAgencyStayPrices(options: {
       status: view.status,
       rooms: view.rooms,
       roomTypesFree: view.roomTypesFree,
-      price: withNightly(view.price, BigInt(nightsOf(search))),
+      price: withNightly(view.price, nights),
       pricesComplete: view.pricesComplete,
       nextFree,
+      rateFilters,
     };
   }
 
@@ -261,7 +319,12 @@ export function createAgencyStayPrices(options: {
         const budget = { left: SEARCH_BUDGET };
         const stays = await Promise.all(
           page.stays.map(
-            async ({ propertyId, slug, childrenEnabled }): Promise<AgencyStayResult | null> => {
+            async ({
+              propertyId,
+              slug,
+              childrenEnabled,
+              timezone,
+            }): Promise<AgencyStayResult | null> => {
               const stay = { propertyId, slug };
               const own: AgencySearch = {
                 ...search,
@@ -282,7 +345,7 @@ export function createAgencyStayPrices(options: {
                 // answer past the search's budget (a later search may price it all).
                 const result = await cached(
                   key,
-                  () => outcome(stay, own, budget, context.log),
+                  () => outcome({ ...stay, timezone }, own, budget, context.log),
                   (kept) => kept !== null && budget.left > 0,
                 );
                 return result && { ...stay, ...result };
@@ -299,6 +362,7 @@ export function createAgencyStayPrices(options: {
                   price: null,
                   pricesComplete: false,
                   nextFree: null,
+                  rateFilters: null,
                 };
               }
             },
@@ -324,7 +388,7 @@ type Read = (query: StayPricesQuery, offered: StayOffers) => Promise<StayPrices 
 type Room = StayPrices["rooms"][number];
 type Offer = Room["offers"][number];
 type Priced = { totalMinor: string; currency: string; promoApplied: boolean };
-type View = Omit<AgencyStayResult, "propertyId" | "slug" | "price" | "nextFree"> & {
+type View = Omit<AgencyStayResult, "propertyId" | "slug" | "price" | "nextFree" | "rateFilters"> & {
   price: Priced | null;
   suggestedRooms: number | null;
 };
@@ -348,7 +412,8 @@ const cheapest = (room: Room, allowed: (offer: Offer) => boolean = any) =>
         : best,
     null,
   );
-const complete = (room: Room) => room.offers.every((offer) => offer.status !== "unpriced");
+const complete = (room: Room, allowed: (offer: Offer) => boolean = any) =>
+  room.offers.every((offer) => offer.status !== "unpriced" || !allowed(offer));
 const searchFor = (search: AgencySearch, room: Party): StayPricesQuery => ({
   checkIn: search.checkIn,
   checkOut: search.checkOut,
@@ -391,12 +456,14 @@ async function stayView(read: Read, search: AgencySearch, offered: StayOffers) {
 }
 
 /** The party in `count` rooms: one room for all, or each room priced on its own as the page
- * prices a group room by room (VAY-2320), the cheapest set of free rooms from this one stay. */
+ * prices a group room by room (VAY-2320), the cheapest set of free rooms from this one stay.
+ * `only` keeps to some rates (VAY-2460: a rate filter). */
 async function viewFor(
   read: Read,
   search: AgencySearch,
   count: number,
   offered: StayOffers,
+  only: (offer: Offer) => boolean = any,
 ): Promise<View | null> {
   if (count === 1) {
     const prices = await read(
@@ -404,7 +471,7 @@ async function viewFor(
       offered,
     );
     if (!prices) return null;
-    const free = prices.rooms.filter((room) => usable(room));
+    const free = prices.rooms.filter((room) => usable(room, only));
     return {
       status: free.length
         ? "available"
@@ -413,8 +480,8 @@ async function viewFor(
           : "no_fit",
       rooms: 1,
       roomTypesFree: free.length,
-      price: lowest(free.map((room) => cheapest(room))),
-      pricesComplete: free.every(complete),
+      price: lowest(free.map((room) => cheapest(room, only))),
+      pricesComplete: free.every((room) => complete(room, only)),
       suggestedRooms: prices.suggestedRooms ?? null,
     };
   }
@@ -439,7 +506,8 @@ async function viewFor(
   // (booking-web `combinable`): each such group of rates is tried on its own.
   let bookable = false,
     best: { total: bigint; price: Priced } | null = null;
-  for (const allowed of paymentGroups(offered)) {
+  for (const group of paymentGroups(offered)) {
+    const allowed = (offer: Offer) => group(offer) && only(offer);
     if (
       cheapestRooms(counts, free, (kind, type) => {
         const room = option(kind, type);
@@ -470,7 +538,7 @@ async function viewFor(
     roomTypesFree: types.filter((_, type) =>
       kinds.some((_, kind) => {
         const room = option(kind, type);
-        return !!room && usable(room);
+        return !!room && usable(room, only);
       }),
     ).length,
     price: bookable ? (best?.price ?? null) : null,
@@ -480,11 +548,52 @@ async function viewFor(
       types.every((_, type) =>
         kinds.every((_, kind) => {
           const room = option(kind, type);
-          return !room || !usable(room) || complete(room);
+          return !room || !usable(room, only) || complete(room, only);
         }),
       ),
     suggestedRooms: byKind[0]!.suggestedRooms ?? null,
   };
+}
+
+/** Meal plans that count as "Breakfast included" (VAY-2460). */
+const WITH_BREAKFAST = new Set(["breakfast", "half_board", "full_board", "all_inclusive"]);
+
+/** The rates each rate filter keeps (VAY-2460), by the stay's offer terms. Free cancellation as
+ * the stay's page words it: free until a number of days before arrival, and that day not yet
+ * past on the stay's calendar (`today`). A partial refund isn't free. */
+function ratePredicates(
+  offered: StayOffers,
+  checkIn: string,
+  today: string,
+): Record<AgencyRateFilter, (offer: Offer) => boolean> {
+  const terms = new Map(
+    offered.rooms.flatMap((room) => room.offers.map((offer) => [offer.publicOfferKey, offer])),
+  );
+  const breakfast = (offer: Offer) =>
+    WITH_BREAKFAST.has(terms.get(offer.publicOfferKey)?.mealPlan ?? "");
+  const freeCancellation = (offer: Offer) => {
+    const cancellation = terms.get(offer.publicOfferKey)?.cancellation;
+    return (
+      cancellation?.kind === "free_until_days_before_arrival" &&
+      typeof cancellation.days === "number" &&
+      Number.isInteger(cancellation.days) &&
+      today <= freeCancellationUntil(checkIn, cancellation.days)
+    );
+  };
+  return {
+    breakfast,
+    freeCancellation,
+    both: (offer) => breakfast(offer) && freeCancellation(offer),
+  };
+}
+
+/** Today on the stay's calendar; in UTC without a valid time zone, as its page does. */
+function stayToday(timezone: string | null | undefined, at: number): string {
+  const instant = new Date(at);
+  return (
+    (timezone ? propertyLocalDate(instant, timezone) : null) ??
+    propertyLocalDate(instant, "Etc/UTC")!
+  );
 }
 
 /** Which rates may be booked together, one group per way of paying: rates paid the same way
