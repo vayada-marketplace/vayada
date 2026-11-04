@@ -4187,15 +4187,16 @@ describe("vayada-api", () => {
       ],
     } as unknown as ConstructorParameters<typeof BookingPublicationNotReadyError>[0]);
     let failure: Error = notReady;
-    app = buildAuthenticatedApp({
+    const server = buildAuthenticatedApp({
       bookingPublicationRefresh: {
         async refresh() {
           throw failure;
         },
       },
     });
+    app = server;
     const save = () =>
-      injectJson(app, {
+      injectJson(server, {
         method: "POST",
         url: "/api/booking/hotels/booking_hotel_alpenrose/public-bookability?when=live",
         headers: { authorization: "Bearer valid-token" },
