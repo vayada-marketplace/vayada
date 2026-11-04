@@ -101,6 +101,7 @@ export default function AgencyStayMap({
   price,
   typeName,
   href,
+  compact = false,
   className = "",
 }: {
   /** All the page's stays, in its order. */
@@ -117,6 +118,8 @@ export default function AgencyStayMap({
   price: (card: AgencyCard) => string | null;
   typeName: (card: AgencyCard) => string | null;
   href: (card: AgencyCard) => string;
+  /** A narrow map (beside the list): the stay's card puts View rooms under its name. */
+  compact?: boolean;
   className?: string;
 }) {
   const t = useTranslations("agency");
@@ -191,28 +194,36 @@ export default function AgencyStayMap({
         // Above Google's logo and terms at the bottom of the map.
         <div
           data-testid="agency-map-card"
-          className="absolute bottom-10 left-4 right-4 z-10 flex items-center gap-3.5 rounded-2xl bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+          className={`absolute bottom-10 left-4 right-4 z-10 flex gap-3.5 rounded-2xl bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.16)] ${
+            compact ? "flex-col" : "items-center"
+          }`}
         >
-          <div className="relative h-[78px] w-[104px] shrink-0 overflow-hidden rounded-[10px] bg-gray-200">
-            {chosen.stay.photoUrl && (
-              <Image
-                src={chosen.stay.photoUrl}
-                alt={chosen.stay.name}
-                fill
-                sizes="104px"
-                className="object-cover"
-              />
-            )}
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="line-clamp-2 text-[17px] font-bold leading-snug text-gray-900">
-              {chosen.stay.name}
-            </span>
-            <span className="text-sm text-gray-500">{facts!.filter(Boolean).join(" · ")}</span>
+          <div className="flex min-w-0 flex-1 items-center gap-3.5">
+            <div
+              className={`relative shrink-0 overflow-hidden rounded-[10px] bg-gray-200 ${
+                compact ? "h-[60px] w-[80px]" : "h-[78px] w-[104px]"
+              }`}
+            >
+              {chosen.stay.photoUrl && (
+                <Image
+                  src={chosen.stay.photoUrl}
+                  alt={chosen.stay.name}
+                  fill
+                  sizes="104px"
+                  className="object-cover"
+                />
+              )}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5 pr-4">
+              <span className="line-clamp-2 text-[17px] font-bold leading-snug text-gray-900">
+                {chosen.stay.name}
+              </span>
+              <span className="text-sm text-gray-500">{facts!.filter(Boolean).join(" · ")}</span>
+            </div>
           </div>
           <a
             href={href(chosen)}
-            className="shrink-0 rounded-full bg-primary-600 px-5 py-3 text-[15px] font-semibold text-white hover:bg-primary-700"
+            className="shrink-0 rounded-full bg-primary-600 px-5 py-3 text-center text-[15px] font-semibold text-white hover:bg-primary-700"
           >
             {t("viewRooms")}
           </a>

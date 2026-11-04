@@ -592,6 +592,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
                 card.stay.propertyType ? stayTypeName(card.stay.propertyType, t) : null
               }
               href={text.href}
+              compact={layout === "split"}
               className={
                 layout === "split"
                   ? // Under the search card, which sticks to the top too (`top-4`, about 110 px).
