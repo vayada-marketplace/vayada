@@ -11,6 +11,7 @@ import type {
 } from "@/services/api/agencyPage";
 import { resolveLocale } from "@/lib/utils";
 import { routing } from "@/i18n/routing";
+import { metresBetween } from "@vayada/domain-hotels";
 
 /** What a guest narrowed the stays to (VAY-2460). Type, area and private pool are the stay's;
  * breakfast and free cancellation price each card with only such rates; the price range is per
@@ -288,6 +289,40 @@ export function agencyFilterOptions(
           ? { min: filters.price.min ?? 0, max: filters.price.max ?? filters.price.min ?? 0 }
           : null,
   };
+}
+
+/** "Other stays nearby" on a stay's page (VAY-2461). */
+export const NEARBY_STAYS = 8;
+
+export type NearbyStay = {
+  stay: AgencyStay;
+  /** Straight-line distance from the stay whose page this is; null without both pins. */
+  metres: number | null;
+  /** Measured from or to a spot rounded to its area. */
+  approximate: boolean;
+};
+
+/** The page's other stays, closest first (those without a pin after them, in the page's order),
+ * at most `most`. */
+export function nearbyStays(
+  stays: AgencyStay[],
+  current: AgencyStay,
+  most = NEARBY_STAYS,
+): NearbyStay[] {
+  const from = current.map;
+  return stays
+    .filter((stay) => stay.slug !== current.slug)
+    .map((stay) => ({
+      stay,
+      metres: from && stay.map ? metresBetween(from, stay.map) : null,
+      approximate: !!(from?.approximate || stay.map?.approximate),
+    }))
+    .sort((a, b) =>
+      a.metres === null || b.metres === null
+        ? Number(a.metres === null) - Number(b.metres === null)
+        : a.metres - b.metres,
+    )
+    .slice(0, most);
 }
 
 // A host whose first label is the page's slug, as the middleware reads it (`<slug>.localhost` too).

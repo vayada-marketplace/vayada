@@ -1082,6 +1082,13 @@
     "units": "{count, plural, one {# Zimmer} other {# Zimmer}}",
     "villas": "{count, plural, one {# Villa} other {# Villen}}",
     "roomLine": "Zimmer {number}: {name}",
-    "yourChoice": "Ihre Auswahl"
+    "yourChoice": "Ihre Auswahl",
+    "nearbyHeading": "Weitere Unterkünfte in der Nähe",
+    "nearbyHintMap": "Zeigen Sie auf eine Unterkunft, um sie auf der Karte unten zu sehen. Seitlich scrollen für mehr.",
+    "nearbyHint": "Seitlich scrollen für mehr.",
+    "distanceAway": "{distance} entfernt",
+    "aboutAway": "etwa {distance} entfernt",
+    "notAvailable": "Für diese Daten nicht verfügbar",
+    "stayMapLabel": "Karte dieser Unterkunft und der Unterkünfte in der Nähe"
   }
 }

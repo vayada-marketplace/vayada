@@ -10,6 +10,7 @@ import PromoField from "@/components/booking/PromoField";
 import StayRooms from "@/components/booking/StayRooms";
 import PropertyGallery from "@/components/booking/PropertyGallery";
 import Toast from "@/components/booking/Toast";
+import AgencyNearbyStays from "@/components/agency/AgencyNearbyStays";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import { StayHotelProvider, useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -20,6 +21,9 @@ import { hotelService } from "@/services/api/hotel";
 import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 import { encodePick } from "@/lib/roomPicker";
 import type { AgencyPage, AgencyStay } from "@/services/api/agencyPage";
+
+/** Google Maps' browser key; without one, the stay page has no map. */
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 
 interface AppliedPromo {
   code: string;
@@ -300,8 +304,23 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
             stay={stay}
             back={overviewHref(location, agency.slug, `?${overview}`)}
             hotelName={hotel.name}
+            mapLink={agency.stayPage.map && !!MAPS_KEY && !!stay.map}
           />
         }
+      />
+
+      <AgencyNearbyStays
+        agency={agency}
+        stay={stay}
+        search={{
+          checkIn,
+          checkOut,
+          adults,
+          children,
+          rooms: overviewRooms,
+          promoCode: overviewPromo,
+        }}
+        mapsKey={MAPS_KEY}
       />
 
       <ChoiceBar
@@ -318,8 +337,20 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
 
 /** The stay at a glance (Timo's prototype): photo, back to all stays, name and type, area and
  * what it has, and its photos. */
-function StayBox({ stay, back, hotelName }: { stay: AgencyStay; back: string; hotelName: string }) {
+function StayBox({
+  stay,
+  back,
+  hotelName,
+  mapLink,
+}: {
+  stay: AgencyStay;
+  back: string;
+  hotelName: string;
+  /** "Map" scrolls to the stay's map below the rooms. */
+  mapLink: boolean;
+}) {
   const t = useTranslations("agency");
+  const tm = useTranslations("locationMap");
   const tg = useTranslations("home.gallery");
   const type = stay.propertyType ? stayTypeName(stay.propertyType, t) : null;
   const facts = [
@@ -377,6 +408,27 @@ function StayBox({ stay, back, hotelName }: { stay: AgencyStay; back: string; ho
           outline
           label={`${tg("open")}: ${stay.name}`}
         />
+        {mapLink && (
+          <a
+            href="#stay-map"
+            className="flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-[18px] text-[15px] font-semibold text-[#1F2427] hover:bg-[#F0F1F1] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          >
+            <svg
+              aria-hidden="true"
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" />
+              <path d="M9 4v14M15 6v14" />
+            </svg>
+            {tm("viewMap")}
+          </a>
+        )}
       </div>
     </section>
   );

@@ -77,6 +77,7 @@ describe("readAgencyPage", () => {
         bedrooms: false,
       },
       layout: { allowed: ["list"], default: "list" },
+      stayPage: { nearby: true, map: true },
       stays: [
         {
           propertyId: "p1",
@@ -92,6 +93,17 @@ describe("readAgencyPage", () => {
           units: null,
         },
       ],
+    });
+  });
+
+  it("reads the stay page's switches, on unless the agency turned them off (VAY-2461)", () => {
+    expect(readAgencyPage({ ...page, stayPage: { nearby: false } }).stayPage).toEqual({
+      nearby: false,
+      map: true,
+    });
+    expect(readAgencyPage({ ...page, stayPage: undefined }).stayPage).toEqual({
+      nearby: true,
+      map: true,
     });
   });
 
