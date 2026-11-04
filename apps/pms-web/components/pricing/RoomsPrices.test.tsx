@@ -150,6 +150,16 @@ it("tells the Rooms list how to start when nothing is published yet", async () =
   expect(text()).toContain("No prices yet. Open a room's Prices tab");
   expect(button("Save prices again")).toBeUndefined();
 });
+it("treats prices whose every room was deleted as no prices, with nothing to save again (VAY-2471)", async () => {
+  const empty = { ...props().prices!, publication: { ...publication(true), rooms: [] } };
+  await mount({ prices: empty, error: null, reload });
+  expect(text()).toContain("No prices yet. Open a room's Prices tab");
+  expect(button("Save prices again")).toBeUndefined();
+  act(() =>
+    view.update(<RoomsPricesStrip prices={empty} error={null} reload={reload} staleOnly />),
+  );
+  expect(view.toJSON()).toBeNull();
+});
 it("republishes a stale publication with every room unchanged; the press declares mandatory charges (VAY-2093)", async () => {
   await mount(props());
   expect(text()).toContain("Prices need to be saved again");

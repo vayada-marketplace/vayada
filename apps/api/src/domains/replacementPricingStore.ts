@@ -14,7 +14,8 @@ export interface PricingStorageGuard {
    * Runs even for historical retries; must not require proposed owner references to remain current. */
   lock(client: PoolClient, scope: PricingStorageScope, access: "read" | "manage"): Promise<PricingStorageSources | null>;
   /** Validate every proposed room/owner/terms reference against its owner and hold relevant locks.
-   * Required for new publications and drafts, after historical receipt lookup. No default allow. */
+   * Required for new publications and drafts, after historical receipt lookup. No default allow.
+   * False means no access (403); a reference that changed throws its own PricingStorageError (VAY-2471). */
   validate(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, intent: "draft" | "publish", draft?: BookingPricingDraft): Promise<boolean>;
   /** Optional draft-policy support. Missing ports must fail closed for projected sources. */
   project?(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, draft: BookingPricingDraft, access: "read" | "manage"): Promise<PricingStorageSources | null>;
