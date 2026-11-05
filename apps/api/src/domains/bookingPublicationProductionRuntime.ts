@@ -56,8 +56,32 @@ export type BookingPublicationRefreshPort = {
     audit: BookingPublicationAuditContext;
     /** Only republish a page that is already live; null when the hotel has not gone live. */
     onlyIfLive?: boolean;
+    /** The live page's own source hash: null, and nothing republished, while the hotel's
+     * sources still hash the same (VAY-2472). */
+    skipIfSourceManifestHash?: string;
   }): Promise<BookingPublicationOperation | null>;
 };
+
+/** The page can't be republished until the hotel fixes something, e.g. a calendar its room
+ * changes made stale. Not a server fault: the saves that asked for it are kept (VAY-2472). */
+export class BookingPublicationNotReadyError extends Error {
+  readonly blockers: readonly { groupId: string; code: string; message: string }[];
+
+  constructor(readiness: EvaluatedBookingReadiness) {
+    super(`Booking publication readiness is incomplete. (${readinessSummary(readiness)})`);
+    this.name = "BookingPublicationNotReadyError";
+    this.blockers = blockersOf(readiness).map(({ groupId, code, message }) => ({
+      groupId,
+      code,
+      message,
+    }));
+  }
+}
+
+type BookingReadiness = Awaited<
+  ReturnType<BookingPublicationRefreshDependencies["readinessProvider"]["getBookingReadiness"]>
+>;
+type EvaluatedBookingReadiness = Extract<BookingReadiness, { outcome: "evaluated" }>;
 
 type BookingPublicationRefreshDependencies = {
   readinessProvider: Pick<
@@ -88,7 +112,7 @@ export function createBookingPublicationRefresh(
   dependencies: BookingPublicationRefreshDependencies,
   wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): BookingPublicationRefreshPort["refresh"] {
-  return async ({ onlyIfLive, ...input }) => {
+  return async ({ onlyIfLive, skipIfSourceManifestHash, ...input }) => {
     for (let attempt = 0; ; attempt += 1) {
       const delay = LIVE_REFRESH_RETRY_DELAYS_MS[attempt];
       const active = await dependencies.projection.getActive(input.propertyId);
@@ -108,10 +132,14 @@ export function createBookingPublicationRefresh(
           await wait(delay);
           continue;
         }
+        if (readiness.outcome === "evaluated" && readiness.product === "booking")
+          throw new BookingPublicationNotReadyError(readiness);
         throw new Error(
           `Booking publication readiness is incomplete. (${readinessSummary(readiness)})`,
         );
       }
+      const ready = readiness as ReadyBookingPublicationEvidence;
+      if (skipIfSourceManifestHash === ready.sourceManifestHash) return null;
       let requested: Awaited<
         ReturnType<BookingPublicationRefreshDependencies["repository"]["requestPublication"]>
       >;
@@ -122,7 +150,7 @@ export function createBookingPublicationRefresh(
             ? `${input.idempotencyKey}:retry-${attempt}`
             : input.idempotencyKey,
           expectedActiveContentRevisionId: active?.revisionId ?? null,
-          readiness: readiness as ReadyBookingPublicationEvidence,
+          readiness: ready,
         });
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
@@ -157,21 +185,21 @@ export function createBookingPublicationRefresh(
 }
 
 /** Codes only, for the logs: the failed read, or the status and its blockers. */
-function readinessSummary(
-  readiness: Awaited<
-    ReturnType<BookingPublicationRefreshDependencies["readinessProvider"]["getBookingReadiness"]>
-  >,
-): string {
+function readinessSummary(readiness: BookingReadiness): string {
   if (readiness.outcome !== "evaluated")
     return `${readiness.outcome}: ${readiness.error.errorSource}/${readiness.error.code}`;
-  const blockers = readiness.groups.flatMap((group) =>
+  const blockers = blockersOf(readiness).map(({ groupId, code }) => `${groupId}:${code}`);
+  return `${readiness.product} ${readiness.status}: ${blockers.join(", ") || "no blockers"}`;
+}
+
+function blockersOf(readiness: EvaluatedBookingReadiness) {
+  return readiness.groups.flatMap((group) =>
     group.steps.flatMap((step) =>
       step.entities.flatMap((entity) =>
-        entity.blockers.map((blocker) => `${group.groupId}:${blocker.code}`),
+        entity.blockers.map((blocker) => ({ ...blocker, groupId: group.groupId })),
       ),
     ),
   );
-  return `${readiness.product} ${readiness.status}: ${blockers.join(", ") || "no blockers"}`;
 }
 
 export type BookingPublicationWorker = { close(): Promise<void> };

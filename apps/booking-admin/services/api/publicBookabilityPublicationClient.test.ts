@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "./client";
+import { ApiErrorResponse, type ApiClient } from "./client";
 import {
   isPublicBookabilityReady,
+  livePageNotReadyReasons,
   publicationReadinessSteps,
   publishPublicBookabilityProfile,
 } from "./publicBookabilityPublicationClient";
@@ -93,5 +94,34 @@ describe("publishPublicBookabilityProfile", () => {
       expect.objectContaining({ id: "payments" }),
       expect.objectContaining({ id: "profile" }),
     ]);
+  });
+});
+
+describe("livePageNotReadyReasons (VAY-2472)", () => {
+  it("reads what keeps a live page from taking a save, and nothing from other failures", () => {
+    const reasons = ["Your hotel or rooms changed. Review and save your calendar again."];
+    expect(
+      livePageNotReadyReasons(
+        new ApiErrorResponse(409, {
+          code: "booking_page_not_ready",
+          message: "The live booking page updates once these are fixed.",
+          details: reasons,
+        }),
+      ),
+    ).toEqual(reasons);
+    expect(
+      livePageNotReadyReasons(
+        new ApiErrorResponse(409, { code: "idempotency_conflict", message: "Conflict." }),
+      ),
+    ).toBeNull();
+    expect(
+      livePageNotReadyReasons(
+        new ApiErrorResponse(500, {
+          code: "write_model_unavailable",
+          message: "Booking preview could not be published.",
+        }),
+      ),
+    ).toBeNull();
+    expect(livePageNotReadyReasons(new Error("offline"))).toBeNull();
   });
 });

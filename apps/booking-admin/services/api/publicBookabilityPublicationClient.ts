@@ -1,4 +1,4 @@
-import { apiClient, omitHotelContext, type ApiClient } from "./client";
+import { ApiErrorResponse, apiClient, omitHotelContext, type ApiClient } from "./client";
 
 export const PUBLIC_BOOKABILITY_PUBLICATION_PATH =
   "/api/booking/hotels/:hotelId/public-bookability";
@@ -43,6 +43,18 @@ export async function publishPublicBookabilityProfile(
     undefined,
     omitHotelContext,
   );
+}
+
+/** Why a live page didn't take a save: what the hotel still has to fix, e.g. a calendar its room
+ * changes made stale. Null when the refresh failed for any other reason (VAY-2472). */
+export function livePageNotReadyReasons(error: unknown): string[] | null {
+  if (
+    !(error instanceof ApiErrorResponse) ||
+    error.status !== 409 ||
+    error.data.code !== "booking_page_not_ready"
+  )
+    return null;
+  return (error.data.details ?? []).filter((reason) => typeof reason === "string" && reason);
 }
 
 export function isPublicBookabilityReady(publication: PublicBookabilityPublication): boolean {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
 import {
@@ -14,7 +15,10 @@ import { settingsService, type CustomDomainStatus } from "@/services/settings";
 import { designStudioBookingDesignClient } from "@/services/api/bookingDesignClient";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
-import { publishPublicBookabilityProfile } from "@/services/api/publicBookabilityPublicationClient";
+import {
+  livePageNotReadyReasons,
+  publishPublicBookabilityProfile,
+} from "@/services/api/publicBookabilityPublicationClient";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { COLOR_PRESETS, FONT_PAIRINGS, isTooLightBrandColor } from "@/lib/constants/branding";
 import { FeedbackAlert, SaveButton } from "@/components/ui";
@@ -59,7 +63,23 @@ export default function DesignStudioPage() {
     type: "success" | "error";
     message: string;
     retryHeroUpload?: boolean;
+    /** What blocks the live page, in the API's words, after the message (VAY-2472). */
+    reasons?: string;
   } | null>(null);
+  const router = useRouter();
+  // The save is kept either way. A live page that can't take it yet says why (VAY-2472).
+  const showPublishFailure = (error: unknown, message: string) => {
+    const reasons = livePageNotReadyReasons(error);
+    setFeedback(
+      reasons
+        ? {
+            type: "error",
+            message: "designStudio.feedback.livePageNotReady",
+            reasons: reasons.join(" "),
+          }
+        : { type: "error", message },
+    );
+  };
   const [domainInput, setDomainInput] = useState("");
   const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null);
 
@@ -337,14 +357,14 @@ export default function DesignStudioPage() {
       }
       try {
         await publishPublicBookabilityProfile(hotelId);
-      } catch {
-        console.error("Failed to publish hero image");
-      }
-      if (!heroUrl) {
-        setFeedback({
-          type: "error",
-          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
-        });
+        if (!heroUrl) {
+          setFeedback({
+            type: "error",
+            message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
+          });
+        }
+      } catch (error) {
+        showPublishFailure(error, "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed");
       }
     } catch (err) {
       console.error("Image upload failed:", err);
@@ -383,15 +403,16 @@ export default function DesignStudioPage() {
         () => true,
         () => false,
       );
-      const published = await publishPublicBookabilityProfile(hotelId).then(
-        () => true,
-        () => false,
-      );
-      if (!saved || !published) {
-        setFeedback({
-          type: "error",
-          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
-        });
+      try {
+        await publishPublicBookabilityProfile(hotelId);
+        if (!saved) {
+          setFeedback({
+            type: "error",
+            message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
+          });
+        }
+      } catch (error) {
+        showPublishFailure(error, "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed");
       }
     } catch {
       await refreshCanonicalGallery().catch(() => undefined);
@@ -462,12 +483,9 @@ export default function DesignStudioPage() {
     let published = true;
     try {
       await publishPublicBookabilityProfile(hotelId);
-    } catch {
+    } catch (error) {
       published = false;
-      setFeedback({
-        type: "error",
-        message: "admin.gallerySavedButTheBookingPreviewCouldNotBeRefreshed",
-      });
+      showPublishFailure(error, "admin.gallerySavedButTheBookingPreviewCouldNotBeRefreshed");
     }
     return { published, refreshed };
   };
@@ -616,11 +634,8 @@ export default function DesignStudioPage() {
           hotelId,
         );
         await publishPublicBookabilityProfile(hotelId);
-      } catch {
-        setFeedback({
-          type: "error",
-          message: "admin.logoUploadedButTheBookingHeaderCouldNotBeRefreshed",
-        });
+      } catch (error) {
+        showPublishFailure(error, "admin.logoUploadedButTheBookingHeaderCouldNotBeRefreshed");
       }
     } catch (error) {
       console.error("Header logo upload failed:", error);
@@ -785,11 +800,8 @@ export default function DesignStudioPage() {
       // The other settings are saved either way, so the live page still gets them.
       try {
         await publishPublicBookabilityProfile(hotelId);
-      } catch {
-        setFeedback({
-          type: "error",
-          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
-        });
+      } catch (error) {
+        showPublishFailure(error, "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed");
         return;
       }
       setFeedback(
@@ -884,7 +896,9 @@ export default function DesignStudioPage() {
       {feedback && (
         <FeedbackAlert
           type={feedback.type}
-          message={t(feedback.message)}
+          message={
+            feedback.reasons ? `${t(feedback.message)} ${feedback.reasons}` : t(feedback.message)
+          }
           className="shrink-0"
           action={
             feedback.retryHeroUpload
@@ -894,7 +908,13 @@ export default function DesignStudioPage() {
                     if (lastHeroFileRef.current) void uploadHeroImage(lastHeroFileRef.current);
                   },
                 }
-              : undefined
+              : feedback.reasons
+                ? // The dashboard's booking page card lists each item with its Fix in setup link.
+                  {
+                    label: t("designStudio.feedback.seeWhatToFix"),
+                    onClick: () => router.push("/dashboard"),
+                  }
+                : undefined
           }
         />
       )}

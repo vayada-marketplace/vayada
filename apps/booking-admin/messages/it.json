@@ -435,6 +435,8 @@
   "designStudio.feedback.saveSuccess": "Impostazioni di design salvate con successo",
   "designStudio.feedback.saveError": "Impossibile salvare le impostazioni di design",
   "designStudio.feedback.uploadError": "Caricamento immagine fallito. Riprova.",
+  "designStudio.feedback.livePageNotReady": "Le modifiche sono state salvate. La tua pagina di prenotazione online si aggiornerà quando questo sarà risolto:",
+  "designStudio.feedback.seeWhatToFix": "Vedi cosa correggere",
   "designStudio.media.heroImageTitle": "Immagine principale",
   "designStudio.media.heroImageRecommended": "1920x1080 consigliato",
   "designStudio.media.clickToUpload": "Clicca per caricare",

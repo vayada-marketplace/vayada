@@ -892,6 +892,77 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
+  for (const width of [1440, 390]) {
+    test(`says what keeps the live page from taking a save at ${width}px (VAY-2472)`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(
+        !PROD,
+        "Requires a production booking-admin build so the authenticated shell hydrates.",
+      );
+
+      // The browser logs the expected 409 and 500 answers below as failed resources, so this
+      // test checks page errors itself instead of watchPageHealth.
+      const pageErrors: string[] = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+      await mockBookingAdminAuthenticatedSession(page);
+      await mockBookingAdminShellRoutes(page);
+      await mockBookingAdminDesignSettings(page);
+      // Tiga Lombok on 3 Nov: the design is saved, but its calendar blocks the live page.
+      const blocked = {
+        status: 409,
+        json: {
+          statusCode: 409,
+          code: "booking_page_not_ready",
+          category: "write_model",
+          message: "The live booking page updates once these are fixed.",
+          details: ["Your hotel or rooms changed. Review and save your calendar again."],
+        },
+      };
+      let publish: { status: number; json: unknown } = blocked;
+      await page.route(`**${BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH}*`, (route) =>
+        route.fulfill(publish),
+      );
+
+      await page.goto("/design-studio");
+      await page.getByRole("button", { name: "Save Changes" }).click();
+      const notReady = page.getByText(
+        "Your changes are saved. Your live booking page will update once this is fixed: Your hotel or rooms changed. Review and save your calendar again.",
+      );
+      await expect(notReady).toBeVisible();
+      const fix = page.getByRole("button", { name: "See what to fix" });
+      await expect(fix).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath(`design-studio-live-page-not-ready-${width}.png`),
+      });
+
+      // Any other failure keeps the old message, with nothing to fix.
+      publish = {
+        status: 500,
+        json: {
+          statusCode: 500,
+          code: "write_model_unavailable",
+          category: "write_model",
+          message: "Booking preview could not be published.",
+        },
+      };
+      await page.getByRole("button", { name: "Save Changes" }).click();
+      await expect(
+        page.getByText("Design saved, but the booking preview could not be refreshed. Try again."),
+      ).toBeVisible();
+      await expect(fix).toHaveCount(0);
+
+      // The dashboard's booking page card lists what to fix, each with its setup link.
+      publish = blocked;
+      await page.getByRole("button", { name: "Save Changes" }).click();
+      await expect(notReady).toBeVisible();
+      await fix.click();
+      await expect(page).toHaveURL(/\/dashboard$/);
+      expect(pageErrors).toEqual([]);
+    });
+  }
+
   test("creates the first booking design only when the colour or font changes", async ({
     page,
   }, testInfo) => {
