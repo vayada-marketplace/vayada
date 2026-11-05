@@ -200,3 +200,20 @@ it("records what the guest agreed to and when", async () => {
     query.mockImplementation(implementation);
   }
 });
+
+// VAY-2462: booked on the account's agency page. The writer passes the live page it found showing
+// this stay; the booking names it with this stay's account. The command is as it always was.
+it("names the agency page the guest booked on, with the stay's own account", async () => {
+  const metadata = async (agencyPage?: { slug: string } | null) => {
+    query.mockClear();
+    await stagePricingBookingDraft(client, "hotel", { ...input, agencyPage });
+    const [, values] = query.mock.calls.find(([sql]) => sql.startsWith("WITH draft"))!;
+    return values?.[10] as Record<string, unknown>;
+  };
+  expect((await metadata({ slug: "the-travel-ubud" })).agencyPage).toEqual({
+    organizationId: input.current.scope.organizationId,
+    slug: "the-travel-ubud",
+  });
+  for (const none of [undefined, null])
+    expect(await metadata(none), String(none)).not.toHaveProperty("agencyPage");
+});

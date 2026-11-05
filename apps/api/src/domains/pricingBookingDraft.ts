@@ -22,6 +22,9 @@ type Input = {
   finance: NonNullable<Awaited<ReturnType<typeof lockFinancePricingAcceptanceTerms>>>;
   bookingId: string;
   publicReference: string;
+  /** VAY-2462: the live agency page (its address) the writer found showing this stay, which the
+   * guest booked on. */
+  agencyPage?: { slug: string } | null;
 };
 const iso = (v: unknown): v is string =>
   typeof v === "string" && Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v;
@@ -34,7 +37,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
   const fail = (): never => {
     throw new Error("Pricing booking draft is unavailable");
   };
-  const { current, disclosure, command, finance, bookingId, publicReference } = input;
+  const { current, disclosure, command, finance, bookingId, publicReference, agencyPage } = input;
   const scope = await lockPublicPricingAuthority(client, slug);
   if (
     !scope ||
@@ -160,6 +163,12 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
         acceptanceMode: quote.acceptanceMode,
         pricingSelections: quote.stay.rooms,
         consent,
+        // VAY-2462: booked on the account's agency page, which showed this stay (a page shows only
+        // its own account's stays). Attribution only: the booking stays the stay's own direct
+        // booking, with its payment, policies and emails.
+        ...(agencyPage
+          ? { agencyPage: { organizationId: scope.organizationId, slug: agencyPage.slug } }
+          : {}),
       },
       finance.billingPlanSnapshot,
       terms,

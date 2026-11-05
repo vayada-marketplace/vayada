@@ -8,7 +8,7 @@ vi.mock("next-intl/middleware", async () => {
   return { default: () => () => NextResponse.next() };
 });
 vi.mock("./services/api/bookingWebPublic", () => ({
-  bookingWebPublicApi: { resolveHost: vi.fn() },
+  bookingWebPublicApi: { resolveHost: vi.fn(), agencyPageStays: vi.fn() },
   PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS: 60,
 }));
 
@@ -168,5 +168,78 @@ describe("Booking Web former hotel addresses (VAY-2295)", () => {
     );
     expect(response.status).not.toBe(308);
     expect(response.headers.get("location")).toBeNull();
+  });
+});
+
+// VAY-2462: a stay's pages (its page, checkout and bookings) are only on an agency's address, for
+// the stays its live page shows; a page load anywhere else answers 404.
+describe("Booking Web stay pages on an agency's address", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const agency = "the-travel-ubud.next-booking.vayada.com";
+  const hotel = "hotel-alpenrose.next-booking.vayada.com";
+  const load = (host: string, path: string, headers: Record<string, string> = {}) =>
+    middleware(new NextRequest(`https://${host}${path}`, { headers: { host, ...headers } }));
+
+  it("serves the stays the agency's live page shows, and answers 404 for others", async () => {
+    vi.mocked(bookingWebPublicApi.agencyPageStays).mockResolvedValue([
+      "escape-ubud",
+      "mertha-ubud",
+    ]);
+    for (const path of [
+      "/stays/escape-ubud?checkIn=2026-12-01",
+      "/de/stays/mertha-ubud/book?offer=x",
+      "/stays/escape-ubud/booking/VAY-ABC123",
+    ])
+      expect((await load(agency, path)).status, path).not.toBe(404);
+    expect(bookingWebPublicApi.agencyPageStays).toHaveBeenCalledWith(
+      "the-travel-ubud",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    const response = await load(agency, "/stays/other-hotel/book?offer=x");
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-robots-tag")).toBe("noindex");
+    const html = await response.text();
+    expect(html).toContain("This booking page isn&#39;t online right now");
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    // In the address's language.
+    expect(await (await load(agency, "/de/stays/other-hotel")).text()).toContain(
+      "Diese Buchungsseite ist gerade nicht online",
+    );
+  });
+
+  it("answers 404 for stay pages on a hotel's address", async () => {
+    vi.mocked(bookingWebPublicApi.agencyPageStays).mockResolvedValue(null);
+    expect((await load(hotel, "/stays/escape-ubud")).status).toBe(404);
+    expect(bookingWebPublicApi.agencyPageStays).toHaveBeenCalledWith(
+      "hotel-alpenrose",
+      expect.anything(),
+    );
+  });
+
+  it("leaves it to the page when the agency page can't be read, and for the app's own navigation", async () => {
+    vi.mocked(bookingWebPublicApi.agencyPageStays).mockRejectedValue(new Error("unreachable"));
+    expect((await load(agency, "/stays/other-hotel")).status).not.toBe(404);
+    vi.mocked(bookingWebPublicApi.agencyPageStays).mockClear();
+    const navigations: Record<string, string>[] = [
+      { rsc: "1" },
+      { "next-router-prefetch": "1", rsc: "1" },
+    ];
+    for (const headers of navigations)
+      expect((await load(agency, "/stays/other-hotel", headers)).status).not.toBe(404);
+    expect(bookingWebPublicApi.agencyPageStays).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing for other pages or on a development host", async () => {
+    for (const path of ["/", "/de", "/book?offer=x", "/booking/VAY-ABC123", "/staying"])
+      expect((await load(agency, path)).status, path).not.toBe(404);
+    await middleware(
+      new NextRequest("http://localhost:3002/stays/other-hotel", {
+        headers: { host: "localhost:3002" },
+      }),
+    );
+    expect(bookingWebPublicApi.agencyPageStays).not.toHaveBeenCalled();
   });
 });

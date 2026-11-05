@@ -64,8 +64,9 @@ export default function AnalyticsConsent() {
       document.removeEventListener("keydown", escape);
     };
   }, [open]);
-  // VAY-2459: an agency's overview records no analytics, so it asks nothing.
-  if (!slug || !open || agency) return null;
+  // VAY-2459: an agency's overview records no analytics, so it asks nothing. VAY-2462: one of its
+  // stays (its page and checkout there) asks for that stay, which the events are for.
+  if (!slug || !open || (agency && !hotel)) return null;
   const save = (enabled: boolean) => {
     const saved = saveAnalyticsChoice(slug, enabled);
     setError(!saved);

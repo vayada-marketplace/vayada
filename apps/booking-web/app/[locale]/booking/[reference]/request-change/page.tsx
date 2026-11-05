@@ -7,7 +7,7 @@ import HotelHeroImage from "@/components/booking/HotelHeroImage";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import StayRange from "@/components/booking/StayRange";
@@ -31,6 +31,8 @@ export default function RequestChangePage({
   const { slug } = useSlug();
   const { formatPrice } = useCurrency();
   const router = useRouter();
+  // VAY-2462: this stay's pages, under the stay on an agency's address.
+  const stayPath = useStayPath();
   const errorText = useGuestErrorText();
 
   const [booking, setBooking] = useState<Booking | null>(null);
@@ -150,7 +152,7 @@ export default function RequestChangePage({
         addonQuantities: {},
         addonDates: {},
       });
-      router.push(`/booking/${reference}`);
+      router.push(stayPath(`/booking/${reference}`));
     } catch (err: unknown) {
       setSubmitError(errorText(err, t("submitError")));
     } finally {

@@ -296,14 +296,20 @@ export async function mockAgencyPage(
     stayPrices?: (request: Request, url: URL) => { status: number; json: unknown } | null;
   } = {},
 ) {
-  // The analytics choice is made, so its prompt doesn't cover the page.
+  // The analytics choice is made, so its prompt doesn't cover the page: the agency's, and each
+  // stay's, asked on the stay's pages here (VAY-2462).
   await page.addInitScript(
-    ({ slug, version }) =>
-      localStorage.setItem(
-        `vayada_booking_analytics:${slug}`,
-        JSON.stringify({ version, analytics: false }),
-      ),
-    { slug: AGENCY_SLUG, version: CONSENT },
+    ({ slugs, version }) => {
+      for (const slug of slugs)
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: false }),
+        );
+    },
+    {
+      slugs: [AGENCY_SLUG, ...AGENCY_STAYS.map((stay) => staySlug(stay.id))],
+      version: CONSENT,
+    },
   );
   await mockBookingApis(page);
   await page.route(`**/api/booking-web/hotels/${AGENCY_SLUG}**`, (route) =>

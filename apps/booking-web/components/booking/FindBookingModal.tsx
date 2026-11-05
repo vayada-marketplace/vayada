@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 
-import { useSlug } from "@/contexts/HotelContext";
+import { useSlug, useStayPath } from "@/contexts/HotelContext";
 import { useRouter } from "@/i18n/navigation";
 import { ApiError } from "@/services/api/client";
 import { bookingService } from "@/services/api/booking";
@@ -18,6 +18,8 @@ export default function FindBookingModal({
   const t = useTranslations("myBooking");
   const tc = useTranslations("common");
   const router = useRouter();
+  // VAY-2462: this stay's pages, under the stay on an agency's address.
+  const stayPath = useStayPath();
   const { slug } = useSlug();
   const dialog = useRef<HTMLDialogElement>(null);
   const referenceInput = useRef<HTMLInputElement>(null);
@@ -61,7 +63,7 @@ export default function FindBookingModal({
       });
       dialog.current?.close();
       onClose();
-      router.push(`/confirmation?${params}`);
+      router.push(stayPath(`/confirmation?${params}`));
     } catch (lookupError) {
       if (version !== requestVersion.current) return;
       setError(

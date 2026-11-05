@@ -138,6 +138,57 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
     });
     await fixture.close();
   });
+
+  // VAY-2462: booked on the account's agency page, which the route found showing this stay.
+  it("records the agency page the guest booked on, keeping the stay's own direct booking", async () => {
+    const fixture = await setupFixture();
+    mockOwners(fixture);
+    vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
+      // Keep the shared worker suite from claiming this committed fixture before cleanup.
+      await client.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      return new Date().toISOString();
+    });
+    const input = {
+      ...fixture.input,
+      agencyPage: { slug: "the-travel-ubud", propertyIds: [fixture.propertyId] },
+    };
+    const accepted = (await writePricingAcceptance(fixture.pool, input)) as {
+      kind: string;
+      bookingId: string;
+    };
+    expect(accepted.kind).toBe("accepted");
+    const booking = await fixture.observer.query(
+      `SELECT property_id::text AS "propertyId", booking_channel AS channel,
+              direct_booking_source AS source, booking_metadata->'agencyPage' AS "agencyPage",
+              booking_metadata->>'requestFingerprint' AS fingerprint
+       FROM booking.guest_bookings WHERE id=$1`,
+      [accepted.bookingId],
+    );
+    expect(booking.rows).toEqual([
+      {
+        propertyId: fixture.propertyId,
+        channel: "direct",
+        source: "booking_engine",
+        agencyPage: { organizationId: fixture.organizationId, slug: "the-travel-ubud" },
+        // The command and its fingerprint are the hotel page's own.
+        fingerprint: fixture.f.command.fingerprint,
+      },
+    ]);
+    const acceptance = await fixture.observer.query(
+      "SELECT acceptance_command FROM booking.pricing_quote_acceptances WHERE guest_booking_id=$1",
+      [accepted.bookingId],
+    );
+    expect(acceptance.rows[0].acceptance_command).not.toHaveProperty("via");
+    // The same request again is the same booking.
+    await expect(writePricingAcceptance(fixture.pool, input)).resolves.toMatchObject({
+      kind: "replayed",
+      bookingId: accepted.bookingId,
+    });
+    await fixture.close();
+  });
 });
 
 describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", () => {
