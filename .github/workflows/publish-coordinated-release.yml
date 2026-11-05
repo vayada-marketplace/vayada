@@ -41,7 +41,7 @@ jobs:
           )
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout trusted publisher from main
         uses: actions/checkout@v7

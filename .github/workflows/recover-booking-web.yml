@@ -30,7 +30,7 @@ env:
 jobs:
   build-and-deploy:
     name: Rebuild and deploy canonical Booking image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout approved source
         uses: actions/checkout@v7
