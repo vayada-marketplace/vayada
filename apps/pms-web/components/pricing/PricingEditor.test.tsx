@@ -4199,6 +4199,22 @@ it("keeps this room's edits over the reload after a refused save when only anoth
   expect(saved.snapshot.rooms[1].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12345" } } });
   expect(confirm).toHaveBeenCalledTimes(2); expect(publish).toHaveBeenCalledTimes(2);
 });
+it("says prices changed, keeps the edits over the reload and saves without a deleted room's prices (VAY-2471)", async () => {
+  client.read.mockResolvedValueOnce(published()); await mountRoom();
+  await act(async () => input().props.onChange({ target: { value: "123.45" } }));
+  // The other room was deleted after these prices were published: the server refuses the copy that still has it.
+  client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "stale", reason: "room_unavailable" } as never)); await click("Save and publish");
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Pricing or its settings changed. Reload pricing"); expect(text()).not.toContain("do not have access");
+  expect(text()).toContain("Your changes to this room are kept if nobody else changed this room");
+  // The read leaves the deleted room out, so the save after the reload publishes this room alone, with the edit.
+  client.read.mockResolvedValueOnce(published([family])); await click("Reload pricing");
+  expect(input().props.value).toBe("123.45"); expect(button("Save and publish").props.disabled).toBe(false);
+  await click("Save and publish");
+  expect(saved.baseRevision).toBe(1); expect(saved.snapshot.rooms.map((room) => room.roomTypeId)).toEqual([familyId]);
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12345" } } });
+  expect(publish).toHaveBeenCalledTimes(1);
+});
 it("after an Owner's currency change shows the prices in the new currency and publishes every room's same numbers (VAY-2390)", async () => {
   const settings = vi.spyOn(bookingsService, "getPaymentSettings").mockResolvedValue({ paymentSettings: { payAtPropertyEnabled: true, onlineCardPayment: false, defaultCurrency: "CHF" } } as never);
   try {

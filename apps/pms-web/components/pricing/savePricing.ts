@@ -58,6 +58,9 @@ function financeReason(error: unknown) {
   return typeof reason === "string" && Object.hasOwn(financeReasons, reason) ? financeReasons[reason as keyof typeof financeReasons] : null;
 }
 export const financeNotReady = (error: unknown) => financeReason(error) !== null;
+/** A refusal without a reason: this user may not change prices here (VAY-2471). Any other refusal names its reason. */
+export const noPricingAccess = (error: unknown) =>
+  error instanceof ApiErrorResponse && error.status === 403 && (error.data as { reason?: unknown }).reason === undefined;
 /** `paymentCurrency`: the currency Payment settings take, when the page has read it; a refused currency names it. */
 export function pricingSaveError(error: unknown, t: Translate, { paymentCurrency = null }: { paymentCurrency?: string | null } = {}) {
   const finance = financeReason(error);
@@ -70,6 +73,9 @@ export function pricingSaveError(error: unknown, t: Translate, { paymentCurrency
   if (error instanceof ApiErrorResponse && error.status === 409 && (error.data as { code?: unknown }).code === "currency_conversion_required")
     return t("pricing.currencyChanged.otherCurrency");
   if (error instanceof ApiErrorResponse && error.status === 409) return t("pricing.editor.errorChanged");
-  if (error instanceof ApiErrorResponse && error.status === 403) return t("pricing.editor.errorForbidden");
+  // VAY-2471: only a refusal without a reason means no access. A reason this page doesn't name, or pricing being
+  // unavailable (503), is "try again later": the edits stay and "Retry last action" or a new save can follow.
+  if (noPricingAccess(error)) return t("pricing.editor.errorForbidden");
+  if (error instanceof ApiErrorResponse && (error.status === 403 || error.status >= 500)) return t("pricing.editor.errorUnavailable");
   return errorText(error, t, "pricing.editor.errorSaveFailed");
 }

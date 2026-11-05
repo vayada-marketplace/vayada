@@ -126,12 +126,18 @@ function sources(value: unknown): PricingSources {
     finance: value.finance as string,
   };
 }
-function snapshot(value: unknown, propertyId: string, revision?: number): PricingSnapshot {
+/** `noRooms`: the current prices may hold no room, when every priced room was deleted (VAY-2471); saves never may. */
+function snapshot(
+  value: unknown,
+  propertyId: string,
+  revision?: number,
+  noRooms = false,
+): PricingSnapshot {
   if (
     !exact(value, ["currency", "rooms", "ownerReferences"]) ||
     typeof value.currency !== "string" ||
     !Array.isArray(value.rooms) ||
-    !value.rooms.length ||
+    (!value.rooms.length && !noRooms) ||
     !pricingObject(value.ownerReferences) ||
     !evidence(value.ownerReferences.finance, "finance.pricing.v2:") ||
     Object.keys(value.ownerReferences).some((key) => !["finance", "charges"].includes(key)) ||
@@ -447,6 +453,7 @@ export function createReplacementPricingClient(
           { currency: value.currency, rooms: value.rooms, ownerReferences: value.ownerReferences },
           propertyId,
           value.revision,
+          true,
         ),
         revision: value.revision,
         sources: sources(value.sources),

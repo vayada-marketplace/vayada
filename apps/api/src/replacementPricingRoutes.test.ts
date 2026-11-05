@@ -105,8 +105,13 @@ async function fixture(
   manualPayments?: ReplacementPricingRoutesOptions["manualPayments"],
   cardReadiness?: ReplacementPricingRoutesOptions["cardReadiness"],
   guestDisplayRate?: ReplacementPricingRoutesOptions["guestDisplayRate"],
+  logs?: { text: string },
 ) {
-  const app = Fastify();
+  const app = Fastify(
+    logs
+      ? { logger: { level: "info", stream: { write: (chunk: string) => (logs.text += chunk) } } }
+      : {},
+  );
   apps.push(app);
   app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => {
@@ -483,6 +488,67 @@ describe("replacement pricing HTTP boundary", () => {
     expect(response.body).not.toContain("secret");
     f.commands.read.mockResolvedValue(null);
     expect((await f.inject(0)).statusCode).toBe(404);
+  });
+  it("logs every refused or failed pricing request with its step, code and reason (VAY-2471)", async () => {
+    const logs = { text: "" },
+      f = await fixture(context, undefined, undefined, undefined, logs);
+    f.commands.prepare.mockRejectedValueOnce(new PricingStorageError("stale", "room_unavailable"));
+    const stale = await f.inject(2);
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ code: "stale", reason: "room_unavailable" });
+    f.commands.publish.mockRejectedValueOnce(new Error("secret database detail"));
+    const failed = await f.inject(5);
+    expect(failed.statusCode).toBe(503);
+    expect(failed.body).not.toContain("secret");
+    const readOnly = await fixture(
+      { ...context, membership: { ...context.membership!, permissions: ["pms.rooms_rates.read"] } },
+      undefined,
+      undefined,
+      undefined,
+      logs,
+    );
+    expect((await readOnly.inject(2)).statusCode).toBe(403);
+    expect((await f.inject(0)).statusCode).toBe(200);
+    const lines = logs.text
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => String(line["msg"]).startsWith("pricing request"))
+      .map(({ level, msg, pricingStep, propertyId, code, reason, err }) => ({
+        level,
+        msg,
+        pricingStep,
+        propertyId,
+        code,
+        reason,
+        logged: err !== undefined,
+      }));
+    expect(lines).toEqual([
+      {
+        level: 40,
+        msg: "pricing request refused",
+        pricingStep: "POST pricing-v2/prepare",
+        propertyId: id,
+        code: "stale",
+        reason: "room_unavailable",
+        logged: false,
+      },
+      {
+        level: 50,
+        msg: "pricing request failed",
+        pricingStep: "POST pricing-v2/publish",
+        propertyId: id,
+        logged: true,
+      },
+      {
+        level: 40,
+        msg: "pricing request refused",
+        pricingStep: "POST pricing-v2/prepare",
+        propertyId: id,
+        code: "forbidden",
+        logged: false,
+      },
+    ]);
   });
   it("registers the protected API only when its runtime is supplied", async () => {
     const disabled = buildApp({ logger: false });

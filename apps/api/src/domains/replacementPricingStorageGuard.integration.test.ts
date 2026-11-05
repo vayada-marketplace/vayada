@@ -98,9 +98,10 @@ describe.skipIf(!url)("live replacement pricing storage guard", () => {
   });
   it("requires declarations for publication and validates supplied draft declarations", async () => {
     const f = await fixture();
-    await expect(f.store.save(f.scope, { ...f.command, draft: undefined, snapshot: f.draft.snapshot })).rejects.toMatchObject({ code: "denied" });
-    for (const ownerReferences of [{ ...f.snapshot.ownerReferences, charges: randomUUID() },
-      { ...f.snapshot.ownerReferences, arbitrary: "unverified" }, { ...f.snapshot.ownerReferences, fx: randomUUID() }]) {
+    // A declaration that doesn't cover these prices is refused as changed (409): save again declares anew (VAY-2471).
+    await expect(f.store.save(f.scope, { ...f.command, draft: undefined, snapshot: f.draft.snapshot })).rejects.toMatchObject({ code: "stale", reason: "charges_stale" });
+    await expect(f.store.saveDraft(f.scope, { ...f.draft, expectedDraftRevision: 2, snapshot: { ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: randomUUID() } } })).rejects.toMatchObject({ code: "stale", reason: "charges_stale" });
+    for (const ownerReferences of [{ ...f.snapshot.ownerReferences, arbitrary: "unverified" }, { ...f.snapshot.ownerReferences, fx: randomUUID() }]) {
       await expect(f.store.saveDraft(f.scope, { ...f.draft, expectedDraftRevision: 2, snapshot: { ...f.snapshot, ownerReferences } })).rejects.toMatchObject({ code: "denied" });
     }
     await expect(f.store.save(f.scope, { ...f.command, sources: { ...f.sources, finance: "forged" } })).rejects.toMatchObject({ code: "stale" });

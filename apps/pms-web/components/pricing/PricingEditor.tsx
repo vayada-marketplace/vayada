@@ -9,7 +9,7 @@ import { ApiErrorResponse } from "@/services/api/client";
 import { samePricingValue, type createReplacementPricingClient, type PricingGuestDisplay, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
 import { amountInput, baseAmounts, editedSnapshot, errorText, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
-import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
+import { financeNotReady, noPricingAccess, pricingSave, pricingSaveError } from "./savePricing";
 import type { NewRoomPrices } from "./newRoomPrices";
 import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
@@ -335,8 +335,8 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   useEffect(() => { if (!take) return; take.current = takeNewRoomPrices; return () => { take.current = null; }; }); // Gone with the tab.
   useEffect(() => { callbacks.current.onPrices?.(dirty); }, [dirty]);
   const disabled = busy || retry || needsReload || done || !!newRoom?.locked, display = current;
-  // Edits survive a reload after a conflict; a denial (no permission) would only be refused again.
-  const keepsOnReload = needsReload && dirty && !(error instanceof ApiErrorResponse && error.status === 403);
+  // Edits survive a reload after any refusal but no access, which would only be refused again.
+  const keepsOnReload = needsReload && dirty && !noPricingAccess(error);
   const roomSetup = setup?.rooms.filter((room) => room.roomTypeId === focus) ?? [];
   const firstTime = !loading && !focusRoom && roomSetup.length > 0, firstForm = firstTime && !newRoom;
   useEffect(() => {

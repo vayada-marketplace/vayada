@@ -101,6 +101,19 @@ export type ReplacementPricingOfferOwners =
 
 type DraftPricingOwners = ReplacementPricingOfferOwners | { kind: "awaiting_charge_confirmation" };
 
+/** Why the owners refused prices, as the HTTP answer (VAY-2471): 403 only without access, or with Finance's reason;
+ * a room, terms, charges or source that changed since the page read the prices is 409, so the page says to reload
+ * rather than "no access". */
+export function pricingOwnersRefusal(
+  owners: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>,
+): PricingStorageError {
+  if (owners.reason === "denied" || owners.reason === "invalid")
+    return new PricingStorageError(owners.reason);
+  if (owners.reason === "finance_unavailable")
+    return new PricingStorageError("denied", owners.financeReason);
+  return new PricingStorageError("stale", owners.reason);
+}
+
 /** Drafts may await confirmation; a supplied declaration must still match. */
 export function lockReplacementPricingDraftOwners(
   client: PoolClient,

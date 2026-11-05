@@ -11,6 +11,7 @@ import { lockReplacementPricingAuthorization } from "./replacementPricingAuthori
 import {
   lockReplacementPricingDraftOwners,
   lockReplacementPricingOfferOwners,
+  pricingOwnersRefusal,
 } from "./replacementPricingOfferOwners.js";
 import type {
   PricingStorageGuard,
@@ -86,6 +87,9 @@ export function createReplacementPricingStorageGuard(
       const result = await (
         intent === "draft" ? lockReplacementPricingDraftOwners : lockReplacementPricingOfferOwners
       )(client, trustedContext, scope, proposed, sources, draft);
+      // Only missing access stays a plain refusal (403); anything that changed says why (VAY-2471).
+      if (result.kind === "unavailable" && result.reason !== "denied")
+        throw pricingOwnersRefusal(result);
       return (
         result.kind === "verified" ||
         (intent === "draft" && result.kind === "awaiting_charge_confirmation")

@@ -8259,17 +8259,27 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await chargeTotals(f)).toBeNull();
     expect(before?.totalMinor).toBe("20600");
     const other = await publicFixture(false);
+    // Another hotel's or a mismatched declaration never covers these prices: refused as changed (409, VAY-2471).
     other.snapshot.ownerReferences.charges = f.snapshot.ownerReferences.charges!;
-    await expect(other.publishPrices()).rejects.toMatchObject({ code: "denied" });
+    await expect(other.publishPrices()).rejects.toMatchObject({
+      code: "stale",
+      reason: "charges_stale",
+    });
     other.snapshot.ownerReferences.charges = "booking.fixed-charge-policy.v1:" + randomUUID();
-    await expect(other.publishPrices()).rejects.toMatchObject({ code: "denied" });
+    await expect(other.publishPrices()).rejects.toMatchObject({
+      code: "stale",
+      reason: "charges_stale",
+    });
     const saved = await createFixedChargePolicyStore(pool).save(other.context, other.scope, {
       requestId: randomUUID(),
       expectedRevision: null,
       policy: { ...fixedPolicy(), currency: "USD" },
     });
     other.snapshot.ownerReferences.charges = "booking.fixed-charge-policy.v1:" + saved.revision;
-    await expect(other.publishPrices()).rejects.toMatchObject({ code: "denied" });
+    await expect(other.publishPrices()).rejects.toMatchObject({
+      code: "stale",
+      reason: "charges_stale",
+    });
   });
   it("rejects overallocated included charges and retains current fee locks through consumption", async () => {
     const policy = fixedPolicy(true);
