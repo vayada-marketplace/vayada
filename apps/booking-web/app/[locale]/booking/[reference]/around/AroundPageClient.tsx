@@ -78,7 +78,9 @@ export default function AroundPageClient({ reference }: { reference: string }) {
   const only = shown.length === 1 && layer.categories.length > 1 ? shown[0]!.id : null;
   const chip = (on: boolean) =>
     `inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold sm:min-h-[36px] ${
-      on ? "border-primary-700 bg-primary-700 text-white" : "border-gray-300 bg-white text-gray-900"
+      on
+        ? "border-primary-700 bg-primary-700 text-primary-on-700"
+        : "border-gray-300 bg-white text-gray-900"
     }`;
   const distance = (nearby: (typeof layer.places)[number]) => {
     if (!from) return null;
@@ -162,7 +164,7 @@ export default function AroundPageClient({ reference }: { reference: string }) {
               href={hotelDirections}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-primary-700 px-5 font-semibold text-white hover:bg-primary-800"
+              className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-primary-700 px-5 font-semibold text-primary-on-700 hover:bg-primary-800"
             >
               <svg
                 aria-hidden="true"

@@ -47,7 +47,7 @@ export default function ConsentTile({
             onChange={(event) => onChange(event.target.checked)}
           />
           <svg
-            className="pointer-events-none absolute inset-0 m-auto hidden h-3.5 w-3.5 text-white peer-checked:block"
+            className="pointer-events-none absolute inset-0 m-auto hidden h-3.5 w-3.5 text-primary-on-600 peer-checked:block"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

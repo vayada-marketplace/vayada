@@ -20,7 +20,7 @@ import {
   publishPublicBookabilityProfile,
 } from "@/services/api/publicBookabilityPublicationClient";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
-import { COLOR_PRESETS, FONT_PAIRINGS, isTooLightBrandColor } from "@/lib/constants/branding";
+import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import { FeedbackAlert, SaveButton } from "@/components/ui";
 import {
   MAX_PROPERTY_GALLERY_PHOTOS,
@@ -771,11 +771,8 @@ export default function DesignStudioPage() {
   const handleSave = async () => {
     const hotelId = designHotelIdRef.current;
     if (!hotelId) return;
+    // Any colour saves: light ones get dark button text on the booking page (VAY-2475).
     const designChoices = changedDesignChoices();
-    if (designChoices && isTooLightBrandColor(designChoices.primaryColor)) {
-      setFeedback({ type: "error", message: "designStudio.colors.tooLight" });
-      return;
-    }
     try {
       setSaving(true);
       setFeedback(null);

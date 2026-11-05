@@ -120,7 +120,7 @@ export default function ConfirmationCancellation({
               type="button"
               autoFocus
               onClick={() => setOpen(false)}
-              className="h-11 rounded-full bg-primary-700 px-5 font-semibold text-white hover:bg-primary-800"
+              className="h-11 rounded-full bg-primary-700 px-5 font-semibold text-primary-on-700 hover:bg-primary-800"
             >
               {t("close")}
             </button>

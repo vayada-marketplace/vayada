@@ -24,6 +24,7 @@ export * from "./firstRunBuilders.js";
 export * from "./bookingLaunchEvidence.js";
 export * from "./bookingLaunchReadiness.js";
 export * from "./bookingDesign.js";
+export * from "./bookingDesignColors.js";
 export * from "./bookingDesignSnapshot.js";
 export * from "./bookingDesignReadiness.js";
 export * from "./bookingPricingEvidence.js";

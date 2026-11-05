@@ -13,7 +13,7 @@ import {
 } from "@/services/api/pricingAcceptance";
 
 const button =
-  "rounded-full bg-primary-600 px-6 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-full bg-primary-600 px-6 py-3 font-semibold text-primary-on-600 disabled:cursor-not-allowed disabled:opacity-50";
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Card step of a replacement-pricing booking: the booking is accepted and holds its rooms
