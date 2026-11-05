@@ -48,7 +48,7 @@ jobs:
     name: Hold, settle, precheck, publish, hand off
     # A real release runs only from main; any branch may dry-run.
     if: github.ref == 'refs/heads/main' || inputs.dry_run
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Above the train step's own limit, so the cleanup below still runs after it.
     timeout-minutes: 330
     permissions:
