@@ -21,7 +21,7 @@ concurrency:
 jobs:
   report:
     name: Report last week's infrastructure failures
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A week of runs took about 11 minutes to read (2026-10-23).
     timeout-minutes: 30
 
