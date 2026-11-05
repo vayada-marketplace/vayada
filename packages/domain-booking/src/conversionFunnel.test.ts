@@ -181,6 +181,28 @@ describe("funnel event allowlist (VAY-2197)", () => {
     }
   });
 
+  it("takes the agency page's mark on any event, and nothing else under that name (VAY-2462)", () => {
+    expect(parseFunnelEventMetadata("page_visit", { ...sequence, via: "agency_page" })).toEqual({
+      ...sequence,
+      via: "agency_page",
+    });
+    expect(
+      parseFunnelEventMetadata("booking_completed", {
+        paymentMethod: "card",
+        outcome: "confirmed",
+        via: "agency_page",
+        ...sequence,
+      }),
+    ).toEqual({ paymentMethod: "card", outcome: "confirmed", via: "agency_page", ...sequence });
+    // Without it, an event is exactly what it was.
+    expect(Object.keys(parseFunnelEventMetadata("details_completed", sequence)!)).toEqual([
+      "funnelVersion",
+      "funnelSequence",
+    ]);
+    for (const via of ["the-travel-ubud", "", null, true, { agencyPage: "x" }])
+      expect(parseFunnelEventMetadata("page_visit", { ...sequence, via }), String(via)).toBe(null);
+  });
+
   it("keeps the new events out of the dashboard stages", () => {
     expect(FUNNEL_EVENT_TYPES).toEqual(expect.arrayContaining(["step_viewed", "booking_error"]));
     expect(FUNNEL_STAGES).not.toContain("step_viewed");

@@ -66,6 +66,7 @@ import {
   BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
   isFunnelId,
   isManualPricingPaymentMethod,
+  parseAccountBookingPageSlug,
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
   parseFunnelEventMetadata,
@@ -281,7 +282,15 @@ export type BookingWebCheckoutAdapter = {
   ): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
-  acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
+  acceptPricingQuote?(
+    slug: string,
+    request: BookingWebCheckoutRequest,
+    context?: {
+      log?: { warn(fields: object, message: string): void };
+      /** VAY-2462: the agency page's address the guest booked on (X-Vayada-Agency-Page). */
+      agencyPage?: unknown;
+    },
+  ): Promise<unknown>;
   completePricingCardPayment?(slug: string, quoteId: string, requestId: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
@@ -641,7 +650,10 @@ export async function registerBookingWebPublicRoutes(
         throw createHttpError(400, "Invalid quote acceptance request.");
       let response;
       try {
-        response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+        response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body, {
+          log: request.log,
+          agencyPage: request.headers["x-vayada-agency-page"],
+        });
       } catch (error) {
         // The default error body has no room for which rooms sold out (VAY-2320).
         if ((error as { code?: unknown }).code !== "ROOMS_SOLD_OUT") throw error;
@@ -1166,7 +1178,7 @@ function writeBookingWebCorsHeaders(
   reply.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   reply.header(
     "Access-Control-Allow-Headers",
-    "content-type,idempotency-key,x-vayada-session-id,x-vayada-request-id",
+    "content-type,idempotency-key,x-vayada-session-id,x-vayada-request-id,x-vayada-agency-page",
   );
   reply.header("Access-Control-Max-Age", "600");
   reply.header("Vary", "Origin");
@@ -1938,9 +1950,28 @@ export function createTargetBookingWebCheckoutAdapter(
       if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
       return disclosure;
     },
-    async acceptPricingQuote(slug, request) {
+    async acceptPricingQuote(slug, request, context) {
       if (!config.replacementPricingAcceptanceEnabled)
         throw createHttpError(404, "Quote acceptance unavailable.");
+      // VAY-2462: booked on an agency page (its address in X-Vayada-Agency-Page). Its stays come
+      // from the agency page read guests' browsing already keeps (30 s, on its own pool), never
+      // inside the booking's transaction; the booking records the page only if it shows this
+      // stay. The mark is outside the command, so commands, fingerprints and their history are
+      // exactly as before. A failed read never stops a booking.
+      const agencySlug = parseAccountBookingPageSlug(context?.agencyPage);
+      let shownOn: { slug: string; propertyIds: string[] } | null = null;
+      if (agencySlug) {
+        try {
+          const page = await agencyPage(agencySlug);
+          if (page)
+            shownOn = {
+              slug: agencySlug,
+              propertyIds: page.stays.map((stay) => stay.propertyId),
+            };
+        } catch (error) {
+          context?.log?.warn({ err: error }, "Agency page read for a booking failed");
+        }
+      }
       try {
         const cardPayments =
           config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
@@ -1952,7 +1983,8 @@ export function createTargetBookingWebCheckoutAdapter(
             : undefined;
         const result = await writePricingAcceptance(
           pool,
-          { slug, command: request },
+          // A hotel's own page names none: its call is exactly as before.
+          agencySlug ? { slug, command: request, agencyPage: shownOn } : { slug, command: request },
           cardPayments,
           config.replacementPricingRequestAcceptanceEnabled === true,
           config.replacementPricingManualPaymentAcceptanceEnabled

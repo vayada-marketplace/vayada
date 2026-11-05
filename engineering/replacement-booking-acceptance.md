@@ -23,6 +23,16 @@ its `sha256:` prefix removed. Never reuse the legacy checkout operation.
 Same request ID with different normalized input conflicts. Different request IDs
 must not create two bookings from one quote.
 
+VAY-2462: a booking made on an agency page names the page's address in the
+`X-Vayada-Agency-Page` header, outside the command: the command, its fingerprint
+and the stored acceptance history are exactly as for any booking, so the API can
+deploy or roll back in any order. The route reads that live page's stays (the
+30-second agency page read, on the browsing pool) before the transaction, never
+under the account's pricing lock; the draft records `booking_metadata.agencyPage`
+(`organizationId` of the stay, `slug`) only when that page shows this stay. A page
+shows only its own account's stays. The booking stays the stay's own direct
+booking (`booking_engine`); a failed read books without the mark.
+
 Booking-owned migration 0210 introduces the append-only
 `booking.pricing_quote_acceptances` relation with:
 

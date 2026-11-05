@@ -33,6 +33,10 @@ export type FunnelPaymentMethod = (typeof FUNNEL_PAYMENT_METHODS)[number];
  * the public endpoint stores nothing under another version, so a new consent text bumps it.
  * 2 (VAY-2213): the text names the hotel as responsible and links the privacy notice. */
 export const BOOKING_WEB_ANALYTICS_CONSENT_VERSION = 2;
+/** VAY-2462: where an event came from besides the stay's own booking page, the same for every
+ * event type: its agency's page (`/stays/<slug>` on the agency's address). Absent otherwise. */
+export const FUNNEL_VIA = ["agency_page"] as const;
+export type FunnelVia = (typeof FUNNEL_VIA)[number];
 /** The /book steps (VAY-2195). */
 export const FUNNEL_STEPS = ["rooms", "extras", "details", "payment"] as const;
 export type FunnelStep = (typeof FUNNEL_STEPS)[number];
@@ -119,7 +123,8 @@ export function isFunnelId(value: unknown): value is string {
   );
 }
 
-/** The event's metadata when it carries exactly what its type allows, else null. */
+/** The event's metadata when it carries exactly what its type allows (and, on any event, `via`),
+ * else null. */
 export function parseFunnelEventMetadata(
   eventType: string,
   metadata: unknown,
@@ -130,11 +135,15 @@ export function parseFunnelEventMetadata(
   const { funnelVersion, funnelSequence, ...properties } = metadata as Record<string, unknown>;
   if (funnelVersion !== 1 || !Number.isSafeInteger(funnelSequence) || Number(funnelSequence) < 1)
     return null;
+  // A type's own properties never include `via`; any event may carry it.
+  const via = own(properties, "via") ? properties.via : undefined;
+  delete properties.via;
+  if (via !== undefined && !(FUNNEL_VIA as readonly unknown[]).includes(via)) return null;
   if (Object.keys(properties).some((key) => !own(rules, key))) return null;
   for (const [key, rule] of Object.entries(rules)) {
     if (own(properties, key) ? !rule.valid(properties[key]) : !rule.optional) return null;
   }
-  return { ...properties, funnelVersion, funnelSequence };
+  return { ...properties, ...(via === undefined ? {} : { via }), funnelVersion, funnelSequence };
 }
 export type BookingFunnelEvent = {
   sessionId: string;
