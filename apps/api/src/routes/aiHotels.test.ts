@@ -430,6 +430,38 @@ describe("target public hotel profile security", () => {
     await app.close();
   });
 
+  it("sends the guest display currency the page opens in, display only (VAY-2474)", async () => {
+    const { repository } = targetRepository(
+      targetProfileRow({ bookingDisplayCurrencies: ["USD", "GBP"] }),
+    );
+    const profile = (await repository.findProfileBySlug("hotel-alpenrose"))!;
+    // As the live page read adds it (activeBookingPublicationProfile.ts).
+    const shown = {
+      ...profile,
+      hotel: {
+        ...profile.hotel,
+        branding: { ...profile.hotel.branding!, displayDefaultCurrency: "USD" },
+      },
+    };
+    const app = Fastify({ logger: false });
+    await app.register(registerAiHotelRoutes, {
+      prefix: "/api/ai",
+      repository: { findProfileBySlug: async () => shown },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/ai/hotels/hotel-alpenrose" });
+    const hotel = response.json().hotel;
+
+    expect(response.statusCode).toBe(200);
+    expect(hotel.branding).toMatchObject({
+      displayCurrencies: ["EUR", "USD", "GBP"],
+      displayDefaultCurrency: "USD",
+    });
+    expect(hotel.defaultCurrency).toBe("EUR");
+    expect(hotel.supportedQuoteParameters.supportedCurrencies).toEqual(["EUR"]);
+    await app.close();
+  });
+
   it.each([[[]], [["EUR"]], [null]])(
     "omits display currencies when Booking offers only the pricing currency (%j)",
     async (bookingDisplayCurrencies) => {

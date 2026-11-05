@@ -399,6 +399,11 @@ function serializeHotelProfile(
             ...(hotel.branding.displayCurrencies === undefined
               ? {}
               : { displayCurrencies: hotel.branding.displayCurrencies.map((code) => code) }),
+            // VAY-2474: the guest display currency the page opens in; booking-web fell back to the
+            // pricing currency while this was left out.
+            ...(hotel.branding.displayDefaultCurrency === undefined
+              ? {}
+              : { displayDefaultCurrency: hotel.branding.displayDefaultCurrency }),
             heroImage: hotel.branding.heroImage ?? null,
             heroHeading: hotel.branding.heroHeading ?? null,
             heroSubtext: hotel.branding.heroSubtext ?? null,

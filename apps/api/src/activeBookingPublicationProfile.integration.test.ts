@@ -12,7 +12,10 @@ import {
   configureActiveBookingPublicationGate,
   lockActiveBookingPublication,
 } from "./domains/activeBookingPublicationGate.js";
-import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
+import {
+  serializePublicHotelProfileProjection,
+  type PublicHotelProfileReadPool,
+} from "./routes/aiHotels.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const userId = "85858585-8585-4585-8585-858585858501";
@@ -294,6 +297,11 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     );
     expect(await branding()).toMatchObject({
       displayCurrencies: ["EUR", "USD", "GBP"],
+      displayDefaultCurrency: "USD",
+    });
+    // VAY-2474: and the public hotel response passes it on; it used to drop it.
+    const live = (await repository.findProfileBySlug("hotel-alpenrose"))!;
+    expect(serializePublicHotelProfileProjection(live).hotel.branding).toMatchObject({
       displayDefaultCurrency: "USD",
     });
     await admin.query(

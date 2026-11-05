@@ -2959,7 +2959,11 @@ export async function registerBookingSettingsRoutes(
                 throw new Error("Canonical property was not found for publication.");
               }
             }
-          : undefined,
+          : bookingPublicationRefresh
+            ? // VAY-2474: production has no legacy publisher, so languages reached the live page
+              // only with some later save. Refresh a live page like the other settings saves do.
+              async (hotelId, _settings, _stored, request) => refreshPublicPage(hotelId, request)
+            : undefined,
         toResponse: toLocalizationSettingsRouteResponse,
       }),
   );
