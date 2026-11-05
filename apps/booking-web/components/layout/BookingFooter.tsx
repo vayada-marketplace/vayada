@@ -12,23 +12,25 @@ export default function BookingFooter() {
   const tm = useTranslations("myBooking");
   const ta = useTranslations("analyticsConsent");
   const [findBookingOpen, setFindBookingOpen] = useState(false);
+  // wa.me takes the digits only, as the Contact menu's link does (VAY-2473).
+  const whatsappDigits = hotel.contact.whatsapp?.replace(/\D/g, "");
 
   return (
-    <footer className="bg-primary-600 text-white py-8 px-4 sm:px-6 lg:px-8">
+    <footer className="bg-primary-600 text-primary-on-600 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           {/* Hotel Info */}
           <div>
             <h3 className="text-lg font-bold mb-2">{hotel.name}</h3>
             {hotel.description?.trim() && (
-              <p className="text-white/80 text-sm leading-relaxed">{hotel.description}</p>
+              <p className="text-primary-on-600/80 text-sm leading-relaxed">{hotel.description}</p>
             )}
           </div>
 
           {/* Contact */}
           <div>
             <h4 className="text-sm font-bold uppercase tracking-wider mb-3">{t("contact")}</h4>
-            <div className="space-y-1 text-sm text-white/80">
+            <div className="space-y-1 text-sm text-primary-on-600/80">
               <p>{hotel.contact.address}</p>
               <p>
                 {t("phone")}: {hotel.contact.phone}
@@ -39,19 +41,19 @@ export default function BookingFooter() {
             </div>
 
             {/* Social Media Links */}
-            {(hotel.contact.whatsapp ||
+            {(whatsappDigits ||
               (hotel.socialLinks &&
                 (hotel.socialLinks.instagram ||
                   hotel.socialLinks.facebook ||
                   hotel.socialLinks.tiktok ||
                   hotel.socialLinks.youtube))) && (
               <div className="flex items-center gap-3 mt-4">
-                {hotel.contact.whatsapp && (
+                {whatsappDigits && (
                   <a
-                    href={`https://wa.me/${hotel.contact.whatsapp.replace(/\s+/g, "")}`}
+                    href={`https://wa.me/${whatsappDigits}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white/70 hover:text-white transition-colors"
+                    className="text-primary-on-600/70 hover:text-primary-on-600 transition-colors"
                     aria-label="WhatsApp"
                   >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -64,7 +66,7 @@ export default function BookingFooter() {
                     href={hotel.socialLinks.instagram}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white/70 hover:text-white transition-colors"
+                    className="text-primary-on-600/70 hover:text-primary-on-600 transition-colors"
                     aria-label="Instagram"
                   >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -77,7 +79,7 @@ export default function BookingFooter() {
                     href={hotel.socialLinks.facebook}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white/70 hover:text-white transition-colors"
+                    className="text-primary-on-600/70 hover:text-primary-on-600 transition-colors"
                     aria-label="Facebook"
                   >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -90,7 +92,7 @@ export default function BookingFooter() {
                     href={hotel.socialLinks.tiktok}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white/70 hover:text-white transition-colors"
+                    className="text-primary-on-600/70 hover:text-primary-on-600 transition-colors"
                     aria-label="TikTok"
                   >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -103,7 +105,7 @@ export default function BookingFooter() {
                     href={hotel.socialLinks.youtube}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white/70 hover:text-white transition-colors"
+                    className="text-primary-on-600/70 hover:text-primary-on-600 transition-colors"
                     aria-label="YouTube"
                   >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -117,8 +119,8 @@ export default function BookingFooter() {
         </div>
 
         {/* Bottom bar */}
-        <div className="border-t border-white/20 pt-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-white/70">
+        <div className="border-t border-primary-on-600/20 pt-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-primary-on-600/70">
             <p>
               &copy; {new Date().getFullYear()} {t("allRightsReserved", { name: hotel.name })}
             </p>
@@ -126,7 +128,7 @@ export default function BookingFooter() {
               <button
                 type="button"
                 onClick={() => setFindBookingOpen(true)}
-                className="font-semibold text-white underline underline-offset-4 transition-opacity hover:opacity-80"
+                className="font-semibold text-primary-on-600 underline underline-offset-4 transition-opacity hover:opacity-80"
               >
                 {tm("findBooking")}
               </button>
@@ -134,13 +136,14 @@ export default function BookingFooter() {
               <button
                 type="button"
                 onClick={(event) => openAnalyticsChoices(event.currentTarget)}
-                className="underline underline-offset-4 transition-colors hover:text-white"
+                className="underline underline-offset-4 transition-colors hover:text-primary-on-600"
               >
                 {ta("settings")}
               </button>
             </div>
             <p>
-              {t("poweredBy")} <span className="text-white font-semibold underline">vayada</span>
+              {t("poweredBy")}{" "}
+              <span className="text-primary-on-600 font-semibold underline">vayada</span>
             </p>
           </div>
         </div>

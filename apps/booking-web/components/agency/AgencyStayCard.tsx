@@ -79,7 +79,7 @@ export default function AgencyStayCard({
             </span>
           )}
           {lowest && (
-            <span className="absolute right-3.5 top-3.5 rounded-full bg-primary-600 px-2.5 py-0.5 text-[13px] font-semibold text-white">
+            <span className="absolute right-3.5 top-3.5 rounded-full bg-primary-600 px-2.5 py-0.5 text-[13px] font-semibold text-primary-on-600">
               {t("lowestPrice")}
             </span>
           )}

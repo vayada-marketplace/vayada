@@ -399,7 +399,7 @@ export default function BookingNavigation({
                       closeAll();
                       setContactOpen(!contactOpen);
                     }}
-                    className="px-5 py-2 text-sm font-semibold text-white bg-primary-600 rounded-full hover:bg-primary-700 transition-colors"
+                    className="px-5 py-2 text-sm font-semibold text-primary-on-600 bg-primary-600 rounded-full hover:bg-primary-700 transition-colors"
                   >
                     {t("contact")}
                   </button>
@@ -495,7 +495,7 @@ export default function BookingNavigation({
                       closeAll();
                       setContactOpen(!contactOpen);
                     }}
-                    className={`flex h-7 w-7 items-center justify-center rounded-full bg-primary-600 text-white focus:outline-none focus-visible:ring-2 ${solid ? "focus-visible:ring-primary-500 focus-visible:ring-offset-2" : "focus-visible:ring-white/80"}`}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full bg-primary-600 text-primary-on-600 focus:outline-none focus-visible:ring-2 ${solid ? "focus-visible:ring-primary-500 focus-visible:ring-offset-2" : "focus-visible:ring-white/80"}`}
                   >
                     <svg
                       className="h-3.5 w-3.5"

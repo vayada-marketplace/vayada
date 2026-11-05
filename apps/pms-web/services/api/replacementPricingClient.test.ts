@@ -95,6 +95,11 @@ describe("replacement pricing browser workflow", () => {
     expect(http.post).not.toHaveBeenCalled();
     http.get.mockResolvedValue({ ...snapshot, revision: 1, sources, stale: false }); expect(await api.read()).toMatchObject({ revision: 1 });
     http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" })); expect(await api.read()).toBeNull();
+    // VAY-2471: every priced room was deleted; the page starts from no rooms at that revision. A saved draft never may.
+    http.get.mockResolvedValue({ ...snapshot, rooms: [], revision: 3, sources, stale: false });
+    expect(await api.read()).toMatchObject({ revision: 3, rooms: [] });
+    http.get.mockResolvedValue({ ...stored, snapshot: { ...snapshot, rooms: [] } });
+    await expect(api.readDraft(draftId)).rejects.toBeInstanceOf(PricingResponseError);
     for (const error of [new ApiErrorResponse(403, { code: "denied" }), new ApiErrorResponse(409, { code: "stale" }), new ApiErrorResponse(404, { code: "other" })]) {
       http.get.mockRejectedValue(error); await expect(api.readDraft(draftId)).rejects.toBe(error);
     }

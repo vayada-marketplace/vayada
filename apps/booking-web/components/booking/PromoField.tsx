@@ -50,7 +50,7 @@ function PromoPopover({
         <button
           onClick={onApply}
           disabled={loading || !value.trim()}
-          className="px-4 py-1.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-xs disabled:opacity-50"
+          className="px-4 py-1.5 bg-primary-600 text-primary-on-600 font-semibold rounded-full hover:bg-primary-700 transition-colors text-xs disabled:opacity-50"
         >
           {loading ? "..." : t("apply")}
         </button>

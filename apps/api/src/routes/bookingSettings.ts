@@ -12,7 +12,10 @@ import {
   type BookingAcceptanceSettingsPort,
 } from "../domains/bookingAcceptanceSettings.js";
 import type { SameDayBookingSettingsPort } from "../domains/sameDayBookingSettings.js";
-import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
+import {
+  BookingPublicationNotReadyError,
+  type BookingPublicationRefreshPort,
+} from "../domains/bookingPublicationProductionRuntime.js";
 import { projectPropertyPublicProfile } from "../platform/propertyPublicProfileProjection.js";
 import { enforceRoutePolicy } from "./policy.js";
 
@@ -523,7 +526,8 @@ export type BookingSettingsWriteErrorCode =
   | "invalid_header_logo_media"
   | "private_contact_conflict"
   | "not_found"
-  | "write_model_unavailable";
+  | "write_model_unavailable"
+  | "booking_page_not_ready";
 
 export type BookingSettingsWriteError = {
   statusCode: 401 | 403 | 404 | 409 | 422 | 500;
@@ -2732,6 +2736,17 @@ export async function registerBookingSettingsRoutes(
           }
           return publication;
         } catch (error) {
+          // The save is kept; the live page waits for the hotel to fix what blocks it (VAY-2472).
+          if (error instanceof BookingPublicationNotReadyError) {
+            request.log.warn({ err: error, hotelId }, "Live booking page not ready to refresh");
+            return sendBookingSettingsWriteError(reply, {
+              statusCode: 409,
+              code: "booking_page_not_ready",
+              category: "write_model",
+              message: "The live booking page updates once these are fixed.",
+              details: [...new Set(error.blockers.map(({ message }) => message))],
+            });
+          }
           request.log.error({ err: error, hotelId }, "Public bookability publication failed");
           return sendBookingSettingsWriteError(reply, {
             statusCode: 500,

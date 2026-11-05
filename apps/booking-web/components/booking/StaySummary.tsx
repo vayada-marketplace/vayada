@@ -27,7 +27,7 @@ export type SummaryExtra = { id: string; name: string; price: string | null; nee
 /** The step's main button in "Your stay" (VAY-2416): the same size and place on every step. An
  * extra still waiting for its day greys it, but it stays pressable to say why. */
 export const stayButton = (waiting = false) =>
-  `flex h-[52px] w-full items-center justify-center rounded-full px-5 text-[17px] font-semibold text-white disabled:opacity-40 ${waiting ? "bg-gray-400" : "bg-primary-600"}`;
+  `flex h-[52px] w-full items-center justify-center rounded-full px-5 text-[17px] font-semibold disabled:opacity-40 ${waiting ? "bg-gray-400 text-white" : "bg-primary-600 text-primary-on-600"}`;
 
 function Row({ label, value, sub }: { label: ReactNode; value: ReactNode; sub?: ReactNode }) {
   return (

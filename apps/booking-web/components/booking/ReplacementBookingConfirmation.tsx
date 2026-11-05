@@ -22,7 +22,8 @@ import {
 import { displayQuoteMoney } from "@/services/api/replacementOffers";
 import ReplacementCardPayment from "./ReplacementCardPayment";
 
-const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
+const button =
+  "rounded-full bg-primary-600 px-5 py-3 font-semibold text-primary-on-600 disabled:opacity-40";
 
 /** A booking attempt whose outcome isn't known yet: the quote, details and rules it sent. */
 export type BookingAttempt = {

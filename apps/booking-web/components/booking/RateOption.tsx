@@ -87,7 +87,7 @@ export default function RateOption({
               {discountPercent != null && discountPercent > 0 && (
                 <>
                   <span className="[word-spacing:0.25rem]"> </span>
-                  <span className="relative top-px inline-flex h-[18px] items-center align-top text-[10px] leading-none font-bold bg-primary-600 text-white px-1.5 rounded whitespace-nowrap">
+                  <span className="relative top-px inline-flex h-[18px] items-center align-top text-[10px] leading-none font-bold bg-primary-600 text-primary-on-600 px-1.5 rounded whitespace-nowrap">
                     {t("percentOff", { percent: discountPercent })}
                   </span>
                 </>

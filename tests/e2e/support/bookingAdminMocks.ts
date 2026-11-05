@@ -37,6 +37,8 @@ export interface BookingAdminPropertySettingsFixture {
   id: string;
   slug: string;
   property_name?: string;
+  phone_number?: string;
+  whatsapp_number?: string;
   instagram?: string;
   facebook?: string;
   tiktok?: string;
@@ -206,6 +208,9 @@ export interface BookingAdminBookingFlowMocksOptions {
 export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFixture = {
   id: BOOKING_ADMIN_HOTEL_ID,
   slug: BOOKING_ADMIN_HOTEL_SLUG,
+  // The API always sends both, "" when none is set.
+  phone_number: "",
+  whatsapp_number: "",
   default_currency: "EUR",
   time_zone: "Europe/Berlin",
   default_language: "en",

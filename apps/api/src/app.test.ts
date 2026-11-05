@@ -46,7 +46,10 @@ import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import { loadConfig } from "./config.js";
 import { HIDDEN_GUEST_CONTACT } from "./domains/bookingGuestContactAccess.js";
-import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
+import {
+  BookingPublicationNotReadyError,
+  type BookingPublicationRefreshPort,
+} from "./domains/bookingPublicationProductionRuntime.js";
 import type { PropertyPlanReadRepository } from "./domains/propertyPlanReadModel.js";
 import { pmsRoomOrderVersion } from "./domains/pmsRoomOrder.js";
 import {
@@ -4142,6 +4145,81 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ propertyId: pmsPropertyId, status: "not_live" });
     expect(refreshInputs).toMatchObject([{ propertyId: pmsPropertyId, onlyIfLive: true }]);
+  });
+
+  it("says what a live page needs fixed instead of failing a design save (VAY-2472)", async () => {
+    const blocker = (code: string, message: string) => ({ code, message });
+    // Tiga Lombok on 3 Nov: the calendar its room changes made stale blocked every refresh.
+    const notReady = new BookingPublicationNotReadyError({
+      outcome: "evaluated",
+      product: "booking",
+      status: "blocked",
+      groups: [
+        {
+          groupId: "booking.calendar",
+          steps: [
+            {
+              entities: [
+                {
+                  blockers: [
+                    blocker(
+                      "operating_calendar_source_stale",
+                      "Your hotel or rooms changed. Review and save your calendar again.",
+                    ),
+                    blocker(
+                      "inventory_launch_readiness_incomplete",
+                      "Room availability isn't prepared yet. Open your calendar to prepare it.",
+                    ),
+                  ],
+                },
+                {
+                  blockers: [
+                    blocker(
+                      "operating_calendar_source_stale",
+                      "Your hotel or rooms changed. Review and save your calendar again.",
+                    ),
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as unknown as ConstructorParameters<typeof BookingPublicationNotReadyError>[0]);
+    let failure: Error = notReady;
+    const server = buildAuthenticatedApp({
+      bookingPublicationRefresh: {
+        async refresh() {
+          throw failure;
+        },
+      },
+    });
+    app = server;
+    const save = () =>
+      injectJson(server, {
+        method: "POST",
+        url: "/api/booking/hotels/booking_hotel_alpenrose/public-bookability?when=live",
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+    const blocked = await save();
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.body).toEqual({
+      statusCode: 409,
+      code: "booking_page_not_ready",
+      category: "write_model",
+      message: "The live booking page updates once these are fixed.",
+      details: [
+        "Your hotel or rooms changed. Review and save your calendar again.",
+        "Room availability isn't prepared yet. Open your calendar to prepare it.",
+      ],
+    });
+
+    // Anything else is still a server fault.
+    failure = new Error("Booking publication refresh failed: publication_in_progress.");
+    const failed = await save();
+    expect(failed.statusCode).toBe(500);
+    expect(failed.body).toMatchObject({ code: "write_model_unavailable" });
   });
 
   it("returns booking property settings with auth, policy, and the legacy-compatible shape", async () => {

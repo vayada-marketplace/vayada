@@ -89,6 +89,7 @@ import { createBookingGuestPolicyCatalogCurrentOwnerEvidenceAdapter } from "./do
 import { createPgBookingGuestPolicyCatalogProjectionPort } from "./domains/bookingGuestPolicyCatalogProjection.js";
 import { createBookingGuestPolicyCurrentOwnerEvidenceAdapter } from "./domains/bookingGuestPolicyCurrentOwnerEvidence.js";
 import { createBookingGuestPolicyLivePageRefresh } from "./domains/bookingGuestPolicyLivePageRefresh.js";
+import { catchUpLiveBookingPages } from "./domains/bookingLivePageCatchUp.js";
 import { createBookingGuestPolicyProjectionHandler } from "./domains/bookingGuestPolicyProjectionHandler.js";
 import { createBookingGuestPolicyOutboxProjector } from "./domains/bookingGuestPolicyProjectionRuntime.js";
 import { startBookingGuestPolicyProjectionWorker } from "./domains/bookingGuestPolicyProjectionWorker.js";
@@ -2958,6 +2959,35 @@ const runCalendarAutoOpenSchedule = () => {
       const run = await runPmsCalendarAutoOpenScheduler(session, {
         workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
       });
+      // VAY-2472: last, republish live booking pages that saves couldn't refresh while something
+      // blocked them, e.g. the calendars repaired above. In the same locked run, so the two never
+      // collide; pages that already show what the hotel saved are left alone.
+      if (config.publicHotelProfileSource === "active_publication" && bookingPublicationRuntime) {
+        const catchUp = await catchUpLiveBookingPages(
+          {
+            pool: propertySetupOwnerPool,
+            refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime),
+          },
+          { runId: `booking.live-page-catch-up:${new Date().toISOString()}` },
+        ).catch((error: unknown) => {
+          app.log.warn({ err: error }, "Live booking page catch-up failed");
+          return null;
+        });
+        // A page whose activator lost access waits for its next save; never run as someone else.
+        if (catchUp && catchUp.unchanged < catchUp.livePages) {
+          app.log[catchUp.failed.length + catchUp.noAccess.length > 0 ? "warn" : "info"](
+            {
+              livePages: catchUp.livePages,
+              unchanged: catchUp.unchanged,
+              refreshed: catchUp.refreshed.slice(0, 10),
+              blocked: catchUp.blocked.slice(0, 10),
+              noAccess: catchUp.noAccess.slice(0, 10),
+              failed: catchUp.failed.slice(0, 10),
+            },
+            "Live booking page catch-up run",
+          );
+        }
+      }
       // The counts only explain the run; failing to read them must not hide its result.
       const stats = await session.readSelectionStats().catch(() => null);
       return { run, stats };

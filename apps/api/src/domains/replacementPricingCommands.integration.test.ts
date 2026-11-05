@@ -486,21 +486,74 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       other.proposed,
     ])
       await expect(f.commands.prepare(id, proposed)).rejects.toMatchObject({ code: "invalid" });
+    // With access checked, a proposal that doesn't match the current rooms and terms is stale, not denied (VAY-2471).
     const foreignRoom = { ...other.proposed.rooms[0], propertyId: id };
     await expect(
       f.commands.prepare(id, { ...f.proposed, rooms: [foreignRoom] }),
-    ).rejects.toMatchObject({ code: "denied" });
+    ).rejects.toMatchObject({ code: "stale", reason: "room_unavailable" });
     const stale = structuredClone(f.proposed);
     stale.rooms[0].offers[0].termsRevision = randomUUID();
-    await expect(f.commands.prepare(id, stale)).rejects.toMatchObject({ code: "denied" });
+    await expect(f.commands.prepare(id, stale)).rejects.toMatchObject({
+      code: "stale",
+      reason: "terms_stale",
+    });
     await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [
       f.proposed.rooms[0].roomTypeId,
     ]);
-    await expect(f.commands.prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
+    await expect(f.commands.prepare(id, f.proposed)).rejects.toMatchObject({
+      code: "stale",
+      reason: "room_unavailable",
+    });
     await expect(other.commands.prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
     await expect(
       createReplacementPricingCommands(pool, null).prepare(id, f.proposed),
     ).rejects.toMatchObject({ code: "denied" });
+  });
+  it("leaves a deleted room out of the editor's read, so the next save publishes without it (VAY-2471)", async () => {
+    const f = await fixture(),
+      id = f.scope.propertyId;
+    expect(await f.commands.publish(id, await confirmed(f))).toEqual({
+      revision: 1,
+      replayed: false,
+    });
+    const [kept, removed] = f.proposed.rooms;
+    // Room type Delete and Retire only switch the room off; the published revision keeps its prices.
+    await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [removed!.roomTypeId]);
+    // The copy the page read before the delete is refused as changed (409, reload), not as no access.
+    const before = {
+      currency: "EUR",
+      rooms: f.proposed.rooms.map((room) => ({ ...room, revision: 2 })),
+    };
+    await expect(f.commands.prepare(id, before)).rejects.toMatchObject({
+      code: "stale",
+      reason: "room_unavailable",
+    });
+    // The PMS prepares with a draft context; its terms projection must not hide the reason.
+    await expect(
+      f.commands.prepare(id, before, { draftId: randomUUID(), baseRevision: 1 }),
+    ).rejects.toMatchObject({ code: "stale", reason: "room_unavailable" });
+    const read = (await f.commands.read(id))!;
+    expect(read).toMatchObject({ revision: 1, stale: false });
+    expect(read.rooms.map((room) => room.roomTypeId)).toEqual([kept!.roomTypeId]);
+    // Saving what the page reads now publishes revision 2 without the deleted room.
+    const prepared = await f.commands.prepare(id, {
+      currency: "EUR",
+      rooms: read.rooms.map((room) => ({ ...room, revision: 2 })),
+    });
+    const draft = { draftId: randomUUID(), expectedDraftRevision: 0, baseRevision: 1, ...prepared };
+    const next = await confirmed({ ...f, prepared, draft });
+    expect(await f.commands.publish(id, next)).toEqual({ revision: 2, replayed: false });
+    expect((await f.commands.read(id))?.rooms.map((room) => room.roomTypeId)).toEqual([
+      kept!.roomTypeId,
+    ]);
+    const stored = await pool.query(
+      "SELECT room_count FROM pms.pricing_v2_revisions WHERE property_id=$1 AND revision=2",
+      [id],
+    );
+    expect(stored.rows[0].room_count).toBe(1);
+    // With every priced room deleted the page starts from no rooms at this revision, so a new room can be priced.
+    await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [kept!.roomTypeId]);
+    expect(await f.commands.read(id)).toMatchObject({ revision: 2, rooms: [] });
   });
   it("executes the protected HTTP flow against real pricing owners and storage", async () => {
     const f = await fixture(),
@@ -934,7 +987,7 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
         { currency: "EUR", rooms: f.prepared.snapshot.rooms },
         { ...context, draftId: randomUUID() },
       ),
-    ).rejects.toMatchObject({ code: "denied" });
+    ).rejects.toMatchObject({ code: "stale", reason: "terms_stale" });
     const depositTerms = {
       requestId: randomUUID(),
       expectedRevision: f.baseline.rooms[0]!.offers[0]!.termsRevision,

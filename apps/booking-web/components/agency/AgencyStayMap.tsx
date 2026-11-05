@@ -223,7 +223,7 @@ export default function AgencyStayMap({
           </div>
           <a
             href={href(chosen)}
-            className="shrink-0 rounded-full bg-primary-600 px-5 py-3 text-center text-[15px] font-semibold text-white hover:bg-primary-700"
+            className="shrink-0 rounded-full bg-primary-600 px-5 py-3 text-center text-[15px] font-semibold text-primary-on-600 hover:bg-primary-700"
           >
             {t("viewRooms")}
           </a>

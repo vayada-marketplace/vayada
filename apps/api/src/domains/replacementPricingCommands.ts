@@ -18,7 +18,11 @@ import {
   replacementChargeFingerprint,
 } from "./replacementChargeDeclarations.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
-import { lockReplacementPricingDraftOwners } from "./replacementPricingOfferOwners.js";
+import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
+import {
+  lockReplacementPricingDraftOwners,
+  pricingOwnersRefusal,
+} from "./replacementPricingOfferOwners.js";
 import {
   createReplacementPricingStorageGuard,
   lockReplacementPricingSources,
@@ -134,6 +138,10 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
           "manage",
         );
         if (!sources) return fail("denied");
+        // A room deleted since the page read the prices (VAY-2471); checked first, as a draft's terms can't say why.
+        for (const room of rooms)
+          if (!(await lockPmsPricingRoomScope(client, currentScope.propertyId, room.roomTypeId)))
+            throw new PricingStorageError("stale", "room_unavailable");
         const references = rooms.flatMap((room) =>
           room.offers.map((offer) => ({
             roomTypeId: room.roomTypeId,
@@ -155,7 +163,8 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
           : await lockBookingPricingOfferTerms(client, currentScope.propertyId, references);
         const effectiveSources =
           draft && projected ? { ...sources, terms: projected.source } : sources;
-        if (!terms) return fail("denied");
+        // Access was checked with the sources: these terms are no longer current (VAY-2471).
+        if (!terms) throw new PricingStorageError("stale", "terms_stale");
         const finance = await lockFinanceReplacementPricingReadiness(client, {
           propertyId: currentScope.propertyId,
           currency,
@@ -177,6 +186,7 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
           effectiveSources,
           draft,
         );
+        if (owners.kind === "unavailable") throw pricingOwnersRefusal(owners);
         if (owners.kind !== "awaiting_charge_confirmation") return fail("denied");
         await client.query("COMMIT");
         return { sources, snapshot, ...(draft ? { effectiveSources } : {}) };

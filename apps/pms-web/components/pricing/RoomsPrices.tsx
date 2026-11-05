@@ -214,7 +214,7 @@ export function RoomsPricesStrip({
   }
   function saveAgain() {
     const publication = prices?.publication;
-    if (!prices || !publication || busy) return;
+    if (!prices || !publication?.rooms.length || busy) return;
     const revision = publication.revision + 1;
     step.current = pricingSave(prices.client, {
       snapshot: {
@@ -243,7 +243,8 @@ export function RoomsPricesStrip({
         </button>
       </div>
     );
-  const publication = prices?.publication;
+  // Prices whose every room was deleted are no prices: there is nothing to save again (VAY-2471).
+  const publication = prices?.publication?.rooms.length ? prices.publication : null;
   // On the Rooms list the subtitle carries the currency, so current prices show nothing here (VAY-2338).
   const quiet = !publication?.stale && !saved && failure === null;
   if (!prices || (quiet && (staleOnly || publication))) return null;

@@ -19,6 +19,10 @@
       "types": "./dist/conversionFunnel.d.ts",
       "default": "./dist/conversionFunnel.js"
     },
+    "./design-colors": {
+      "types": "./dist/bookingDesignColors.d.ts",
+      "default": "./dist/bookingDesignColors.js"
+    },
     "./account-booking-page": {
       "types": "./dist/accountBookingPage.d.ts",
       "default": "./dist/accountBookingPage.js"

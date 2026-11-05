@@ -14,7 +14,8 @@ export interface PricingStorageGuard {
    * Runs even for historical retries; must not require proposed owner references to remain current. */
   lock(client: PoolClient, scope: PricingStorageScope, access: "read" | "manage"): Promise<PricingStorageSources | null>;
   /** Validate every proposed room/owner/terms reference against its owner and hold relevant locks.
-   * Required for new publications and drafts, after historical receipt lookup. No default allow. */
+   * Required for new publications and drafts, after historical receipt lookup. No default allow.
+   * False means no access (403); a reference that changed throws its own PricingStorageError (VAY-2471). */
   validate(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, intent: "draft" | "publish", draft?: BookingPricingDraft): Promise<boolean>;
   /** Optional draft-policy support. Missing ports must fail closed for projected sources. */
   project?(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, draft: BookingPricingDraft, access: "read" | "manage"): Promise<PricingStorageSources | null>;
@@ -68,7 +69,11 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       return transaction(scope, "read", async (client, sources) => {
         const result = await current(client, scope.propertyId);
-        return result && { ...result, stale: canonical(result.sources) !== canonical(sources) };
+        if (!result) return null;
+        // A deleted (inactive) room stays in the prices it was published with, but no save can include it: the editor
+        // gets the others (maybe none), so its next save publishes without it (VAY-2471).
+        const active = new Set((await client.query("SELECT id FROM pms.room_types WHERE property_id=$1 AND active", [scope.propertyId])).rows.map((row) => row.id as string));
+        return { ...result, rooms: result.rooms.filter((room) => active.has(room.roomTypeId)), stale: canonical(result.sources) !== canonical(sources) };
       });
     },
     save(scope: PricingStorageScope, input: { requestId: string; expectedRevision: number; sources: PricingStorageSources; effectiveSources?: PricingStorageSources; snapshot: unknown;

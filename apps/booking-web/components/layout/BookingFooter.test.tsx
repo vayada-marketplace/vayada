@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import enMessages from "../../messages/en.json";
 import BookingFooter from "./BookingFooter";
 
-const hotel = vi.hoisted(() => ({ description: "" }));
+const hotel = vi.hoisted(() => ({ description: "", whatsapp: undefined as string | undefined }));
 
 vi.mock("@/contexts/HotelContext", () => ({
   useHotel: () => ({
@@ -16,6 +16,7 @@ vi.mock("@/contexts/HotelContext", () => ({
         address: "Alpenstrasse 12, Munich",
         phone: "+49 89 5550 1234",
         email: "stay@alpenrose.example",
+        whatsapp: hotel.whatsapp,
       },
       socialLinks: {},
     },
@@ -48,5 +49,17 @@ describe("BookingFooter", () => {
 
   it("offers the guest's privacy choices (VAY-2419)", () => {
     expect(renderFooter("")).toContain(">Privacy choices</button>");
+  });
+
+  it("opens WhatsApp with the number's digits only, as the Contact menu does (VAY-2473)", () => {
+    try {
+      hotel.whatsapp = "+62 823 4196 3715";
+      expect(renderFooter("")).toContain('href="https://wa.me/6282341963715"');
+      // No digits, no link: never a bare https://wa.me/.
+      hotel.whatsapp = "on request";
+      expect(renderFooter("")).not.toContain("wa.me");
+    } finally {
+      hotel.whatsapp = undefined;
+    }
   });
 });

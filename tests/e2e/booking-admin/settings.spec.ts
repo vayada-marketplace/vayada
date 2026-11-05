@@ -407,6 +407,62 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(description).toBeDisabled();
   });
 
+  test("saves the phone and WhatsApp numbers spaced, as setup stores them (VAY-2473)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    // General stored "+6282341963715" as typed, so the booking page's Contact menu lost the
+    // spacing setup gives the same number ("+62 823 4196 3715").
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    const persisted = {
+      ...defaultBookingAdminPropertySettings,
+      property_name: "Alpenrose",
+      phone_number: "+62 823 4196 3715",
+      whatsapp_number: "",
+    };
+    await mockBookingAdminShellRoutes(page, { propertySettings: persisted });
+    const writes: Record<string, unknown>[] = [];
+    await page.route(`**${BOOKING_ADMIN_PROPERTY_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PATCH") {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        writes.push(body);
+        Object.assign(persisted, body);
+      }
+      await route.fulfill({ json: persisted });
+    });
+    const save = page.getByRole("button", { name: "Save property details", exact: true });
+
+    await page.goto("/settings/general");
+    const phone = page.getByPlaceholder("+62 370 123 4567");
+    const whatsapp = page.getByPlaceholder("+62 812 3456 7890");
+    await expect(phone).toHaveValue("+62 823 4196 3715");
+    await phone.fill("+6282341963715");
+    await whatsapp.fill(" +6282341963715 ");
+    await save.click();
+    await expect(page.getByText("Settings saved successfully")).toBeVisible();
+    await phone.evaluate((field) => field.scrollIntoView({ block: "center" }));
+    await page.screenshot({ path: testInfo.outputPath("vay2473-general-contact-saved.png") });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      phone_number: "+62 823 4196 3715",
+      whatsapp_number: "+62 823 4196 3715",
+    });
+    await expect(phone).toHaveValue("+62 823 4196 3715");
+    await expect(whatsapp).toHaveValue("+62 823 4196 3715");
+
+    // A number that isn't valid yet is saved as typed, and a cleared one stays empty.
+    await phone.fill("+1 555");
+    await whatsapp.fill("");
+    await save.click();
+    await expect.poll(() => writes.length).toBe(2);
+    expect(writes[1]).toMatchObject({ phone_number: "+1 555", whatsapp_number: "" });
+    await assertHealthy();
+  });
+
   test("loads migrated settings surfaces without helper calls", async ({ page }, testInfo) => {
     test.skip(
       !PROD,
@@ -847,34 +903,33 @@ test.describe("booking-admin settings no-legacy guard", () => {
     const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
     await expect(hex).toHaveValue("#0077B6");
 
-    // A colour too light for white button text is explained and never saved.
-    const tooLight = "Too light for white button text. Choose a darker shade.";
-    await hex.fill("#d4a017");
-    await expect(hex).toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByText(tooLight)).toHaveCount(1);
-    await page.getByRole("button", { name: "Save Changes" }).click();
-    await expect(page.getByText(tooLight)).toHaveCount(2);
-    expect(order).toEqual([]);
-    await page.screenshot({ path: testInfo.outputPath("design-studio-too-light.png") });
-    // The Tropical Gold preset is a darker, readable gold now.
+    // The preview's buttons show the live page's text colour: white on a dark brand colour...
+    const checkAvailability = page
+      .getByLabel("Live booking page preview")
+      .getByText("Check Availability", { exact: true });
     await page.getByRole("button", { name: "Tropical Gold" }).click();
     await expect(hex).toHaveValue("#A67D12");
-    await expect(hex).toHaveAttribute("aria-invalid", "false");
+    await expect(checkAvailability).toHaveCSS("color", "rgb(255, 255, 255)");
 
-    await hex.fill("#5e0000");
+    // ...and dark on a light one such as Aether's, which saves without a warning (VAY-2475).
+    await hex.fill("#c19a76");
+    await expect(checkAvailability).toHaveCSS("color", "rgb(0, 0, 0)");
+    await expect(page.getByText(/too light/i)).toHaveCount(0);
+    await expect(hex).not.toHaveAttribute("aria-invalid");
     await page.getByRole("button", { name: "Typography" }).click();
     await page.getByRole("button", { name: /Grand Classic/ }).click();
     await page.getByRole("button", { name: "Save Changes" }).click();
 
     await expect(page.getByText("Design settings saved successfully")).toBeVisible();
+    await expect(page.getByText(/too light/i)).toHaveCount(0);
     expect(bookingDesignRequests.filter(({ method }) => method === "PUT")).toEqual([
       {
         method: "PUT",
-        body: { expectedRevision: 1, primaryColor: "#5E0000", fontPairing: "grand-classic" },
+        body: { expectedRevision: 1, primaryColor: "#C19A76", fontPairing: "grand-classic" },
       },
     ]);
     expect(requests.find(({ method }) => method === "PATCH")?.body).toMatchObject({
-      primaryColor: "#5E0000",
+      primaryColor: "#C19A76",
       fontPairing: "grand-classic",
     });
     expect(order).toEqual(["settings", "design", "publish"]);
@@ -892,6 +947,77 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
+  for (const width of [1440, 390]) {
+    test(`says what keeps the live page from taking a save at ${width}px (VAY-2472)`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(
+        !PROD,
+        "Requires a production booking-admin build so the authenticated shell hydrates.",
+      );
+
+      // The browser logs the expected 409 and 500 answers below as failed resources, so this
+      // test checks page errors itself instead of watchPageHealth.
+      const pageErrors: string[] = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+      await mockBookingAdminAuthenticatedSession(page);
+      await mockBookingAdminShellRoutes(page);
+      await mockBookingAdminDesignSettings(page);
+      // Tiga Lombok on 3 Nov: the design is saved, but its calendar blocks the live page.
+      const blocked = {
+        status: 409,
+        json: {
+          statusCode: 409,
+          code: "booking_page_not_ready",
+          category: "write_model",
+          message: "The live booking page updates once these are fixed.",
+          details: ["Your hotel or rooms changed. Review and save your calendar again."],
+        },
+      };
+      let publish: { status: number; json: unknown } = blocked;
+      await page.route(`**${BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH}*`, (route) =>
+        route.fulfill(publish),
+      );
+
+      await page.goto("/design-studio");
+      await page.getByRole("button", { name: "Save Changes" }).click();
+      const notReady = page.getByText(
+        "Your changes are saved. Your live booking page will update once this is fixed: Your hotel or rooms changed. Review and save your calendar again.",
+      );
+      await expect(notReady).toBeVisible();
+      const fix = page.getByRole("button", { name: "See what to fix" });
+      await expect(fix).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath(`design-studio-live-page-not-ready-${width}.png`),
+      });
+
+      // Any other failure keeps the old message, with nothing to fix.
+      publish = {
+        status: 500,
+        json: {
+          statusCode: 500,
+          code: "write_model_unavailable",
+          category: "write_model",
+          message: "Booking preview could not be published.",
+        },
+      };
+      await page.getByRole("button", { name: "Save Changes" }).click();
+      await expect(
+        page.getByText("Design saved, but the booking preview could not be refreshed. Try again."),
+      ).toBeVisible();
+      await expect(fix).toHaveCount(0);
+
+      // The dashboard's booking page card lists what to fix, each with its setup link.
+      publish = blocked;
+      await page.getByRole("button", { name: "Save Changes" }).click();
+      await expect(notReady).toBeVisible();
+      await fix.click();
+      await expect(page).toHaveURL(/\/dashboard$/);
+      expect(pageErrors).toEqual([]);
+    });
+  }
+
   test("creates the first booking design only when the colour or font changes", async ({
     page,
   }, testInfo) => {
@@ -905,7 +1031,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     });
     await mockBookingAdminAuthenticatedSession(page);
     await mockBookingAdminShellRoutes(page);
-    // No booking design yet, and the settings row still holds the old, too-light Tropical Gold.
+    // No booking design yet, and the settings row still holds the old, light Tropical Gold.
     const { requests, bookingDesignRequests } = await mockBookingAdminDesignSettings(
       page,
       { ...defaultBookingAdminDesignSettings, primaryColor: "#D4A017" },
@@ -916,9 +1042,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.goto("/design-studio?tab=colors");
     const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
     await expect(hex).toHaveValue("#D4A017");
-    await expect(
-      page.getByText("Too light for white button text. Choose a darker shade."),
-    ).toBeVisible();
+    // A light colour is fine now (VAY-2475): no warning.
+    await expect(page.getByText(/too light/i)).toHaveCount(0);
     // Saving the other settings works and leaves the booking design alone.
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Design settings saved successfully")).toBeVisible();
