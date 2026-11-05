@@ -76,7 +76,7 @@ import {
 } from "@/services/api/bookingPagePaymentMethods";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
 import { hotelCountryName } from "@/lib/checkoutTerms";
 import { paymentMethodOptions } from "@/lib/paymentMethodOptions";
@@ -144,6 +144,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const tCommon = useTranslations("common");
   const tExtrasRooms = useTranslations("extrasRooms");
   const { hotel } = useHotel();
+  // VAY-2462: this stay's pages, under the stay on an agency's address.
+  const stayPath = useStayPath();
   // VAY-2347: the one tick, for the price, rules and room names it was given for.
   const [agreedTo, setAgreedTo] = useState<string | null>(null);
   // The price whose Confirm was pressed before the box was ticked (VAY-2306).
@@ -219,7 +221,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       stayIn < stayOut &&
       (!!picks || (/^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) && valid.adults));
     if (!choiceMade) {
-      router.replace(`/?${home}`);
+      router.replace(stayPath(`/?${home}`));
       return;
     }
     // VAY-2195: a refresh or Back keeps what this tab chose for the same hand-off.
@@ -537,7 +539,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // then the hotel page's, and a step change built from it would send the guest forward again,
     // without their rooms.
     if (!window.location.pathname.endsWith("/book")) return;
-    const href = `/book?${bookStepQuery(window.location.search, next)}`;
+    const href = stayPath(`/book?${bookStepQuery(window.location.search, next)}`);
     if (replace) return router.replace(href);
     if (steps.indexOf(next) > steps.indexOf(step)) forwardFrom.current.push(step);
     router.push(href);
@@ -591,7 +593,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   useEffect(() => {
     if (!notOffered || attemptOpen) return;
     clearBookFlowDraft(slug);
-    router.replace(`/?${homeSearch}`);
+    router.replace(stayPath(`/?${homeSearch}`));
     // router changes identity on navigation; the choice decides.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notOffered]);
@@ -707,7 +709,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noWayToPay, settled, step]);
   // Back to the room cards for this stay; a group's other rooms stay chosen there (VAY-2320).
-  const backToRooms = () => router.push(`/?${homeSearch}`);
+  const backToRooms = () => router.push(stayPath(`/?${homeSearch}`));
   // VAY-2347: deadlines are worded on the hotel's calendar day by the server's clock, never in the
   // guest's device's zone; the price's guest rules name the zone the server books in.
   const hotelZone = guestRulesQuote.disclosure?.propertyTimeZone ?? (hotel?.timezone || "Etc/UTC");
@@ -794,7 +796,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     carryStay(choices);
     const home = new URLSearchParams(homeSearch);
     home.set("change", String(index + 1));
-    router.push(`/?${home}`);
+    router.push(stayPath(`/?${home}`));
   };
   // VAY-2393: Remove spreads the adults evenly over the rooms left; each keeps its children, and
   // the removed room's go where roomGuests puts them. While every place still fits, the guest
@@ -855,7 +857,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         focusAction: byKeyboard,
         at: Date.now(),
       });
-      return router.push(`/?${home}`);
+      return router.push(stayPath(`/?${home}`));
     }
     const search = new URLSearchParams(before.search);
     search.delete("pick");
@@ -1030,7 +1032,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       guestEmail: context.guestEmail,
       guestPhone: guest.phone.trim(),
     });
-    router.replace(`/booking/${encodeURIComponent(bookingReference)}`);
+    router.replace(stayPath(`/booking/${encodeURIComponent(bookingReference)}`));
   };
   const missingDay = (addonCatalogue ?? []).find((addon) =>
     extras?.items.some((item) => item.id === addon.id && extraNeedsDay(addon, item)),
@@ -1139,7 +1141,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           }),
           roomTypeIds,
         );
-      router.push(`/?${homeSearch}`);
+      router.push(stayPath(`/?${homeSearch}`));
     };
     return (
       <div
@@ -1163,7 +1165,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           <button
             type="button"
             className="text-sm font-semibold text-gray-700 underline"
-            onClick={() => router.push("/")}
+            onClick={() => router.push(stayPath("/"))}
           >
             {tGroup("newSearch")}
           </button>
@@ -1309,7 +1311,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 checkIn={checkIn}
                 timezone={hotel?.timezone}
                 childMaxAge={Math.max(0, (hotel?.guestTypeSettings?.adultAgeThreshold ?? 18) - 1)}
-                changeRoomsHref={`/?${homeSearch}`}
+                changeRoomsHref={stayPath(`/?${homeSearch}`)}
                 formatMoney={money}
                 onChange={(selectionId, patch) =>
                   changeChoices((current) =>

@@ -16,7 +16,7 @@ import {
 import { formatDistance } from "@/components/booking/RoomPlace";
 import BookingFooter from "@/components/layout/BookingFooter";
 import BookingNavigation from "@/components/layout/BookingNavigation";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import { Link } from "@/i18n/navigation";
 import { placeAddress, placeDirectionsUrl, type StayPlace } from "@/lib/bookingStay";
 import { directionsUrl } from "@/lib/confirmationDisplay";
@@ -35,6 +35,8 @@ export default function AroundPageClient({ reference }: { reference: string }) {
   const categoryName = useNearbyCategoryName();
   const { hotel } = useHotel();
   const { slug } = useSlug();
+  // VAY-2462: this stay's pages, under the stay on an agency's address.
+  const stayPath = useStayPath();
   const layer = useNearbyLayer(slug, true, false);
   const [place, setPlace] = useState<StayPlace | null>(null);
   const [showMap, setShowMap] = useState(false);
@@ -135,7 +137,7 @@ export default function AroundPageClient({ reference }: { reference: string }) {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex min-w-0 flex-col gap-1.5">
             <Link
-              href={`/booking/${encodeURIComponent(reference)}`}
+              href={stayPath(`/booking/${encodeURIComponent(reference)}`)}
               className="flex items-center gap-2 self-start font-semibold text-primary-700 hover:underline"
             >
               <svg

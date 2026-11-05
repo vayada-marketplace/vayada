@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  ReactNode,
+} from "react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Hotel, Addon } from "@/lib/types";
@@ -10,6 +18,7 @@ import { ApiError } from "@/services/api/client";
 import { routing } from "@/i18n/routing";
 import { generateColorPalette, generateOnColorPalette } from "@/lib/utils/colors";
 import { brandFontPairing } from "@vayada/fonts/brand";
+import { stayPath } from "@/lib/stayPath";
 
 // Rooms, availability and prices are served by the room-and-price page (/book); this
 // provider only carries the hotel profile and its add-on catalogue. An agency's address
@@ -22,6 +31,9 @@ interface HotelContextValue {
   error: string | null;
   locale: string;
   slug: string;
+  /** Where the stay's own pages (checkout, its bookings) start on this address: "" on a hotel's
+   * (VAY-2462). */
+  basePath: string;
 }
 
 const HotelContext = createContext<HotelContextValue>({
@@ -32,6 +44,7 @@ const HotelContext = createContext<HotelContextValue>({
   error: null,
   locale: "en",
   slug: "",
+  basePath: "",
 });
 
 // Resolve the active hotel slug. In production the server layout has
@@ -294,6 +307,7 @@ export function HotelProvider({
         error,
         locale,
         slug: slug ?? "",
+        basePath: "",
       }}
     >
       {children}
@@ -409,4 +423,11 @@ export function useAddons() {
 export function useSlug() {
   const { slug } = useContext(HotelContext);
   return { slug };
+}
+
+/** A page of the stay being booked on this address (VAY-2462), from its path on a hotel's own
+ * address ("/", "/book?…", "/booking/<reference>"): as is there, under the stay on an agency's. */
+export function useStayPath() {
+  const { basePath } = useContext(HotelContext);
+  return useCallback((path: string) => stayPath(basePath, path), [basePath]);
 }

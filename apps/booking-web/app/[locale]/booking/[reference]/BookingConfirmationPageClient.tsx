@@ -35,7 +35,7 @@ import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/local
 import { Link } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
-import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { Booking } from "@/lib/types";
 import { bookingService, type BookingChangeRequest } from "@/services/api/booking";
@@ -235,6 +235,8 @@ export default function BookingConfirmationPageClient({
   const withdrawDialog = useRef<HTMLDialogElement>(null);
   const { hotel } = useHotel();
   const { slug } = useSlug();
+  // VAY-2462: this stay's pages, under the stay on an agency's address.
+  const stayPath = useStayPath();
   const { formatPrice } = useCurrency();
   const [booking, setBooking] = useState<Booking | null>(null);
   const [status, setStatus] = useState<string>("");
@@ -525,7 +527,7 @@ export default function BookingConfirmationPageClient({
       : 1;
   const guestEmail = (booking?.guestEmail || emailParam || "").trim();
   const guestName = booking?.guestFirstName?.trim();
-  const manageBookingHref = `/my-booking?reference=${encodeURIComponent(reference)}`;
+  const manageBookingHref = stayPath(`/my-booking?reference=${encodeURIComponent(reference)}`);
   const paymentMethodLabels: Record<PaymentMethodLabelKey, string> = {
     card: t("manualCard"),
     creditCard: t("creditCard"),
@@ -822,7 +824,7 @@ export default function BookingConfirmationPageClient({
           icon="home"
           title={t("bookAgain")}
           hint={t("bookAgainHint", { hotel: hotel.name })}
-          href="/"
+          href={stayPath("/")}
         />
         {contact}
       </>
@@ -1225,7 +1227,9 @@ export default function BookingConfirmationPageClient({
             name={hotel.name}
             heroImage={hotel.heroImage}
             aroundHref={
-              hasTips && !isEnded ? `/booking/${encodeURIComponent(reference)}/around` : undefined
+              hasTips && !isEnded
+                ? stayPath(`/booking/${encodeURIComponent(reference)}/around`)
+                : undefined
             }
             places={details?.places ?? []}
             fallback={{
@@ -1253,7 +1257,7 @@ export default function BookingConfirmationPageClient({
         </aside>
         {!isEnded && (
           <Link
-            href="/"
+            href={stayPath("/")}
             className="flex items-center gap-2 self-start pl-1 font-semibold text-primary-700 hover:underline lg:col-start-1 lg:row-start-2"
           >
             <svg

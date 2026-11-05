@@ -10,7 +10,7 @@ import { useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
-import { useAgencyPage, useHotel, useSlug } from "@/contexts/HotelContext";
+import { useAgencyPage, useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import AgencyOverview from "@/components/agency/AgencyOverview";
 import { calculateNights, ensureMinOneNight } from "@/lib/utils";
 import { trackEvent } from "@/services/api/tracking";
@@ -29,6 +29,7 @@ interface AppliedPromo {
 
 function HomePageContent() {
   const router = useRouter();
+  const stayPath = useStayPath();
   const locale = useLocale();
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -113,7 +114,7 @@ function HomePageContent() {
     adults,
     children: effectiveChildren,
     promoCode: appliedPromo?.code ?? null,
-    book: (search) => router.push(`/book${search}`),
+    book: (search) => router.push(stayPath(`/book${search}`)),
   });
   const {
     rooms,

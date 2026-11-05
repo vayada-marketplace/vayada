@@ -27,6 +27,8 @@ vi.mock("@/services/api/pricingAcceptance", async (importOriginal) => ({
   acceptPricingQuote: vi.fn(),
 }));
 const cardStep = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
+// VAY-2462: the stay's pages on this address; a hotel's own here.
+vi.mock("@/contexts/HotelContext", () => ({ useStayPath: () => (path: string) => path }));
 vi.mock("./ReplacementCardPayment", () => ({
   default: (props: Record<string, unknown>) => {
     cardStep.props = props;

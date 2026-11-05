@@ -8,6 +8,7 @@ import {
   type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import { ApiError } from "@/services/api/client";
+import { useStayPath } from "@/contexts/HotelContext";
 import type { FunnelPaymentMethod } from "@vayada/domain-booking/conversion-funnel";
 import { funnelErrorCode, trackEvent } from "@/services/api/tracking";
 import {
@@ -83,6 +84,8 @@ export default function ReplacementBookingConfirmation({
   actionSlot?: HTMLElement | null;
   buttonClassName?: string;
 }) {
+  // VAY-2462: this stay's pages, under the stay on an agency's address.
+  const stayPath = useStayPath();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [soldOut, setSoldOut] = useState<string[] | null>(null);
@@ -129,10 +132,12 @@ export default function ReplacementBookingConfirmation({
     onBooked?.({
       bookingReference: manualPayment.bookingReference,
       requested: false,
-      confirmationUrl: `/confirmation?${new URLSearchParams({
-        booking: manualPayment.bookingReference,
-        token: manualPayment.confirmationToken,
-      })}`,
+      confirmationUrl: stayPath(
+        `/confirmation?${new URLSearchParams({
+          booking: manualPayment.bookingReference,
+          token: manualPayment.confirmationToken,
+        })}`,
+      ),
     });
     // Once per reservation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -251,7 +256,7 @@ export default function ReplacementBookingConfirmation({
           booking expires and the room is released.
         </p>
         <p>We sent the payment details to the email address you provided.</p>
-        <a className={`${button} inline-block`} href={`/confirmation?${details}`}>
+        <a className={`${button} inline-block`} href={stayPath(`/confirmation?${details}`)}>
           See payment details
         </a>
       </section>
