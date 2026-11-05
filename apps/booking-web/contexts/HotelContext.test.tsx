@@ -14,6 +14,7 @@ import {
   useAgencyPage,
   useHotel,
   useSlug,
+  useStayPath,
 } from "./HotelContext";
 
 const { getHotel, getAddons, getAgencyPage, path } = vi.hoisted(() => ({
@@ -269,7 +270,7 @@ it("shows an agency's page, in its design stay's look, at an address no hotel ha
   }
 });
 
-it("shows an agency's address as not online past its overview (its checkout comes later)", async () => {
+it("shows an agency's address as not online past its overview and its stays' pages", async () => {
   getHotel.mockRejectedValue(notFound("Booking Web hotel profile not found."));
   getAddons.mockResolvedValue([]);
   getAgencyPage.mockResolvedValue(agency);
@@ -330,7 +331,11 @@ it("shows the page of a stay the agency shows, in any language, and not another"
     ["/stays/escape-ubud", true],
     ["/de/stays/escape-ubud/", true],
     ["/stays/other-hotel", false],
-    ["/stays/escape-ubud/book", false],
+    // VAY-2462: its checkout and bookings, under the stay.
+    ["/stays/escape-ubud/book", true],
+    ["/de/stays/escape-ubud/booking/VAY-1/around", true],
+    ["/stays/other-hotel/book", false],
+    ["/book", false],
   ] as const) {
     path.current = pathname;
     const { container, cleanup } = await renderProvider(<p>Stay page</p>, "the-travel-ubud");
@@ -377,7 +382,12 @@ it("loads a stay inside its agency's page, which keeps the agency's look and con
     const { agency } = useAgencyPage();
     const { slug } = useSlug();
     const { addons } = useAddons();
-    return createElement("p", null, `${hotel.name} / ${agency?.name} / ${slug} / ${addons.length}`);
+    const stayPath = useStayPath();
+    return createElement(
+      "p",
+      null,
+      `${hotel.name} / ${agency?.name} / ${slug} / ${addons.length} / ${stayPath("/book?x=1")}`,
+    );
   }
 
   const { container, cleanup } = await renderProvider(
@@ -387,7 +397,10 @@ it("loads a stay inside its agency's page, which keeps the agency's look and con
     "the-travel-ubud",
   );
   try {
-    expect(container.textContent).toBe("The Escape Villa Ubud / The Travel Ubud / escape-ubud / 1");
+    // VAY-2462: its pages are under it on the agency's address.
+    expect(container.textContent).toBe(
+      "The Escape Villa Ubud / The Travel Ubud / escape-ubud / 1 / /stays/escape-ubud/book?x=1",
+    );
     expect(getHotel).toHaveBeenCalledWith("escape-ubud", "en");
     // The agency's design stays: the stay's own colours don't apply.
     expect(document.documentElement.style.getPropertyValue("--color-primary-600")).toBe(

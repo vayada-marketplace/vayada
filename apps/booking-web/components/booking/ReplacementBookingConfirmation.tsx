@@ -8,7 +8,7 @@ import {
   type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import { ApiError } from "@/services/api/client";
-import { useStayPath } from "@/contexts/HotelContext";
+import { useAgencyPage, useStayPath } from "@/contexts/HotelContext";
 import type { FunnelPaymentMethod } from "@vayada/domain-booking/conversion-funnel";
 import { funnelErrorCode, trackEvent } from "@/services/api/tracking";
 import {
@@ -86,6 +86,8 @@ export default function ReplacementBookingConfirmation({
 }) {
   // VAY-2462: this stay's pages, under the stay on an agency's address.
   const stayPath = useStayPath();
+  // VAY-2462: booked on the agency's page, which the booking then records.
+  const { agency } = useAgencyPage();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [soldOut, setSoldOut] = useState<string[] | null>(null);
@@ -176,6 +178,7 @@ export default function ReplacementBookingConfirmation({
         attempted,
         undefined,
         pending ? "uncertain-retry" : "fresh",
+        agency?.slug,
       );
       if (accepted.kind === "payment_required") setCardPayment(accepted);
       else if (accepted.kind === "payment_pending") setManualPayment(accepted);

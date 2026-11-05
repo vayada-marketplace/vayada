@@ -239,7 +239,9 @@ const optional = (value: string | null | undefined) => value?.trim() || null;
 
 /** Quotes paid at the property (instant, or a request the hotel confirms), or instant and paid in
  * full online by card (the answer is then payment_required). The server re-reads and validates
- * every quote, policy and finance owner. */
+ * every quote, policy and finance owner. VAY-2462: `agencyPage`, the agency page's address when
+ * the guest books there, goes in a header beside the command (which stays exactly as it is); the
+ * booking records it if that page shows this stay. */
 export async function acceptPricingQuote(
   slug: string,
   quote: PublicBookingQuote,
@@ -247,6 +249,7 @@ export async function acceptPricingQuote(
   guest: PricingAcceptanceGuest,
   signal?: AbortSignal,
   mode: "fresh" | "uncertain-retry" = "fresh",
+  agencyPage?: string,
 ): Promise<PricingAcceptanceResult | PricingCardPaymentRequired | PricingManualPaymentPending> {
   const verifiedDisclosure = parsePublicQuoteGuestDisclosure(disclosure, quote);
   if (
@@ -285,7 +288,14 @@ export async function acceptPricingQuote(
     raw = await bookingWebPublic.post<unknown>(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/quotes/${encodeURIComponent(quote.quoteId)}/accept`,
       command,
-      { headers: { "Idempotency-Key": requestId }, signal, cache: "no-store" },
+      {
+        headers: {
+          "Idempotency-Key": requestId,
+          ...(agencyPage ? { "X-Vayada-Agency-Page": agencyPage } : {}),
+        },
+        signal,
+        cache: "no-store",
+      },
     );
   } catch (error) {
     if (error instanceof ApiError && error.status === 409)

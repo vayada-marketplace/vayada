@@ -12,12 +12,16 @@ import PropertyGallery from "@/components/booking/PropertyGallery";
 import Toast from "@/components/booking/Toast";
 import AgencyNearbyStays from "@/components/agency/AgencyNearbyStays";
 import BookingNavigation from "@/components/layout/BookingNavigation";
-import { StayHotelProvider, useHotel, useSlug } from "@/contexts/HotelContext";
+import AnalyticsConsent from "@/components/AnalyticsConsent";
+import { StayHotelProvider, useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
+import { Link } from "@/i18n/navigation";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useStayRooms, type StayRoomsModel } from "@/lib/hooks/useStayRooms";
-import { overviewHref, stayCheckoutUrl, stayTypeName } from "@/lib/agencyOverview";
+import { overviewHref, stayTypeName } from "@/lib/agencyOverview";
 import { calculateNights, ensureMinOneNight } from "@/lib/utils";
 import { hotelService } from "@/services/api/hotel";
+import { trackEvent } from "@/services/api/tracking";
+import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 import { encodePick } from "@/lib/roomPicker";
 import type { AgencyPage, AgencyStay } from "@/services/api/agencyPage";
@@ -42,8 +46,8 @@ const localDate = (daysFromToday: number) => {
  * One stay of an agency's page on the agency's address (VAY-2461, Timo's desktop prototype): the
  * agency's header, the search card, a compact box for the stay ("← All stays", name, type, area
  * and what it has, Gallery), and the stay's rooms exactly as on its own page. A room chosen shows
- * a dark bar with the choice and its total; Continue opens the stay's own checkout, on the stay's
- * address, until checkout runs on the agency's (VAY-2462).
+ * a dark bar with the choice and its total; Continue opens the stay's checkout, here on the
+ * agency's address under the stay (VAY-2462).
  */
 export default function AgencyStayPage({ agency, stay }: { agency: AgencyPage; stay: AgencyStay }) {
   return (
@@ -59,6 +63,8 @@ export default function AgencyStayPage({ agency, stay }: { agency: AgencyPage; s
       />
       <StayHotelProvider slug={stay.slug}>
         <StayContent agency={agency} stay={stay} />
+        {/* VAY-2462: this stay's events (its rooms and checkout) are recorded with its own choice. */}
+        <AnalyticsConsent />
       </StayHotelProvider>
     </div>
   );
@@ -71,6 +77,12 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
   const { slug } = useSlug();
   const searchParams = useSearchParams();
   const { approximate } = useCurrency();
+  // VAY-2462: the stay's funnel starts here, as on its own page (a session counts from its visit);
+  // its events say they came through the agency's page. "Allow" starts a first visit then.
+  useEffect(() => {
+    trackEvent(slug, "page_visit", {});
+    return onAnalyticsAllowed(slug, () => trackEvent(slug, "page_visit", {}));
+  }, [slug]);
 
   // The agency's search, as its stay card linked here (`stayHref`), else tomorrow for one night.
   const [initialDates] = useState(() =>
@@ -199,6 +211,18 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
       : null;
   };
   const shownChoice = current(chosen);
+  // VAY-2462: checkout runs here, under the stay; the agency's own room count and code go along,
+  // so the way back from it keeps the agency's search.
+  const stayPath = useStayPath();
+  const checkoutHref = (() => {
+    if (!shownChoice) return null;
+    const params = new URLSearchParams(shownChoice);
+    for (const name of ["agencyRooms", "agencyPromo"]) {
+      const value = searchParams.get(name);
+      if (value) params.set(name, value);
+    }
+    return stayPath(`/book?${params}`);
+  })();
 
   return (
     <>
@@ -328,7 +352,7 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         model={model}
         chosen={shownChoice}
         approximate={approximate}
-        href={shownChoice && stayCheckoutUrl(location, agency.slug, stay.slug, shownChoice)}
+        href={checkoutHref}
       />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </>
@@ -543,12 +567,12 @@ function Bar({
       </div>
       <div className="flex items-center gap-4">
         {total && <strong className="text-lg">{total}</strong>}
-        <a
+        <Link
           href={href}
           className="flex min-h-[48px] items-center rounded-full bg-white px-[22px] text-base font-semibold text-gray-900 hover:bg-gray-100"
         >
           {hasAddons ? th("roomsProgress.continueToExtras") : tc("continue")}
-        </a>
+        </Link>
       </div>
     </section>
   );

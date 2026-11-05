@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { toLegacyHotel, type BookingWebPublicHotelResponse } from "./bookingWebPublic";
+import {
+  bookingWebPublicApi,
+  toLegacyHotel,
+  type BookingWebPublicHotelResponse,
+} from "./bookingWebPublic";
 
 function publicHotelResponse(
   publicContacts?: BookingWebPublicHotelResponse["hotel"]["publicContacts"],
@@ -242,5 +246,36 @@ describe("Booking Web public hotel adapter", () => {
     expect(toLegacyHotel(response).heroImage).toBe("https://cdn.vayada.example/pool.jpg");
     expect(toLegacyHotel(publicHotelResponse()).images).toEqual([]);
     expect(toLegacyHotel(publicHotelResponse()).heroImage).toBeNull();
+  });
+});
+
+// VAY-2462: which stays a live agency page at an address shows, for the server's 404.
+describe("agency page stays", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const answer = (status: number, body: unknown) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(body), { status })),
+    );
+
+  it("lists the stays' addresses, or null when no live page has the address", async () => {
+    answer(200, { version: "agency-page.v1", stays: [{ slug: "escape-ubud" }, { slug: 7 }] });
+    await expect(bookingWebPublicApi.agencyPageStays("the-travel-ubud")).resolves.toEqual([
+      "escape-ubud",
+    ]);
+    const [url] = vi.mocked(fetch).mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/booking-web\/agency-pages\/the-travel-ubud$/);
+    answer(404, { statusCode: 404, error: "Not Found", message: "Agency page not found." });
+    await expect(bookingWebPublicApi.agencyPageStays("hotel-alpenrose")).resolves.toBeNull();
+  });
+
+  it("can't tell when the API fails or answers something else", async () => {
+    // A 404 that isn't the API's own answer (a proxy or a wrong address) says nothing.
+    answer(404, { message: "Route GET:/api/booking-web/agency-pages/the-travel-ubud not found" });
+    await expect(bookingWebPublicApi.agencyPageStays("the-travel-ubud")).rejects.toThrow();
+    answer(503, { statusCode: 503 });
+    await expect(bookingWebPublicApi.agencyPageStays("the-travel-ubud")).rejects.toThrow();
+    answer(200, { version: "agency-page.v1" });
+    await expect(bookingWebPublicApi.agencyPageStays("the-travel-ubud")).rejects.toThrow();
   });
 });

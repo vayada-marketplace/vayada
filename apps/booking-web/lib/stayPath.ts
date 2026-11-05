@@ -1,3 +1,5 @@
+import { routing } from "@/i18n/routing";
+
 /**
  * A page of the stay being booked, on this address (VAY-2462): as is on a hotel's own address,
  * under the stay on an agency's (`/stays/<slug>/book`, `/stays/<slug>/booking/<reference>`). The
@@ -10,4 +12,25 @@ export function stayPath(base: string, path: string): string {
   if (path === "/") return base;
   if (path.startsWith("/?") || path.startsWith("/#")) return base + path.slice(1);
   return base + path;
+}
+
+/** Where a stay's pages start on its agency's address (VAY-2462). */
+export function agencyStayBase(staySlug: string): string {
+  return `/stays/${encodeURIComponent(staySlug)}`;
+}
+
+// VAY-2461: a stay's page on its agency's address; VAY-2462: its checkout and bookings under it.
+const AGENCY_STAY_PATH = new RegExp(
+  `^/(?:(?:${routing.locales.join("|")})/)?stays/([^/]+)(?:/.*)?$`,
+);
+
+/** The stay a path is about on an agency's address (`/stays/<slug>…`), else null. */
+export function agencyStayPathSlug(pathname: string): string | null {
+  const match = AGENCY_STAY_PATH.exec(pathname);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return null;
+  }
 }

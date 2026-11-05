@@ -12,7 +12,7 @@ import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2461: a stay's page on its agency's address: the agency's header and search, a box for the
 // stay, its rooms as on its own page, and a dark bar with the choice that continues to the stay's
-// own checkout (until checkout runs on the agency's address, VAY-2462).
+// checkout, there on the agency's address (VAY-2462).
 
 const expectedMissingUrls = [
   /\/api\/booking-web\/hotels\/the-travel-ubud(\/checkout-config)?(\?.*)?$/,
@@ -61,7 +61,7 @@ test("a stay card opens the stay's page on the agency's address, with the same s
   await assertHealthy();
 });
 
-test("a chosen rate shows the dark bar, whose Continue opens the stay's own checkout", async ({
+test("a chosen rate shows the dark bar, whose Continue opens the stay's checkout here", async ({
   page,
   baseURL,
 }, testInfo) => {
@@ -77,11 +77,10 @@ test("a chosen rate shows the dark bar, whose Continue opens the stay's own chec
   // EUR 300.00, shown in the agency's display currency (US$1 = €0.90).
   await expect(bar).toContainText("≈ US$333");
   const href = await bar.getByRole("link", { name: "Continue" }).getAttribute("href");
-  const url = new URL(href!);
-  expect(url.host).toBe(
-    new URL(agencyUrl(baseURL)).host.replace(/^the-travel-ubud\./, `${escape}.`),
-  );
-  expect(url.pathname).toBe("/book");
+  const url = new URL(href!, page.url());
+  // VAY-2462: on the agency's address, under the stay.
+  expect(url.host).toBe(new URL(agencyUrl(baseURL)).host);
+  expect(url.pathname).toBe(`/stays/${escape}/book`);
   expect(Object.fromEntries(url.searchParams)).toMatchObject({
     checkIn,
     checkOut,
@@ -117,7 +116,8 @@ test("two rooms choose room by room, with the room tabs, and the bar names both"
     }),
   ).toHaveCount(1);
   const href = await bar.getByRole("link", { name: "Continue" }).getAttribute("href");
-  const url = new URL(href!);
+  const url = new URL(href!, page.url());
+  expect(url.pathname).toBe(`/stays/${escape}/book`);
   expect(url.searchParams.get("rooms")).toBe("2");
   expect(url.searchParams.getAll("pick")).toHaveLength(2);
   // The bar keeps the page's end clear of it.
