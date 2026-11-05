@@ -31,7 +31,7 @@ env:
 jobs:
   token:
     name: Pages token present
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       present: ${{ steps.check.outputs.present }}
@@ -52,7 +52,7 @@ jobs:
     name: Build and publish to Cloudflare Pages
     needs: token
     if: needs.token.outputs.present == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
