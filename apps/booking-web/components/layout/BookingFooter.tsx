@@ -12,6 +12,8 @@ export default function BookingFooter() {
   const tm = useTranslations("myBooking");
   const ta = useTranslations("analyticsConsent");
   const [findBookingOpen, setFindBookingOpen] = useState(false);
+  // wa.me takes the digits only, as the Contact menu's link does (VAY-2473).
+  const whatsappDigits = hotel.contact.whatsapp?.replace(/\D/g, "");
 
   return (
     <footer className="bg-primary-600 text-white py-8 px-4 sm:px-6 lg:px-8">
@@ -39,16 +41,16 @@ export default function BookingFooter() {
             </div>
 
             {/* Social Media Links */}
-            {(hotel.contact.whatsapp ||
+            {(whatsappDigits ||
               (hotel.socialLinks &&
                 (hotel.socialLinks.instagram ||
                   hotel.socialLinks.facebook ||
                   hotel.socialLinks.tiktok ||
                   hotel.socialLinks.youtube))) && (
               <div className="flex items-center gap-3 mt-4">
-                {hotel.contact.whatsapp && (
+                {whatsappDigits && (
                   <a
-                    href={`https://wa.me/${hotel.contact.whatsapp.replace(/\s+/g, "")}`}
+                    href={`https://wa.me/${whatsappDigits}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-white/70 hover:text-white transition-colors"

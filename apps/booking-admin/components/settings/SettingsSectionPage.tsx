@@ -35,6 +35,7 @@ import {
   type CardNotReadyReason,
 } from "@/components/settings/CardNotReadyBanner";
 import { createReplacementPricingClient } from "@vayada/product-onboarding/replacementPricingClient";
+import { internationalPhone } from "@vayada/product-onboarding/CountryPhoneField";
 import {
   paymentWindowsPlan,
   paymentWindowsSaveError,
@@ -293,8 +294,9 @@ function buildTargetSettingsUpdate(
       // Name and address belong to the shared property profile, saved separately.
       data: {
         reservation_email: settings.reservation_email,
-        phone_number: settings.phone_number,
-        whatsapp_number: settings.whatsapp_number,
+        // Stored spaced, as setup stores them: the booking page shows them as saved (VAY-2473).
+        phone_number: internationalPhone(settings.phone_number),
+        whatsapp_number: internationalPhone(settings.whatsapp_number),
         instagram: settings.instagram,
         facebook: settings.facebook,
         tiktok: settings.tiktok,
