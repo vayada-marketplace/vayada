@@ -5,6 +5,7 @@ import {
   type FunnelEventProperties,
   type FunnelEventType,
 } from "@vayada/domain-booking/conversion-funnel";
+import { agencyStayPathSlug } from "@/lib/stayPath";
 import { bookingWebDirect } from "./client";
 import { getBookingWebSessionId } from "./session";
 
@@ -14,7 +15,8 @@ export function funnelErrorCode(code: unknown) {
 }
 
 /** A funnel event, only with analytics consent and only with the properties its type allows
- * (VAY-2197): an event carrying anything else is never sent. */
+ * (VAY-2197): an event carrying anything else is never sent. VAY-2462: on a stay's pages on its
+ * agency's address (`/stays/<slug>…`), every event says it came through the agency's page. */
 export function trackEvent<T extends FunnelEventType>(
   hotelSlug: string,
   eventType: T,
@@ -26,6 +28,7 @@ export function trackEvent<T extends FunnelEventType>(
     const metadata: Record<string, unknown> = Object.fromEntries(
       Object.entries(properties).filter(([, value]) => value !== undefined),
     );
+    if (agencyStayPathSlug(window.location?.pathname ?? "")) metadata.via = "agency_page";
     if (!parseFunnelEventMetadata(eventType, { ...metadata, funnelVersion: 1, funnelSequence: 1 }))
       return;
     const sessionId = getBookingWebSessionId(hotelSlug);

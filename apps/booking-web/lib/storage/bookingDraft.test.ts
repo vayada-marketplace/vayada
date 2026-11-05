@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   expireCheckoutIdempotencyKeyAt,
   getCheckoutIdempotencyKey,
+  saveGuestDetails,
   toConfirmationBooking,
   type BookingConfirmationSource,
 } from "./bookingDraft";
@@ -30,6 +31,43 @@ describe("checkout idempotency keys", () => {
     expect(getCheckoutIdempotencyKey("quote", quoteIdentity)).toBe(firstQuoteKey);
     expireCheckoutIdempotencyKeyAt("quote", quoteIdentity, "2020-01-01T00:00:00.000Z");
     expect(getCheckoutIdempotencyKey("quote", quoteIdentity)).not.toBe(firstQuoteKey);
+  });
+});
+
+// VAY-2462: one tab on an agency's address books several stays.
+describe("ending a booking's checkout attempts", () => {
+  const values = new Map<string, string>();
+  beforeEach(() => {
+    values.clear();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const details = {
+    roomTypeId: "",
+    guestFirstName: "Ada",
+    guestLastName: "Lovelace",
+    guestEmail: "ada@example.test",
+    guestPhone: "",
+  };
+  const attempt = (slug: string) =>
+    getCheckoutIdempotencyKey("pricing-acceptance", JSON.stringify([slug, "quote-1"]));
+
+  it("ends only the booked stay's attempts on an agency's address", () => {
+    const [escape, mertha] = [attempt("escape-ubud"), attempt("mertha-ubud")];
+    saveGuestDetails(details, "escape-ubud");
+    expect(attempt("escape-ubud")).not.toBe(escape);
+    expect(attempt("mertha-ubud")).toBe(mertha);
+  });
+
+  it("ends every attempt on a hotel's own address, as before", () => {
+    const hotel = attempt("hotel");
+    saveGuestDetails(details);
+    expect(attempt("hotel")).not.toBe(hotel);
   });
 });
 

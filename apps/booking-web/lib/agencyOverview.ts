@@ -368,28 +368,6 @@ export function stayHref(
   return `${localePrefix(location.pathname)}/stays/${encodeURIComponent(staySlug)}?${params}`;
 }
 
-/**
- * The stay's own checkout for a choice made on its agency stay page (`search`: "?checkIn=…"), on
- * the stay's address, until checkout runs on the agency's (VAY-2462). On a booking host the
- * stay's host; elsewhere (local development) the same origin with `?slug=`.
- */
-export function stayCheckoutUrl(
-  location: { protocol: string; host: string; pathname: string },
-  agencySlug: string,
-  staySlug: string,
-  search: string,
-): string {
-  const path = `${localePrefix(location.pathname)}/book`;
-  const labels = location.host.split(".");
-  if (BOOKING_HOST.test(location.host) && labels[0] === agencySlug) {
-    labels[0] = staySlug;
-    return `${location.protocol}//${labels.join(".")}${path}${search}`;
-  }
-  const params = new URLSearchParams(search);
-  params.set("slug", staySlug);
-  return `${path}?${params}`;
-}
-
 /** The agency's overview for the same search, from one of its stay pages. */
 export function overviewHref(
   location: { host: string; pathname: string },

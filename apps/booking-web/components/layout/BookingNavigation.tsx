@@ -292,7 +292,8 @@ export default function BookingNavigation({
 }) {
   const { hotel } = useHotel();
   const { agency } = useAgencyPage();
-  const nav = useMemo(() => (hotel ? hotelSource(hotel) : agencySource(agency!)), [hotel, agency]);
+  // VAY-2462: on an agency's address the bar is the agency's, on its stays' pages and checkout too.
+  const nav = useMemo(() => (agency ? agencySource(agency) : hotelSource(hotel)), [hotel, agency]);
   const { selectedCurrency, setSelectedCurrency, availableCurrencies } = useCurrency();
   const t = useTranslations("nav");
   const locale = useLocale();

@@ -112,6 +112,30 @@ it("binds normalized guest details and server evidence to the path and request k
   });
 });
 
+// VAY-2462: booked on an agency page, named beside the command; the command is the same.
+it("names the agency page it is booked on in a header, leaving the command as it is", async () => {
+  await acceptPricingQuote("escape-ubud", quote, disclosure, guest);
+  await acceptPricingQuote(
+    "escape-ubud",
+    quote,
+    disclosure,
+    guest,
+    undefined,
+    "uncertain-retry",
+    "the-travel-ubud",
+  );
+  const headers = (index: number) =>
+    fetcher.mock.calls[index]![1]!.headers as Record<string, string>;
+  expect(headers(0)).not.toHaveProperty("X-Vayada-Agency-Page");
+  expect(headers(1)["X-Vayada-Agency-Page"]).toBe("the-travel-ubud");
+  expect(fetcher.mock.calls[1]![0]).toBe(
+    `/api/booking-web/hotels/escape-ubud/bookings/quotes/${quote.quoteId}/accept`,
+  );
+  // The same request: the same command and key.
+  expect(sent(1).body).toEqual(sent(0).body);
+  expect(sent(1).key).toBe(sent(0).key);
+});
+
 it("reuses uncertain retry keys and separates changed guest details", async () => {
   fetcher.mockRejectedValueOnce(new Error("network"));
   await expect(acceptPricingQuote("hotel", quote, disclosure, guest)).rejects.toThrow("network");

@@ -76,7 +76,7 @@ import {
 } from "@/services/api/bookingPagePaymentMethods";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
+import { useAgencyPage, useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
 import { hotelCountryName } from "@/lib/checkoutTerms";
 import { paymentMethodOptions } from "@/lib/paymentMethodOptions";
@@ -146,6 +146,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const { hotel } = useHotel();
   // VAY-2462: this stay's pages, under the stay on an agency's address.
   const stayPath = useStayPath();
+  const { agency } = useAgencyPage();
   // VAY-2347: the one tick, for the price, rules and room names it was given for.
   const [agreedTo, setAgreedTo] = useState<string | null>(null);
   // The price whose Confirm was pressed before the box was ticked (VAY-2306).
@@ -212,6 +213,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
       if (params.get(name) && valid[name] !== false) home.set(name, params.get(name)!);
     if (picks && params.get("rooms")) home.set("rooms", params.get("rooms")!);
+    // VAY-2462: on an agency's address the stay page also keeps the agency's own room count and
+    // code, for its way back to all stays.
+    if (agency)
+      for (const name of ["agencyRooms", "agencyPromo"])
+        if (params.get(name)) home.set(name, params.get(name)!);
     // VAY-2446: /book only continues a choice made on the hotel page for a stay, a room card's or
     // a group's. The old room form (which also took the dates) is gone: without one, the guest
     // chooses on the hotel page.
@@ -1025,13 +1031,17 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         context,
       ),
     );
-    saveGuestDetails({
-      roomTypeId: "",
-      guestFirstName: context.guestFirstName,
-      guestLastName: context.guestLastName,
-      guestEmail: context.guestEmail,
-      guestPhone: guest.phone.trim(),
-    });
+    saveGuestDetails(
+      {
+        roomTypeId: "",
+        guestFirstName: context.guestFirstName,
+        guestLastName: context.guestLastName,
+        guestEmail: context.guestEmail,
+        guestPhone: guest.phone.trim(),
+      },
+      // VAY-2462: on an agency's address, only this stay's attempts end.
+      agency ? slug : undefined,
+    );
     router.replace(stayPath(`/booking/${encodeURIComponent(bookingReference)}`));
   };
   const missingDay = (addonCatalogue ?? []).find((addon) =>
