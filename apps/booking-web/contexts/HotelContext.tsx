@@ -18,7 +18,7 @@ import { ApiError } from "@/services/api/client";
 import { routing } from "@/i18n/routing";
 import { generateColorPalette, generateOnColorPalette } from "@/lib/utils/colors";
 import { brandFontPairing } from "@vayada/fonts/brand";
-import { stayPath } from "@/lib/stayPath";
+import { agencyStayBase, agencyStayPathSlug, stayPath } from "@/lib/stayPath";
 
 // Rooms, availability and prices are served by the room-and-price page (/book); this
 // provider only carries the hotel profile and its add-on catalogue. An agency's address
@@ -60,21 +60,8 @@ const HotelContext = createContext<HotelContextValue>({
 // a clear error instead of fetching a dev seed slug that 404s in prod.
 const DEV_SLUG_STORAGE_KEY = "dev-hotel-slug";
 
-// An agency page has only its overview so far ("/", "/de"); its checkout comes with VAY-2462.
+// An agency's overview ("/", "/de"); everything else on its address is one of its stays'.
 const HOME_PATH = new RegExp(`^/(?:(?:${routing.locales.join("|")})/?)?$`);
-// VAY-2461: one of an agency's stays on its address.
-const STAY_PATH = new RegExp(`^/(?:(?:${routing.locales.join("|")})/)?stays/([^/]+)/?$`);
-
-/** The stay a path names on an agency's address (`/stays/<slug>`), else null. */
-export function stayPathSlug(pathname: string): string | null {
-  const match = STAY_PATH.exec(pathname);
-  if (!match) return null;
-  try {
-    return decodeURIComponent(match[1]!);
-  } catch {
-    return null;
-  }
-}
 
 function resolveSlug(slugProp?: string): string | null {
   if (slugProp) return slugProp;
@@ -235,9 +222,9 @@ export function HotelProvider({
     }
   }, [fontPairing]);
 
-  // An agency's address has its overview and its stays' pages (VAY-2461), only for the stays it
-  // shows; a hotel's has no stay pages.
-  const staySlug = stayPathSlug(pathname);
+  // An agency's address has its overview and its stays' pages (VAY-2461) with their checkout and
+  // bookings (VAY-2462), only for the stays it shows; a hotel's has no stay pages.
+  const staySlug = agencyStayPathSlug(pathname);
   const offline =
     notOnline ||
     (agency
@@ -319,6 +306,7 @@ export function HotelProvider({
  * One stay of an agency's page, on the agency's address (VAY-2461): the stay's own profile and
  * add-ons for its rooms, inside the agency's page, which keeps its look (no colours or fonts of
  * the stay's) and its context (`useAgencyPage`). While the stay loads, a spinner stands in.
+ * VAY-2462: the stay's pages (its checkout and bookings) are under `/stays/<slug>` there.
  */
 export function StayHotelProvider({ slug, children }: { slug: string; children: ReactNode }) {
   const outer = useContext(HotelContext);
@@ -397,6 +385,7 @@ export function StayHotelProvider({ slug, children }: { slug: string; children: 
         loading: false,
         error: null,
         slug,
+        basePath: agencyStayBase(slug),
       }}
     >
       {children}

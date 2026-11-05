@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { stayPath } from "./stayPath";
+import { agencyStayBase, agencyStayPathSlug, stayPath } from "./stayPath";
 
 describe("stayPath", () => {
   it("leaves every path as it is on a hotel's own address", () => {
@@ -27,6 +27,30 @@ describe("stayPath", () => {
     expect(stayPath(base, "/confirmation?booking=VAY-1&token=t")).toBe(
       "/stays/escape-villa/confirmation?booking=VAY-1&token=t",
     );
+  });
+});
+
+describe("a stay's pages on its agency's address", () => {
+  it("start under /stays/<slug>", () => {
+    expect(agencyStayBase("escape-villa")).toBe("/stays/escape-villa");
+    expect(stayPath(agencyStayBase("villa ü"), "/book?offer=x")).toBe(
+      "/stays/villa%20%C3%BC/book?offer=x",
+    );
+  });
+
+  it("are read back from the address, in any language", () => {
+    for (const [pathname, slug] of [
+      ["/stays/escape-villa", "escape-villa"],
+      ["/de/stays/escape-villa/", "escape-villa"],
+      ["/stays/escape-villa/book", "escape-villa"],
+      ["/fr/stays/villa%20%C3%BC/booking/VAY-1/around", "villa ü"],
+      ["/", null],
+      ["/book", null],
+      ["/booking/VAY-1", null],
+      ["/stays", null],
+      ["/stays/%E0%A4%A", null],
+    ] as const)
+      expect([pathname, agencyStayPathSlug(pathname)]).toEqual([pathname, slug]);
   });
 });
 

@@ -163,8 +163,15 @@ test.describe("booking-web canonical URL policy", () => {
         "/en/booking-status",
         "/my-booking",
         "/en/my-booking",
+        // VAY-2462: a stay's checkout and bookings on its agency's address.
+        "/stays/*/book",
+        "/de/stays/*/book",
+        "/stays/*/booking",
+        "/stays/*/confirmation",
+        "/stays/*/my-booking",
       ]),
     );
     expect(privateDisallowRules(locales)).not.toContain("/rooms");
+    expect(privateDisallowRules(locales)).not.toContain("/stays");
   });
 });

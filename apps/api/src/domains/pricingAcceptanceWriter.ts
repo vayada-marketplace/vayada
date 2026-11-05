@@ -64,6 +64,10 @@ export async function writePricingAcceptance(
   input: {
     slug: unknown;
     command: unknown;
+    /** VAY-2462: the live agency page the guest booked on (its address and the stays it shows),
+     * read by the caller before this transaction; null when no live page has that address. The
+     * booking records it only when the page shows this stay; otherwise it is booked as usual. */
+    agencyPage?: { slug: string; propertyIds: readonly string[] } | null;
   },
   /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED);
    * those leaving the rest to pay at the property also need `deposits`
@@ -164,10 +168,15 @@ export async function writePricingAcceptance(
         ? pricingCardBookingId(prepared.current.scope.propertyId, prepared.command.requestId)
         : randomUUID();
     const publicReference = `VAY-${bookingId.replaceAll("-", "").toUpperCase()}`;
+    const page = input.agencyPage;
     await stagePricingBookingDraft(client, input.slug, {
       ...prepared,
       bookingId,
       publicReference,
+      agencyPage:
+        page && page.propertyIds.includes(prepared.current.scope.propertyId)
+          ? { slug: page.slug }
+          : null,
     });
     const lifecycle = await stagePricingBookingLifecycle(
       client,

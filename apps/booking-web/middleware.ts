@@ -2,6 +2,8 @@ import createMiddleware from "next-intl/middleware";
 import { NextRequest, NextResponse } from "next/server";
 import { routing } from "./i18n/routing";
 import { getRequestHost } from "./lib/requestHost";
+import { stayNotFoundPage } from "./lib/stayNotFound";
+import { agencyStayPathSlug } from "./lib/stayPath";
 import {
   getCanonicalHostRedirectUrl,
   isFallbackBookingHost,
@@ -142,8 +144,43 @@ export default async function middleware(request: NextRequest) {
     if (canonicalRedirect) return canonicalRedirect;
   }
 
+  // VAY-2462: a stay's pages (`/stays/<slug>`, its checkout and bookings) are only on an agency's
+  // address, for the stays its live page shows. A page load anywhere else answers 404; navigation
+  // inside the app and an address or page that can't be read are left to the page, which says
+  // "not online" itself.
+  const staySlug = agencyStayPathSlug(request.nextUrl.pathname);
+  if (staySlug !== null && slug && isPageLoad(request)) {
+    const shown = await addressShowsStay(slug, staySlug);
+    if (shown === false)
+      return stayNotFoundPage(
+        firstLocaleSegment(request.nextUrl.pathname) || routing.defaultLocale,
+      );
+  }
+
   // No cookies before the guest's privacy choice (VAY-2223); the hotel comes from the host.
   return response;
+}
+
+/** A browser's (or a crawler's) load of a page, not the app's own navigation or prefetch. */
+function isPageLoad(request: NextRequest): boolean {
+  return (
+    (request.method === "GET" || request.method === "HEAD") &&
+    !request.headers.has("rsc") &&
+    !request.headers.has("next-router-prefetch")
+  );
+}
+
+/** Whether this address shows the stay; null when it can't tell. */
+async function addressShowsStay(slug: string, staySlug: string): Promise<boolean | null> {
+  try {
+    const stays = await bookingWebPublicApi.agencyPageStays(slug, {
+      signal: AbortSignal.timeout(3000),
+      next: { revalidate: 30 },
+    });
+    return stays !== null && stays.includes(staySlug);
+  } catch {
+    return null;
+  }
 }
 
 async function fetchHostResolution(

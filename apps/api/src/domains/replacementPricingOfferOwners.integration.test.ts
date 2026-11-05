@@ -7980,6 +7980,29 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     ])
       expect(await f.price(input)).toBeNull();
   });
+  // VAY-2462: an agency page books one stay at a time. A room of another stay of the same
+  // account, the agency's, is refused like any other stay's, alone or next to this stay's own.
+  it("refuses a room of another stay of the same account (VAY-2462)", async () => {
+    sharedOrganization = randomUUID();
+    let f!: Awaited<ReturnType<typeof stayFixture>>, sibling!: typeof f;
+    try {
+      f = await stayFixture();
+      sibling = await stayFixture();
+    } finally {
+      sharedOrganization = null;
+    }
+    expect(sibling.scope.organizationId).toBe(f.scope.organizationId);
+    expect(sibling.scope.propertyId).not.toBe(f.scope.propertyId);
+    expect(await f.price()).not.toBeNull();
+    const own = f.selection.rooms[0];
+    const theirs = {
+      ...own,
+      selectionId: "two",
+      publicOfferKey: sibling.bindings[0].publicOfferKey,
+    };
+    for (const rooms of [[theirs], [own, theirs]])
+      expect(await f.price({ ...f.selection, rooms }), JSON.stringify(rooms)).toBeNull();
+  });
   it("rejects nightly stop-sell and aggregate overflow across otherwise valid rooms", async () => {
     const closed = await stayFixture((s) => ({
       ...s,

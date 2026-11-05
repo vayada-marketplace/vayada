@@ -27,8 +27,12 @@ vi.mock("@/services/api/pricingAcceptance", async (importOriginal) => ({
   acceptPricingQuote: vi.fn(),
 }));
 const cardStep = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
-// VAY-2462: the stay's pages on this address; a hotel's own here.
-vi.mock("@/contexts/HotelContext", () => ({ useStayPath: () => (path: string) => path }));
+// VAY-2462: a hotel's own address unless a test puts the stay on its agency's.
+const place = vi.hoisted(() => ({ agency: null as null | { slug: string }, base: "" }));
+vi.mock("@/contexts/HotelContext", () => ({
+  useAgencyPage: () => ({ agency: place.agency }),
+  useStayPath: () => (path: string) => place.base + path,
+}));
 vi.mock("./ReplacementCardPayment", () => ({
   default: (props: Record<string, unknown>) => {
     cardStep.props = props;
@@ -73,6 +77,7 @@ let root: Root;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.assign(place, { agency: null, base: "" });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   document.body.innerHTML = '<div id="root"></div>';
   root = createRoot(document.getElementById("root")!);
@@ -180,6 +185,8 @@ it("books with the guest's details and shows the public confirmation reference",
     },
     undefined,
     "fresh",
+    // A hotel's own page: no agency page to name.
+    undefined,
   );
   expect(document.body.textContent).toContain("Booking confirmed");
   expect(document.body.textContent).toContain(result.bookingReference);
@@ -261,6 +268,7 @@ it("keeps an uncertain attempt retryable", async () => {
   expect(vi.mocked(acceptPricingQuote).mock.calls[1]!.slice(4)).toEqual([
     undefined,
     "uncertain-retry",
+    undefined,
   ]);
   expect(document.body.textContent).toContain(result.bookingReference);
   // The retry is the same click; the booking is still counted once it is made.
@@ -323,6 +331,7 @@ it("sends a pay-at-property request and says the hotel still has to accept it", 
     expect.objectContaining({ email: "ada@example.test" }),
     undefined,
     "fresh",
+    undefined,
   );
   expect(document.body.textContent).toContain("Booking request sent");
   expect(document.body.textContent).toContain("Nothing has been charged");
@@ -474,6 +483,44 @@ it("hands a made booking to the page so it can open the confirmation (VAY-2195)"
   expect(booked).toHaveBeenCalledWith({
     bookingReference: result.bookingReference,
     requested: false,
+  });
+});
+
+// VAY-2462: on a stay's page on its agency's address.
+it("names the agency page it is booked on, and keeps the reservation's link on that address", async () => {
+  Object.assign(place, { agency: { slug: "the-travel-ubud" }, base: "/stays/escape-ubud" });
+  vi.mocked(acceptPricingQuote).mockResolvedValue({
+    kind: "payment_pending",
+    bookingId: result.bookingId,
+    bookingReference: result.bookingReference,
+    payment: {
+      method: "bank_transfer",
+      amountMinor: "20000",
+      currency: "EUR",
+      deadlineAt: "2026-09-16T12:00:00.000Z",
+    },
+    confirmationToken: "token-1",
+  });
+  const booked = vi.fn();
+  act(() =>
+    root.render(
+      createElement(ReplacementBookingConfirmation, {
+        slug: "escape-ubud",
+        quote,
+        disclosure,
+        guest: ada,
+        termsAccepted: true,
+        onBooked: booked,
+      }),
+    ),
+  );
+  await submit();
+  expect(vi.mocked(acceptPricingQuote).mock.calls[0]![0]).toBe("escape-ubud");
+  expect(vi.mocked(acceptPricingQuote).mock.calls[0]![6]).toBe("the-travel-ubud");
+  expect(booked).toHaveBeenCalledWith({
+    bookingReference: result.bookingReference,
+    requested: false,
+    confirmationUrl: `/stays/escape-ubud/confirmation?booking=${result.bookingReference}&token=token-1`,
   });
 });
 

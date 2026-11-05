@@ -122,6 +122,27 @@ describe("Booking funnel instrumentation", () => {
     expect(JSON.parse(init.body as string).metadata).not.toHaveProperty("code");
   });
 
+  // VAY-2462: a stay's pages on its agency's address.
+  it("marks every event sent from a stay's page on its agency's address", () => {
+    mockBrowser();
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    const metadata = () =>
+      JSON.parse((fetch.mock.calls.at(-1) as unknown as [string, RequestInit])[1].body as string)
+        .metadata;
+    vi.stubGlobal("window", { location: { pathname: "/de/stays/escape-ubud/book" } });
+    trackEvent("hotel", "step_viewed", { step: "extras" });
+    expect(metadata()).toEqual({
+      step: "extras",
+      via: "agency_page",
+      funnelVersion: 1,
+      funnelSequence: 1,
+    });
+    vi.stubGlobal("window", { location: { pathname: "/book" } });
+    trackEvent("hotel", "step_viewed", { step: "details" });
+    expect(metadata()).toEqual({ step: "details", funnelVersion: 1, funnelSequence: 2 });
+  });
+
   it("posts straight to the API as text/plain, without cookies or the page address (VAY-2214)", () => {
     mockBrowser({ version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION, analytics: true });
     const fetch = vi.fn(async () => new Response(null, { status: 204 }));

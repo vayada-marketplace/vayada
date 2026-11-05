@@ -92,6 +92,26 @@ describe("pricing acceptance writer", () => {
     expect(client.release).toHaveBeenCalledOnce();
   });
 
+  // VAY-2462: the booking names the agency page only when that live page shows this stay.
+  it("passes the agency page to the booking only when it shows this stay", async () => {
+    const agencyPageGiven = () =>
+      vi.mocked(stagePricingBookingDraft).mock.calls.at(-1)![2].agencyPage;
+    await writePricingAcceptance(pool as never, {
+      ...input,
+      agencyPage: { slug: "the-travel-ubud", propertyIds: ["other", "property"] },
+    });
+    expect(agencyPageGiven()).toEqual({ slug: "the-travel-ubud" });
+    for (const agencyPage of [
+      null,
+      undefined,
+      { slug: "the-travel-ubud", propertyIds: ["other"] },
+      { slug: "the-travel-ubud", propertyIds: [] },
+    ]) {
+      await writePricingAcceptance(pool as never, { ...input, agencyPage });
+      expect(agencyPageGiven(), JSON.stringify(agencyPage)).toBeNull();
+    }
+  });
+
   it("rolls back all staged writes when the final gate fails", async () => {
     vi.mocked(finishPricingAcceptance).mockRejectedValue(
       new Error("Booking acceptance expired or unavailable"),

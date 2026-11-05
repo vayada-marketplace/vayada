@@ -56,9 +56,24 @@ function safeSet(key: string, value: string): void {
   } catch {}
 }
 
-export function saveGuestDetails(draft: GuestDetailsDraft): void {
+/** The guest's details after a booking, which ends its checkout attempts. VAY-2462: on an agency's
+ * address, where one tab books several stays, only `slug`'s attempts end (an uncertain attempt for
+ * another stay keeps its key, so its retry is still the same request). */
+export function saveGuestDetails(draft: GuestDetailsDraft, slug?: string): void {
   safeSet(GUEST_KEY, JSON.stringify(draft));
-  safeSet(CHECKOUT_ATTEMPT_KEY, JSON.stringify({ keys: {} }));
+  if (slug === undefined) {
+    safeSet(CHECKOUT_ATTEMPT_KEY, JSON.stringify({ keys: {} }));
+    return;
+  }
+  // Every attempt's identity starts with its hotel: `["<slug>", …]`.
+  const own = `:${JSON.stringify([slug]).slice(0, -1)},`;
+  const { keys } = checkoutAttemptState();
+  safeSet(
+    CHECKOUT_ATTEMPT_KEY,
+    JSON.stringify({
+      keys: Object.fromEntries(Object.entries(keys).filter(([binding]) => !binding.includes(own))),
+    }),
+  );
 }
 
 export function getCheckoutIdempotencyKey(operation: string, identity: string): string {

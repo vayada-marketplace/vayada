@@ -1,6 +1,6 @@
 import type { Hotel } from "@/lib/types";
 
-import { bookingWebPublic, type ApiRequestInit } from "./client";
+import { ApiError, bookingWebPublic, type ApiRequestInit } from "./client";
 
 export const PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS = 60;
 
@@ -107,6 +107,32 @@ function serverBookingWebApiUrl(path: string): string {
 }
 
 export const bookingWebPublicApi = {
+  /** VAY-2462: the stays (their addresses) a live agency page at this address shows, read on the
+   * server; null when the API says no live agency page has this address (a hotel's address too).
+   * Throws when it can't tell, a 404 from anything but the API itself included. */
+  async agencyPageStays(slug: string, init?: ApiRequestInit): Promise<string[] | null> {
+    const path = `/api/booking-web/agency-pages/${encodeURIComponent(slug)}`;
+    let raw: unknown;
+    try {
+      raw = await bookingWebPublic.get<unknown>(serverBookingWebApiUrl(path), init);
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status === 404 &&
+        (error.detail as { message?: unknown } | null)?.message === "Agency page not found."
+      )
+        return null;
+      throw error;
+    }
+    const stays = (raw as { stays?: unknown } | null)?.stays;
+    if (!Array.isArray(stays)) throw new Error("Unreadable agency page.");
+    return stays.flatMap((stay) =>
+      stay && typeof stay === "object" && typeof (stay as { slug?: unknown }).slug === "string"
+        ? [(stay as { slug: string }).slug]
+        : [],
+    );
+  },
+
   async resolveHost(host: string, init?: ApiRequestInit): Promise<BookingWebPublicHostResponse> {
     const path = `/api/booking-web/hosts/${encodeURIComponent(host)}`;
     return bookingWebPublic.get<BookingWebPublicHostResponse>(
