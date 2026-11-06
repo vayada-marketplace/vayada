@@ -68,6 +68,9 @@ export type HostNotificationFeed = {
   syncAlert: HostNotificationSyncAlert | null;
   unread: { all: number; bookings: number; needsAction: number; updates: number };
   badge: "none" | "blue" | "red";
+  /** Whether "View booking" opens the booking's page in PMS (VAY-2480); otherwise it opens Reservations
+   * here. */
+  canOpenPmsBookings: boolean;
 };
 
 type Http = Pick<ApiClient, "get" | "post">;
@@ -177,6 +180,7 @@ export function parseHostNotificationFeed(v: unknown): HostNotificationFeed | nu
     syncAlert: alert
       ? { ...(alert as HostNotificationSyncAlert), canViewDetails: alert.canViewDetails === true }
       : null,
+    canOpenPmsBookings: v.canOpenPmsBookings === true,
   };
 }
 

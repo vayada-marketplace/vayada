@@ -23,6 +23,7 @@ const feed: HostNotificationFeed = {
   syncAlert: null,
   unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
   badge: "none",
+  canOpenPmsBookings: false,
 };
 const key = "booking-event:e0000001-0000-4000-8000-000000000000";
 
@@ -43,6 +44,7 @@ describe("Booking Admin notification routes", () => {
         "booking.promos.read",
         "pms.operations.manage",
         "pms.operations.read",
+        "pms.reservation.read",
       ],
       pms: true,
       syncRetryDomains: ["ari"],
@@ -59,12 +61,18 @@ describe("Booking Admin notification routes", () => {
       canReadGuestContact: false,
       retrySyncDomains: ["ari"],
       canOpenChannelManager: true,
+      canOpenPmsBookings: true,
     });
     await app.close();
 
-    // Retry sync needs the PMS permission and the PMS product for this property.
+    // Retry sync and opening bookings in PMS need the PMS permission and the PMS product for this property.
     app = await routeApp(repository, {
-      permissions: ["booking.reservation.read", "pms.guest_contact.read", "pms.operations.manage"],
+      permissions: [
+        "booking.reservation.read",
+        "pms.guest_contact.read",
+        "pms.operations.manage",
+        "pms.reservation.read",
+      ],
       syncRetryDomains: ["ari"],
     });
     expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(200);
@@ -75,7 +83,20 @@ describe("Booking Admin notification routes", () => {
       canReadGuestContact: true,
       retrySyncDomains: [],
       canOpenChannelManager: false,
+      canOpenPmsBookings: false,
     });
+    await app.close();
+
+    // VAY-2480: PMS for this property, but not its bookings.
+    app = await routeApp(repository, {
+      permissions: ["booking.reservation.read", "pms.operations.read"],
+      pms: true,
+    });
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(200);
+    expect(repository.read).toHaveBeenLastCalledWith(
+      propertyId,
+      expect.objectContaining({ canOpenChannelManager: true, canOpenPmsBookings: false }),
+    );
   });
 
   it("marks notifications read, one by one or all at once", async () => {

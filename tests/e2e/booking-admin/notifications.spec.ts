@@ -6,7 +6,9 @@ import {
   mockBookingAdminBookingFlow,
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
+import { corsHeaders, fulfillCorsPreflight } from "../support/cors";
 import { watchPageHealth } from "../support/pageHealth";
+import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 
 // VAY-2349: Booking Admin's notifications bell, its panel and the links out of it (Paper "VAY-2349
 // Notifications bell", approved 2026-10-25). The feed is mocked; the API is covered by its own suites.
@@ -177,6 +179,37 @@ async function setUp(page: Page, feeds: unknown[], { freezeTime = true } = {}) {
   return reads;
 }
 
+/** A signed-in AuthKit session with a CSRF token, as in production, instead of the legacy token: links to
+ * PMS then go through the one-time session exchange. */
+async function useAuthKitSession(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("token_expires_at");
+  });
+  await page.route(/\/auth\/session(?:\?|$)/, (route) =>
+    route.request().method() === "OPTIONS"
+      ? fulfillCorsPreflight(route)
+      : route.fulfill({
+          headers: corsHeaders(route),
+          json: {
+            accessToken: "test-access-token",
+            csrfToken: "test-csrf-token",
+            organizationId: "11111111-1111-4111-8111-111111111111",
+            workosOrganizationId: "org_workos_hotel_group",
+            organizationKind: "hotel_group",
+            resources: { "booking:booking_hotel": [BOOKING_ADMIN_HOTEL_ID] },
+            user: {
+              id: "user_1",
+              email: "owner@example.com",
+              name: "Booking Owner",
+              status: "active",
+              workosUserId: "user_workos_owner",
+            },
+          },
+        }),
+  );
+}
+
 const bell = (page: Page) => page.locator("header").getByRole("button", { name: /^Notifications/ });
 const panel = (page: Page) => page.getByRole("dialog", { name: "Notifications" });
 const rows = (page: Page) => panel(page).getByTestId("notification-row");
@@ -278,9 +311,11 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await expect(bell(page)).toHaveAccessibleName("Notifications, channel manager sync failed");
   });
 
-  test("View booking opens Reservations filtered to that booking", async ({ page }, testInfo) => {
+  test("View booking opens Reservations filtered to that booking without PMS access", async ({
+    page,
+  }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
-    await setUp(page, [fullFeed()]);
+    await setUp(page, [{ ...fullFeed(), canOpenPmsBookings: false }]);
     await page.route(READ_ROUTE, (route) => route.fulfill({ status: 204 }));
     const searches: (string | null)[] = [];
     await page.route(`**/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/reservations*`, (route) => {
@@ -307,6 +342,90 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     );
     await expect.poll(() => searches).toContain("VAY-GHI789");
     await assertHealthy();
+  });
+
+  test("View booking opens the booking in PMS on the selected property (VAY-2480)", async ({
+    page,
+    baseURL,
+  }) => {
+    await setUp(page, [{ ...fullFeed(), canOpenPmsBookings: true }]);
+    await useAuthKitSession(page);
+    const marks: unknown[] = [];
+    let answerMark = () => {};
+    const markAnswered = new Promise<void>((resolve) => (answerMark = resolve));
+    await page.route(READ_ROUTE, async (route) => {
+      marks.push(route.request().postDataJSON());
+      await markAnswered;
+      await route.fulfill({ status: 204 });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // New booking: unread, so it is marked read before PMS opens.
+    const pms = await mockSetupExitHandoff(
+      page,
+      baseURL,
+      BOOKING_ADMIN_PROPERTY_ID,
+      `/bookings/${booking.id}`,
+    );
+    let handoffs = 0;
+    await page.route("**/auth/handoff/create", (route) => {
+      handoffs += 1;
+      return route.fallback();
+    });
+    await page.goto("/settings");
+    await bell(page).click();
+    await rows(page).first().getByRole("button", { name: "View booking" }).click();
+    await expect
+      .poll(() => marks)
+      .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] }]);
+    // Nothing leaves the page until the mark is saved.
+    await page.waitForTimeout(500);
+    expect(handoffs).toBe(0);
+    answerMark();
+    await expect.poll(() => page.url()).toBe(pms);
+    expect(handoffs).toBe(1);
+
+    // Booking modified opens its own booking.
+    await mockSetupExitHandoff(
+      page,
+      baseURL,
+      BOOKING_ADMIN_PROPERTY_ID,
+      "/bookings/b0000000-0000-4000-8000-000000000003",
+    );
+    await page.goto("/settings");
+    await bell(page).click();
+    await expect(rows(page).nth(2)).toContainText("Booking modified");
+    await rows(page).nth(2).getByRole("button", { name: "View booking" }).click();
+    await expect.poll(() => page.url()).toBe(pms);
+  });
+
+  test("View booking stays on Reservations when PMS can't be opened on the property", async ({
+    page,
+  }) => {
+    // Without the one-time exchange, PMS's sign-in wouldn't know which property the booking is in.
+    await setUp(page, [{ ...fullFeed(), canOpenPmsBookings: true }]);
+    await useAuthKitSession(page);
+    await page.route(READ_ROUTE, (route) => route.fulfill({ status: 204 }));
+    await page.route("**/auth/handoff/create", (route) =>
+      route.request().method() === "OPTIONS"
+        ? fulfillCorsPreflight(route)
+        : route.fulfill({
+            status: 503,
+            headers: corsHeaders(route),
+            json: { error: { code: "handoff_unavailable", retryable: true } },
+          }),
+    );
+    const searches: (string | null)[] = [];
+    await page.route(`**/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/reservations*`, (route) => {
+      searches.push(new URL(route.request().url()).searchParams.get("search"));
+      return route.fulfill({ json: { bookings: [], total: 0, limit: 20, offset: 0 } });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+    await rows(page).first().getByRole("button", { name: "View booking" }).click();
+    await expect(page).toHaveURL(/\/reservations\?search=VAY-ABC123$/);
+    await expect.poll(() => searches).toContain("VAY-ABC123");
   });
 
   test("Extend opens that promo code in Promos", async ({ page }) => {
@@ -558,6 +677,36 @@ test.describe("Booking Admin notification toasts (VAY-2349 part 3)", () => {
     await focusRead(page);
     await expect.poll(() => reads.length).toBeGreaterThan(2);
     await expect(toasts(page)).toHaveCount(2);
+  });
+
+  test("a toast's View booking opens the booking in PMS too (VAY-2480)", async ({
+    page,
+    baseURL,
+  }) => {
+    const pmsFeed = { ...fullFeed(), canOpenPmsBookings: true };
+    const reads = await setUp(page, [{ ...emptyFeed, canOpenPmsBookings: true }, pmsFeed], {
+      freezeTime: false,
+    });
+    await useAuthKitSession(page);
+    const marks: unknown[] = [];
+    await page.route(READ_ROUTE, (route) => {
+      marks.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    const pms = await mockSetupExitHandoff(
+      page,
+      baseURL,
+      BOOKING_ADMIN_PROPERTY_ID,
+      `/bookings/${booking.id}`,
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await expect.poll(() => reads.length).toBeGreaterThan(0);
+    await focusRead(page);
+    await expect(toasts(page).nth(1)).toContainText("New booking · €600");
+    await toasts(page).nth(1).getByRole("button", { name: "View booking" }).click();
+    await expect.poll(() => page.url()).toBe(pms);
+    expect(marks).toContainEqual({ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] });
   });
 
   test("closes booking toasts after 8 s; the sync error stays until closed", async ({ page }) => {

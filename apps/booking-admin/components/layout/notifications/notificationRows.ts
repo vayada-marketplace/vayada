@@ -11,7 +11,7 @@ export const NOTIFICATION_TABS: NotificationTab[] = ["all", "bookings", "needs_a
 export type NotificationGroup = "today" | "yesterday" | "thisWeek" | "earlier";
 
 export type NotificationAction =
-  | { kind: "view_booking"; reference: string }
+  | { kind: "view_booking"; reference: string; bookingId: string }
   | { kind: "contact_guest"; email: string }
   | { kind: "edit_promo"; promoId: string; label: "extend" | "raiseLimit" };
 
@@ -157,7 +157,11 @@ export function notificationRow(
       .join(" · ");
     const dates = stayDates(booking.checkIn, booking.checkOut, locale);
     const total = money(booking.totalAmount, booking.currency, locale);
-    const view: NotificationAction = { kind: "view_booking", reference: booking.reference };
+    const view: NotificationAction = {
+      kind: "view_booking",
+      reference: booking.reference,
+      bookingId: booking.id,
+    };
     if (item.kind === "booking_new") {
       const guests = [plural(t, "notifications.adults", booking.adults)];
       if (booking.children > 0) guests.push(plural(t, "notifications.children", booking.children));
