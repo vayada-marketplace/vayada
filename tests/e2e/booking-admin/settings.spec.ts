@@ -587,7 +587,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     const canonicalBookingUrl = new URL(page.url()).hostname.endsWith(".localhost")
       ? `hotel-alpenrose.booking.localhost${new URL(page.url()).port ? `:${new URL(page.url()).port}` : ""}`
-      : "hotel-alpenrose.booking.vayada.com";
+      : // VAY-2483: the new system's host; *.booking.vayada.com is the old system.
+        "hotel-alpenrose.next-booking.vayada.com";
     await expect(page.getByRole("button", { name: "Content" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Colors" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Typography" })).toBeVisible();
@@ -636,9 +637,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(currentBookingUrl).toBeVisible();
     await expect(page.getByRole("heading", { name: "Custom Domain" })).toBeVisible();
     await expect(heroImageHeading).toHaveCount(0);
-    await expect(
-      currentBookingUrl.getByText("hotel-alpenrose.booking.vayada.com", { exact: true }),
-    ).toBeVisible();
+    await expect(currentBookingUrl.getByText(canonicalBookingUrl, { exact: true })).toBeVisible();
     await expect(preview).toContainText(canonicalBookingUrl);
 
     await page.getByPlaceholder("booking.yourdomain.com").fill("book.alpenrose.example");

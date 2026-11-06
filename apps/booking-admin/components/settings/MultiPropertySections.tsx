@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { ChevronDownIcon, ChevronUpIcon, EllipsisVerticalIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowTopRightOnSquareIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  EllipsisVerticalIcon,
+} from "@heroicons/react/24/outline";
 import {
   ACCOUNT_BOOKING_PAGE_FILTERS,
   ACCOUNT_BOOKING_PAGE_LAYOUTS,
@@ -28,6 +33,7 @@ import {
   validWhatsapp,
   type AccountBookingPageDraft,
   type DraftProblem,
+  type PageStatus,
   type PropertyStatus,
 } from "@/lib/utils/accountBookingPage";
 import type {
@@ -51,8 +57,13 @@ export type SectionProps = {
   /** Shown once the member tried to save. */
   problems: Set<DraftProblem>;
   disabled: boolean;
-  /** The agency page's address around the slug, and the full one while the slug is valid. */
-  address: { before: string; after: string; url: string | null };
+  /** The form differs from the saved page. */
+  dirty: boolean;
+  /** What guests find at the saved page's address now (VAY-2483). */
+  status: PageStatus;
+  /** The agency page's address around the slug, the full one while the slug is valid, and the saved
+   * page's (Preview opens that one). */
+  address: { before: string; after: string; url: string | null; saved: string | null };
   copyText: (value: string) => Promise<void>;
 };
 
@@ -168,16 +179,43 @@ const withSettings = (
   change: (settings: AccountBookingPageSettings) => AccountBookingPageSettings,
 ): AccountBookingPageDraft => ({ ...draft, settings: change(draft.settings) });
 
+const linkButtonClass =
+  "inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-full border border-gray-300 bg-white px-4 text-[14px] font-semibold hover:border-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500";
+
+const STATUS_TEXT: Record<PageStatus, string> = {
+  live: "settings.multiProperty.page.statusLive",
+  noReadyStay: "settings.multiProperty.page.statusNoReadyStay",
+  liveOnSave: "settings.multiProperty.page.statusLiveOnSave",
+  needsReadyStay: "settings.multiProperty.error.noReadyProperty",
+  off: "settings.multiProperty.page.statusOff",
+};
+
 export function PageSection({
   t,
   draft,
   setDraft,
   problems,
   disabled,
+  dirty,
+  status,
   address,
   copyText,
 }: SectionProps) {
-  const [copied, setCopied] = useState(false);
+  // "Link copied", or what Preview needs (VAY-2483). A note belongs to the state it was shown in:
+  // once the page's status or its unsaved changes move on, it is gone.
+  const noteState = `${status}|${dirty}`;
+  const [note, setNote] = useState<{ text: string; state: string } | null>(null);
+  const noteTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const timer = noteTimer;
+    return () => window.clearTimeout(timer.current);
+  }, []);
+  const showNote = (text: string, forMs?: number) => {
+    window.clearTimeout(noteTimer.current);
+    setNote(text ? { text, state: noteState } : null);
+    if (forMs) noteTimer.current = window.setTimeout(() => setNote(null), forMs);
+  };
+  const live = status === "live" ? address.saved : null;
   const page = draft.settings.page;
   const setPage = (change: Partial<AccountBookingPageSettings["page"]>) =>
     setDraft(withSettings(draft, (s) => ({ ...s, page: { ...s.page, ...change } })));
@@ -192,11 +230,9 @@ export function PageSection({
       title={t("settings.multiProperty.nav.page")}
       hint={
         <span data-testid="multi-property-status">
-          {draft.live && address.url
-            ? t("settings.multiProperty.page.statusLive", {
-                address: address.url.replace(/^https?:\/\//, ""),
-              })
-            : t("settings.multiProperty.page.statusOff")}
+          {t(STATUS_TEXT[status], {
+            address: address.saved?.replace(/^https?:\/\//, "") ?? "",
+          })}
         </span>
       }
       aside={
@@ -296,19 +332,56 @@ export function PageSection({
               onClick={() => {
                 if (!address.url) return;
                 copyText(address.url).then(
-                  () => {
-                    setCopied(true);
-                    window.setTimeout(() => setCopied(false), 3000);
-                  },
-                  () => setCopied(false),
+                  () => showNote(t("settings.multiProperty.page.copied"), 3000),
+                  () => showNote(""),
                 );
               }}
-              className="min-h-[44px] shrink-0 rounded-full border border-gray-300 bg-white px-4 text-[14px] font-semibold text-gray-900 hover:border-gray-500 disabled:opacity-50"
+              className={`${linkButtonClass} text-gray-900 disabled:opacity-50`}
             >
               {t("settings.multiProperty.page.copy")}
             </button>
-            <span role="status" className="self-center text-[13px] font-medium text-green-700">
-              {copied ? t("settings.multiProperty.page.copied") : ""}
+            {/* The saved page, as guests see it, in a new tab (VAY-2483). Until it is live, the
+                button says what it needs. */}
+            {live ? (
+              <a
+                href={live}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() =>
+                  showNote(dirty ? t("settings.multiProperty.page.previewSavedVersion") : "")
+                }
+                // relative: holds the screen-reader text inside the row (it is absolutely placed).
+                className={`${linkButtonClass} relative text-gray-900`}
+              >
+                {t("settings.multiProperty.page.preview")}
+                <span className="sr-only">{t("settings.multiProperty.page.previewNewTab")}</span>
+                <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+              </a>
+            ) : (
+              // Still a button: pressed, it says what the page needs.
+              <button
+                type="button"
+                onClick={() =>
+                  showNote(
+                    t(
+                      status === "noReadyStay" || status === "needsReadyStay"
+                        ? "settings.multiProperty.page.previewNeedsStay"
+                        : "settings.multiProperty.page.previewNeedsLive",
+                    ),
+                  )
+                }
+                className={`${linkButtonClass} text-gray-500`}
+              >
+                {t("settings.multiProperty.page.preview")}
+                <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+            <span
+              role="status"
+              data-testid="multi-property-link-note"
+              className="self-center text-[13px] font-medium text-gray-700"
+            >
+              {note?.state === noteState ? note.text : ""}
             </span>
           </span>
         )}

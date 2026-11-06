@@ -16,7 +16,11 @@ import {
 } from "@/components/settings/MultiPropertySections";
 import { FeedbackAlert } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
-import { draftProblems, type AccountBookingPageDraft } from "@/lib/utils/accountBookingPage";
+import {
+  draftProblems,
+  pageStatus,
+  type AccountBookingPageDraft,
+} from "@/lib/utils/accountBookingPage";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { uploadSingleImageWithMediaReference, type UploadedImage } from "@/lib/utils/uploadImage";
 import {
@@ -241,11 +245,14 @@ export function MultiPropertyBookingPage({
     }
   };
 
-  const sample = buildBookingPreviewUrl({
-    slug: "slug-sample",
-    template: process.env.NEXT_PUBLIC_BOOKING_PREVIEW_URL_TEMPLATE,
-    location: typeof window === "undefined" ? undefined : window.location,
-  });
+  // The address the top bar's Preview opens, on the new system's host (VAY-2483).
+  const addressOf = (slug: string) =>
+    buildBookingPreviewUrl({
+      slug,
+      template: process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE,
+      location: typeof window === "undefined" ? undefined : window.location,
+    });
+  const sample = addressOf("slug-sample");
   const [addressBefore, addressAfter] = sample?.split("slug-sample") ?? ["https://", ""];
   const props: SectionProps = {
     t,
@@ -259,12 +266,15 @@ export function MultiPropertyBookingPage({
     summary,
     problems: showProblems ? problems : new Set(),
     disabled: saving,
+    dirty,
+    status: pageStatus(summary, draft, blocked),
     address: {
       before: addressBefore ?? "",
       after: addressAfter ?? "",
       url: problems.has("invalidSlug")
         ? null
         : `${addressBefore}${draft.slug.trim()}${addressAfter}`,
+      saved: summary.saved ? addressOf(summary.page.slug) : null,
     },
     copyText,
   };

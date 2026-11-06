@@ -6,6 +6,7 @@ import {
 import type {
   AccountBookingPageHeaderImage,
   AccountBookingPageProperty,
+  AccountBookingPageSummary,
 } from "@/services/api/accountBookingPageClient";
 
 /** The page as the form edits it (VAY-2457). */
@@ -35,6 +36,31 @@ export function propertyStatus(
   const type = property.missing.includes("type");
   const location = property.missing.includes("location");
   return type && location ? "noTypeNoLocation" : type ? "noType" : "noLocation";
+}
+
+/** What guests find at the page's address now (VAY-2483), from the saved page: live with a stay to
+ * book, live with none ready (its address says "not online"), or off. While it isn't live, the
+ * form tells whether a save would put it online: the switch is on, a ready stay is included and
+ * the account may save (`blocked`: it needs two properties first). */
+export type PageStatus = "live" | "noReadyStay" | "liveOnSave" | "needsReadyStay" | "off";
+
+export function pageStatus(
+  summary: {
+    saved: boolean;
+    page: Pick<AccountBookingPageSummary["page"], "live">;
+    properties: readonly Pick<AccountBookingPageProperty, "propertyId" | "included" | "ready">[];
+  },
+  draft: Pick<AccountBookingPageDraft, "live" | "propertyIds">,
+  blocked: boolean,
+): PageStatus {
+  const ready = (included: (property: { propertyId: string; included: boolean }) => boolean) =>
+    summary.properties.some((property) => property.ready && included(property));
+  if (summary.saved && summary.page.live)
+    return ready((property) => property.included) ? "live" : "noReadyStay";
+  if (!draft.live || blocked) return "off";
+  return ready((property) => draft.propertyIds.includes(property.propertyId))
+    ? "liveOnSave"
+    : "needsReadyStay";
 }
 
 /** Includes a stay at the end of the order, or leaves it out. The design can only be copied from an
