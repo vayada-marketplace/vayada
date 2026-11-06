@@ -522,8 +522,11 @@ test("a rate whose older terms today's rules refuse: the copy's Prices tab opens
       exact: false,
     }),
   ).toBeVisible();
+  // The banner says why the save failed; the Rates step marks the rate to fix.
+  const rule = "Non-refundable stays are paid in advance, so they can't be paid at the property";
+  await expect(main(page).getByRole("alert").filter({ hasText: rule }).first()).toBeVisible();
   await expect(
-    main(page).getByText("Non-refundable stays are paid in advance", { exact: false }),
+    main(page).getByLabel("Rates").getByRole("alert").filter({ hasText: rule }),
   ).toBeVisible();
   const table = seasonTable(page);
   await expect(table.getByLabel("Hilltop Villa Copy Offer 1 Per room")).toHaveValue("400.00");
