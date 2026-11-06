@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
+import { useHotel } from "@/contexts/HotelContext";
 import type { PricingRoom } from "@/services/api/replacementOffers";
 import RoomPlace, { type GuestPlace } from "./RoomPlace";
 
@@ -16,7 +17,8 @@ const DETAILS_MIN_HEIGHT = 160;
 /** "View Details" on a room card, restored from the old booking page (VAY-2190): the room's
  * photos, facts, full description and amenities, with the card's own choices below.
  * VAY-2410: from lg up, a wide window whose 5:4 photo sets its height, with the details scrolling
- * beside it over the pinned rates. Smaller screens show one column, phones as before. */
+ * beside it over the pinned rates. Smaller screens show one column, phones as before.
+ * VAY-2488: the property's check-in and check-out times under the description, as the old page had. */
 export default function RoomDetailModal({
   room,
   roomCount,
@@ -35,6 +37,10 @@ export default function RoomDetailModal({
   children: ReactNode;
 }) {
   const t = useTranslations("home");
+  const tc = useTranslations("common");
+  // The stay's hotel: on an agency's page, the stay's own (VAY-2461).
+  const { hotel } = useHotel();
+  const { checkInTime, checkOutTime } = hotel;
   const titleId = useId();
   const amenitiesId = useId();
   const descriptionId = useId();
@@ -280,6 +286,46 @@ export default function RoomDetailModal({
                         {showFullDescription ? t("showLess") : t("readMore")}
                       </button>
                     )}
+                  </div>
+                )}
+                {(checkInTime || checkOutTime) && (
+                  <div className="flex items-center gap-2 text-sm text-gray-700 mb-5 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                    <svg
+                      className="w-4 h-4 text-primary-600 flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    {/* Each time leads with its "·", and the times start one dot's width left of
+                        the clipped edge: a line's first time, wrapped onto a new line too, shows none. */}
+                    <span className="min-w-0 overflow-hidden">
+                      <span className="flex flex-wrap gap-y-0.5 -ml-6">
+                        {[
+                          checkInTime && tc("checkInFrom", { time: checkInTime }),
+                          checkOutTime && tc("checkOutBy", { time: checkOutTime }),
+                        ]
+                          .filter(Boolean)
+                          .map((text) => (
+                            <span key={text}>
+                              <span
+                                className="inline-block w-6 text-center text-gray-300"
+                                aria-hidden="true"
+                              >
+                                ·
+                              </span>
+                              <span>{text}</span>
+                            </span>
+                          ))}
+                      </span>
+                    </span>
                   </div>
                 )}
                 {amenities.length > 0 && (
