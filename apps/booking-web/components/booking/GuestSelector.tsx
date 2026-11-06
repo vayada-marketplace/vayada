@@ -205,7 +205,7 @@ export default function GuestSelector({
       <button
         type="button"
         onClick={onClose}
-        className="w-full mt-5 py-2.5 bg-primary-600 text-primary-on-600 font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
+        className="w-full mt-5 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
       >
         {t("done")}
       </button>

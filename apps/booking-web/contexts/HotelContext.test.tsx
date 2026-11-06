@@ -125,8 +125,9 @@ it("keeps the page mounted while a loaded hotel is fetched again for another pag
   }
 });
 
-// VAY-2475: any brand colour; buttons on a light one get dark text instead of white.
-it("gives buttons dark text on a light brand colour and white text on a dark one", async () => {
+// VAY-2486: text on the brand colour stays white, however light the colour (Timo's call);
+// the page sets only the brand shades, with no dark-text switch.
+it("applies a light brand colour's shades and sets no text colour for them", async () => {
   getHotel.mockResolvedValue({
     slug: "aether",
     name: "Aether Hilltop Villas",
@@ -134,24 +135,14 @@ it("gives buttons dark text on a light brand colour and white text on a dark one
   });
   getAddons.mockResolvedValue([]);
 
-  const first = await renderProvider(<p>Hotel content</p>, "aether");
+  const { cleanup } = await renderProvider(<p>Hotel content</p>, "aether");
   const root = document.documentElement.style;
   try {
     expect(root.getPropertyValue("--color-primary-600")).toBe("#aa8868");
-    expect(root.getPropertyValue("--color-primary-on-600")).toBe("0 0 0");
-    // The confirmation page's darker buttons keep white text, which reads better there.
-    expect(root.getPropertyValue("--color-primary-on-700")).toBe("255 255 255");
+    expect(root.getPropertyValue("--color-primary-on-600")).toBe("");
+    expect(root.getPropertyValue("--color-primary-on-700")).toBe("");
   } finally {
-    first.cleanup();
-  }
-
-  getHotel.mockResolvedValue({ slug: "tiga", name: "Tiga", branding: { primaryColor: "#2D3436" } });
-  const second = await renderProvider(<p>Hotel content</p>, "tiga");
-  try {
-    expect(root.getPropertyValue("--color-primary-on-600")).toBe("255 255 255");
-    expect(root.getPropertyValue("--color-primary-on-700")).toBe("255 255 255");
-  } finally {
-    second.cleanup();
+    cleanup();
   }
 });
 

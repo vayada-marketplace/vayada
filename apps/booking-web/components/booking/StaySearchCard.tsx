@@ -148,7 +148,7 @@ export default function StaySearchCard({
             onPanel(null);
             onCheck();
           }}
-          className="w-full md:w-auto px-8 py-3 bg-primary-600 text-primary-on-600 font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2"
+          className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2"
         >
           {tc("checkAvailability")}
         </button>

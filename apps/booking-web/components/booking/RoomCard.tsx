@@ -358,7 +358,7 @@ export default function RoomCard({
               ? "bg-success-50 text-success-800 border border-success-200 cursor-default"
               : !selected || soldOut || usedUp || tooSmall || pick.allChosen
                 ? "bg-gray-100 text-gray-600 border border-gray-200 cursor-not-allowed"
-                : "bg-primary-600 text-primary-on-600 hover:bg-primary-700"
+                : "bg-primary-600 text-white hover:bg-primary-700"
           }`}
         >
           {soldOut
@@ -384,7 +384,7 @@ export default function RoomCard({
             () => selected && onSelect(selected.offer.publicOfferKey, roomCount),
           )}
           disabled={!selected || tooSmall}
-          className="w-full mt-4 py-3 bg-primary-600 text-primary-on-600 font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
+          className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
         >
           {soldOut
             ? t("soldOut")

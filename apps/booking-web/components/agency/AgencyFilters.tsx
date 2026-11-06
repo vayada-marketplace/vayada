@@ -7,7 +7,7 @@ import type { AgencyFilterOptions, AgencyFilters as Filters } from "@/lib/agency
 const chip = (active: boolean) =>
   `inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[15px] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 ${
     active
-      ? "border-primary-600 bg-primary-600 text-primary-on-600"
+      ? "border-primary-600 bg-primary-600 text-white"
       : "border-gray-300 bg-white text-gray-900 hover:border-gray-900"
   }`;
 
@@ -261,7 +261,7 @@ function PriceBox({
             <button
               type="button"
               onClick={close}
-              className="min-h-[44px] rounded-full bg-primary-600 px-5 text-[15px] font-semibold text-primary-on-600 hover:bg-primary-700"
+              className="min-h-[44px] rounded-full bg-primary-600 px-5 text-[15px] font-semibold text-white hover:bg-primary-700"
             >
               {t("priceDone")}
             </button>

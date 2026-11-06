@@ -68,7 +68,7 @@ const PILL =
   // A touch target of at least 44 px around the pill (VAY-2325).
   "before:absolute before:-inset-2 before:content-['']";
 const PILL_IDLE = "border border-gray-200 bg-white text-gray-900";
-const PILL_SELECTED = "border-2 border-white bg-primary-600 text-primary-on-600";
+const PILL_SELECTED = "border-2 border-white bg-primary-600 text-white";
 // Nearby places further from every pill than this stay out of the first view (an airport, a day trip).
 const NEARBY_FIT_METRES = 5_000;
 
@@ -573,7 +573,7 @@ export function MapGate({
       <button
         type="button"
         onClick={onRequest}
-        className="rounded-full bg-primary-600 px-5 py-2.5 text-sm font-semibold text-primary-on-600 hover:bg-primary-700"
+        className="rounded-full bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-700"
       >
         {t("showMap")}
       </button>

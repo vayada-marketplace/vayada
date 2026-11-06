@@ -164,7 +164,7 @@ export default function ExtrasStep({
               onClick={() => setCategory(key)}
               className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
                 category === key
-                  ? "bg-primary-600 text-primary-on-600 border-primary-600"
+                  ? "bg-primary-600 text-white border-primary-600"
                   : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
               }`}
             >

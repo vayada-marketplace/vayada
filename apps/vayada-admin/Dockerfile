@@ -10,7 +10,7 @@ WORKDIR /app
 COPY . .
 
 RUN npm ci
-# product-onboarding imports @vayada/domain-booking/design-colors at runtime, so build domain-booking.
+# Shared packages such as product-onboarding import @vayada/domain-booking, which resolves to dist/.
 # Its prebuild also builds the Hotels, PMS, and Finance packages.
 RUN npm --workspace @vayada/domain-booking run build
 

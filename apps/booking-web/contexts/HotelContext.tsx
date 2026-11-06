@@ -16,7 +16,7 @@ import { hotelService } from "@/services/api/hotel";
 import { getAgencyPage, type AgencyPage } from "@/services/api/agencyPage";
 import { ApiError } from "@/services/api/client";
 import { routing } from "@/i18n/routing";
-import { generateColorPalette, generateOnColorPalette } from "@/lib/utils/colors";
+import { generateColorPalette } from "@/lib/utils/colors";
 import { brandFontPairing } from "@vayada/fonts/brand";
 import { agencyStayBase, agencyStayPathSlug, stayPath } from "@/lib/stayPath";
 
@@ -193,10 +193,7 @@ export function HotelProvider({
   const primaryColor = hotel?.branding?.primaryColor ?? agency?.design.primaryColor;
   useEffect(() => {
     if (primaryColor) {
-      const palette = {
-        ...generateColorPalette(primaryColor),
-        ...generateOnColorPalette(primaryColor),
-      };
+      const palette = generateColorPalette(primaryColor);
       const root = document.documentElement;
       for (const [shade, color] of Object.entries(palette)) {
         root.style.setProperty(`--color-primary-${shade}`, color);
