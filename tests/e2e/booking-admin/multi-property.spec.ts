@@ -200,7 +200,7 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
   await expect(pageSection.getByRole("link", { name: "Preview" })).toHaveCount(0);
   await pageSection.getByRole("button", { name: "Preview" }).click();
   await expect(page.getByTestId("multi-property-link-note")).toHaveText(
-    "Turn the page live and save it to preview it.",
+    "Preview opens the page once it is live and saved.",
   );
 
   // Header
@@ -244,10 +244,12 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Changes saved", { exact: true })).toBeVisible();
   await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
-  // Live on the new system's host, never the old *.booking.vayada.com (VAY-2483).
+  // Live on the new system's host, never the old *.booking.vayada.com (VAY-2483). The note from
+  // before the save is gone with the state it was about.
   await expect(page.getByTestId("multi-property-status")).toHaveText(
     `Live at ${agencyAddress(page, "thetravelubud")}`,
   );
+  await expect(page.getByTestId("multi-property-link-note")).toHaveText("");
   await expect(pageSection.getByRole("link", { name: "Preview" })).toHaveAttribute(
     "href",
     new RegExp(`^https?://${agencyAddress(page, "thetravelubud").replace(/\./g, "\\.")}$`),
@@ -321,9 +323,8 @@ test("previews the saved page, and says what it needs while guests can't see it"
   await expect(status).toHaveText(
     "On, but no included property is ready to book yet, so guests see a “not online” message.",
   );
-  const unavailable = section.getByRole("button", { name: "Preview" });
-  await expect(unavailable).toHaveAttribute("aria-disabled", "true");
-  await unavailable.click();
+  await expect(section.getByRole("link", { name: "Preview" })).toHaveCount(0);
+  await section.getByRole("button", { name: "Preview" }).click();
   await expect(note).toHaveText(
     "Include at least one ready property and save to preview the page.",
   );
@@ -335,21 +336,49 @@ test("previews the saved page, and says what it needs while guests can't see it"
   expect(mock.saves.at(-1)?.propertyIds).toEqual([mansion, escape]);
   const address = agencyAddress(page, "thetravelubud");
   await expect(status).toHaveText(`Live at ${address}`);
-  const preview = section.getByRole("link", { name: "Preview" });
+  await expect(note).toHaveText("");
+  const preview = section.getByRole("link", { name: "Preview (opens in a new tab)" });
   await expect(preview).toHaveAttribute("target", "_blank");
   await expect(preview).toHaveAttribute("rel", "noopener noreferrer");
-  let popup = page.waitForEvent("popup");
-  await preview.click();
-  expect(new URL((await popup).url()).host).toBe(address);
+  const opened = async () => {
+    const popup = page.waitForEvent("popup");
+    await preview.click();
+    const tab = await popup;
+    await tab.waitForLoadState();
+    return new URL(tab.url()).host;
+  };
+  expect(await opened()).toBe(address);
   await expect(note).toHaveText("");
 
   // Unsaved edits, even a new link, don't change what Preview opens: the saved page.
   await page.getByRole("textbox", { name: "Link address" }).fill("travel-ubud");
   await expect(status).toHaveText(`Live at ${address}`);
-  popup = page.waitForEvent("popup");
-  await preview.click();
-  expect(new URL((await popup).url()).host).toBe(address);
+  expect(await opened()).toBe(address);
   await expect(note).toHaveText("The preview shows the last saved version.");
+});
+
+test("says a page switched on needs a ready property before a save puts it live", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.goto("/settings/multi-property");
+  const status = page.getByTestId("multi-property-status");
+  const note = page.getByTestId("multi-property-link-note");
+  await page.getByRole("switch", { name: "Booking page live" }).click();
+  await expect(status).toHaveText("Goes live when you save.");
+  for (const name of ["The Escape Villa Ubud", "Mandala's Villa", "Mertha Carik Guest House"])
+    await page.getByRole("switch", { name: `Include ${name}` }).click();
+  await expect(status).toHaveText(
+    "Include at least one ready property before turning the page live.",
+  );
+  await page.locator("#mp-page").getByRole("button", { name: "Preview" }).click();
+  await expect(note).toHaveText(
+    "Include at least one ready property and save to preview the page.",
+  );
+  // Taking a ready one back: a save would put it live, and the note about before is gone.
+  await page.getByRole("switch", { name: "Include Mandala's Villa" }).click();
+  await expect(status).toHaveText("Goes live when you save.");
+  await expect(note).toHaveText("");
 });
 
 test("uploads the agency's own header image, saves it and can remove it", async ({

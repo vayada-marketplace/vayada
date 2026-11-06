@@ -59,26 +59,46 @@ describe("agency booking page form rules", () => {
     expect(missing(["type", "location"])).toBe("noTypeNoLocation");
   });
 
-  // VAY-2483: what guests find at the address now, from the saved page.
-  it("says whether the saved page is live, live with no stay to book, or off", () => {
+  // VAY-2483: what guests find at the address now, from the saved page; else what a save would do.
+  it("says whether the saved page is live, live with no stay to book, or what a save does", () => {
     const page = (
       saved: boolean,
       live: boolean,
       properties: AccountBookingPageProperty[],
-      draftLive: boolean,
-    ) => pageStatus({ saved, page: { live }, properties }, draftLive);
+      form: { live: boolean; propertyIds?: string[] },
+      blocked = false,
+    ) =>
+      pageStatus(
+        { saved, page: { live }, properties },
+        {
+          live: form.live,
+          propertyIds:
+            form.propertyIds ?? properties.filter((p) => p.included).map((p) => p.propertyId),
+        },
+        blocked,
+      );
     const included = stay("a", { included: true });
     const notReady = stay("b", { included: true, ready: false, missing: ["location"] });
     const left = stay("c");
-    expect(page(true, true, [notReady, included], true)).toBe("live");
-    // Switched off in the form but not saved yet: still live.
-    expect(page(true, true, [included], false)).toBe("live");
+    expect(page(true, true, [notReady, included], { live: true })).toBe("live");
+    // Switched off or emptied in the form but not saved yet: still live as saved.
+    expect(page(true, true, [included], { live: false, propertyIds: [] })).toBe("live");
     // A ready stay that isn't included doesn't count; neither does an included one that isn't ready.
-    expect(page(true, true, [notReady, left], true)).toBe("noReadyStay");
-    expect(page(true, false, [included], true)).toBe("liveOnSave");
-    expect(page(false, false, [included], true)).toBe("liveOnSave");
-    expect(page(true, false, [included], false)).toBe("off");
-    expect(page(false, false, [], false)).toBe("off");
+    expect(page(true, true, [notReady, left], { live: true })).toBe("noReadyStay");
+    expect(page(true, true, [notReady, left], { live: true, propertyIds: ["c"] })).toBe(
+      "noReadyStay",
+    );
+    // Not live yet: a save puts it online only with a ready stay in the form and when it may save.
+    expect(page(true, false, [included], { live: true })).toBe("liveOnSave");
+    expect(page(false, false, [notReady, left], { live: true, propertyIds: ["b", "c"] })).toBe(
+      "liveOnSave",
+    );
+    expect(page(false, false, [notReady, left], { live: true, propertyIds: ["b"] })).toBe(
+      "needsReadyStay",
+    );
+    expect(page(false, false, [included], { live: true }, true)).toBe("off");
+    expect(page(true, false, [included], { live: false })).toBe("off");
+    expect(page(false, false, [], { live: false })).toBe("off");
   });
 
   it("includes stays at the end and resets the design when its stay leaves", () => {

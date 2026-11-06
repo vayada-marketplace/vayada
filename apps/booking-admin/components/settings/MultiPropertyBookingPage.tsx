@@ -267,7 +267,7 @@ export function MultiPropertyBookingPage({
     problems: showProblems ? problems : new Set(),
     disabled: saving,
     dirty,
-    status: pageStatus(summary, draft.live),
+    status: pageStatus(summary, draft, blocked),
     address: {
       before: addressBefore ?? "",
       after: addressAfter ?? "",

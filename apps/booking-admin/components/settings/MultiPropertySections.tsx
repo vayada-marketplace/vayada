@@ -180,12 +180,13 @@ const withSettings = (
 ): AccountBookingPageDraft => ({ ...draft, settings: change(draft.settings) });
 
 const linkButtonClass =
-  "inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-full border border-gray-300 bg-white px-4 text-[14px] font-semibold text-gray-900 hover:border-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500";
+  "inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-full border border-gray-300 bg-white px-4 text-[14px] font-semibold hover:border-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500";
 
 const STATUS_TEXT: Record<PageStatus, string> = {
   live: "settings.multiProperty.page.statusLive",
   noReadyStay: "settings.multiProperty.page.statusNoReadyStay",
   liveOnSave: "settings.multiProperty.page.statusLiveOnSave",
+  needsReadyStay: "settings.multiProperty.error.noReadyProperty",
   off: "settings.multiProperty.page.statusOff",
 };
 
@@ -200,8 +201,10 @@ export function PageSection({
   address,
   copyText,
 }: SectionProps) {
-  // "Link copied", or what Preview needs (VAY-2483).
-  const [note, setNote] = useState("");
+  // "Link copied", or what Preview needs (VAY-2483). A note belongs to the state it was shown in:
+  // once the page's status or its unsaved changes move on, it is gone.
+  const noteState = `${status}|${dirty}`;
+  const [note, setNote] = useState<{ text: string; state: string } | null>(null);
   const noteTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
     const timer = noteTimer;
@@ -209,8 +212,8 @@ export function PageSection({
   }, []);
   const showNote = (text: string, forMs?: number) => {
     window.clearTimeout(noteTimer.current);
-    setNote(text);
-    if (forMs) noteTimer.current = window.setTimeout(() => setNote(""), forMs);
+    setNote(text ? { text, state: noteState } : null);
+    if (forMs) noteTimer.current = window.setTimeout(() => setNote(null), forMs);
   };
   const live = status === "live" ? address.saved : null;
   const page = draft.settings.page;
@@ -333,7 +336,7 @@ export function PageSection({
                   () => showNote(""),
                 );
               }}
-              className={`${linkButtonClass} disabled:opacity-50`}
+              className={`${linkButtonClass} text-gray-900 disabled:opacity-50`}
             >
               {t("settings.multiProperty.page.copy")}
             </button>
@@ -347,25 +350,27 @@ export function PageSection({
                 onClick={() =>
                   showNote(dirty ? t("settings.multiProperty.page.previewSavedVersion") : "")
                 }
-                className={linkButtonClass}
+                // relative: holds the screen-reader text inside the row (it is absolutely placed).
+                className={`${linkButtonClass} relative text-gray-900`}
               >
                 {t("settings.multiProperty.page.preview")}
+                <span className="sr-only">{t("settings.multiProperty.page.previewNewTab")}</span>
                 <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
               </a>
             ) : (
+              // Still a button: pressed, it says what the page needs.
               <button
                 type="button"
-                aria-disabled="true"
                 onClick={() =>
                   showNote(
                     t(
-                      status === "noReadyStay"
+                      status === "noReadyStay" || status === "needsReadyStay"
                         ? "settings.multiProperty.page.previewNeedsStay"
                         : "settings.multiProperty.page.previewNeedsLive",
                     ),
                   )
                 }
-                className={`${linkButtonClass} cursor-not-allowed opacity-50 hover:border-gray-300`}
+                className={`${linkButtonClass} text-gray-500`}
               >
                 {t("settings.multiProperty.page.preview")}
                 <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
@@ -376,7 +381,7 @@ export function PageSection({
               data-testid="multi-property-link-note"
               className="self-center text-[13px] font-medium text-gray-700"
             >
-              {note}
+              {note?.state === noteState ? note.text : ""}
             </span>
           </span>
         )}
