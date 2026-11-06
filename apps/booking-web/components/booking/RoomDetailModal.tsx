@@ -304,14 +304,27 @@ export default function RoomDetailModal({
                         d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                       />
                     </svg>
-                    <span className="flex flex-wrap gap-x-3 gap-y-0.5">
-                      {checkInTime && <span>{tc("checkInFrom", { time: checkInTime })}</span>}
-                      {checkInTime && checkOutTime && (
-                        <span className="text-gray-300" aria-hidden="true">
-                          ·
-                        </span>
-                      )}
-                      {checkOutTime && <span>{tc("checkOutBy", { time: checkOutTime })}</span>}
+                    {/* Each time leads with its "·", and the times start one dot's width left of
+                        the clipped edge: a line's first time, wrapped onto a new line too, shows none. */}
+                    <span className="min-w-0 overflow-hidden">
+                      <span className="flex flex-wrap gap-y-0.5 -ml-6">
+                        {[
+                          checkInTime && tc("checkInFrom", { time: checkInTime }),
+                          checkOutTime && tc("checkOutBy", { time: checkOutTime }),
+                        ]
+                          .filter(Boolean)
+                          .map((text) => (
+                            <span key={text}>
+                              <span
+                                className="inline-block w-6 text-center text-gray-300"
+                                aria-hidden="true"
+                              >
+                                ·
+                              </span>
+                              <span>{text}</span>
+                            </span>
+                          ))}
+                      </span>
                     </span>
                   </div>
                 )}

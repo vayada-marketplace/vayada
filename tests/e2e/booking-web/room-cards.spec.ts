@@ -611,6 +611,44 @@ for (const width of [1440, 390]) {
   });
 }
 
+test("VAY-2488: a longer language wraps the times on a phone, with no stray dot", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(
+    ({ slug, version }) =>
+      localStorage.setItem(
+        `vayada_booking_analytics:${slug}`,
+        JSON.stringify({ version, analytics: false }),
+      ),
+    { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+  );
+  await mockBookingApis(page, { supportedLocales: ["en", "es"] });
+  await mockRooms(page);
+  await page.goto(`/es${STAY.slice(1)}`);
+  await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
+
+  await page.getByTestId("room-card-deluxe").getByRole("button", { name: "Ver detalles" }).click();
+  const dialog = page.getByRole("dialog", { name: "Deluxe Double Room" });
+  const checkIn = dialog.getByText("Check-in desde las 15:00", { exact: true });
+  const checkOut = dialog.getByText("Check-out hasta las 11:00", { exact: true });
+  await expect(checkIn).toBeVisible();
+  await expect(checkOut).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("room-details-times-390-es.png"),
+    animations: "disabled",
+  });
+  // Check-out starts a second line, level with check-in; its "·" sits left of both, cut off.
+  const checkInBox = (await checkIn.boundingBox())!;
+  const checkOutBox = (await checkOut.boundingBox())!;
+  const dotBox = (await checkOut.locator("xpath=preceding-sibling::span[1]").boundingBox())!;
+  expect(checkOutBox.y).toBeGreaterThan(checkInBox.y);
+  expect(Math.abs(checkOutBox.x - checkInBox.x)).toBeLessThan(1);
+  expect(dotBox.x + dotBox.width).toBeLessThanOrEqual(checkInBox.x + 0.5);
+  await assertHealthy();
+});
+
 for (const width of [1440, 390]) {
   test(`VAY-2422: opens the room a hotel website's link names, once, at ${width}px`, async ({
     page,

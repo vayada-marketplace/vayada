@@ -65,15 +65,18 @@ const render = (locale = "en") =>
     ),
   );
 const details = () => document.querySelector('[role="dialog"]')?.textContent ?? "";
-// The times' row: the one block whose text starts with them (its clock icon has none).
+// The times' row: the one block whose text starts with them (its clock icon has none). Each time
+// leads with a "·" that screen readers skip; the row hides the one that starts a line.
 const timesRow = () =>
   Array.from(document.querySelectorAll('[role="dialog"] div')).find((element) =>
-    /^Check-(in|out)/.test(element.textContent ?? ""),
+    /^·Check-(in|out)/.test(element.textContent ?? ""),
   )?.textContent;
 
 it("shows the hotel's check-in and check-out times under the description, above the amenities (VAY-2488)", () => {
   render();
-  expect(timesRow()).toBe("Check-in from 14:00·Check-out by 11:00");
+  const dots = document.querySelectorAll('[role="dialog"] [aria-hidden="true"]');
+  expect(Array.from(dots).filter((dot) => dot.textContent === "·")).toHaveLength(2);
+  expect(timesRow()).toBe("·Check-in from 14:00·Check-out by 11:00");
   const text = details();
   expect(text.indexOf(room.description!)).toBeLessThan(text.indexOf("Check-in from 14:00"));
   expect(text.indexOf("Check-out by 11:00")).toBeLessThan(text.indexOf("Private pool"));
@@ -81,17 +84,17 @@ it("shows the hotel's check-in and check-out times under the description, above 
 
 it("says them in the guest's language", () => {
   render("de");
-  expect(timesRow()).toBe("Check-in ab 14:00·Check-out bis 11:00");
+  expect(timesRow()).toBe("·Check-in ab 14:00·Check-out bis 11:00");
 });
 
 it("shows only the time the hotel has, and no row without either", () => {
   hotel.checkOutTime = "";
   render();
-  expect(timesRow()).toBe("Check-in from 14:00");
+  expect(timesRow()).toBe("·Check-in from 14:00");
 
   Object.assign(hotel, { checkInTime: "", checkOutTime: "10:30" });
   render();
-  expect(timesRow()).toBe("Check-out by 10:30");
+  expect(timesRow()).toBe("·Check-out by 10:30");
 
   hotel.checkOutTime = "";
   render();
