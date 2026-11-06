@@ -13,7 +13,8 @@ export type SearchPanel = "calendar" | "guests" | "promo" | null;
  * The search card under a booking page's hero (`#stay-search`, sticky on scroll): the stay's
  * dates, its guests, an optional promo field (`promo`, see PromoField) and Check Availability.
  * Which panel is open is the page's (`panel`), so it can open one from elsewhere. Shared by a
- * hotel's page and an agency's (VAY-2459).
+ * hotel's page and an agency's (VAY-2459). An agency's pages keep it in place on phones, where a
+ * pinned card would cover a third of the screen, and its stay page has no hero there (VAY-2463).
  */
 export default function StaySearchCard({
   panel,
@@ -28,6 +29,8 @@ export default function StaySearchCard({
   guests,
   promo,
   onCheck,
+  stickyOnPhones = true,
+  heroOnPhones = true,
 }: {
   panel: SearchPanel;
   onPanel: (panel: SearchPanel) => void;
@@ -43,12 +46,19 @@ export default function StaySearchCard({
   promo?: ReactNode;
   /** After every panel closed. */
   onCheck: () => void;
+  /** False: sticky from `lg` up only. */
+  stickyOnPhones?: boolean;
+  /** False: below `lg` the card starts under the page's bar instead of over a hero. */
+  heroOnPhones?: boolean;
 }) {
   const locale = useLocale();
   const t = useTranslations("home");
   const tc = useTranslations("common");
   return (
-    <div id="stay-search" className="sticky top-4 z-30 max-w-5xl mx-auto px-4 -mt-10">
+    <div
+      id="stay-search"
+      className={`${stickyOnPhones ? "sticky top-4" : "relative lg:sticky lg:top-4"} z-30 max-w-5xl mx-auto px-4 ${heroOnPhones ? "-mt-10" : "mt-4 lg:-mt-10"}`}
+    >
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-row flex-wrap items-center gap-4 md:gap-6">
         {/* Dates — clickable to open calendar */}
         <div className="relative flex-1 min-w-[120px]">

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useLocale, useTranslations } from "next-intl";
 import GuestMap, { MapGate, type GuestMapPlace } from "@/components/booking/GuestMap";
+import { useWideScreen } from "@/components/booking/AccommodationViews";
 import { formatDistance } from "@/components/booking/RoomPlace";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { chooseMaps, mapsChosen } from "@/lib/mapsChoice";
@@ -58,6 +59,7 @@ export default function AgencyNearbyStays({
   const showMap =
     agency.stayPage.map && !!mapsKey && [stay, ...nearby.map((one) => one.stay)].some((s) => s.map);
   const [hovered, setHovered] = useState<string | null>(null);
+  const wide = useWideScreen();
   const [requested, setRequested] = useState(mapsChosen);
 
   // The nearby stays' prices for the same search: the agency's read, as on its overview.
@@ -138,11 +140,12 @@ export default function AgencyNearbyStays({
       <div className="flex flex-col gap-3.5 border-t border-gray-200 pt-7">
         {nearby.length > 0 && (
           <>
-            <h2 id="nearby-heading" className="font-heading text-3xl text-gray-900">
+            <h2 id="nearby-heading" className="font-heading text-[22px] text-gray-900 lg:text-3xl">
               {t("nearbyHeading")}
             </h2>
             <p className="-mt-1.5 text-[15px] text-gray-500">
-              {t(showMap ? "nearbyHintMap" : "nearbyHint")}
+              {/* A phone has no mouse to point at a stay with (VAY-2463). */}
+              {t(showMap && wide ? "nearbyHintMap" : "nearbyHint")}
             </p>
             <ul
               data-testid="agency-nearby-stays"
@@ -154,7 +157,10 @@ export default function AgencyNearbyStays({
                 const away = distance(one);
                 const lit = hovered === one.stay.propertyId;
                 return (
-                  <li key={one.stay.propertyId} className="w-[260px] shrink-0 snap-start">
+                  <li
+                    key={one.stay.propertyId}
+                    className="w-[200px] shrink-0 snap-start lg:w-[260px]"
+                  >
                     <a
                       href={hrefOf(one.stay)}
                       data-testid={`agency-nearby-${one.stay.slug}`}
@@ -213,7 +219,7 @@ export default function AgencyNearbyStays({
           <div
             id="stay-map"
             data-testid="agency-stay-map"
-            className="relative mt-2 h-[420px] scroll-mt-36 overflow-hidden rounded-[20px] border border-gray-200 bg-gray-100"
+            className="relative mt-2 h-[240px] scroll-mt-4 overflow-hidden rounded-[20px] border border-gray-200 bg-gray-100 lg:h-[420px] lg:scroll-mt-36"
           >
             {requested ? (
               <GuestMap
