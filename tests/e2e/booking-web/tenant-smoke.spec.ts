@@ -107,7 +107,24 @@ test.describe("booking-web tenant smoke", () => {
     }
     const footer = page.locator("footer");
     await expect(footer).toHaveCSS("background-color", "rgb(170, 136, 104)");
-    await expect(footer).toHaveCSS("color", white);
+    // Every visible footer text and link is white: the name, contact block, copyright, Find My
+    // Booking, Privacy choices and "Powered by vayada" (some lines at 70-80%, as before #4059).
+    const expectWhiteFooterText = async () => {
+      const colours = await footer.evaluate((root) =>
+        Array.from(root.querySelectorAll<HTMLElement>("*"))
+          .filter(
+            (node) =>
+              node.checkVisibility() &&
+              Array.from(node.childNodes).some(
+                (child) => child.nodeType === Node.TEXT_NODE && child.textContent?.trim(),
+              ),
+          )
+          .map((node) => `${getComputedStyle(node).color} ${node.textContent?.trim()}`),
+      );
+      expect(colours.length).toBeGreaterThan(8);
+      for (const colour of colours) expect(colour).toMatch(/^rgba?\(255, 255, 255(, 0\.[78])?\) /);
+    };
+    await expectWhiteFooterText();
     await expect(footer.getByRole("button", { name: "Find My Booking" })).toHaveCSS("color", white);
     const reject = page.getByRole("button", { name: "Reject analytics" });
     await reject.waitFor({ state: "visible", timeout: 4000 }).then(
@@ -122,7 +139,7 @@ test.describe("booking-web tenant smoke", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect(selectRate).toHaveCSS("color", white);
-    await expect(footer).toHaveCSS("color", white);
+    await expectWhiteFooterText();
     await page.screenshot({ path: testInfo.outputPath("brand-colour-c19a76-390.png") });
 
     // A very light colour keeps white text too.
@@ -131,7 +148,7 @@ test.describe("booking-web tenant smoke", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(search).toHaveCSS("background-color", "rgb(216, 216, 216)");
     await expect(search).toHaveCSS("color", white);
-    await expect(footer).toHaveCSS("color", white);
+    await expectWhiteFooterText();
   });
 
   test("shows WhatsApp only when the hotel publishes a WhatsApp number", async ({ page }) => {
