@@ -9,6 +9,7 @@ import StaySearchCard, { type SearchPanel } from "@/components/booking/StaySearc
 import PromoField from "@/components/booking/PromoField";
 import StayRooms from "@/components/booking/StayRooms";
 import PropertyGallery from "@/components/booking/PropertyGallery";
+import { useWideScreen } from "@/components/booking/AccommodationViews";
 import Toast from "@/components/booking/Toast";
 import AgencyNearbyStays from "@/components/agency/AgencyNearbyStays";
 import BookingNavigation from "@/components/layout/BookingNavigation";
@@ -47,20 +48,27 @@ const localDate = (daysFromToday: number) => {
  * agency's header, the search card, a compact box for the stay ("← All stays", name, type, area
  * and what it has, Gallery), and the stay's rooms exactly as on its own page. A room chosen shows
  * a dark bar with the choice and its total; Continue opens the stay's checkout, here on the
- * agency's address under the stay (VAY-2462).
+ * agency's address under the stay (VAY-2462). On a phone (Timo's mobile prototype, VAY-2463) the
+ * page starts with the agency's slim bar instead of the hero, as checkout does; the search card
+ * stays where it is, the box is compact and the choice is a white bar along the bottom.
  */
 export default function AgencyStayPage({ agency, stay }: { agency: AgencyPage; stay: AgencyStay }) {
+  const wide = useWideScreen();
   return (
     // Clipped, not hidden, as on the overview: a hidden overflow would stop sticky parts.
     // The bottom padding keeps the page's end clear of the choice bar while it is up.
     <div className="min-h-screen bg-white overflow-x-clip pb-[var(--fixed-bottom-bar,0px)]">
-      <StayHero
-        image={agency.header.imageUrl}
-        alt={agency.name}
-        heading={agency.page.title}
-        subtext={agency.page.description}
-        navigation={<BookingNavigation showGallery />}
-      />
+      {wide ? (
+        <StayHero
+          image={agency.header.imageUrl}
+          alt={agency.name}
+          heading={agency.page.title}
+          subtext={agency.page.description}
+          navigation={<BookingNavigation showGallery />}
+        />
+      ) : (
+        <BookingNavigation solid />
+      )}
       <StayHotelProvider slug={stay.slug}>
         <StayContent agency={agency} stay={stay} />
         {/* VAY-2462: this stay's events (its rooms and checkout) are recorded with its own choice. */}
@@ -77,6 +85,7 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
   const { slug } = useSlug();
   const searchParams = useSearchParams();
   const { approximate } = useCurrency();
+  const wide = useWideScreen();
   // VAY-2462: the stay's funnel starts here, as on its own page (a session counts from its visit);
   // its events say they came through the agency's page. "Allow" starts a first visit then.
   useEffect(() => {
@@ -224,9 +233,20 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
     return stayPath(`/book?${params}`);
   })();
 
+  const box = (
+    <StayBox
+      stay={stay}
+      back={overviewHref(location, agency.slug, `?${overview}`)}
+      hotelName={hotel.name}
+      mapLink={agency.stayPage.map && !!MAPS_KEY && !!stay.map}
+      wide={wide}
+    />
+  );
   return (
     <>
       <StaySearchCard
+        stickyOnPhones={false}
+        heroOnPhones={false}
         panel={panel}
         onPanel={setPanel}
         checkIn={checkIn}
@@ -315,22 +335,23 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         }
         onCheck={() => {
           if (roomsFailed) reloadCatalog();
-          document.getElementById("rooms")?.scrollIntoView({ behavior: "smooth" });
+          document
+            .getElementById(wide ? "rooms" : "stay-intro")
+            ?.scrollIntoView({ behavior: "smooth" });
         }}
       />
 
+      {/* A phone has "All stays" and the box first, before the rooms' heading (VAY-2463). */}
+      {!wide && (
+        <div id="stay-intro" className="mx-auto max-w-7xl scroll-mt-4 px-4 pt-6 sm:px-6">
+          {box}
+        </div>
+      )}
       <StayRooms
         model={model}
         onEditDates={editDates}
         onEditGuests={openGuests}
-        intro={
-          <StayBox
-            stay={stay}
-            back={overviewHref(location, agency.slug, `?${overview}`)}
-            hotelName={hotel.name}
-            mapLink={agency.stayPage.map && !!MAPS_KEY && !!stay.map}
-          />
-        }
+        intro={wide ? box : undefined}
       />
 
       <AgencyNearbyStays
@@ -353,6 +374,8 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         chosen={shownChoice}
         approximate={approximate}
         href={checkoutHref}
+        nights={calculateNights(checkIn, checkOut)}
+        wide={wide}
       />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </>
@@ -360,18 +383,22 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
 }
 
 /** The stay at a glance (Timo's prototype): photo, back to all stays, name and type, area and
- * what it has, and its photos. */
+ * what it has, and its photos. On a phone (`wide` false, the mobile prototype) "All stays" comes
+ * first, then a compact box with Gallery and Map side by side; its name is the page's heading
+ * there, as no hero names the agency. */
 function StayBox({
   stay,
   back,
   hotelName,
   mapLink,
+  wide,
 }: {
   stay: AgencyStay;
   back: string;
   hotelName: string;
   /** "Map" scrolls to the stay's map below the rooms. */
   mapLink: boolean;
+  wide: boolean;
 }) {
   const t = useTranslations("agency");
   const tm = useTranslations("locationMap");
@@ -383,6 +410,100 @@ function StayBox({
     stay.units !== null &&
       t(stay.propertyType === "villa" ? "villas" : "units", { count: stay.units }),
   ].filter(Boolean);
+  const mapIcon = (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" />
+      <path d="M9 4v14M15 6v14" />
+    </svg>
+  );
+  const gallery = new Set(stay.photos.filter(Boolean)).size >= 2;
+  if (!wide)
+    return (
+      <>
+        <a
+          href={back}
+          className="mb-2 flex min-h-[44px] w-fit items-center gap-1 text-[15px] font-semibold text-gray-900"
+        >
+          <svg
+            aria-hidden="true"
+            className="h-[18px] w-[18px]"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          {t("allStays")}
+        </a>
+        <section
+          aria-labelledby="stay-name"
+          data-testid="agency-stay-box"
+          className="flex flex-col gap-3 rounded-[18px] border border-gray-200 p-3"
+        >
+          <div className="flex items-center gap-3">
+            <div className="relative h-[70px] w-[92px] shrink-0 overflow-hidden rounded-xl bg-gray-200">
+              {stay.photoUrl && (
+                <Image src={stay.photoUrl} alt="" fill sizes="92px" className="object-cover" />
+              )}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 id="stay-name" className="text-lg font-bold leading-snug text-gray-900">
+                  {stay.name}
+                </h1>
+                {type && (
+                  <span className="rounded-full border border-gray-300 bg-gray-100 px-2 py-px text-xs text-gray-700">
+                    {type}
+                  </span>
+                )}
+              </div>
+              {facts.length > 0 && <p className="text-sm text-gray-500">{facts.join(" · ")}</p>}
+            </div>
+          </div>
+          {/* Two equal halves; the gallery's own button fills its half. It shows from two
+              photos up (PropertyGallery). */}
+          {(gallery || mapLink) && (
+            <div
+              className={`grid gap-2 [&_button]:h-11 [&_button]:w-full [&_button]:justify-center ${
+                gallery && mapLink ? "grid-cols-2" : "grid-cols-1"
+              }`}
+            >
+              {gallery && (
+                <div className="min-w-0">
+                  <PropertyGallery
+                    hotelName={hotelName}
+                    images={stay.photos}
+                    outline
+                    label={`${tg("open")}: ${stay.name}`}
+                  />
+                </div>
+              )}
+              {mapLink && (
+                <a
+                  href="#stay-map"
+                  className="flex h-11 items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-[18px] text-[15px] font-semibold text-[#1F2427] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                >
+                  {mapIcon}
+                  {tm("viewMap")}
+                </a>
+              )}
+            </div>
+          )}
+        </section>
+      </>
+    );
   return (
     <section
       aria-labelledby="stay-name"
@@ -437,19 +558,7 @@ function StayBox({
             href="#stay-map"
             className="flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-[18px] text-[15px] font-semibold text-[#1F2427] hover:bg-[#F0F1F1] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
           >
-            <svg
-              aria-hidden="true"
-              className="h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" />
-              <path d="M9 4v14M15 6v14" />
-            </svg>
+            {mapIcon}
             {tm("viewMap")}
           </a>
         )}
@@ -466,12 +575,16 @@ function ChoiceBar({
   chosen,
   approximate,
   href,
+  nights,
+  wide,
 }: {
   stay: AgencyStay;
   model: StayRoomsModel;
   chosen: string | null;
   approximate: (amount: number, currency: string) => string | null;
   href: string | null;
+  nights: number;
+  wide: boolean;
 }) {
   const t = useTranslations("agency");
   const params = new URLSearchParams(chosen ?? "");
@@ -511,24 +624,38 @@ function ChoiceBar({
         {chosen ? [stay.name, line, total].filter(Boolean).join(", ") : ""}
       </p>
       {chosen && href && (
-        <Bar name={stay.name} line={line} total={total} hasAddons={model.hasAddons} href={href} />
+        <Bar
+          name={stay.name}
+          line={line}
+          total={total}
+          hasAddons={model.hasAddons}
+          href={href}
+          nights={nights}
+          wide={wide}
+        />
       )}
     </>
   );
 }
 
+/** The dark bar floating over the page; on a phone a white bar along the bottom with the total
+ * and what was chosen for how many nights (Timo's mobile prototype, VAY-2463). */
 function Bar({
   name,
   line,
   total,
   hasAddons,
   href,
+  nights,
+  wide,
 }: {
   name: string;
   line: string | undefined;
   total: string | null;
   hasAddons: boolean;
   href: string;
+  nights: number;
+  wide: boolean;
 }) {
   const t = useTranslations("agency");
   const th = useTranslations("home");
@@ -540,10 +667,11 @@ function Bar({
     const element = bar.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     const root = document.documentElement;
+    // Its height and the 20px it floats above the page's bottom (a phone's sits on it).
+    const gap = wide ? 20 : 0;
     const update = () => {
-      // Its height and the 20px it floats above the page's bottom.
-      root.style.setProperty("--fixed-bottom-bar", `${element.offsetHeight + 20}px`);
-      root.style.setProperty("scroll-padding-bottom", `${element.offsetHeight + 20}px`);
+      root.style.setProperty("--fixed-bottom-bar", `${element.offsetHeight + gap}px`);
+      root.style.setProperty("scroll-padding-bottom", `${element.offsetHeight + gap}px`);
     };
     update();
     const observer = new ResizeObserver(update);
@@ -553,7 +681,30 @@ function Bar({
       root.style.removeProperty("--fixed-bottom-bar");
       root.style.removeProperty("scroll-padding-bottom");
     };
-  }, []);
+  }, [wide]);
+  const label = hasAddons ? th("roomsProgress.continueToExtras") : tc("continue");
+  if (!wide)
+    return (
+      <section
+        ref={bar}
+        aria-label={t("yourChoice")}
+        data-testid="agency-choice-bar"
+        className="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3.5 text-gray-900 shadow-[0_-6px_18px_rgba(0,0,0,0.06)]"
+      >
+        <div className="flex min-w-0 flex-col">
+          <strong className="truncate text-lg">{total ?? name}</strong>
+          <span className="truncate text-[13px] text-gray-500">
+            {[line, tc("nights", { count: nights })].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+        <Link
+          href={href}
+          className="flex min-h-[48px] shrink-0 items-center rounded-full bg-primary-600 px-[22px] text-base font-semibold text-white hover:bg-primary-700"
+        >
+          {label}
+        </Link>
+      </section>
+    );
   return (
     <section
       ref={bar}
@@ -571,7 +722,7 @@ function Bar({
           href={href}
           className="flex min-h-[48px] items-center rounded-full bg-white px-[22px] text-base font-semibold text-gray-900 hover:bg-gray-100"
         >
-          {hasAddons ? th("roomsProgress.continueToExtras") : tc("continue")}
+          {label}
         </Link>
       </div>
     </section>
