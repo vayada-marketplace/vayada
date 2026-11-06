@@ -90,7 +90,7 @@ export default function AgencyFilterSheet({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-[50px] w-full rounded-full bg-primary-600 px-6 text-base font-semibold text-primary-on-600 hover:bg-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+            className="min-h-[50px] w-full rounded-full bg-primary-600 px-6 text-base font-semibold text-white hover:bg-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
           >
             {count === null ? t("showStaysPending") : t("showStays", { count })}
           </button>
