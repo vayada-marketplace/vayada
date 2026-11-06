@@ -15,6 +15,8 @@ const chip = (active: boolean) =>
  * The agency overview's filter chips (VAY-2460), on the row under the count: property type and
  * area as single choices ("All" first), a price box with a minimum and maximum per night, and
  * on/off chips for a private pool, breakfast and free cancellation. Only the chips in `options`.
+ * In the phone's filter sheet (`sheet`, VAY-2463) each choice has its name above it and the
+ * price fields are in place, without the Price chip's box.
  */
 export default function AgencyFilters({
   options,
@@ -23,6 +25,7 @@ export default function AgencyFilters({
   typeLabel,
   currency,
   formatPrice,
+  sheet = false,
 }: {
   options: AgencyFilterOptions;
   filters: Filters;
@@ -32,6 +35,7 @@ export default function AgencyFilters({
   currency: string;
   /** Whole units in `currency`. */
   formatPrice: (value: number) => string;
+  sheet?: boolean;
 }) {
   const t = useTranslations("agency");
   const set = (change: Partial<Filters>) => onChange({ ...filters, ...change });
@@ -46,7 +50,7 @@ export default function AgencyFilters({
     <div
       role="group"
       aria-label={t("filters")}
-      className="relative flex flex-wrap items-center gap-2"
+      className={sheet ? "flex flex-col gap-6" : "relative flex flex-wrap items-center gap-2"}
     >
       {options.types.length > 0 && (
         <Choices
@@ -56,6 +60,7 @@ export default function AgencyFilters({
           chosen={filters.type}
           name={typeLabel}
           onChoose={(type) => set({ type })}
+          titled={sheet}
         />
       )}
       {options.areas.length > 0 && (
@@ -66,9 +71,20 @@ export default function AgencyFilters({
           chosen={filters.area}
           name={(area) => area}
           onChoose={(area) => set({ area })}
+          titled={sheet}
         />
       )}
-      {options.price && (
+      {options.price && sheet && (
+        <div role="group" aria-label={t("pricePerNight", { currency })}>
+          <PriceFields
+            bounds={options.price}
+            value={filters.price}
+            onChange={(price) => set({ price })}
+            currency={currency}
+          />
+        </div>
+      )}
+      {options.price && !sheet && (
         <PriceBox
           bounds={options.price}
           value={filters.price}
@@ -77,19 +93,25 @@ export default function AgencyFilters({
           format={formatPrice}
         />
       )}
-      {toggles.map((key) => (
-        <button
-          key={key}
-          type="button"
-          aria-pressed={filters[key]}
-          onClick={() => set({ [key]: !filters[key] })}
-          className={chip(filters[key])}
-        >
-          {t(key)}
-        </button>
-      ))}
+      {sheet
+        ? toggles.length > 0 && <div className="flex flex-wrap gap-2">{toggles.map(toggle)}</div>
+        : toggles.map(toggle)}
     </div>
   );
+
+  function toggle(key: (typeof toggles)[number]) {
+    return (
+      <button
+        key={key}
+        type="button"
+        aria-pressed={filters[key]}
+        onClick={() => set({ [key]: !filters[key] })}
+        className={chip(filters[key])}
+      >
+        {t(key)}
+      </button>
+    );
+  }
 }
 
 function Choices({
@@ -99,6 +121,7 @@ function Choices({
   chosen,
   name,
   onChoose,
+  titled = false,
 }: {
   label: string;
   all: string;
@@ -106,8 +129,10 @@ function Choices({
   chosen: string | null;
   name: (value: string) => string;
   onChoose: (value: string | null) => void;
+  /** Its name above the chips (the phone's filter sheet). */
+  titled?: boolean;
 }) {
-  return (
+  const chips = (
     <div role="group" aria-label={label} className="flex flex-wrap items-center gap-2">
       {[null, ...values].map((value) => (
         <button
@@ -121,6 +146,16 @@ function Choices({
         </button>
       ))}
     </div>
+  );
+  return titled ? (
+    <div className="flex flex-col gap-2.5">
+      <p aria-hidden="true" className="text-[15px] font-semibold text-gray-900">
+        {label}
+      </p>
+      {chips}
+    </div>
+  ) : (
+    chips
   );
 }
 
@@ -182,26 +217,6 @@ function PriceBox({
         : value.max !== null
           ? t("priceUpTo", { max: format(value.max) })
           : t("filterPrice");
-  const amount = (raw: string) => {
-    const number = Math.floor(Number(raw));
-    return raw.trim() === "" || !Number.isFinite(number) || number < 0 ? null : number;
-  };
-  const field = (key: "min" | "max") => (
-    <label className="flex min-w-0 flex-1 flex-col gap-1 text-[13px] text-gray-500">
-      {t(key === "min" ? "priceMin" : "priceMax")}
-      <input
-        type="number"
-        inputMode="numeric"
-        min={0}
-        step={1}
-        value={value[key] ?? ""}
-        placeholder={String(bounds[key])}
-        onChange={(event) => onChange({ ...value, [key]: amount(event.target.value) })}
-        className="min-h-[44px] w-full rounded-xl border border-gray-200 px-3 text-[15px] text-gray-900 focus:border-gray-900 focus:outline-none"
-      />
-    </label>
-  );
-
   return (
     <div ref={box} className="sm:relative">
       <button
@@ -239,16 +254,7 @@ function PriceBox({
             alignEnd ? "sm:right-0" : "sm:left-0"
           }`}
         >
-          <p className="text-[15px] font-semibold text-gray-900">
-            {t("pricePerNight", { currency })}
-          </p>
-          <div className="mt-3 flex items-end gap-2">
-            {field("min")}
-            <span aria-hidden="true" className="pb-3 text-gray-500">
-              –
-            </span>
-            {field("max")}
-          </div>
+          <PriceFields bounds={bounds} value={value} onChange={onChange} currency={currency} />
           <div className="mt-4 flex items-center justify-between gap-3">
             <button
               type="button"
@@ -269,5 +275,52 @@ function PriceBox({
         </div>
       )}
     </div>
+  );
+}
+
+/** The lowest and highest price per night the guest wants, in whole units of `currency`. Empty
+ * fields show the stays' own lowest and highest; changes apply as they are typed. */
+function PriceFields({
+  bounds,
+  value,
+  onChange,
+  currency,
+}: {
+  bounds: { min: number; max: number };
+  value: Filters["price"];
+  onChange: (price: Filters["price"]) => void;
+  currency: string;
+}) {
+  const t = useTranslations("agency");
+  const amount = (raw: string) => {
+    const number = Math.floor(Number(raw));
+    return raw.trim() === "" || !Number.isFinite(number) || number < 0 ? null : number;
+  };
+  const field = (key: "min" | "max") => (
+    <label className="flex min-w-0 flex-1 flex-col gap-1 text-[13px] text-gray-500">
+      {t(key === "min" ? "priceMin" : "priceMax")}
+      <input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        step={1}
+        value={value[key] ?? ""}
+        placeholder={String(bounds[key])}
+        onChange={(event) => onChange({ ...value, [key]: amount(event.target.value) })}
+        className="min-h-[44px] w-full rounded-xl border border-gray-200 px-3 text-[15px] text-gray-900 focus:border-gray-900 focus:outline-none"
+      />
+    </label>
+  );
+  return (
+    <>
+      <p className="text-[15px] font-semibold text-gray-900">{t("pricePerNight", { currency })}</p>
+      <div className="mt-3 flex items-end gap-2">
+        {field("min")}
+        <span aria-hidden="true" className="pb-3 text-gray-500">
+          –
+        </span>
+        {field("max")}
+      </div>
+    </>
   );
 }

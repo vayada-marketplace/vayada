@@ -15,7 +15,9 @@ import BookingNavigation from "@/components/layout/BookingNavigation";
 import AgencyStayCard, { type AgencyCardText } from "@/components/agency/AgencyStayCard";
 import AgencyFullStays from "@/components/agency/AgencyFullStays";
 import AgencyFilters from "@/components/agency/AgencyFilters";
+import AgencyFilterSheet from "@/components/agency/AgencyFilterSheet";
 import AgencyStayMap, { AgencyLayoutSwitch } from "@/components/agency/AgencyStayMap";
+import AgencyPhoneMap from "@/components/agency/AgencyPhoneMap";
 import { useWideScreen } from "@/components/booking/AccommodationViews";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { ApiError } from "@/services/api/client";
@@ -26,6 +28,7 @@ import {
   type AgencyStayPrices,
 } from "@/services/api/agencyPage";
 import {
+  activeFilterCount,
   agencyFilterOptions,
   agencyResults,
   filtersActive,
@@ -38,6 +41,7 @@ import {
   type AgencyCard,
   type AgencyFilters as Filters,
 } from "@/lib/agencyOverview";
+import { chooseMaps } from "@/lib/mapsChoice";
 import { mostRooms } from "@/lib/roomPicker";
 import { ensureMinOneNight } from "@/lib/utils";
 
@@ -94,6 +98,7 @@ function searchFromUrl(params: URLSearchParams, childrenEnabled: boolean): Agenc
 export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
   const t = useTranslations("agency");
   const th = useTranslations("home");
+  const tm = useTranslations("locationMap");
   const locale = useLocale();
   const searchParams = useSearchParams();
   const { baseCurrency, rates, approximate, selectedCurrency, convertPrice } = useCurrency();
@@ -130,6 +135,37 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
     setFilters(next);
     setHovered(null);
     setPicked(null);
+  };
+  // VAY-2463: on a phone the filters are in a sheet the Filters button opens.
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const filtersButton = useRef<HTMLButtonElement>(null);
+  if (wide && sheetOpen) setSheetOpen(false);
+  const closeSheet = () => {
+    setSheetOpen(false);
+    requestAnimationFrame(() => filtersButton.current?.focus());
+  };
+  // VAY-2463: a phone's map fills the screen, opened with the Map button over the list. The
+  // agency's "Map" layout opens on it, behind "Show map" until the guest chose maps (VAY-2216);
+  // "List + map" opens as the list. The Map button floats while the stays are on screen.
+  const [phoneMapOpen, setPhoneMapOpen] = useState(agency.layout.default === "map");
+  // A wide screen has its own layouts: the phone's map doesn't come back when it narrows again.
+  if (wide && phoneMapOpen) setPhoneMapOpen(false);
+  const mapButton = useRef<HTMLButtonElement>(null);
+  const [staysSection, setStaysSection] = useState<HTMLElement | null>(null);
+  const [staysOnScreen, setStaysOnScreen] = useState(false);
+  useEffect(() => {
+    if (!staysSection) return;
+    const observer = new IntersectionObserver((entries) =>
+      setStaysOnScreen(entries[entries.length - 1]!.isIntersecting),
+    );
+    observer.observe(staysSection);
+    return () => observer.disconnect();
+  }, [staysSection]);
+  const closePhoneMap = () => {
+    setPhoneMapOpen(false);
+    setPicked(null);
+    // The Map button floats only over the stays; at the top of the page, Filters is the nearest.
+    requestAnimationFrame(() => (mapButton.current ?? filtersButton.current)?.focus());
   };
   const [panel, setPanel] = useState<SearchPanel>(null);
   const [promoInput, setPromoInput] = useState(initial.promoCode ?? "");
@@ -313,10 +349,32 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
         },
       ),
   };
-  // Maps need Google's key and a wide screen; phones keep the list (their layouts are VAY-2463).
+  // Maps need Google's key. A wide screen has the agency's layouts; a phone has the list and, when
+  // the agency allows a map, the Map button for its full-screen map.
   const layouts: AccountBookingPageLayout[] = wide && MAPS_KEY ? agency.layout.allowed : ["list"];
   const layout = layouts.includes(chosenLayout) ? chosenLayout : "list";
+  const phoneMap =
+    !wide && !!MAPS_KEY && agency.layout.allowed.some((allowed) => allowed !== "list");
   const showChips = hasFilterChips(filterOptions);
+  const activeFilters = activeFilterCount(filters);
+  const filterChips = (sheet: boolean) => (
+    <AgencyFilters
+      options={filterOptions}
+      filters={filters}
+      onChange={changeFilters}
+      typeLabel={(type) => stayTypeName(type, t)}
+      currency={selectedCurrency}
+      formatPrice={(value) =>
+        new Intl.NumberFormat("en-GB", {
+          style: "currency",
+          currency: selectedCurrency,
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        }).format(value)
+      }
+      sheet={sheet}
+    />
+  );
   // A pill says the price per night in whole units, the guest's display currency first.
   const pinPrice = (card: AgencyCard) => {
     const price = card.price?.status === "available" ? card.price.price : null;
@@ -328,6 +386,19 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
             maximumFractionDigits: 0,
           }).format(price.nightly))
       : null;
+  };
+  const mapProps = {
+    stays: agency.stays,
+    cards: results.cards,
+    apiKey: MAPS_KEY,
+    hovered,
+    onHover: setHovered,
+    picked,
+    onPick: setPicked,
+    price: pinPrice,
+    typeName: (card: AgencyCard) =>
+      card.stay.propertyType ? stayTypeName(card.stay.propertyType, t) : null,
+    href: text.href,
   };
   const currencies = Array.from(
     new Set(
@@ -347,6 +418,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
       />
 
       <StaySearchCard
+        stickyOnPhones={false}
         panel={panel}
         onPanel={changePanel}
         checkIn={form.checkIn}
@@ -410,46 +482,94 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
 
       <section
         id="stays"
+        ref={setStaysSection}
         aria-labelledby="stays-heading"
-        className="mx-auto max-w-[1320px] scroll-mt-36 px-4 pb-16 pt-14 sm:px-6"
+        className="mx-auto max-w-[1320px] scroll-mt-4 px-4 pb-16 pt-14 sm:px-6 lg:scroll-mt-36"
       >
-        <div className="flex flex-wrap items-center justify-between gap-5">
+        {/* On a phone (Timo's mobile prototype, VAY-2463) one slim row instead: how many stays
+            are available, Sort by and the Filters button; the heading stays for screen readers.
+            The count takes two lines before Sort and Filters move under it (a longer language,
+            "Filters (2)"). */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:gap-5">
           <h2
             id="stays-heading"
-            className="font-heading text-3xl leading-tight text-gray-900 md:text-[44px]"
+            className="sr-only font-heading text-3xl leading-tight text-gray-900 md:text-[44px] lg:not-sr-only"
           >
             {th("availableAccommodations")}
           </h2>
-          <label className="flex items-center gap-2 text-[15px] text-gray-500">
-            <svg
-              aria-hidden="true"
-              className="h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4" />
-            </svg>
-            {t("sortBy")}
-            <select
-              value={sort}
-              onChange={(event) => setSort(event.target.value as AccountBookingPageSort)}
-              className="min-h-[44px] cursor-pointer rounded-full border border-gray-200 bg-white px-4 text-[15px] font-semibold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
-            >
-              {SORTS.map((key) => (
-                <option key={key} value={key}>
-                  {t(`sort.${key}`)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <p
+            role="status"
+            data-testid="agency-count-short"
+            className="flex-[1_1_4rem] text-[15px] leading-snug text-gray-500 lg:hidden"
+          >
+            {answer
+              ? t("availableShort", { count: results.available })
+              : t("checkingShort", { total: agency.stays.length })}
+          </p>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <label className="flex items-center gap-2 text-[15px] text-gray-500">
+              <svg
+                aria-hidden="true"
+                className="hidden h-4 w-4 lg:block"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4" />
+              </svg>
+              <span className="sr-only lg:not-sr-only">{t("sortBy")}</span>
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value as AccountBookingPageSort)}
+                className="min-h-[44px] cursor-pointer rounded-full border border-gray-200 bg-white px-3 text-[14px] font-semibold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 lg:px-4 lg:text-[15px]"
+              >
+                {SORTS.map((key) => (
+                  <option key={key} value={key}>
+                    {t(`sort.${key}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {showChips && (
+              <button
+                ref={filtersButton}
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={sheetOpen}
+                onClick={() => setSheetOpen(true)}
+                data-testid="agency-filters-button"
+                className={`flex min-h-[44px] items-center gap-1.5 rounded-full border px-3.5 text-[14px] font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 lg:hidden ${
+                  activeFilters
+                    ? "border-primary-600 bg-primary-600 text-white"
+                    : "border-gray-200 bg-white text-gray-900"
+                }`}
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                >
+                  <path d="M4 6h16M7 12h10M10 18h4" />
+                </svg>
+                {activeFilters ? t("filtersCount", { count: activeFilters }) : t("filters")}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 space-y-1.5">
-          <p className="text-[17px] text-gray-500" role="status" data-testid="agency-count">
+          <p
+            className="hidden text-[17px] text-gray-500 lg:block"
+            role="status"
+            data-testid="agency-count"
+          >
             {answer
               ? t("count", {
                   available: results.available,
@@ -471,25 +591,10 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           )}
         </div>
 
+        {/* From `lg` up; a phone has the Filters button and its sheet. */}
         {(showChips || layouts.length > 1) && (
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4">
-            {showChips && (
-              <AgencyFilters
-                options={filterOptions}
-                filters={filters}
-                onChange={changeFilters}
-                typeLabel={(type) => stayTypeName(type, t)}
-                currency={selectedCurrency}
-                formatPrice={(value) =>
-                  new Intl.NumberFormat("en-GB", {
-                    style: "currency",
-                    currency: selectedCurrency,
-                    minimumFractionDigits: 0,
-                    maximumFractionDigits: 0,
-                  }).format(value)
-                }
-              />
-            )}
+          <div className="mt-6 hidden flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4 lg:flex">
+            {showChips && filterChips(false)}
             {layouts.length > 1 && (
               <AgencyLayoutSwitch layouts={layouts} layout={layout} onChange={setLayout} />
             )}
@@ -580,18 +685,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           )}
           {layout !== "list" && (
             <AgencyStayMap
-              stays={agency.stays}
-              cards={results.cards}
-              apiKey={MAPS_KEY}
-              hovered={hovered}
-              onHover={setHovered}
-              picked={picked}
-              onPick={setPicked}
-              price={pinPrice}
-              typeName={(card) =>
-                card.stay.propertyType ? stayTypeName(card.stay.propertyType, t) : null
-              }
-              href={text.href}
+              {...mapProps}
               compact={layout === "split"}
               className={
                 layout === "split"
@@ -603,6 +697,54 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
           )}
         </div>
       </section>
+
+      {/* Not over the search card's open calendar, guests or promo field. */}
+      {phoneMap && !phoneMapOpen && staysOnScreen && !sheetOpen && panel === null && (
+        // Pressing it is the guest's choice to load Google (VAY-2216), remembered for this tab.
+        <button
+          ref={mapButton}
+          type="button"
+          onClick={() => {
+            chooseMaps();
+            setPhoneMapOpen(true);
+          }}
+          className="fixed bottom-7 left-1/2 z-40 inline-flex min-h-[50px] -translate-x-1/2 items-center gap-2 rounded-full bg-gray-900 px-6 text-base font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.25)] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+        >
+          <svg
+            aria-hidden="true"
+            className="h-[18px] w-[18px]"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" />
+            <path d="M9 4v14M15 6v14" />
+          </svg>
+          {tm("viewMap")}
+        </button>
+      )}
+      {phoneMap && phoneMapOpen && (
+        <AgencyPhoneMap
+          {...mapProps}
+          title={t("mapSummary", { name: agency.name, count: results.cards.length })}
+          summary={`${dates} · ${guests(shown, shown.rooms)}`}
+          onClose={closePhoneMap}
+        />
+      )}
+
+      {sheetOpen && (
+        <AgencyFilterSheet
+          count={answer ? results.cards.length : null}
+          canReset={filtersActive(filters)}
+          onReset={() => changeFilters(NO_FILTERS)}
+          onClose={closeSheet}
+        >
+          {filterChips(true)}
+        </AgencyFilterSheet>
+      )}
     </div>
   );
 }

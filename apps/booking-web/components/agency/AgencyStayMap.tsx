@@ -9,6 +9,9 @@ import { chooseMaps, mapsChosen } from "@/lib/mapsChoice";
 import type { AgencyCard } from "@/lib/agencyOverview";
 import type { AgencyStay } from "@/services/api/agencyPage";
 
+/** Room around the pills on the phone's map: its summary above, the stay's card and List below. */
+const PHONE_FIT = { top: 96, right: 48, bottom: 240, left: 48 };
+
 /** The agency overview's layouts (VAY-2460), as Settings names them. */
 const LAYOUTS: Record<AccountBookingPageLayout, "viewList" | "viewSplit" | "viewMap"> = {
   list: "viewList",
@@ -88,7 +91,9 @@ function LayoutIcon({ layout }: { layout: AccountBookingPageLayout }) {
  * both sides, and a pill opens the stay's small card with View rooms. Stays without a pin stay
  * off the map. Google loads only after the guest's "Show map" (VAY-2216), remembered for the tab.
  * The map is drawn once for every stay with a pin: filters, sorting and new prices only hide pills
- * or change their labels, so the guest's view stays and no new map is loaded.
+ * or change their labels, so the guest's view stays and no new map is loaded. On a phone
+ * (`phone`, VAY-2463) it fills the screen: one finger moves it, and the stay's card sits above
+ * the List button with View rooms under it.
  */
 export default function AgencyStayMap({
   stays,
@@ -102,6 +107,7 @@ export default function AgencyStayMap({
   typeName,
   href,
   compact = false,
+  phone = false,
   className = "",
 }: {
   /** All the page's stays, in its order. */
@@ -120,6 +126,8 @@ export default function AgencyStayMap({
   href: (card: AgencyCard) => string;
   /** A narrow map (beside the list): the stay's card puts View rooms under its name. */
   compact?: boolean;
+  /** The phone's full-screen map (AgencyPhoneMap): no frame, its summary on top, List below. */
+  phone?: boolean;
   className?: string;
 }) {
   const t = useTranslations("agency");
@@ -154,9 +162,12 @@ export default function AgencyStayMap({
     <div
       data-testid="agency-map"
       onKeyDown={(event) => {
-        if (event.key === "Escape" && chosen) onPick(null);
+        // The phone's map closes a card itself, wherever the focus is (AgencyPhoneMap).
+        if (event.key === "Escape" && chosen && !phone) onPick(null);
       }}
-      className={`relative overflow-hidden rounded-[20px] border border-gray-200 bg-gray-100 ${className}`}
+      className={`relative overflow-hidden bg-gray-100 ${
+        phone ? "" : "rounded-[20px] border border-gray-200"
+      } ${className}`}
     >
       {!requested ? (
         <MapGate
@@ -182,9 +193,12 @@ export default function AgencyStayMap({
             apiKey={apiKey}
             label={t("mapLabel")}
             className="h-full"
+            {...(phone ? { gestureHandling: "greedy" as const, fitPadding: PHONE_FIT } : {})}
           />
           {hidden.length === pinned.length && (
-            <p className="absolute inset-x-4 top-4 z-10 rounded-xl bg-white px-4 py-3 text-center text-sm text-gray-600 shadow-[0_2px_8px_rgba(0,0,0,0.12)]">
+            <p
+              className={`absolute inset-x-4 z-10 rounded-xl ${phone ? "top-24" : "top-4"} bg-white px-4 py-3 text-center text-sm text-gray-600 shadow-[0_2px_8px_rgba(0,0,0,0.12)]`}
+            >
               {t("noMapStays")}
             </p>
           )}
@@ -194,8 +208,12 @@ export default function AgencyStayMap({
         // Above Google's logo and terms at the bottom of the map.
         <div
           data-testid="agency-map-card"
-          className={`absolute bottom-10 left-4 right-4 z-10 flex gap-3.5 rounded-2xl bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.16)] ${
-            compact ? "flex-col" : "items-center"
+          className={`absolute left-4 right-4 z-10 flex gap-3.5 rounded-2xl bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.16)] ${
+            phone
+              ? "bottom-[6.5rem] flex-col"
+              : compact
+                ? "bottom-10 flex-col"
+                : "bottom-10 items-center"
           }`}
         >
           <div className="flex min-w-0 flex-1 items-center gap-3.5">

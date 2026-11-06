@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeFilterCount,
   agencyFilterOptions,
   agencyResults,
   formatStayRange,
@@ -121,6 +122,24 @@ describe("agencyResults", () => {
     const results = agencyResults(stays, answer([priced("escape", 95)]), "price_low", options);
     expect(ids(results.cards)).toEqual(["escape"]);
     expect(results.total).toBe(1);
+  });
+});
+
+describe("activeFilterCount (VAY-2463)", () => {
+  it("counts each filter the guest has on, a price range once", () => {
+    expect(activeFilterCount(NO_FILTERS)).toBe(0);
+    expect(activeFilterCount({ ...NO_FILTERS, type: "villa", privatePool: true })).toBe(2);
+    expect(activeFilterCount({ ...NO_FILTERS, price: { min: 40, max: null } })).toBe(1);
+    expect(
+      activeFilterCount({
+        type: "villa",
+        area: "Ubud",
+        price: { min: 40, max: 120 },
+        privatePool: true,
+        breakfast: true,
+        freeCancellation: true,
+      }),
+    ).toBe(6);
   });
 });
 
