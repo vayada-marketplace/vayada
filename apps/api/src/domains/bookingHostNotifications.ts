@@ -109,6 +109,9 @@ export type HostNotificationFeed = {
   /** Red while the channel sync is failing (read or not) or a missed payment is unread, blue for other
    * unread, none otherwise. */
   badge: "none" | "blue" | "red";
+  /** Whether "View booking" opens the booking's page in PMS (VAY-2480); otherwise it opens Booking
+   * Admin's Reservations list. */
+  canOpenPmsBookings: boolean;
 };
 
 export type HostNotificationViewer = {
@@ -120,6 +123,8 @@ export type HostNotificationViewer = {
   retrySyncDomains: readonly HostSyncDomain[];
   /** Whether the person may open PMS → Channel manager. */
   canOpenChannelManager: boolean;
+  /** Whether the person may open this property's bookings in PMS. */
+  canOpenPmsBookings: boolean;
 };
 
 /** "Mark all read" as the person saw it: items up to `before`, and the sync card they were shown. */
@@ -480,6 +485,7 @@ export function buildHostNotificationFeed(
     syncAlert: alert,
     unread,
     badge: urgent ? "red" : unread.all > 0 ? "blue" : "none",
+    canOpenPmsBookings: viewer.canOpenPmsBookings,
   };
 }
 

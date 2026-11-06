@@ -25,14 +25,16 @@ export type SyncRetryState = "idle" | "running" | "succeeded" | "failed" | "slow
 type Client = Pick<typeof bookingNotificationsClient, "retrySync" | "syncOperationStatus">;
 
 /** What the bell's rows do (VAY-2349), in one place: links mark the notification read first, Retry sync
- * reruns PMS → Channel manager's own sync and follows it to the end. */
+ * reruns PMS → Channel manager's own sync and follows it to the end. View booking opens the booking in PMS
+ * for people who may open it there (VAY-2480), else Reservations here. */
 export function useNotificationActions(
   hotelId: string | undefined,
-  notifications: Pick<ReturnType<typeof useHostNotifications>, "markRead" | "reload">,
+  notifications: Pick<ReturnType<typeof useHostNotifications>, "feed" | "markRead" | "reload">,
   client: Client = bookingNotificationsClient,
 ) {
   const router = useRouter();
   const { markRead, reload } = notifications;
+  const canOpenPmsBookings = notifications.feed?.canOpenPmsBookings === true;
   const [sync, setSync] = useState<SyncRetryState>("idle");
   const run = useRef(0);
 
@@ -48,23 +50,59 @@ export function useNotificationActions(
     [],
   );
 
+  /** Opens a PMS page on the selected property: the one-time exchange carries the session and the property
+   * over; without it, PMS asks the person to sign in. False when there's no PMS address to go to. */
+  const openInPms = useCallback(
+    async (targetPath: string): Promise<boolean> => {
+      const csrfToken = getAuthCsrfToken();
+      if (csrfToken && hotelId) {
+        try {
+          window.location.href = await createBrowserAuthHandoff({
+            csrfToken,
+            routingHints: { propertyId: hotelId },
+            sourceSurface: "booking-admin",
+            targetPath,
+            targetSurface: "pms-web",
+          });
+          return true;
+        } catch {
+          // Require PMS sign-in when the one-time exchange is unavailable.
+        }
+      }
+      try {
+        window.location.href = crossAppReauthenticationUrl(PMS_FRONTEND_URL, targetPath);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [hotelId],
+  );
+
   const act = useCallback(
     (key: string, read: boolean, action: NotificationAction) => {
+      const openReservations = (reference: string) =>
+        openNotificationLink({ path: "/reservations", param: "search" }, reference, router.push);
+      if (action.kind === "view_booking" && canOpenPmsBookings && action.bookingId) {
+        const { bookingId, reference } = action;
+        void (async () => {
+          // A full page change follows: let the mark go out first.
+          if (!read) await markRead([key]);
+          if (!(await openInPms(`/bookings/${encodeURIComponent(bookingId)}`)))
+            openReservations(reference);
+        })();
+        return;
+      }
       if (!read) void markRead([key]);
       if (action.kind === "contact_guest") {
         window.location.href = `mailto:${action.email}`;
         return;
       }
-      if (action.kind === "view_booking")
-        openNotificationLink(
-          { path: "/reservations", param: "search" },
-          action.reference,
-          router.push,
-        );
+      if (action.kind === "view_booking") openReservations(action.reference);
       else
         openNotificationLink({ path: "/promo-codes", param: "edit" }, action.promoId, router.push);
     },
-    [markRead, router],
+    [canOpenPmsBookings, markRead, openInPms, router],
   );
 
   const retrySync = useCallback(
@@ -106,29 +144,10 @@ export function useNotificationActions(
     async (alert: HostNotificationSyncAlert) => {
       // A full page change follows: let the mark go out first.
       if (!alert.read) await markRead([alert.key]);
-      const targetPath = "/channel-manager";
-      const csrfToken = getAuthCsrfToken();
-      if (csrfToken && hotelId) {
-        try {
-          window.location.href = await createBrowserAuthHandoff({
-            csrfToken,
-            routingHints: { propertyId: hotelId },
-            sourceSurface: "booking-admin",
-            targetPath,
-            targetSurface: "pms-web",
-          });
-          return;
-        } catch {
-          // Require PMS sign-in when the one-time exchange is unavailable.
-        }
-      }
-      try {
-        window.location.href = crossAppReauthenticationUrl(PMS_FRONTEND_URL, targetPath);
-      } catch {
-        // No PMS address configured here: stay on the page.
-      }
+      // No PMS address configured here: stay on the page.
+      await openInPms("/channel-manager");
     },
-    [hotelId, markRead],
+    [markRead, openInPms],
   );
 
   const resetSync = useCallback(() => {

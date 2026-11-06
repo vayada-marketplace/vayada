@@ -157,10 +157,11 @@ async function authorize(
         organizationId: context.selectedOrganization.organizationId,
         canReadPromos: hasPermission(context, "booking.promos.read"),
         canReadGuestContact: hasPermission(context, "pms.guest_contact.read"),
-        retrySyncDomains: canUsePmsSync(request, propertyId, "pms.operations.manage")
+        retrySyncDomains: canUsePms(request, propertyId, "pms.operations.manage")
           ? syncRetryDomains
           : [],
-        canOpenChannelManager: canUsePmsSync(request, propertyId, "pms.operations.read"),
+        canOpenChannelManager: canUsePms(request, propertyId, "pms.operations.read"),
+        canOpenPmsBookings: canUsePms(request, propertyId, "pms.reservation.read"),
       },
     };
   } catch (error) {
@@ -176,12 +177,13 @@ async function authorize(
   }
 }
 
-/** "Retry sync" posts PMS → Channel manager's own sync command and "View details" opens that page, so each
- * shows only to people PMS accepts there: the same permission, PMS product and property access. */
-function canUsePmsSync(
+/** "Retry sync" posts PMS → Channel manager's own sync command, "View details" opens that page and "View
+ * booking" opens the booking's page in PMS (VAY-2480), so each goes to PMS only for people PMS accepts
+ * there: the same permission, PMS product and property access. (The property itself was checked above.) */
+function canUsePms(
   request: FastifyRequest,
   propertyId: string,
-  permission: "pms.operations.read" | "pms.operations.manage",
+  permission: "pms.operations.read" | "pms.operations.manage" | "pms.reservation.read",
 ): boolean {
   const resource = {
     product: "pms",

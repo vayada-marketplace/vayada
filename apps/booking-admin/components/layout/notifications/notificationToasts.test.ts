@@ -34,6 +34,7 @@ function feed(items: HostNotification[], syncKey: string | null = null): HostNot
       : null,
     unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
     badge: "none",
+    canOpenPmsBookings: false,
   };
 }
 

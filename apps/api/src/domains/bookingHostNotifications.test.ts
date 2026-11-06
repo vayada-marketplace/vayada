@@ -17,6 +17,7 @@ const viewer: HostNotificationViewer = {
   canReadGuestContact: true,
   retrySyncDomains: ["ari", "booking"],
   canOpenChannelManager: true,
+  canOpenPmsBookings: true,
 };
 
 let eventNumber = 0;
@@ -455,6 +456,14 @@ describe("Booking Admin notifications feed (VAY-2349)", () => {
     expect(retry(["ari", "booking"])).toBe(true);
     expect(retry(["ari"])).toBe(false);
     expect(retry([])).toBe(false);
+  });
+
+  it("says whether View booking may open the booking in PMS (VAY-2480)", () => {
+    expect(buildHostNotificationFeed(sources(), viewer).canOpenPmsBookings).toBe(true);
+    expect(
+      buildHostNotificationFeed(sources(), { ...viewer, canOpenPmsBookings: false })
+        .canOpenPmsBookings,
+    ).toBe(false);
   });
 
   it("accepts only well-formed keys", () => {

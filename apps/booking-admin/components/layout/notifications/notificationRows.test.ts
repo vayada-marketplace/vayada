@@ -71,6 +71,7 @@ function feed(overrides: Partial<HostNotificationFeed> = {}): HostNotificationFe
     syncAlert: null,
     unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
     badge: "none",
+    canOpenPmsBookings: false,
     ...overrides,
   };
 }
@@ -86,7 +87,7 @@ describe("notification rows (VAY-2349)", () => {
       amountTone: "green",
       detail: "Sarah Miller · Deluxe Garden Room",
       meta: "Feb 13 – 18 · 5 nights · 2 adults · 12 min ago",
-      action: { kind: "view_booking", reference: "VAY-ABC123" },
+      action: { kind: "view_booking", reference: "VAY-ABC123", bookingId: booking.id },
     });
   });
 
@@ -138,7 +139,7 @@ describe("notification rows (VAY-2349)", () => {
       amountTone: "red",
       detail: "Sarah Miller · Deluxe Garden Room · bank transfer missed the deadline",
       // Without the guest's email (hidden until accepted), the row offers the booking instead.
-      action: { kind: "view_booking", reference: "VAY-ABC123" },
+      action: { kind: "view_booking", reference: "VAY-ABC123", bookingId: booking.id },
     });
     expect(
       notificationRow(
@@ -300,6 +301,16 @@ describe("notification rows (VAY-2349)", () => {
     });
     expect(parsed?.items).toHaveLength(1);
     expect(parseHostNotificationFeed({ items: [] })).toBeNull();
+    // VAY-2480: View booking opens PMS only when the API says so; an older API leaves it off.
+    const withoutFlag: Record<string, unknown> = { ...feed() };
+    delete withoutFlag.canOpenPmsBookings;
+    expect(parseHostNotificationFeed(withoutFlag)?.canOpenPmsBookings).toBe(false);
+    expect(
+      parseHostNotificationFeed({ ...feed(), canOpenPmsBookings: "yes" })?.canOpenPmsBookings,
+    ).toBe(false);
+    expect(parseHostNotificationFeed(feed({ canOpenPmsBookings: true }))?.canOpenPmsBookings).toBe(
+      true,
+    );
     // A time zone this browser doesn't know, a bad currency or date: the feed still shows, safely.
     const odd = parseHostNotificationFeed({
       ...feed({ items: [item({})] }),
