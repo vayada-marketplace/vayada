@@ -699,7 +699,7 @@ function Bar({
         </div>
         <Link
           href={href}
-          className="flex min-h-[48px] shrink-0 items-center rounded-full bg-primary-600 px-[22px] text-base font-semibold text-primary-on-600 hover:bg-primary-700"
+          className="flex min-h-[48px] shrink-0 items-center rounded-full bg-primary-600 px-[22px] text-base font-semibold text-white hover:bg-primary-700"
         >
           {label}
         </Link>
