@@ -1081,6 +1081,8 @@
     "showStays": "{count, plural, one {Show # stay} other {Show # stays}}",
     "showStaysPending": "Show stays",
     "mapLabel": "Map of the stays",
+    "phoneMapLabel": "Stays on the map",
+    "mapSummary": "{name} · {count, plural, one {# stay} other {# stays}}",
     "noMapStays": "None of these stays shows where it is on a map.",
     "fromPerNight": "from {amount} / night",
     "pinName": "{name}, from {amount} per night",

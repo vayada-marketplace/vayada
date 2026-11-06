@@ -1080,6 +1080,8 @@
     "showStays": "Tampilkan {count} penginapan",
     "showStaysPending": "Tampilkan penginapan",
     "mapLabel": "Peta penginapan",
+    "phoneMapLabel": "Penginapan di peta",
+    "mapSummary": "{name} · {count} penginapan",
     "noMapStays": "Tidak ada penginapan ini yang menampilkan lokasinya di peta.",
     "fromPerNight": "mulai {amount} / malam",
     "pinName": "{name}, mulai {amount} per malam",

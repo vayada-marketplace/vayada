@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { mockAgencyMap } from "../support/agencyMapFake";
 import {
   agencyPage,
   agencyUrl,
@@ -11,7 +12,8 @@ import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2463: the agency's booking page on a phone (Timo's mobile prototype, 390 wide). One slim
 // row with the stays available, Sort by and Filters; the filters in a sheet from the bottom; the
-// search card stays where it is instead of covering the list; nothing scrolls sideways.
+// search card stays where it is instead of covering the list; a Map button for a full-screen map;
+// nothing scrolls sideways.
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
@@ -40,14 +42,24 @@ async function open(
   page: Page,
   baseURL: string | undefined,
   filters: Record<string, boolean> = everyFilter,
-  locale = "",
+  { layout = { allowed: ["list", "split", "map"], default: "list" }, locale = "" } = {},
 ) {
   // Every language the app has, for the row's longest words.
-  const data = { ...agencyPage({ filters }), locales: { default: "en", supported: LOCALES } };
+  const data = {
+    ...agencyPage({ filters, layout }),
+    locales: { default: "en", supported: LOCALES },
+  };
   await mockAgencyPage(page, { page: data });
   await page.goto(agencyUrl(baseURL, `${locale}/${search}`));
-  await expect(cards(page)).toHaveCount(8);
+  // Counted by their test ids: a map over the page leaves them out of reach.
+  await expect(page.getByTestId("agency-stays").locator("a")).toHaveCount(8);
 }
+const phoneMap = (page: Page) => page.getByRole("dialog", { name: "Stays on the map" });
+const mapButton = (page: Page) => page.getByRole("button", { name: "Map", exact: true });
+const pill = (page: Page, name: string) =>
+  phoneMap(page)
+    .getByRole("region", { name: "Map of the stays" })
+    .getByRole("button", { name, exact: true });
 
 async function noSidewaysScroll(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -221,7 +233,7 @@ test("the sheet closes when the screen turns wide, and leaves the page as it was
 
 for (const locale of LOCALES)
   test(`the slim row fits in ${locale}, with a filter on`, async ({ page, baseURL }) => {
-    await open(page, baseURL, everyFilter, locale === "en" ? "" : `/${locale}`);
+    await open(page, baseURL, everyFilter, { locale: locale === "en" ? "" : `/${locale}` });
     // The page really is in that language.
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
     await filtersButton(page).click();
@@ -254,3 +266,149 @@ for (const locale of LOCALES)
     ).toBe(true);
     await noSidewaysScroll(page);
   });
+
+test("Map and List: the stays on a full-screen map, a pill's card with View rooms", async ({
+  page,
+  baseURL,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo, { expectedMissingUrls });
+  const google = await mockAgencyMap(page);
+  await open(page, baseURL);
+
+  // The Map button floats over the list; pressing it is the choice to load Google.
+  await cards(page).first().scrollIntoViewIfNeeded();
+  await expect(mapButton(page)).toBeVisible();
+  expect(google).toHaveLength(0);
+  await mapButton(page).click();
+  await expect(phoneMap(page)).toBeVisible();
+  expect(await phoneMap(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+  await expect(phoneMap(page)).toContainText("The Travel Ubud · 8 stays");
+  await expect(phoneMap(page)).toContainText("2 adults");
+  await expect(phoneMap(page).getByRole("button", { name: "Show map" })).toHaveCount(0);
+  await expect.poll(() => google.length).toBeGreaterThan(0);
+  await expect(phoneMap(page).getByRole("button", { name: "List" })).toBeFocused();
+  // A pill per stay with a pin (Adhidrawa has none), with its price per night.
+  await expect(
+    phoneMap(page).getByRole("region", { name: "Map of the stays" }).getByRole("button"),
+  ).toHaveCount(7);
+  const escape = pill(page, "The Escape Villa Ubud, from US$95 per night");
+  await expect(escape).toHaveText("US$95");
+
+  // A tapped pill opens the stay's card above List, with View rooms for the search.
+  await escape.click();
+  const card = page.getByTestId("agency-map-card");
+  await expect(card).toContainText("The Escape Villa Ubud");
+  await expect(card).toContainText("Villa · from US$95 / night");
+  await expect(card.getByRole("link", { name: "View rooms" })).toHaveAttribute(
+    "href",
+    (await page.getByTestId(`agency-stay-${staySlug("escape")}`).getAttribute("href"))!,
+  );
+  const list = await phoneMap(page).getByRole("button", { name: "List" }).boundingBox();
+  const shown = await card.boundingBox();
+  expect(shown!.y + shown!.height).toBeLessThan(list!.y);
+  expect(shown!.x).toBeGreaterThanOrEqual(0);
+  expect(shown!.x + shown!.width).toBeLessThanOrEqual(390);
+
+  // Escape closes the card first, then the map; the focus goes back to the Map button.
+  await page.keyboard.press("Escape");
+  await expect(card).toHaveCount(0);
+  await expect(phoneMap(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(phoneMap(page)).toHaveCount(0);
+  await expect(mapButton(page)).toBeFocused();
+
+  // List goes back to the cards too; the map is remembered for the tab.
+  await mapButton(page).click();
+  await expect(phoneMap(page).getByRole("region", { name: "Map of the stays" })).toBeVisible();
+  await phoneMap(page).getByRole("button", { name: "List" }).click();
+  await expect(phoneMap(page)).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(8);
+  await noSidewaysScroll(page);
+  await assertHealthy();
+});
+
+test("the agency's Map layout opens a phone on the full-screen map, behind Show map", async ({
+  page,
+  baseURL,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo, { expectedMissingUrls });
+  const google = await mockAgencyMap(page);
+  await open(page, baseURL, everyFilter, {
+    layout: { allowed: ["list", "split", "map"], default: "map" },
+  });
+
+  await expect(phoneMap(page)).toBeVisible();
+  // Google loads only once the guest asks (VAY-2216).
+  await expect(phoneMap(page).getByRole("button", { name: "Show map" })).toBeVisible();
+  expect(google).toHaveLength(0);
+  await phoneMap(page).getByRole("button", { name: "Show map" }).click();
+  await expect(pill(page, "Mertha Carik Guest House, from US$38 per night")).toBeVisible();
+  await phoneMap(page).getByRole("button", { name: "List" }).click();
+  await expect(cards(page)).toHaveCount(8);
+  await cards(page).first().scrollIntoViewIfNeeded();
+  await expect(mapButton(page)).toBeVisible();
+  await assertHealthy();
+});
+
+test("List + map opens a phone on the list with the Map button", async ({ page, baseURL }) => {
+  await mockAgencyMap(page);
+  await open(page, baseURL, everyFilter, {
+    layout: { allowed: ["list", "split"], default: "split" },
+  });
+  await expect(phoneMap(page)).toHaveCount(0);
+  await cards(page).first().scrollIntoViewIfNeeded();
+  await expect(mapButton(page)).toBeVisible();
+  // The wide screen's layout switch is not on a phone.
+  await expect(page.getByRole("group", { name: "Show the accommodations as" })).toHaveCount(0);
+});
+
+test("no Map button when the agency allows only the list", async ({ page, baseURL }) => {
+  await mockAgencyMap(page);
+  await open(page, baseURL, everyFilter, { layout: { allowed: ["list"], default: "list" } });
+  await cards(page).first().scrollIntoViewIfNeeded();
+  await expect(cards(page)).toHaveCount(8);
+  // The button would show once the list is seen on screen: give that a moment first.
+  await page.waitForTimeout(800);
+  await expect(mapButton(page)).toHaveCount(0);
+});
+
+test("the Map button stays clear of the search card's calendar", async ({ page, baseURL }) => {
+  await mockAgencyMap(page);
+  await open(page, baseURL);
+  await cards(page).first().scrollIntoViewIfNeeded();
+  await expect(mapButton(page)).toBeVisible();
+  // Opened and closed in place: a scroll would hide the button for another reason.
+  const dates = page.locator("#stay-search button").first();
+  await dates.evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(mapButton(page)).toHaveCount(0);
+  await dates.evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(mapButton(page)).toBeVisible();
+});
+
+test("the map closes when the screen turns wide, and doesn't come back", async ({
+  page,
+  baseURL,
+}) => {
+  await mockAgencyMap(page);
+  await open(page, baseURL, everyFilter, {
+    layout: { allowed: ["list", "split", "map"], default: "map" },
+  });
+  await expect(phoneMap(page)).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(phoneMap(page)).toHaveCount(0);
+  // The wide screen opens on its own Map layout.
+  await expect(
+    page
+      .getByRole("group", { name: "Show the accommodations as" })
+      .getByRole("button", { name: "Map", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    await page.evaluate(() => ({
+      inert: document.querySelectorAll("[inert]").length,
+      overflow: document.documentElement.style.overflow,
+    })),
+  ).toEqual({ inert: 0, overflow: "" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(500);
+  await expect(phoneMap(page)).toHaveCount(0);
+});
