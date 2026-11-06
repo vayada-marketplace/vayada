@@ -61,7 +61,7 @@ export default function AgencyStayPage({ agency, stay }: { agency: AgencyPage; s
       {wide ? (
         <StayHero
           image={agency.header.imageUrl}
-          alt={agency.name}
+          alt={agency.page.title}
           heading={agency.page.title}
           subtext={agency.page.description}
           navigation={<BookingNavigation showGallery />}

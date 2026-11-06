@@ -52,7 +52,17 @@ test("shows the agency's stays for the search, cheapest first, full stays at the
   ).toBeVisible();
   const nav = page.getByRole("navigation");
   await expect(nav.getByRole("link", { name: "The Travel Ubud" })).toBeVisible();
+  // The page's title stands for the agency; the account's name shows nowhere, not even to a
+  // screen reader.
+  await expect(page.getByText("Hotel Group")).toHaveCount(0);
+  await expect(page.locator('[alt*="Hotel Group"], [aria-label*="Hotel Group"]')).toHaveCount(0);
   await expect(nav.getByRole("button", { name: "Open photo gallery" }).first()).toBeVisible();
+  // The bar's gallery is named after the page too.
+  await nav.getByRole("button", { name: "Open photo gallery" }).first().click();
+  const gallery = page.getByRole("dialog", { name: "Our photo gallery for The Travel Ubud" });
+  await expect(gallery).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(gallery).toHaveCount(0);
   await expect(nav.getByRole("button", { name: "Contact" })).toBeVisible();
   await expect(nav.getByRole("button", { name: /^EN/ }).first()).toBeVisible();
   await expect(nav.getByRole("button", { name: /^USD/ }).first()).toBeVisible();
@@ -145,6 +155,20 @@ test("opens with the agency's default sort, and only the header switches it has 
   await expect(nav.getByRole("button", { name: "Open photo gallery" })).toHaveCount(0);
   await expect(nav.getByRole("button", { name: "Contact" })).toHaveCount(0);
   await expect(nav.getByRole("button", { name: /^(EN|USD)/ })).toHaveCount(0);
+});
+
+test("a page without a title of its own goes by the account's name", async ({ page, baseURL }) => {
+  const data = agencyPage();
+  data.page.title = "";
+  await mockAgencyPage(page, { page: data });
+  await page.goto(agencyUrl(baseURL, `/${search}`));
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Travel Ubud Hotel Group" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation").getByRole("link", { name: "Travel Ubud Hotel Group" }),
+  ).toBeVisible();
 });
 
 test("Use these dates searches a full stay's next free dates", async ({ page, baseURL }) => {
