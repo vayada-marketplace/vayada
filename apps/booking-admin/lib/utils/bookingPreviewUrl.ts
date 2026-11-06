@@ -21,5 +21,7 @@ export function buildBookingPreviewUrl(input: {
     return `${protocol}//${slug}.booking.localhost${port}`;
   }
 
-  return `https://${slug}.booking.vayada.com`;
+  // The new system's booking pages (VAY-2483): `*.booking.vayada.com` is still the old system, which
+  // knows none of its hotels or agency pages.
+  return `https://${slug}.next-booking.vayada.com`;
 }

@@ -34,6 +34,19 @@ describe("buildBookingPreviewUrl", () => {
     ).toBe("http://hotel-alpenrose.localhost:3002");
   });
 
+  // VAY-2483: *.booking.vayada.com is the old system, which knows none of the new system's pages.
+  it("falls back to the new system's booking host, never the old one", () => {
+    expect(
+      buildBookingPreviewUrl({
+        slug: "thetravelubud",
+        location: { protocol: "https:", hostname: "next-booking-admin.vayada.com", port: "" },
+      }),
+    ).toBe("https://thetravelubud.next-booking.vayada.com");
+    expect(buildBookingPreviewUrl({ slug: "hotel-alpenrose", template: "" })).toBe(
+      "https://hotel-alpenrose.next-booking.vayada.com",
+    );
+  });
+
   it("rejects non-canonical identifiers instead of opening a broken host", () => {
     expect(buildBookingPreviewUrl({ slug: "prop_123" })).toBeNull();
   });

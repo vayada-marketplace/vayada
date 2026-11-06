@@ -121,6 +121,27 @@ async function setup(
 const row = (page: Page, propertyId: string) =>
   page.getByTestId(`multi-property-row-${propertyId}`);
 
+/** The agency page's address as Booking Admin builds it (VAY-2483): the new system's host, or the
+ * local booking host when Booking Admin runs on one. */
+function agencyAddress(page: Page, slug: string) {
+  const admin = new URL(page.url());
+  return admin.hostname.endsWith(".localhost")
+    ? `${slug}.booking.localhost${admin.port ? `:${admin.port}` : ""}`
+    : `${slug}.next-booking.vayada.com`;
+}
+
+/** The new tab Preview opens: answered here, so no test reaches a real booking page (only this
+ * agency's address, never Booking Admin's own host). */
+async function stubBookingPages(page: Page) {
+  await page
+    .context()
+    .route(
+      /^https?:\/\/thetravelubud\.(next-booking\.vayada\.com|booking\.localhost)(:\d+)?\//,
+      (route) =>
+        route.fulfill({ contentType: "text/html", body: "<title>The Travel Ubud</title>" }),
+    );
+}
+
 /** Booking Admin scrolls inside <main>, so a full-page screenshot shows only the viewport: grow the
  * viewport to the page's height for the shot. */
 async function fullShot(page: Page, path: string) {
@@ -172,9 +193,15 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
     .getByLabel("Page description")
     .fill("13 villas, guest houses and resorts in and around Ubud");
   await page.getByRole("textbox", { name: "Link address" }).fill("thetravelubud");
-  await expect(page.getByTestId("multi-property-status")).toContainText("Live at ");
-  await expect(page.getByTestId("multi-property-status")).toContainText("thetravelubud");
+  // VAY-2483: not live until saved, so Preview says what it needs instead of opening a page.
+  await expect(page.getByTestId("multi-property-status")).toHaveText("Goes live when you save.");
   await expect(page.getByTestId("multi-property-save-note")).toHaveText("Unsaved changes");
+  const pageSection = page.locator("#mp-page");
+  await expect(pageSection.getByRole("link", { name: "Preview" })).toHaveCount(0);
+  await pageSection.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByTestId("multi-property-link-note")).toHaveText(
+    "Turn the page live and save it to preview it.",
+  );
 
   // Header
   await page.getByRole("switch", { name: "Contact button" }).click();
@@ -217,6 +244,14 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Changes saved", { exact: true })).toBeVisible();
   await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
+  // Live on the new system's host, never the old *.booking.vayada.com (VAY-2483).
+  await expect(page.getByTestId("multi-property-status")).toHaveText(
+    `Live at ${agencyAddress(page, "thetravelubud")}`,
+  );
+  await expect(pageSection.getByRole("link", { name: "Preview" })).toHaveAttribute(
+    "href",
+    new RegExp(`^https?://${agencyAddress(page, "thetravelubud").replace(/\./g, "\\.")}$`),
+  );
   expect(mock.saves).toEqual([
     {
       revision: 0,
@@ -263,6 +298,58 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
   );
   await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
   await expect(page.getByText("3 of 6 properties included")).toBeVisible();
+});
+
+// VAY-2483: Preview opens the saved page as guests see it, and says why it can't while it isn't.
+test("previews the saved page, and says what it needs while guests can't see it", async ({
+  page,
+}) => {
+  await stubBookingPages(page);
+  // Live, but its only included stay has lost its map pin since: guests see "not online".
+  const mock = await setup(page, {
+    summary: accountBookingPageSummary("The Travel Ubud", STAYS, {
+      revision: 2,
+      slug: "thetravelubud",
+      live: true,
+      propertyIds: [mansion],
+    }),
+  });
+  await page.goto("/settings/multi-property");
+  const status = page.getByTestId("multi-property-status");
+  const note = page.getByTestId("multi-property-link-note");
+  const section = page.locator("#mp-page");
+  await expect(status).toHaveText(
+    "On, but no included property is ready to book yet, so guests see a “not online” message.",
+  );
+  const unavailable = section.getByRole("button", { name: "Preview" });
+  await expect(unavailable).toHaveAttribute("aria-disabled", "true");
+  await unavailable.click();
+  await expect(note).toHaveText(
+    "Include at least one ready property and save to preview the page.",
+  );
+
+  // With a ready stay saved, the address is live and Preview opens it in a new tab.
+  await row(page, escape).getByRole("switch", { name: "Include The Escape Villa Ubud" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByTestId("multi-property-save-note")).toHaveText("All changes saved");
+  expect(mock.saves.at(-1)?.propertyIds).toEqual([mansion, escape]);
+  const address = agencyAddress(page, "thetravelubud");
+  await expect(status).toHaveText(`Live at ${address}`);
+  const preview = section.getByRole("link", { name: "Preview" });
+  await expect(preview).toHaveAttribute("target", "_blank");
+  await expect(preview).toHaveAttribute("rel", "noopener noreferrer");
+  let popup = page.waitForEvent("popup");
+  await preview.click();
+  expect(new URL((await popup).url()).host).toBe(address);
+  await expect(note).toHaveText("");
+
+  // Unsaved edits, even a new link, don't change what Preview opens: the saved page.
+  await page.getByRole("textbox", { name: "Link address" }).fill("travel-ubud");
+  await expect(status).toHaveText(`Live at ${address}`);
+  popup = page.waitForEvent("popup");
+  await preview.click();
+  expect(new URL((await popup).url()).host).toBe(address);
+  await expect(note).toHaveText("The preview shows the last saved version.");
 });
 
 test("uploads the agency's own header image, saves it and can remove it", async ({

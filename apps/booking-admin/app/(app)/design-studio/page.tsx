@@ -135,10 +135,11 @@ export default function DesignStudioPage() {
 
   // Fonts state
   const [selectedFont, setSelectedFont] = useState("high-end-serif");
+  // The address the top bar's Preview opens, on the new system's host (VAY-2483).
   const defaultBookingPreviewUrl = propertySlug
     ? buildBookingPreviewUrl({
         slug: propertySlug,
-        template: process.env.NEXT_PUBLIC_BOOKING_PREVIEW_URL_TEMPLATE,
+        template: process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE,
         location: typeof window === "undefined" ? undefined : window.location,
       })
     : null;
@@ -1007,7 +1008,7 @@ export default function DesignStudioPage() {
 
             {activeTab === "domain" && (
               <CustomDomainCard
-                bookingUrl={propertySlug ? `${propertySlug}.booking.vayada.com` : ""}
+                bookingUrl={defaultBookingPreviewUrl?.replace(/^https?:\/\//, "") ?? ""}
                 domainInput={domainInput}
                 domainStatus={domainStatus}
                 saving={domainBusy}

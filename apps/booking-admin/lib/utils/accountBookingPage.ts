@@ -6,6 +6,7 @@ import {
 import type {
   AccountBookingPageHeaderImage,
   AccountBookingPageProperty,
+  AccountBookingPageSummary,
 } from "@/services/api/accountBookingPageClient";
 
 /** The page as the form edits it (VAY-2457). */
@@ -35,6 +36,26 @@ export function propertyStatus(
   const type = property.missing.includes("type");
   const location = property.missing.includes("location");
   return type && location ? "noTypeNoLocation" : type ? "noType" : "noLocation";
+}
+
+/** What guests find at the page's address now (VAY-2483), from the saved page: live with a stay to
+ * book, live with none ready (its address says "not online"), or off. While it isn't live, the
+ * form's switch tells whether a save puts it online. */
+export type PageStatus = "live" | "noReadyStay" | "liveOnSave" | "off";
+
+export function pageStatus(
+  summary: {
+    saved: boolean;
+    page: Pick<AccountBookingPageSummary["page"], "live">;
+    properties: readonly Pick<AccountBookingPageProperty, "included" | "ready">[];
+  },
+  draftLive: boolean,
+): PageStatus {
+  if (summary.saved && summary.page.live)
+    return summary.properties.some((property) => property.included && property.ready)
+      ? "live"
+      : "noReadyStay";
+  return draftLive ? "liveOnSave" : "off";
 }
 
 /** Includes a stay at the end of the order, or leaves it out. The design can only be copied from an
