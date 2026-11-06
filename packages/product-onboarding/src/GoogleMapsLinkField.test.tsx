@@ -13,7 +13,10 @@ const messages = {
   searchInstead: "Search an address instead",
 };
 
-function render(resolveShortLink: ((url: string) => Promise<string | null>) | null = null) {
+function render(
+  resolveShortLink: ((url: string) => Promise<string | null>) | null = null,
+  onResolvingChange?: (resolving: boolean) => void,
+) {
   const onPin = vi.fn();
   const onClose = vi.fn();
   let renderer!: ReactTestRenderer;
@@ -26,6 +29,7 @@ function render(resolveShortLink: ((url: string) => Promise<string | null>) | nu
         onClose={onClose}
         classNames={{ label: "label", input: "input", link: "link" }}
         resolveShortLink={resolveShortLink}
+        onResolvingChange={onResolvingChange}
       />,
     );
   });
@@ -92,6 +96,28 @@ describe("GoogleMapsLinkField (VAY-2321, VAY-2444)", () => {
       });
       expect(field.result().props.children).toBe(messages.shortLink);
       expect(field.onPin).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("takes the focus by default, and says while a short link is read (VAY-2482)", async () => {
+    vi.useFakeTimers();
+    try {
+      const onResolvingChange = vi.fn();
+      const field = render(async () => null, onResolvingChange);
+      expect(field.input().props.autoFocus).toBe(true);
+      expect(onResolvingChange).toHaveBeenLastCalledWith(false);
+      field.type("https://maps.app.goo.gl/abc");
+      expect(onResolvingChange).toHaveBeenLastCalledWith(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(onResolvingChange).toHaveBeenLastCalledWith(false);
+      field.type("https://maps.app.goo.gl/def");
+      expect(onResolvingChange).toHaveBeenLastCalledWith(true);
+      act(() => field.renderer.unmount());
+      expect(onResolvingChange).toHaveBeenLastCalledWith(false);
     } finally {
       vi.useRealTimers();
     }

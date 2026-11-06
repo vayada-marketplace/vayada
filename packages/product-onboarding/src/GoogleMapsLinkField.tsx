@@ -33,6 +33,8 @@ export default function GoogleMapsLinkField({
   onClose,
   classNames,
   resolveShortLink = null,
+  autoFocus = true,
+  onResolvingChange,
 }: {
   inputId: string;
   messages: GoogleMapsLinkMessages;
@@ -42,6 +44,10 @@ export default function GoogleMapsLinkField({
   classNames: { label: string; input: string; link: string };
   /** The long link a short link opens, or null when it can't be read. */
   resolveShortLink?: ((url: string) => Promise<string | null>) | null;
+  /** False where the field is there from the start (VAY-2482's address window): no keyboard over a phone screen. */
+  autoFocus?: boolean;
+  /** True while a short link is being read, false again once it is or the field goes. */
+  onResolvingChange?: (resolving: boolean) => void;
 }) {
   const [text, setText] = useState("");
   const [result, setResult] = useState<ReturnType<typeof parseGoogleMapsLink> | undefined>();
@@ -56,6 +62,14 @@ export default function GoogleMapsLinkField({
     },
     [],
   );
+  const onResolvingChangeRef = useRef(onResolvingChange);
+  useEffect(() => {
+    onResolvingChangeRef.current = onResolvingChange;
+  });
+  useEffect(() => {
+    onResolvingChangeRef.current?.(resolving);
+  }, [resolving]);
+  useEffect(() => () => onResolvingChangeRef.current?.(false), []);
 
   function place(found: ReturnType<typeof parseGoogleMapsLink> | undefined) {
     setResult(found);
@@ -95,7 +109,7 @@ export default function GoogleMapsLinkField({
           id={inputId}
           type="text"
           inputMode="url"
-          autoFocus
+          autoFocus={autoFocus}
           autoComplete="off"
           spellCheck={false}
           value={text}

@@ -4201,6 +4201,7 @@
   "rooms.addressModal.lookingUp": "Adresse wird gesucht…",
   "rooms.addressModal.noAddress": "Noch keine Adresse. Tragen Sie sie in die Felder ein.",
   "rooms.addressModal.noAddressForPin": "Google kennt für diese Markierung keine Adresse. Prüfen Sie die Adressfelder und füllen Sie sie von Hand aus.",
+  "rooms.addressModal.mapsLinkShort": "Dieser Kurzlink ließ sich nicht lesen. Öffnen Sie ihn, kopieren Sie den langen Link aus der Adresszeile und fügen Sie ihn ein.",
   "rooms.addressModal.leftBehindOne": "{names} liegt mit eigenen Koordinaten auf der alten Markierung und bleibt dort. Stellen Sie diesen Zimmertyp auf „Wie die Unterkunft“, damit er der Adresse folgt.",
   "rooms.addressModal.leftBehindMany": "{names} liegen mit eigenen Koordinaten auf der alten Markierung und bleiben dort. Stellen Sie sie auf „Wie die Unterkunft“, damit sie der Adresse folgen.",
   "propertyAddress.area": "Ortsteil / Dorf",

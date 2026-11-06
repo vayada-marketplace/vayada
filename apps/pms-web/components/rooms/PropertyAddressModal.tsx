@@ -63,7 +63,8 @@ export default function PropertyAddressModal({
   const [rooms, setRooms] = useState<RoomType[] | "loading" | "failed">("loading");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  // A pasted link's address still loading: a save now would keep the old address under the new pin.
+  // A pasted short link being read, or its address loading: a save now would drop the link or keep the old
+  // address under the new pin.
   const [lookingUp, setLookingUp] = useState(false);
 
   useEffect(() => {
@@ -274,7 +275,7 @@ export default function PropertyAddressModal({
                   label: t("rooms.form.mapsLinkLabel"),
                   hint: t("rooms.form.mapsLinkHint"),
                   placed: (coordinates) => t("rooms.form.mapsLinkPlaced", { coordinates }),
-                  shortLink: t("rooms.form.mapsLinkShort"),
+                  shortLink: t("rooms.addressModal.mapsLinkShort"),
                   resolving: t("rooms.form.mapsLinkResolving"),
                   noPin: t("rooms.form.mapsLinkNone"),
                   searchInstead: t("rooms.form.searchInstead"),

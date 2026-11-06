@@ -558,7 +558,7 @@ test.describe("pms-web room location", () => {
       ),
     ).toEqual(["48.156341,11.58242"]);
 
-    // Every field stays editable; dragging the pin or clicking the map moves only the coordinates.
+    // Every field stays editable; dragging the pin moves only the coordinates.
     await modal.getByLabel("Street and number").fill("Leopoldstraße 12a");
     await map.evaluate((element) =>
       (
@@ -567,12 +567,6 @@ test.describe("pms-web room location", () => {
     );
     const coordinates = modal.getByText("Coordinates (advanced)", { exact: true }).locator("..");
     await expect(coordinates).toContainText("48.156512, 11.583012");
-    await map.evaluate((element) =>
-      (
-        element as HTMLElement & { vayadaE2eClickMap: (lat: number, lng: number) => void }
-      ).vayadaE2eClickMap(48.1566, 11.5831),
-    );
-    await expect(coordinates).toContainText("48.1566, 11.5831");
     await expect(modal.getByLabel("Street and number")).toHaveValue("Leopoldstraße 12a");
     await expect(guests).toContainText("Leopoldstraße 12a, Schwabing, 80802 München, Germany");
 
@@ -588,8 +582,8 @@ test.describe("pms-web room location", () => {
             postalCode: "80802",
             city: "München",
             countryCode: "DE",
-            latitude: 48.1566,
-            longitude: 11.5831,
+            latitude: 48.156512,
+            longitude: 11.583012,
           }),
         },
       },
@@ -630,11 +624,23 @@ test.describe("pms-web room location", () => {
       modal.getByText("Paste a Google Maps link, or click the map to drop the pin."),
     ).toBeVisible();
     await expect(modal.getByText("Pin set")).toHaveCount(0);
-    expect(
-      await page.evaluate(
-        () => (window as { vayadaE2ePlaceQueries?: string[] }).vayadaE2ePlaceQueries,
-      ),
-    ).toEqual(["text:Alpenstrasse 12, 80331 Munich, Germany"]);
+    // (The dev server's strict mode may ask twice.)
+    const queries = await page.evaluate(
+      () => (window as { vayadaE2ePlaceQueries?: string[] }).vayadaE2ePlaceQueries ?? [],
+    );
+    expect([...new Set(queries)]).toEqual(["text:Alpenstrasse 12, 80331 Munich, Germany"]);
+
+    // A click on the map places the first pin; the link then moves it.
+    await map.evaluate((element) =>
+      (
+        element as HTMLElement & { vayadaE2eClickMap: (lat: number, lng: number) => void }
+      ).vayadaE2eClickMap(48.1374, 11.5757),
+    );
+    await expect(map).toHaveAttribute("data-marker", "48.1374,11.5757");
+    await expect(modal.getByText("Pin set")).toBeVisible();
+    await expect(
+      modal.getByText("Coordinates (advanced)", { exact: true }).locator(".."),
+    ).toContainText("48.1374, 11.5757");
 
     await modal.getByLabel("Google Maps link").fill(leopoldstrasseLink);
     await expect(map).toHaveAttribute("data-marker", "48.156341,11.58242");

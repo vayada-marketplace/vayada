@@ -10,8 +10,8 @@ vi.mock("./GooglePlacesAddressField", () => ({
   default: () => <div data-testid="address-search" />,
 }));
 const google = vi.hoisted(() => ({
-  addressFromPin: vi.fn(),
-  findAddressOnMap: vi.fn(),
+  addressFromPin: vi.fn(async (): Promise<unknown> => null),
+  findAddressOnMap: vi.fn(async (): Promise<unknown> => null),
 }));
 vi.mock("./addressFromPin", () => ({ addressFromPin: google.addressFromPin }));
 vi.mock("./googleMaps", () => ({ findAddressOnMap: google.findAddressOnMap }));
@@ -27,6 +27,12 @@ import PropertyAddressFields, {
   type PropertyAddress,
   type PropertyAddressLinkMode,
 } from "./PropertyAddressFields";
+
+/** Lets a lookup's answer travel through its promise chain (the timeout race) and render. */
+const settle = () =>
+  act(async () => {
+    for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
+  });
 
 const saved: PropertyAddress = {
   streetAddress: "Alpenstrasse 12",
@@ -125,8 +131,56 @@ function render(
       field(label).props.onChange({ target: { value } });
     });
   const map = () => renderer.root.findByProps({ "data-testid": "map" }).props;
-  return { renderer, text, changes, paste, type, map, value: () => latest };
+  const directions = (value: string) =>
+    act(() => {
+      renderer.root.findByType("textarea").props.onChange({ target: { value } });
+    });
+  const button = (label: string) =>
+    act(() => {
+      renderer.root
+        .find(
+          (node) =>
+            node.type === "button" &&
+            node.findAll((child) => child.children.includes(label)).length > 0,
+        )
+        .props.onClick();
+    });
+  return {
+    renderer,
+    text,
+    changes,
+    paste,
+    type,
+    map,
+    directions,
+    button,
+    linkInput,
+    value: () => latest,
+  };
 }
+
+const google12 = (parts: Record<string, string> = {}) => ({
+  streetAddress: "Jl. Dukuh Sari",
+  area: "Buruan",
+  postalCode: "80581",
+  city: "Kabupaten Gianyar",
+  region: "Bali",
+  countryCode: "ID",
+  latitude: -8.546938,
+  longitude: 115.299455,
+  location: null,
+  ...parts,
+});
+const mertha: PropertyAddress = {
+  ...saved,
+  streetAddress: "Jalan Dukuh Sari",
+  postalCode: "",
+  city: "Kabupaten Gianyar",
+  countryCode: "ID",
+  latitude: null,
+  longitude: null,
+};
+const merthaLink = "https://www.google.com/maps/place/X/data=!3d-8.546938!4d115.299455";
 
 describe("PropertyAddressFields (VAY-2322, VAY-2482)", () => {
   afterEach(() => {
@@ -176,6 +230,7 @@ describe("PropertyAddressFields (VAY-2322, VAY-2482)", () => {
         location: null,
       });
     });
+    await settle();
     expect(form.value()).toMatchObject({
       streetAddress: "Leopoldstraße 12",
       area: "Schwabing",
@@ -206,6 +261,7 @@ describe("PropertyAddressFields (VAY-2322, VAY-2482)", () => {
         countryCode: "DE",
       });
     });
+    await settle();
     expect(form.value()).toMatchObject({
       streetAddress: "Leopoldstraße 12a",
       city: "Munich",
@@ -217,7 +273,7 @@ describe("PropertyAddressFields (VAY-2322, VAY-2482)", () => {
     google.addressFromPin.mockResolvedValueOnce(null);
     const form = render();
     form.paste(link);
-    await act(async () => {});
+    await settle();
     expect(form.value()).toMatchObject({ streetAddress: "Alpenstrasse 12", city: "Munich" });
     expect(form.text()).toContain("Google has no address for this pin.");
     expect(form.text()).toContain("Alpenstrasse 12, 80331 Munich, Germany");
@@ -232,7 +288,7 @@ describe("PropertyAddressFields (VAY-2322, VAY-2482)", () => {
       precise: true,
     });
     const form = render({ value: { ...saved, latitude: null, longitude: null } });
-    await act(async () => {});
+    await settle();
     expect(google.findAddressOnMap).toHaveBeenCalledWith(
       "key",
       "Alpenstrasse 12, 80331 Munich, Germany",
@@ -249,5 +305,110 @@ describe("PropertyAddressFields (VAY-2322, VAY-2482)", () => {
       .props.onPick as (position: { lat: number; lng: number }) => void;
     act(() => pick({ lat: 48.15651234, lng: 11.58301234 }));
     expect(form.value()).toMatchObject({ latitude: 48.156512, longitude: 11.583012 });
+  });
+
+  it("keeps a saved part Google has no value for when the pin stays at the same place", async () => {
+    google.findAddressOnMap.mockResolvedValue(null);
+    google.addressFromPin.mockResolvedValueOnce(google12({ streetAddress: "" }));
+    const form = render({ value: mertha });
+    form.paste(merthaLink);
+    await settle();
+    expect(form.value()).toMatchObject({
+      streetAddress: "Jalan Dukuh Sari",
+      area: "Buruan",
+      postalCode: "80581",
+      city: "Kabupaten Gianyar",
+      countryCode: "ID",
+      latitude: -8.546938,
+      longitude: 115.299455,
+    });
+  });
+
+  it("leaves a part empty that Google has no value for when the link moves the property far", async () => {
+    google.addressFromPin.mockResolvedValueOnce(google12({ postalCode: "", area: "" }));
+    const form = render({ value: { ...saved, area: "Altstadt" } });
+    form.paste(merthaLink);
+    await settle();
+    expect(form.value()).toMatchObject({
+      streetAddress: "Jl. Dukuh Sari",
+      area: "",
+      postalCode: "",
+      city: "Kabupaten Gianyar",
+      countryCode: "ID",
+    });
+  });
+
+  it("takes the region as the city when Google names no town, as address search does", async () => {
+    google.findAddressOnMap.mockResolvedValue(null);
+    google.addressFromPin.mockResolvedValueOnce(google12({ city: "" }));
+    const form = render({ value: mertha });
+    form.paste(merthaLink);
+    await settle();
+    expect(form.value()).toMatchObject({ city: "Bali", countryCode: "ID" });
+    expect(form.text()).not.toContain("Google has no address for this pin.");
+  });
+
+  it("keeps a link's address loading while the host writes arrival directions", async () => {
+    let answer!: (address: unknown) => void;
+    google.addressFromPin.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const onLookupChange = vi.fn();
+    const form = render({ links: linkMode(onLookupChange) });
+    form.paste(merthaLink);
+    form.directions("Turn at the blue gate");
+    expect(onLookupChange).toHaveBeenLastCalledWith(true);
+    await act(async () => answer(google12()));
+    await settle();
+    expect(form.value()).toMatchObject({
+      streetAddress: "Jl. Dukuh Sari",
+      arrivalDirections: "Turn at the blue gate",
+    });
+    expect(onLookupChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("gives up on a lookup that never answers, so Save isn't held", async () => {
+    vi.useFakeTimers();
+    try {
+      google.addressFromPin.mockReturnValueOnce(new Promise(() => undefined));
+      const onLookupChange = vi.fn();
+      const form = render({ links: linkMode(onLookupChange) });
+      form.paste(merthaLink);
+      expect(onLookupChange).toHaveBeenLastCalledWith(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      await settle();
+      expect(onLookupChange).toHaveBeenLastCalledWith(false);
+      expect(form.text()).toContain("Google has no address for this pin.");
+      expect(form.value()).toMatchObject({ streetAddress: "Alpenstrasse 12", latitude: -8.546938 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds Save while a short link is read, and lets go when the link box goes", async () => {
+    vi.useFakeTimers();
+    try {
+      const onLookupChange = vi.fn();
+      const links = {
+        ...linkMode(onLookupChange),
+        resolveShortLink: () => new Promise<null>(() => undefined),
+      };
+      const form = render({ links });
+      form.paste("https://maps.app.goo.gl/AbC");
+      expect(onLookupChange).toHaveBeenLastCalledWith(true);
+      form.button("Search an address instead");
+      expect(onLookupChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("puts the focus in the link box only once the host comes back to it", () => {
+    const form = render();
+    expect(form.linkInput().props.autoFocus).toBe(false);
+    form.button("Search an address instead");
+    expect(form.renderer.root.findAllByProps({ "data-testid": "address-search" })).toHaveLength(1);
+    form.button("Paste a Google Maps link");
+    expect(form.linkInput().props.autoFocus).toBe(true);
   });
 });

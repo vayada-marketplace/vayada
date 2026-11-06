@@ -4187,6 +4187,7 @@
   "rooms.addressModal.lookingUp": "Looking up the address…",
   "rooms.addressModal.noAddress": "No address yet. Add it in the fields.",
   "rooms.addressModal.noAddressForPin": "Google has no address for this pin. Check the address fields and fill them in by hand.",
+  "rooms.addressModal.mapsLinkShort": "This short link couldn't be read. Open it, copy the long link from the address bar, and paste that.",
   "rooms.addressModal.leftBehindOne": "{names} sits on the old pin by its own coordinates and stays there. Set it to “Same as property” to follow the address.",
   "rooms.addressModal.leftBehindMany": "{names} sit on the old pin by their own coordinates and stay there. Set them to “Same as property” to follow the address.",
   "propertyAddress.area": "Area / village",

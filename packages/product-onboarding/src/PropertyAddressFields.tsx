@@ -93,6 +93,8 @@ const MAX_LENGTH = { streetAddress: 240, postalCode: 32, city: 120, area: 120 } 
 const roundCoordinate = (value: number) => Math.round(value * 1e6) / 1e6;
 // A pin this far from a road or an area the host picks can't be where guests arrive (VAY-2344).
 const STALE_PIN_KM = 2;
+// How long a pasted link's address may take before the fields are left for the host (VAY-2482).
+const LINK_LOOKUP_TIMEOUT_MS = 10_000;
 
 /** The property's address (VAY-2322), shared by Booking Admin's Location settings and the PMS room editor's
  * "Property address" modal so the two can't drift apart: address search, fields that can all be typed by
@@ -120,14 +122,20 @@ export default function PropertyAddressFields({
 }) {
   const t = translate ?? ((key) => propertyAddressEnglish[key]);
   const id = useId();
-  // A pick or a link's address still loading is dropped once the host types, picks, pastes or moves the pin.
+  // A pick still loading is dropped once the host types.
   const revision = useRef(0);
+  // A link's address still loading is dropped once the host edits the address or the pin, or the form goes.
+  const linkLookup = useRef(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [searchUnavailable, setSearchUnavailable] = useState(false);
   // Where a road or an area picked in search lies: the map shows it, so the next click pins it.
   const [found, setFound] = useState<MapPosition | null>(null);
-  // Link mode: the link first, or address search instead.
+  // Link mode: the link first, or address search instead. The link box takes the focus only once the host asks
+  // for it again: on opening it would put a phone's keyboard over the window.
   const [input, setInput] = useState<"link" | "search">("link");
+  const [focusLink, setFocusLink] = useState(false);
+  // A short link being read, then the address Google gives the pin.
+  const [resolvingLink, setResolvingLink] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [noAddressForPin, setNoAddressForPin] = useState(false);
   // The map and address search keep the handlers they started with: they read this to ignore picks while saving.
@@ -139,6 +147,7 @@ export default function PropertyAddressFields({
   useEffect(
     () => () => {
       revision.current += 1;
+      linkLookup.current += 1;
     },
     [],
   );
@@ -147,13 +156,16 @@ export default function PropertyAddressFields({
     onLookupChange.current = linkMode?.onLookupChange;
   });
   useEffect(() => {
-    onLookupChange.current?.(lookingUp);
-  }, [lookingUp]);
+    onLookupChange.current?.(lookingUp || resolvingLink);
+  }, [lookingUp, resolvingLink]);
   const change = (patch: Partial<PropertyAddress>) => {
     revision.current += 1;
-    // Whatever the host does meanwhile wins over a link's address still loading.
-    setLookingUp(false);
-    setNoAddressForPin(false);
+    // The host's own address or pin wins over a link's address still loading; arrival directions don't touch it.
+    if (Object.keys(patch).some((key) => key !== "arrivalDirections")) {
+      linkLookup.current += 1;
+      setLookingUp(false);
+      setNoAddressForPin(false);
+    }
     onChange(patch);
   };
   const hasPin = value.latitude !== null && value.longitude !== null;
@@ -209,25 +221,40 @@ export default function PropertyAddressFields({
    * stay as typed, for the host to check. */
   const placeFromLink = (pin: MapsLinkPin) => {
     if (disabledRef.current) return;
+    // The same place (no pin yet, or one close by): a part Google has no value for keeps the saved one, e.g. a
+    // Bali street Google only knows by its village. Far away, the old parts belong to another place.
+    const samePlace =
+      value.latitude === null ||
+      value.longitude === null ||
+      distanceKm({ latitude: value.latitude, longitude: value.longitude }, pin) <= STALE_PIN_KM;
+    const before = value;
     change({ latitude: pin.latitude, longitude: pin.longitude });
-    const request = revision.current;
+    const request = linkLookup.current;
     setLookingUp(true);
-    void addressFromPin(apiKey, { lat: pin.latitude, lng: pin.longitude }).then((address) => {
-      if (request !== revision.current) return;
-      if (!address?.city || !address.countryCode) {
-        setLookingUp(false);
-        setNoAddressForPin(true);
-        return;
-      }
-      // A new place: every part comes from Google, empty where it has none.
-      change({
-        streetAddress: address.streetAddress,
-        area: address.area,
-        postalCode: address.postalCode,
-        city: address.city,
-        countryCode: address.countryCode,
+    // A lookup that never answers would hold Save: after a while it counts as no address.
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), LINK_LOOKUP_TIMEOUT_MS),
+    );
+    void Promise.race([addressFromPin(apiKey, { lat: pin.latitude, lng: pin.longitude }), timeout])
+      .catch(() => null)
+      .then((address) => {
+        if (request !== linkLookup.current) return;
+        const city = address ? address.city || address.region : "";
+        if (!address || !city.trim() || !address.countryCode) {
+          setLookingUp(false);
+          setNoAddressForPin(true);
+          return;
+        }
+        const part = (found: string, saved: string | undefined) =>
+          found.trim() || (samePlace ? (saved ?? "") : "");
+        change({
+          streetAddress: part(address.streetAddress, before.streetAddress),
+          area: part(address.area, before.area),
+          postalCode: part(address.postalCode, before.postalCode),
+          city,
+          countryCode: address.countryCode,
+        });
       });
-    });
   };
   const text = (key: "streetAddress" | "postalCode" | "city" | "area", label: string) => (
     <label className={labelClass}>
@@ -275,6 +302,8 @@ export default function PropertyAddressFields({
               messages={links.messages.link}
               onPin={placeFromLink}
               onClose={() => setInput("search")}
+              autoFocus={focusLink}
+              onResolvingChange={setResolvingLink}
               classNames={{
                 label: `${labelClass} mb-1`,
                 input: inputBaseClass,
@@ -330,7 +359,10 @@ export default function PropertyAddressFields({
             {links && (
               <button
                 type="button"
-                onClick={() => setInput("link")}
+                onClick={() => {
+                  setFocusLink(true);
+                  setInput("link");
+                }}
                 className={`${linkButtonClass} mt-2`}
               >
                 <LinkIcon className="h-3.5 w-3.5" />
@@ -440,18 +472,15 @@ export default function PropertyAddressFields({
         {!hasPin && !(links && showMap) && (
           <p className="text-xs text-amber-800">{t("propertyAddress.noPin")}</p>
         )}
+        {/* Not a live region: it changes with every key typed in the fields; the link box says what it did. */}
         {links && hasPin && (
-          <div aria-live="polite">
-            <GuestsWillSeeCard
-              label={links.messages.guestsWillSee}
-              name={links.guestName}
-              address={
-                lookingUp
-                  ? links.messages.lookingUp
-                  : addressLine(value) || links.messages.noAddress
-              }
-            />
-          </div>
+          <GuestsWillSeeCard
+            label={links.messages.guestsWillSee}
+            name={links.guestName}
+            address={
+              lookingUp ? links.messages.lookingUp : addressLine(value) || links.messages.noAddress
+            }
+          />
         )}
         {/* Open by itself when the map can't place the pin. */}
         <details open={!showMap} className="group">
