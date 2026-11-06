@@ -197,6 +197,7 @@ async function useAuthKitSession(page: Page) {
             organizationId: "11111111-1111-4111-8111-111111111111",
             workosOrganizationId: "org_workos_hotel_group",
             organizationKind: "hotel_group",
+            resources: { "booking:booking_hotel": [BOOKING_ADMIN_HOTEL_ID] },
             user: {
               id: "user_1",
               email: "owner@example.com",
@@ -350,9 +351,12 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await setUp(page, [{ ...fullFeed(), canOpenPmsBookings: true }]);
     await useAuthKitSession(page);
     const marks: unknown[] = [];
-    await page.route(READ_ROUTE, (route) => {
+    let answerMark = () => {};
+    const markAnswered = new Promise<void>((resolve) => (answerMark = resolve));
+    await page.route(READ_ROUTE, async (route) => {
       marks.push(route.request().postDataJSON());
-      return route.fulfill({ status: 204 });
+      await markAnswered;
+      await route.fulfill({ status: 204 });
     });
     await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -363,11 +367,23 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
       BOOKING_ADMIN_PROPERTY_ID,
       `/bookings/${booking.id}`,
     );
+    let handoffs = 0;
+    await page.route("**/auth/handoff/create", (route) => {
+      handoffs += 1;
+      return route.fallback();
+    });
     await page.goto("/settings");
     await bell(page).click();
     await rows(page).first().getByRole("button", { name: "View booking" }).click();
+    await expect
+      .poll(() => marks)
+      .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] }]);
+    // Nothing leaves the page until the mark is saved.
+    await page.waitForTimeout(500);
+    expect(handoffs).toBe(0);
+    answerMark();
     await expect.poll(() => page.url()).toBe(pms);
-    expect(marks).toContainEqual({ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] });
+    expect(handoffs).toBe(1);
 
     // Booking modified opens its own booking.
     await mockSetupExitHandoff(
@@ -383,27 +399,33 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await expect.poll(() => page.url()).toBe(pms);
   });
 
-  test("View booking asks for the PMS sign-in when the one-time exchange can't be made", async ({
+  test("View booking stays on Reservations when PMS can't be opened on the property", async ({
     page,
-    baseURL,
   }) => {
-    // The legacy session has no CSRF token, so there is no exchange: PMS signs in, then opens the booking.
+    // Without the one-time exchange, PMS's sign-in wouldn't know which property the booking is in.
     await setUp(page, [{ ...fullFeed(), canOpenPmsBookings: true }]);
+    await useAuthKitSession(page);
     await page.route(READ_ROUTE, (route) => route.fulfill({ status: 204 }));
-    const pmsSignIn = (url: URL) =>
-      url.pathname === "/login" && url.searchParams.get("returnTo") === `/bookings/${booking.id}`;
-    await page.route(pmsSignIn, (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: "<!doctype html><title>PMS sign-in</title>",
-      }),
+    await page.route("**/auth/handoff/create", (route) =>
+      route.request().method() === "OPTIONS"
+        ? fulfillCorsPreflight(route)
+        : route.fulfill({
+            status: 503,
+            headers: corsHeaders(route),
+            json: { error: { code: "handoff_unavailable", retryable: true } },
+          }),
     );
+    const searches: (string | null)[] = [];
+    await page.route(`**/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/reservations*`, (route) => {
+      searches.push(new URL(route.request().url()).searchParams.get("search"));
+      return route.fulfill({ json: { bookings: [], total: 0, limit: 20, offset: 0 } });
+    });
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/settings");
     await bell(page).click();
     await rows(page).first().getByRole("button", { name: "View booking" }).click();
-    await expect.poll(() => pmsSignIn(new URL(page.url()))).toBe(true);
-    expect(new URL(page.url()).origin).not.toBe(new URL(baseURL!).origin);
+    await expect(page).toHaveURL(/\/reservations\?search=VAY-ABC123$/);
+    await expect.poll(() => searches).toContain("VAY-ABC123");
   });
 
   test("Extend opens that promo code in Promos", async ({ page }) => {

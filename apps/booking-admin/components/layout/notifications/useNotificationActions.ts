@@ -50,30 +50,22 @@ export function useNotificationActions(
     [],
   );
 
-  /** Opens a PMS page on the selected property: the one-time exchange carries the session and the property
-   * over; without it, PMS asks the person to sign in. False when there's no PMS address to go to. */
-  const openInPms = useCallback(
-    async (targetPath: string): Promise<boolean> => {
+  /** The one-time exchange that opens a PMS page signed in, on the selected property; null when it can't be
+   * made. */
+  const pmsHandoff = useCallback(
+    async (targetPath: string): Promise<string | null> => {
       const csrfToken = getAuthCsrfToken();
-      if (csrfToken && hotelId) {
-        try {
-          window.location.href = await createBrowserAuthHandoff({
-            csrfToken,
-            routingHints: { propertyId: hotelId },
-            sourceSurface: "booking-admin",
-            targetPath,
-            targetSurface: "pms-web",
-          });
-          return true;
-        } catch {
-          // Require PMS sign-in when the one-time exchange is unavailable.
-        }
-      }
+      if (!csrfToken || !hotelId) return null;
       try {
-        window.location.href = crossAppReauthenticationUrl(PMS_FRONTEND_URL, targetPath);
-        return true;
+        return await createBrowserAuthHandoff({
+          csrfToken,
+          routingHints: { propertyId: hotelId },
+          sourceSurface: "booking-admin",
+          targetPath,
+          targetSurface: "pms-web",
+        });
       } catch {
-        return false;
+        return null;
       }
     },
     [hotelId],
@@ -88,8 +80,10 @@ export function useNotificationActions(
         void (async () => {
           // A full page change follows: let the mark go out first.
           if (!read) await markRead([key]);
-          if (!(await openInPms(`/bookings/${encodeURIComponent(bookingId)}`)))
-            openReservations(reference);
+          const url = await pmsHandoff(`/bookings/${encodeURIComponent(bookingId)}`);
+          // Without the exchange, PMS's sign-in wouldn't know the property: stay on Reservations here.
+          if (url) window.location.href = url;
+          else openReservations(reference);
         })();
         return;
       }
@@ -102,7 +96,7 @@ export function useNotificationActions(
       else
         openNotificationLink({ path: "/promo-codes", param: "edit" }, action.promoId, router.push);
     },
-    [canOpenPmsBookings, markRead, openInPms, router],
+    [canOpenPmsBookings, markRead, pmsHandoff, router],
   );
 
   const retrySync = useCallback(
@@ -144,10 +138,20 @@ export function useNotificationActions(
     async (alert: HostNotificationSyncAlert) => {
       // A full page change follows: let the mark go out first.
       if (!alert.read) await markRead([alert.key]);
-      // No PMS address configured here: stay on the page.
-      await openInPms("/channel-manager");
+      const targetPath = "/channel-manager";
+      const url = await pmsHandoff(targetPath);
+      if (url) {
+        window.location.href = url;
+        return;
+      }
+      // Require PMS sign-in when the one-time exchange is unavailable.
+      try {
+        window.location.href = crossAppReauthenticationUrl(PMS_FRONTEND_URL, targetPath);
+      } catch {
+        // No PMS address configured here: stay on the page.
+      }
     },
-    [markRead, openInPms],
+    [markRead, pmsHandoff],
   );
 
   const resetSync = useCallback(() => {
