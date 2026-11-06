@@ -6,14 +6,17 @@ import type {
   PricingSnapshot,
 } from "@/services/api/replacementPricingClient";
 import { firstPricingInput } from "./FirstPricingSetup";
-import { pricesForRoom, publishNewRoomPrices } from "./newRoomPrices";
+import { copiedRoomPrices, pricesForRoom, publishNewRoomPrices } from "./newRoomPrices";
 
 const temporary = "61000000-0000-4000-8000-0000000000aa";
 const created = "61000000-0000-4000-8000-0000000000bb";
 const other = "61000000-0000-4000-8000-0000000000cc";
 const offer = "61000000-0000-4000-8000-0000000000dd";
 const capacity = { total: 2, adults: 2, children: 2 };
-const answers = (mode: "flat" | "occupancy") =>
+const answers = (
+  mode: "flat" | "occupancy",
+  cancellation: "non_refundable" | "flexible" = "non_refundable",
+) =>
   firstPricingInput("property", { roomTypeId: temporary, name: "Suite", capacity }, offer, {
     mode,
     occupancy: mode === "occupancy" ? ["90", "120"] : [],
@@ -27,8 +30,8 @@ const answers = (mode: "flat" | "occupancy") =>
     countChildren: "yes",
     minimum: "1",
     maximum: "",
-    cancellation: "non_refundable",
-    freeDays: "",
+    cancellation,
+    freeDays: cancellation === "flexible" ? "7" : "",
     payment: "full",
   });
 const typed = (mode: "flat" | "occupancy" = "flat") => {
@@ -44,6 +47,7 @@ const confirm = vi.fn(),
   stage = vi.fn();
 const client = {
   read: vi.fn(),
+  readTerms: vi.fn(),
   termsAction: vi.fn(() => stage),
   prepare: vi.fn(),
   saveDraft: vi.fn(),
@@ -90,6 +94,14 @@ beforeEach(() => {
     declaration: "all_mandatory_charges_included",
   }));
   confirm.mockResolvedValue({ id: "declaration" });
+  client.readTerms.mockImplementation(
+    async (roomTypeId: string, offerId: string, revision: string) => ({
+      roomTypeId,
+      offerId,
+      revision,
+      ...termsOf(offerId),
+    }),
+  );
   publish.mockResolvedValue({ revision: 4, replayed: false });
 });
 
@@ -195,4 +207,178 @@ it("after an Owner's currency change carries the other rooms as their Prices tab
   expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([
     [created, 6],
   ]);
+});
+
+// VAY-2487: a duplicated room type gets the original's saved prices.
+const original = "61000000-0000-4000-8000-0000000000ee";
+const linked = "61000000-0000-4000-8000-0000000000ff";
+const mainTerms = "61000000-0000-4000-8000-000000000101";
+const linkedTerms = "61000000-0000-4000-8000-000000000102";
+const occupancy = (...amountsMinor: string[]) => ({ mode: "occupancy" as const, amountsMinor });
+const rules = (minArrivalNights: number) => ({
+  minArrivalNights,
+  maxStayNights: null,
+  closedToArrival: false,
+  closedToDeparture: false,
+  stopSell: false,
+});
+/** The original as saved: prices per number of guests, two seasons with their own minimum stay, and a second option
+ * linked to the first ("10% less"). */
+function originalRoom(): PricingSnapshot["rooms"][number] {
+  const room = typed("occupancy").room;
+  const main = room.offers[0];
+  if (main.price.kind !== "independent") throw new Error("The first option has its own prices");
+  return {
+    ...room,
+    roomTypeId: original,
+    revision: 3,
+    offers: [
+      {
+        ...main,
+        termsRevision: mainTerms,
+        price: {
+          kind: "independent",
+          calendar: {
+            ...main.price.calendar,
+            seasons: [
+              {
+                name: "January",
+                tier: "",
+                from: "01-01",
+                through: "01-31",
+                price: occupancy("32500", "35000"),
+              },
+              {
+                name: "December",
+                tier: "high",
+                from: "12-01",
+                through: "12-31",
+                price: occupancy("40000", "42500"),
+              },
+            ],
+          },
+        },
+        restrictions: {
+          kind: "own",
+          rules: rules(1),
+          seasons: [{ from: "12-01", through: "12-31", rules: rules(3) }],
+          dates: [],
+        },
+      },
+      {
+        id: linked,
+        termsRevision: linkedTerms,
+        meal: main.meal,
+        price: {
+          kind: "linked",
+          parentId: offer,
+          adjustment: { kind: "percentage", basisPoints: -1000 },
+          dateOverrides: [],
+        },
+        restrictions: { kind: "inherit" },
+      },
+    ],
+  } as PricingSnapshot["rooms"][number];
+}
+/** Each option's saved cancellation and payment: the linked option is flexible, the first one non-refundable. */
+const termsOf = (offerId: string) => {
+  const { cancellation, payment } = answers(
+    "flat",
+    offerId === linked ? "flexible" : "non_refundable",
+  ).terms;
+  return { cancellation, payment };
+};
+const savedWithOriginal = () => ({
+  currency: "EUR",
+  ownerReferences: { finance: "finance" },
+  rooms: [otherRoom, originalRoom()],
+  revision: 3,
+  sources,
+  stale: false,
+});
+const copyOf = (read: ReturnType<typeof savedWithOriginal> | null, from = original) =>
+  copiedRoomPrices(
+    client as unknown as ReturnType<typeof createReplacementPricingClient>,
+    read,
+    from,
+    created,
+  );
+const savedRoom = (roomTypeId: string) =>
+  saved.snapshot.rooms.find((room) => room.roomTypeId === roomTypeId)!;
+
+it("copies the original's saved prices, seasons, prices per number of guests and every option's terms to its copy (VAY-2487)", async () => {
+  const read = savedWithOriginal();
+  // Room-type IDs are lower-case UUIDs; the list's id may carry another case.
+  const prices = await copyOf(read, original.toUpperCase());
+  expect(prices!.room).toEqual({ ...originalRoom(), roomTypeId: created });
+  expect(client.readTerms.mock.calls).toEqual([
+    [original, offer, mainTerms],
+    [original, linked, linkedTerms],
+  ]);
+  // New terms of the copy, with the original's cancellation and payment.
+  expect(prices!.terms).toEqual([
+    { roomTypeId: created, offerId: offer, expectedRevision: null, ...termsOf(offer) },
+    { roomTypeId: created, offerId: linked, expectedRevision: null, ...termsOf(linked) },
+  ]);
+  expect(prices!.terms[1].cancellation).not.toEqual(prices!.terms[0].cancellation);
+
+  // Published from that same read, next to the other rooms, which stay as they are.
+  await publishNewRoomPrices(
+    client as unknown as ReturnType<typeof createReplacementPricingClient>,
+    prices!,
+    read,
+  );
+  expect(client.read).not.toHaveBeenCalled();
+  expect(saved.baseRevision).toBe(3);
+  expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([
+    [other, 4],
+    [original, 4],
+    [created, 4],
+  ]);
+  expect(client.termsAction.mock.calls.map((call) => (call as unknown[])[0])).toEqual(
+    prices!.terms,
+  );
+  // The copy is independent: its options have their own new terms, the original keeps its own.
+  expect(savedRoom(created).offers.map((value) => value.termsRevision)).toEqual([
+    "terms-revision",
+    "terms-revision",
+  ]);
+  expect(savedRoom(original)).toEqual({ ...originalRoom(), revision: 4 });
+  expect(savedRoom(created)).toEqual({
+    ...originalRoom(),
+    roomTypeId: created,
+    revision: 4,
+    offers: originalRoom().offers.map((value) => ({ ...value, termsRevision: "terms-revision" })),
+  });
+  expect(publish).toHaveBeenCalledOnce();
+});
+
+it("leaves a copy without prices when the original has none, reading no terms", async () => {
+  expect(await copyOf({ ...savedWithOriginal(), rooms: [otherRoom] })).toBeNull();
+  expect(await copyOf(null)).toBeNull();
+  expect(client.readTerms).not.toHaveBeenCalled();
+});
+
+it("copies nothing when an option's saved terms can't be read", async () => {
+  client.readTerms.mockImplementation(
+    async (roomTypeId: string, offerId: string, revision: string) =>
+      offerId === linked ? null : { roomTypeId, offerId, revision, ...termsOf(offerId) },
+  );
+  await expect(copyOf(savedWithOriginal())).rejects.toThrow();
+  client.readTerms.mockRejectedValue(new ApiErrorResponse(409, { message: "changed" }));
+  await expect(copyOf(savedWithOriginal())).rejects.toBeInstanceOf(ApiErrorResponse);
+  expect(client.termsAction).not.toHaveBeenCalled();
+});
+
+it("refuses a copy's save when someone published prices for the copy after the read", async () => {
+  const read = savedWithOriginal();
+  const prices = await copyOf(read);
+  await expect(
+    publishNewRoomPrices(
+      client as unknown as ReturnType<typeof createReplacementPricingClient>,
+      prices!,
+      { ...read, rooms: [...read.rooms, { ...otherRoom, roomTypeId: created }] },
+    ),
+  ).rejects.toBeInstanceOf(ApiErrorResponse);
+  expect(client.prepare).not.toHaveBeenCalled();
 });

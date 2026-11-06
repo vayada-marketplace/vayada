@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreparedHotelImportPanel } from "@vayada/product-onboarding/PreparedHotelImportPanel";
 import {
   roomsService,
@@ -23,6 +23,17 @@ const { pricingRead, notSellingRates } = vi.hoisted(() => ({
 vi.mock("@/services/api/replacementPricingClient", () => ({
   createReplacementPricingClient: () => ({ read: pricingRead, notSellingRates }),
 }));
+const { routerPush, copiedRoomPrices, publishNewRoomPrices, keepNewRoomPrices } = vi.hoisted(
+  () => ({
+    routerPush: vi.fn(),
+    copiedRoomPrices: vi.fn(),
+    publishNewRoomPrices: vi.fn(),
+    keepNewRoomPrices: vi.fn(),
+  }),
+);
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }));
+vi.mock("@/components/pricing/newRoomPrices", () => ({ copiedRoomPrices, publishNewRoomPrices }));
+vi.mock("@/components/pricing/keptNewRoomPrices", () => ({ keepNewRoomPrices }));
 vi.mock("@vayada/product-onboarding/PreparedHotelImportPanel", () => ({
   PreparedHotelImportPanel: () => null,
 }));
@@ -35,6 +46,8 @@ const room = { id: "room-1", name: "Existing suite" } as RoomType;
 beforeEach(() => {
   pricingRead.mockReset().mockResolvedValue(null);
   notSellingRates.mockReset().mockResolvedValue([]);
+  for (const mock of [routerPush, copiedRoomPrices, publishNewRoomPrices, keepNewRoomPrices])
+    mock.mockReset();
   vi.spyOn(individualRoomsService, "list").mockResolvedValue([]);
   vi.spyOn(linkedInventoryGroupsService, "list").mockResolvedValue([]);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -213,4 +226,97 @@ it("offers no room reordering with a single room", async () => {
     view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick(),
   );
   expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(0);
+});
+
+describe("Duplicate (VAY-2487)", () => {
+  const copy = { ...room, id: "room-copy", hotelId: "test-property", name: "Existing suite Copy" };
+  const read = { currency: "EUR", revision: 3, rooms: [], stale: false };
+  const prices = { room: { roomTypeId: "room-copy" }, terms: [] };
+  // The original's button: the first row.
+  const duplicateButton = () =>
+    view.root.findAllByProps({ "aria-label": "rooms.duplicateRoomType" })[0];
+  async function duplicate() {
+    await act(async () => duplicateButton().props.onClick({ stopPropagation: () => undefined }));
+  }
+  const list = () => vi.mocked(roomsService.list);
+  beforeEach(() => {
+    vi.spyOn(roomsService, "list").mockResolvedValue([room]);
+    vi.spyOn(roomsService, "duplicate").mockResolvedValue(copy as RoomType);
+    copiedRoomPrices.mockResolvedValue(prices);
+    publishNewRoomPrices.mockResolvedValue(undefined);
+  });
+
+  it("saves the original's prices for the copy from one read, then shows both rooms with their prices", async () => {
+    await mount();
+    pricingRead.mockClear();
+    pricingRead.mockResolvedValueOnce(read);
+    list().mockResolvedValue([room, copy as RoomType]);
+    await duplicate();
+    expect(roomsService.duplicate).toHaveBeenCalledWith("room-1");
+    const client = copiedRoomPrices.mock.calls[0][0];
+    expect(copiedRoomPrices).toHaveBeenCalledWith(client, read, "room-1", "room-copy");
+    expect(publishNewRoomPrices).toHaveBeenCalledWith(client, prices, read);
+    // The list and its prices are read again after the save.
+    expect(pricingRead).toHaveBeenCalledTimes(2);
+    expect(text()).toContain("Existing suite Copy");
+    expect(text()).not.toContain("rooms.duplicatePricesNotCopied");
+    expect(keepNewRoomPrices).not.toHaveBeenCalled();
+    expect(routerPush).not.toHaveBeenCalled();
+    expect(duplicateButton().props.disabled).toBe(false);
+  });
+
+  it("copies no prices when the original has none", async () => {
+    copiedRoomPrices.mockResolvedValue(null);
+    await mount();
+    await duplicate();
+    expect(publishNewRoomPrices).not.toHaveBeenCalled();
+    expect(text()).not.toContain("rooms.duplicatePricesNotCopied");
+    expect(routerPush).not.toHaveBeenCalled();
+  });
+
+  it("opens the copy's Prices tab on the copied prices when their save fails", async () => {
+    const refused = new Error("refused");
+    publishNewRoomPrices.mockRejectedValue(refused);
+    await mount();
+    await duplicate();
+    expect(keepNewRoomPrices).toHaveBeenCalledWith(prices, refused);
+    expect(routerPush).toHaveBeenCalledWith("/rooms/room-copy?tab=prices");
+  });
+
+  it("keeps the copied prices for the copy's Prices tab without opening it once the list is left", async () => {
+    let refuse!: (cause: Error) => void;
+    publishNewRoomPrices.mockReturnValue(
+      new Promise((_, reject) => {
+        refuse = reject;
+      }),
+    );
+    await mount();
+    await duplicate();
+    // The host leaves the Rooms list while the prices are still saving.
+    act(() => view.update(createElement("div")));
+    await act(async () => refuse(new Error("refused")));
+    expect(keepNewRoomPrices).toHaveBeenCalledWith(prices, expect.any(Error));
+    expect(routerPush).not.toHaveBeenCalled();
+  });
+
+  it("says the prices weren't copied when the original's prices can't be read", async () => {
+    copiedRoomPrices.mockRejectedValue(new Error("offline"));
+    await mount();
+    list().mockResolvedValue([room, copy as RoomType]);
+    await duplicate();
+    expect(publishNewRoomPrices).not.toHaveBeenCalled();
+    expect(keepNewRoomPrices).not.toHaveBeenCalled();
+    expect(routerPush).not.toHaveBeenCalled();
+    expect(text()).toContain("rooms.duplicatePricesNotCopied");
+    // The copy exists: the list shows it.
+    expect(text()).toContain("Existing suite Copy");
+  });
+
+  it("keeps the old message when the room type itself can't be duplicated", async () => {
+    vi.mocked(roomsService.duplicate).mockRejectedValue(new Error(""));
+    await mount();
+    await duplicate();
+    expect(copiedRoomPrices).not.toHaveBeenCalled();
+    expect(text()).toContain("rooms.failedToDuplicate");
+  });
 });
