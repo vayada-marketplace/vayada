@@ -552,6 +552,66 @@ test("shows a room's details with its choices, as the old page did", async ({ pa
 });
 
 for (const width of [1440, 390]) {
+  test(`VAY-2488: shows the hotel's check-in and check-out times in every room's details, at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    await page.addInitScript(
+      ({ slug, version }) =>
+        localStorage.setItem(
+          `vayada_booking_analytics:${slug}`,
+          JSON.stringify({ version, analytics: false }),
+        ),
+      { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
+    );
+    // The seeded hotel's settings: check-in from 15:00, check-out by 11:00.
+    await mockBookingApis(page);
+    await mockRooms(page);
+    await page.goto(STAY);
+    await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
+
+    await page
+      .getByTestId("room-card-deluxe")
+      .getByRole("button", { name: "View Details" })
+      .click();
+    const deluxe = page.getByRole("dialog", { name: "Deluxe Double Room" });
+    const description = deluxe.getByText("Our quietest room, facing the garden.");
+    await expect(description).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`room-details-times-${width}.png`),
+      animations: "disabled",
+    });
+    const checkIn = deluxe.getByText("Check-in from 15:00", { exact: true });
+    const checkOut = deluxe.getByText("Check-out by 11:00", { exact: true });
+    await expect(checkIn).toBeVisible();
+    await expect(checkOut).toBeVisible();
+    // Under the description, above the amenities.
+    const top = async (locator: typeof checkIn) => (await locator.boundingBox())!.y;
+    const bottom = async (locator: typeof checkIn) => {
+      const box = (await locator.boundingBox())!;
+      return box.y + box.height;
+    };
+    expect(await top(checkIn)).toBeGreaterThanOrEqual(await bottom(description));
+    expect(await bottom(checkOut)).toBeLessThanOrEqual(
+      await top(deluxe.getByText("Free WiFi", { exact: true })),
+    );
+    await page.keyboard.press("Escape");
+    await expect(deluxe).toHaveCount(0);
+
+    // A room without a description shows them under its facts.
+    await page
+      .getByTestId("room-card-garden")
+      .getByRole("button", { name: "View Details" })
+      .click();
+    const garden = page.getByRole("dialog", { name: "Garden Suite" });
+    await expect(garden.getByText("Check-in from 15:00", { exact: true })).toBeVisible();
+    await expect(garden.getByText("Check-out by 11:00", { exact: true })).toBeVisible();
+    await assertHealthy();
+  });
+}
+
+for (const width of [1440, 390]) {
   test(`VAY-2422: opens the room a hotel website's link names, once, at ${width}px`, async ({
     page,
   }, testInfo) => {
