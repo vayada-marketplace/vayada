@@ -543,7 +543,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
                 data-testid="agency-filters-button"
                 className={`flex min-h-[44px] items-center gap-1.5 rounded-full border px-3.5 text-[14px] font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 lg:hidden ${
                   activeFilters
-                    ? "border-primary-600 bg-primary-600 text-primary-on-600"
+                    ? "border-primary-600 bg-primary-600 text-white"
                     : "border-gray-200 bg-white text-gray-900"
                 }`}
               >
