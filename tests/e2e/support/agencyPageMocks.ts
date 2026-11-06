@@ -147,7 +147,8 @@ export function agencyPage(
   return {
     version: "agency-page.v1",
     slug: AGENCY_SLUG,
-    name: "The Travel Ubud",
+    // The account's name, as an account can be named: guests see the page's title instead.
+    name: "Travel Ubud Hotel Group",
     page: {
       title: "The Travel Ubud",
       description: "13 villas, guest houses and resorts in and around Ubud",

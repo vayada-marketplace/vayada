@@ -148,6 +148,7 @@ export function readAgencyPage(raw: unknown): AgencyPage {
     slug: raw.slug,
     name: raw.name,
     page: {
+      // What guests see as the agency's name; the account's name only when the page has none.
       title: text(raw.page.title) ?? raw.name,
       description: text(raw.page.description) ?? "",
     },

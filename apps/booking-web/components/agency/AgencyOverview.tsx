@@ -411,7 +411,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
     <div className="min-h-screen bg-white overflow-x-clip">
       <StayHero
         image={agency.header.imageUrl}
-        alt={agency.name}
+        alt={agency.page.title}
         heading={agency.page.title}
         subtext={agency.page.description}
         navigation={<BookingNavigation showGallery />}
@@ -729,7 +729,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
       {phoneMap && phoneMapOpen && (
         <AgencyPhoneMap
           {...mapProps}
-          title={t("mapSummary", { name: agency.name, count: results.cards.length })}
+          title={t("mapSummary", { name: agency.page.title, count: results.cards.length })}
           summary={`${dates} · ${guests(shown, shown.rooms)}`}
           onClose={closePhoneMap}
         />

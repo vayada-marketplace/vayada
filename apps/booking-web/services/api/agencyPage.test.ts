@@ -96,6 +96,15 @@ describe("readAgencyPage", () => {
     });
   });
 
+  it("names the agency by its page's title, by the account's name only when the page has none", () => {
+    const account = { ...page, name: "Travel Ubud Hotel Group" };
+    expect(readAgencyPage(account).page.title).toBe("The Travel Ubud");
+    for (const title of [undefined, null, "", "   ", 7])
+      expect(readAgencyPage({ ...account, page: { ...page.page, title } }).page.title).toBe(
+        "Travel Ubud Hotel Group",
+      );
+  });
+
   it("reads the stay page's switches, on unless the agency turned them off (VAY-2461)", () => {
     expect(readAgencyPage({ ...page, stayPage: { nearby: false } }).stayPage).toEqual({
       nearby: false,

@@ -255,12 +255,12 @@ function hotelSource(hotel: Hotel): NavigationSource {
   };
 }
 
-/** An agency's bar: its name (it has no logo yet), its own contact, its design stay's languages,
- * and its stays' photos, stay by stay. */
+/** An agency's bar: its page's title (it has no logo yet; the account's name only when the page
+ * has no title), its own contact, its design stay's languages, and its stays' photos, stay by stay. */
 function agencySource(agency: AgencyPage): NavigationSource {
   const contact = agency.header.contact;
   return {
-    name: agency.name,
+    name: agency.page.title,
     header: {
       showContactButton: !!contact,
       showLanguageSelector: agency.header.language,

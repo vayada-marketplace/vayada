@@ -51,7 +51,9 @@ test("the slim bar, the search card in place, All stays and a compact box", asyn
 
   // No hero: the agency's slim bar, as on checkout, then the search card right under it.
   await expect(page.getByRole("heading", { name: "The Travel Ubud" })).toHaveCount(0);
-  await expect(page.getByText("The Travel Ubud", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByRole("navigation").first().getByRole("link", { name: "The Travel Ubud" }),
+  ).toBeVisible();
   const card = await page.locator("#stay-search").boundingBox();
   expect(card!.y).toBeLessThan(140);
 
