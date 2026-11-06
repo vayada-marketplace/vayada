@@ -43,6 +43,18 @@ export const filtersActive = (filters: AgencyFilters) =>
   filters.breakfast ||
   filters.freeCancellation;
 
+/** How many filters the guest has on, as the phone's "Filters (N)" says it (VAY-2463): a price
+ * range counts once, however many of its ends are set. */
+export const activeFilterCount = (filters: AgencyFilters) =>
+  [
+    filters.type,
+    filters.area,
+    filters.price.min !== null || filters.price.max !== null,
+    filters.privatePool,
+    filters.breakfast,
+    filters.freeCancellation,
+  ].filter(Boolean).length;
+
 /** The rates the cards are priced with: null for any rate. */
 const rateFilterOf = (filters: AgencyFilters): AgencyRateFilter | null =>
   filters.breakfast && filters.freeCancellation
