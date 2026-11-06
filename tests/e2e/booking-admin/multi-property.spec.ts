@@ -305,7 +305,7 @@ test("opens from Settings, edits every section and saves the page", async ({ pag
 // VAY-2483: Preview opens the saved page as guests see it, and says why it can't while it isn't.
 test("previews the saved page, and says what it needs while guests can't see it", async ({
   page,
-}) => {
+}, testInfo) => {
   await stubBookingPages(page);
   // Live, but its only included stay has lost its map pin since: guests see "not online".
   const mock = await setup(page, {
@@ -328,6 +328,7 @@ test("previews the saved page, and says what it needs while guests can't see it"
   await expect(note).toHaveText(
     "Include at least one ready property and save to preview the page.",
   );
+  await section.screenshot({ path: testInfo.outputPath("multi-property-page-no-ready-stay.png") });
 
   // With a ready stay saved, the address is live and Preview opens it in a new tab.
   await row(page, escape).getByRole("switch", { name: "Include The Escape Villa Ubud" }).click();
@@ -337,6 +338,7 @@ test("previews the saved page, and says what it needs while guests can't see it"
   const address = agencyAddress(page, "thetravelubud");
   await expect(status).toHaveText(`Live at ${address}`);
   await expect(note).toHaveText("");
+  await section.screenshot({ path: testInfo.outputPath("multi-property-page-live.png") });
   const preview = section.getByRole("link", { name: "Preview (opens in a new tab)" });
   await expect(preview).toHaveAttribute("target", "_blank");
   await expect(preview).toHaveAttribute("rel", "noopener noreferrer");
