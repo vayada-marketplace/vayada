@@ -16,13 +16,23 @@ type GeocodingLibrary = {
 
 // Results Google gives for a spot, most precise first; a building's or street's address beats a town's.
 const ADDRESS_TYPES = ["street_address", "premise", "subpremise", "route", "plus_code"];
+// The part of town or the village a spot lies in, smallest first (VAY-2482's "Area / village"): a Bali desa is
+// an administrative_area_level_4, its kecamatan a level 3.
+const AREA_TYPES = [
+  "sublocality_level_1",
+  "sublocality",
+  "neighborhood",
+  "administrative_area_level_4",
+  "administrative_area_level_3",
+];
 
-/** The address Google gives a pin (reverse geocoding, VAY-2444), keeping the pin itself. Null when Google has none
- * or can't be asked (e.g. the Geocoding API is off for the key): the owner then types the address. */
+/** The address Google gives a pin (reverse geocoding, VAY-2444), keeping the pin itself, with the area or village
+ * it lies in ("" without one other than the city). Null when Google has none or can't be asked (e.g. the Geocoding
+ * API is off for the key): the owner then types the address. */
 export async function addressFromPin(
   apiKey: string,
   pin: { lat: number; lng: number },
-): Promise<GooglePlacesAddress | null> {
+): Promise<(GooglePlacesAddress & { area: string }) | null> {
   try {
     const { Geocoder } = await importGoogleMapsLibrary<GeocodingLibrary>(apiKey, "geocoding");
     const { results } = await new Geocoder().geocode({ location: pin });
@@ -47,9 +57,14 @@ export async function addressFromPin(
       route && (firstPart.includes(route.long_name) || firstPart.includes(route.short_name))
         ? firstPart
         : address.streetAddress;
+    const area =
+      AREA_TYPES.map(
+        (type) => components.find((component) => component.types.includes(type))?.long_name ?? "",
+      ).find((name) => name.trim() && name.trim() !== address.city) ?? "";
     return {
       ...address,
       streetAddress,
+      area: area.trim(),
       latitude: pin.lat,
       longitude: pin.lng,
       location: { latitude: pin.lat, longitude: pin.lng },

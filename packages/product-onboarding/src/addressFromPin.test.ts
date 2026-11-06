@@ -53,6 +53,7 @@ describe("addressFromPin (VAY-2444)", () => {
       city: "Dikwella",
       countryCode: "LK",
       region: "",
+      area: "Hiriketiya",
       latitude: 5.9762,
       longitude: 80.7063,
       location: { latitude: 5.9762, longitude: 80.7063 },
@@ -98,6 +99,49 @@ describe("addressFromPin (VAY-2444)", () => {
       city: "Dikwella",
       countryCode: "LK",
     });
+  });
+
+  it("names the village a Bali pin lies in, never the city again (VAY-2482)", async () => {
+    // Mertha Carik Guest House: Google's answer for the pin from its Maps link.
+    stubGeocoder(async () => ({
+      results: [
+        {
+          types: ["route"],
+          formatted_address:
+            "Jl. Dukuh Sari, Buruan, Kec. Blahbatuh, Kabupaten Gianyar, Bali 80581, Indonesia",
+          address_components: [
+            part("Jalan Dukuh Sari", ["route"], "Jl. Dukuh Sari"),
+            part("Buruan", ["administrative_area_level_4", "political"]),
+            part("Kecamatan Blahbatuh", ["administrative_area_level_3", "political"]),
+            part("Kabupaten Gianyar", ["administrative_area_level_2", "political"]),
+            part("Bali", ["administrative_area_level_1", "political"]),
+            part("Indonesia", ["country", "political"], "ID"),
+            part("80581", ["postal_code"]),
+          ],
+        },
+      ],
+    }));
+    expect(await addressFromPin("key", { lat: -8.546938, lng: 115.299455 })).toMatchObject({
+      streetAddress: "Jl. Dukuh Sari",
+      area: "Buruan",
+      postalCode: "80581",
+      city: "Kabupaten Gianyar",
+      countryCode: "ID",
+    });
+    // A town Google names only as its locality has no area apart from the city.
+    stubGeocoder(async () => ({
+      results: [
+        {
+          types: ["route"],
+          address_components: [
+            part("Main Street", ["route"]),
+            part("Dikwella", ["locality", "sublocality_level_1", "political"]),
+            part("Sri Lanka", ["country", "political"], "LK"),
+          ],
+        },
+      ],
+    }));
+    expect((await addressFromPin("key", { lat: 5.97, lng: 80.7 }))?.area).toBe("");
   });
 
   it("returns null when Google has no address or refuses the request", async () => {

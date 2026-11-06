@@ -10,7 +10,7 @@ import PropertyAddressFields, {
 import { useTranslation } from "@/lib/i18n";
 import { roomLocationSource } from "@/lib/roomLocation";
 import { pmsPropertyPlace, type PmsPropertyPlace } from "@/services/api/pmsPropertyClient";
-import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
+import { mapsLinkApi, sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { roomsService, type RoomType } from "@/services/rooms";
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
@@ -42,7 +42,8 @@ function addressImpact(rooms: RoomType[], roomId: string | null, saved: Pin, dra
 
 /** The property's address over the room editor (VAY-2322), so the room's unsaved edits stay: the same form as
  * Booking Admin's Location settings, saved to the shared property profile. Only the address and pin change;
- * the guest map's visibility and the rest of the location stay as Booking Admin set them. */
+ * the guest map's visibility and the rest of the location stay as Booking Admin set them. Here the form places
+ * the pin the room editor's way (VAY-2482): a pasted Google Maps link first, the pin map, "Guests will see". */
 export default function PropertyAddressModal({
   propertyId,
   room,
@@ -62,6 +63,9 @@ export default function PropertyAddressModal({
   const [rooms, setRooms] = useState<RoomType[] | "loading" | "failed">("loading");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // A pasted short link being read, or its address loading: a save now would drop the link or keep the old
+  // address under the new pin.
+  const [lookingUp, setLookingUp] = useState(false);
 
   useEffect(() => {
     if (dialog.current && !dialog.current.open) dialog.current.showModal?.();
@@ -122,7 +126,7 @@ export default function PropertyAddressModal({
   const complete = draft !== null && problem === null;
 
   async function save() {
-    if (typeof profile !== "object" || !draft || !complete) return;
+    if (typeof profile !== "object" || !draft || !complete || lookingUp) return;
     setSaving(true);
     setError("");
     try {
@@ -263,6 +267,38 @@ export default function PropertyAddressModal({
             translate={t}
             locale={locale}
             markerTitle={profile.profile.displayName}
+            linkMode={{
+              resolveShortLink: mapsLinkApi.resolveShortLink,
+              guestName: profile.profile.displayName,
+              messages: {
+                link: {
+                  label: t("rooms.form.mapsLinkLabel"),
+                  hint: t("rooms.form.mapsLinkHint"),
+                  placed: (coordinates) => t("rooms.form.mapsLinkPlaced", { coordinates }),
+                  shortLink: t("rooms.addressModal.mapsLinkShort"),
+                  resolving: t("rooms.form.mapsLinkResolving"),
+                  noPin: t("rooms.form.mapsLinkNone"),
+                  searchInstead: t("rooms.form.searchInstead"),
+                },
+                pasteLink: t("rooms.form.pasteMapsLink"),
+                map: {
+                  mapType: t("rooms.form.mapType"),
+                  mapView: t("rooms.form.mapView"),
+                  satelliteView: t("rooms.form.satelliteView"),
+                  dragPin: t("rooms.form.dragPin"),
+                  recenter: t("rooms.form.recenter"),
+                  empty: t("rooms.addressModal.mapEmpty"),
+                },
+                mapHint: t("rooms.form.mapClickHint"),
+                pinSet: t("rooms.form.pinSet"),
+                guestsWillSee: t("rooms.form.guestsWillSee"),
+                lookingUp: t("rooms.addressModal.lookingUp"),
+                noAddress: t("rooms.addressModal.noAddress"),
+                noAddressForPin: t("rooms.addressModal.noAddressForPin"),
+                coordinates: t("rooms.form.coordinatesAdvanced"),
+              },
+              onLookupChange: setLookingUp,
+            }}
           />
         )}
       </div>
@@ -291,7 +327,7 @@ export default function PropertyAddressModal({
           <button
             type="button"
             onClick={() => void save()}
-            disabled={saving || !complete || typeof profile !== "object"}
+            disabled={saving || lookingUp || !complete || typeof profile !== "object"}
             className="h-11 flex-1 rounded-lg bg-primary-600 px-[18px] text-[13px] font-semibold text-white disabled:opacity-50 sm:h-[38px] sm:flex-none"
           >
             {saving ? t("rooms.addressModal.saving") : t("rooms.addressModal.save")}
