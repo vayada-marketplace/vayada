@@ -6,7 +6,6 @@ import {
   Squares2X2Icon,
   UserGroupIcon,
 } from "@heroicons/react/24/outline";
-import { createBookingDesignButtonColors } from "@vayada/domain-booking/design-colors";
 import type { ReactNode } from "react";
 
 export function BookingPagePreview({
@@ -60,8 +59,6 @@ export function BookingPagePreview({
     });
   const accent = /^#[0-9a-f]{6}$/i.test(primaryColor) ? primaryColor : "#4F46E5";
   const tint = `${accent}18`;
-  // The live page's button text: white, or dark on a light brand colour (VAY-2475).
-  const onAccent = createBookingDesignButtonColors(accent).foregroundColor;
   const languageCount = supportedLanguages
     ? new Set([defaultLanguage, ...supportedLanguages].filter(Boolean)).size
     : 2;
@@ -117,8 +114,8 @@ export function BookingPagePreview({
               )}
               {showContactButton && (
                 <span
-                  className="rounded-full px-2.5 py-1 text-[9px] font-semibold"
-                  style={{ backgroundColor: accent, color: onAccent }}
+                  className="rounded-full px-2.5 py-1 text-[9px] font-semibold text-white"
+                  style={{ backgroundColor: accent }}
                 >
                   {t("bookingPreview.contact")}
                 </span>
@@ -166,8 +163,8 @@ export function BookingPagePreview({
               value={t("bookingPreview.2adults")}
             />
             <button
-              className="ml-auto shrink-0 rounded-full px-3 py-2 text-[9px] font-semibold"
-              style={{ backgroundColor: accent, color: onAccent }}
+              className="ml-auto shrink-0 rounded-full px-3 py-2 text-[9px] font-semibold text-white"
+              style={{ backgroundColor: accent }}
               tabIndex={-1}
               type="button"
             >

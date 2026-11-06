@@ -47,9 +47,9 @@ export const guestAddonText = {
 
 export const guestAddonAddClass =
   "px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors bg-white text-gray-700 border-gray-300 hover:border-gray-400 disabled:opacity-40";
-/** The details' filled Add button; on a light brand colour its text turns dark (VAY-2475). */
+/** The details' filled Add button. */
 export const guestAddonPrimaryClass =
-  "inline-flex h-11 items-center justify-center rounded-full bg-primary-600 px-8 text-[15px] font-semibold text-primary-on-600 transition-colors hover:bg-primary-700 disabled:opacity-40 disabled:hover:bg-primary-600";
+  "inline-flex h-11 items-center justify-center rounded-full bg-primary-600 px-8 text-[15px] font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-40 disabled:hover:bg-primary-600";
 
 const tones = {
   idle: "border-gray-200",

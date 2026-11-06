@@ -16,10 +16,7 @@ import {
   type BookingDesignChangedEvent,
   type UpsertBookingDesignCommand,
 } from "./bookingDesign.js";
-import {
-  bookingDesignTextColorOn,
-  createBookingDesignButtonColors,
-} from "./bookingDesignColors.js";
+import { createBookingDesignButtonColors } from "./bookingDesignColors.js";
 
 const propertyId = "abcdef00-0000-4000-8000-000000000002";
 
@@ -196,42 +193,14 @@ describe("Booking design contract", () => {
       expect(isBookingDesignPrimaryColor(malformed), String(malformed)).toBe(false);
   });
 
-  it("gives light brand colours dark button text, and keeps white wherever it was readable", () => {
+  it("keeps white button text on every brand colour, however light (VAY-2486)", () => {
     expect(createBookingDesignButtonColors("#C19A76")).toEqual({
       backgroundColor: "#aa8868",
       hoverBackgroundColor: "#8b6f55",
-      foregroundColor: "#000000",
+      foregroundColor: "#FFFFFF",
     });
-    expect(createBookingDesignButtonColors("#F5F5F5").foregroundColor).toBe("#000000");
-    expect(createBookingDesignButtonColors("#FFFFFF").foregroundColor).toBe("#000000");
-    // White would only reach 4.28:1 on this blue's button, so it gets black (6.0:1) instead.
-    expect(createBookingDesignButtonColors("#008CFF").foregroundColor).toBe("#000000");
-    // On Aether's darker shade (the confirmation page's buttons) white reads better again.
-    expect(bookingDesignTextColorOn("#8b6f55")).toBe("#FFFFFF");
-    // Every colour the old rule took (white text at 4.5:1 on the button) keeps white text, so no
-    // live hotel's buttons change; and the chosen text always reaches 4.5:1.
-    const steps = Array.from({ length: 18 }, (_, step) => step * 15);
-    for (const red of steps)
-      for (const green of steps)
-        for (const blue of steps) {
-          const colour = `#${[red, green, blue]
-            .map((channel) => channel.toString(16).padStart(2, "0"))
-            .join("")}`.toUpperCase();
-          const button = createBookingDesignButtonColors(colour);
-          if (contrastWithWhite(button.backgroundColor) >= 4.5) {
-            expect(button.foregroundColor, colour).toBe("#FFFFFF");
-            expect(bookingDesignTextColorOn(button.hoverBackgroundColor), colour).toBe("#FFFFFF");
-          }
-          expect(
-            contrast(button.backgroundColor, button.foregroundColor),
-            colour,
-          ).toBeGreaterThanOrEqual(4.5);
-          // The darker shade (the confirmation page's buttons) picks its own text the same way.
-          const onDarker = bookingDesignTextColorOn(button.hoverBackgroundColor);
-          expect(contrast(button.hoverBackgroundColor, onDarker), colour).toBeGreaterThanOrEqual(
-            4.5,
-          );
-        }
+    for (const colour of ["#F5F5F5", "#FFFFFF", "#008CFF", "#D4A017", "#000000"])
+      expect(createBookingDesignButtonColors(colour).foregroundColor, colour).toBe("#FFFFFF");
   });
 
   it("keeps every generated Booking button palette WCAG AA-safe with white text", () => {
@@ -256,21 +225,12 @@ describe("Booking design contract", () => {
   });
 });
 
-function luminance(hex: string): number {
+function contrastWithWhite(hex: string): number {
   const channels = [1, 3, 5].map(
     (offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255,
   );
-  const linear = channels.map((value) =>
+  const luminance = channels.map((value) =>
     value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
   );
-  return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
-}
-
-function contrast(first: string, second: string): number {
-  const [lighter, darker] = [luminance(first), luminance(second)].sort((a, b) => b - a);
-  return (lighter! + 0.05) / (darker! + 0.05);
-}
-
-function contrastWithWhite(hex: string): number {
-  return contrast(hex, "#FFFFFF");
+  return 1.05 / (0.2126 * luminance[0]! + 0.7152 * luminance[1]! + 0.0722 * luminance[2]! + 0.05);
 }

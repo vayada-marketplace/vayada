@@ -193,8 +193,8 @@ export function createBookingDesignSourceRevision(
 }
 
 /**
- * Any uppercase #RRGGBB. Light colours are allowed too: their buttons get dark text instead of
- * white (VAY-2475), so a hotel can use its real brand colour.
+ * Any uppercase #RRGGBB, light colours too, so a hotel can use its real brand colour (VAY-2475).
+ * Button text stays white on every colour (VAY-2486).
  */
 export function isBookingDesignPrimaryColor(value: unknown): value is BookingDesignPrimaryColor {
   return typeof value === "string" && /^#[0-9A-F]{6}$/.test(value);

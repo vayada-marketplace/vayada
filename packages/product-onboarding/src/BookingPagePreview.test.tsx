@@ -31,27 +31,6 @@ describe("BookingPagePreview", () => {
     expect(text).toContain("Available Accommodations");
   });
 
-  it("shows the live page's button text: dark on a light brand colour, white on a dark one (VAY-2475)", () => {
-    const buttonText = (primaryColor: string) =>
-      create(
-        <BookingPagePreview
-          currency="USD"
-          defaultLanguage="en"
-          font={font}
-          heroHeading="Aether Hilltop Villas"
-          heroImage=""
-          heroSubtext=""
-          primaryColor={primaryColor}
-          propertyName="Aether Hilltop Villas"
-        />,
-      )
-        .root.findAll((node) => node.props.style?.backgroundColor === primaryColor)
-        .map((node) => node.props.style.color);
-
-    expect(buttonText("#c19a76")).toEqual(["#000000", "#000000"]);
-    expect(buttonText("#2D6A4F")).toEqual(["#FFFFFF", "#FFFFFF"]);
-  });
-
   it("reflects hidden header controls immediately", () => {
     const renderer = create(
       <BookingPagePreview
@@ -136,5 +115,30 @@ describe("BookingPagePreview", () => {
     expect(headerTexts()).not.toContain("Gallery");
     expect(headerTexts(false)).not.toContain("Gallery");
     expect(headerTexts(true)).toEqual(["Gallery", "Contact", "DE", "CHF"]);
+  });
+
+  it("keeps white button text on a light brand colour, like the live page (VAY-2486)", () => {
+    const buttons = (primaryColor: string) =>
+      create(
+        <BookingPagePreview
+          currency="USD"
+          defaultLanguage="en"
+          font={font}
+          heroHeading="Aether Hilltop Villas"
+          heroImage=""
+          heroSubtext=""
+          primaryColor={primaryColor}
+          propertyName="Aether Hilltop Villas"
+        />,
+      ).root.findAll((node) => node.props.style?.backgroundColor === primaryColor);
+
+    for (const primaryColor of ["#c19a76", "#F5F5F5", "#2D6A4F"]) {
+      const found = buttons(primaryColor);
+      expect(found, primaryColor).toHaveLength(2);
+      for (const button of found) {
+        expect(button.props.className, primaryColor).toContain("text-white");
+        expect(button.props.style.color, primaryColor).toBeUndefined();
+      }
+    }
   });
 });

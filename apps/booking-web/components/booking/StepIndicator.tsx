@@ -21,7 +21,7 @@ export default function StepIndicator({ steps, currentStep, back }: StepIndicato
           <>
             <div
               className={`w-5 h-5 md:w-6 md:h-6 rounded-full flex items-center justify-center text-[10px] md:text-xs font-bold shrink-0 ${
-                isActive ? "bg-primary-600 text-primary-on-600" : "bg-gray-200 text-gray-500"
+                isActive ? "bg-primary-600 text-white" : "bg-gray-200 text-gray-500"
               }`}
             >
               {isCompleted ? (

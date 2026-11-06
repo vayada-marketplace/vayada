@@ -1,5 +1,3 @@
-import { bookingDesignTextColorOn } from "@vayada/domain-booking/design-colors";
-
 type Rgb = [number, number, number];
 
 function hexToRgb(hex: string): Rgb {
@@ -43,15 +41,4 @@ export function generateColorPalette(hex: string): Record<string, string> {
     "800": mix(base, black, 0.45),
     "900": mix(base, black, 0.65),
   };
-}
-
-/**
- * The text colour on the primary-600 and primary-700 shades, as "r g b" for Tailwind's
- * `text-primary-on-600` / `text-primary-on-700`: white, or dark on a light brand colour, so buttons
- * stay readable with any brand colour (VAY-2475).
- */
-export function generateOnColorPalette(hex: string): Record<"on-600" | "on-700", string> {
-  const palette = generateColorPalette(hex);
-  const channels = (shade: string) => hexToRgb(bookingDesignTextColorOn(shade)).join(" ");
-  return { "on-600": channels(palette["600"]!), "on-700": channels(palette["700"]!) };
 }

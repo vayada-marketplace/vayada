@@ -903,7 +903,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
     await expect(hex).toHaveValue("#0077B6");
 
-    // The preview's buttons show the live page's text colour: white on a dark brand colour...
+    // The preview's buttons show the live page's text colour: white on any brand colour...
     const checkAvailability = page
       .getByLabel("Live booking page preview")
       .getByText("Check Availability", { exact: true });
@@ -911,9 +911,10 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(hex).toHaveValue("#A67D12");
     await expect(checkAvailability).toHaveCSS("color", "rgb(255, 255, 255)");
 
-    // ...and dark on a light one such as Aether's, which saves without a warning (VAY-2475).
+    // ...a light one such as Aether's included (VAY-2486), which saves without a warning (VAY-2475).
     await hex.fill("#c19a76");
-    await expect(checkAvailability).toHaveCSS("color", "rgb(0, 0, 0)");
+    await expect(checkAvailability).toHaveCSS("background-color", "rgb(193, 154, 118)");
+    await expect(checkAvailability).toHaveCSS("color", "rgb(255, 255, 255)");
     await expect(page.getByText(/too light/i)).toHaveCount(0);
     await expect(hex).not.toHaveAttribute("aria-invalid");
     await page.getByRole("button", { name: "Typography" }).click();

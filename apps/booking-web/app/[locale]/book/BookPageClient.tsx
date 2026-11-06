@@ -112,8 +112,7 @@ import {
   type RoomChoice,
 } from "@/services/api/replacementOffers";
 
-const button =
-  "rounded-full bg-primary-600 px-5 py-3 font-semibold text-primary-on-600 disabled:opacity-40";
+const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
 const newRoom = (): RoomChoice => ({
   selectionId: crypto.randomUUID(),
   publicOfferKey: "",
@@ -1381,7 +1380,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 <p className="mt-1">Your rooms are kept. You can continue without extras.</p>
                 <button
                   type="button"
-                  className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-primary-on-600"
+                  className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
                   onClick={() => setAddonReload((value) => value + 1)}
                 >
                   Try again
@@ -1631,7 +1630,7 @@ function Notice({
       {action && (
         <button
           type="button"
-          className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-primary-on-600"
+          className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
           onClick={action.onClick}
         >
           {action.label}

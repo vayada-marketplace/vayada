@@ -22,9 +22,6 @@ module.exports = {
           700: "var(--color-primary-700, #162FB8)",
           800: "var(--color-primary-800, #0F2095)",
           900: "var(--color-primary-900, #081172)",
-          // The shared guest add-on button's text (VAY-2475). Booking Admin never sets the variable,
-          // so it stays white here; the guest booking site sets it from the hotel's colour.
-          "on-600": "rgb(var(--color-primary-on-600, 255 255 255) / <alpha-value>)",
         },
       },
     },

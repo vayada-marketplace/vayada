@@ -28,7 +28,7 @@ function MapTile() {
 }
 
 const DIRECTIONS =
-  "flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-primary-700 px-4 font-semibold text-primary-on-700 transition-colors hover:bg-primary-800";
+  "flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-primary-700 px-4 font-semibold text-white transition-colors hover:bg-primary-800";
 const NAV_ICON = (
   <svg
     aria-hidden="true"

@@ -162,7 +162,7 @@ function MonthGrid({
                   isPast
                     ? "text-gray-300 cursor-default line-through decoration-gray-400"
                     : isSelected
-                      ? "bg-primary-600 text-primary-on-600 font-bold"
+                      ? "bg-primary-600 text-white font-bold"
                       : isToday
                         ? "border-2 border-primary-400 text-primary-700 font-semibold"
                         : "text-gray-800 hover:bg-primary-100 cursor-pointer font-medium"

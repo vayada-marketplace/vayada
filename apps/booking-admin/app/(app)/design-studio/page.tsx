@@ -771,7 +771,7 @@ export default function DesignStudioPage() {
   const handleSave = async () => {
     const hotelId = designHotelIdRef.current;
     if (!hotelId) return;
-    // Any colour saves: light ones get dark button text on the booking page (VAY-2475).
+    // Any colour saves (VAY-2475); button text on the booking page stays white (VAY-2486).
     const designChoices = changedDesignChoices();
     try {
       setSaving(true);

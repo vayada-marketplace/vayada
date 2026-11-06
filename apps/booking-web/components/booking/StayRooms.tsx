@@ -230,7 +230,7 @@ export default function StayRooms({
           <button
             type="button"
             onClick={() => changeRoomCount(roomsNeeded)}
-            className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 text-sm font-semibold text-primary-on-600 hover:bg-primary-700"
+            className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700"
           >
             {t("oneRoom.bookRooms", { count: roomsNeeded })}
           </button>
@@ -325,7 +325,7 @@ export default function StayRooms({
             <button
               type="button"
               onClick={reloadCatalog}
-              className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-primary-on-600 hover:bg-primary-700"
+              className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-white hover:bg-primary-700"
             >
               {t("retryPrices")}
             </button>

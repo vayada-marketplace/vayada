@@ -507,8 +507,8 @@ test("offers an extra with a lead time from its first bookable check-in date", a
   await page.screenshot({ path: testInfo.outputPath("extras-enough-notice.png"), fullPage: true });
 });
 
-// VAY-2475: a light brand colour such as Aether's gets dark text on its buttons.
-test("gives an extra's Add button dark text on a light brand colour", async ({
+// VAY-2486: text on the brand colour stays white, even on a light one such as Aether's.
+test("keeps an extra's Add button text white on a light brand colour", async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -522,7 +522,7 @@ test("gives an extra's Add button dark text on a light brand colour", async ({
     .getByRole("dialog", { name: "Garden breakfast" })
     .getByRole("button", { name: "Add", exact: true });
   await expect(add).toHaveCSS("background-color", "rgb(170, 136, 104)");
-  await expect(add).toHaveCSS("color", "rgb(0, 0, 0)");
+  await expect(add).toHaveCSS("color", "rgb(255, 255, 255)");
   await page.screenshot({ path: testInfo.outputPath("extra-details-c19a76.png") });
 });
 
