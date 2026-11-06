@@ -1080,6 +1080,8 @@
     "showStays": "{count, plural, one {Voir # hébergement} other {Voir # hébergements}}",
     "showStaysPending": "Voir les hébergements",
     "mapLabel": "Carte des hébergements",
+    "phoneMapLabel": "Hébergements sur la carte",
+    "mapSummary": "{name} · {count, plural, one {# hébergement} other {# hébergements}}",
     "noMapStays": "Aucun de ces hébergements n'indique son emplacement sur une carte.",
     "fromPerNight": "à partir de {amount} / nuit",
     "pinName": "{name}, à partir de {amount} par nuit",
