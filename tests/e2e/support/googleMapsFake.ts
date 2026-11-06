@@ -29,6 +29,9 @@ export type FakeGoogleMapsOptions = {
   geocode?: FakeGeocode;
   /** A plain input stands in for Places' <gmp-place-autocomplete>; without it, that search is unavailable. */
   placeAutocompleteElement?: boolean;
+  /** Where Places text search (`Place.searchByText`) finds any typed address (VAY-2482); without it, that search
+   * isn't there. `window.vayadaE2ePlaceQueries` records each query as "text:<query>". */
+  textSearch?: { latitude: number; longitude: number; types: string[] };
   /** The script loads, then Google rejects the key through `gm_authFailure`. */
   authFailure?: boolean;
   /** Autocomplete requests fail (Places API off for the key). */
@@ -52,6 +55,7 @@ export function googleMapsFakeScript({
   placesUnavailable = false,
   geocode,
   placeAutocompleteElement = false,
+  textSearch,
 }: FakeGoogleMapsOptions = {}) {
   return `
     const places = ${JSON.stringify(places)};
@@ -129,6 +133,15 @@ export function googleMapsFakeScript({
       setVisible(visible) { this.element.dataset[this.attribute + "Visible"] = String(visible); }
     }
     class AutocompleteSessionToken {}
+    const textSearch = ${JSON.stringify(textSearch ?? null)};
+    const Place = {
+      searchByText: async ({ textQuery }) => {
+        window.vayadaE2ePlaceQueries.push("text:" + textQuery);
+        return {
+          places: [{ location: latLng(textSearch.latitude, textSearch.longitude), types: textSearch.types }],
+        };
+      },
+    };
     const AutocompleteSuggestion = {
       fetchAutocompleteSuggestions: async ({ input, sessionToken }) => {
         window.vayadaE2ePlaceQueries.push("suggest:" + input + (sessionToken instanceof AutocompleteSessionToken ? "" : ":no-session"));
@@ -168,7 +181,12 @@ export function googleMapsFakeScript({
           : library === "marker" ? { Marker: GoogleMarker }
           : library === "core" ? { ControlPosition: { RIGHT_TOP: 3 } }
           : library === "places"
-            ? { AutocompleteSessionToken, AutocompleteSuggestion, ...(${placeAutocompleteElement} ? { PlaceAutocompleteElement } : {}) }
+            ? {
+                AutocompleteSessionToken,
+                AutocompleteSuggestion,
+                ...(${placeAutocompleteElement} ? { PlaceAutocompleteElement } : {}),
+                ...(textSearch ? { Place } : {}),
+              }
           : library === "geocoding" && geocode ? { Geocoder }
           : Promise.reject(new Error("Unknown library " + library)),
       },

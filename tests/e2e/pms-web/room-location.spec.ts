@@ -6,7 +6,7 @@ import {
   pmsWebRoomType,
   sharedPropertyProfile,
 } from "../support/pmsWebMocks";
-import { mockGoogleMaps, type FakeGooglePlace } from "../support/googleMapsFake";
+import { mockGoogleMaps, type FakeGeocode, type FakeGooglePlace } from "../support/googleMapsFake";
 import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2126: a room type's own address and pin. Google address search fills the coordinates and the pin can be
@@ -30,6 +30,29 @@ const leopoldstrasse: FakeGooglePlace = {
 };
 // The mocked property's own pin (pmsWebMocks' shared profile: Alpenrose Munich, Alpenstrasse 12).
 const propertyPin = "48.1372,11.5756";
+// A place's Google Maps link, and what Google's reverse geocoding answers for its pin (VAY-2482).
+const leopoldstrasseLink =
+  "https://www.google.com/maps/place/Leopoldstra%C3%9Fe+12/@48.15634,11.58242,17z/data=!3d48.1563412!4d11.5824198";
+const leopoldstrasseGeocode: FakeGeocode = {
+  results: [
+    {
+      types: ["street_address"],
+      formatted_address: "Leopoldstraße 12, 80802 München, Germany",
+      address_components: [
+        { long_name: "12", short_name: "12", types: ["street_number"] },
+        { long_name: "Leopoldstraße", short_name: "Leopoldstraße", types: ["route"] },
+        {
+          long_name: "Schwabing",
+          short_name: "Schwabing",
+          types: ["sublocality_level_1", "sublocality", "political"],
+        },
+        { long_name: "München", short_name: "München", types: ["locality", "political"] },
+        { long_name: "80802", short_name: "80802", types: ["postal_code"] },
+        { long_name: "Germany", short_name: "DE", types: ["country", "political"] },
+      ],
+    },
+  ],
+};
 
 test.describe("pms-web room location", () => {
   test("fills the pin from a picked address, takes a dragged pin and saves both", async ({
@@ -435,7 +458,7 @@ test.describe("pms-web room location", () => {
 
     // Moving the pin away leaves the older room at its own pin, and says so. Without a Maps key
     // there is no map, so the coordinates are open from the start.
-    if (hasMapsKey) await modal.getByText("Coordinates", { exact: true }).click();
+    if (hasMapsKey) await modal.getByText("Coordinates (advanced)", { exact: true }).click();
     await modal.getByLabel("Latitude").fill("48.1394");
     await modal.getByLabel("Longitude").fill("");
     await expect(save).toBeDisabled();
@@ -482,6 +505,159 @@ test.describe("pms-web room location", () => {
       "false",
     );
     expect(backend.locationWrites).toEqual([]);
+  });
+
+  test("places the property's pin from a pasted Google Maps link, the address from Google (VAY-2482)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockRoomBackend(page);
+    await mockGoogleMaps(page, { places: [], geocode: leopoldstrasseGeocode });
+    const profileWrites: Record<string, unknown>[] = [];
+    await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/profile`, (route) => {
+      if (route.request().method() === "PUT") profileWrites.push(route.request().postDataJSON());
+      return route.fallback();
+    });
+
+    await page.goto(locationTab);
+    await page.getByRole("button", { name: "Edit property address" }).click();
+    const modal = page.getByRole("dialog", { name: "Property address" });
+    // The map opens zoomed in on the saved pin.
+    const map = modal.getByTestId("google-address-map-canvas");
+    await expect(map).toHaveAttribute("data-marker", propertyPin);
+    await expect(map).toHaveAttribute("data-center", propertyPin);
+    await expect(map).toHaveAttribute("data-zoom", "17");
+    await expect(map).toHaveAttribute("data-marker-draggable", "true");
+    await expect(modal.getByText("Pin set")).toBeVisible();
+    await expect(modal.getByRole("button", { name: "Recenter" })).toBeVisible();
+
+    // The link comes first. One without a place says so and changes nothing.
+    const link = modal.getByLabel("Google Maps link");
+    await link.fill("https://www.google.com/maps/search/hotels+in+munich");
+    await expect(
+      modal.getByText("This link has no coordinates. Copy the link of a place or a dropped pin."),
+    ).toBeVisible();
+    await expect(map).toHaveAttribute("data-marker", propertyPin);
+    await expect(modal.getByLabel("Street and number")).toHaveValue("Alpenstrasse 12");
+
+    await link.fill(leopoldstrasseLink);
+    await expect(modal.getByText("Pin placed at 48.156341, 11.58242")).toBeVisible();
+    await expect(map).toHaveAttribute("data-marker", "48.156341,11.58242");
+    await expect(modal.getByLabel("Street and number")).toHaveValue("Leopoldstraße 12");
+    await expect(modal.getByLabel("Area / village")).toHaveValue("Schwabing");
+    await expect(modal.getByLabel("Postal code")).toHaveValue("80802");
+    await expect(modal.getByLabel("City / region")).toHaveValue("München");
+    await expect(modal.getByLabel("Country")).toHaveValue("DE");
+    const guests = modal.getByText("Guests will see").locator("..");
+    await expect(guests).toContainText("Alpenrose Munich");
+    await expect(guests).toContainText("Leopoldstraße 12, Schwabing, 80802 München, Germany");
+    expect(
+      await page.evaluate(
+        () => (window as { vayadaE2eGeocodeQueries?: string[] }).vayadaE2eGeocodeQueries,
+      ),
+    ).toEqual(["48.156341,11.58242"]);
+
+    // Every field stays editable; dragging the pin or clicking the map moves only the coordinates.
+    await modal.getByLabel("Street and number").fill("Leopoldstraße 12a");
+    await map.evaluate((element) =>
+      (
+        element as HTMLElement & { vayadaE2eDragMarker: (lat: number, lng: number) => void }
+      ).vayadaE2eDragMarker(48.15651234, 11.58301234),
+    );
+    const coordinates = modal.getByText("Coordinates (advanced)", { exact: true }).locator("..");
+    await expect(coordinates).toContainText("48.156512, 11.583012");
+    await map.evaluate((element) =>
+      (
+        element as HTMLElement & { vayadaE2eClickMap: (lat: number, lng: number) => void }
+      ).vayadaE2eClickMap(48.1566, 11.5831),
+    );
+    await expect(coordinates).toContainText("48.1566, 11.5831");
+    await expect(modal.getByLabel("Street and number")).toHaveValue("Leopoldstraße 12a");
+    await expect(guests).toContainText("Leopoldstraße 12a, Schwabing, 80802 München, Germany");
+
+    await modal.getByRole("button", { name: "Save address" }).click();
+    await expect(modal).toHaveCount(0);
+    expect(profileWrites).toEqual([
+      {
+        expectedProfileRevision: 1,
+        patch: {
+          location: expect.objectContaining({
+            streetAddress: "Leopoldstraße 12a",
+            area: "Schwabing",
+            postalCode: "80802",
+            city: "München",
+            countryCode: "DE",
+            latitude: 48.1566,
+            longitude: 11.5831,
+          }),
+        },
+      },
+    ]);
+    await expect(
+      page.locator("main").getByText("Leopoldstraße 12a, 80802 München · Schwabing"),
+    ).toBeVisible();
+    await assertHealthy();
+  });
+
+  test("opens the map on a saved address without a pin, and keeps the fields when Google has no address for a link (VAY-2482)", async ({
+    page,
+  }) => {
+    test.skip(!hasMapsKey, "needs the dev server's fake Google Maps key");
+    await mockRoomBackend(page);
+    // Google finds the typed address; reverse geocoding is off for the key.
+    await mockGoogleMaps(page, {
+      places: [],
+      geocode: "denied",
+      placeAutocompleteElement: true,
+      textSearch: { latitude: 48.1373, longitude: 11.5755, types: ["street_address"] },
+    });
+    const profile = structuredClone(sharedPropertyProfile);
+    Object.assign(profile.profile.location, { latitude: null, longitude: null, geoPublic: false });
+    await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/profile`, (route) =>
+      route.request().method() === "PUT" ? route.fallback() : route.fulfill({ json: profile }),
+    );
+
+    await page.goto(locationTab);
+    await page.getByRole("button", { name: "Edit property address" }).click();
+    const modal = page.getByRole("dialog", { name: "Property address" });
+    const map = modal.getByTestId("google-address-map-canvas");
+    // Not the world map: the saved address, without a pin until the host places it.
+    await expect(map).toHaveAttribute("data-center", "48.1373,11.5755");
+    await expect(map).toHaveAttribute("data-zoom", "16");
+    await expect(map).not.toHaveAttribute("data-marker", /.+/);
+    await expect(
+      modal.getByText("Paste a Google Maps link, or click the map to drop the pin."),
+    ).toBeVisible();
+    await expect(modal.getByText("Pin set")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => (window as { vayadaE2ePlaceQueries?: string[] }).vayadaE2ePlaceQueries,
+      ),
+    ).toEqual(["text:Alpenstrasse 12, 80331 Munich, Germany"]);
+
+    await modal.getByLabel("Google Maps link").fill(leopoldstrasseLink);
+    await expect(map).toHaveAttribute("data-marker", "48.156341,11.58242");
+    await expect(
+      modal.getByText("Google has no address for this pin. Check the address fields"),
+    ).toBeVisible();
+    await expect(modal.getByLabel("Street and number")).toHaveValue("Alpenstrasse 12");
+    await expect(modal.getByLabel("City / region")).toHaveValue("Munich");
+    await expect(modal.getByText("Guests will see").locator("..")).toContainText(
+      "Alpenstrasse 12, 80331 Munich, Germany",
+    );
+    await expect(modal.getByRole("button", { name: "Save address" })).toBeEnabled();
+
+    // Address search is the fallback, and the link is one click away again.
+    await modal.getByRole("button", { name: "Search an address instead" }).click();
+    await expect(modal.getByLabel("Google Maps link")).toHaveCount(0);
+    await expect(
+      modal.getByText(
+        "Picking a result fills in the fields below. Every field can be edited by hand.",
+      ),
+    ).toBeVisible();
+    await modal.getByRole("button", { name: "Paste a Google Maps link" }).click();
+    await expect(modal.getByLabel("Google Maps link")).toBeVisible();
   });
 
   test("shows a separate place to guests as an area, named from Google, next to the property (VAY-2321)", async ({
