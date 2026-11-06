@@ -2113,6 +2113,7 @@
   "calendar.viewTimeline": "Zeitleiste",
   "calendar.viewMonth": "Monat",
   "rooms.failedToDuplicate": "Der Zimmertyp konnte nicht dupliziert werden",
+  "rooms.duplicatePricesNotCopied": "Der Zimmertyp wurde kopiert, seine Preise aber nicht. Legen Sie sie im Tab „Preise“ fest.",
   "rooms.failedToChangeStatus": "Der Zimmerstatus konnte nicht geändert werden.",
   "pricing.leaveTitle": "Preise verlassen?",
   "pricing.leaveMessage": "Dieser Entwurf und ein ausstehender Wiederholungsversuch können nach dem Verlassen nicht wiederhergestellt werden.",

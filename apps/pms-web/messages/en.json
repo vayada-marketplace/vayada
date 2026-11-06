@@ -2099,6 +2099,7 @@
   "rooms.form.option.non_smoking": "Non-smoking",
   "rooms.form.option.adults_only": "Adults-Only",
   "rooms.failedToDuplicate": "Failed to duplicate room type",
+  "rooms.duplicatePricesNotCopied": "The room type was copied, but its prices were not. Set them on its Prices tab.",
   "rooms.failedToChangeStatus": "Room status could not be changed.",
   "pricing.leaveTitle": "Leave pricing?",
   "pricing.leaveMessage": "This draft and any pending retry cannot be recovered after leaving.",

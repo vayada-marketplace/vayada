@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   PlusIcon,
   ChevronDownIcon,
@@ -20,8 +21,15 @@ import {
   type Room,
 } from "@/services/rooms";
 import { ApiErrorResponse } from "@/services/api/client";
+import { createReplacementPricingClient } from "@/services/api/replacementPricingClient";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { keepNewRoomPrices } from "@/components/pricing/keptNewRoomPrices";
+import {
+  copiedRoomPrices,
+  publishNewRoomPrices,
+  type NewRoomPrices,
+} from "@/components/pricing/newRoomPrices";
 import {
   RoomPriceSummary,
   RoomPricesLink,
@@ -565,6 +573,7 @@ import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 
 export default function RoomsPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [importPropertyId, setImportPropertyId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -630,8 +639,26 @@ export default function RoomsPage() {
     setDuplicatingRoomTypeIds((current) => new Set(current).add(id));
     setDuplicateError("");
     try {
-      await roomsService.duplicate(id);
+      const copy = await roomsService.duplicate(id);
+      // VAY-2487: the copy gets the original's saved prices and rate terms, saved right away as the New room page
+      // saves its prices. When they can't be saved, the copy's Prices tab opens on them and says why.
+      let prices: NewRoomPrices | null = null;
+      try {
+        const client = createReplacementPricingClient(copy.hotelId);
+        const saved = await client.read();
+        prices = await copiedRoomPrices(client, saved, id, copy.id);
+        if (prices) await publishNewRoomPrices(client, prices, saved);
+      } catch (cause) {
+        if (prices) {
+          keepNewRoomPrices(prices, cause);
+          router.push(`/rooms/${encodeURIComponent(copy.id)}?tab=prices`);
+          return;
+        }
+        console.error(cause);
+        setDuplicateError(t("rooms.duplicatePricesNotCopied"));
+      }
       loadData();
+      void propertyPrices.reload();
     } catch (err: any) {
       setDuplicateError(err.message || t("rooms.failedToDuplicate"));
     } finally {
