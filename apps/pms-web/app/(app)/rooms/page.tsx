@@ -630,6 +630,13 @@ export default function RoomsPage() {
       loadRevision.current++;
     };
   }, []);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const refreshRooms = () => {
     loadData();
@@ -640,6 +647,7 @@ export default function RoomsPage() {
     setDuplicateError("");
     try {
       const copy = await roomsService.duplicate(id);
+      loadData();
       // VAY-2487: the copy gets the original's saved prices and rate terms, saved right away as the New room page
       // saves its prices. When they can't be saved, the copy's Prices tab opens on them and says why.
       let prices: NewRoomPrices | null = null;
@@ -651,13 +659,13 @@ export default function RoomsPage() {
       } catch (cause) {
         if (prices) {
           keepNewRoomPrices(prices, cause);
-          router.push(`/rooms/${encodeURIComponent(copy.id)}?tab=prices`);
+          // Only from the list: after leaving it, the copy's Prices tab still starts from them when opened.
+          if (mounted.current) router.push(`/rooms/${encodeURIComponent(copy.id)}?tab=prices`);
           return;
         }
         console.error(cause);
         setDuplicateError(t("rooms.duplicatePricesNotCopied"));
       }
-      loadData();
       void propertyPrices.reload();
     } catch (err: any) {
       setDuplicateError(err.message || t("rooms.failedToDuplicate"));

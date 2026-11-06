@@ -283,6 +283,22 @@ describe("Duplicate (VAY-2487)", () => {
     expect(routerPush).toHaveBeenCalledWith("/rooms/room-copy?tab=prices");
   });
 
+  it("keeps the copied prices for the copy's Prices tab without opening it once the list is left", async () => {
+    let refuse!: (cause: Error) => void;
+    publishNewRoomPrices.mockReturnValue(
+      new Promise((_, reject) => {
+        refuse = reject;
+      }),
+    );
+    await mount();
+    await duplicate();
+    // The host leaves the Rooms list while the prices are still saving.
+    act(() => view.update(createElement("div")));
+    await act(async () => refuse(new Error("refused")));
+    expect(keepNewRoomPrices).toHaveBeenCalledWith(prices, expect.any(Error));
+    expect(routerPush).not.toHaveBeenCalled();
+  });
+
   it("says the prices weren't copied when the original's prices can't be read", async () => {
     copiedRoomPrices.mockRejectedValue(new Error("offline"));
     await mount();

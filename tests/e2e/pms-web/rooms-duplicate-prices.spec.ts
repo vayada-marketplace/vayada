@@ -62,7 +62,8 @@ const monthNames = [
   "December",
 ];
 const monthDays = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-// Aether Hilltop Villas' year: $400 standard, one season a month (the ticket's screenshot, then the rest of the year).
+// Aether Hilltop Villas' year: 400 a night standard, one season a month (the ticket's screenshot, then the rest of the
+// year). In EUR, the shared mocks' payment currency, so no currency change shows.
 const monthPrices = [325, 325, 300, 275, 250, 225, 250, 275, 300, 325, 350, 375];
 const two = (value: number) => String(value).padStart(2, "0");
 const monthlySeasons = monthNames.map((name, index) => ({
@@ -79,7 +80,7 @@ const pricesFor = (roomTypeId: string, seasons: Room[] = monthlySeasons): Room =
   propertyId: PMS_WEB_PROPERTY_ID,
   roomTypeId,
   revision: 3,
-  currency: "USD",
+  currency: "EUR",
   capacity: { total: 2, adults: 2, children: 0 },
   children: {
     adultFromAge: 18,
@@ -193,18 +194,18 @@ async function mockRooms(page: Page, { copied = false } = {}) {
 /** An in-memory pricing-v2 store: the published rooms, each rate's terms per room, every terms write and publish.
  * As on the server, staged terms become a rate's current terms only when a publish names them. `refuse` answers the
  * next publish with an error once. */
-async function mockPricing(page: Page, rooms: Room[]) {
+async function mockPricing(page: Page, rooms: Room[], { saved = nonRefundableTerms } = {}) {
   const heads = new Map<string, string>(),
     terms = new Map<string, Record<string, unknown>>();
   for (const room of rooms)
     for (const offer of room.offers) {
       heads.set(`${room.roomTypeId}/${offer.id}`, offer.termsRevision);
-      terms.set(offer.termsRevision, offer.id === "flexible" ? flexibleTerms : nonRefundableTerms);
+      terms.set(offer.termsRevision, offer.id === "flexible" ? flexibleTerms : saved);
     }
   const state = {
     publication: rooms.length
       ? ({
-          currency: "USD",
+          currency: "EUR",
           revision: 3,
           stale: false,
           sources,
@@ -259,6 +260,12 @@ async function mockPricing(page: Page, rooms: Room[]) {
           : route.fulfill({ status: 404, json: { code: "not_found" } });
       if (body.expectedRevision !== (head ?? null))
         return route.fulfill({ status: 409, json: { code: "stale" } });
+      // As the server: new terms may not take non-refundable stays at the property (VAY-2280).
+      if (
+        body.cancellation.kind === "non_refundable" &&
+        body.payment.acceptedMethods?.includes("pay_at_property")
+      )
+        return route.fulfill({ status: 400, json: { code: "non_refundable_pay_at_property" } });
       state.termsWrites.push({ roomTypeId, offerId, body });
       const revision = `77777777-7777-4777-8777-${String(state.termsWrites.length).padStart(12, "0")}`;
       terms.set(revision, { cancellation: body.cancellation, payment: body.payment });
@@ -419,13 +426,11 @@ test("Duplicate saves the original's standard price, 12 seasons and rate terms f
 test("a season price changed on the copy leaves the original's prices as they were", async ({
   page,
 }) => {
-  const copied = { ...pricesFor(VILLA), roomTypeId: COPY };
-  copied.offers = copied.offers.map((offer: Room, index: number) => ({
-    ...offer,
-    termsRevision: `88888888-8888-4888-8888-00000000000${index + 1}`,
-  }));
-  await mockRooms(page, { copied: true });
-  const pricing = await mockPricing(page, [pricesFor(VILLA), copied]);
+  await mockRooms(page);
+  const pricing = await mockPricing(page, [pricesFor(VILLA)]);
+  await duplicateVilla(page);
+  await expect(main(page).locator(`a[href="/rooms/${COPY}?tab=prices"]`)).toHaveText("Edit prices");
+  expect(pricing.publishes).toHaveLength(1);
   await openPrices(page, COPY);
   const table = seasonTable(page);
   await table.getByLabel("June price Per room").fill("240");
@@ -433,11 +438,11 @@ test("a season price changed on the copy leaves the original's prices as they we
   await main(page).getByRole("button", { name: "Save and publish" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
 
-  expect(pricing.publishes).toHaveLength(1);
+  expect(pricing.publishes).toHaveLength(2);
   const june = (room: Room) =>
     room.offers[0].price.calendar.seasons.find((season: Room) => season.name === "June").price;
   expect(june(publishedRoom(pricing, COPY))).toEqual(flat(240));
-  expect(publishedRoom(pricing, VILLA)).toEqual({ ...pricesFor(VILLA), revision: 4 });
+  expect(publishedRoom(pricing, VILLA)).toEqual({ ...pricesFor(VILLA), revision: 5 });
 
   await openPrices(page, VILLA);
   await expect(seasonTable(page).getByLabel("June price Per room")).toHaveValue("225.00");
@@ -497,4 +502,32 @@ test("when the copied prices can't be saved, the copy's Prices tab opens on them
   expect(withoutRevisions(publishedRoom(pricing, COPY))).toEqual(
     withoutRevisions(pricesFor(VILLA)),
   );
+});
+
+test("a rate whose older terms today's rules refuse: the copy's Prices tab opens on the copied prices and names the rule", async ({
+  page,
+}) => {
+  await mockRooms(page);
+  // Saved before VAY-2280: non-refundable, yet payable at the property. The original keeps selling with it.
+  const older = {
+    ...nonRefundableTerms,
+    payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+  };
+  const pricing = await mockPricing(page, [pricesFor(VILLA)], { saved: older });
+  await duplicateVilla(page);
+
+  await expect(page).toHaveURL(new RegExp(`/rooms/${COPY}\\?tab=prices$`));
+  await expect(
+    main(page).getByText("The room type was created, but its prices were not saved.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    main(page).getByText("Non-refundable stays are paid in advance", { exact: false }),
+  ).toBeVisible();
+  const table = seasonTable(page);
+  await expect(table.getByLabel("Hilltop Villa Copy Offer 1 Per room")).toHaveValue("400.00");
+  await expect(table.getByLabel("June price Per room")).toHaveValue("225.00");
+  expect(pricing.publishes).toHaveLength(0);
+  expect(pricing.publication!.rooms).toEqual([pricesFor(VILLA)]);
 });
