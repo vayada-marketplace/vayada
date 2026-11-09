@@ -1,6 +1,7 @@
 import {
   parsePricingConfiguration,
   pricingCurrencyScale,
+  pricingOfferOnBookingPage,
   type PricingConfiguration,
   type PricingOfferSale,
 } from "@vayada/domain-pms/replacement-pricing";
@@ -85,7 +86,8 @@ export type SimpleRoom = {
   main: Offer;
   mainTerms: OptionTerms;
   cancellation: SimpleCancellation;
-  /** The room-only option non-refundable and a percentage cheaper than the main option, if there is one. */
+  /** The room-only option non-refundable and a percentage cheaper than the main option, if there is one. While the
+   * main option is off the booking page it costs the main option's price (0%, VAY-2489). */
   nonRefundable: Offer | null;
   /** The breakfast option at the main option's price, with its cancellation and payment, if there is one. */
   breakfast: Offer | null;
@@ -116,7 +118,8 @@ export function simpleRoom(room: Room, terms: Terms): SimpleRoom | null {
             offer.meal.kind === "room_only" &&
             offer.price.kind === "linked" &&
             offer.price.adjustment.kind === "percentage" &&
-            offer.price.adjustment.basisPoints < 0 &&
+            (offer.price.adjustment.basisPoints < 0 ||
+              (offer.price.adjustment.basisPoints === 0 && !pricingOfferOnBookingPage(main))) &&
             terms[offer.id]!.cancellation.kind === "non_refundable",
         ) ?? null)
       : null;
@@ -195,6 +198,34 @@ export function setOfferSale(room: Room, offerId: string, sale: PricingOfferSale
   });
   if (!next) throw new PricingError("pricing.rates.keepOne");
   return next;
+}
+/** The Non-refundable rate and its discount from when the Flexible rate went off (VAY-2489). */
+export type KeptDiscount = { offerId: string; percent: string };
+/** The Flexible rate (the main option) off or on again (VAY-2285), with the Non-refundable rate that follows it
+ * (VAY-2489): while the Flexible rate is off, guests book the Non-refundable rate at the season price (0%); on again,
+ * it is cheaper by the `kept` discount, or the default. Only a rate still at 0% gets a discount back. */
+export function setFlexibleSale(
+  room: Room,
+  simple: SimpleRoom,
+  on: boolean,
+  kept: KeptDiscount | null,
+): Room {
+  const next = setOfferSale(room, simple.main.id, on ? null : "not_sold");
+  // On again, the kept rate is found by its id: an edit while the Flexible rate was off (its cancellation, say) can
+  // take the rate off the card.
+  const offer =
+    (on ? room.offers.find((value) => value.id === kept?.offerId) : undefined) ??
+    simple.nonRefundable;
+  if (
+    offer?.price.kind !== "linked" ||
+    offer.price.parentId !== simple.main.id ||
+    offer.price.adjustment.kind !== "percentage"
+  )
+    return next;
+  if (!on) return changeLinkedAdjustment(next, offer.id, { kind: "percentage", value: "0" });
+  return offer.price.adjustment.basisPoints === 0
+    ? setDiscount(next, offer.id, kept?.percent ?? defaultDiscount)
+    : next;
 }
 /** The breakfast option's price per room or per adult; children's breakfast stays as it is. */
 export function setBreakfastAmount(room: Room, offerId: string, amount: string): Room {

@@ -386,6 +386,96 @@ it("turns the Flexible rate off only while the Non-refundable rate is on, and ke
   );
 });
 
+it("sells the Non-refundable rate at the season price while the Flexible rate is off, and gives the discount back (VAY-2489)", () => {
+  const optionTerms = terms(["pay_at_property"], ["bank_transfer"]);
+  const adjustment = (value: PricingConfiguration) => {
+    const offer = value.offers.find((entry) => entry.id === "nonrefundable")!;
+    return offer.price.kind === "linked" ? offer.price.adjustment : null;
+  };
+  // The same tree on every update, so the card keeps what it remembers.
+  const render = (value: PricingConfiguration, nonRefundable = "9000") => (
+    <PricingManualMethodsProvider value={["bank_transfer"]}>
+      <PricingCardReadinessProvider value={null}>
+        <StepRates
+          room={value}
+          simple={simpleRoom(value, optionTerms)}
+          terms={optionTerms}
+          failed={false}
+          prices={{ flexible: "10000", nonrefundable: nonRefundable }}
+          disabled={false}
+          {...handlers}
+        />
+      </PricingCardReadinessProvider>
+    </PricingManualMethodsProvider>
+  );
+  const flexibleSwitch = () => card("Flexible rate").findByProps({ role: "switch" });
+  act(() => {
+    view = create(render(room()));
+  });
+  // The hotel's own discount (12%) is the one that comes back later.
+  act(() => view.root.findByProps({ "aria-label": "1% more" }).props.onClick());
+  act(() => view.root.findByProps({ "aria-label": "1% more" }).props.onClick());
+  act(() => view.update(render(handlers.onChange.mock.lastCall![0])));
+  // A discount that doesn't parse holds Save until the Flexible switch replaces it.
+  act(() =>
+    view.root
+      .findByProps({ "aria-label": "How much cheaper, in percent" })
+      .props.onChange({ target: { value: "abc" } }),
+  );
+  expect(handlers.onPending).toHaveBeenLastCalledWith(true);
+  act(() => flexibleSwitch().props.onClick());
+  const off = handlers.onChange.mock.lastCall![0] as PricingConfiguration;
+  expect(off.offers[0]).toMatchObject({ id: "flexible", sale: "not_sold" });
+  expect(adjustment(off)).toEqual({ kind: "percentage", basisPoints: 0 });
+  // Off: no discount to set, the season price, and the rate stays on.
+  act(() => view.update(render(off, "10000")));
+  const nonRefundable = textOf(card("Non-refundable rate"));
+  expect(nonRefundable).toContain("Season price, no refund");
+  expect(nonRefundable).toContain("Same as the season price while the Flexible rate is off.");
+  expect(nonRefundable).toContain("€100 a night");
+  expect(nonRefundable).not.toContain("How much cheaper");
+  expect(view.root.findAllByProps({ "aria-label": "How much cheaper, in percent" })).toHaveLength(
+    0,
+  );
+  expect(nonRefundable).toContain("Keep at least one rate on.");
+  expect(handlers.onPending).toHaveBeenLastCalledWith(false);
+  expect(card("Non-refundable rate").findAll((node) => node.props.role === "alert")).toHaveLength(
+    0,
+  );
+  // On again: the 12% comes back, not the default.
+  act(() => flexibleSwitch().props.onClick());
+  const on = handlers.onChange.mock.lastCall![0] as PricingConfiguration;
+  expect(on.offers[0]).not.toHaveProperty("sale");
+  expect(adjustment(on)).toEqual({ kind: "percentage", basisPoints: -1200 });
+  act(() => view.update(render(on, "8800")));
+  expect(view.root.findByProps({ "aria-label": "How much cheaper, in percent" }).props.value).toBe(
+    "12",
+  );
+  expect(textOf(card("Non-refundable rate"))).toContain("12% cheaper, no refund");
+  // A card opened later (after a reload) doesn't know it: the default 10%.
+  act(() => {
+    view = create(render(off, "10000"));
+  });
+  act(() => flexibleSwitch().props.onClick());
+  expect(adjustment(handlers.onChange.mock.lastCall![0])).toEqual({
+    kind: "percentage",
+    basisPoints: -1000,
+  });
+});
+
+it("shows a discount saved with the Flexible rate off before VAY-2489, and keeps it when Flexible is on again", () => {
+  const old = setOfferSale(room(), "flexible", "not_sold");
+  mount(old, terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
+  expect(textOf(card("Non-refundable rate"))).toContain("10% cheaper, no refund");
+  expect(view.root.findByProps({ "aria-label": "How much cheaper, in percent" }).props.value).toBe(
+    "10",
+  );
+  act(() => card("Flexible rate").findByProps({ role: "switch" }).props.onClick());
+  const on = handlers.onChange.mock.lastCall![0] as PricingConfiguration;
+  expect(on.offers[0]).not.toHaveProperty("sale");
+  expect(on.offers[1]).toEqual(old.offers[1]);
+});
+
 it("sells another option on channels only, but never the room's last booking-page option (VAY-2285)", () => {
   const value = room(),
     onSale = vi.fn();
