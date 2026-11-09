@@ -29,6 +29,7 @@ import {
   setDiscount,
   setFlexibleSale,
   switchOption,
+  type KeptDiscount,
   type SimpleRoom,
 } from "./simplePricing";
 import { money, type OptionTerms } from "./stepPricing";
@@ -282,16 +283,18 @@ function FlexibleRate({
   const on = pricingOfferOnBookingPage(simple.main);
   const otherRate = !!simple.nonRefundable && pricingOfferOnBookingPage(simple.nonRefundable);
   // The Non-refundable rate's discount from before the Flexible rate went off (VAY-2489), for when it is on again.
-  const kept = useRef<string | null>(null);
+  const kept = useRef<KeptDiscount | null>(null);
   // Off keeps the option and its terms (sale "not_sold"); on again drops the key (VAY-2285). Off, the Non-refundable
   // rate costs the season price; on again, it is cheaper by its kept discount, or the default (VAY-2489).
   const toggle = () => {
     if (disabled) return;
     if (on && !otherRate) return setError(t("pricing.rates.keepOneFlexible"));
     try {
-      const discount = discountOf(simple.nonRefundable);
-      if (on && discount) kept.current = String(discount / 100);
-      onChange(setFlexibleSale(room, simple, !on, kept.current ?? defaultDiscount));
+      const offer = simple.nonRefundable,
+        discount = discountOf(offer);
+      if (on && offer && discount)
+        kept.current = { offerId: offer.id, percent: String(discount / 100) };
+      onChange(setFlexibleSale(room, simple, !on, kept.current));
       setError("");
     } catch (cause) {
       setError(errorText(cause, t, "pricing.rates.keepOne"));

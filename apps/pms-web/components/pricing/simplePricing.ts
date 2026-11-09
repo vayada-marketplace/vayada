@@ -199,20 +199,33 @@ export function setOfferSale(room: Room, offerId: string, sale: PricingOfferSale
   if (!next) throw new PricingError("pricing.rates.keepOne");
   return next;
 }
+/** The Non-refundable rate and its discount from when the Flexible rate went off (VAY-2489). */
+export type KeptDiscount = { offerId: string; percent: string };
 /** The Flexible rate (the main option) off or on again (VAY-2285), with the Non-refundable rate that follows it
  * (VAY-2489): while the Flexible rate is off, guests book the Non-refundable rate at the season price (0%); on again,
- * it is `percent` cheaper again. A discount it still has is kept. */
+ * it is cheaper by the `kept` discount, or the default. Only a rate still at 0% gets a discount back. */
 export function setFlexibleSale(
   room: Room,
   simple: SimpleRoom,
   on: boolean,
-  percent: string,
+  kept: KeptDiscount | null,
 ): Room {
   const next = setOfferSale(room, simple.main.id, on ? null : "not_sold");
-  const offer = simple.nonRefundable;
-  if (offer?.price.kind !== "linked" || offer.price.adjustment.kind !== "percentage") return next;
+  // On again, the kept rate is found by its id: an edit while the Flexible rate was off (its cancellation, say) can
+  // take the rate off the card.
+  const offer =
+    (on ? room.offers.find((value) => value.id === kept?.offerId) : undefined) ??
+    simple.nonRefundable;
+  if (
+    offer?.price.kind !== "linked" ||
+    offer.price.parentId !== simple.main.id ||
+    offer.price.adjustment.kind !== "percentage"
+  )
+    return next;
   if (!on) return changeLinkedAdjustment(next, offer.id, { kind: "percentage", value: "0" });
-  return offer.price.adjustment.basisPoints < 0 ? next : setDiscount(next, offer.id, percent);
+  return offer.price.adjustment.basisPoints === 0
+    ? setDiscount(next, offer.id, kept?.percent ?? defaultDiscount)
+    : next;
 }
 /** The breakfast option's price per room or per adult; children's breakfast stays as it is. */
 export function setBreakfastAmount(room: Room, offerId: string, amount: string): Room {

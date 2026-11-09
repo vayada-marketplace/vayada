@@ -416,6 +416,13 @@ it("sells the Non-refundable rate at the season price while the Flexible rate is
   act(() => view.root.findByProps({ "aria-label": "1% more" }).props.onClick());
   act(() => view.root.findByProps({ "aria-label": "1% more" }).props.onClick());
   act(() => view.update(render(handlers.onChange.mock.lastCall![0])));
+  // A discount that doesn't parse holds Save until the Flexible switch replaces it.
+  act(() =>
+    view.root
+      .findByProps({ "aria-label": "How much cheaper, in percent" })
+      .props.onChange({ target: { value: "abc" } }),
+  );
+  expect(handlers.onPending).toHaveBeenLastCalledWith(true);
   act(() => flexibleSwitch().props.onClick());
   const off = handlers.onChange.mock.lastCall![0] as PricingConfiguration;
   expect(off.offers[0]).toMatchObject({ id: "flexible", sale: "not_sold" });
@@ -432,6 +439,9 @@ it("sells the Non-refundable rate at the season price while the Flexible rate is
   );
   expect(nonRefundable).toContain("Keep at least one rate on.");
   expect(handlers.onPending).toHaveBeenLastCalledWith(false);
+  expect(card("Non-refundable rate").findAll((node) => node.props.role === "alert")).toHaveLength(
+    0,
+  );
   // On again: the 12% comes back, not the default.
   act(() => flexibleSwitch().props.onClick());
   const on = handlers.onChange.mock.lastCall![0] as PricingConfiguration;
@@ -451,6 +461,19 @@ it("sells the Non-refundable rate at the season price while the Flexible rate is
     kind: "percentage",
     basisPoints: -1000,
   });
+});
+
+it("shows a discount saved with the Flexible rate off before VAY-2489, and keeps it when Flexible is on again", () => {
+  const old = setOfferSale(room(), "flexible", "not_sold");
+  mount(old, terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
+  expect(textOf(card("Non-refundable rate"))).toContain("10% cheaper, no refund");
+  expect(view.root.findByProps({ "aria-label": "How much cheaper, in percent" }).props.value).toBe(
+    "10",
+  );
+  act(() => card("Flexible rate").findByProps({ role: "switch" }).props.onClick());
+  const on = handlers.onChange.mock.lastCall![0] as PricingConfiguration;
+  expect(on.offers[0]).not.toHaveProperty("sale");
+  expect(on.offers[1]).toEqual(old.offers[1]);
 });
 
 it("sells another option on channels only, but never the room's last booking-page option (VAY-2285)", () => {
