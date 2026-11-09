@@ -1,7 +1,7 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import { expect, it, vi } from "vitest";
-import { loadConfig, vayadaPaymentOpenFor } from "./config.js";
+import { loadConfig, vayadaPaymentLiveFor, vayadaPaymentOpenFor } from "./config.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
 
 const propertyId = "24420000-0000-4000-8000-000000000002";
@@ -237,6 +237,65 @@ it("opens vayada Payment only for the hotels on VAYADA_PAYMENT_PROPERTY_IDS whil
   expect(() => loadConfig({ VAYADA_PAYMENT_PROPERTY_IDS: "not-a-property" })).toThrow(
     "VAYADA_PAYMENT_PROPERTY_IDS requires up to 100 property UUIDs",
   );
+});
+
+it("opens a live hotel only with the live keys and never falls back to test mode", () => {
+  const live = "24420000-0000-4000-8000-0000000000aa";
+  const testKeys = {
+    VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2442live",
+    VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2442live",
+  };
+  const liveKeys = {
+    VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2442live",
+    VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2442live",
+  };
+  const on = {
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: `${live},${propertyId}`,
+    VAYADA_PAYMENT_LIVE_PROPERTY_IDS: live.toUpperCase(),
+  };
+  const both = loadConfig({ ...testKeys, ...liveKeys, ...on });
+  expect(both.vayadaPaymentLivePropertyIds).toEqual([live]);
+  expect(vayadaPaymentLiveFor(both)(live)).toBe(true);
+  expect(vayadaPaymentLiveFor(both)(propertyId)).toBe(false);
+  // Side by side: the live hotel on the live keys, the other one on the test keys.
+  expect([vayadaPaymentOpenFor(both)(live), vayadaPaymentOpenFor(both)(propertyId)]).toEqual([
+    true,
+    true,
+  ]);
+  // Test keys only: the live hotel stays closed, even with "*", rather than taking test money.
+  const testOnly = loadConfig({ ...testKeys, ...on });
+  expect([
+    vayadaPaymentOpenFor(testOnly)(live),
+    vayadaPaymentOpenFor(testOnly)(propertyId),
+  ]).toEqual([false, true]);
+  expect(
+    vayadaPaymentOpenFor(loadConfig({ ...testKeys, ...on, VAYADA_PAYMENT_PROPERTY_IDS: "*" }))(
+      live,
+    ),
+  ).toBe(false);
+  // Live keys only: only the live hotel opens.
+  const liveOnly = loadConfig({ ...liveKeys, ...on });
+  expect([
+    vayadaPaymentOpenFor(liveOnly)(live),
+    vayadaPaymentOpenFor(liveOnly)(propertyId),
+  ]).toEqual([true, false]);
+  // The fast stop: off VAYADA_PAYMENT_PROPERTY_IDS (or the switch off) closes it, while it stays
+  // live, so the refunds of money it already took keep going to the live keys.
+  const stopped = loadConfig({ ...testKeys, ...liveKeys, ...on, VAYADA_PAYMENT_PROPERTY_IDS: "" });
+  expect(vayadaPaymentOpenFor(stopped)(live)).toBe(false);
+  expect(vayadaPaymentLiveFor(stopped)(live)).toBe(true);
+  expect(
+    vayadaPaymentOpenFor(
+      loadConfig({ ...testKeys, ...liveKeys, ...on, VAYADA_PAYMENT_ENABLED: "false" }),
+    )(live),
+  ).toBe(false);
+  // Real money only for hotels named one by one.
+  for (const ids of ["*", "not-a-property"])
+    expect(() => loadConfig({ VAYADA_PAYMENT_LIVE_PROPERTY_IDS: ids })).toThrow(
+      "VAYADA_PAYMENT_LIVE_PROPERTY_IDS requires up to 100 property UUIDs",
+    );
+  expect(loadConfig({}).vayadaPaymentLivePropertyIds).toEqual([]);
 });
 
 it("keeps vayada Payment off unless VAYADA_PAYMENT_ENABLED is set", () => {
