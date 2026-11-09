@@ -614,6 +614,105 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
+  it("takes a live hotel's card as real money, and never a test charge once it has taken real money (VAY-2442)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    try {
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      // Neither fake says anything about livemode: the router gives each intent its keys' mode.
+      const testCreate = vi.fn((input: Parameters<typeof createPaymentIntent>[0]) =>
+        createPaymentIntent(input),
+      );
+      const testKeys = {
+        createPaymentIntent: testCreate,
+        retrievePaymentIntent: vi.fn(),
+        cancelPaymentIntent: vi.fn(),
+      };
+      const liveKeys = { createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent: vi.fn() };
+      let onLiveList = false;
+      const provider = routeVayadaPaymentStripe(
+        {} as never,
+        { provider: testKeys as never, publishableKey: "pk_test_writer" },
+        {
+          account: { provider: liveKeys as never, publishableKey: "pk_live_writer" },
+          for: (propertyId) => onLiveList && propertyId === fixture.propertyId,
+        },
+      );
+      const vayada = { open: () => true, feePercent: 6 };
+
+      // The hotel took real money before and has fallen off the live list: its checkout is
+      // refused rather than confirming a booking for a test charge.
+      const earlier = await fixture.observer.query(
+        `INSERT INTO finance.payments (property_id,source_system,payment_kind,payment_method,status,amount,
+           currency,payment_metadata)
+         VALUES ($1,'finance','full','card','paid',1,$2,'{"chargeType":"vayada_payment","livemode":true}')
+         RETURNING id`,
+        [fixture.propertyId, fixture.f.current.quote.stay.currency],
+      );
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, { provider, vayada }),
+      ).rejects.toMatchObject({ code: "conflict" });
+      expect(testCreate).toHaveBeenCalledOnce();
+      expect((await snapshot(fixture.observer, fixture)).bookings).toBe(0);
+      await fixture.observer.query("DELETE FROM finance.payments WHERE id=$1", [
+        earlier.rows[0].id,
+      ]);
+
+      // On the live list: the live keys charge it, and the payment and the ledger say real money.
+      onLiveList = true;
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada,
+      });
+      expect(result).toMatchObject({
+        kind: "payment_required",
+        payment: { stripeAccountId: null, publishableKey: "pk_live_writer" },
+      });
+      expect(testCreate).toHaveBeenCalledOnce();
+      const payment = (
+        await fixture.observer.query(
+          "SELECT id,payment_metadata AS meta FROM finance.payments WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(payment).toHaveLength(1);
+      expect(payment[0].meta).toMatchObject({ chargeType: "vayada_payment", livemode: true });
+      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+      const intent = await createPaymentIntent({
+        amountMinor,
+        currency: fixture.f.current.quote.stay.currency,
+      });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: (result as { bookingReference: string }).bookingReference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT entry_kind,livemode,payment_id::text FROM finance.hotel_payout_ledger
+             WHERE property_id=$1`,
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([{ entry_kind: "charge", livemode: true, payment_id: payment[0].id }]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("settles a vayada Payment stay from its webhook, refunds it on Vayada's account and nets disputes (VAY-2442)", async () => {
     const { fixture, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
     try {

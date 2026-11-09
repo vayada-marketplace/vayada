@@ -155,6 +155,19 @@ export async function startPricingCardPayment(
   const feeMinor = planFeeMinor + vayadaFeeMinor;
   if (!Number.isSafeInteger(vayadaFeeMinor) || vayadaFeeMinor < 0 || feeMinor > amountMinor)
     return fail();
+  // A hotel that has taken real money through vayada Payment never takes a test-mode charge again
+  // (say it fell off VAYADA_PAYMENT_LIVE_PROPERTY_IDS by mistake): a test charge confirms a booking
+  // for no money.
+  const tookLiveMoney =
+    vayadaCharge &&
+    (
+      await client.query(
+        `SELECT 1 FROM finance.payments WHERE property_id=$1 AND payment_method='card'
+           AND payment_metadata->>'chargeType'='vayada_payment' AND payment_metadata->>'livemode'='true'
+         LIMIT 1`,
+        [scope.propertyId],
+      )
+    ).rowCount === 1;
   const idempotencyKey = pricingCardPaymentIdempotencyKey(scope.propertyId, input.requestId);
   // A request only authorises the card; the hotel's acceptance captures it.
   const captureMethod = quote.acceptanceMode === "request" ? "manual" : "automatic";
@@ -171,7 +184,8 @@ export async function startPricingCardPayment(
   if (
     !intent.clientSecret ||
     intent.amountMinor !== amountMinor ||
-    intent.currency.toUpperCase() !== currency.toUpperCase()
+    intent.currency.toUpperCase() !== currency.toUpperCase() ||
+    (tookLiveMoney && intent.livemode !== true)
   )
     return fail();
   const inserted = await client.query(

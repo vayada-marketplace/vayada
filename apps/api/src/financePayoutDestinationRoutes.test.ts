@@ -248,6 +248,7 @@ it("opens a live hotel only with the live keys and never falls back to test mode
   const liveKeys = {
     VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2442live",
     VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2442live",
+    VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_vay2442live",
   };
   const on = {
     VAYADA_PAYMENT_ENABLED: "true",
@@ -274,6 +275,16 @@ it("opens a live hotel only with the live keys and never falls back to test mode
       live,
     ),
   ).toBe(false);
+  // Live keys without the live webhook: closed, since disputes and dashboard refunds of real
+  // money would never reach the hotel's balance.
+  const noWebhook = loadConfig({
+    ...testKeys,
+    ...liveKeys,
+    ...on,
+    VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "",
+  });
+  expect(noWebhook.vayadaPaymentStripeLive).toBeDefined();
+  expect(vayadaPaymentOpenFor(noWebhook)(live)).toBe(false);
   // Live keys only: only the live hotel opens.
   const liveOnly = loadConfig({ ...liveKeys, ...on });
   expect([

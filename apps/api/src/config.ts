@@ -481,8 +481,12 @@ export function vayadaPaymentOpenFor(
   return (propertyId) =>
     config.vayadaPaymentEnabled &&
     (ids === "all" || ids.includes(propertyId.toLowerCase())) &&
-    // A live hotel never falls back to the test keys, nor a test hotel to the live ones.
-    (live(propertyId) ? config.vayadaPaymentStripeLive : config.vayadaPaymentStripe) !== undefined;
+    // A live hotel never falls back to the test keys, nor a test hotel to the live ones. Real money
+    // also needs the live webhook: without it disputes and dashboard refunds never reach the
+    // hotel's balance, and Vayada would pay out money it no longer has.
+    (live(propertyId)
+      ? config.vayadaPaymentStripeLive?.webhookSecret !== undefined
+      : config.vayadaPaymentStripe !== undefined);
 }
 
 /** VAY-2442: whether a hotel's vayada Payment money is real (Stripe live mode): every Stripe call

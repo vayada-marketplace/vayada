@@ -135,18 +135,23 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
       },
     );
 
+    // Stripe's answer here says nothing about livemode: the intent carries the mode of the keys.
     await expect(provider.createPaymentIntent(charge(liveRef))).resolves.toMatchObject({
       paymentIntentId: "pi_live",
       providerAccountRef: liveRef,
       publishableKey: "pk_live_vayada",
+      livemode: true,
     });
     await expect(provider.createPaymentIntent(charge(ref))).resolves.toMatchObject({
       paymentIntentId: "pi_test",
       providerAccountRef: ref,
       publishableKey: "pk_test_vayada",
+      livemode: false,
     });
     await provider.retrievePaymentIntent("pi_live", liveRef);
-    await provider.capturePaymentIntent("pi_live", liveRef, "k");
+    await expect(provider.capturePaymentIntent("pi_live", liveRef, "k")).resolves.toMatchObject({
+      livemode: true,
+    });
     await provider.cancelPaymentIntent("pi_live", liveRef, "k");
     await provider.createRefund({
       paymentIntentId: "pi_live",

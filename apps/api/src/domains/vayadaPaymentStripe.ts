@@ -46,7 +46,9 @@ export function routeVayadaPaymentStripe(
       );
     return { ...account, livemode };
   };
-  // The stored reference stays on the intent, so identity checks compare like with like.
+  // The stored reference stays on the intent, so identity checks compare like with like. When
+  // Stripe's answer doesn't say, the intent carries the mode of the keys it was called with, so a
+  // live charge is never recorded as test money (left out of the hotel's live payouts).
   const tagged = (
     intent: StripeBookingPaymentIntent,
     ref: string,
@@ -55,6 +57,7 @@ export function routeVayadaPaymentStripe(
     ...intent,
     providerAccountRef: ref,
     publishableKey: account.publishableKey,
+    livemode: typeof intent.livemode === "boolean" ? intent.livemode : account.livemode,
   });
   // Before a guest can pay (and on every read), Stripe's own livemode must match the hotel's, so
   // test money is never taken as real, nor the reverse. Checked only where nothing has moved yet.
