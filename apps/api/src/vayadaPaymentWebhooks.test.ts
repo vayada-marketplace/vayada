@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
+import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { stayCurrencyFee } from "./domains/vayadaPaymentWebhookEvents.js";
 import { registerVayadaPaymentWebhookRoutes } from "./routes/vayadaPaymentWebhooks.js";
@@ -60,6 +61,120 @@ describe("vayada Payment's Stripe webhook (VAY-2442)", () => {
       const broken = "{not json";
       expect((await post(app, broken, signed(broken))).statusCode).toBe(400);
       expect(handle).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("takes live events only on the live endpoint, signed with the live secret", async () => {
+    const liveSecret = "whsec_vay2442live";
+    const handleTest = vi.fn(async () => "handled" as const);
+    const handleLive = vi.fn(async () => "handled" as const);
+    // As buildApp registers them: both endpoints side by side, each with its own secret.
+    const app = Fastify();
+    await app.register(registerVayadaPaymentWebhookRoutes, {
+      secret,
+      livemode: false,
+      handle: handleTest,
+      now: () => now,
+    });
+    await app.register(registerVayadaPaymentWebhookRoutes, {
+      secret: liveSecret,
+      livemode: true,
+      handle: handleLive,
+      now: () => now,
+    });
+    const send = (url: string, body: string, signature: string) =>
+      app.inject({
+        method: "POST",
+        url,
+        headers: { "content-type": "application/json", "stripe-signature": signature },
+        payload: body,
+      });
+    try {
+      const liveEvent = { ...event, id: "evt_live", livemode: true };
+      const live = JSON.stringify(liveEvent);
+      const ok = await send("/webhooks/stripe/vayada-payment-live", live, signed(live, liveSecret));
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json()).toEqual({ received: true, handled: true });
+      expect(handleLive).toHaveBeenCalledWith(liveEvent);
+      // The test secret can't sign for the live endpoint, nor the live secret for the test one.
+      expect(
+        (await send("/webhooks/stripe/vayada-payment-live", live, signed(live))).statusCode,
+      ).toBe(400);
+      expect(
+        (await send("/webhooks/stripe/vayada-payment", live, signed(live, liveSecret))).statusCode,
+      ).toBe(400);
+      // A test event on the live endpoint, or a live one on the test endpoint, is left alone.
+      const test = JSON.stringify(event);
+      const crossedLive = await send(
+        "/webhooks/stripe/vayada-payment-live",
+        test,
+        signed(test, liveSecret),
+      );
+      expect(crossedLive.json()).toEqual({ received: true, handled: false });
+      const crossedTest = await send("/webhooks/stripe/vayada-payment", live, signed(live));
+      expect(crossedTest.json()).toEqual({ received: true, handled: false });
+      // A connected-account event is refused on the live endpoint too.
+      const connected = JSON.stringify({ ...liveEvent, account: "acct_hotel" });
+      expect(
+        (
+          await send(
+            "/webhooks/stripe/vayada-payment-live",
+            connected,
+            signed(connected, liveSecret),
+          )
+        ).statusCode,
+      ).toBe(400);
+      expect(handleLive).toHaveBeenCalledTimes(1);
+      expect(handleTest).not.toHaveBeenCalled();
+      // The test endpoint still takes test events as before.
+      expect((await send("/webhooks/stripe/vayada-payment", test, signed(test))).json()).toEqual({
+        received: true,
+        handled: true,
+      });
+      expect(handleTest).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("serves both endpoints from the app, each pinned to its own mode", async () => {
+    const handle = vi.fn(async () => "handled" as const);
+    const app = buildApp({
+      logger: false,
+      // The test endpoint stays test mode whatever its options say.
+      vayadaPaymentWebhooks: { secret, livemode: true, handle, now: () => now },
+      vayadaPaymentLiveWebhooks: { secret: "whsec_vay2442live", handle, now: () => now },
+    });
+    const send = (url: string, body: string, signature: string) =>
+      app.inject({
+        method: "POST",
+        url,
+        headers: { "content-type": "application/json", "stripe-signature": signature },
+        payload: body,
+      });
+    try {
+      const test = JSON.stringify(event);
+      const live = JSON.stringify({ ...event, livemode: true });
+      expect((await send("/webhooks/stripe/vayada-payment", test, signed(test))).json()).toEqual({
+        received: true,
+        handled: true,
+      });
+      expect((await send("/webhooks/stripe/vayada-payment", live, signed(live))).json()).toEqual({
+        received: true,
+        handled: false,
+      });
+      expect(
+        (
+          await send(
+            "/webhooks/stripe/vayada-payment-live",
+            live,
+            signed(live, "whsec_vay2442live"),
+          )
+        ).json(),
+      ).toEqual({ received: true, handled: true });
+      expect(handle).toHaveBeenCalledTimes(2);
     } finally {
       await app.close();
     }

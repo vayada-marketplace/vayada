@@ -479,6 +479,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financePayoutDestination?: Parameters<typeof registerFinancePayoutDestinationRoutes>[1];
   /** VAY-2442: events from vayada Payment's own Stripe account. */
   vayadaPaymentWebhooks?: Parameters<typeof registerVayadaPaymentWebhookRoutes>[1];
+  /** VAY-2442: the live-mode endpoint, registered only with the live webhook secret. */
+  vayadaPaymentLiveWebhooks?: Parameters<typeof registerVayadaPaymentWebhookRoutes>[1];
   vayadaPaymentPayouts?: Parameters<typeof registerVayadaPaymentPayoutRoutes>[1];
   financePaymentWindows?: Parameters<typeof registerFinancePaymentWindowsRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
@@ -584,7 +586,16 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerProviderWebhookRoutes, options.providerWebhooks);
   }
   if (options.vayadaPaymentWebhooks) {
-    app.register(registerVayadaPaymentWebhookRoutes, options.vayadaPaymentWebhooks);
+    app.register(registerVayadaPaymentWebhookRoutes, {
+      ...options.vayadaPaymentWebhooks,
+      livemode: false,
+    });
+  }
+  if (options.vayadaPaymentLiveWebhooks) {
+    app.register(registerVayadaPaymentWebhookRoutes, {
+      ...options.vayadaPaymentLiveWebhooks,
+      livemode: true,
+    });
   }
   app.register(registerRouteGroups, { prefix: "/api" });
   if (options.publicHotelProfileRepository) {

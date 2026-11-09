@@ -121,6 +121,133 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
     expect(isVayadaPaymentAccountRef(null)).toBe(false);
   });
 
+  it("calls a live hotel's payments only with the live keys and every other hotel's with the test keys", async () => {
+    const liveRef = "vayada:24420000-0000-4000-8000-0000000000aa";
+    const connect = fakeProvider("connect");
+    const test = fakeProvider("test");
+    const live = fakeProvider("live");
+    const provider = routeVayadaPaymentStripe(
+      connect as never,
+      { provider: test as never, publishableKey: "pk_test_vayada" },
+      {
+        account: { provider: live as never, publishableKey: "pk_live_vayada" },
+        for: (propertyId) => propertyId === "24420000-0000-4000-8000-0000000000aa",
+      },
+    );
+
+    // Stripe's answer here says nothing about livemode: the intent carries the mode of the keys.
+    await expect(provider.createPaymentIntent(charge(liveRef))).resolves.toMatchObject({
+      paymentIntentId: "pi_live",
+      providerAccountRef: liveRef,
+      publishableKey: "pk_live_vayada",
+      livemode: true,
+    });
+    await expect(provider.createPaymentIntent(charge(ref))).resolves.toMatchObject({
+      paymentIntentId: "pi_test",
+      providerAccountRef: ref,
+      publishableKey: "pk_test_vayada",
+      livemode: false,
+    });
+    await provider.retrievePaymentIntent("pi_live", liveRef);
+    await expect(provider.capturePaymentIntent("pi_live", liveRef, "k")).resolves.toMatchObject({
+      livemode: true,
+    });
+    await provider.cancelPaymentIntent("pi_live", liveRef, "k");
+    await provider.createRefund({
+      paymentIntentId: "pi_live",
+      providerAccountRef: liveRef,
+      amountMinor: 1,
+      refundApplicationFee: true,
+      commandId: "c",
+      propertyId: "p",
+      bookingReference: "VAY-ABC123",
+      idempotencyKey: "k",
+    });
+    await provider.listRefunds("pi_live", liveRef);
+    await provider.retrieveRefund("re_live", liveRef);
+    for (const fn of [
+      live.retrievePaymentIntent,
+      live.capturePaymentIntent,
+      live.cancelPaymentIntent,
+      live.createRefund,
+      live.listRefunds,
+      live.retrieveRefund,
+    ])
+      expect(fn).toHaveBeenCalledTimes(1);
+    expect(live.createRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ providerAccountRef: null, refundApplicationFee: false }),
+    );
+    // Only the test hotel's charge went to the test keys; Connect saw nothing.
+    expect(test.createPaymentIntent).toHaveBeenCalledTimes(1);
+    for (const fn of [test.retrievePaymentIntent, test.createRefund, test.listRefunds])
+      expect(fn).not.toHaveBeenCalled();
+    for (const fn of Object.values(connect)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("never takes a live hotel's payment on the test keys, nor test money as real", async () => {
+    const liveRef = "vayada:24420000-0000-4000-8000-0000000000aa";
+    const isLive = (propertyId: string) => propertyId === "24420000-0000-4000-8000-0000000000aa";
+    const test = fakeProvider("test");
+    // Live keys not configured: the live hotel's calls fail instead of going to the test keys.
+    const noLive = routeVayadaPaymentStripe(
+      fakeProvider("connect") as never,
+      { provider: test as never, publishableKey: "pk_test_vayada" },
+      { for: isLive },
+    );
+    await expect(noLive.createPaymentIntent(charge(liveRef))).rejects.toThrow(
+      "live-mode Stripe account is not configured",
+    );
+    await expect(noLive.retrievePaymentIntent("pi_x", liveRef)).rejects.toThrow(
+      "live-mode Stripe account is not configured",
+    );
+    expect(test.createPaymentIntent).not.toHaveBeenCalled();
+    expect(test.retrievePaymentIntent).not.toHaveBeenCalled();
+    // Stripe's own livemode must match the hotel's before a guest can pay, and on every read.
+    const modeOf = (livemode: boolean) => {
+      const fake = fakeProvider(livemode ? "live" : "test");
+      const withMode = async (account: string | null) => ({
+        ...(await fakeProvider("x").retrievePaymentIntent("pi_x", account)),
+        livemode,
+      });
+      fake.createPaymentIntent.mockImplementation(async (input) =>
+        withMode(input.providerAccountRef),
+      );
+      fake.retrievePaymentIntent.mockImplementation(async (_id, account) => withMode(account));
+      return fake;
+    };
+    const crossed = routeVayadaPaymentStripe(
+      fakeProvider("connect") as never,
+      { provider: modeOf(true) as never, publishableKey: "pk_test_vayada" },
+      {
+        account: { provider: modeOf(false) as never, publishableKey: "pk_live_vayada" },
+        for: isLive,
+      },
+    );
+    for (const call of [
+      () => crossed.createPaymentIntent(charge(liveRef)),
+      () => crossed.createPaymentIntent(charge(ref)),
+      () => crossed.retrievePaymentIntent("pi_x", liveRef),
+      () => crossed.retrievePaymentIntent("pi_x", ref),
+    ])
+      await expect(call()).rejects.toThrow("Stripe's mode does not match the hotel's");
+    const matched = routeVayadaPaymentStripe(
+      fakeProvider("connect") as never,
+      { provider: modeOf(false) as never, publishableKey: "pk_test_vayada" },
+      {
+        account: { provider: modeOf(true) as never, publishableKey: "pk_live_vayada" },
+        for: isLive,
+      },
+    );
+    await expect(matched.createPaymentIntent(charge(liveRef))).resolves.toMatchObject({
+      livemode: true,
+      publishableKey: "pk_live_vayada",
+    });
+    await expect(matched.retrievePaymentIntent("pi_x", ref)).resolves.toMatchObject({
+      livemode: false,
+      publishableKey: "pk_test_vayada",
+    });
+  });
+
   it("reads a stored payment's own account for vayada Payment too, not the platform's", () => {
     // Host decline, the request deadline sweep and the guest's booking lookup call Stripe with it.
     expect(stripeCallAccountRef("vayada_payment", ref)).toBe(ref);
@@ -130,7 +257,7 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
     expect(stripeCallAccountRef("direct", null)).toBeNull();
   });
 
-  it("accepts only Stripe test-mode keys and a fee from 0 to 50 percent", () => {
+  it("accepts test-mode keys in the test set, live-mode keys in the live set and a fee from 0 to 50 percent", () => {
     expect(loadConfig({}).vayadaPaymentStripe).toBeUndefined();
     expect(loadConfig({}).vayadaPaymentFeePercent).toBe(6);
     expect(
@@ -155,6 +282,38 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
       { VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_abc" },
     ])
       expect(() => loadConfig(env)).toThrow("must both be Stripe test-mode keys");
+    // The live set takes live keys only, so test money and real money never mix.
+    expect(loadConfig({}).vayadaPaymentStripeLive).toBeUndefined();
+    expect(
+      loadConfig({
+        VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_abc",
+        VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_abc",
+        VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_live",
+      }).vayadaPaymentStripeLive,
+    ).toEqual({
+      secretKey: "rk_live_abc",
+      publishableKey: "pk_live_abc",
+      webhookSecret: "whsec_live",
+    });
+    for (const env of [
+      {
+        VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "sk_test_abc",
+        VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_test_abc",
+      },
+      {
+        VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "sk_live_abc",
+        VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_test_abc",
+      },
+      { VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_abc" },
+    ])
+      expect(() => loadConfig(env)).toThrow("must both be Stripe live-mode keys");
+    expect(() =>
+      loadConfig({
+        VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "sk_live_abc",
+        VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_abc",
+        VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "live",
+      }),
+    ).toThrow("VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET must be a Stripe webhook signing secret");
     for (const fee of ["51", "-1", "six", "6.125"])
       expect(() => loadConfig({ VAYADA_PAYMENT_FEE_PERCENT: fee })).toThrow(
         "VAYADA_PAYMENT_FEE_PERCENT",

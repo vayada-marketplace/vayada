@@ -81,6 +81,7 @@ import {
   loadConfig,
   replacementPricingManualPaymentMethods,
   stripeSubscriptionRuntimeEnabled,
+  vayadaPaymentLiveFor,
   vayadaPaymentOpenFor,
 } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
@@ -516,27 +517,34 @@ const bookingDashboardMetricsReadPort =
 
 // VAY-2442: the hotels vayada Payment is on for (the switch, its Stripe keys and the hotel list).
 const vayadaPaymentOpen = vayadaPaymentOpenFor(config);
-// VAY-2442: events from vayada Payment's own Stripe account (test mode only), with its secret.
-const vayadaPaymentWebhookPool = config.vayadaPaymentStripe?.webhookSecret
-  ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
-  : undefined;
+// VAY-2442: events from vayada Payment's own Stripe account, one endpoint per mode with its own
+// secret; both share this pool.
+const vayadaPaymentWebhookPool =
+  config.vayadaPaymentStripe?.webhookSecret || config.vayadaPaymentStripeLive?.webhookSecret
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
+    : undefined;
 const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
   ? (event: Record<string, unknown>) =>
       handleVayadaPaymentWebhookEvent(vayadaPaymentWebhookPool, event, app.log)
   : undefined;
-// VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account
-// (test mode only); every other card payment goes through Stripe Connect as before.
+// VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account, with
+// the live keys for hotels on VAYADA_PAYMENT_LIVE_PROPERTY_IDS and the test keys for the rest;
+// every other card payment goes through Stripe Connect as before.
+const vayadaPaymentAccount = (keys: ApiConfig["vayadaPaymentStripe"]) =>
+  keys
+    ? {
+        provider: createStripeBookingPaymentProvider({ secretKey: keys.secretKey }),
+        publishableKey: keys.publishableKey,
+      }
+    : undefined;
 const stripeBookingPaymentProvider = config.stripeSubscriptions.secretKey
   ? routeVayadaPaymentStripe(
       createStripeBookingPaymentProvider({ secretKey: config.stripeSubscriptions.secretKey }),
-      config.vayadaPaymentStripe
-        ? {
-            provider: createStripeBookingPaymentProvider({
-              secretKey: config.vayadaPaymentStripe.secretKey,
-            }),
-            publishableKey: config.vayadaPaymentStripe.publishableKey,
-          }
-        : undefined,
+      vayadaPaymentAccount(config.vayadaPaymentStripe),
+      {
+        account: vayadaPaymentAccount(config.vayadaPaymentStripeLive),
+        for: vayadaPaymentLiveFor(config),
+      },
     )
   : undefined;
 
@@ -2273,6 +2281,10 @@ const app = buildApp({
   vayadaPaymentWebhooks:
     handleVayadaPaymentWebhook && config.vayadaPaymentStripe?.webhookSecret
       ? { secret: config.vayadaPaymentStripe.webhookSecret, handle: handleVayadaPaymentWebhook }
+      : undefined,
+  vayadaPaymentLiveWebhooks:
+    handleVayadaPaymentWebhook && config.vayadaPaymentStripeLive?.webhookSecret
+      ? { secret: config.vayadaPaymentStripeLive.webhookSecret, handle: handleVayadaPaymentWebhook }
       : undefined,
   vayadaPaymentPayouts: vayadaPaymentPayoutRepository
     ? { repository: vayadaPaymentPayoutRepository }
