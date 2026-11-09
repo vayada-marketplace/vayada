@@ -12,7 +12,9 @@ import {
   pricePerAdultCount,
   setBreakfastAmount,
   setDiscount,
+  setFlexibleSale,
   setMealDescription,
+  setOfferSale,
   simpleCancellation,
   simpleRoom,
   switchOption,
@@ -496,6 +498,31 @@ describe("the simple card's edits", () => {
     expect(onePriceAgain(perCount)).toEqual(design);
     expect(onePriceAgain(complex)).toBe(null);
     expect(() => pricePerAdultCount(complex)).toThrow();
+  });
+
+  it("sells the Non-refundable rate at the season price while the Flexible rate is off, then gives its discount back (VAY-2489)", () => {
+    const simple = simpleRoom(frozen(design), frozen(designTerms))!;
+    const off = setFlexibleSale(design, simple, false, "10");
+    expect(offer(off, "flexible").sale).toBe("not_sold");
+    expect(offer(off, "nonrefundable").price).toMatchObject({
+      adjustment: { kind: "percentage", basisPoints: 0 },
+    });
+    expect(offer(off, "breakfast")).toEqual(offer(design, "breakfast"));
+    // The card still sees its switch at 0%, but only while the Flexible rate is off.
+    const offSimple = simpleRoom(frozen(off), frozen(designTerms))!;
+    expect(offSimple.nonRefundable?.id).toBe("nonrefundable");
+    expect(offSimple.others).toEqual([]);
+    expect(simpleRoom(setOfferSale(off, "flexible", null), designTerms)!.nonRefundable).toBe(null);
+    // On again: the kept discount comes back, so the room is as it was.
+    expect(setFlexibleSale(off, offSimple, true, "10")).toEqual(design);
+    expect(
+      offer(setFlexibleSale(off, offSimple, true, "12.5"), "nonrefundable").price,
+    ).toMatchObject({
+      adjustment: { kind: "percentage", basisPoints: -1250 },
+    });
+    // A discount the rate still has (saved before VAY-2489) stays as it is.
+    const old = setOfferSale(design, "flexible", "not_sold");
+    expect(setFlexibleSale(old, simpleRoom(old, designTerms)!, true, "25")).toEqual(design);
   });
 });
 

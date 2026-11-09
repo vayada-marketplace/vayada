@@ -1207,6 +1207,12 @@ test("turns the Flexible rate off and sells an option on channels only, keeping 
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
+  const nonRefundable = main(page).getByRole("region", { name: "Non-refundable rate" });
+  const discount = nonRefundable.getByLabel("How much cheaper, in percent");
+  // The hotel's own discount (12%) is the one that comes back when the Flexible rate is on again (VAY-2489).
+  await nonRefundable.getByRole("button", { name: "1% more" }).click();
+  await nonRefundable.getByRole("button", { name: "1% more" }).click();
+  await expect(discount).toHaveValue("12");
   const flexibleOn = main(page).getByRole("switch", { name: "Offer “Flexible rate”" });
   await flexibleOn.click();
   await expect(flexibleOn).toHaveAttribute("aria-checked", "false");
@@ -1218,6 +1224,20 @@ test("turns the Flexible rate off and sells an option on channels only, keeping 
     "Keep at least one rate on. Turn on the Flexible rate before you turn this one off.",
   );
   await expect(extra(page, "Non-refundable")).toBeDisabled();
+  // VAY-2489: guests book it at the season price, so there is no discount to set; the bar's "Guests from" is the Low
+  // season's €80, not €80 − 12%.
+  await expect(nonRefundable).toContainText("Season price, no refund");
+  await expect(nonRefundable).toContainText(
+    "Same as the season price while the Flexible rate is off.",
+  );
+  await expect(discount).toHaveCount(0);
+  await expect(page.getByText("Guests from €80 a night", { exact: false })).toBeVisible();
+  // On again, the 12% is back; then off again for the save.
+  await flexibleOn.click();
+  await expect(flexibleOn).toHaveAttribute("aria-checked", "true");
+  await expect(discount).toHaveValue("12");
+  await flexibleOn.click();
+  await expect(flexibleOn).toHaveAttribute("aria-checked", "false");
   // The calendar shows only what guests can book.
   await expect(main(page).getByRole("button", { name: "Show prices for Flexible" })).toHaveCount(0);
   await main(page).getByRole("button", { name: "Save and publish" }).click();
@@ -1227,6 +1247,11 @@ test("turns the Flexible rate off and sells an option on channels only, keeping 
   )!;
   expect(deluxe.offers[0]).toMatchObject({ id: "flexible", sale: "not_sold" });
   expect(deluxe.offers.slice(1).every((offer: Room) => !("sale" in offer))).toBe(true);
+  // The booking page prices from what is published: the Non-refundable rate at 0% (VAY-2489).
+  expect(deluxe.offers[1]).toMatchObject({
+    id: "nonrefundable",
+    price: { kind: "linked", adjustment: { kind: "percentage", basisPoints: 0 } },
+  });
 
   // Another room: an option sold on channels only says it isn't on the booking page.
   await prices(page, GARDEN);

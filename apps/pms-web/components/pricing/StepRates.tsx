@@ -27,7 +27,7 @@ import {
   defaultFreeDays,
   ratePaymentEdits,
   setDiscount,
-  setOfferSale,
+  setFlexibleSale,
   switchOption,
   type SimpleRoom,
 } from "./simplePricing";
@@ -281,12 +281,17 @@ function FlexibleRate({
   const notSelling = useNotSelling(room, simple.main.id);
   const on = pricingOfferOnBookingPage(simple.main);
   const otherRate = !!simple.nonRefundable && pricingOfferOnBookingPage(simple.nonRefundable);
-  // Off keeps the option and its terms (sale "not_sold"); on again drops the key (VAY-2285).
+  // The Non-refundable rate's discount from before the Flexible rate went off (VAY-2489), for when it is on again.
+  const kept = useRef<string | null>(null);
+  // Off keeps the option and its terms (sale "not_sold"); on again drops the key (VAY-2285). Off, the Non-refundable
+  // rate costs the season price; on again, it is cheaper by its kept discount, or the default (VAY-2489).
   const toggle = () => {
     if (disabled) return;
     if (on && !otherRate) return setError(t("pricing.rates.keepOneFlexible"));
     try {
-      onChange(setOfferSale(room, simple.main.id, on ? "not_sold" : null));
+      const discount = discountOf(simple.nonRefundable);
+      if (on && discount) kept.current = String(discount / 100);
+      onChange(setFlexibleSale(room, simple, !on, kept.current ?? defaultDiscount));
       setError("");
     } catch (cause) {
       setError(errorText(cause, t, "pricing.rates.keepOne"));
@@ -506,12 +511,14 @@ function NonRefundableRate({
   const saved = discountOf(offer);
   const [typed, setTyped] = useState(saved === null ? defaultDiscount : String(saved / 100));
   const [error, setError] = useState("");
-  // A reload or a reset brings the saved discount back; text that already means it ("1", "12.") stays as typed.
+  // A reload, a reset or the Flexible switch (VAY-2489) brings the saved discount back; text that already means it
+  // ("1", "12.") stays as typed. Text that didn't parse is replaced, so its error goes too.
   useEffect(() => {
-    if (saved !== null)
-      setTyped((text) =>
-        Math.round(Number(text.trim()) * 100) === saved ? text : String(saved / 100),
-      );
+    if (saved === null) return;
+    setTyped((text) =>
+      Math.round(Number(text.trim()) * 100) === saved ? text : String(saved / 100),
+    );
+    setError("");
   }, [saved]);
   // The editor's callback is new on every render, so it is read through a ref.
   const pendingRef = useRef(onPending);
@@ -528,8 +535,10 @@ function NonRefundableRate({
   const pending = !!(error && offer) || blocked;
   useEffect(() => pendingRef.current(pending), [pending]);
   const available = simple.cancellation.kind === "free";
-  // With the Flexible rate off this is the rate guests book, so it stays on until Flexible is on again (VAY-2285).
+  // With the Flexible rate off this is the rate guests book, so it stays on until Flexible is on again (VAY-2285),
+  // at the season price: there is no discount to set (VAY-2489).
   const last = !!offer && !pricingOfferOnBookingPage(simple.main);
+  const seasonPrice = last && saved === 0;
   const edit = (value: string) => {
     setTyped(value);
     if (!offer) return setError("");
@@ -582,9 +591,11 @@ function NonRefundableRate({
       name={name}
       notSelling={notSelling}
       sub={
-        offer && saved !== null
-          ? t("pricing.rates.nonRefundableSub", { percent: saved / 100 })
-          : t("pricing.rates.nonRefundableOffSub")
+        seasonPrice
+          ? t("pricing.rates.nonRefundableSeasonSub")
+          : offer && saved !== null
+            ? t("pricing.rates.nonRefundableSub", { percent: saved / 100 })
+            : t("pricing.rates.nonRefundableOffSub")
       }
       control={
         <button
@@ -608,50 +619,62 @@ function NonRefundableRate({
         </p>
       ) : (
         <>
-          <Part label={t("pricing.rates.discount")} className="lg:min-h-[150px]">
-            <p className="text-[13px] text-gray-600">{t("pricing.rates.discountQuestion")}</p>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex h-10 items-center gap-1 rounded-[10px] border border-gray-300 bg-white px-1.5">
-                <button
-                  type="button"
-                  aria-label={t("pricing.rates.discountLess")}
-                  disabled={disabled}
-                  onClick={() => step(-1)}
-                  className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
-                >
-                  <MinusIcon aria-hidden="true" className="h-3.5 w-3.5" />
-                </button>
-                <input
-                  aria-label={t("pricing.simple.extras.discountLabel")}
-                  aria-invalid={!!error || undefined}
-                  inputMode="decimal"
-                  disabled={disabled}
-                  value={typed}
-                  onChange={(event) => edit(event.target.value)}
-                  className="w-10 bg-transparent text-center text-[14px] font-semibold text-gray-900 outline-none"
-                />
-                <span className="text-[14px] font-semibold text-gray-900">%</span>
-                <button
-                  type="button"
-                  aria-label={t("pricing.rates.discountMore")}
-                  disabled={disabled}
-                  onClick={() => step(1)}
-                  className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
-                >
-                  <PlusIcon aria-hidden="true" className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              {before && after && (
-                <span className="flex items-center gap-1.5">
-                  <s className="text-[13px] text-gray-400">{money(before, room.currency)}</s>
-                  <span className="text-[14px] font-semibold text-gray-900">
-                    {t("pricing.simple.extras.night", { amount: money(after, room.currency) })}
-                  </span>
-                </span>
+          {seasonPrice ? (
+            <Part label={t("pricing.rates.price")} className="lg:min-h-[150px]">
+              <p className="text-[13px] text-gray-600">{t("pricing.rates.seasonPrice")}</p>
+              {after && (
+                <p className="text-[14px] font-semibold text-gray-900">
+                  {t("pricing.simple.extras.night", { amount: money(after, room.currency) })}
+                </p>
               )}
-            </div>
-            {last && <p className={ui.errorText}>{t("pricing.rates.keepOneNonRefundable")}</p>}
-          </Part>
+              <p className={ui.errorText}>{t("pricing.rates.keepOneNonRefundable")}</p>
+            </Part>
+          ) : (
+            <Part label={t("pricing.rates.discount")} className="lg:min-h-[150px]">
+              <p className="text-[13px] text-gray-600">{t("pricing.rates.discountQuestion")}</p>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex h-10 items-center gap-1 rounded-[10px] border border-gray-300 bg-white px-1.5">
+                  <button
+                    type="button"
+                    aria-label={t("pricing.rates.discountLess")}
+                    disabled={disabled}
+                    onClick={() => step(-1)}
+                    className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+                  >
+                    <MinusIcon aria-hidden="true" className="h-3.5 w-3.5" />
+                  </button>
+                  <input
+                    aria-label={t("pricing.simple.extras.discountLabel")}
+                    aria-invalid={!!error || undefined}
+                    inputMode="decimal"
+                    disabled={disabled}
+                    value={typed}
+                    onChange={(event) => edit(event.target.value)}
+                    className="w-10 bg-transparent text-center text-[14px] font-semibold text-gray-900 outline-none"
+                  />
+                  <span className="text-[14px] font-semibold text-gray-900">%</span>
+                  <button
+                    type="button"
+                    aria-label={t("pricing.rates.discountMore")}
+                    disabled={disabled}
+                    onClick={() => step(1)}
+                    className="rounded-md p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+                  >
+                    <PlusIcon aria-hidden="true" className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {before && after && (
+                  <span className="flex items-center gap-1.5">
+                    <s className="text-[13px] text-gray-400">{money(before, room.currency)}</s>
+                    <span className="text-[14px] font-semibold text-gray-900">
+                      {t("pricing.simple.extras.night", { amount: money(after, room.currency) })}
+                    </span>
+                  </span>
+                )}
+              </div>
+              {last && <p className={ui.errorText}>{t("pricing.rates.keepOneNonRefundable")}</p>}
+            </Part>
+          )}
           <RatePayment
             rate="non_refundable"
             payment={terms[offer.id]?.payment ?? mainTerms.payment}
