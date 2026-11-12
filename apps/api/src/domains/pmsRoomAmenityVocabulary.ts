@@ -51,8 +51,8 @@ const PMS_ROOM_AMENITY_KEY_STRINGS_V1 = [
 ] as const;
 
 /**
- * PMS-owned V1 room choices. Property facilities, room facts, and deferred
- * room features intentionally do not belong to this membership set.
+ * PMS-owned V1 room choices, which guests see with the labels and order below. A room can
+ * also hold the host's own amenities, saved as typed (VAY-2490).
  */
 export const PMS_ROOM_AMENITY_KEYS_V1: readonly PmsRoomAmenityKey[] = Object.freeze(
   PMS_ROOM_AMENITY_KEY_STRINGS_V1.map((key) => {
@@ -113,17 +113,25 @@ const PMS_ROOM_AMENITY_PUBLIC_LABEL_OVERRIDES_V1: Readonly<Record<string, string
   wifi: "Wi-Fi",
 });
 
+/** Vocabulary labels in guest order, then the host's own amenities as typed. A label shown
+ * once is not repeated in another case ("Wi-Fi" and "wi-fi"). */
 export function toPublicPmsRoomAmenityLabelsV1(amenities: readonly string[]): string[] {
   const uniqueAmenities = [...new Set(amenities)];
   const selectedKeys = new Set(
     uniqueAmenities.filter((key) => PMS_ROOM_AMENITY_KEY_SET_V1.has(key)),
   );
+  const shown = new Set<string>();
   return [
     ...PMS_ROOM_AMENITY_PUBLIC_ORDER_V1.filter((key) => selectedKeys.has(key)).map(
       publicRoomAmenityLabel,
     ),
     ...uniqueAmenities.filter((amenity) => !PMS_ROOM_AMENITY_KEY_SET_V1.has(amenity)),
-  ];
+  ].filter((label) => {
+    const folded = label.toLocaleLowerCase("en");
+    if (shown.has(folded)) return false;
+    shown.add(folded);
+    return true;
+  });
 }
 
 function publicRoomAmenityLabel(key: string): string {
@@ -133,11 +141,16 @@ function publicRoomAmenityLabel(key: string): string {
   );
 }
 
+/**
+ * Accepts every amenity the room contract parses: a V1 key or the host's own amenity as typed
+ * (VAY-2490). The confirm command and the room publication read share this port, so a saved
+ * room always reads back.
+ */
 export function createPmsRoomAmenityVocabularyValidationPort(): RoomAmenityVocabularyValidationPort {
   return Object.freeze({
     async validateRoomAmenities(amenities) {
       const unsupportedAmenityKeys = Object.freeze(
-        [...new Set(amenities.filter((key) => !PMS_ROOM_AMENITY_KEY_SET_V1.has(key)))].sort(),
+        [...new Set(amenities.filter((amenity) => !parsePmsRoomAmenityKey(amenity)))].sort(),
       );
       return unsupportedAmenityKeys.length === 0
         ? Object.freeze({ ok: true as const })

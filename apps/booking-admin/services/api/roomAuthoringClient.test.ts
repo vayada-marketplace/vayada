@@ -435,6 +435,23 @@ describe("roomAuthoringClient", () => {
     expect(allEndpoints).not.toMatch(/pricing|calendar/);
   });
 
+  it("loads a room holding the host's own amenities from the PMS (VAY-2490)", async () => {
+    const currentPublication = publication(false);
+    const amenities = ["Mobile Concierge Service", "Reception", "Scooter Rental", "wifi"];
+    Object.assign(currentPublication.rooms[0]!, { amenities });
+    calls.get.mockImplementation(async (endpoint) => {
+      if (endpoint.endsWith("/room-types")) return { propertyId, items: [factsSnapshot()] };
+      if (endpoint.endsWith(`/room-types/${roomTypeId}/capacity`)) return capacity(5, 3);
+      if (endpoint.endsWith("/room-publication-snapshot")) return currentPublication;
+      throw new Error(`Unexpected GET ${endpoint}`);
+    });
+    const client = createRoomAuthoringClient(http, mediaHttp, calls.uploadFetch);
+
+    await expect(client.loadWorkspace(propertyId, [])).resolves.toMatchObject([
+      { roomTypeId, amenityKeys: amenities, amenitiesReviewed: true },
+    ]);
+  });
+
   it("reduces previously verified setup-generated rooms through canonical reconciliation", async () => {
     const room = {
       ...completeRoom(),

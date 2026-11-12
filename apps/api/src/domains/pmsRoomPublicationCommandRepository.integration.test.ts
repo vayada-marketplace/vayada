@@ -210,6 +210,46 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-publication adapters", 
     expect(JSON.stringify(snapshot)).not.toMatch(/bucket|storageKey|ownerOrganizationId/);
   });
 
+  it("confirms the host's own amenities as typed and reads them back for publication (VAY-2490)", async () => {
+    const roomTypeId = await createFactsRoom("custom-amenities", "Three-Bedroom Villa");
+    await seedActiveUnit(roomTypeId);
+    const saved = [
+      "Massage Service",
+      "Mobile Concierge Service",
+      "Reception",
+      "Scooter Rental",
+      "balcony",
+      "wifi",
+    ];
+
+    await expect(
+      repository.confirmRoomTypeAmenities(
+        amenitiesCommand("amenities-custom", roomTypeId, 1, [
+          "wifi",
+          "Reception",
+          "Scooter Rental",
+          "Massage Service",
+          "Mobile Concierge Service",
+          "balcony",
+        ]),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      response: { roomAmenities: { roomAmenitiesRevision: 2, reviewed: true, amenities: saved } },
+    });
+    await expect(readPublicationState(roomTypeId)).resolves.toMatchObject({
+      roomAmenitiesRevision: "2",
+      amenitiesSnapshot: saved,
+    });
+    // The publication read re-checks reviewed amenities: a saved custom amenity must not
+    // stop the hotel's room publication (manual bookings and setup read it).
+    const snapshot = await publicationReadModel.getRoomPublicationSnapshot({
+      organizationId,
+      propertyId,
+    });
+    expect(snapshot.rooms).toEqual([expect.objectContaining({ roomTypeId, amenities: saved })]);
+  });
+
   it("serializes concurrent amenity confirms and never lets a stale set overwrite the winner", async () => {
     const roomTypeId = await createFactsRoom("concurrent", "Concurrent Suite");
     const first = amenitiesCommand("amenities-first", roomTypeId, 1, ["balcony"]);

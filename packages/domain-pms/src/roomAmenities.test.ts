@@ -4,6 +4,7 @@ import {
   PMS_ROOM_AMENITIES_CONTRACT_VERSION,
   parseConfirmRoomTypeAmenitiesCommand,
   parseConfirmRoomTypeAmenitiesResult,
+  parsePmsRoomAmenityKey,
   parseRoomAmenitiesSnapshot,
   serializeConfirmRoomTypeAmenitiesFingerprint,
 } from "./roomAmenities.js";
@@ -40,7 +41,48 @@ describe("room amenities contract", () => {
     expect(parsed?.amenities).toEqual(["air_conditioning", "wifi"]);
 
     expect(parseConfirmRoomTypeAmenitiesCommand(command(["wifi", "wifi"]))).toBeNull();
-    expect(parseConfirmRoomTypeAmenitiesCommand(command(["WiFi"]))).toBeNull();
+    expect(
+      parseConfirmRoomTypeAmenitiesCommand(command(["Scooter Rental", "Scooter Rental"])),
+    ).toBeNull();
+  });
+
+  it("keeps a host's own amenities as typed next to vocabulary keys (VAY-2490)", () => {
+    const parsed = parseConfirmRoomTypeAmenitiesCommand(
+      command([
+        "wifi",
+        "Reception",
+        "Scooter Rental",
+        "Massage Service",
+        "Mobile Concierge Service",
+        "Café & bar",
+        "24-hour security",
+      ]),
+    );
+    expect(parsed?.amenities).toEqual([
+      "24-hour security",
+      "Café & bar",
+      "Massage Service",
+      "Mobile Concierge Service",
+      "Reception",
+      "Scooter Rental",
+      "wifi",
+    ]);
+    expect(parsePmsRoomAmenityKey("x".repeat(80))).toBe("x".repeat(80));
+    expect(parsePmsRoomAmenityKey(`Long ${"x".repeat(76)}`)).toBeNull();
+  });
+
+  it.each([
+    ["blank", ""],
+    ["only spaces", "   "],
+    ["untrimmed", " Reception"],
+    ["two lines", "Reception\nSpa"],
+    ["a tab", "Reception\tSpa"],
+    ["markup", "<b>Spa</b>"],
+    ["no letter or digit", "- / -"],
+    ["not text", 7],
+  ])("refuses an amenity that is %s", (_case, value) => {
+    expect(parsePmsRoomAmenityKey(value)).toBeNull();
+    expect(parseConfirmRoomTypeAmenitiesCommand(command(["wifi", value as string]))).toBeNull();
   });
 
   it("makes set ordering irrelevant to the command fingerprint", () => {

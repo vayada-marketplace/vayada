@@ -8,7 +8,8 @@ import { SetupStepHeading } from "./SetupStepHeading";
 
 /**
  * The server's room amenities (pmsRoomAmenityVocabulary.ts, PMS_ROOM_AMENITY_KEYS_V1), in the mockup's eight
- * groups. Only these can be saved, so there is no custom amenity (Flamur, 2026-11-02).
+ * groups. Setup offers no custom amenity (Flamur, 2026-11-02); one the host added in the PMS
+ * (VAY-2490) stays on the room when setup saves, unlisted here.
  */
 export const SETUP_AMENITY_GROUPS: ReadonlyArray<{
   name: string;

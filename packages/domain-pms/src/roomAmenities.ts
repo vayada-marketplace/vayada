@@ -6,6 +6,10 @@ export const ROOM_AMENITIES_MAX_ITEMS = 100;
 
 const ROOM_AMENITY_KEY_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const ROOM_AMENITY_KEY_MAX_LENGTH = 80;
+// A host's own amenity is kept as typed ("Scooter Rental"): one line of plain text with at
+// least one letter or digit, and no control characters or angle brackets (VAY-2490).
+const CUSTOM_ROOM_AMENITY_TEXT = /[\p{L}\p{N}]/u;
+const CUSTOM_ROOM_AMENITY_FORBIDDEN = /[\p{Cc}<>]/u;
 
 declare const pmsRoomAmenityKeyBrand: unique symbol;
 
@@ -41,7 +45,7 @@ export type RoomAmenityVocabularyValidationResult =
       };
     };
 
-/** PMS-owned membership check. Shape parsing alone never approves an amenity key. */
+/** PMS-owned check of a room's amenity set, run on save and on every publication read. */
 export type RoomAmenityVocabularyValidationPort = {
   validateRoomAmenities(
     amenities: readonly PmsRoomAmenityKey[],
@@ -83,10 +87,16 @@ export type RoomAmenitiesCommandPort = {
   ): Promise<ConfirmRoomTypeAmenitiesResult>;
 };
 
+/**
+ * A room amenity: a vocabulary key such as `wifi`, or a host's own amenity saved as typed,
+ * such as `Scooter Rental` (VAY-2490). Both are at most 80 characters.
+ */
 export function parsePmsRoomAmenityKey(value: unknown): PmsRoomAmenityKey | null {
-  return typeof value === "string" &&
-    value.length <= ROOM_AMENITY_KEY_MAX_LENGTH &&
-    ROOM_AMENITY_KEY_PATTERN.test(value)
+  if (typeof value !== "string" || value.length > ROOM_AMENITY_KEY_MAX_LENGTH) return null;
+  if (ROOM_AMENITY_KEY_PATTERN.test(value)) return value as PmsRoomAmenityKey;
+  return value.trim() === value &&
+    CUSTOM_ROOM_AMENITY_TEXT.test(value) &&
+    !CUSTOM_ROOM_AMENITY_FORBIDDEN.test(value)
     ? (value as PmsRoomAmenityKey)
     : null;
 }

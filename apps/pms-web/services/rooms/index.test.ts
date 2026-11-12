@@ -316,7 +316,7 @@ describe("roomsService.update", () => {
           ],
           size: { value: 32, unit: "sqm" },
         },
-        amenities: ["wifi", "in_room_safe", "balcony"],
+        amenities: ["wifi", "in_room_safe", "balcony", "Scooter Rental"],
       }),
     });
 
@@ -324,7 +324,8 @@ describe("roomsService.update", () => {
       category: "Deluxe",
       bedType: "1 King Bed, 2 Sofa Bed",
       size: 32,
-      amenities: ["Free WiFi", "Safe", "balcony"],
+      // A host's own amenity reads back as typed (VAY-2490).
+      amenities: ["Free WiFi", "Safe", "Balcony", "Scooter Rental"],
     });
     expect(mocks.get).toHaveBeenCalledTimes(1);
   });
@@ -637,6 +638,66 @@ describe("roomsService.update room facts and amenities", () => {
     expect(result.pricesNeedPublishing).toBe(false);
   });
 
+  it("saves the host's own amenities as typed next to the list's keys (VAY-2490)", async () => {
+    const saved = await load();
+    mocks.get.mockResolvedValueOnce({ propertyId, item: loaded });
+
+    await roomsService.update(
+      roomTypeId,
+      {
+        ...withoutRoomCount(saved),
+        amenities: [
+          "Free WiFi",
+          "Reception",
+          "Scooter Rental",
+          "Massage Service",
+          "Mobile Concierge Service",
+          // The same amenity again, typed differently, is saved once.
+          "  massage   service ",
+          "free wifi",
+          // Booking Admin's balcony, kitchen and TV have PMS labels too.
+          "Balcony",
+          "TV",
+          "Kitchen",
+        ],
+      },
+      saved,
+    );
+
+    expect(mocks.put).toHaveBeenCalledWith(
+      `/api/pms/properties/${propertyId}/room-types/${roomTypeId}/amenities`,
+      {
+        expectedRoomAmenitiesRevision: 2,
+        amenities: [
+          "Massage Service",
+          "Mobile Concierge Service",
+          "Reception",
+          "Scooter Rental",
+          "balcony",
+          "kitchen",
+          "tv",
+          "wifi",
+        ],
+      },
+      expect.anything(),
+    );
+  });
+
+  it("names an amenity it can't store and writes nothing", async () => {
+    const saved = await load();
+    const long = `Private beach access ${"x".repeat(60)}`;
+
+    await expect(
+      roomsService.update(
+        roomTypeId,
+        { ...withoutRoomCount(saved), amenities: ["Free WiFi", long] },
+        saved,
+      ),
+    ).rejects.toThrow(`Shorten or reword "${long}": an amenity is up to 80 characters`);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.patch).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid edit before writing anything", async () => {
     const saved = await load();
 
@@ -861,9 +922,9 @@ describe("roomsService.create", () => {
         bathroomType: "private",
         maxOccupancy: 2,
         bedType: "1 King Bed",
-        amenities: ["Free WiFi", "Parking", "Concierge"],
+        amenities: ["Free WiFi", "Parking", "<b>Concierge</b>"],
       }),
-    ).rejects.toThrow("Parking, Concierge can't be saved as room amenities.");
+    ).rejects.toThrow('Shorten or reword "<b>Concierge</b>"');
     await expect(
       roomsService.create({
         name: "Garden Suite",
