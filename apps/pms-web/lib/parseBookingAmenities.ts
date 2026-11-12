@@ -29,7 +29,6 @@ const ALIASES: Record<string, string> = {
   "streaming service": "Netflix / Streaming",
   "streaming service like netflix": "Netflix / Streaming",
   netflix: "Netflix / Streaming",
-  tv: "Flat-screen TV",
   "cable channels": "Flat-screen TV",
   "satellite channels": "Flat-screen TV",
   "pay per view channels": "Flat-screen TV",
@@ -39,7 +38,6 @@ const ALIASES: Record<string, string> = {
   internet: "Free WiFi",
 
   // Kitchen
-  kitchen: "Kitchenware",
   kitchenette: "Kitchenware",
   "tea coffee maker": "Electric kettle",
   "coffee machine": "Electric kettle",

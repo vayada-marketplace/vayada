@@ -34,26 +34,37 @@ describe("PMS room amenity vocabulary", () => {
     });
   });
 
-  it("reports unsupported keys once in deterministic code-unit order", async () => {
+  it("accepts the host's own amenities as typed (VAY-2490)", async () => {
     const input = Object.freeze([
-      key("unknown_z"),
       key("wifi"),
-      key("unknown_a"),
-      key("unknown_z"),
+      key("Reception"),
+      key("Scooter Rental"),
+      key("Massage Service"),
+      key("Mobile Concierge Service"),
+      key("parking"),
     ]);
     const before = [...input];
 
-    const result = await vocabulary.validateRoomAmenities(input);
+    await expect(vocabulary.validateRoomAmenities(input)).resolves.toEqual({ ok: true });
+    expect(input).toEqual(before);
+  });
+
+  it("refuses values the room amenity contract can't read, once and in code-unit order", async () => {
+    const unreadable = ["Spa\nPool", " Reception", "<b>Spa</b>"] as PmsRoomAmenityKey[];
+
+    const result = await vocabulary.validateRoomAmenities([
+      key("wifi"),
+      ...unreadable,
+      unreadable[0]!,
+    ]);
 
     expect(result).toEqual({
       ok: false,
       error: {
         code: "unsupported_room_amenity_keys",
-        unsupportedAmenityKeys: ["unknown_a", "unknown_z"],
+        unsupportedAmenityKeys: [" Reception", "<b>Spa</b>", "Spa\nPool"],
       },
     });
-    expect(input).toEqual(before);
-    expect(Object.isFrozen(input)).toBe(true);
     expect(result.ok || Object.isFrozen(result.error.unsupportedAmenityKeys)).toBe(true);
     expect(Object.isFrozen(result)).toBe(true);
   });
@@ -66,33 +77,27 @@ describe("PMS room amenity vocabulary", () => {
     ]);
   });
 
+  it("shows the host's own amenities as typed after the vocabulary, each name once", () => {
+    expect(
+      toPublicPmsRoomAmenityLabelsV1([
+        "Massage Service",
+        "Reception",
+        "Scooter Rental",
+        "wifi",
+        "Wi-Fi",
+        "reception",
+        "balcony",
+      ]),
+    ).toEqual(["Wi-Fi", "Balcony", "Massage Service", "Reception", "Scooter Rental"]);
+  });
+
   it.each([
     ["bathroom type", ["private_bathroom", "shared_bathroom"]],
-    ["bed configuration", ["king_bed", "queen_bed", "sofa_bed"]],
-    ["room category and size", ["room_category", "room_size"]],
     ["deferred room features", ["room_features", "mountain_view", "private_entrance"]],
-    [
-      "property facilities",
-      [
-        "breakfast",
-        "concierge",
-        "fitness_center",
-        "front_desk_24h",
-        "parking",
-        "restaurant",
-        "room_service",
-        "spa",
-        "swimming_pool",
-      ],
-    ],
-  ])("rejects %s as room amenities", async (_category, values) => {
-    const excluded = values.map(key);
-    await expect(vocabulary.validateRoomAmenities(excluded)).resolves.toEqual({
-      ok: false,
-      error: {
-        code: "unsupported_room_amenity_keys",
-        unsupportedAmenityKeys: [...excluded].sort(),
-      },
+    ["property facilities", ["breakfast", "concierge", "parking", "spa", "swimming_pool"]],
+  ])("no longer refuses %s a host keeps on the room", async (_category, values) => {
+    await expect(vocabulary.validateRoomAmenities(values.map(key))).resolves.toEqual({
+      ok: true,
     });
   });
 });

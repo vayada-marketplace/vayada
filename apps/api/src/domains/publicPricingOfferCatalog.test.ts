@@ -25,6 +25,31 @@ it("reads the room cards' size, category and amenity labels (VAY-2190)", () => {
   });
 });
 
+it("shows the host's own amenities as typed in the room details (VAY-2490)", () => {
+  // As the PMS saves them: sorted, the host's own amenities next to vocabulary keys.
+  expect(
+    roomCardFacts({
+      category: "villa",
+      attributes: {},
+      amenities: [
+        "Massage Service",
+        "Mobile Concierge Service",
+        "Reception",
+        "Scooter Rental",
+        "balcony",
+        "wifi",
+      ],
+    }).amenities,
+  ).toEqual([
+    "Wi-Fi",
+    "Balcony",
+    "Massage Service",
+    "Mobile Concierge Service",
+    "Reception",
+    "Scooter Rental",
+  ]);
+});
+
 it("reads bedrooms and bathrooms for the room details (VAY-2410)", () => {
   const facts = (bedrooms: unknown, bathrooms: unknown) => {
     const read = roomCardFacts({

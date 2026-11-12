@@ -12,8 +12,9 @@ import { roomTabBarOffset } from "../support/roomTabBar";
 const roomTypeId = "22222222-2222-4222-8222-222222222222";
 const acceptedAt = "2026-10-10T08:00:00.000Z";
 
-type StoredRoom = typeof pmsWebRoomType & {
+type StoredRoom = Omit<typeof pmsWebRoomType, "amenities"> & {
   version: string;
+  amenities: string[];
   roomAmenitiesRevision: number;
   attributes: Record<string, unknown>;
 };
@@ -56,6 +57,56 @@ test.describe("pms-web room edit save", () => {
     await expect(roomField(page, "Room Type Name")).toHaveValue("Lake Suite");
     await expect(roomField(page, "Max Children")).toHaveValue("2");
     await expect(page.getByRole("heading", { name: "Edit: Lake Suite" })).toBeVisible();
+    await assertHealthy();
+  });
+
+  // VAY-2490: Tiga Lombok's villa could not save amenities the host added themselves.
+  test("saves the host's own amenities and keeps them after a reload", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    const stored = await mockRoomBackend(page, { amenities: ["wifi"] });
+    await mockPublishedPrices(page, () => false);
+    const own = ["Reception", "Scooter Rental", "Massage Service", "Mobile Concierge Service"];
+
+    await page.goto(`/rooms/${roomTypeId}`);
+    await page.getByRole("button", { name: "Images & Amenities", exact: true }).click();
+    // Three come from a pasted Booking.com list, kept as custom; one is typed into a category.
+    await page.getByRole("button", { name: "Paste amenities from Booking.com" }).click();
+    await page
+      .getByPlaceholder(/^Free WiFi/)
+      .fill(["Reception", "Scooter Rental", "Massage Service", "TV"].join("\n"));
+    await page.getByRole("button", { name: "Parse & add" }).click();
+    for (const name of own.slice(0, 3)) {
+      await page
+        .getByText(name, { exact: true })
+        .locator("xpath=following-sibling::button[1]")
+        .click();
+    }
+    const typed = page.getByPlaceholder("+ Add custom amenity").first();
+    await typed.fill(own[3]!);
+    await typed.press("Enter");
+    await page.getByRole("button", { name: "Save Changes" }).click();
+
+    await expect(page.getByText("Room type updated successfully")).toBeVisible();
+    await expect(page.getByText("can't be saved as room amenities")).toHaveCount(0);
+    expect(stored.amenityWrites).toEqual([
+      {
+        expectedRoomAmenitiesRevision: 2,
+        amenities: [
+          "Massage Service",
+          "Mobile Concierge Service",
+          "Reception",
+          "Scooter Rental",
+          "tv",
+          "wifi",
+        ],
+      },
+    ]);
+
+    await page.reload();
+    await page.getByRole("button", { name: "Images & Amenities", exact: true }).click();
+    for (const name of own) await expect(page.getByText(name, { exact: true })).toBeVisible();
     await assertHealthy();
   });
 
@@ -152,12 +203,16 @@ function roomField(page: Page, label: string) {
   );
 }
 
-async function mockRoomBackend(page: Page, options: { refuseFacts?: boolean } = {}) {
+async function mockRoomBackend(
+  page: Page,
+  options: { refuseFacts?: boolean; amenities?: string[] } = {},
+) {
   const state = {
     room: {
       ...pmsWebRoomType,
       roomTypeId,
       version: "room-type-facts-v3",
+      amenities: options.amenities ?? pmsWebRoomType.amenities,
       roomAmenitiesRevision: 2,
       occupancyLimits: { total: 3, adults: 2, children: 1 },
       attributes: {
@@ -169,6 +224,7 @@ async function mockRoomBackend(page: Page, options: { refuseFacts?: boolean } = 
       },
     } as StoredRoom,
     factWrites: [] as Record<string, unknown>[],
+    amenityWrites: [] as Record<string, unknown>[],
   };
 
   await mockPmsWebAuthenticatedSession(page);
@@ -188,6 +244,36 @@ async function mockRoomBackend(page: Page, options: { refuseFacts?: boolean } = 
       route.request().method() === "GET"
         ? route.fulfill({ json: { propertyId: PMS_WEB_PROPERTY_ID, item: state.room } })
         : route.fulfill({ status: 500, json: { code: "unexpected_location_write" } }),
+  );
+
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${roomTypeId}/amenities`,
+    (route) => {
+      const body = route.request().postDataJSON() as {
+        expectedRoomAmenitiesRevision: number;
+        amenities: string[];
+      };
+      state.amenityWrites.push(body);
+      const revision = body.expectedRoomAmenitiesRevision + 1;
+      const amenities = [...body.amenities].sort();
+      state.room = { ...state.room, amenities, roomAmenitiesRevision: revision };
+      return route.fulfill({
+        json: {
+          contractVersion: "pms-room-amenities.v1",
+          outcome: "confirmed",
+          roomAmenities: {
+            contractVersion: "pms-room-amenities.v1",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            roomTypeId,
+            roomAmenitiesRevision: revision,
+            reviewed: true,
+            amenities,
+            reviewedAt: acceptedAt,
+          },
+          acceptedAt,
+        },
+      });
+    },
   );
 
   const setupPath = `**/api/pms/setup/properties/${PMS_WEB_PROPERTY_ID}/room-types/${roomTypeId}`;

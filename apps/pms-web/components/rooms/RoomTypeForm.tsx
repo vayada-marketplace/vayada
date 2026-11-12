@@ -40,6 +40,7 @@ const AMENITY_CATEGORIES = [
       "Free WiFi",
       "Flat-screen TV",
       "Smart TV",
+      "TV",
       "Netflix / Streaming",
       "Work desk",
       "Laptop-friendly workspace",
@@ -48,6 +49,7 @@ const AMENITY_CATEGORIES = [
   {
     name: "Kitchen",
     items: [
+      "Kitchen",
       "Minibar",
       "Refrigerator",
       "Microwave",
@@ -79,7 +81,7 @@ const AMENITY_CATEGORIES = [
   },
   {
     name: "Bedroom",
-    items: ["Extra pillows", "Blackout curtains", "Wardrobe", "Bed linen"],
+    items: ["Extra pillows", "Blackout curtains", "Wardrobe", "Bed linen", "Balcony"],
   },
   {
     name: "Laundry",
@@ -1085,6 +1087,8 @@ export default function RoomTypeForm({
                         <div className="flex gap-2 mt-2">
                           <input
                             type="text"
+                            // A room keeps an amenity name of up to 80 characters (VAY-2490).
+                            maxLength={80}
                             value={customAmenityInputs[cat.name] || ""}
                             onChange={(e) =>
                               setCustomAmenityInputs((prev) => ({

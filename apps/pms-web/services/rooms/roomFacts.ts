@@ -1,9 +1,15 @@
-import { parseRoomTypeFacts, type RoomTypeFacts } from "@vayada/domain-pms";
+import {
+  ROOM_AMENITIES_MAX_ITEMS,
+  parsePmsRoomAmenityKey,
+  parseRoomTypeFacts,
+  type RoomTypeFacts,
+} from "@vayada/domain-pms";
 
 import type { RoomTypeCreate, RoomTypeUpdate } from ".";
 
 // The room form's bed and amenity labels, keyed to the canonical room-facts and room-amenity
 // vocabularies (apps/api/src/domains/pmsRoomFactsVocabulary.ts, pmsRoomAmenityVocabulary.ts).
+// Any other amenity is the host's own and is saved as typed (VAY-2490).
 const BED_TYPE_KEYS: Record<string, string> = {
   "King Bed": "king",
   "Queen Bed": "queen",
@@ -18,9 +24,11 @@ const ROOM_AMENITY_KEYS: Record<string, string> = {
   "Free WiFi": "wifi",
   "Flat-screen TV": "flat_screen_tv",
   "Smart TV": "smart_tv",
+  TV: "tv",
   "Netflix / Streaming": "streaming_services",
   "Work desk": "work_desk",
   "Laptop-friendly workspace": "laptop_friendly_workspace",
+  Kitchen: "kitchen",
   Minibar: "minibar",
   Refrigerator: "refrigerator",
   Microwave: "microwave",
@@ -46,6 +54,7 @@ const ROOM_AMENITY_KEYS: Record<string, string> = {
   "Blackout curtains": "blackout_curtains",
   Wardrobe: "wardrobe",
   "Bed linen": "bed_linen",
+  Balcony: "balcony",
   "Washing machine": "washing_machine",
   Dryer: "dryer",
   "Iron/Ironing board": "iron_and_ironing_board",
@@ -64,6 +73,10 @@ const BED_TYPE_LABELS = Object.fromEntries(
 );
 const ROOM_AMENITY_LABELS = Object.fromEntries(
   Object.entries(ROOM_AMENITY_KEYS).map(([label, key]) => [key, label]),
+);
+// "free wifi" typed as a custom amenity is still the Free WiFi key.
+const ROOM_AMENITY_KEYS_BY_FOLDED_LABEL = new Map(
+  Object.entries(ROOM_AMENITY_KEYS).map(([label, key]) => [foldAmenity(label), key]),
 );
 
 /** The guest numbers the room-facts command stores for a form (the New room page prices a room with them). */
@@ -137,15 +150,33 @@ export function roomAmenityInputsChanged(
   return amenities(next) !== amenities(saved);
 }
 
+/** The amenities the room command stores: list labels as their keys, the host's own amenities
+ * as typed (spaces tidied), each once whatever its case. */
 export function roomAmenityKeys(labels: readonly string[]): string[] {
-  const roomAmenities = labels.filter((label) => label !== PRIVATE_BATHROOM_LABEL);
-  const unsupported = roomAmenities.filter((label) => !ROOM_AMENITY_KEYS[label]);
-  if (unsupported.length > 0) {
+  const amenities = new Map<string, string>();
+  const unreadable: string[] = [];
+  for (const label of labels) {
+    const typed = label.replace(/\s+/g, " ").trim();
+    if (!typed || typed === PRIVATE_BATHROOM_LABEL) continue;
+    const amenity = ROOM_AMENITY_KEYS_BY_FOLDED_LABEL.get(foldAmenity(typed)) ?? typed;
+    if (!parsePmsRoomAmenityKey(amenity)) unreadable.push(typed);
+    else if (!amenities.has(foldAmenity(amenity))) amenities.set(foldAmenity(amenity), amenity);
+  }
+  if (unreadable.length > 0) {
     throw new Error(
-      `${unsupported.join(", ")} can't be saved as room amenities. Remove them and try again.`,
+      `Shorten or reword ${unreadable.map((label) => `"${label}"`).join(", ")}: an amenity is up to 80 characters of plain text.`,
     );
   }
-  return Array.from(new Set(roomAmenities.map((label) => ROOM_AMENITY_KEYS[label]!))).sort();
+  if (amenities.size > ROOM_AMENITIES_MAX_ITEMS) {
+    throw new Error(
+      `A room can list up to ${ROOM_AMENITIES_MAX_ITEMS} amenities. Remove ${amenities.size - ROOM_AMENITIES_MAX_ITEMS} and try again.`,
+    );
+  }
+  return Array.from(amenities.values()).sort();
+}
+
+function foldAmenity(amenity: string): string {
+  return amenity.toLocaleLowerCase("en");
 }
 
 export function bedSummaryFromFacts(beds: unknown): string | undefined {
