@@ -342,12 +342,33 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       ]),
     });
     expect(JSON.stringify(confirmation.rows[0]?.payload)).not.toContain("VIP");
+    // VAY-2492: the guest gets the booking page's "Booking confirmed" email, once despite the replay; the
+    // hotel made the booking, so it gets no "New confirmed booking" email.
+    const emails = await bookingEmails(created.guestBookingId);
+    expect(emails).toEqual([
+      {
+        type: "email.booking-final-confirmation",
+        role: "guest",
+        to: "ada@example.test",
+        subject: `Booking confirmed - ${created.bookingReference}`,
+        text: expect.any(String),
+      },
+    ]);
+    const text = emails[0]!.text;
+    expect(text).toContain("Hi Ada Lovelace,\n\nYour booking at VAY-1254 is confirmed.");
+    expect(text).toMatch(/Stay: .*1 Jan 2027 to .*4 Jan 2027/);
+    expect(text).toContain("Total: 410.00 EUR\n\nBalance: 410.00 EUR\n\nPayment method: Cash");
+    expect(text).toContain("Guests: 3 adults, 0 children\n\nRooms: 2\n\nAccommodation: 2 × Studio");
+    expect(text).toContain("Special requests: Quiet room");
+    expect(text).not.toContain("VIP");
     await expect(counts()).resolves.toMatchObject({
       booking: "1",
       nightly: "4",
       payment: "0",
       outbox: "5",
-      audit: "1",
+      // The manual-booking audit and the email's.
+      audit: "2",
+      emails: "1",
       commands: "1",
     });
   });
@@ -1429,6 +1450,13 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     expect(emails.rows[0].payload.text).toContain(cancellation.guestMessage);
     expect(emails.rows[0].payload.text).not.toContain(cancellation.reason);
     expect(emails.rows[0].payload.html).toBeUndefined();
+    // VAY-2492: the booking's confirmation from its create, and exactly one email from the cancel.
+    expect(
+      (await bookingEmails(created.guestBookingId)).map(({ type, role }) => [type, role]).sort(),
+    ).toEqual([
+      ["email.booking-canceled", "guest"],
+      ["email.booking-final-confirmation", "guest"],
+    ]);
 
     const stored = await admin.query(
       `SELECT booking.lifecycle_status AS status,assignment.assignment_status AS assignment,
@@ -1961,13 +1989,21 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         await expect(
           readRepository.findReservationByGuestBookingId(propertyId, created.guestBookingId),
         ).resolves.toMatchObject({ payment: { expectedMethod: method, status } });
+        // VAY-2492: one guest confirmation, with the balance left after the payment recorded at the desk.
+        const emails = await bookingEmails(created.guestBookingId);
+        expect(emails.map(({ type, role }) => [type, role])).toEqual([
+          ["email.booking-final-confirmation", "guest"],
+        ]);
+        expect(emails[0]!.text).toContain(`Balance: ${status === "paid" ? "0.00" : "200.00"} EUR`);
       }
     }
     await expect(counts()).resolves.toMatchObject({
       booking: "10",
       payment: "5",
       outbox: "50",
-      audit: "10",
+      // Each booking's manual-booking audit and its email's.
+      audit: "20",
+      emails: "10",
       commands: "10",
     });
   });
@@ -2048,6 +2084,43 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       payment: "0",
       outbox: "0",
       audit: "0",
+      emails: "0",
+      commands: "0",
+    });
+  });
+
+  it("drops the queued guest confirmation when the booking rolls back after queueing it (VAY-2492)", async () => {
+    const platform = createPgPmsManualBookingPlatformOwnerPort();
+    const queued: string[] = [];
+    const booking = createPgPmsManualBookingBookingOwnerPort();
+    const failing = createPgPmsManualBookingCommandRepository({
+      connectionString: TEST_DATABASE_URL!,
+      now: () => acceptedAt,
+      dependencies: dependencies({
+        booking: {
+          ...booking,
+          async enqueueGuestConfirmation(input) {
+            await booking.enqueueGuestConfirmation(input);
+            queued.push(input.guestBookingId);
+          },
+        },
+        platform: {
+          ...platform,
+          async completeCommand() {
+            throw new Error("forced completion failure");
+          },
+        },
+      }),
+    });
+    await expect(
+      failing.createManualBooking(command("email-rollback", "paid", "cash", "2027-04-05", false)),
+    ).rejects.toThrow("forced completion failure");
+    await failing.close();
+    expect(queued).toHaveLength(1);
+    await expect(counts()).resolves.toMatchObject({
+      booking: "0",
+      audit: "0",
+      emails: "0",
       commands: "0",
     });
   });
@@ -2309,11 +2382,32 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         (SELECT count(*)::text FROM finance.payments WHERE property_id = $1::uuid) AS payment,
         (SELECT count(*)::text FROM platform.outbox_events WHERE property_id = $1::uuid) AS outbox,
         (SELECT count(*)::text FROM platform.product_audit_events WHERE property_id = $1::uuid) AS audit,
+        (SELECT count(*)::text FROM platform.jobs WHERE property_id = $1::uuid
+          AND queue_name = 'platform.email') AS emails,
         (SELECT count(*)::text FROM platform.idempotency_keys WHERE property_id = $1::uuid
           AND operation = 'pms.manual_booking.create') AS commands`,
       [propertyId],
     );
     return result.rows[0];
+  }
+
+  /** A booking's queued emails, oldest first. */
+  async function bookingEmails(guestBookingId: string) {
+    const result = await admin.query<{
+      type: string;
+      role: string;
+      to: string;
+      subject: string;
+      text: string;
+    }>(
+      `SELECT job_type AS type, payload->>'recipientRole' AS role, payload->>'to' AS "to",
+         payload->>'subject' AS subject, payload->>'text' AS text
+       FROM platform.jobs
+       WHERE property_id = $1::uuid AND resource_id = $2 AND queue_name = 'platform.email'
+       ORDER BY created_at, job_type`,
+      [propertyId, guestBookingId],
+    );
+    return result.rows;
   }
 
   async function occupiedAriEvents(triggerRefId: string) {
@@ -2396,6 +2490,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       await admin.query("SET LOCAL session_replication_role = replica");
       for (const sql of [
         "DELETE FROM platform.outbox_events WHERE property_id = $1::uuid",
+        // Queued booking emails, so no later suite in this database delivers them.
+        "DELETE FROM platform.jobs WHERE property_id = $1::uuid",
         "WITH s AS (DELETE FROM pms.inventory_reservation_statuses WHERE property_id=$1::uuid), w AS (DELETE FROM pms.inventory_reservation_day_watermarks WHERE property_id=$1::uuid) DELETE FROM pms.inventory_reservation_receipts WHERE property_id=$1::uuid",
         "DELETE FROM platform.product_audit_events WHERE property_id = $1::uuid",
         "DELETE FROM platform.domain_events WHERE property_id = $1::uuid",

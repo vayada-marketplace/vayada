@@ -136,6 +136,7 @@ it("rolls back the booking transaction when create optimization fails", async ()
           checkOut: "2026-08-21",
         })),
         markPaid: vi.fn(),
+        enqueueGuestConfirmation: vi.fn(),
       },
       operations: {
         lockRooms: vi.fn(async () => [{ roomId: "room-1", roomTypeId: "type-1" }]),
@@ -190,4 +191,111 @@ it("rolls back the booking transaction when create optimization fails", async ()
   expect(writeEvidence).not.toHaveBeenCalled();
   expect(completeCommand).not.toHaveBeenCalled();
   expect(transaction.release).toHaveBeenCalledOnce();
+});
+
+// VAY-2492: a calendar booking queues the guest's "Booking confirmed" email in its own transaction.
+it("queues the guest's confirmation after the desk payment and before the commit", async () => {
+  const steps: string[] = [];
+  const query = vi.fn(async (sql: string) => {
+    if (sql === "COMMIT") steps.push("commit");
+    if (sql.includes("txid_current"))
+      return { rows: [{ transactionId: "7" }] as never[], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  const transaction = { query, release: vi.fn() };
+  const enqueueGuestConfirmation = vi.fn(async () => {
+    steps.push("confirmation");
+  });
+  const findReplay = vi.fn(async () => null);
+  const repository = createPgPmsManualBookingCommandRepository({
+    connectionString: "postgresql://unused",
+    pool: { connect: vi.fn(async () => transaction) },
+    now: () => new Date("2026-08-18T00:00:00.000Z"),
+    randomId: () => "81000000-0000-4000-8000-000000000099",
+    dependencies: {
+      attribution: createBookingPmsManualAttributionOwner(),
+      booking: {
+        assertSourceCommandUnused: vi.fn(),
+        persistBookingFacts: vi.fn(async () => ({
+          guestBookingId: "81000000-0000-4000-8000-000000000099",
+          bookingReference: "PMS-TEST",
+          total: { amountDecimal: "100.00", currency: "EUR" },
+          checkIn: "2026-08-20",
+          checkOut: "2026-08-21",
+        })),
+        markPaid: vi.fn(async () => {
+          steps.push("paid");
+        }),
+        enqueueGuestConfirmation,
+      },
+      operations: {
+        lockRooms: vi.fn(async () => [{ roomId: "room-1", roomTypeId: "type-1" }]),
+        persistOperationalFacts: vi.fn(async () => []),
+      },
+      platform: {
+        findReplay,
+        reserveCommand: vi.fn(async () => ({
+          id: "81000000-0000-4000-8000-000000000098",
+          keyHash: "key-hash",
+          requestFingerprint: "fingerprint",
+        })),
+        writeEvidence: vi.fn(async () => {
+          steps.push("evidence");
+        }),
+        completeCommand: vi.fn(),
+      },
+      nightlyEvidence: { appendExactNightlyEvidence: vi.fn() },
+      financeSettlement: {
+        settleFull: vi.fn(async () => {
+          steps.push("settled");
+          return { paymentEvidenceId: "81000000-0000-4000-8000-000000000097" } as never;
+        }),
+      },
+      pricing: {
+        calculate: vi.fn(async () => ({
+          contractVersion: "pms-manual-booking.v1" as const,
+          currency: "EUR",
+          pricingRevision: null,
+          stays: [],
+          addOns: [],
+          grandTotal: { amountDecimal: "100.00", currency: "EUR" },
+        })),
+      },
+      roomAssignmentOptimization: { afterCreate: vi.fn(async () => []), afterChange: vi.fn() },
+    },
+  });
+  const command = {
+    contractVersion: "pms-manual-booking.v1",
+    commandId: "create-1",
+    idempotencyKey: "key-1",
+    propertyId,
+    directSource: "email",
+    stays: [{ checkIn: "2026-08-20", checkOut: "2026-08-21" }],
+    payment: { expectedMethod: "cash", settlement: { status: "paid", reference: null } },
+    audit: {
+      actor: { kind: "user", userId: "81000000-0000-4000-8000-000000000096", organizationId: "o" },
+      requestId: "request-1",
+      correlationId: null,
+      requestedAt: "2026-08-18T00:00:00.000Z",
+    },
+  } as unknown as PmsManualBookingCreateCommand;
+
+  await expect(repository.createManualBooking(command)).resolves.toMatchObject({
+    outcome: "created",
+    paymentStatus: "paid",
+  });
+  expect(steps).toEqual(["settled", "paid", "confirmation", "evidence", "commit"]);
+  expect(enqueueGuestConfirmation).toHaveBeenCalledWith({
+    transaction,
+    command,
+    guestBookingId: "81000000-0000-4000-8000-000000000099",
+    acceptedAt: "2026-08-18T00:00:00.000Z",
+  });
+
+  // A replay answers from the first create and queues nothing.
+  findReplay.mockResolvedValueOnce({ outcome: "replayed" } as never);
+  await expect(repository.createManualBooking(command)).resolves.toEqual({
+    outcome: "replayed",
+  });
+  expect(enqueueGuestConfirmation).toHaveBeenCalledOnce();
 });

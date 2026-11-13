@@ -57,6 +57,13 @@ export interface PmsManualBookingBookingOwnerPort {
     transaction: PmsManualBookingTransaction;
     guestBookingId: string;
   }): Promise<void>;
+  /** VAY-2492: queue the guest's "Booking confirmed" email; it is sent only if the booking commits. */
+  enqueueGuestConfirmation(input: {
+    transaction: PmsManualBookingTransaction;
+    command: PmsManualBookingCreateCommand;
+    guestBookingId: string;
+    acceptedAt: string;
+  }): Promise<void>;
 }
 
 export interface PmsManualBookingOperationsOwnerPort {
