@@ -219,6 +219,14 @@
       "noneFits": "Keine Unterkunft bietet allein Platz für {count} Gäste.",
       "splitHint": "Teilen Sie Ihre Gruppe auf und wählen Sie für jeden Teil eine Unterkunft.",
       "bookRooms": "{count} Zimmer buchen"
+    },
+    "phoneSearch": {
+      "dates": "Reisedaten",
+      "addPromoCode": "Aktionscode hinzufügen",
+      "availableStays": "Freie Unterkünfte",
+      "options": "{count, plural, one {# Option} other {# Optionen}}",
+      "sort": "Sortieren",
+      "edit": "Ändern"
     }
   },
   "rooms": {

@@ -219,6 +219,14 @@
       "noneFits": "No single place fits {count} guests.",
       "splitHint": "Split your group and pick a place for each part.",
       "bookRooms": "Book {count} rooms"
+    },
+    "phoneSearch": {
+      "dates": "Dates",
+      "addPromoCode": "Add promo code",
+      "availableStays": "Available stays",
+      "options": "{count, plural, one {# option} other {# options}}",
+      "sort": "Sort",
+      "edit": "Edit"
     }
   },
   "rooms": {

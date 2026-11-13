@@ -64,7 +64,8 @@ test("the slim bar, the search card in place, All stays and a compact box", asyn
   expect((await back.boundingBox())!.y).toBeLessThan((await box.boundingBox())!.y);
   await expect(box.getByRole("heading", { level: 1, name: "The Escape Villa Ubud" })).toBeVisible();
   // Before the rooms and their heading, which comes after the page's h1.
-  const rooms = page.getByRole("heading", { name: "Available Accommodations" });
+  // VAY-2494: the phone's shorter heading.
+  const rooms = page.getByRole("heading", { name: "Available stays" });
   expect((await box.boundingBox())!.y).toBeLessThan((await rooms.boundingBox())!.y);
   await expect(page.locator("h1, h2").first()).toHaveText("The Escape Villa Ubud");
   await expect(box).toContainText("Ubud · Private pool · 3 villas");

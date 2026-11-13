@@ -27,7 +27,10 @@ for (const mobile of [false, true]) {
     await page.screenshot({ path: test.info().outputPath("guest-capacity.png"), fullPage: true });
     // The room cards show this stay, so Check Availability stays on the page (VAY-2190).
     await page.getByRole("button", { name: "Check Availability", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeInViewport();
+    await expect(
+      // VAY-2494: the phone's shorter heading.
+      page.getByRole("heading", { name: mobile ? "Available stays" : "Available Accommodations" }),
+    ).toBeInViewport();
     await expect(page).not.toHaveURL(/\/book/);
     await page.getByTestId("select-rate-suite").click();
     await expect(page).toHaveURL(

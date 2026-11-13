@@ -219,6 +219,14 @@
       "noneFits": "Aucun logement n'accueille {count} personnes à lui seul.",
       "splitHint": "Répartissez votre groupe et choisissez un logement pour chaque partie.",
       "bookRooms": "Réserver {count} chambres"
+    },
+    "phoneSearch": {
+      "dates": "Dates",
+      "addPromoCode": "Ajouter un code promo",
+      "availableStays": "Séjours disponibles",
+      "options": "{count, plural, one {# option} other {# options}}",
+      "sort": "Trier",
+      "edit": "Modifier"
     }
   },
   "rooms": {

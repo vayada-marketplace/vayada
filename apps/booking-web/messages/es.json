@@ -219,6 +219,14 @@
       "noneFits": "Ningún alojamiento tiene sitio para {count} huéspedes.",
       "splitHint": "Divide tu grupo y elige un alojamiento para cada parte.",
       "bookRooms": "Reservar {count} habitaciones"
+    },
+    "phoneSearch": {
+      "dates": "Fechas",
+      "addPromoCode": "Añadir código promocional",
+      "availableStays": "Estancias disponibles",
+      "options": "{count, plural, one {# opción} other {# opciones}}",
+      "sort": "Ordenar",
+      "edit": "Editar"
     }
   },
   "rooms": {

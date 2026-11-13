@@ -111,7 +111,7 @@ export default function AccommodationViews({
   const toolbarRow = (controls: ReactNode) => (
     <>
       <div
-        className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-3 ${tabs ? "mb-5" : "mb-9"}`}
+        className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-1 md:gap-y-3 ${tabs ? "mb-5" : "mb-9"}`}
       >
         {heading}
         {/* Wrapped below the heading, they stay on the right from tablets up. */}

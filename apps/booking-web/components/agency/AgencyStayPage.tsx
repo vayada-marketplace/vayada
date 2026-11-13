@@ -245,7 +245,7 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
   return (
     <>
       <StaySearchCard
-        stickyOnPhones={false}
+        stickyOnTablets={false}
         heroOnPhones={false}
         panel={panel}
         onPanel={setPanel}
@@ -259,6 +259,7 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         adults={adults}
         childCount={effectiveChildren}
         guestsNote={pickMode ? th("roomsCount", { count: roomCount }) : tc("guests")}
+        guestsAside={pickMode ? th("roomsCount", { count: roomCount }) : undefined}
         guests={{
           adultAgeThreshold: guestTypeSettings.adultAgeThreshold,
           childrenEnabled: guestTypeSettings.childrenEnabled,

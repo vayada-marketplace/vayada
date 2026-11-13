@@ -151,7 +151,9 @@ function HomePageContent() {
   const heroSubtext = hotel.branding?.heroSubtext || hotel.description;
 
   return (
-    <div className="min-h-screen bg-white overflow-x-hidden">
+    // Clipped, not hidden (VAY-2494): a hidden overflow made this a scroll container, so the
+    // search card's `sticky` never stuck.
+    <div className="min-h-screen bg-white overflow-x-clip">
       <PublicStructuredData hotel={hotel} rooms={[]} locale={locale} />
 
       <StayHero
@@ -175,6 +177,7 @@ function HomePageContent() {
         adults={adults}
         childCount={effectiveChildren}
         guestsNote={pickMode ? t("roomsCount", { count: roomCount }) : tc("guests")}
+        guestsAside={pickMode ? t("roomsCount", { count: roomCount }) : undefined}
         guests={{
           adultAgeThreshold: guestTypeSettings.adultAgeThreshold,
           childrenEnabled: guestTypeSettings.childrenEnabled,
@@ -260,7 +263,7 @@ function HomePageContent() {
       />
 
       {/* Main Content */}
-      <StayRooms model={stayRooms} onEditDates={editDates} onEditGuests={openGuests} />
+      <StayRooms model={stayRooms} onEditDates={editDates} onEditGuests={openGuests} searchBar />
 
       {mapProperty && rooms?.length && !severalPlaces ? (
         <RoomsLocationMap
