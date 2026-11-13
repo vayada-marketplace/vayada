@@ -8,7 +8,7 @@ export function analyticsChoice(slug: string): boolean | null {
   if (denied.has(slug)) return false;
   try {
     const value = JSON.parse(localStorage.getItem(key(slug)) ?? "null");
-    // A choice saved under another consent text is asked again.
+    // A choice saved under another consent text counts as no choice.
     return value?.version === VERSION && typeof value.analytics === "boolean"
       ? value.analytics
       : null;
@@ -42,7 +42,7 @@ export function onAnalyticsAllowed(slug: string, listener: () => void): () => vo
 
 const OPEN = "vayada:analytics-choices";
 
-/** Opens the analytics prompt again, from the footer's "Privacy choices" link (VAY-2419). The
+/** Opens the analytics prompt, from the footer's "Privacy choices" link (VAY-2419, VAY-2491). The
  * link passes itself to get focus back: Safari doesn't focus a button it clicks. */
 export function openAnalyticsChoices(opener: HTMLElement) {
   window.dispatchEvent(new CustomEvent(OPEN, { detail: opener }));

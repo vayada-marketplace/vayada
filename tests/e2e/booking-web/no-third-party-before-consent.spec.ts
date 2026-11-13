@@ -51,9 +51,11 @@ for (const fontPairing of [
       if (request.resourceType() === "font") fontFiles.push(request.url());
     });
     await page.goto("/?checkIn=2026-09-12&checkOut=2026-09-15");
+    // No choice made: since VAY-2491 nothing asks on load.
+    await expect(page.getByTestId("room-card-suite")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Optional analytics", exact: true }),
-    ).toBeVisible();
+    ).toBeHidden();
     await expect.poll(() => loadedHeadingFaces(page)).toBeGreaterThan(0);
     expect(fontFiles.length).toBeGreaterThan(0);
     for (const file of fontFiles) expect(new URL(file).origin).toBe(new URL(baseURL!).origin);

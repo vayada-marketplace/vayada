@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION as CONSENT } from "@vayada/domain-booking/conversion-funnel";
 
-test("accepts, reopens from the footer and withdraws optional analytics without blocking rooms", async ({
+test("opens from the footer only, accepts and withdraws optional analytics without blocking rooms", async ({
   page,
 }) => {
   await mockBookingApis(page);
@@ -15,6 +15,15 @@ test("accepts, reopens from the footer and withdraws optional analytics without 
     page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith("vayada_sid")));
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
+  // VAY-2491: a first visit asks nothing (the prompt covered the first room card), and no choice
+  // means no analytics.
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Optional analytics", exact: true })).toBeHidden();
+  expect(events).toEqual([]);
+  expect(await identifiers()).toEqual([]);
+  // VAY-2419: no floating button any more; the footer's link opens the prompt.
+  const choices = page.getByRole("button", { name: "Privacy choices", exact: true });
+  await choices.click();
   await expect(
     page.getByRole("heading", { name: "Optional analytics", exact: true }),
   ).toBeVisible();
@@ -28,8 +37,6 @@ test("accepts, reopens from the footer and withdraws optional analytics without 
   await expect(notice).toHaveAttribute("rel", "noopener noreferrer");
   expect(events).toEqual([]);
   expect(await identifiers()).toEqual([]);
-  // VAY-2419: no floating button any more; the footer's link reopens the prompt.
-  const choices = page.getByRole("button", { name: "Privacy choices", exact: true });
   await expect(choices).toHaveCount(1);
   await expect(
     page.locator("footer").getByRole("button", { name: "Privacy choices" }),
@@ -66,9 +73,7 @@ test("accepts, reopens from the footer and withdraws optional analytics without 
   expect(await identifiers()).toEqual([]);
 });
 
-test("asks again when the saved choice was made under the earlier consent text", async ({
-  page,
-}) => {
+test("treats a choice saved under the earlier consent text as no choice", async ({ page }) => {
   await mockBookingApis(page);
   const events: unknown[] = [];
   await page.route("**/api/booking-web/events", (route) => {
@@ -87,11 +92,14 @@ test("asks again when the saved choice was made under the earlier consent text",
     sessionStorage.setItem("vayada_funnel_sequence:old-session", "3");
   }, SEEDED_BOOKING_SLUG);
   await page.goto("/");
+  await expect(page.getByTestId("room-card-suite")).toBeVisible();
+  // VAY-2491: not asked on load; the footer's prompt shows no saved choice.
+  await expect(page.getByRole("heading", { name: "Optional analytics", exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "Privacy choices", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Optional analytics", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Analytics is on.", { exact: true })).toHaveCount(0);
-  await expect(page.getByTestId("room-card-suite")).toBeVisible();
   expect(
     await page.evaluate(() =>
       Object.keys(sessionStorage).filter((key) => key.startsWith("vayada_")),

@@ -160,11 +160,10 @@ test("a first-time guest who allows analytics is counted from the hotel page to 
 }) => {
   const sent = await mockFunnel(page);
   await page.goto(HOTEL);
-  await expect(
-    page.getByRole("heading", { name: "Optional analytics", exact: true }),
-  ).toBeVisible();
   await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
   expect(sent).toEqual([]);
+  // VAY-2491: the prompt opens only from the footer's link.
+  await page.getByRole("button", { name: "Privacy choices", exact: true }).click();
   await page.getByRole("button", { name: "Allow analytics", exact: true }).click();
   await book(page);
 
@@ -224,12 +223,11 @@ for (const choice of ["rejected", "unanswered"] as const) {
     if (choice === "rejected") await saveChoice(page, false);
     const sent = await mockFunnel(page);
     await page.goto(HOTEL);
-    if (choice === "unanswered") {
-      const banner = page.getByRole("heading", { name: "Optional analytics", exact: true });
-      await expect(banner).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(banner).toBeHidden();
-    }
+    // VAY-2491: nothing asks on load.
+    await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Optional analytics", exact: true }),
+    ).toBeHidden();
     await book(page);
     expect(sent).toEqual([]);
     expect(

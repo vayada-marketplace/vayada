@@ -24,11 +24,12 @@ export default function AnalyticsConsent() {
   // What opened the prompt (the footer's "Privacy choices" link) gets focus back when it closes.
   const opener = useRef<HTMLElement | null>(null);
   const panel = useRef<HTMLElement>(null);
+  // VAY-2491: the prompt no longer opens by itself on a first visit (it covered the first room
+  // card); only the footer's "Privacy choices" link opens it. No choice still means no analytics.
   useEffect(() => {
     const sync = () => {
       const saved = analyticsChoice(slug);
       setChoice(saved);
-      setOpen(saved === null);
       if (saved !== true) clearAnalyticsSession(slug);
     };
     sync();
@@ -40,7 +41,7 @@ export default function AnalyticsConsent() {
       onAnalyticsChoicesOpened((from) => {
         opener.current = from;
         setOpen(true);
-        // Already open (it opens by itself until answered): focus moves into it.
+        // Already open: focus moves into it.
         panel.current?.focus({ preventScroll: true });
       }),
     [],
@@ -64,8 +65,8 @@ export default function AnalyticsConsent() {
       document.removeEventListener("keydown", escape);
     };
   }, [open]);
-  // VAY-2459: an agency's overview records no analytics, so it asks nothing. VAY-2462: one of its
-  // stays (its page and checkout there) asks for that stay, which the events are for.
+  // VAY-2459: an agency's overview records no analytics, so it has no prompt. VAY-2462: on one of
+  // its stays (its page and checkout there) the prompt is for that stay, which the events are for.
   if (!slug || !open || (agency && !hotel)) return null;
   const save = (enabled: boolean) => {
     const saved = saveAnalyticsChoice(slug, enabled);

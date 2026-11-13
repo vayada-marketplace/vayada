@@ -42,7 +42,6 @@ async function mockExtrasCheckout(page: Page) {
 async function openPage(page: Page, path: string) {
   await page.goto(path);
   await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
-  await page.getByRole("button", { name: "Reject analytics" }).click();
 }
 
 async function chooseGarden(page: Page, rooms: number) {

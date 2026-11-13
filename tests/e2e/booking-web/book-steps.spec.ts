@@ -885,8 +885,6 @@ for (const width of [1440, 390]) {
     catalog.paymentMethods = ["paypal"];
     const asked = prices.asked.length;
     await page.reload();
-    // The analytics question opens on every load until it's answered.
-    await page.getByRole("button", { name: "Reject analytics" }).click();
     const ways = page.getByRole("region", { name: "How would you like to pay?" });
     await expect(ways.getByRole("alert")).toContainText(
       "The rooms you chose can't be paid for in any way this hotel offers.",
