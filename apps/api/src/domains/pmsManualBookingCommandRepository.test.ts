@@ -198,7 +198,8 @@ it("queues the guest's confirmation after the desk payment and before the commit
   const steps: string[] = [];
   const query = vi.fn(async (sql: string) => {
     if (sql === "COMMIT") steps.push("commit");
-    if (sql.includes("txid_current")) return { rows: [{ transactionId: "7" }], rowCount: 1 };
+    if (sql.includes("txid_current"))
+      return { rows: [{ transactionId: "7" }] as never[], rowCount: 1 };
     return { rows: [], rowCount: 0 };
   });
   const transaction = { query, release: vi.fn() };
