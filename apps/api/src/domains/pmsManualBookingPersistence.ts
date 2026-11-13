@@ -1,6 +1,10 @@
 import type { PmsManualBookingCreateCommand } from "@vayada/domain-pms";
 import { PmsManualBookingCreateError as CommandError } from "@vayada/domain-pms";
 
+import {
+  enqueueBookingTransitionNotifications,
+  PMS_MANUAL_BOOKING_CREATED_REASON,
+} from "../jobs/bookingEmails.js";
 import type { ManualBookingPreviewResult } from "../routes/pmsManualBookingPreview.js";
 import type {
   PmsManualBookingAcceptedWrite,
@@ -54,7 +58,33 @@ export function createPgPmsManualBookingBookingOwnerPort(): PmsManualBookingBook
     persistBookingFacts: ({ transaction, ...input }) => persistBookingFacts(transaction, input),
     markPaid: ({ transaction, guestBookingId }) =>
       markManualBookingPaid(transaction, guestBookingId),
+    enqueueGuestConfirmation: ({ transaction, ...input }) =>
+      enqueueManualBookingGuestConfirmation(transaction, input),
   };
+}
+
+/** VAY-2492: the guest gets the booking page's "Booking confirmed" email. The hotel made the booking, so it
+ * gets no "New confirmed booking" email. */
+export async function enqueueManualBookingGuestConfirmation(
+  transaction: PmsManualBookingTransaction,
+  input: { command: PmsManualBookingCreateCommand; guestBookingId: string; acceptedAt: string },
+): Promise<void> {
+  const { command } = input;
+  await enqueueBookingTransitionNotifications(transaction, {
+    propertyId: command.propertyId,
+    guestBookingId: input.guestBookingId,
+    occurredAt: input.acceptedAt,
+    correlationId: command.audit.correlationId ?? command.audit.requestId,
+    causationId: command.commandId,
+    actor: { type: "user", userId: command.audit.actor.userId },
+    source: "apps/api-pms-manual-booking",
+    transition: {
+      eventType: "guest_booking.created",
+      fromStatus: null,
+      toStatus: "confirmed",
+      reason: PMS_MANUAL_BOOKING_CREATED_REASON,
+    },
+  });
 }
 
 export function createPgPmsManualBookingOperationsOwnerPort(): PmsManualBookingOperationsOwnerPort {

@@ -7,6 +7,7 @@ import {
   CANCEL_LINE_TEXT,
   BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE,
   BOOKING_RESERVED_PENDING_PAYMENT_EMAIL_JOB_TYPE,
+  PMS_MANUAL_BOOKING_CREATED_REASON,
   REFUND_LINE_TEXT,
   bookedAddonsText,
   bookingLifecycleEmailJobKey,
@@ -1080,6 +1081,60 @@ describe("booking lifecycle email jobs", () => {
       "contact.purpose = 'general' AND contact.source_system IN ('platform', 'booking')",
     );
     expect(recipientQuery).not.toContain("contact.purpose = 'creator'");
+  });
+
+  it("sends a PMS calendar booking's guest the booking page's confirmation and the hotel nothing (VAY-2492)", async () => {
+    const created = async (reason?: string, toStatus = "confirmed") => {
+      const target = createTargetEmailStore({
+        paymentMethod: "cash",
+        accommodation: "2 × Studio",
+      });
+      const enqueued = await enqueueBookingTransitionNotifications(target, {
+        propertyId: "f2000000-0000-0000-0000-000000000951",
+        guestBookingId: "book_bank_001",
+        occurredAt: "2026-09-01T10:00:00.000Z",
+        transition: {
+          eventType: "guest_booking.created",
+          fromStatus: null,
+          toStatus,
+          ...(reason ? { reason } : {}),
+        },
+      });
+      const payloads = target.calls
+        .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
+        .map((call) => JSON.parse(String(call.values?.[8])));
+      return { jobTypes: enqueued.map((job) => job.jobType), payloads, target };
+    };
+
+    const pms = await created(PMS_MANUAL_BOOKING_CREATED_REASON);
+    expect(pms.jobTypes).toEqual([BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE]);
+    expect(pms.payloads).toEqual([
+      expect.objectContaining({
+        to: "guest@example.test",
+        recipientRole: "guest",
+        template: "booking_final_confirmation",
+        subject: "Booking confirmed - B-BANK-001",
+      }),
+    ]);
+    expect(pms.payloads[0].text).toContain("Accommodation: 2 × Studio");
+    // The snapshot names a PMS booking's assigned room types when nothing else names its rooms.
+    expect(pms.target.requiredCall('AS "hostEmail"').text).toMatch(
+      /FROM pms\.operational_booking_assignments assignment[\s\S]*booking\.source_system = 'pms'/,
+    );
+
+    // A booking-page booking still gets one guest confirmation, and the hotel its own email.
+    const page = await created();
+    expect(page.jobTypes).toEqual([
+      BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE,
+      "email.booking-host-new-booking",
+    ]);
+    // Same email, word for word.
+    const pageGuest = page.payloads.find((payload) => payload.recipientRole === "guest");
+    expect(pms.payloads[0]).toMatchObject({ subject: pageGuest.subject, text: pageGuest.text });
+
+    expect((await created(PMS_MANUAL_BOOKING_CREATED_REASON, "pending_payment")).jobTypes).toEqual(
+      [],
+    );
   });
 });
 

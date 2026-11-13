@@ -58,6 +58,9 @@ export const BOOKING_LIFECYCLE_EMAIL_JOB_TYPES = Object.values(
 
 export type BookingNotificationRecipientRole = "guest" | "host";
 
+/** VAY-2492: the `guest_booking.created` reason of a booking the hotel made in the PMS calendar. */
+export const PMS_MANUAL_BOOKING_CREATED_REASON = "pms_manual_booking";
+
 export type BookingLifecycleTransition = {
   revision?: string;
   eventType: string;
@@ -408,6 +411,23 @@ export async function loadBookingNotificationSnapshot(
            JOIN pms.room_types room_type
              ON room_type.id::text = selection.value->>'roomTypeId'
             AND room_type.property_id = booking.property_id
+           GROUP BY room_type.id, room_type.name
+         ) booked
+       ), (
+         -- VAY-2492: a booking made in the PMS calendar names its assigned rooms' types the same way.
+         SELECT string_agg(
+                  CASE WHEN booked.count > 1 THEN booked.count || ' × ' ELSE '' END || booked.name,
+                  ' + ' ORDER BY booked.first_position)
+         FROM (
+           SELECT room_type.name, count(*) AS count, min(assignment.position) AS first_position
+           FROM pms.operational_booking_assignments assignment
+           JOIN pms.room_types room_type
+             ON room_type.id = assignment.room_type_id
+            AND room_type.property_id = booking.property_id
+           WHERE booking.source_system = 'pms'
+             AND assignment.guest_booking_id = booking.id
+             AND assignment.property_id = booking.property_id
+             AND assignment.assignment_status <> 'canceled'
            GROUP BY room_type.id, room_type.name
          ) booked
        )) AS accommodation,
@@ -1129,6 +1149,11 @@ function notificationsForTransition(
       ? [{ kind: "payment_reminder", role: "guest" }]
       : [];
   if (transition.eventType === "guest_booking.created") {
+    // VAY-2492: the hotel made the booking in the PMS calendar, so only the guest hears of it.
+    if (transition.reason === PMS_MANUAL_BOOKING_CREATED_REASON)
+      return transition.toStatus === "confirmed"
+        ? [{ kind: "final_confirmation", role: "guest" }]
+        : [];
     if (transition.toStatus === "confirmed") {
       return [
         { kind: "final_confirmation", role: "guest" },

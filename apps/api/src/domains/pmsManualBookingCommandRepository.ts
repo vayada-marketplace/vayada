@@ -160,6 +160,13 @@ export function createPgPmsManualBookingCommandRepository(config: {
           },
           occupiedChanges,
         );
+        // VAY-2492: after the payment, so the email shows the balance the booking ends with.
+        await config.dependencies.booking.enqueueGuestConfirmation({
+          transaction,
+          command,
+          guestBookingId,
+          acceptedAt: acceptedAt.toISOString(),
+        });
         const result = createResult(command, accepted, paymentEvidenceId, rearrangedBookingCount);
         await config.dependencies.platform.writeEvidence({
           transaction,
