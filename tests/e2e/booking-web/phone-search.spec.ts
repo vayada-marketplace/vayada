@@ -5,10 +5,11 @@ import { mockBookingApis, mockStayPrices, SEEDED_BOOKING_SLUG } from "../support
 import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2494 (Timo's "Proposal – Card overlaps hero" and "Proposal – scrolled"): the top of the
-// hotel page on a phone. The card overlaps the hero without dark strips beside it, dates and
-// guests are two full-width rows, the promo is a small link, "Available stays" has a found line
-// and a small Sort that opens a sheet, and a compact bar takes over once the card scrolls away.
-// From `md` up nothing changes, except that the card now sticks as it was meant to.
+// hotel page on a phone. A 420px hero with its text 28px above the card, which overlaps it by
+// 64px without dark strips beside it; dates and guests are two 64px rows, the promo a 44px row
+// under a 54px button; "Available stays" (32px) has a found line and a small Sort beside its foot
+// that opens a sheet, 20px above the rooms; a 102px bar with the hotel's name and the stay takes
+// over once the card scrolls away. From `md` up nothing changes, except that the card now sticks.
 const key = (letter: string) => `pricing-offer.v2:${letter.repeat(64)}`;
 const STAY = "/?checkIn=2026-11-13&checkOut=2026-11-14&adults=2";
 const ROOMS = [
@@ -105,9 +106,17 @@ test.describe("on a phone", () => {
       .locator("#stay-search")
       .evaluate((el) => el.previousElementSibling!.getBoundingClientRect().toJSON());
     const card = await box(page, "#stay-search > div");
+    expect(Math.round(hero.height)).toBe(420);
     expect(Math.round(hero.bottom - card.y)).toBe(64);
     expect(card.x).toBe(16);
     expect(card.width).toBe(358);
+    await expect(page.locator("#stay-search > div")).toHaveCSS("border-top-left-radius", "20px");
+    // The hero's heading and line sit low, 28px above the card.
+    const text = await page
+      .locator("h1")
+      .first()
+      .evaluate((h1) => h1.parentElement!.lastElementChild!.getBoundingClientRect().bottom);
+    expect(Math.round(card.y - text)).toBe(28);
     // Left and right of the card, the photo has faded into the page instead of a dark band.
     for (const x of [4, 385]) {
       const [r, g, b] = await pixel(page, x, hero.bottom - 6);
@@ -128,17 +137,29 @@ test.describe("on a phone", () => {
     const [d, g] = [(await datesRow.boundingBox())!, (await guestsRow.boundingBox())!];
     expect(g.y).toBeGreaterThan(d.y + d.height);
     expect(Math.abs(g.width - d.width)).toBeLessThan(2);
+    expect(Math.round(d.height)).toBe(64);
+    expect(Math.round(g.height)).toBe(64);
+    await expect(datesRow.getByText("Dates", { exact: true })).toHaveCSS(
+      "text-transform",
+      "uppercase",
+    );
 
     // Check Availability spans the card, white on the brand colour (VAY-2486); the promo is a
     // small link under it.
     const check = page.getByRole("button", { name: "Check Availability", exact: true });
     const c = (await check.boundingBox())!;
     expect(c.width).toBeGreaterThan(320);
+    expect(Math.round(c.height)).toBe(54);
     await expect(check).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expect(check).toHaveCSS("font-size", "19px");
     const promo = page.getByRole("button", { name: "Add promo code" });
     await expect(promo).toBeVisible();
-    expect((await promo.boundingBox())!.y).toBeGreaterThan(c.y + c.height);
-    await expect(promo.locator("span:visible")).toHaveCSS("font-size", "14px");
+    const p = (await promo.boundingBox())!;
+    expect(p.y).toBeGreaterThan(c.y + c.height);
+    expect(Math.round(p.height)).toBe(44);
+    await expect(promo.locator("svg")).toBeVisible();
+    await expect(promo.locator("span:visible")).toHaveCSS("font-size", "15px");
+    await expect(promo.locator("span:visible")).toHaveCSS("text-decoration-line", "none");
 
     // The top bar as it was: Contact, the language and the currency.
     const nav = page.locator("nav");
@@ -174,24 +195,31 @@ test.describe("on a phone", () => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await open(page);
     const heading = page.getByRole("heading", { name: "Available stays" });
-    const [h, row, card] = [
+    const found = page.getByTestId("rooms-found");
+    const [h, column, card, f, first] = [
       (await heading.boundingBox())!,
       (await heading.locator("..").boundingBox())!,
       await box(page, "#stay-search"),
+      (await found.boundingBox())!,
+      await box(page, '[data-testid^="room-card-"]'),
     ];
+    await expect(heading).toHaveCSS("font-size", "32px");
     const lineHeight = await heading.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     expect(h.height).toBeLessThan(lineHeight * 1.5);
-    // The heading's row starts 36px under the search card.
-    expect(Math.round(row.y - (card.y + card.height))).toBe(36);
+    // The heading's column starts 36px under the search card; the rooms 20px under it.
+    expect(Math.round(column.y - (card.y + card.height))).toBe(36);
+    expect(f.y).toBeGreaterThan(h.y + h.height);
+    expect(Math.round(first.y - (column.y + column.height))).toBe(20);
     // The range as the browser's Intl writes it ("13 – 14 Nov", with thin spaces).
-    await expect(page.getByTestId("rooms-found")).toHaveText(
-      /^3 options · 13\s*–\s*14 Nov · 2 adults$/,
-    );
+    await expect(found).toHaveText(/^3 options · 13\s*–\s*14 Nov · 2 adults$/);
 
+    // The sort beside the column's foot, level with the found line's bottom.
     const sort = page.getByRole("button", { name: "Sort", exact: true });
     const s = (await sort.boundingBox())!;
-    expect(Math.abs(s.y + s.height / 2 - (h.y + h.height / 2))).toBeLessThan(4);
+    expect(Math.abs(s.y + s.height - (column.y + column.height))).toBeLessThan(2);
+    expect(s.x).toBeGreaterThan(h.x + h.width);
     expect(s.x + s.width).toBeLessThanOrEqual(374);
+    await expect(sort).toHaveCSS("font-size", "15px");
     await expect(page.getByRole("combobox", { name: "Sort by" })).toBeHidden();
 
     await sort.click();
@@ -237,13 +265,18 @@ test.describe("on a phone", () => {
       .poll(
         async () => (await page.getByRole("heading", { name: "Available stays" }).boundingBox())!.y,
       )
-      .toBeGreaterThanOrEqual(56);
+      .toBeGreaterThanOrEqual(102);
 
     await page.getByTestId("room-card-mid").scrollIntoViewIfNeeded();
     await expect(bar).toBeVisible();
-    expect(await bar.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390, height: 56 });
+    expect(await bar.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390, height: 102 });
+    // The hotel's name on top, then the stay in a 48px pill with Edit, and the round sort.
+    await expect(bar.getByText("Hotel Alpenrose", { exact: true })).toBeVisible();
     const edit = bar.getByRole("button", { name: /13\s*–\s*14 Nov · 2 adults.*Edit/ });
     await expect(edit).toBeVisible();
+    expect(Math.round((await edit.boundingBox())!.height)).toBe(48);
+    const barSort = (await bar.getByRole("button", { name: "Sort", exact: true }).boundingBox())!;
+    expect([Math.round(barSort.width), Math.round(barSort.height)]).toEqual([48, 48]);
     await page.screenshot({ path: testInfo.outputPath("phone-scrolled.png") });
 
     // Its sort is the heading's.

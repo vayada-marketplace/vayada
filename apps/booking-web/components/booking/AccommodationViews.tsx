@@ -108,10 +108,11 @@ export default function AccommodationViews({
 
   // VAY-2448: the heading with the views and the sort on one row; on a phone the controls wrap
   // below the heading. A group's tabs follow on their own row, their underline on its border.
+  // Phones (VAY-2494): the sort sits beside the foot of the heading's column, 20px above the rooms.
   const toolbarRow = (controls: ReactNode) => (
     <>
       <div
-        className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-1 md:gap-y-3 ${tabs ? "mb-5" : "mb-9"}`}
+        className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-1 md:gap-y-3 max-md:items-end max-md:gap-x-3 ${tabs ? "mb-5" : "mb-9 max-md:mb-5"}`}
       >
         {heading}
         {/* Wrapped below the heading, they stay on the right from tablets up. */}
