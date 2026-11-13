@@ -284,7 +284,8 @@ async function readDeletionCheck(
  * - connected channels: the staff retirement's connected statuses;
  * - open payments: the staff retirement's open statuses, plus vayada Payment card refunds still pending;
  * - open payouts: the staff retirement's open payouts, plus vayada Payment payouts started but not sent
- *   or returned, plus each currency in which live vayada Payment money is still owed (VAY-2442 ledger);
+ *   or returned, plus each currency in which Vayada still owes the property live vayada Payment money
+ *   (VAY-2442 ledger; a property that owes Vayada after a refund is settled by staff, not by waiting);
  * - other accounts: deleting retires the property for everyone, so one shared with another account is
  *   left to Vayada support.
  */
@@ -328,7 +329,7 @@ const DELETION_CHECK_SQL = `
       + (SELECT count(*) FROM (
            SELECT ledger.currency FROM finance.hotel_payout_ledger ledger
            WHERE ledger.property_id = property.id AND ledger.livemode
-           GROUP BY ledger.currency HAVING sum(ledger.net_minor) <> 0) owed)
+           GROUP BY ledger.currency HAVING sum(ledger.net_minor) > 0) owed)
       AS "openPayouts",
     (SELECT count(DISTINCT other.organization_id) FROM identity.organization_resource_links other
      JOIN identity.organizations other_account

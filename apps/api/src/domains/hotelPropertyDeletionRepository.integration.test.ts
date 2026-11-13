@@ -314,6 +314,9 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
     });
     await ledger(propertyA, "EUR", -5_000, true);
     await expect(checkA()).resolves.toMatchObject({ blockers: [], canDelete: true });
+    // Money the property owes Vayada after a refund isn't waiting to be paid out.
+    await ledger(propertyA, "EUR", -1_200, true);
+    await expect(checkA()).resolves.toMatchObject({ blockers: [], canDelete: true });
 
     // Deleting retires the property for every account, so a shared one is left to Vayada support.
     await admin.query(
