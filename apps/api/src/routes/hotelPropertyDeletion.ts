@@ -50,7 +50,7 @@ export async function registerHotelPropertyDeletionRoutes(
     if (!scope) return reply;
     reply.header("Cache-Control", "private, no-store");
     try {
-      const check = await repository.check(scope);
+      const check = await repository.check(target(scope));
       if (!check) return sendError(reply, "property_not_found");
       return reply.send(check);
     } catch (error) {
@@ -76,7 +76,7 @@ export async function registerHotelPropertyDeletionRoutes(
       });
     try {
       const result = await repository.delete({
-        ...scope,
+        ...target(scope),
         ...body,
         idempotencyKey,
         audit: {
@@ -152,6 +152,15 @@ function authorize(
     organizationId: context.selectedOrganization.organizationId,
     actorUserId: context.actor.internalUserId,
     propertyId: propertyId.toLowerCase(),
+  };
+}
+
+/** The account, the acting admin and the property: what the repository checks again. */
+function target(scope: NonNullable<ReturnType<typeof authorize>>) {
+  return {
+    organizationId: scope.organizationId,
+    actorUserId: scope.actorUserId,
+    propertyId: scope.propertyId,
   };
 }
 
