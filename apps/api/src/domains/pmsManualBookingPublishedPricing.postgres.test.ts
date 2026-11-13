@@ -135,7 +135,15 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     );
     await seedInventory();
   });
-  afterAll(() => pool.end());
+  afterAll(async () => {
+    // VAY-2492: its bookings queue guest emails; no later suite in this database may deliver them.
+    await pool.query(
+      `UPDATE platform.jobs SET status = 'canceled', finished_at = now(), updated_at = now()
+       WHERE property_id = $1::uuid AND queue_name = 'platform.email' AND status = 'pending'`,
+      [propertyId],
+    );
+    await pool.end();
+  });
 
   it("refuses offer stays before publishing and books custom rates in the property currency", async () => {
     const offer = command(flexId);
