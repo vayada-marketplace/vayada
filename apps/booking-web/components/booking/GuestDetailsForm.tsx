@@ -247,9 +247,9 @@ function PhoneInput({
       <div className="relative w-[88px] shrink-0 rounded-l-[10px] border-r border-gray-300 bg-gray-50 lg:w-28">
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 flex items-center justify-between gap-1 pl-3 pr-2.5 font-medium lg:pl-3.5 lg:pr-3"
+          className="pointer-events-none absolute inset-0 flex items-center justify-between pl-3 pr-2.5 font-medium max-lg:gap-1 lg:pl-3.5 lg:pr-3"
         >
-          <span className="truncate">
+          <span className="max-lg:truncate">
             <span className="max-lg:hidden">{parts.country} </span>
             {DIAL.get(parts.country)}
           </span>

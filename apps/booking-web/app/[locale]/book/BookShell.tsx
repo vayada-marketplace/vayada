@@ -35,6 +35,7 @@ export default function BookShell({
   subtitle,
   children,
   back,
+  exit,
   rooms,
 }: {
   steps: readonly BookStep[];
@@ -43,6 +44,8 @@ export default function BookShell({
   subtitle?: string;
   children: ReactNode;
   back?: { label: string; onClick: () => void; disabled?: boolean };
+  /** The phone bar's arrow where a step has no Back (the rooms step, a step still loading). */
+  exit?: { label: string; onClick: () => void };
   /** Back to the rooms from the indicator's Rooms, after the rooms step. */
   rooms?: { onClick: () => void; disabled?: boolean };
 }) {
@@ -58,6 +61,7 @@ export default function BookShell({
     payment: t("payment"),
   };
   const number = steps.indexOf(current) + 1;
+  const arrow = back ?? exit;
   return (
     // The step's "Your stay" bar is fixed to the bottom of a phone's screen: the footer clears it.
     <div className="min-h-screen bg-gray-50 pb-[var(--fixed-bottom-bar,0px)]">
@@ -66,12 +70,12 @@ export default function BookShell({
       </div>
       <header className="border-b border-gray-200 bg-white lg:hidden">
         <div className="relative flex h-14 items-center px-2">
-          {back && (
+          {arrow && (
             <button
               type="button"
-              onClick={back.onClick}
-              disabled={back.disabled}
-              aria-label={back.label}
+              onClick={arrow.onClick}
+              disabled={back?.disabled}
+              aria-label={arrow.label}
               className="relative z-10 flex h-11 w-11 items-center justify-center rounded-full text-gray-900 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-40"
             >
               {backIcon("h-6 w-6")}
@@ -85,14 +89,14 @@ export default function BookShell({
         <div className="px-4 pb-3">
           <div className="flex items-baseline gap-1 text-[13px] leading-5 text-gray-600">
             <span className="shrink-0">
-              {t("progress", { current: number, total: steps.length })} ·
+              {t("progress", { current: Math.max(1, number), total: steps.length })} ·
             </span>
             <h1 className="min-w-0 truncate font-semibold text-gray-900">{title}</h1>
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-gray-200" aria-hidden="true">
             <div
               className="h-full rounded-full bg-primary-600"
-              style={{ width: `${(number / steps.length) * 100}%` }}
+              style={{ width: `${(Math.max(1, number) / steps.length) * 100}%` }}
             />
           </div>
         </div>

@@ -168,6 +168,24 @@ test("opens the price sheet from Details, and Escape or Close shuts it", async (
   await expect(stay.getByText("Pay now")).toBeHidden();
 });
 
+test("Continue in the open sheet with fields missing closes it and marks the first field", async ({
+  page,
+}) => {
+  await page.setViewportSize(phone);
+  await mockCheckout(page);
+  await page.goto(STAY);
+  const stay = page.getByRole("complementary", { name: "Your stay" });
+  await expect(stay.getByTestId("stay-total")).toHaveText("€100");
+  const details = stay.getByRole("button", { name: "Details", exact: true });
+  await details.click();
+  await expect(stay.getByText("Pay now")).toBeVisible();
+  await stay.getByRole("button", { name: "Continue to review" }).click();
+  await expect(details).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByLabel("First name")).toBeFocused();
+  await expect(page.getByLabel("First name")).toHaveAttribute("aria-invalid", "true");
+  await expect(page).toHaveURL(/[?&]step=details/);
+});
+
 test("keeps the brand-colour footer clear of the bar, white text on the brand colour", async ({
   page,
 }, testInfo) => {

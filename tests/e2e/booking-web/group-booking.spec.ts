@@ -60,6 +60,11 @@ for (const width of [1440, 390]) {
 
     // Who's staying: each room with its rate and the guests the hotel page split.
     await expect(page.getByRole("heading", { name: "Who's staying in each room" })).toBeVisible();
+    // VAY-2495: on a phone the checkout's bar has a way back to the hotel page here too.
+    if (width === 390)
+      await expect(
+        page.getByRole("banner").getByRole("button", { name: "Back to rooms" }),
+      ).toBeVisible();
     const room1 = page.getByTestId("room-guests-1");
     const room2 = page.getByTestId("room-guests-2");
     await expect(room1).toContainText("Deluxe Double Room");

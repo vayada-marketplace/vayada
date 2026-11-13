@@ -259,6 +259,10 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
   expect(total.previousElementSibling!.className).toContain("max-lg:sr-only");
   expect(boxLines.className).toContain("max-lg:hidden");
   expect(button("Continue to review").parentElement!.className).toContain("max-lg:shrink-0");
+  // display:contents keeps no margins between the row's parts.
+  expect(button("Continue to review").parentElement!.parentElement!.className).toContain(
+    "max-lg:space-y-0",
+  );
   // The notice and hint are full-width lines above and below the row.
   expect(text()).toMatch(/Your price changed\.Continue to reviewChoose a day/);
   expect(text()).toContain("Cancellation policy");
@@ -271,6 +275,8 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
   expect(boxLines.className).not.toContain("max-lg:hidden");
   expect(total.previousElementSibling!.className).not.toContain("sr-only");
   expect(document.body.querySelector(".bg-gray-900\\/40")).not.toBeNull();
+  // It takes focus.
+  expect(document.activeElement).toBe(aside.querySelector("#stay-summary-title"));
   // Escape closes it, with focus back on "Details".
   act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
@@ -282,6 +288,19 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
   // So does a tap on the backdrop.
   act(() => toggle.click());
   act(() => (document.body.querySelector(".bg-gray-900\\/40") as HTMLElement).click());
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  // Pressing the button in the sheet closes it: what it marks is behind the sheet.
+  act(() => toggle.click());
+  act(() => button("Continue to review").click());
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  // And tabbing out of it, so the next focused thing isn't covered.
+  const outside = document.body.appendChild(document.createElement("button"));
+  act(() => toggle.click());
+  act(() => {
+    aside
+      .querySelector("#stay-summary-title")!
+      .dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: outside }));
+  });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
 });
 

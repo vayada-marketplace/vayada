@@ -887,7 +887,8 @@
       "adults": "{count, plural, one {# dewasa} other {# dewasa}}",
       "children": "{count, plural, one {# anak} other {# anak}}",
       "edit": "Ubah",
-      "editStay": "Ubah masa inap"
+      "editStay": "Ubah masa inap",
+      "continueShort": "Lanjut"
     },
     "checkingPrice": "Memeriksa harga…",
     "busyConfirm": "Mengonfirmasi pemesanan…",

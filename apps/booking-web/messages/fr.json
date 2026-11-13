@@ -887,7 +887,8 @@
       "adults": "{count, plural, one {# adulte} other {# adultes}}",
       "children": "{count, plural, one {# enfant} other {# enfants}}",
       "edit": "Modifier",
-      "editStay": "Modifier votre séjour"
+      "editStay": "Modifier votre séjour",
+      "continueShort": "Continuer"
     },
     "checkingPrice": "Vérification du prix…",
     "busyConfirm": "Confirmation de la réservation…",

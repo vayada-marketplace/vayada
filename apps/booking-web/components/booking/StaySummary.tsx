@@ -196,9 +196,11 @@ export default function StaySummary({
   const sheet = checkout && slim;
   const row = sheet && !open;
   const toggle = useRef<HTMLButtonElement>(null);
-  // The sheet closes with Escape, focus back on "Details".
+  const title = useRef<HTMLHeadingElement>(null);
+  // The sheet takes focus when it opens and closes with Escape, focus back on "Details".
   useEffect(() => {
     if (!sheet || !open) return;
+    title.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setOpen(false);
@@ -246,6 +248,7 @@ export default function StaySummary({
   const hidden = checkout && !open ? "max-lg:hidden" : "";
   const heading = (
     <h2
+      ref={title}
       id="stay-summary-title"
       tabIndex={-1}
       className="text-xl font-bold text-gray-900 outline-none"
@@ -259,9 +262,14 @@ export default function StaySummary({
       aria-label={t("stay.title")}
       className={
         checkout
-          ? `z-30 flex flex-col gap-[18px] bg-white max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[85dvh] max-lg:gap-3 max-lg:overflow-y-auto max-lg:border-t max-lg:border-gray-200 max-lg:px-4 max-lg:pb-3 max-lg:pt-3 max-lg:shadow-[0_-6px_20px_rgba(17,24,39,0.06)] lg:sticky lg:top-5 lg:max-h-[calc(100dvh-40px)] lg:rounded-2xl lg:border lg:border-gray-200 lg:p-7${sheet ? ` max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]${open ? " max-lg:rounded-t-2xl max-lg:pt-4" : ""}` : ""}`
+          ? `z-30 flex flex-col gap-[18px] bg-white max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[85dvh] max-lg:gap-3 max-lg:overflow-y-auto max-lg:border-t max-lg:border-gray-200 max-lg:px-4 max-lg:pb-3 max-lg:pt-3 max-lg:shadow-[0_-6px_20px_rgba(17,24,39,0.06)] lg:sticky lg:top-5 lg:max-h-[calc(100dvh-40px)] lg:rounded-2xl lg:border lg:border-gray-200 lg:p-7${sheet ? ` max-lg:overscroll-contain${open ? " max-lg:rounded-t-2xl max-lg:pt-4" : ""}` : ""}`
           : "bg-white rounded-2xl border border-gray-200 p-5 md:p-7 lg:sticky lg:top-8 space-y-[18px]"
       }
+      // Tabbing out of the open sheet closes it, so the focused field isn't left behind it.
+      onBlur={(event) => {
+        const next = event.relatedTarget as Node | null;
+        if (sheet && open && next && !event.currentTarget.contains(next)) setOpen(false);
+      }}
     >
       {sheet &&
         open &&
@@ -477,7 +485,7 @@ export default function StaySummary({
         )}
         {sheet ? (
           // In the slim row the notice and hint take full-width lines above and below it.
-          <div className={`space-y-3 ${row ? "max-lg:contents" : ""}`}>
+          <div className={`space-y-3 ${row ? "max-lg:contents max-lg:space-y-0" : ""}`}>
             {notice ? (
               <div className={row ? "max-lg:order-first max-lg:w-full" : undefined}>{notice}</div>
             ) : null}
@@ -487,6 +495,8 @@ export default function StaySummary({
                   ? "max-lg:shrink-0 max-lg:[&_button]:h-12 max-lg:[&_button]:w-auto max-lg:[&_button]:px-6 max-lg:[&_button]:text-base"
                   : undefined
               }
+              // Pressed in the sheet, the button closes it: what it marks or opens is behind it.
+              onClickCapture={() => setOpen(false)}
             >
               {action}
             </div>

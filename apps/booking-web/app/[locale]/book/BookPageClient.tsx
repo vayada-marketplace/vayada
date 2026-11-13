@@ -1231,7 +1231,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   };
   const slimLabel = (label: string) => (
     <>
-      <span className="lg:hidden">{tCommon("continue")}</span>
+      <span className="lg:hidden">{tReview("stay.continueShort")}</span>
       <span className="max-lg:hidden">{label}</span>
     </>
   );
@@ -1320,6 +1320,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 }
       }
       rooms={settled ? { onClick: backToRooms, disabled: attemptOpen } : undefined}
+      exit={{ label: tDetails("backToRooms"), onClick: backToRooms }}
       title={titles[step]}
       subtitle={
         step === "extras"

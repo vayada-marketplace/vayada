@@ -888,7 +888,8 @@
       "adults": "{count, plural, one {# adult} other {# adults}}",
       "children": "{count, plural, one {# child} other {# children}}",
       "edit": "Edit",
-      "editStay": "Edit your stay"
+      "editStay": "Edit your stay",
+      "continueShort": "Continue"
     },
     "checkingPrice": "Checking price…",
     "busyConfirm": "Confirming booking…",
