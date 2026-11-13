@@ -33,7 +33,10 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("room-tab-1")).toContainText("choosing");
     await expect(page.getByTestId("room-tab-2")).toContainText("next");
     await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(0);
-    await expect(page.getByText("2 rooms", { exact: true })).toBeVisible();
+    // The guests' rooms: under the count from tablets up, on the row's right on a phone.
+    await expect(
+      page.locator("#stay-search").getByText("2 rooms", { exact: true }).filter({ visible: true }),
+    ).toBeVisible();
 
     const deluxe = page.getByTestId("room-card-deluxe");
     await expect(deluxe).toContainText("Select your rate for room 1 · 2 Adults");
@@ -158,7 +161,11 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("room-tab-2")).toContainText("Garden Double Room");
 
     // Room 1 takes 3 of the 4 adults: its Garden room sleeps 2, so room 1 is chosen again.
-    await page.getByText("4 Adults", { exact: true }).click();
+    // The guests row ("4 Adults" from tablets up, "4 adults" on a phone, VAY-2494).
+    await page
+      .locator("#stay-search button")
+      .filter({ hasText: /4 adults/i })
+      .click();
     const split = page.getByTestId("who-sleeps-where");
     await expect(split).toContainText("Room 1");
     await expect(split).toContainText("2 adults");
@@ -611,7 +618,7 @@ test("puts the room tabs and the sort on one row and moves between the tabs from
   await assertHealthy();
 });
 
-test("scrolls the room tabs on a phone, with the sort below the heading and targets of 44px", async ({
+test("scrolls the room tabs on a phone, with the Sort button on the heading's row and targets of 44px", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
@@ -629,17 +636,19 @@ test("scrolls the room tabs on a phone, with the sort below the heading and targ
       (rooms) =>
         rooms.getBoundingClientRect().right - parseFloat(getComputedStyle(rooms).paddingRight),
     );
-  // VAY-2448: on a phone the sort wraps below the heading, and the tabs follow below it.
-  const sort = page.getByRole("combobox", { name: "Sort by" });
-  const heading = page.getByRole("heading", { name: "Available Accommodations" });
+  // VAY-2494: on a phone a small Sort button sits on the heading's row; the tabs follow below.
+  const sort = page.getByRole("button", { name: "Sort", exact: true });
+  const heading = page.getByRole("heading", { name: "Available stays" });
   const [row, select, title] = await Promise.all([
     tabs.boundingBox(),
     sort.boundingBox(),
     heading.boundingBox(),
   ]);
   expect(row!.x + row!.width).toBeLessThanOrEqual(right + 1);
-  expect(select!.y).toBeGreaterThanOrEqual(title!.y + title!.height);
-  expect(row!.y).toBeGreaterThanOrEqual(select!.y + select!.height);
+  expect(Math.abs(select!.y + select!.height / 2 - (title!.y + title!.height / 2))).toBeLessThan(4);
+  expect(row!.y).toBeGreaterThanOrEqual(
+    Math.max(title!.y + title!.height, select!.y + select!.height),
+  );
   for (const target of [
     page.getByTestId("room-tab-1"),
     page.getByRole("button", { name: "Remove Room 1 from booking" }),

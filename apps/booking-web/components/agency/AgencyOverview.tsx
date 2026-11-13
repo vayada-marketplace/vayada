@@ -418,7 +418,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
       />
 
       <StaySearchCard
-        stickyOnPhones={false}
+        stickyOnTablets={false}
         panel={panel}
         onPanel={changePanel}
         checkIn={form.checkIn}
@@ -428,6 +428,7 @@ export default function AgencyOverview({ agency }: { agency: AgencyPage }) {
         adults={form.adults}
         childCount={form.children}
         guestsNote={th("roomsCount", { count: form.rooms })}
+        guestsAside={th("roomsCount", { count: form.rooms })}
         guests={{
           childrenEnabled,
           onUpdate: (adults, children) =>

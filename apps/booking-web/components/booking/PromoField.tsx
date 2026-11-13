@@ -63,7 +63,8 @@ function PromoPopover({
 /**
  * The search card's promo field: "Add promo code" with its popover, or the applied code as a chip
  * with a remove button. What a code does is the page's (`onApply`, `onRemove`). Shared by a
- * hotel's page and an agency's (VAY-2459).
+ * hotel's page and an agency's (VAY-2459). On phones it is a small link under Check Availability
+ * (VAY-2494): last in the card, without the tag icon.
  */
 export default function PromoField({
   applied,
@@ -91,7 +92,7 @@ export default function PromoField({
 }) {
   const t = useTranslations("home");
   return (
-    <div className="relative flex justify-center md:justify-start w-full md:w-auto">
+    <div className="relative order-last flex justify-center md:order-none md:justify-start w-full md:w-auto">
       {applied ? (
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
@@ -128,7 +129,12 @@ export default function PromoField({
             onClick={() => (open ? onClose() : onOpen())}
             className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              className="hidden md:block w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -136,7 +142,10 @@ export default function PromoField({
                 d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
               />
             </svg>
-            <span className="text-sm font-medium">{t("addPromo")}</span>
+            <span className="hidden md:inline text-sm font-medium">{t("addPromo")}</span>
+            <span className="md:hidden text-sm text-gray-600 underline underline-offset-2">
+              {t("phoneSearch.addPromoCode")}
+            </span>
           </button>
           {open && (
             <PromoPopover

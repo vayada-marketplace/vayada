@@ -219,6 +219,14 @@
       "noneFits": "Tidak ada satu tempat yang muat untuk {count} tamu.",
       "splitHint": "Bagi rombongan Anda dan pilih tempat untuk setiap bagian.",
       "bookRooms": "Pesan {count} kamar"
+    },
+    "phoneSearch": {
+      "dates": "Tanggal",
+      "addPromoCode": "Tambah kode promo",
+      "availableStays": "Penginapan tersedia",
+      "options": "{count} pilihan",
+      "sort": "Urutkan",
+      "edit": "Ubah"
     }
   },
   "rooms": {

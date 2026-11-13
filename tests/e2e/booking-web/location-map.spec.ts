@@ -193,7 +193,7 @@ test.describe("booking page location map", () => {
     await page.setViewportSize({ width: 360, height: 760 });
     await page.goto("/");
     // No view switch and no Location section on a phone: the cards say where each room is.
-    await expect(page.getByRole("heading", { name: "Available Accommodations" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Available stays" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Show the accommodations as" })).toHaveCount(0);
     await expect(page.getByTestId("rooms-location-map")).toHaveCount(0);
     await expect(page.getByTestId("room-card-schwabing")).toContainText("Own location");

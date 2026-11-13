@@ -92,19 +92,21 @@ test("keeps the sort on the title's line when the approximate-amounts note shows
   expect(below!.y).toBeGreaterThanOrEqual(select!.y + select!.height);
 });
 
-test("wraps the sort below the heading on a phone, with a 44px select", async ({
+test("keeps a small Sort button on the heading's row on a phone (VAY-2494)", async ({
   page,
 }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page, HOTEL);
   await expect(page.locator('[data-testid^="room-card-"]').first()).toBeVisible();
-  const [title, select] = await Promise.all([
-    page.getByRole("heading", { name: "Available Accommodations" }).boundingBox(),
-    page.getByRole("combobox", { name: "Sort by" }).boundingBox(),
+  const [title, sort] = await Promise.all([
+    page.getByRole("heading", { name: "Available stays" }).boundingBox(),
+    page.getByRole("button", { name: "Sort", exact: true }).boundingBox(),
   ]);
-  expect(select!.y).toBeGreaterThanOrEqual(title!.y + title!.height);
-  expect(select!.height).toBeGreaterThanOrEqual(44);
+  expect(Math.abs(sort!.y + sort!.height / 2 - (title!.y + title!.height / 2))).toBeLessThan(4);
+  expect(sort!.x).toBeGreaterThan(title!.x + title!.width);
+  expect(sort!.height).toBeGreaterThanOrEqual(44);
+  await expect(page.getByRole("combobox", { name: "Sort by" })).toBeHidden();
   await assertHealthy();
 });
 

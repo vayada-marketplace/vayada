@@ -1,8 +1,9 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { calculateNights, formatDate, formatDateShort } from "@/lib/utils";
+import { formatStayRange } from "@/lib/agencyOverview";
 import type { RoomSortKey } from "@/lib/roomSorting";
 import type { StayRoomsModel } from "@/lib/hooks/useStayRooms";
 import { trackEvent } from "@/services/api/tracking";
@@ -12,6 +13,8 @@ import RoomCard from "./RoomCard";
 import RoomTabs, { RoomsHelp } from "./RoomsProgress";
 import AccommodationViews from "./AccommodationViews";
 import ApproximateAmountsNote from "./ApproximateAmountsNote";
+import RoomSortSheet from "./RoomSortSheet";
+import StickySearchBar from "./StickySearchBar";
 
 // VAY-2449: the sort menu's options, as the hotel's Room Sorting lists them.
 const SORT_LABELS: Record<RoomSortKey, string> = {
@@ -28,6 +31,10 @@ const SORT_LABELS: Record<RoomSortKey, string> = {
  * with the sort, a group's room tabs and help, the room cards in their views (VAY-2324), and what
  * the page says without them. `useStayRooms` holds the state; the search card above opens the
  * dates (`onEditDates`) and "Who sleeps where" (`onEditGuests`).
+ *
+ * On phones (VAY-2494): "Available stays" on one line with a line saying what the search found,
+ * a small Sort button that opens the sort in a sheet, 36px below the search card, and on the
+ * hotel page (`searchBar`) a compact search bar once the card has scrolled away.
  */
 export default function StayRooms({
   model,
@@ -35,6 +42,7 @@ export default function StayRooms({
   onEditGuests,
   heading: headingText,
   intro,
+  searchBar = false,
 }: {
   model: StayRoomsModel;
   onEditDates: () => void;
@@ -43,10 +51,14 @@ export default function StayRooms({
   heading?: ReactNode;
   /** Shown under the heading, above the rooms, such as the agency's stay box (VAY-2461). */
   intro?: ReactNode;
+  /** The phone's compact search bar (StickySearchBar), on the hotel page only. */
+  searchBar?: boolean;
 }) {
   const locale = useLocale();
   const t = useTranslations("home");
   const tc = useTranslations("common");
+  const tp = useTranslations("home.phoneSearch");
+  const [sortOpen, setSortOpen] = useState(false);
   const {
     slug,
     hotel,
@@ -92,51 +104,98 @@ export default function StayRooms({
     roomsMap,
   } = model;
   const nights = calculateNights(checkIn, checkOut);
+  // Phones: "13–14 Nov · 2 adults" (and the rooms of a group) for the line under the heading and
+  // the compact bar; the year only for a stay that isn't this year's, as on the search card.
+  const thisYear = String(new Date().getFullYear());
+  const stayLine = [
+    formatStayRange(
+      checkIn,
+      checkOut,
+      locale,
+      !checkIn.startsWith(thisYear) || !checkOut.startsWith(thisYear),
+    ),
+    t("roomsProgress.guests", { adults, children: effectiveChildren }),
+    pickMode && t("roomsCount", { count: roomCount }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const canSort = Boolean(rooms?.length) && menu.options.length > 0;
+  const openSort = () => setSortOpen(true);
 
-  // VAY-2448: the sort sits on the heading's row: its icon, "Sort by" and the select.
+  // VAY-2448: the sort sits on the heading's row: its icon, "Sort by" and the select. On phones
+  // (VAY-2494) a small Sort button opens the same options in a sheet.
   const sortControl = (
-    <div className="flex items-center gap-2">
-      <svg
-        className="h-4 w-4 text-gray-500"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
+    <>
+      <button
+        type="button"
+        onClick={openSort}
+        aria-haspopup="dialog"
+        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-gray-200 bg-white px-4 text-sm font-medium text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 md:hidden"
       >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-        />
-      </svg>
-      <label htmlFor="room-sort" className="text-sm text-gray-500">
-        {t("sortBy")}
-      </label>
-      <div className="relative">
-        <select
-          id="room-sort"
-          value={sortOption}
-          onChange={(event) => setSortPick(event.target.value as RoomSortKey)}
-          className="min-h-[44px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-white pl-4 pr-10 text-sm font-medium text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
-        >
-          {menu.options.map((option) => (
-            <option key={option} value={option}>
-              {t(SORT_LABELS[option])}
-            </option>
-          ))}
-        </select>
         <svg
-          className="pointer-events-none absolute right-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-700"
+          className="h-4 w-4 text-gray-500"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
           aria-hidden="true"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+          />
         </svg>
+        {tp("sort")}
+      </button>
+      <div className="hidden md:flex items-center gap-2">
+        <svg
+          className="h-4 w-4 text-gray-500"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+          />
+        </svg>
+        <label htmlFor="room-sort" className="text-sm text-gray-500">
+          {t("sortBy")}
+        </label>
+        <div className="relative">
+          <select
+            id="room-sort"
+            value={sortOption}
+            onChange={(event) => setSortPick(event.target.value as RoomSortKey)}
+            className="min-h-[44px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-white pl-4 pr-10 text-sm font-medium text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          >
+            {menu.options.map((option) => (
+              <option key={option} value={option}>
+                {t(SORT_LABELS[option])}
+              </option>
+            ))}
+          </select>
+          <svg
+            className="pointer-events-none absolute right-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-700"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </div>
       </div>
-    </div>
+    </>
   );
   const roomCard = (
     room: PricingRoom,
@@ -246,9 +305,23 @@ export default function StayRooms({
   // centred on the title.
   const heading = (
     <>
-      <h2 className="min-w-0 text-2xl md:text-3xl font-heading text-gray-900">
-        {headingText ?? t("availableAccommodations")}
+      <h2 className="min-w-0 text-xl md:text-3xl font-heading text-gray-900">
+        {headingText ?? (
+          <>
+            <span className="md:hidden">{tp("availableStays")}</span>
+            <span className="hidden md:inline">{t("availableAccommodations")}</span>
+          </>
+        )}
       </h2>
+      {rooms?.length ? (
+        // Phones: "5 options · 13–14 Nov · 2 adults", on its own line under the heading's row.
+        <p
+          data-testid="rooms-found"
+          className="order-last basis-full text-sm text-gray-500 md:hidden"
+        >
+          {tp("options", { count: shownRooms.length })} · {stayLine}
+        </p>
+      ) : null}
       {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
       <ApproximateAmountsNote currency={hotel.currency} className="order-last basis-full" />
     </>
@@ -256,7 +329,32 @@ export default function StayRooms({
 
   return (
     // VAY-2448: no stepper while choosing; the sort shares the heading's row.
-    <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-12 scroll-mt-36">
+    <div
+      id="rooms"
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-9 md:pt-16 pb-12 scroll-mt-9 md:scroll-mt-36"
+    >
+      {searchBar && (
+        <StickySearchBar
+          label={stayLine}
+          onEdit={onEditDates}
+          onSort={canSort ? openSort : undefined}
+        />
+      )}
+      {sortOpen && canSort && (
+        <RoomSortSheet
+          options={menu.options}
+          value={sortOption}
+          label={(option) => t(SORT_LABELS[option])}
+          onPick={(option) => {
+            setSortPick(option);
+            setSortOpen(false);
+            // From further down (the compact bar), back to the first room in the new order.
+            const top = document.getElementById("rooms");
+            if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: "start" });
+          }}
+          onClose={() => setSortOpen(false)}
+        />
+      )}
       {rooms === null && !roomsFailed ? (
         <>
           <div className="mb-9">{heading}</div>
