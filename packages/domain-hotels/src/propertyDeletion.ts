@@ -12,10 +12,12 @@ export type HotelPropertyDeletionBlockerCode =
   | "upcoming_bookings"
   /** A connected channel manager (Booking.com, Airbnb, …). */
   | "connected_channels"
-  /** Payments that are pending, need action, are authorized or disputed. */
+  /** Payments that are pending, need action, are authorized or disputed, and pending card refunds. */
   | "unresolved_payments"
-  /** Payouts that are pending, scheduled, processing or failed. */
-  | "open_payouts";
+  /** Payouts not finished yet, including vayada Payment money still owed to the property. */
+  | "open_payouts"
+  /** The property also belongs to another account: Vayada support deletes it. */
+  | "shared_property";
 
 export type HotelPropertyDeletionBlocker = {
   code: HotelPropertyDeletionBlockerCode;

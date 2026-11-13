@@ -21,6 +21,7 @@ const run = randomUUID().slice(0, 8);
 const organizationId = randomUUID();
 const adminUserId = randomUUID();
 const staffUserId = randomUUID();
+const otherOrganizationId = randomUUID();
 const propertyA = randomUUID();
 const propertyB = randomUUID();
 const properties = [
@@ -54,8 +55,9 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
     );
     await admin.query(
       `INSERT INTO identity.organizations (id, kind, name, slug, status)
-       VALUES ($1::uuid, 'hotel_group', 'Travel Ubud Test', $2, 'active')`,
-      [organizationId, `travel-ubud-${run}`],
+       VALUES ($1::uuid, 'hotel_group', 'Travel Ubud Test', $2, 'active'),
+              ($3::uuid, 'hotel_group', 'Other Account Test', $4, 'active')`,
+      [organizationId, `travel-ubud-${run}`, otherOrganizationId, `other-account-${run}`],
     );
     await admin.query(
       `INSERT INTO identity.organization_memberships (
@@ -100,6 +102,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
         "booking.guest_bookings",
         "pms.channel_connections",
         "finance.payments",
+        "finance.hotel_payout_ledger",
         "platform.product_audit_events",
         "platform.idempotency_keys",
         "distribution.active_public_booking_revision",
@@ -109,6 +112,15 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
           [propertyA, propertyB],
         ]);
       }
+      await admin.query(
+        "DELETE FROM identity.organization_resource_links WHERE organization_id = $1::uuid",
+        [otherOrganizationId],
+      );
+      await admin.query(
+        `UPDATE hotel_catalog.property_locations SET timezone = 'Asia/Makassar'
+         WHERE property_id = ANY($1::uuid[])`,
+        [[propertyA, propertyB]],
+      );
       await admin.query(
         `UPDATE hotel_catalog.properties
          SET lifecycle_status = 'active', lifecycle_revision = 1, profile_status = 'complete',
@@ -290,6 +302,48 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
     });
   });
 
+  it("is blocked by vayada Payment money still owed and by another account's link", async () => {
+    // Live money owed in one currency blocks; test-mode money and a settled currency don't.
+    await ledger(propertyA, "EUR", 5_000, true);
+    await ledger(propertyA, "USD", 7_000, true);
+    await ledger(propertyA, "USD", -7_000, true);
+    await ledger(propertyA, "IDR", 900_000, false);
+    await expect(checkA()).resolves.toMatchObject({
+      blockers: [{ code: "open_payouts", count: 1 }],
+      canDelete: false,
+    });
+    await ledger(propertyA, "EUR", -5_000, true);
+    await expect(checkA()).resolves.toMatchObject({ blockers: [], canDelete: true });
+
+    // Deleting retires the property for every account, so a shared one is left to Vayada support.
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links
+         (organization_id, product, resource_type, resource_id, relationship, status)
+       VALUES ($1::uuid, 'hotel_catalog', 'property', $2::uuid::text, 'operator', 'active')`,
+      [otherOrganizationId, propertyA],
+    );
+    await expect(checkA()).resolves.toMatchObject({
+      blockers: [{ code: "shared_property", count: 1 }],
+      canDelete: false,
+    });
+    await expect(repository.delete(command(propertyA))).rejects.toMatchObject({
+      code: "deletion_blocked",
+    });
+  });
+
+  it("reads a time zone PostgreSQL doesn't know as UTC instead of failing", async () => {
+    await admin.query(
+      `UPDATE hotel_catalog.property_locations SET timezone = 'Asia/Bali'
+       WHERE property_id = $1::uuid`,
+      [propertyA],
+    );
+    // Checked out 13 Nov: past in Bali, but today in UTC, which is used here.
+    await insertBooking(admin, propertyA, "confirmed", "2026-11-10", "2026-11-13");
+    await expect(checkA()).resolves.toMatchObject({
+      blockers: [{ code: "upcoming_bookings", count: 1 }],
+    });
+  });
+
   it("refuses a wrong typed name and a stale revision", async () => {
     await expect(
       repository.delete(command(propertyA, { confirmationName: "escape villa" })),
@@ -379,6 +433,16 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
     );
   }
 
+  async function ledger(propertyId: string, currency: string, net: number, livemode: boolean) {
+    await admin.query(
+      `INSERT INTO finance.hotel_payout_ledger (
+         property_id, entry_kind, currency, gross_minor, fee_minor, net_minor, livemode, source_key,
+         occurred_at
+       ) VALUES ($1::uuid, 'adjustment', $2, $3, 0, $3, $4, $5, $6::timestamptz)`,
+      [propertyId, currency, net, livemode, `delete-${run}-${randomUUID()}`, now.toISOString()],
+    );
+  }
+
   async function insertBooking(
     client: pg.Client,
     propertyId: string,
@@ -425,6 +489,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
       for (const table of [
         "booking.guest_bookings",
         "pms.channel_connections",
+        "finance.hotel_payout_ledger",
         "platform.product_audit_events",
         "platform.idempotency_keys",
         "distribution.public_hotel_bookability_profiles",
@@ -435,8 +500,8 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel property deletion on PostgreSQL", () 
         await admin.query(`DELETE FROM ${table} WHERE property_id = ANY($1::uuid[])`, [ids]);
       }
       await admin.query(
-        "DELETE FROM identity.organization_resource_links WHERE organization_id = $1::uuid",
-        [organizationId],
+        "DELETE FROM identity.organization_resource_links WHERE organization_id = ANY($1::uuid[])",
+        [[organizationId, otherOrganizationId]],
       );
       await admin.query(
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1::uuid",

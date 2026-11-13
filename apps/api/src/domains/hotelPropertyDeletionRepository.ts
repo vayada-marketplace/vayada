@@ -92,6 +92,7 @@ type CheckRow = {
   connectedChannels: number | string;
   unresolvedPayments: number | string;
   openPayouts: number | string;
+  otherAccounts: number | string;
 };
 
 export function createPgHotelPropertyDeletionRepository(config: {
@@ -260,6 +261,7 @@ async function readDeletionCheck(
     { code: "connected_channels" as const, count: count(row.connectedChannels) },
     { code: "unresolved_payments" as const, count: count(row.unresolvedPayments) },
     { code: "open_payouts" as const, count: count(row.openPayouts) },
+    { code: "shared_property" as const, count: count(row.otherAccounts) },
   ].filter((blocker) => blocker.count > 0);
   return {
     lifecycleStatus: row.lifecycleStatus,
@@ -276,10 +278,15 @@ async function readDeletionCheck(
 }
 
 /**
- * One property of the account (an active owner/operator link) with what blocks its deletion. Upcoming
- * bookings are the paid or awaiting-payment ones whose check-out is today or later in the property's own
- * time zone; drafts (an unfinished checkout) and past stays don't block. Payments and payouts use the
- * staff retirement's open statuses, channels its connected ones.
+ * One property of the account (an active owner/operator link) with what blocks its deletion:
+ * - upcoming bookings: paid or awaiting payment, checking out today or later in the property's own time
+ *   zone (UTC when it has none or PostgreSQL doesn't know it); drafts and past stays don't block;
+ * - connected channels: the staff retirement's connected statuses;
+ * - open payments: the staff retirement's open statuses, plus vayada Payment card refunds still pending;
+ * - open payouts: the staff retirement's open payouts, plus vayada Payment payouts started but not sent
+ *   or returned, plus each currency in which live vayada Payment money is still owed (VAY-2442 ledger);
+ * - other accounts: deleting retires the property for everyone, so one shared with another account is
+ *   left to Vayada support.
  */
 const DELETION_CHECK_SQL = `
   WITH account_property_links AS (
@@ -300,19 +307,36 @@ const DELETION_CHECK_SQL = `
     (SELECT count(*) FROM booking.guest_bookings booking
      WHERE booking.property_id = property.id
        AND booking.lifecycle_status IN ('pending_payment', 'confirmed')
-       AND booking.check_out >= ($3::timestamptz AT TIME ZONE
-         COALESCE(NULLIF(location.timezone, ''), 'UTC'))::date) AS "upcomingBookings",
+       AND booking.check_out >= ($3::timestamptz AT TIME ZONE COALESCE(
+         (SELECT zone.name FROM pg_timezone_names zone WHERE zone.name = location.timezone),
+         'UTC'))::date) AS "upcomingBookings",
     (SELECT count(*) FROM pms.channel_connections connection
      WHERE connection.property_id = property.id
        AND connection.connection_status IN ('connected', 'degraded')) AS "connectedChannels",
     (SELECT count(*) FROM finance.payments payment
      WHERE payment.property_id = property.id
        AND payment.status IN ('requires_action', 'authorized', 'pending', 'disputed'))
+      + (SELECT count(*) FROM finance.card_refund_commands refund
+         WHERE refund.property_id = property.id AND refund.status = 'pending')
       AS "unresolvedPayments",
     (SELECT count(*) FROM finance.payouts payout
      WHERE (payout.property_id = property.id OR payout.related_property_id = property.id)
        AND payout.payout_status IN ('pending', 'scheduled', 'processing', 'failed'))
-      AS "openPayouts"
+      + (SELECT count(*) FROM finance.hotel_payouts hotel_payout
+         WHERE hotel_payout.property_id = property.id AND hotel_payout.livemode
+           AND hotel_payout.sent_at IS NULL AND hotel_payout.returned_at IS NULL)
+      + (SELECT count(*) FROM (
+           SELECT ledger.currency FROM finance.hotel_payout_ledger ledger
+           WHERE ledger.property_id = property.id AND ledger.livemode
+           GROUP BY ledger.currency HAVING sum(ledger.net_minor) <> 0) owed)
+      AS "openPayouts",
+    (SELECT count(DISTINCT other.organization_id) FROM identity.organization_resource_links other
+     JOIN identity.organizations other_account
+       ON other_account.id = other.organization_id
+      AND other_account.kind = 'hotel_group' AND other_account.status = 'active'
+     WHERE other.resource_id = property.id::text
+       AND other.product = 'hotel_catalog' AND other.resource_type = 'property'
+       AND other.status = 'active' AND other.organization_id <> $1::uuid) AS "otherAccounts"
   FROM hotel_catalog.properties property
   LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
   WHERE property.id = $2::uuid
