@@ -36,6 +36,15 @@ async function mockAccount(page: Page, options: { blockers?: Blocker[] } = {}) {
   await page.route("**/api/hotel-setup/status**", (route) => {
     const remaining = PROPERTIES.filter((property) => !deleted.has(property.propertyId));
     const requested = new URL(route.request().url()).searchParams.get("propertyId");
+    // As the API does: a deleted property keeps its link but is answered like an unlinked one.
+    if (requested && deleted.has(requested))
+      return route.fulfill({
+        status: 403,
+        json: {
+          code: "missing_property_resource_link",
+          detail: "The selected hotel group is not linked to that property.",
+        },
+      });
     const selected =
       remaining.find((property) => property.propertyId === requested) ?? remaining[0]!;
     const status = createAdaptiveHotelSetupStatusMock({
@@ -145,6 +154,15 @@ test("the account admin deletes the open property in two steps and the PMS switc
   await expect(main).toContainText(
     "An account needs at least one property, so its last property can't be deleted.",
   );
+  expect(await page.evaluate(() => localStorage.getItem("selectedHotelId"))).toBe(DEWARI_ID);
+
+  // Another tab or device that still has the deleted property selected falls back to Dewari.
+  await page.evaluate((deletedId) => {
+    localStorage.setItem("selectedHotelId", deletedId);
+    localStorage.setItem("selectedSharedPropertyId", deletedId);
+  }, PMS_WEB_PROPERTY_ID);
+  await page.goto("/dashboard");
+  await expect(page.locator("header button[title]").first()).toContainText("Dewari Villa");
   expect(await page.evaluate(() => localStorage.getItem("selectedHotelId"))).toBe(DEWARI_ID);
 
   expect(deletes).toHaveLength(1);

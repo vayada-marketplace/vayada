@@ -42,6 +42,8 @@ export function blockerText(t: Translate, blocker: HotelPropertyDeletionBlocker)
       return count === 1
         ? t("manageProperties.blockerOpenPayoutsOne")
         : t("manageProperties.blockerOpenPayouts", { count });
+    case "shared_property":
+      return t("manageProperties.blockerSharedProperty");
   }
 }
 

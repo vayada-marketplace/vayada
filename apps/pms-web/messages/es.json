@@ -1250,6 +1250,7 @@
   "manageProperties.blockerOpenPayments": "Hay {count} pagos todavía abiertos. Espera a que se liquiden.",
   "manageProperties.blockerOpenPayoutsOne": "Hay 1 pago al hotel todavía abierto. Espera a que se abone.",
   "manageProperties.blockerOpenPayouts": "Hay {count} pagos al hotel todavía abiertos. Espera a que se abonen.",
+  "manageProperties.blockerSharedProperty": "También pertenece a otra cuenta. Pide al soporte de Vayada que la elimine.",
   "manageProperties.deleteProperty": "Eliminar propiedad",
   "manageProperties.confirmTitle": "Confirmar eliminación",
   "manageProperties.confirmBody": "Para confirmar, escribe el nombre de la propiedad:",

@@ -1246,6 +1246,7 @@
   "manageProperties.blockerOpenPayments": "有 {count} 笔付款尚未完成。请等待其完成。",
   "manageProperties.blockerOpenPayoutsOne": "有 1 笔打款尚未完成。请等待到账。",
   "manageProperties.blockerOpenPayouts": "有 {count} 笔打款尚未完成。请等待到账。",
+  "manageProperties.blockerSharedProperty": "此物业还属于另一个账户。请联系 Vayada 支持团队删除。",
   "manageProperties.deleteProperty": "删除物业",
   "manageProperties.confirmTitle": "确认删除",
   "manageProperties.confirmBody": "请输入物业名称以确认：",

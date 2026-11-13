@@ -4443,6 +4443,7 @@
   "manageProperties.blockerOpenPayments": "{count} payments are still open. Wait until they're settled.",
   "manageProperties.blockerOpenPayoutsOne": "1 payout is still open. Wait until it's paid out.",
   "manageProperties.blockerOpenPayouts": "{count} payouts are still open. Wait until they're paid out.",
+  "manageProperties.blockerSharedProperty": "It also belongs to another account. Ask Vayada support to delete it.",
   "manageProperties.deleteProperty": "Delete property",
   "manageProperties.confirmTitle": "Confirm deletion",
   "manageProperties.confirmBody": "To confirm, type the property name:",

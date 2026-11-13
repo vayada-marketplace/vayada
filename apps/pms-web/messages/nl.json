@@ -1246,6 +1246,7 @@
   "manageProperties.blockerOpenPayments": "Er staan nog {count} betalingen open. Wacht tot ze zijn afgerond.",
   "manageProperties.blockerOpenPayoutsOne": "Er staat nog 1 uitbetaling open. Wacht tot die is uitbetaald.",
   "manageProperties.blockerOpenPayouts": "Er staan nog {count} uitbetalingen open. Wacht tot ze zijn uitbetaald.",
+  "manageProperties.blockerSharedProperty": "De accommodatie hoort ook bij een ander account. Vraag Vayada-support om haar te verwijderen.",
   "manageProperties.deleteProperty": "Accommodatie verwijderen",
   "manageProperties.confirmTitle": "Verwijderen bevestigen",
   "manageProperties.confirmBody": "Typ ter bevestiging de naam van de accommodatie:",

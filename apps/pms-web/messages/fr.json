@@ -1246,6 +1246,7 @@
   "manageProperties.blockerOpenPayments": "{count} paiements sont encore en cours. Attendez qu'ils soient réglés.",
   "manageProperties.blockerOpenPayoutsOne": "1 versement est encore en cours. Attendez qu'il soit effectué.",
   "manageProperties.blockerOpenPayouts": "{count} versements sont encore en cours. Attendez qu'ils soient effectués.",
+  "manageProperties.blockerSharedProperty": "Il appartient aussi à un autre compte. Demandez au support Vayada de le supprimer.",
   "manageProperties.deleteProperty": "Supprimer l'établissement",
   "manageProperties.confirmTitle": "Confirmer la suppression",
   "manageProperties.confirmBody": "Pour confirmer, saisissez le nom de l'établissement :",

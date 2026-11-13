@@ -4457,6 +4457,7 @@
   "manageProperties.blockerOpenPayments": "{count} Zahlungen sind noch offen. Warte, bis sie abgeschlossen sind.",
   "manageProperties.blockerOpenPayoutsOne": "1 Auszahlung ist noch offen. Warte, bis sie ausgezahlt ist.",
   "manageProperties.blockerOpenPayouts": "{count} Auszahlungen sind noch offen. Warte, bis sie ausgezahlt sind.",
+  "manageProperties.blockerSharedProperty": "Sie gehört auch zu einem anderen Konto. Bitte den Vayada-Support, sie zu löschen.",
   "manageProperties.deleteProperty": "Unterkunft löschen",
   "manageProperties.confirmTitle": "Löschen bestätigen",
   "manageProperties.confirmBody": "Gib zur Bestätigung den Namen der Unterkunft ein:",

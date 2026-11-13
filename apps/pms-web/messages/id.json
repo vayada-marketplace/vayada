@@ -1250,6 +1250,7 @@
   "manageProperties.blockerOpenPayments": "{count} pembayaran masih terbuka. Tunggu hingga selesai.",
   "manageProperties.blockerOpenPayoutsOne": "1 pencairan dana masih terbuka. Tunggu hingga dibayarkan.",
   "manageProperties.blockerOpenPayouts": "{count} pencairan dana masih terbuka. Tunggu hingga dibayarkan.",
+  "manageProperties.blockerSharedProperty": "Properti ini juga milik akun lain. Minta dukungan Vayada untuk menghapusnya.",
   "manageProperties.deleteProperty": "Hapus properti",
   "manageProperties.confirmTitle": "Konfirmasi penghapusan",
   "manageProperties.confirmBody": "Untuk mengonfirmasi, ketik nama properti:",

@@ -1246,6 +1246,7 @@
   "manageProperties.blockerOpenPayments": "Незавершённых платежей: {count}. Дождитесь их завершения.",
   "manageProperties.blockerOpenPayoutsOne": "1 выплата ещё не завершена. Дождитесь её завершения.",
   "manageProperties.blockerOpenPayouts": "Незавершённых выплат: {count}. Дождитесь их завершения.",
+  "manageProperties.blockerSharedProperty": "Объект также относится к другому аккаунту. Попросите поддержку Vayada удалить его.",
   "manageProperties.deleteProperty": "Удалить объект",
   "manageProperties.confirmTitle": "Подтвердите удаление",
   "manageProperties.confirmBody": "Для подтверждения введите название объекта:",

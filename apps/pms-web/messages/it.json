@@ -1246,6 +1246,7 @@
   "manageProperties.blockerOpenPayments": "{count} pagamenti sono ancora aperti. Attendi che vengano regolati.",
   "manageProperties.blockerOpenPayoutsOne": "1 versamento è ancora aperto. Attendi che venga pagato.",
   "manageProperties.blockerOpenPayouts": "{count} versamenti sono ancora aperti. Attendi che vengano pagati.",
+  "manageProperties.blockerSharedProperty": "Appartiene anche a un altro account. Chiedi all'assistenza Vayada di eliminarla.",
   "manageProperties.deleteProperty": "Elimina struttura",
   "manageProperties.confirmTitle": "Conferma eliminazione",
   "manageProperties.confirmBody": "Per confermare, digita il nome della struttura:",

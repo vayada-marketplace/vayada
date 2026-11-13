@@ -1246,6 +1246,7 @@
   "manageProperties.blockerOpenPayments": "未完了の支払いが{count}件あります。完了するまでお待ちください。",
   "manageProperties.blockerOpenPayoutsOne": "未完了の入金が1件あります。入金されるまでお待ちください。",
   "manageProperties.blockerOpenPayouts": "未完了の入金が{count}件あります。入金されるまでお待ちください。",
+  "manageProperties.blockerSharedProperty": "この施設は別のアカウントにも属しています。削除はVayadaサポートに依頼してください。",
   "manageProperties.deleteProperty": "施設を削除",
   "manageProperties.confirmTitle": "削除の確認",
   "manageProperties.confirmBody": "確認のため、施設名を入力してください:",
