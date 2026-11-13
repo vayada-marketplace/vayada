@@ -13,7 +13,6 @@ const cardOrder = (page: Page) =>
 async function openHotelPage(page: Page, path: string) {
   await page.goto(path);
   await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
-  await page.getByRole("button", { name: "Reject analytics" }).click();
 }
 
 for (const width of [1440, 390]) {

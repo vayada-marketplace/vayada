@@ -372,7 +372,6 @@ test("says why a room whose one choice can't be booked is not available (VAY-231
   await expect(garden.locator(`[data-offer-key="${key("e")}"]`)).toContainText("Not available");
   await expect(page.getByTestId("select-rate-garden")).toBeDisabled();
   await expect(page.getByTestId("select-rate-garden")).toHaveText("Not available");
-  await page.getByRole("button", { name: "Reject analytics" }).click();
   await garden.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("room-card-not-available-1440.png") });
   const reason = "This room can't be booked for these dates. Try other dates.";

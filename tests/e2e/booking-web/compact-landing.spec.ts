@@ -16,7 +16,6 @@ async function open(page: Page, path: string) {
   await mockAnyPrice(page);
   await page.goto(path);
   await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
-  await page.getByRole("button", { name: "Reject analytics" }).click();
 }
 
 const heroHeight = (page: Page) =>
