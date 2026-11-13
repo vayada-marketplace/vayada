@@ -59,7 +59,7 @@ export class PlatformPropertyLifecycleError extends Error {
   }
 }
 
-type CommandClient = {
+export type CommandClient = {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: readonly unknown[],
@@ -67,7 +67,7 @@ type CommandClient = {
   release(): void;
 };
 
-type CommandPool = { connect(): Promise<CommandClient>; end(): Promise<void> };
+export type CommandPool = { connect(): Promise<CommandClient>; end(): Promise<void> };
 type LockedProperty = {
   lifecycleStatus: PlatformPropertyLifecycleStatus;
   lifecycleRevision: number | string;
@@ -257,7 +257,7 @@ async function updateLifecycle(
   return lifecycleResult(input.propertyId, input.status, result.rows[0]?.lifecycleRevision);
 }
 
-async function retireProperty(
+export async function retireProperty(
   client: CommandClient,
   input: Parameters<PlatformPropertyLifecycleCommandRepository["retire"]>[0],
   at: Date,
@@ -275,7 +275,7 @@ async function retireProperty(
   return lifecycleResult(input.propertyId, "retired", result.rows[0]?.lifecycleRevision);
 }
 
-async function removePublicExposure(
+export async function removePublicExposure(
   client: CommandClient,
   input: { propertyId: string; reason: string; audit: PlatformPropertyLifecycleAudit },
   at: Date,
@@ -293,7 +293,7 @@ async function removePublicExposure(
   );
 }
 
-async function findReplay(
+export async function findReplay(
   client: CommandClient,
   operation: string,
   input: { propertyId: string; idempotencyKey: string },
@@ -323,7 +323,7 @@ async function findReplay(
   return existing.resultJson;
 }
 
-async function reserveIdempotency(
+export async function reserveIdempotency(
   client: CommandClient,
   operation: string,
   input: { propertyId: string; idempotencyKey: string; audit: PlatformPropertyLifecycleAudit },
@@ -351,7 +351,7 @@ async function reserveIdempotency(
   return id;
 }
 
-async function completeIdempotency(
+export async function completeIdempotency(
   client: CommandClient,
   id: string,
   result: PlatformPropertyLifecycleResult,
@@ -375,7 +375,7 @@ async function completeIdempotency(
   if (completed.rowCount !== 1) throw new Error("Lifecycle idempotency completion failed");
 }
 
-async function recordAudit(
+export async function recordAudit(
   client: CommandClient,
   operation: string,
   input: { propertyId: string; reason: string; audit: PlatformPropertyLifecycleAudit },
@@ -412,7 +412,10 @@ async function recordAudit(
   );
 }
 
-async function inTransaction<T>(pool: CommandPool, work: (client: CommandClient) => Promise<T>) {
+export async function inTransaction<T>(
+  pool: CommandPool,
+  work: (client: CommandClient) => Promise<T>,
+) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");

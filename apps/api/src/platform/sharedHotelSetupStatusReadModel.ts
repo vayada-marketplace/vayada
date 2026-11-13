@@ -1766,6 +1766,8 @@ function adaptiveHotelSetupFactsSql(): string {
       WHERE contact.property_id = property.id
         AND contact.channel_type IN ('email', 'phone')
     ) contacts ON TRUE
+    -- VAY-2493: a deleted (retired) property leaves the property switchers and setup.
+    WHERE property.lifecycle_status <> 'retired'
     ORDER BY array_position($1::uuid[], property.id)
   `;
 }
