@@ -52,8 +52,11 @@ export async function fillGuestDetails(page: Page) {
 
 /** A price for whatever is asked (each room 100.00 a stay, pay at the property; each chosen extra
  * `extraMinor`, none by default) and its guest rules, for specs that pass through the steps
- * without testing the price itself. */
-export async function mockAnyPrice(page: Page, { extraMinor }: { extraMinor?: number } = {}) {
+ * without testing the price itself. `specialRequests` switches the hotel's special requests on. */
+export async function mockAnyPrice(
+  page: Page,
+  { extraMinor, specialRequests = false }: { extraMinor?: number; specialRequests?: boolean } = {},
+) {
   const quotes = new Map<string, { issuedAt: string; expiresAt: string }>();
   await page.route("**/bookings/quote", (route) => {
     const { selection, paymentMethod } = route.request().postDataJSON();
@@ -120,7 +123,7 @@ export async function mockAnyPrice(page: Page, { extraMinor }: { extraMinor?: nu
           adultAgeThreshold: 18,
           phoneRequired: true,
           arrivalTimeEnabled: false,
-          specialRequestsEnabled: false,
+          specialRequestsEnabled: specialRequests,
           checkInTime: "15:00",
           checkOutTime: "11:00",
         },

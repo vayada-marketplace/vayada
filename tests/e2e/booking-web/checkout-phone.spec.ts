@@ -15,7 +15,7 @@ const STAY = `/book?checkIn=2026-12-11&checkOut=2026-12-12&adults=2&offer=${offe
 const addon = "55555555-5555-4555-8555-555555555555";
 const BRAND = "#c19a76";
 
-async function mockCheckout(page: Page, { extras = false } = {}) {
+async function mockCheckout(page: Page, { extras = false, specialRequests = false } = {}) {
   // The analytics question is answered, so nothing covers the step.
   await page.addInitScript(
     ({ slug, version }) =>
@@ -72,7 +72,7 @@ async function mockCheckout(page: Page, { extras = false } = {}) {
       },
     }),
   );
-  await mockAnyPrice(page);
+  await mockAnyPrice(page, { specialRequests });
 }
 
 const phone = { width: 390, height: 844 };
@@ -181,7 +181,9 @@ test("fits the details step on a phone's first screen, with the slim bar", async
   expect(last.y).toBe(first.y);
   expect(Math.round(first.height)).toBe(52);
   // The code field is narrow: "+49", the number takes the rest.
-  expect(Math.round((await box(page, page.getByLabel("Country code"))).width)).toBe(96);
+  expect(Math.round((await box(page, page.getByLabel("Country code").locator(".."))).width)).toBe(
+    96,
+  );
   await page.screenshot({ path: testInfo.outputPath("details-390-first-screen.png") });
 
   await fillGuestDetails(page);
@@ -251,7 +253,7 @@ test("ends in the slim brand footer, clear of the bar, under the bar that stays 
   page,
 }, testInfo) => {
   await page.setViewportSize(phone);
-  await mockCheckout(page);
+  await mockCheckout(page, { specialRequests: true });
   await page.goto(STAY);
   const stay = page.getByRole("complementary", { name: "Your stay" });
   await expect(stay.getByTestId("stay-total")).toHaveText("€100");
