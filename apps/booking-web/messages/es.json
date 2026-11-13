@@ -820,7 +820,9 @@
     "errorCountry": "Elige tu país de la lista.",
     "rulesFailed": "No hemos podido comprobar las normas de la casa para este precio. Puedes seguir rellenando tus datos.",
     "retry": "Reintentar",
-    "addSpecialRequest": "Añadir una petición especial"
+    "addSpecialRequest": "Añadir una petición especial",
+    "introOptional": "Lleva 1 minuto. Todos los campos son obligatorios salvo los marcados como opcionales.",
+    "addSpecialRequestHint": "p. ej., llegada tarde, traslado al aeropuerto, necesidades alimentarias. El hotel te responderá por correo electrónico."
   },
   "reviewPay": {
     "title": "Revisar y pagar",
@@ -896,7 +898,10 @@
       "children": "{count, plural, one {# niño} other {# niños}}",
       "edit": "Editar",
       "editStay": "Editar tu estancia",
-      "continueShort": "Continuar"
+      "continueShort": "Continuar",
+      "priceDetails": "Detalles del precio",
+      "taxes": "Impuestos y cargos",
+      "included": "Incluidos"
     },
     "checkingPrice": "Comprobando el precio…",
     "busyConfirm": "Confirmando la reserva…",

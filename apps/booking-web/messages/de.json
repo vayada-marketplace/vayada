@@ -821,7 +821,9 @@
     "errorCountry": "Wählen Sie Ihr Land aus der Liste.",
     "rulesFailed": "Wir konnten die Hausregeln für diesen Preis nicht prüfen. Sie können Ihre Angaben weiter ausfüllen.",
     "retry": "Erneut versuchen",
-    "addSpecialRequest": "Besonderen Wunsch hinzufügen"
+    "addSpecialRequest": "Besonderen Wunsch hinzufügen",
+    "introOptional": "Dauert etwa 1 Minute. Alle Felder sind Pflichtfelder, sofern nicht als optional markiert.",
+    "addSpecialRequestHint": "z. B. späte Ankunft, Flughafentransfer, Ernährungswünsche. Das Hotel antwortet per E-Mail."
   },
   "reviewPay": {
     "title": "Prüfen & bezahlen",
@@ -897,7 +899,10 @@
       "children": "{count, plural, one {# Kind} other {# Kinder}}",
       "edit": "Ändern",
       "editStay": "Aufenthalt ändern",
-      "continueShort": "Weiter"
+      "continueShort": "Weiter",
+      "priceDetails": "Preisdetails",
+      "taxes": "Steuern und Gebühren",
+      "included": "Inklusive"
     },
     "checkingPrice": "Preis wird geprüft …",
     "busyConfirm": "Buchung wird bestätigt …",

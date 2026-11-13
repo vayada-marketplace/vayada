@@ -821,7 +821,9 @@
     "errorCountry": "Choose your country from the list.",
     "rulesFailed": "We couldn’t check the hotel’s guest rules for this price. You can keep filling in your details.",
     "retry": "Try again",
-    "addSpecialRequest": "Add a special request"
+    "addSpecialRequest": "Add a special request",
+    "introOptional": "Takes about 1 minute. All fields are required unless marked optional.",
+    "addSpecialRequestHint": "e.g. late arrival, airport pickup, dietary needs. The hotel will reply by email."
   },
   "reviewPay": {
     "title": "Review & pay",
@@ -897,7 +899,10 @@
       "children": "{count, plural, one {# child} other {# children}}",
       "edit": "Edit",
       "editStay": "Edit your stay",
-      "continueShort": "Continue"
+      "continueShort": "Continue",
+      "priceDetails": "Price details",
+      "taxes": "Taxes & fees",
+      "included": "Included"
     },
     "checkingPrice": "Checking price…",
     "busyConfirm": "Confirming booking…",

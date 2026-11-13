@@ -232,7 +232,12 @@ it("opens the special request from a link on phones, and shows one already writt
   const link = Array.from(document.querySelectorAll("button")).find(
     (button) => button.textContent === "Add a special request(optional)",
   )!;
-  expect(link.className).toContain("lg:hidden");
+  // Timo's boards: a dashed box on phones, what to ask for under it.
+  expect(link.parentElement!.className).toContain("lg:hidden");
+  expect(link.className).toContain("border-dashed");
+  expect(document.getElementById(link.getAttribute("aria-describedby")!)!.textContent).toBe(
+    "e.g. late arrival, airport pickup, dietary needs. The hotel will reply by email.",
+  );
   const request = document.querySelector<HTMLTextAreaElement>('[name="specialRequests"]')!;
   // Still there on wide screens; hidden on a phone until the link is pressed.
   expect(request.closest(".max-lg\\:hidden")).not.toBeNull();
@@ -255,4 +260,23 @@ it("opens the special request from a link on phones, and shows one already writt
     .parentElement!.querySelector('span[aria-hidden="true"]')!;
   expect(code.textContent).toBe("DE +49");
   expect(code.querySelector(".max-lg\\:hidden")!.textContent).toBe("DE ");
+  expect(code.parentElement!.className).toContain("w-24");
+});
+
+// VAY-2495 (Timo's boards): phones mark only the optional fields, and say so in the intro.
+it("says on phones that every field without (optional) is required, without asterisks", () => {
+  render(rules);
+  const intro = document.querySelector("section h2")!.nextElementSibling!;
+  expect(intro.querySelector(".lg\\:hidden")!.textContent).toBe(
+    "Takes about 1 minute. All fields are required unless marked optional.",
+  );
+  expect(intro.querySelector(".max-lg\\:hidden")!.textContent).toBe(
+    "Takes about 1 minute. Fields marked * are required.",
+  );
+  const stars = Array.from(document.querySelectorAll('span[aria-hidden="true"]')).filter(
+    (span) => span.textContent === "*",
+  );
+  expect(stars.length).toBeGreaterThan(0);
+  for (const star of stars) expect(star.className).toContain("max-lg:hidden");
+  expect(input("firstName")!.className).toContain("max-lg:h-[52px]");
 });

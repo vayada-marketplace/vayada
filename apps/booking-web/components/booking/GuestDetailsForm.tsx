@@ -96,11 +96,13 @@ function browserRegion(): string | null {
   return null;
 }
 
+// VAY-2495 (Timo's boards): below lg the fields are 52px tall with 17px text.
 const box = (invalid: boolean) =>
-  `rounded-[10px] border bg-white text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-100 ${
+  `rounded-[10px] border bg-white text-base text-gray-900 max-lg:text-[17px] focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-100 ${
     invalid ? "border-red-600 ring-1 ring-red-600" : "border-gray-300 focus:border-primary-500"
   }`;
-const input = (invalid: boolean) => `w-full h-12 px-3.5 placeholder:text-gray-400 ${box(invalid)}`;
+const input = (invalid: boolean) =>
+  `w-full h-12 max-lg:h-[52px] px-3.5 placeholder:text-gray-400 ${box(invalid)}`;
 const chevron = (
   <svg
     className="h-4 w-4 text-gray-500"
@@ -176,7 +178,8 @@ function Field({
   const id = useId();
   const noteId = `${id}-note`;
   const note = error || hint;
-  // The asterisk stays outside the label, so the field's name is just its label.
+  // The asterisk stays outside the label, so the field's name is just its label. VAY-2495: phones
+  // mark only the optional fields, as their intro says.
   return (
     <div className="min-w-0 md:flex-1">
       <div className="mb-2 flex items-baseline gap-1 text-[15px] font-semibold text-gray-900">
@@ -184,7 +187,11 @@ function Field({
           {label}
           {!required && <span className="font-normal text-gray-500"> {t("optional")}</span>}
         </label>
-        {required && <span aria-hidden="true">*</span>}
+        {required && (
+          <span aria-hidden="true" className="max-lg:hidden">
+            *
+          </span>
+        )}
       </div>
       {children({ id, describedBy: note ? noteId : undefined, invalid: !!error })}
       {error ? (
@@ -242,9 +249,11 @@ function PhoneInput({
     onChange(typedPhone(next));
   };
   return (
-    <div className={`flex h-12 ${box(invalid)} focus-within:ring-2 focus-within:ring-primary-500`}>
+    <div
+      className={`flex h-12 max-lg:h-[52px] ${box(invalid)} focus-within:ring-2 focus-within:ring-primary-500`}
+    >
       {/* VAY-2495: below lg a narrow "+49 ▾"; the number takes the rest. */}
-      <div className="relative w-[88px] shrink-0 rounded-l-[10px] border-r border-gray-300 bg-gray-50 lg:w-28">
+      <div className="relative w-24 shrink-0 rounded-l-[10px] border-r border-gray-300 bg-gray-50 lg:w-28">
         <span
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 flex items-center justify-between pl-3 pr-2.5 font-medium max-lg:gap-1 lg:pl-3.5 lg:pr-3"
@@ -353,10 +362,16 @@ export default function GuestDetailsForm({
       // VAY-2495: no card around the form below lg; the heading is enough.
       className="lg:rounded-2xl lg:border lg:border-gray-200 lg:bg-white lg:p-8"
     >
-      <h2 id={headingId} className="text-xl font-bold text-gray-900">
+      <h2
+        id={headingId}
+        className="text-xl font-bold text-gray-900 max-lg:text-[26px] max-lg:leading-tight"
+      >
         {t("heading")}
       </h2>
-      <p className="mt-1 text-[15px] text-gray-600">{t("intro")}</p>
+      <p className="mt-1 text-[15px] text-gray-600">
+        <span className="lg:hidden">{t("introOptional")}</span>
+        <span className="max-lg:hidden">{t("intro")}</span>
+      </p>
       {errors.length > 0 && (
         // Not a live region: focus moves to the first wrong field, whose message is read with
         // it, and fixing fields doesn't interrupt the screen reader.
@@ -494,28 +509,35 @@ export default function GuestDetailsForm({
           </Field>
         )}
         {rules?.specialRequestsEnabled && !requestOpen && (
-          <button
-            type="button"
-            className="flex items-center gap-1.5 text-[15px] font-semibold text-gray-900 underline-offset-2 hover:underline disabled:opacity-40 lg:hidden"
-            disabled={locked}
-            onClick={() => {
-              // Shown first, so the field can take focus.
-              flushSync(() => setRequestPressed(true));
-              requestBox?.querySelector("textarea")?.focus();
-            }}
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
+          // Timo's boards: a dashed box with what to ask for under it.
+          <div className="lg:hidden">
+            <button
+              type="button"
+              className="flex h-[52px] w-full items-center gap-2.5 rounded-xl border border-dashed border-gray-300 bg-white px-3.5 text-base font-semibold text-gray-900 hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-40"
+              disabled={locked}
+              aria-describedby={`${headingId}-request`}
+              onClick={() => {
+                // Shown first, so the field can take focus.
+                flushSync(() => setRequestPressed(true));
+                requestBox?.querySelector("textarea")?.focus();
+              }}
             >
-              <path strokeLinecap="round" strokeWidth={2} d="M12 5v14M5 12h14" />
-            </svg>
-            {t("addSpecialRequest")}
-            <span className="font-normal text-gray-500">{t("optional")}</span>
-          </button>
+              <svg
+                className="h-[18px] w-[18px] shrink-0 text-primary-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path strokeLinecap="round" strokeWidth={2} d="M12 5v14M5 12h14" />
+              </svg>
+              {t("addSpecialRequest")}
+              <span className="font-normal text-gray-500">{t("optional")}</span>
+            </button>
+            <p id={`${headingId}-request`} className="mt-2 text-sm text-gray-600">
+              {t("addSpecialRequestHint")}
+            </p>
+          </div>
         )}
         {rules?.specialRequestsEnabled && (
           <div ref={setRequestBox} className={requestOpen ? undefined : "max-lg:hidden"}>

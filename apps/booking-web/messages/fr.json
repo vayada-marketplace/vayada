@@ -820,7 +820,9 @@
     "errorCountry": "Choisissez votre pays dans la liste.",
     "rulesFailed": "Nous n’avons pas pu vérifier les règles de l’établissement pour ce prix. Vous pouvez continuer à remplir vos coordonnées.",
     "retry": "Réessayer",
-    "addSpecialRequest": "Ajouter une demande particulière"
+    "addSpecialRequest": "Ajouter une demande particulière",
+    "introOptional": "Environ 1 minute. Tous les champs sont obligatoires, sauf ceux marqués facultatifs.",
+    "addSpecialRequestHint": "p. ex. arrivée tardive, transfert depuis l’aéroport, régime alimentaire. L’hôtel vous répondra par e-mail."
   },
   "reviewPay": {
     "title": "Vérifier et payer",
@@ -896,7 +898,10 @@
       "children": "{count, plural, one {# enfant} other {# enfants}}",
       "edit": "Modifier",
       "editStay": "Modifier votre séjour",
-      "continueShort": "Continuer"
+      "continueShort": "Continuer",
+      "priceDetails": "Détail du prix",
+      "taxes": "Taxes et frais",
+      "included": "Inclus"
     },
     "checkingPrice": "Vérification du prix…",
     "busyConfirm": "Confirmation de la réservation…",

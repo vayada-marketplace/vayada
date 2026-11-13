@@ -6,8 +6,8 @@ import { resolveLocale } from "@/lib/utils";
 import type { SummaryRoom } from "./StaySummary";
 
 /** VAY-2495: the stay in one small card at the top of a phone's details step: a photo, the room
- * and its rate, the dates, nights and guests, and Edit back to the rooms. Wide screens have the
- * "Your stay" card beside the form instead. */
+ * and its rate, the dates, nights and guests, and Edit back to the rooms (a tap anywhere on the
+ * card, as in Timo's boards). Wide screens have the "Your stay" card beside the form instead. */
 export default function StayBrief({
   rooms,
   checkIn,
@@ -49,27 +49,16 @@ export default function StayBrief({
   return (
     <div
       data-testid="stay-brief"
-      className="mb-6 flex items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 lg:hidden"
+      className="relative mb-5 flex items-center gap-3 rounded-[14px] border border-gray-200 bg-gray-50 p-2.5 lg:hidden"
     >
       {photo && (
-        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-          <Image src={photo} alt="" fill className="object-cover" sizes="56px" />
+        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-[10px] bg-gray-100">
+          <Image src={photo} alt="" fill className="object-cover" sizes="48px" />
         </div>
       )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="min-w-0 truncate text-[15px] font-semibold text-gray-900">{title}</p>
-          <button
-            type="button"
-            aria-label={t("stay.editStay")}
-            disabled={locked}
-            onClick={onEdit}
-            className="shrink-0 text-sm font-semibold text-gray-900 underline underline-offset-2 disabled:opacity-40"
-          >
-            {t("stay.edit")}
-          </button>
-        </div>
-        <p className="mt-0.5 text-[13px] text-gray-600">
+        <p className="truncate text-base font-bold text-gray-900">{title}</p>
+        <p className="mt-0.5 text-sm text-gray-600">
           {[
             dates,
             Number.isFinite(nights) && nights > 0 ? t("stay.nights", { count: nights }) : "",
@@ -79,6 +68,16 @@ export default function StayBrief({
             .join(" · ")}
         </p>
       </div>
+      {/* Its tap area covers the whole card. */}
+      <button
+        type="button"
+        aria-label={t("stay.editStay")}
+        disabled={locked}
+        onClick={onEdit}
+        className="shrink-0 rounded-[14px] text-sm font-semibold text-gray-900 underline underline-offset-2 after:absolute after:inset-0 after:rounded-[14px] focus:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary-500 disabled:opacity-40"
+      >
+        {t("stay.edit")}
+      </button>
     </div>
   );
 }

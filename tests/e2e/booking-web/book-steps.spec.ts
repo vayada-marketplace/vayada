@@ -356,7 +356,8 @@ for (const width of [1440, 390]) {
     if (width === 390) await stay.getByRole("button", { name: "Details", exact: true }).click();
     await expect(stay.getByText("Garden breakfast")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`extras-list-${width}.png`) });
-    if (width === 390) await stay.getByRole("button", { name: "Details", exact: true }).click();
+    // VAY-2495: the open sheet shows Close in the place of "Details".
+    if (width === 390) await stay.getByRole("button", { name: "Close" }).click();
     await page.screenshot({ path: testInfo.outputPath(`extras-${width}.png`), fullPage: true });
     await next.click();
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useLocale, useTranslations } from "next-intl";
 import {
   isManualPricingPaymentMethod,
@@ -85,7 +85,11 @@ function useTimeLeft(expiresAt: string | undefined): string | null {
  *
  * VAY-2495: a `slim` card is one row on phones (the total, how the guest pays and "Details" beside
  * the button, about a tenth of the screen); "Details" opens it as a sheet over the page with the
- * lines, the payment box, the cancellation policy and the button. Wide screens are unchanged. */
+ * lines, the payment box, the cancellation policy and the button. Wide screens are unchanged.
+ * Timo's boards: the button fills the row beside the total, "Pay at the hotel · Details" reads as
+ * one link, and the sheet has a handle, "Taxes & fees: Included" and the policy in one sentence;
+ * with the stay in a `brief` card above, the sheet is "Price details" without the stay's rooms and
+ * dates. */
 export default function StaySummary({
   quote,
   checkIn = quote?.checkIn ?? "",
@@ -108,6 +112,7 @@ export default function StaySummary({
   hint,
   payLabel,
   policy,
+  brief = false,
 }: {
   quote?: PublicBookingQuote;
   /** The stay's dates while there is no price. */
@@ -145,6 +150,8 @@ export default function StaySummary({
   payLabel?: string;
   /** The cancellation policy, in the slim bar's sheet on phones. */
   policy?: ReactNode;
+  /** The step shows the stay in a small card (StayBrief): the phone's sheet is the price only. */
+  brief?: boolean;
 }) {
   const t = useTranslations("reviewPay");
   const tRooms = useTranslations("extrasRooms");
@@ -195,19 +202,26 @@ export default function StaySummary({
   // VAY-2495: the slim bar's collapsed row (phones only; its classes are all max-lg).
   const sheet = checkout && slim;
   const row = sheet && !open;
+  // With the stay in its own card above, the sheet leaves out the rooms and dates (phones only).
+  const priceOnly = sheet && brief ? "max-lg:hidden" : "";
   const toggle = useRef<HTMLButtonElement>(null);
+  // "Details" is hidden while the sheet is open: it shows again before it takes focus back.
+  const close = () => {
+    flushSync(() => setOpen(false));
+    toggle.current?.focus();
+  };
   const title = useRef<HTMLHeadingElement>(null);
   // The sheet takes focus when it opens and closes with Escape, focus back on "Details".
   useEffect(() => {
     if (!sheet || !open) return;
     title.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      toggle.current?.focus();
+      if (event.key === "Escape") close();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
+    // `close` reads only refs and the state setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet, open]);
   // While the bar is fixed, other pinned things (the cookie prompt, a toast) sit above it, and the
   // page keeps a focused field clear of it (WCAG 2.4.11).
@@ -253,7 +267,14 @@ export default function StaySummary({
       tabIndex={-1}
       className="text-xl font-bold text-gray-900 outline-none"
     >
-      {t("stay.title")}
+      {sheet && brief ? (
+        <>
+          <span className="lg:hidden">{t("stay.priceDetails")}</span>
+          <span className="max-lg:hidden">{t("stay.title")}</span>
+        </>
+      ) : (
+        t("stay.title")
+      )}
     </h2>
   );
   return (
@@ -262,7 +283,7 @@ export default function StaySummary({
       aria-label={t("stay.title")}
       className={
         checkout
-          ? `z-30 flex flex-col gap-[18px] bg-white max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[85dvh] max-lg:gap-3 max-lg:overflow-y-auto max-lg:border-t max-lg:border-gray-200 max-lg:px-4 max-lg:pb-3 max-lg:pt-3 max-lg:shadow-[0_-6px_20px_rgba(17,24,39,0.06)] lg:sticky lg:top-5 lg:max-h-[calc(100dvh-40px)] lg:rounded-2xl lg:border lg:border-gray-200 lg:p-7${sheet ? ` max-lg:overscroll-contain${open ? " max-lg:rounded-t-2xl max-lg:pt-4" : ""}` : ""}`
+          ? `z-30 flex flex-col gap-[18px] bg-white max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[85dvh] max-lg:gap-3 max-lg:overflow-y-auto max-lg:border-t max-lg:border-gray-200 max-lg:px-4 max-lg:shadow-[0_-6px_20px_rgba(17,24,39,0.06)] lg:sticky lg:top-5 lg:max-h-[calc(100dvh-40px)] lg:rounded-2xl lg:border lg:border-gray-200 lg:p-7 ${sheet ? `max-lg:overscroll-contain max-lg:pb-4 ${open ? "max-lg:rounded-t-3xl max-lg:pt-2" : "max-lg:pt-3"}` : "max-lg:pb-3 max-lg:pt-3"}`
           : "bg-white rounded-2xl border border-gray-200 p-5 md:p-7 lg:sticky lg:top-8 space-y-[18px]"
       }
       // Tabbing out of the open sheet closes it, so the focused field isn't left behind it.
@@ -278,10 +299,16 @@ export default function StaySummary({
           <div
             aria-hidden="true"
             className="fixed inset-0 z-20 bg-gray-900/40 lg:hidden"
-            onClick={() => setOpen(false)}
+            onClick={close}
           />,
           document.body,
         )}
+      {sheet && open && (
+        <span
+          aria-hidden="true"
+          className="mx-auto block h-[5px] w-10 shrink-0 rounded-full bg-gray-300 lg:hidden"
+        />
+      )}
       <div
         id={detailsId}
         className={
@@ -299,10 +326,7 @@ export default function StaySummary({
                 type="button"
                 aria-label={tCommon("close")}
                 className="-m-2.5 rounded-full p-2.5 text-gray-600 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 lg:hidden"
-                onClick={() => {
-                  setOpen(false);
-                  toggle.current?.focus();
-                }}
+                onClick={close}
               >
                 {icon("M6 18L18 6M6 6l12 12", "")}
               </button>
@@ -311,7 +335,7 @@ export default function StaySummary({
             heading
           )}
           {single && (
-            <div className="flex items-start justify-between gap-3">
+            <div className={`flex items-start justify-between gap-3 ${priceOnly}`}>
               <div className="min-w-0">
                 <p className="mt-1 text-base font-semibold text-gray-900">{single.name}</p>
                 <p className="text-sm text-gray-600">
@@ -321,9 +345,9 @@ export default function StaySummary({
               <span className="mt-1 shrink-0">{change(0)}</span>
             </div>
           )}
-          {!single && <p className="mt-1 text-sm text-gray-600">{guests}</p>}
+          {!single && <p className={`mt-1 text-sm text-gray-600 ${priceOnly}`}>{guests}</p>}
         </div>
-        <div className="flex gap-4 border-y border-gray-200 py-[18px]">
+        <div className={`flex gap-4 border-y border-gray-200 py-[18px] ${priceOnly}`}>
           {[
             [
               t("stay.checkIn"),
@@ -359,7 +383,13 @@ export default function StaySummary({
             return single ? (
               <Row
                 key={room.selectionId}
-                label={Number.isFinite(nights) ? t("stay.nights", { count: nights }) : ""}
+                label={
+                  <>
+                    {/* "Villa Five · 1 night" where the sheet leaves out the room above it. */}
+                    {priceOnly && <span className="lg:hidden">{room.name} · </span>}
+                    {Number.isFinite(nights) ? t("stay.nights", { count: nights }) : ""}
+                  </>
+                }
                 value={amount}
               />
             ) : (
@@ -410,15 +440,28 @@ export default function StaySummary({
           )}
           {charges.length > 0 && <Row label={t("stay.fees")} value={money(sum(charges))} />}
           {discount > BigInt(0) && <Row label={t("stay.discount")} value={`−${money(discount)}`} />}
+          {/* The sheet says it as a line; with fees of their own, the line under the total does. */}
+          {sheet && quote && !charges.length && (
+            <div className="flex justify-between gap-4 text-[15px] text-gray-600 lg:hidden">
+              <span>{t("stay.taxes")}</span>
+              <span>{t("stay.included")}</span>
+            </div>
+          )}
         </div>
-        {sheet && policy && <div className="border-t border-gray-200 pt-4 lg:hidden">{policy}</div>}
       </div>
       <div
         className={`shrink-0 space-y-[18px] ${row ? "max-lg:flex max-lg:flex-wrap max-lg:items-center max-lg:gap-x-3 max-lg:gap-y-2 max-lg:space-y-0" : checkout ? "max-lg:space-y-3" : ""}`}
       >
-        <div className={row ? "max-lg:min-w-0 max-lg:flex-1" : undefined}>
+        {/* In the row, a tap anywhere on the total opens the sheet (the toggle's tap area). */}
+        <div
+          className={
+            row ? "max-lg:relative max-lg:min-w-0 max-lg:max-w-[60%] max-lg:shrink-0" : undefined
+          }
+        >
           <div className="flex items-baseline justify-between gap-4">
-            <span className={`text-[17px] font-bold text-gray-900 ${row ? "max-lg:sr-only" : ""}`}>
+            <span
+              className={`text-[17px] font-bold text-gray-900 ${row ? "max-lg:sr-only" : sheet ? "max-lg:text-lg" : ""}`}
+            >
               {t("stay.total")}
             </span>
             <span
@@ -428,7 +471,7 @@ export default function StaySummary({
               className={
                 !quote
                   ? "text-right text-sm text-gray-600"
-                  : `text-[26px] font-bold ${checkout ? "max-lg:text-[22px]" : ""} ${row ? "max-lg:leading-7" : ""} ${ranOut ? "text-gray-400 line-through" : "text-gray-900"}`
+                  : `text-[26px] font-bold ${checkout ? (row ? "max-lg:text-xl max-lg:leading-7" : sheet ? "max-lg:text-lg" : "max-lg:text-[22px]") : ""} ${ranOut ? "text-gray-400 line-through" : "text-gray-900"}`
               }
             >
               {quote ? money(quote.totalMinor) : pending}
@@ -437,8 +480,10 @@ export default function StaySummary({
           <div
             className={`flex items-center justify-between gap-4 ${row ? "max-lg:justify-start max-lg:gap-1" : ""}`}
           >
+            {/* "Pay at the hotel · Details" reads as one link; only "Details" is the button's
+                name. */}
             {row && payLabel && (
-              <span className="min-w-0 truncate text-[13px] text-gray-600 lg:hidden">
+              <span className="min-w-0 truncate text-sm text-gray-600 underline underline-offset-2 lg:hidden">
                 {payLabel} ·
               </span>
             )}
@@ -446,7 +491,7 @@ export default function StaySummary({
               <button
                 ref={toggle}
                 type="button"
-                className={`flex items-center gap-1 text-sm font-semibold text-gray-900 lg:hidden ${row ? "shrink-0" : ""}`}
+                className={`flex items-center gap-1 text-sm lg:hidden ${row ? "min-h-7 shrink-0 text-gray-600 underline underline-offset-2 after:absolute after:inset-0" : sheet ? "max-lg:hidden" : "font-semibold text-gray-900"}`}
                 aria-expanded={open}
                 aria-controls={detailsId}
                 onClick={() => setOpen((value) => !value)}
@@ -457,7 +502,7 @@ export default function StaySummary({
             )}
             {quote && (
               <p
-                className={`ml-auto text-right text-[13px] text-gray-500 ${row ? "max-lg:hidden" : ""}`}
+                className={`ml-auto text-right text-[13px] text-gray-500 ${row || (sheet && !charges.length) ? "max-lg:hidden" : ""}`}
               >
                 {t("stay.includes")}
               </p>
@@ -483,6 +528,9 @@ export default function StaySummary({
                 ))}
           </div>
         )}
+        {sheet && policy && (
+          <div className={`lg:hidden ${row ? "max-lg:hidden" : ""}`}>{policy}</div>
+        )}
         {sheet ? (
           // In the slim row the notice and hint take full-width lines above and below it.
           <div className={`space-y-3 ${row ? "max-lg:contents max-lg:space-y-0" : ""}`}>
@@ -490,11 +538,8 @@ export default function StaySummary({
               <div className={row ? "max-lg:order-first max-lg:w-full" : undefined}>{notice}</div>
             ) : null}
             <div
-              className={
-                row
-                  ? "max-lg:shrink-0 max-lg:[&_button]:h-12 max-lg:[&_button]:w-auto max-lg:[&_button]:px-6 max-lg:[&_button]:text-base"
-                  : undefined
-              }
+              // The button fills the rest of the row.
+              className={row ? "max-lg:min-w-0 max-lg:flex-1" : undefined}
               // Pressed in the sheet, the button closes it: what it marks or opens is behind it.
               onClickCapture={() => setOpen(false)}
             >
