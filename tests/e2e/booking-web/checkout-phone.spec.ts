@@ -109,7 +109,10 @@ test("fits the details step on a phone's first screen, with the slim bar", async
   expect(Math.round((await box(page, header.locator(":scope > div").first())).height)).toBe(56);
   await expect(header.getByRole("button", { name: "Back to rooms" })).toBeVisible();
   await expect(page.getByRole("navigation")).toBeHidden();
+  // (The slim footer at the end of the step has its own Contact.)
   for (const name of ["Contact", "EN", "EUR"])
+    await expect(header.getByRole("button", { name, exact: true })).toHaveCount(0);
+  for (const name of ["EN", "EUR"])
     await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
   // "Step 2 of 3 · Your details" instead of the title and the step circles.
   await expect(header).toContainText("Step 2 of 3 ·Your details");
@@ -310,7 +313,8 @@ test("a tap anywhere on the stay's card is Edit, back to the rooms", async ({ pa
   await page.goto(STAY);
   await expect(page.getByRole("button", { name: "Edit your stay" })).toBeVisible();
   // On its photo, far from the word "Edit".
-  await page.getByTestId("stay-brief").locator("img").click();
+  const photo = await box(page, page.getByTestId("stay-brief").locator("img"));
+  await page.mouse.click(photo.x + photo.width / 2, photo.y + photo.height / 2);
   await expect(page).toHaveURL(/\/\?checkIn=2026-12-11&checkOut=2026-12-12&adults=2$/);
 });
 

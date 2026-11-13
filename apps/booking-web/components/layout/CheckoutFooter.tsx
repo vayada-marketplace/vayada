@@ -19,7 +19,8 @@ export default function CheckoutFooter() {
   const [contactOpen, setContactOpen] = useState(false);
   const contactId = useId();
   const { phone, whatsapp, email } = hotel.contact;
-  // The same links as the Contact menu (wa.me takes the digits only, VAY-2473).
+  // The stay's own contacts, as the full footer shows them, linked as the Contact menu links them
+  // (wa.me takes the digits only, VAY-2473).
   const contacts = [
     phone?.trim() && {
       label: tNav("phone"),
@@ -82,7 +83,8 @@ export default function CheckoutFooter() {
       <p className="mt-3 text-[13px]">
         {t("poweredBy")} <span className="font-semibold">vayada</span>
       </p>
-      <FindBookingModal open={findBookingOpen} onClose={() => setFindBookingOpen(false)} />
+      {/* Only while open: the full footer, hidden here, has its own (one dialog id at a time). */}
+      {findBookingOpen && <FindBookingModal open onClose={() => setFindBookingOpen(false)} />}
     </footer>
   );
 }

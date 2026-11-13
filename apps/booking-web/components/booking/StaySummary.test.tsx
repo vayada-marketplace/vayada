@@ -327,6 +327,11 @@ it("is “Price details” on phones with a brief, without the stay's room and d
     action: createElement("button", { type: "submit" }, "Continue to review"),
   });
   const aside = document.querySelector("aside")!;
+  const details = () =>
+    Array.from(aside.querySelectorAll("button")).find((b) => b.textContent === "Details")!;
+  // Open: the closed sheet is hidden on phones as a whole.
+  act(() => details().click());
+  expect(details().getAttribute("aria-expanded")).toBe("true");
   const heading = aside.querySelector("#stay-summary-title")!;
   expect(heading.querySelector(".lg\\:hidden")!.textContent).toBe("Price details");
   expect(heading.querySelector(".max-lg\\:hidden")!.textContent).toBe("Your stay");
@@ -343,8 +348,9 @@ it("is “Price details” on phones with a brief, without the stay's room and d
     (span) => span.textContent === "Villa Four · ",
   )!;
   expect(name.className).toContain("lg:hidden");
-  // Without a brief (Extras) the sheet keeps the stay.
+  // Without a brief (Extras) the open sheet keeps the stay.
   render({ slim: true, onChangeRoom: () => {}, action: createElement("button", null, "Go") });
+  expect(details().getAttribute("aria-expanded")).toBe("true");
   expect(
     document.querySelector('[aria-label="Change Room 1"]')!.closest(".max-lg\\:hidden"),
   ).toBeNull();

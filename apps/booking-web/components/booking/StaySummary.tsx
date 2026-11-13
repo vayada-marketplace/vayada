@@ -220,8 +220,6 @@ export default function StaySummary({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-    // `close` reads only refs and the state setter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet, open]);
   // While the bar is fixed, other pinned things (the cookie prompt, a toast) sit above it, and the
   // page keeps a focused field clear of it (WCAG 2.4.11).
@@ -471,7 +469,7 @@ export default function StaySummary({
               className={
                 !quote
                   ? "text-right text-sm text-gray-600"
-                  : `text-[26px] font-bold ${checkout ? (row ? "max-lg:text-xl max-lg:leading-7" : sheet ? "max-lg:text-lg" : "max-lg:text-[22px]") : ""} ${ranOut ? "text-gray-400 line-through" : "text-gray-900"}`
+                  : `text-[26px] font-bold ${checkout ? (row ? "max-lg:text-xl max-lg:leading-6" : sheet ? "max-lg:text-lg" : "max-lg:text-[22px]") : ""} ${ranOut ? "text-gray-400 line-through" : "text-gray-900"}`
               }
             >
               {quote ? money(quote.totalMinor) : pending}

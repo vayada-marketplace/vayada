@@ -29,9 +29,9 @@ const backIcon = (className: string) => (
  * VAY-2495: below lg (where "Your stay" is a bar at the bottom) the checkout has its own 56px bar:
  * a back arrow and the property's name, no Contact, language or currency. Under it, "Step 2 of 3 ·
  * Your details" with a thin progress bar takes the place of the title and the step indicator.
- * Timo's boards: the bar stays at the top while the page scrolls, the name in the hotel's colour and
- * font on one line, the progress in one segment per step; "Your details" sits on white and ends in
- * a slim footer. */
+ * Timo's boards: the name in the hotel's colour and font on one line, the progress in one segment
+ * per step; on "Your details" the bar stays at the top while the page scrolls, and the step sits on
+ * white and ends in a slim footer. */
 export default function BookShell({
   steps,
   current,
@@ -76,10 +76,10 @@ export default function BookShell({
       <div className="max-lg:hidden">
         <BookingNavigation solid />
       </div>
-      {/* Stays at the top; globals.css keeps a focused field clear of it. */}
+      {/* On "Your details" it stays at the top; globals.css keeps a focused field clear of it. */}
       <header
-        data-checkout-header
-        className="sticky top-0 z-10 border-b border-gray-200 bg-white lg:hidden"
+        data-checkout-header={details || undefined}
+        className={`border-b border-gray-200 bg-white lg:hidden${details ? " sticky top-0 z-10" : ""}`}
       >
         <div className="relative flex h-14 items-center px-2">
           {arrow && (
