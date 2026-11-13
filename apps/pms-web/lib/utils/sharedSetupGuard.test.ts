@@ -132,6 +132,41 @@ describe("resolvePmsSetupGuard", () => {
     expect(storage.getItem("selectedSharedPropertyId")).toBe("property-exit");
   });
 
+  it("forgets a deleted stored property in both keys before asking again", async () => {
+    const missingPropertyError = Object.assign(new Error("Missing property resource link"), {
+      status: 403,
+      data: { code: "missing_property_resource_link" },
+    });
+    const storage = memoryStorage({
+      selectedHotelId: "property-deleted",
+      selectedSharedPropertyId: "property-deleted",
+    });
+    const storedOnRetry: Array<string | null> = [];
+    const api = {
+      getStatus: vi.fn(async (input: { propertyId?: string | null }) => {
+        if (input.propertyId) throw missingPropertyError;
+        storedOnRetry.push(
+          storage.getItem("selectedHotelId"),
+          storage.getItem("selectedSharedPropertyId"),
+        );
+        return status({
+          product: "pms",
+          propertyId: "property-remaining",
+          decision: "enter",
+          destinationRouteKey: "pms.workspace",
+        });
+      }),
+    };
+
+    await expect(resolvePmsSetupGuard("/dashboard", api, storage)).resolves.toMatchObject({
+      action: "enter_product",
+      propertyId: "property-remaining",
+    });
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
+    expect(storedOnRetry).toEqual([null, null]);
+    expect(storage.getItem("selectedHotelId")).toBe("property-remaining");
+  });
+
   it("does not replace an invalid explicit setup-exit property with another property", async () => {
     const missingPropertyError = Object.assign(new Error("Missing property resource link"), {
       status: 403,
