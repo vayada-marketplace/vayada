@@ -152,8 +152,9 @@ function HomePageContent() {
 
   return (
     // Clipped, not hidden (VAY-2494): a hidden overflow made this a scroll container, so the
-    // search card's `sticky` never stuck.
-    <div className="min-h-screen bg-white overflow-x-clip">
+    // search card's `sticky` never stuck. `overflow-x-clip` comes later in the CSS and wins;
+    // browsers without `clip` (iOS before 16) keep `hidden`, as before.
+    <div className="min-h-screen bg-white overflow-x-hidden overflow-x-clip">
       <PublicStructuredData hotel={hotel} rooms={[]} locale={locale} />
 
       <StayHero
@@ -263,7 +264,13 @@ function HomePageContent() {
       />
 
       {/* Main Content */}
-      <StayRooms model={stayRooms} onEditDates={editDates} onEditGuests={openGuests} searchBar />
+      {/* The compact bar waits while a panel of the card is open, so it never covers one. */}
+      <StayRooms
+        model={stayRooms}
+        onEditDates={editDates}
+        onEditGuests={openGuests}
+        searchBar={panel === null}
+      />
 
       {mapProperty && rooms?.length && !severalPlaces ? (
         <RoomsLocationMap

@@ -394,11 +394,17 @@ export function overviewHref(
 
 const day = (date: string) => new Date(`${date}T00:00:00Z`);
 
-/** "12 – 14 Nov" (or "30 Nov – 2 Dec") in the guest's language. */
-export function formatStayRange(checkIn: string, checkOut: string, locale: string): string {
+/** "12 – 14 Nov" (or "30 Nov – 2 Dec") in the guest's language; `withYear`: "5 – 7 Jan 2027". */
+export function formatStayRange(
+  checkIn: string,
+  checkOut: string,
+  locale: string,
+  withYear = false,
+): string {
   return new Intl.DateTimeFormat(resolveLocale(locale), {
     day: "numeric",
     month: "short",
+    ...(withYear && { year: "numeric" }),
     timeZone: "UTC",
   }).formatRange(day(checkIn), day(checkOut));
 }

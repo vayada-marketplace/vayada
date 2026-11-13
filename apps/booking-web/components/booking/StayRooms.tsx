@@ -105,9 +105,15 @@ export default function StayRooms({
   } = model;
   const nights = calculateNights(checkIn, checkOut);
   // Phones: "13–14 Nov · 2 adults" (and the rooms of a group) for the line under the heading and
-  // the compact bar.
+  // the compact bar; the year only for a stay that isn't this year's, as on the search card.
+  const thisYear = String(new Date().getFullYear());
   const stayLine = [
-    formatStayRange(checkIn, checkOut, locale),
+    formatStayRange(
+      checkIn,
+      checkOut,
+      locale,
+      !checkIn.startsWith(thisYear) || !checkOut.startsWith(thisYear),
+    ),
     t("roomsProgress.guests", { adults, children: effectiveChildren }),
     pickMode && t("roomsCount", { count: roomCount }),
   ]

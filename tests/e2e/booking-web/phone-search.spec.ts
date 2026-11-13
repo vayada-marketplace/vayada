@@ -143,8 +143,8 @@ test.describe("on a phone", () => {
     // The top bar as it was: Contact, the language and the currency.
     const nav = page.locator("nav");
     await expect(nav.getByRole("button", { name: "Contact", exact: true })).toBeVisible();
-    await expect(nav.getByText("EN", { exact: true }).first()).toBeVisible();
-    await expect(nav.getByText("EUR", { exact: true }).first()).toBeVisible();
+    await expect(nav.getByText("EN", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(nav.getByText("EUR", { exact: true }).filter({ visible: true })).toBeVisible();
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       390,
@@ -163,6 +163,9 @@ test.describe("on a phone", () => {
     await expect(page.getByTestId("phone-stay-dates")).toHaveText(
       "Tue, 5 Jan 2027 → Thu, 7 Jan 2027",
     );
+    await expect(page.getByTestId("rooms-found")).toHaveText(
+      /^3 options · 5\s*–\s*7 Jan 2027 · 2 adults$/,
+    );
   });
 
   test("Available stays on one line with what the search found, and the sort in a sheet", async ({
@@ -171,12 +174,19 @@ test.describe("on a phone", () => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await open(page);
     const heading = page.getByRole("heading", { name: "Available stays" });
-    const [h, card] = [(await heading.boundingBox())!, await box(page, "#stay-search")];
+    const [h, row, card] = [
+      (await heading.boundingBox())!,
+      (await heading.locator("..").boundingBox())!,
+      await box(page, "#stay-search"),
+    ];
     const lineHeight = await heading.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     expect(h.height).toBeLessThan(lineHeight * 1.5);
-    // 36px under the search card.
-    expect(Math.round(h.y - (card.y + card.height))).toBe(36);
-    await expect(page.getByTestId("rooms-found")).toHaveText("3 options · 13–14 Nov · 2 adults");
+    // The heading's row starts 36px under the search card.
+    expect(Math.round(row.y - (card.y + card.height))).toBe(36);
+    // The range as the browser's Intl writes it ("13 – 14 Nov", with thin spaces).
+    await expect(page.getByTestId("rooms-found")).toHaveText(
+      /^3 options · 13\s*–\s*14 Nov · 2 adults$/,
+    );
 
     const sort = page.getByRole("button", { name: "Sort", exact: true });
     const s = (await sort.boundingBox())!;
@@ -232,7 +242,7 @@ test.describe("on a phone", () => {
     await page.getByTestId("room-card-mid").scrollIntoViewIfNeeded();
     await expect(bar).toBeVisible();
     expect(await bar.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390, height: 56 });
-    const edit = bar.getByRole("button", { name: /13–14 Nov · 2 adults.*Edit/ });
+    const edit = bar.getByRole("button", { name: /13\s*–\s*14 Nov · 2 adults.*Edit/ });
     await expect(edit).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("phone-scrolled.png") });
 
@@ -247,6 +257,10 @@ test.describe("on a phone", () => {
     await edit.click();
     await expect(page.getByText("Select your dates")).toBeVisible();
     await expect(page.locator("#stay-search")).toBeInViewport();
+    await expect(bar).toHaveCount(0);
+    // While a panel is open the bar waits, even with the card scrolled away: it never covers it.
+    await page.evaluate(() => window.scrollBy(0, 700));
+    await expect(page.getByText("Select your dates")).toBeAttached();
     await expect(bar).toHaveCount(0);
     await assertHealthy();
   });
