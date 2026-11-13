@@ -61,7 +61,8 @@
     "rooms": "Kamar",
     "addons": "Tambahan",
     "details": "Detail",
-    "payment": "Tinjau & bayar"
+    "payment": "Tinjau & bayar",
+    "progress": "Langkah {current} dari {total}"
   },
   "home": {
     "guestCountUnsupported": "Pencarian online tidak mendukung grup Anda sebanyak {count} tamu. Coba kurangi jumlah tamu atau hubungi kami.",
@@ -810,7 +811,8 @@
     "errorPhoneInvalid": "Masukkan nomor telepon yang valid.",
     "errorCountry": "Pilih negara Anda dari daftar.",
     "rulesFailed": "Kami tidak dapat memeriksa aturan tamu hotel untuk harga ini. Anda tetap dapat mengisi data Anda.",
-    "retry": "Coba lagi"
+    "retry": "Coba lagi",
+    "addSpecialRequest": "Tambahkan permintaan khusus"
   },
   "reviewPay": {
     "title": "Tinjau & bayar",
@@ -883,7 +885,9 @@
       "instant": "Konfirmasi instan lewat email",
       "methods": "Bayar {methods}",
       "adults": "{count, plural, one {# dewasa} other {# dewasa}}",
-      "children": "{count, plural, one {# anak} other {# anak}}"
+      "children": "{count, plural, one {# anak} other {# anak}}",
+      "edit": "Ubah",
+      "editStay": "Ubah masa inap"
     },
     "checkingPrice": "Memeriksa harga…",
     "busyConfirm": "Mengonfirmasi pemesanan…",

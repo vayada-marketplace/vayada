@@ -367,6 +367,9 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("region", { name: "Guest rules" })).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Terms & conditions" })).toHaveCount(0);
     await fillGuestDetails(page);
+    // VAY-2495: on a phone the special request opens from a link.
+    if (width === 390)
+      await page.getByRole("button", { name: "Add a special request (optional)" }).click();
     await page.getByLabel("Special requests (optional)").fill("A quiet room, please.");
     await page.reload();
     await expect(page).toHaveURL(/[?&]step=details/);
@@ -667,7 +670,8 @@ test("shows when each extra happens and keeps Continue in view with six extras",
     [id(3), null],
     [id(4), null],
   ]);
-  await expect(next).toHaveText("Continue to your details");
+  // VAY-2495: its whole name; a phone shows "Continue".
+  await expect(next).toHaveAccessibleName("Continue to your details");
   await expect(next).toBeInViewport();
   const stay = page.getByRole("complementary", { name: "Your stay" });
   for (const line of [

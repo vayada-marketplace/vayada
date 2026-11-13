@@ -61,7 +61,8 @@
     "rooms": "Habitaciones",
     "addons": "Extras",
     "details": "Detalles",
-    "payment": "Revisar y pagar"
+    "payment": "Revisar y pagar",
+    "progress": "Paso {current} de {total}"
   },
   "home": {
     "guestCountUnsupported": "La búsqueda en línea no admite su grupo de {count} huéspedes. Pruebe con menos huéspedes o contáctenos.",
@@ -810,7 +811,8 @@
     "errorPhoneInvalid": "Escribe un número de teléfono válido.",
     "errorCountry": "Elige tu país de la lista.",
     "rulesFailed": "No hemos podido comprobar las normas de la casa para este precio. Puedes seguir rellenando tus datos.",
-    "retry": "Reintentar"
+    "retry": "Reintentar",
+    "addSpecialRequest": "Añadir una petición especial"
   },
   "reviewPay": {
     "title": "Revisar y pagar",
@@ -883,7 +885,9 @@
       "instant": "Confirmación inmediata por correo",
       "methods": "Paga {methods}",
       "adults": "{count, plural, one {# adulto} other {# adultos}}",
-      "children": "{count, plural, one {# niño} other {# niños}}"
+      "children": "{count, plural, one {# niño} other {# niños}}",
+      "edit": "Editar",
+      "editStay": "Editar tu estancia"
     },
     "checkingPrice": "Comprobando el precio…",
     "busyConfirm": "Confirmando la reserva…",

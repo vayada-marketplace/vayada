@@ -44,6 +44,8 @@ import StaySummary, {
   type SummaryExtra,
   type SummaryRoom,
 } from "@/components/booking/StaySummary";
+import StayBrief from "@/components/booking/StayBrief";
+import CancellationPolicy from "@/components/booking/CancellationPolicy";
 import GuestDetailsForm, {
   acceptanceGuest,
   emptyGuest,
@@ -62,10 +64,11 @@ import BeforeYouBook, { BookingConsent } from "@/components/booking/BeforeYouBoo
 import ReplacementBookingConfirmation, {
   type BookingAttempt,
 } from "@/components/booking/ReplacementBookingConfirmation";
-import type {
-  PricingPaymentMethod,
-  PublicBookingQuote,
-  PublicQuoteGuestDisclosure,
+import {
+  policyBlocks,
+  type PricingPaymentMethod,
+  type PublicBookingQuote,
+  type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import {
   bookingPageMethodsForArrival,
@@ -1204,41 +1207,69 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         : undefined,
     onChangeRoom: changeRoom,
   };
+  // VAY-2495: Extras and Details have the slim bar on phones: how the guest pays beside the total,
+  // the cancellation policy in its sheet, and "Continue" for the button (its name stays whole).
+  const sheetPolicies = quote ? policyBlocks(quote, { today: hotelDate, roomNames }) : [];
+  const slimBar = {
+    slim: true,
+    notice: priceNotice,
+    payLabel: pricedOption?.title,
+    policy:
+      quote && sheetPolicies.length ? (
+        <div className="space-y-4">
+          {sheetPolicies.map((block) => (
+            <CancellationPolicy
+              key={block.key}
+              block={block}
+              titled={sheetPolicies.length > 1}
+              formatMoney={(minor) => money(minor, quote.currency)}
+              startOpen={false}
+            />
+          ))}
+        </div>
+      ) : null,
+  };
+  const slimLabel = (label: string) => (
+    <>
+      <span className="lg:hidden">{tCommon("continue")}</span>
+      <span className="max-lg:hidden">{label}</span>
+    </>
+  );
+  const extrasLabel =
+    addonError || !chosenExtras.length
+      ? tAddons("continueWithoutExtras")
+      : tAddons("continueToDetails");
   // VAY-2391: with an extra still waiting for its day, Continue says what's missing instead of
   // going on. A refused price says so right above it, in view (VAY-2309).
   const extrasAction = (
-    <div className="space-y-3">
-      {priceNotice}
-      <button
-        type="button"
-        className={stayButton(!!missingDay)}
-        disabled={!missingDay && (addons === null || !quote)}
-        onClick={() => {
-          if (missingDay) {
-            setExtrasTried(true);
-            // The card that still needs its day may be out of view.
-            document
-              .querySelector(`article[aria-label="${CSS.escape(missingDay)}"]`)
-              ?.scrollIntoView({ block: "center", behavior: "smooth" });
-            return;
-          }
-          trackEvent(slug, "addons_step_passed", {
-            extrasShown: true,
-            extrasChosen: !!addons?.length,
-          });
-          go(next);
-        }}
-      >
-        {addonError || !chosenExtras.length
-          ? tAddons("continueWithoutExtras")
-          : tAddons("continueToDetails")}
-      </button>
-      {extrasTried && missingDay && (
-        <p role="alert" className="text-sm text-amber-700">
-          {tAddons("chooseDayFor", { name: missingDay })}
-        </p>
-      )}
-    </div>
+    <button
+      type="button"
+      aria-label={extrasLabel}
+      className={stayButton(!!missingDay)}
+      disabled={!missingDay && (addons === null || !quote)}
+      onClick={() => {
+        if (missingDay) {
+          setExtrasTried(true);
+          // The card that still needs its day may be out of view.
+          document
+            .querySelector(`article[aria-label="${CSS.escape(missingDay)}"]`)
+            ?.scrollIntoView({ block: "center", behavior: "smooth" });
+          return;
+        }
+        trackEvent(slug, "addons_step_passed", {
+          extrasShown: true,
+          extrasChosen: !!addons?.length,
+        });
+        go(next);
+      }}
+    >
+      {slimLabel(extrasLabel)}
+    </button>
+  );
+  const extrasHint = extrasTried && missingDay && (
+    <p role="alert" className="text-sm text-amber-700">
+      {tAddons("chooseDayFor", { name: missingDay })}
+    </p>
   );
   // Review: an expired, refused or changed price, said above the tick and Confirm. "Checking
   // price…" shows in the total's place.
@@ -1365,9 +1396,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             card={
               <StaySummary
                 {...summary}
+                {...slimBar}
                 quote={quote ?? undefined}
                 onRemoveRoom={fromPicks && summaryRooms.length > 1 ? removeRoomFromExtras : null}
                 action={extrasAction}
+                hint={extrasHint}
               />
             }
           >
@@ -1438,24 +1471,33 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           // VAY-2347: the form, then "Your stay" with Continue (a bar on a phone). Continue is always
           // pressable; missing fields are marked and the first one gets focus.
           <form noValidate onSubmit={continueToReview}>
+            {/* VAY-2495: on a phone the stay sits in one small card above the form. */}
+            <StayBrief
+              rooms={summaryRooms}
+              checkIn={checkIn}
+              checkOut={checkOut}
+              guests={guestsLine}
+              image={hotel?.images?.[0]}
+              onEdit={backToRooms}
+              locked={attemptOpen}
+            />
             <CheckoutColumns
               card={
                 <StaySummary
                   {...summary}
+                  {...slimBar}
                   quote={quote ?? undefined}
                   action={
-                    <div className="space-y-3">
-                      {priceNotice}
-                      {/* Pressable while fields are missing, so it can mark them; with everything
-                          filled in it waits for the price, which step 3 needs. */}
-                      <button
-                        type="submit"
-                        className={stayButton()}
-                        disabled={detailsComplete && !quote}
-                      >
-                        {tDetails("continue")}
-                      </button>
-                    </div>
+                    // Pressable while fields are missing, so it can mark them; with everything
+                    // filled in it waits for the price, which step 3 needs.
+                    <button
+                      type="submit"
+                      aria-label={tDetails("continue")}
+                      className={stayButton()}
+                      disabled={detailsComplete && !quote}
+                    >
+                      {slimLabel(tDetails("continue"))}
+                    </button>
                   }
                 />
               }

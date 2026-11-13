@@ -228,3 +228,77 @@ it("offers Change and, for a group, Remove on each room", () => {
     (document.querySelector('[aria-label="Change Room 1"]') as HTMLButtonElement).disabled,
   ).toBe(true);
 });
+
+// VAY-2495: Extras and Details have a slim bar on phones: one row, the rest in a sheet.
+it("is one row on phones when slim, and opens the lines, payment box and policy as a sheet", () => {
+  render({
+    box: [
+      { label: "Pay now", value: "US$0" },
+      { label: "At the hotel", value: "US$175" },
+    ],
+    slim: true,
+    payLabel: "Pay at the hotel",
+    notice: createElement("p", { role: "alert" }, "Your price changed."),
+    hint: createElement("p", null, "Choose a day for Late check-out."),
+    policy: createElement("p", null, "Cancellation policy"),
+    action: createElement("button", { type: "submit" }, "Continue to review"),
+  });
+  const aside = document.querySelector("aside")!;
+  const button = (name: string) =>
+    Array.from(aside.querySelectorAll("button")).find((b) => b.textContent === name)!;
+  const toggle = button("Details");
+  const details = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+  const total = aside.querySelector('[data-testid="stay-total"]')!;
+  const boxLines = Array.from(aside.querySelectorAll("div")).find((div) =>
+    div.className.includes("bg-gray-50"),
+  )!;
+  // The row: the total with how the guest pays and "Details", the button beside them; the
+  // "Total" word stays for screen readers, the payment box waits for the sheet.
+  expect(details.className).toContain("max-lg:hidden");
+  expect(text()).toContain("Pay at the hotel ·Details");
+  expect(total.previousElementSibling!.className).toContain("max-lg:sr-only");
+  expect(boxLines.className).toContain("max-lg:hidden");
+  expect(button("Continue to review").parentElement!.className).toContain("max-lg:shrink-0");
+  // The notice and hint are full-width lines above and below the row.
+  expect(text()).toMatch(/Your price changed\.Continue to reviewChoose a day/);
+  expect(text()).toContain("Cancellation policy");
+  expect(document.body.querySelector(".bg-gray-900\\/40")).toBeNull();
+  // "Details" opens the sheet over a backdrop, with the policy and a Close button.
+  act(() => toggle.click());
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(details.className).not.toContain("max-lg:hidden");
+  expect(text()).not.toContain("Pay at the hotel ·");
+  expect(boxLines.className).not.toContain("max-lg:hidden");
+  expect(total.previousElementSibling!.className).not.toContain("sr-only");
+  expect(document.body.querySelector(".bg-gray-900\\/40")).not.toBeNull();
+  // Escape closes it, with focus back on "Details".
+  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(toggle);
+  expect(document.body.querySelector(".bg-gray-900\\/40")).toBeNull();
+  act(() => toggle.click());
+  act(() => (document.querySelector('aside [aria-label="Close"]') as HTMLButtonElement).click());
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  // So does a tap on the backdrop.
+  act(() => toggle.click());
+  act(() => (document.body.querySelector(".bg-gray-900\\/40") as HTMLElement).click());
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+});
+
+it("keeps the full bar without slim (Review) and shows no Close or policy", () => {
+  render({
+    box: [
+      { label: "Pay now", value: "US$0" },
+      { label: "At the hotel", value: "US$175" },
+    ],
+    payLabel: "Pay at the hotel",
+    policy: createElement("p", null, "Cancellation policy"),
+    action: createElement("button", { type: "button" }, "Confirm booking"),
+  });
+  expect(text()).not.toContain("Pay at the hotel ·");
+  expect(text()).not.toContain("Cancellation policy");
+  expect(document.querySelector('aside [aria-label="Close"]')).toBeNull();
+  expect(
+    document.querySelector('[data-testid="stay-total"]')!.previousElementSibling!.className,
+  ).not.toContain("sr-only");
+});

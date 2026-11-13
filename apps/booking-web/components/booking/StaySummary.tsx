@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useLocale, useTranslations } from "next-intl";
 import {
   isManualPricingPaymentMethod,
@@ -80,7 +81,11 @@ function useTimeLeft(expiresAt: string | undefined): string | null {
  * VAY-2416: with an `action` it is the step's checkout card. The step's main button sits at its
  * bottom (below the tick on Review); it is sticky beside the step on wide screens and a bar fixed to
  * the bottom of the screen on phones, its lines behind "Details". It also stands without a price
- * yet, with `pending` in the total's place. */
+ * yet, with `pending` in the total's place.
+ *
+ * VAY-2495: a `slim` card is one row on phones (the total, how the guest pays and "Details" beside
+ * the button, about a tenth of the screen); "Details" opens it as a sheet over the page with the
+ * lines, the payment box, the cancellation policy and the button. Wide screens are unchanged. */
 export default function StaySummary({
   quote,
   checkIn = quote?.checkIn ?? "",
@@ -98,6 +103,11 @@ export default function StaySummary({
   onRemoveRoom,
   locked = false,
   action,
+  slim = false,
+  notice,
+  hint,
+  payLabel,
+  policy,
 }: {
   quote?: PublicBookingQuote;
   /** The stay's dates while there is no price. */
@@ -125,11 +135,22 @@ export default function StaySummary({
   locked?: boolean;
   /** The step's button with what it says about it (VAY-2416). */
   action?: ReactNode;
+  /** VAY-2495: one row on phones (Extras and Details); Review keeps the full bar. */
+  slim?: boolean;
+  /** What the price says, right above the button (a full-width line over the slim bar). */
+  notice?: ReactNode;
+  /** What the button says when pressed too early, right below it. */
+  hint?: ReactNode;
+  /** How the guest pays ("Pay at the hotel"), beside "Details" in the slim bar. */
+  payLabel?: string;
+  /** The cancellation policy, in the slim bar's sheet on phones. */
+  policy?: ReactNode;
 }) {
   const t = useTranslations("reviewPay");
   const tRooms = useTranslations("extrasRooms");
   const tHome = useTranslations("home");
   const tAddons = useTranslations("addons");
+  const tCommon = useTranslations("common");
   const locale = useLocale();
   const timeLeft = useTimeLeft(quote?.expiresAt);
   const currency = quote?.currency ?? "";
@@ -171,6 +192,21 @@ export default function StaySummary({
   // Phones: the bar shows the total and the button; "Details" opens the rest above them.
   const [open, setOpen] = useState(false);
   const detailsId = useId();
+  // VAY-2495: the slim bar's collapsed row (phones only; its classes are all max-lg).
+  const sheet = checkout && slim;
+  const row = sheet && !open;
+  const toggle = useRef<HTMLButtonElement>(null);
+  // The sheet closes with Escape, focus back on "Details".
+  useEffect(() => {
+    if (!sheet || !open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      toggle.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sheet, open]);
   // While the bar is fixed, other pinned things (the cookie prompt, a toast) sit above it, and the
   // page keeps a focused field clear of it (WCAG 2.4.11).
   const card = useRef<HTMLElement>(null);
@@ -208,16 +244,36 @@ export default function StaySummary({
       </button>
     );
   const hidden = checkout && !open ? "max-lg:hidden" : "";
+  const heading = (
+    <h2
+      id="stay-summary-title"
+      tabIndex={-1}
+      className="text-xl font-bold text-gray-900 outline-none"
+    >
+      {t("stay.title")}
+    </h2>
+  );
   return (
     <aside
       ref={card}
       aria-label={t("stay.title")}
       className={
         checkout
-          ? "z-30 flex flex-col gap-[18px] bg-white max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[85dvh] max-lg:gap-3 max-lg:overflow-y-auto max-lg:border-t max-lg:border-gray-200 max-lg:px-4 max-lg:pb-3 max-lg:pt-3 max-lg:shadow-[0_-6px_20px_rgba(17,24,39,0.06)] lg:sticky lg:top-5 lg:max-h-[calc(100dvh-40px)] lg:rounded-2xl lg:border lg:border-gray-200 lg:p-7"
+          ? `z-30 flex flex-col gap-[18px] bg-white max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[85dvh] max-lg:gap-3 max-lg:overflow-y-auto max-lg:border-t max-lg:border-gray-200 max-lg:px-4 max-lg:pb-3 max-lg:pt-3 max-lg:shadow-[0_-6px_20px_rgba(17,24,39,0.06)] lg:sticky lg:top-5 lg:max-h-[calc(100dvh-40px)] lg:rounded-2xl lg:border lg:border-gray-200 lg:p-7${sheet ? ` max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]${open ? " max-lg:rounded-t-2xl max-lg:pt-4" : ""}` : ""}`
           : "bg-white rounded-2xl border border-gray-200 p-5 md:p-7 lg:sticky lg:top-8 space-y-[18px]"
       }
     >
+      {sheet &&
+        open &&
+        createPortal(
+          // The sheet's backdrop: a tap outside closes it.
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 z-20 bg-gray-900/40 lg:hidden"
+            onClick={() => setOpen(false)}
+          />,
+          document.body,
+        )}
       <div
         id={detailsId}
         className={
@@ -228,13 +284,24 @@ export default function StaySummary({
       >
         <div>
           {/* Focused after a room is removed or brought back, as its own button is gone. */}
-          <h2
-            id="stay-summary-title"
-            tabIndex={-1}
-            className="text-xl font-bold text-gray-900 outline-none"
-          >
-            {t("stay.title")}
-          </h2>
+          {sheet ? (
+            <div className="flex items-start justify-between gap-3">
+              {heading}
+              <button
+                type="button"
+                aria-label={tCommon("close")}
+                className="-m-2.5 rounded-full p-2.5 text-gray-600 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 lg:hidden"
+                onClick={() => {
+                  setOpen(false);
+                  toggle.current?.focus();
+                }}
+              >
+                {icon("M6 18L18 6M6 6l12 12", "")}
+              </button>
+            </div>
+          ) : (
+            heading
+          )}
           {single && (
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -336,11 +403,16 @@ export default function StaySummary({
           {charges.length > 0 && <Row label={t("stay.fees")} value={money(sum(charges))} />}
           {discount > BigInt(0) && <Row label={t("stay.discount")} value={`−${money(discount)}`} />}
         </div>
+        {sheet && policy && <div className="border-t border-gray-200 pt-4 lg:hidden">{policy}</div>}
       </div>
-      <div className={`shrink-0 space-y-[18px] ${checkout ? "max-lg:space-y-3" : ""}`}>
-        <div>
+      <div
+        className={`shrink-0 space-y-[18px] ${row ? "max-lg:flex max-lg:flex-wrap max-lg:items-center max-lg:gap-x-3 max-lg:gap-y-2 max-lg:space-y-0" : checkout ? "max-lg:space-y-3" : ""}`}
+      >
+        <div className={row ? "max-lg:min-w-0 max-lg:flex-1" : undefined}>
           <div className="flex items-baseline justify-between gap-4">
-            <span className="text-[17px] font-bold text-gray-900">{t("stay.total")}</span>
+            <span className={`text-[17px] font-bold text-gray-900 ${row ? "max-lg:sr-only" : ""}`}>
+              {t("stay.total")}
+            </span>
             <span
               role={checkout ? "status" : undefined}
               aria-label={checkout ? tAddons("stayTotalLabel") : undefined}
@@ -348,17 +420,25 @@ export default function StaySummary({
               className={
                 !quote
                   ? "text-right text-sm text-gray-600"
-                  : `text-[26px] font-bold ${checkout ? "max-lg:text-[22px]" : ""} ${ranOut ? "text-gray-400 line-through" : "text-gray-900"}`
+                  : `text-[26px] font-bold ${checkout ? "max-lg:text-[22px]" : ""} ${row ? "max-lg:leading-7" : ""} ${ranOut ? "text-gray-400 line-through" : "text-gray-900"}`
               }
             >
               {quote ? money(quote.totalMinor) : pending}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-4">
+          <div
+            className={`flex items-center justify-between gap-4 ${row ? "max-lg:justify-start max-lg:gap-1" : ""}`}
+          >
+            {row && payLabel && (
+              <span className="min-w-0 truncate text-[13px] text-gray-600 lg:hidden">
+                {payLabel} ·
+              </span>
+            )}
             {checkout && (
               <button
+                ref={toggle}
                 type="button"
-                className="flex items-center gap-1 text-sm font-semibold text-gray-900 lg:hidden"
+                className={`flex items-center gap-1 text-sm font-semibold text-gray-900 lg:hidden ${row ? "shrink-0" : ""}`}
                 aria-expanded={open}
                 aria-controls={detailsId}
                 onClick={() => setOpen((value) => !value)}
@@ -368,13 +448,17 @@ export default function StaySummary({
               </button>
             )}
             {quote && (
-              <p className="ml-auto text-right text-[13px] text-gray-500">{t("stay.includes")}</p>
+              <p
+                className={`ml-auto text-right text-[13px] text-gray-500 ${row ? "max-lg:hidden" : ""}`}
+              >
+                {t("stay.includes")}
+              </p>
             )}
           </div>
         </div>
         {((!!box?.length && quote && !ranOut) || ways) && (
           <div
-            className={`space-y-2.5 rounded-xl bg-gray-50 px-4 py-3.5 text-sm ${checkout ? "max-lg:space-y-1 max-lg:py-2" : ""}`}
+            className={`space-y-2.5 rounded-xl bg-gray-50 px-4 py-3.5 text-sm ${checkout ? "max-lg:space-y-1 max-lg:py-2" : ""} ${row ? "max-lg:hidden" : ""}`}
           >
             {box?.length && quote && !ranOut
               ? box.map((line) => (
@@ -391,7 +475,28 @@ export default function StaySummary({
                 ))}
           </div>
         )}
-        {action}
+        {sheet ? (
+          // In the slim row the notice and hint take full-width lines above and below it.
+          <div className={`space-y-3 ${row ? "max-lg:contents" : ""}`}>
+            {notice ? (
+              <div className={row ? "max-lg:order-first max-lg:w-full" : undefined}>{notice}</div>
+            ) : null}
+            <div
+              className={
+                row
+                  ? "max-lg:shrink-0 max-lg:[&_button]:h-12 max-lg:[&_button]:w-auto max-lg:[&_button]:px-6 max-lg:[&_button]:text-base"
+                  : undefined
+              }
+            >
+              {action}
+            </div>
+            {hint ? (
+              <div className={row ? "max-lg:order-last max-lg:w-full" : undefined}>{hint}</div>
+            ) : null}
+          </div>
+        ) : (
+          action
+        )}
         {quote && (
           <p
             className={`${hidden} flex items-center gap-2 text-sm ${ranOut ? "font-medium text-amber-700" : "text-gray-600"}`}

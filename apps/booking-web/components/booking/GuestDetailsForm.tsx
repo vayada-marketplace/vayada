@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useLocale, useTranslations } from "next-intl";
 import type { PublicQuoteGuestDisclosure } from "@vayada/domain-booking/replacement-pricing";
 import { COUNTRY_OPTIONS } from "@vayada/locale-constants";
@@ -242,12 +243,16 @@ function PhoneInput({
   };
   return (
     <div className={`flex h-12 ${box(invalid)} focus-within:ring-2 focus-within:ring-primary-500`}>
-      <div className="relative w-28 shrink-0 rounded-l-[10px] border-r border-gray-300 bg-gray-50">
+      {/* VAY-2495: below lg a narrow "+49 ▾"; the number takes the rest. */}
+      <div className="relative w-[88px] shrink-0 rounded-l-[10px] border-r border-gray-300 bg-gray-50 lg:w-28">
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 flex items-center justify-between pl-3.5 pr-3 font-medium"
+          className="pointer-events-none absolute inset-0 flex items-center justify-between gap-1 pl-3 pr-2.5 font-medium lg:pl-3.5 lg:pr-3"
         >
-          {parts.country} {DIAL.get(parts.country)}
+          <span className="truncate">
+            <span className="max-lg:hidden">{parts.country} </span>
+            {DIAL.get(parts.country)}
+          </span>
           {chevron}
         </span>
         <select
@@ -315,6 +320,11 @@ export default function GuestDetailsForm({
   const set = (field: keyof GuestDetails) => (event: { target: { value: string } }) =>
     onChange({ ...value, [field]: event.target.value });
   const phone = phoneRequired(rules);
+  // VAY-2495: below lg the special request opens from a link; a request already written shows
+  // (a draft can be restored after the form opens).
+  const [requestPressed, setRequestPressed] = useState(false);
+  const requestOpen = requestPressed || !!value.specialRequests.trim();
+  const [requestBox, setRequestBox] = useState<HTMLDivElement | null>(null);
   const errors = showErrors ? guestErrors(value, rules) : [];
   const error = (field: GuestField, message: string) => (errors.includes(field) ? message : null);
   const countries = useMemo(
@@ -340,7 +350,8 @@ export default function GuestDetailsForm({
   return (
     <section
       aria-labelledby={headingId}
-      className="bg-white rounded-2xl border border-gray-200 p-5 md:p-8"
+      // VAY-2495: no card around the form below lg; the heading is enough.
+      className="lg:rounded-2xl lg:border lg:border-gray-200 lg:bg-white lg:p-8"
     >
       <h2 id={headingId} className="text-xl font-bold text-gray-900">
         {t("heading")}
@@ -355,7 +366,7 @@ export default function GuestDetailsForm({
         </p>
       )}
       <div className="mt-6 space-y-6">
-        <div className="flex flex-col gap-6 md:flex-row md:gap-5">
+        <div className="grid grid-cols-2 gap-3 md:flex md:gap-5">
           <Field label={t("firstName")} required error={error("firstName", t("errorFirstName"))}>
             {({ id, describedBy, invalid }) => (
               <input
@@ -482,23 +493,49 @@ export default function GuestDetailsForm({
             )}
           </Field>
         )}
+        {rules?.specialRequestsEnabled && !requestOpen && (
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-[15px] font-semibold text-gray-900 underline-offset-2 hover:underline disabled:opacity-40 lg:hidden"
+            disabled={locked}
+            onClick={() => {
+              // Shown first, so the field can take focus.
+              flushSync(() => setRequestPressed(true));
+              requestBox?.querySelector("textarea")?.focus();
+            }}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeWidth={2} d="M12 5v14M5 12h14" />
+            </svg>
+            {t("addSpecialRequest")}
+            <span className="font-normal text-gray-500">{t("optional")}</span>
+          </button>
+        )}
         {rules?.specialRequestsEnabled && (
-          <Field label={t("specialRequests")} required={false} hint={t("specialRequestsHint")}>
-            {({ id, describedBy }) => (
-              <textarea
-                id={id}
-                className={`w-full px-3.5 py-3 placeholder:text-gray-400 ${box(false)}`}
-                name="specialRequests"
-                maxLength={2000}
-                rows={4}
-                placeholder={t("specialRequestsPlaceholder")}
-                disabled={locked}
-                aria-describedby={describedBy}
-                value={value.specialRequests}
-                onChange={set("specialRequests")}
-              />
-            )}
-          </Field>
+          <div ref={setRequestBox} className={requestOpen ? undefined : "max-lg:hidden"}>
+            <Field label={t("specialRequests")} required={false} hint={t("specialRequestsHint")}>
+              {({ id, describedBy }) => (
+                <textarea
+                  id={id}
+                  className={`w-full px-3.5 py-3 placeholder:text-gray-400 ${box(false)}`}
+                  name="specialRequests"
+                  maxLength={2000}
+                  rows={4}
+                  placeholder={t("specialRequestsPlaceholder")}
+                  disabled={locked}
+                  aria-describedby={describedBy}
+                  value={value.specialRequests}
+                  onChange={set("specialRequests")}
+                />
+              )}
+            </Field>
+          </div>
         )}
       </div>
     </section>

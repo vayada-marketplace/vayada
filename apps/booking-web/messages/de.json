@@ -61,7 +61,8 @@
     "rooms": "Zimmer",
     "addons": "Extras",
     "details": "Details",
-    "payment": "Prüfen & bezahlen"
+    "payment": "Prüfen & bezahlen",
+    "progress": "Schritt {current} von {total}"
   },
   "home": {
     "guestCountUnsupported": "Die Online-Suche unterstützt Ihre Gruppe von {count} Gästen nicht. Versuchen Sie es mit weniger Gästen oder kontaktieren Sie uns.",
@@ -811,7 +812,8 @@
     "errorPhoneInvalid": "Geben Sie eine gültige Telefonnummer ein.",
     "errorCountry": "Wählen Sie Ihr Land aus der Liste.",
     "rulesFailed": "Wir konnten die Hausregeln für diesen Preis nicht prüfen. Sie können Ihre Angaben weiter ausfüllen.",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "addSpecialRequest": "Besonderen Wunsch hinzufügen"
   },
   "reviewPay": {
     "title": "Prüfen & bezahlen",
@@ -884,7 +886,9 @@
       "instant": "Sofortige Bestätigung per E-Mail",
       "methods": "Zahlung {methods}",
       "adults": "{count, plural, one {# Erwachsener} other {# Erwachsene}}",
-      "children": "{count, plural, one {# Kind} other {# Kinder}}"
+      "children": "{count, plural, one {# Kind} other {# Kinder}}",
+      "edit": "Ändern",
+      "editStay": "Aufenthalt ändern"
     },
     "checkingPrice": "Preis wird geprüft …",
     "busyConfirm": "Buchung wird bestätigt …",

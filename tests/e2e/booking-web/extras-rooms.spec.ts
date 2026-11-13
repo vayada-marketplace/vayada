@@ -79,6 +79,8 @@ for (const width of [1440, 390]) {
     await expect(room1).toContainText("2 Adults");
     await expect(room1).toContainText("€100");
     await expect(room1.getByRole("button", { name: "Remove Room 1 from booking" })).toBeVisible();
+    // VAY-2495: on a phone the lines are a sheet over the page; it closes to add an extra.
+    if (width === 390) await page.keyboard.press("Escape");
     await addTransfer(page);
     await transferAdded(page);
     // Priced again with the transfer.
@@ -92,6 +94,7 @@ for (const width of [1440, 390]) {
     });
 
     // Change Room 1: the room cards open on Room 1, and the new place comes straight back.
+    if (width === 390) await card.getByRole("button", { name: "Details", exact: true }).click();
     await room1.getByRole("button", { name: "Change Room 1" }).click();
     await expectChoosing(page, 1, 2);
     await expect(page.getByTestId("room-tab-1")).toContainText("changing…");
