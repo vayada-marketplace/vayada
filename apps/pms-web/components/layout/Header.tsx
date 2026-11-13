@@ -22,6 +22,7 @@ import {
   getRemainingArrivals,
 } from "@/lib/dashboardBookings";
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
+import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import SearchModal from "./SearchModal";
 
@@ -48,6 +49,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [hotels, setHotels] = useState<HotelSummary[] | null>(null);
   const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null);
   const currencyEditable = !isPmsOperationsReadModelEnabled();
+  // VAY-2493: only the account admin manages (deletes) the account's properties.
+  const isAccountAdmin = usePmsAccess().roleKey === "hotel_owner";
 
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
@@ -344,6 +347,18 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                 >
                   {t("layout.sidebar.settings")}
                 </button>
+                {isAccountAdmin && (
+                  <button
+                    onClick={() => {
+                      setProfileOpen(false);
+                      if (holdsPrices()) window.location.assign("/manage-properties");
+                      else router.push("/manage-properties");
+                    }}
+                    className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    {t("layout.header.manageProperties")}
+                  </button>
+                )}
                 {/* Language selector */}
                 <div className="relative">
                   <button
