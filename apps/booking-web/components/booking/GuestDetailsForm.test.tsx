@@ -220,3 +220,39 @@ it("sends the phone as E.164 (VAY-2347)", () => {
   // A number from an older draft, typed without a code, is sent as typed.
   expect(phoneE164("030 1234567")).toBe("030 1234567");
 });
+
+// VAY-2495: the phone layout: no card, names side by side, a narrow code, the request behind a link.
+it("opens the special request from a link on phones, and shows one already written", () => {
+  const value = { ...ada, specialRequests: "" };
+  render(rules, { value });
+  const section = document.querySelector("section")!;
+  expect(section.className).not.toMatch(/(^| )border( |$)/);
+  expect(section.className).toContain("lg:border");
+  expect(input("firstName")!.closest(".grid")!.className).toContain("grid-cols-2");
+  const link = Array.from(document.querySelectorAll("button")).find(
+    (button) => button.textContent === "Add a special request(optional)",
+  )!;
+  expect(link.className).toContain("lg:hidden");
+  const request = document.querySelector<HTMLTextAreaElement>('[name="specialRequests"]')!;
+  // Still there on wide screens; hidden on a phone until the link is pressed.
+  expect(request.closest(".max-lg\\:hidden")).not.toBeNull();
+  act(() => link.click());
+  expect(request.closest(".max-lg\\:hidden")).toBeNull();
+  expect(document.activeElement).toBe(request);
+  expect(document.body.textContent).not.toContain("Add a special request");
+  // A request already written (a restored draft) is shown, without the link, in a fresh form.
+  act(() => root.unmount());
+  document.body.innerHTML = '<div id="root"></div>';
+  root = createRoot(document.getElementById("root")!);
+  render(rules, { value: ada });
+  expect(
+    document.querySelector('[name="specialRequests"]')!.closest(".max-lg\\:hidden"),
+  ).toBeNull();
+  expect(document.body.textContent).not.toContain("Add a special request");
+  // The code field says "+49" on a phone, "DE +49" on wide screens.
+  const code = document
+    .querySelector('[name="phoneCountry"]')!
+    .parentElement!.querySelector('span[aria-hidden="true"]')!;
+  expect(code.textContent).toBe("DE +49");
+  expect(code.querySelector(".max-lg\\:hidden")!.textContent).toBe("DE ");
+});

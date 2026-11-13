@@ -110,12 +110,13 @@ test("keeps a small Sort button on the heading's row on a phone (VAY-2494)", asy
   await assertHealthy();
 });
 
-for (const width of [1440, 390]) {
+// VAY-2495: phones have the checkout's own bar instead (below).
+for (const width of [1440]) {
   test(`shows a slim bar and the stepper on /book, and Rooms goes back at ${width}px`, async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.setViewportSize({ width, height: 900 });
     await open(page, BOOK);
     await expect(page).toHaveURL(/[?&]step=(extras|details)/);
 
@@ -148,3 +149,31 @@ for (const width of [1440, 390]) {
     await assertHealthy();
   });
 }
+
+// VAY-2495: on a phone the checkout's own 56px bar (back arrow and the hotel's name) with "Step N
+// of M · title" under it, instead of the hotel's bar and the stepper; the arrow goes back.
+test("shows the checkout's bar on /book, and its back arrow goes back at 390px", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, BOOK);
+  await expect(page).toHaveURL(/[?&]step=(extras|details)/);
+  const header = page.getByRole("banner");
+  await expect(header).toContainText("Hotel Alpenrose");
+  await expect(header).toContainText(/Step \d of \d ·/);
+  expect((await header.boundingBox())!.y).toBe(0);
+  const title = (await page.getByRole("heading", { level: 1 }).boundingBox())!;
+  expect(title.y).toBeLessThan(120);
+  await expect(page.locator("nav").first()).toBeHidden();
+  await expect(page.getByRole("button", { name: "Rooms", exact: true })).toBeHidden();
+  const back = header.getByRole("button", { name: "Back to rooms" });
+  const box = (await back.boundingBox())!;
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  await page.screenshot({ path: testInfo.outputPath("book-checkout-bar-390.png") });
+  await back.click();
+  await expect(page).toHaveURL(/\/\?checkIn=2026-11-10&checkOut=2026-11-12&adults=2$/);
+  await expect(page.locator('[data-testid^="room-card-"]').first()).toBeVisible();
+  await assertHealthy();
+});

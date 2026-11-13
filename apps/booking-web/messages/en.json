@@ -61,7 +61,8 @@
     "rooms": "Rooms",
     "addons": "Extras",
     "details": "Details",
-    "payment": "Review & pay"
+    "payment": "Review & pay",
+    "progress": "Step {current} of {total}"
   },
   "home": {
     "guestCountUnsupported": "Online search does not support your group of {count} guests. Try fewer guests or contact us for help.",
@@ -819,7 +820,8 @@
     "errorPhoneInvalid": "Enter a valid phone number.",
     "errorCountry": "Choose your country from the list.",
     "rulesFailed": "We couldn’t check the hotel’s guest rules for this price. You can keep filling in your details.",
-    "retry": "Try again"
+    "retry": "Try again",
+    "addSpecialRequest": "Add a special request"
   },
   "reviewPay": {
     "title": "Review & pay",
@@ -892,7 +894,10 @@
       "instant": "Instant confirmation by email",
       "methods": "Pay {methods}",
       "adults": "{count, plural, one {# adult} other {# adults}}",
-      "children": "{count, plural, one {# child} other {# children}}"
+      "children": "{count, plural, one {# child} other {# children}}",
+      "edit": "Edit",
+      "editStay": "Edit your stay",
+      "continueShort": "Continue"
     },
     "checkingPrice": "Checking price…",
     "busyConfirm": "Confirming booking…",

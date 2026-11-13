@@ -28,15 +28,18 @@ export default function CancellationPolicy({
   block,
   titled,
   formatMoney,
+  startOpen = true,
 }: {
   block: PolicyBlock;
   /** Several policies: each block is named by its rooms (D7). */
   titled: boolean;
   formatMoney: (minor: string) => string;
+  /** VAY-2495: closed to its title and badge in the phone's price sheet. */
+  startOpen?: boolean;
 }) {
   const t = useTranslations("beforeYouBook.policy");
   const locale = useLocale();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(startOpen);
   const panelId = useId();
   const { policy } = block;
   // A date in another year than the hotel's today says its year.
