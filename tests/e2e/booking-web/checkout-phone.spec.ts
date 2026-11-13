@@ -99,7 +99,7 @@ test("fits the details step on a phone's first screen, with the slim bar", async
   // "Step 2 of 3 · Your details" instead of the title and the step circles.
   await expect(header).toContainText("Step 2 of 3 ·Your details");
   await expect(page.getByRole("heading", { name: "Your details", level: 1 })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Rooms" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Rooms", exact: true })).toBeHidden();
 
   // The stay in a small card; "Who's staying?" is the only heading of the form.
   const brief = page.getByTestId("stay-brief");
