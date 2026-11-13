@@ -1734,6 +1734,7 @@ jobs:
             src/domains/hotelCatalogCurrentOwnerEvidence.integration.test.ts \
             src/domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.integration.test.ts \
             src/domains/hotelCatalogStep1Repository.integration.test.ts \
+            src/domains/hotelPropertyDeletionRepository.integration.test.ts \
             src/domains/platformPropertyLifecycleCommandRepository.integration.test.ts \
             src/identityCookieConsent.integration.test.ts \
             src/platform/authSessionHandoffs.integration.test.ts \

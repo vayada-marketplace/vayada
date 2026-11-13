@@ -34,7 +34,12 @@ export async function resolvePmsSetupGuard(
     returnTo,
     setupBaseUrl,
     propertyId: explicitPropertyId ?? readSelectedSharedPropertyId(storage),
-    onInvalidPropertyId: () => storage?.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY),
+    // A deleted or unlinked property (VAY-2493): forget both copies, or the PMS's own key would put
+    // it back into the shared one on the next page.
+    onInvalidPropertyId: () => {
+      storage?.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+      storage?.removeItem(SELECTED_PMS_PROPERTY_ID_KEY);
+    },
     fallbackOnInvalidPropertyId: !explicitPropertyId,
   });
   persistEnteredSharedProperty(decision, storage);

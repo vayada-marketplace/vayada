@@ -369,6 +369,7 @@ import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgPlatformPropertyLifecycleImpactRepository } from "./domains/platformPropertyLifecycleImpactRepository.js";
+import { createPgHotelPropertyDeletionRepository } from "./domains/hotelPropertyDeletionRepository.js";
 import { createPropertySlugChangeCommand } from "./domains/propertySlugChange.js";
 import { createPgPlatformPropertyProvisioningRepository } from "./domains/platformPropertyProvisioningRepository.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
@@ -2364,6 +2365,9 @@ const app = buildApp({
           receiptSecret: config.authSession.workosApiKey,
         }
       : undefined,
+  hotelPropertyDeletion: {
+    repository: createPgHotelPropertyDeletionRepository({ connectionString: targetDatabaseUrl }),
+  },
   platformPropertyLifecycle: {
     impactRepository: createPgPlatformPropertyLifecycleImpactRepository({
       connectionString: targetDatabaseUrl,

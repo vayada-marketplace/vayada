@@ -240,9 +240,11 @@ export async function registerSharedHotelSetupStatusRoutes(
       selectedPropertyId &&
       !authorizedProperties.some((item) => item.propertyId === selectedPropertyId)
     ) {
-      return reply.status(404).send({
-        code: "property_setup_status_not_found",
-        detail: "Setup status was not found for the selected property.",
+      // A deleted (retired) property keeps its link but is no longer the account's (VAY-2493). Answer
+      // like an unlinked one, so a browser that still has it selected falls back to another property.
+      return reply.status(403).send({
+        code: "missing_property_resource_link",
+        detail: "The selected hotel group is not linked to that property.",
       });
     }
 

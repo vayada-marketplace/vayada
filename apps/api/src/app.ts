@@ -115,6 +115,10 @@ import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepositor
 import { registerHotelFirstRunRoutes } from "./routes/hotelFirstRun.js";
 import { registerHotelSetupChecklistRoutes } from "./routes/hotelSetupChecklist.js";
 import { registerHotelAccountAgreementsRoutes } from "./routes/hotelAccountAgreements.js";
+import {
+  registerHotelPropertyDeletionRoutes,
+  type HotelPropertyDeletionRoutesOptions,
+} from "./routes/hotelPropertyDeletion.js";
 import { registerGoogleMapsLinksRoutes } from "./routes/googleMapsLinks.js";
 import {
   registerSharedHotelSetupStatusRoutes,
@@ -461,6 +465,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformAdminDashboardRepository?: PlatformAdminDashboardRepository;
   platformAdminSmokeRecovery?: PlatformAdminDashboardRoutesOptions["smokeRecovery"];
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
+  hotelPropertyDeletion?: HotelPropertyDeletionRoutesOptions;
   platformPropertySlug?: PlatformPropertySlugRoutesOptions;
   identityPrivacyAllowedOrigins?: string[];
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
@@ -715,6 +720,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/hotel-setup",
       createService: options.hotelSetupChecklist,
       propertyAccessRepository: options.auth.propertyAccessRepository,
+    });
+  }
+  if (options.hotelPropertyDeletion) {
+    app.register(registerHotelPropertyDeletionRoutes, {
+      prefix: "/api/hotel-setup",
+      ...options.hotelPropertyDeletion,
     });
   }
   if (options.hotelAccountAgreements) {

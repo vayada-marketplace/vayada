@@ -263,6 +263,25 @@ describe("shared hotel setup status route", () => {
     });
   });
 
+  it("answers a deleted property like an unlinked one, so a stale selection falls back", async () => {
+    // VAY-2493: the read model leaves out retired properties; their account link stays.
+    app = buildSharedSetupApp({
+      linkedResources: [propertyLink(propertyId), propertyLink(secondPropertyId)],
+      repository: repositoryWith([adaptiveProperty(secondPropertyId)]),
+    });
+
+    const deleted = await getSharedSetupStatus(app, propertyId);
+    const fallback = await getSharedSetupStatus(app);
+
+    expect(deleted.statusCode).toBe(403);
+    expect(deleted.body).toMatchObject({ code: "missing_property_resource_link" });
+    expect(fallback.statusCode).toBe(200);
+    expect(fallback.body.propertySelection).toMatchObject({
+      state: "single_property",
+      selectedPropertyId: secondPropertyId,
+    });
+  });
+
   it("returns only assigned properties and applies removal on the next request", async () => {
     let assignedPropertyIds = [secondPropertyId, unrelatedPropertyId];
     const statusCalls: Array<{ organizationId: string; propertyIds: string[] }> = [];
