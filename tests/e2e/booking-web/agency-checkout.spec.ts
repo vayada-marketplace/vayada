@@ -120,7 +120,8 @@ test("books a room of the stay by card, on the agency's address and in its look"
   await expect(page.getByText("+6281234567890")).toBeVisible();
   await nav.getByRole("button", { name: "Contact" }).click();
   await expect(page.getByText("Review & pay").first()).toBeVisible();
-  await expect(page.locator("footer")).toContainText("The Escape Villa Ubud");
+  // VAY-2495: the details step also carries the phone's slim footer, hidden on wide screens.
+  await expect(page.locator("footer:visible")).toContainText("The Escape Villa Ubud");
 
   await continueToPayment(page, { method: "card" });
   await page.getByLabel(/I agree to the cancellation policy/).check();

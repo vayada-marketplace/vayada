@@ -1208,7 +1208,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     onChangeRoom: changeRoom,
   };
   // VAY-2495: Extras and Details have the slim bar on phones: how the guest pays beside the total,
-  // the cancellation policy in its sheet, and "Continue" for the button (its name stays whole).
+  // the cancellation policy in its sheet (one sentence each), and "Continue" for the button (its
+  // name stays whole).
   const sheetPolicies = quote ? policyBlocks(quote, { today: hotelDate, roomNames }) : [];
   const slimBar = {
     slim: true,
@@ -1216,14 +1217,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     payLabel: pricedOption?.title,
     policy:
       quote && sheetPolicies.length ? (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {sheetPolicies.map((block) => (
             <CancellationPolicy
               key={block.key}
               block={block}
               titled={sheetPolicies.length > 1}
               formatMoney={(minor) => money(minor, quote.currency)}
-              startOpen={false}
+              compact
             />
           ))}
         </div>
@@ -1487,6 +1488,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 <StaySummary
                   {...summary}
                   {...slimBar}
+                  // The stay is in the small card above: the phone's sheet is the price.
+                  brief
                   quote={quote ?? undefined}
                   action={
                     // Pressable while fields are missing, so it can mark them; with everything

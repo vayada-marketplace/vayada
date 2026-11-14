@@ -820,7 +820,9 @@
     "errorCountry": "Pilih negara Anda dari daftar.",
     "rulesFailed": "Kami tidak dapat memeriksa aturan tamu hotel untuk harga ini. Anda tetap dapat mengisi data Anda.",
     "retry": "Coba lagi",
-    "addSpecialRequest": "Tambahkan permintaan khusus"
+    "addSpecialRequest": "Tambahkan permintaan khusus",
+    "introOptional": "Sekitar 1 menit. Semua kolom wajib diisi kecuali yang bertanda opsional.",
+    "addSpecialRequestHint": "mis. tiba larut malam, jemputan bandara, kebutuhan makanan. Hotel akan membalas melalui email."
   },
   "reviewPay": {
     "title": "Tinjau & bayar",
@@ -896,7 +898,10 @@
       "children": "{count, plural, one {# anak} other {# anak}}",
       "edit": "Ubah",
       "editStay": "Ubah masa inap",
-      "continueShort": "Lanjut"
+      "continueShort": "Lanjut",
+      "priceDetails": "Rincian harga",
+      "taxes": "Pajak & biaya",
+      "included": "Termasuk"
     },
     "checkingPrice": "Memeriksa harga…",
     "busyConfirm": "Mengonfirmasi pemesanan…",

@@ -258,7 +258,10 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
   expect(text()).toContain("Pay at the hotel ·Details");
   expect(total.previousElementSibling!.className).toContain("max-lg:sr-only");
   expect(boxLines.className).toContain("max-lg:hidden");
-  expect(button("Continue to review").parentElement!.className).toContain("max-lg:shrink-0");
+  // Timo's boards: the button fills the row; a tap anywhere on the total opens the sheet.
+  expect(button("Continue to review").parentElement!.className).toContain("max-lg:flex-1");
+  expect(toggle.className).toContain("after:inset-0");
+  expect(total.className).toContain("max-lg:text-xl");
   // display:contents keeps no margins between the row's parts.
   expect(button("Continue to review").parentElement!.parentElement!.className).toContain(
     "max-lg:space-y-0",
@@ -275,6 +278,16 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
   expect(boxLines.className).not.toContain("max-lg:hidden");
   expect(total.previousElementSibling!.className).not.toContain("sr-only");
   expect(document.body.querySelector(".bg-gray-900\\/40")).not.toBeNull();
+  // A handle on top; "Details" makes way for Close; taxes are a line, the policy under the box.
+  expect(aside.firstElementChild!.className).toContain("w-10");
+  expect(toggle.className).toContain("max-lg:hidden");
+  expect(text()).toContain("Taxes & feesIncluded");
+  const includes = Array.from(aside.querySelectorAll("p")).find(
+    (p) => p.textContent === "Includes taxes & fees",
+  )!;
+  expect(includes.className).toContain("max-lg:hidden");
+  expect(text()).toMatch(/At the hotelUS\$175Cancellation policy.*Continue to review/);
+  expect(total.className).toContain("max-lg:text-lg");
   // It takes focus.
   expect(document.activeElement).toBe(aside.querySelector("#stay-summary-title"));
   // Escape closes it, with focus back on "Details".
@@ -302,6 +315,76 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
       .dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: outside }));
   });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
+});
+
+// VAY-2495 (Timo's boards): with the stay in its small card above, the sheet is the price only.
+it("is “Price details” on phones with a brief, without the stay's room and dates", () => {
+  render({
+    slim: true,
+    brief: true,
+    payLabel: "Pay at the hotel",
+    onChangeRoom: () => {},
+    action: createElement("button", { type: "submit" }, "Continue to review"),
+  });
+  const aside = document.querySelector("aside")!;
+  const details = () =>
+    Array.from(aside.querySelectorAll("button")).find((b) => b.textContent === "Details")!;
+  // Open: the closed sheet is hidden on phones as a whole.
+  act(() => details().click());
+  expect(details().getAttribute("aria-expanded")).toBe("true");
+  const heading = aside.querySelector("#stay-summary-title")!;
+  expect(heading.querySelector(".lg\\:hidden")!.textContent).toBe("Price details");
+  expect(heading.querySelector(".max-lg\\:hidden")!.textContent).toBe("Your stay");
+  // The room with Change and the check-in and check-out are wide screens only.
+  const change = aside.querySelector('[aria-label="Change Room 1"]')!;
+  expect(change.closest(".max-lg\\:hidden")).not.toBeNull();
+  const checkIn = Array.from(aside.querySelectorAll("p")).find(
+    (p) => p.textContent === "Check-in",
+  )!;
+  expect(checkIn.closest(".max-lg\\:hidden")).not.toBeNull();
+  // Its line names the room on phones: "Villa Four · 1 night".
+  expect(text()).toContain("Villa Four · 1 night");
+  const name = Array.from(aside.querySelectorAll("span")).find(
+    (span) => span.textContent === "Villa Four · ",
+  )!;
+  expect(name.className).toContain("lg:hidden");
+  // Without a brief (Extras) the open sheet keeps the stay.
+  render({ slim: true, onChangeRoom: () => {}, action: createElement("button", null, "Go") });
+  expect(details().getAttribute("aria-expanded")).toBe("true");
+  expect(
+    document.querySelector('[aria-label="Change Room 1"]')!.closest(".max-lg\\:hidden"),
+  ).toBeNull();
+  expect(document.querySelector("#stay-summary-title")!.textContent).toBe("Your stay");
+});
+
+it("keeps “Includes taxes & fees” in the sheet when the price has fees of its own", () => {
+  render({
+    quote: {
+      ...quote,
+      totalMinor: "19500",
+      lines: [
+        ...quote.lines,
+        { kind: "charge", amountMinor: "2000" },
+      ] as unknown as PublicBookingQuote["lines"],
+    },
+    slim: true,
+    action: createElement("button", null, "Go"),
+  });
+  expect(text()).toContain("FeesUS$20");
+  expect(text()).not.toContain("Taxes & fees");
+  const includes = Array.from(document.querySelectorAll("aside p")).find(
+    (p) => p.textContent === "Includes taxes & fees",
+  )!;
+  // In the row it waits for the sheet; open, it shows.
+  expect(includes.className).toContain("max-lg:hidden");
+  act(() =>
+    (
+      Array.from(document.querySelectorAll("aside button")).find(
+        (b) => b.textContent === "Details",
+      ) as HTMLButtonElement
+    ).click(),
+  );
+  expect(includes.className).not.toContain("max-lg:hidden");
 });
 
 it("keeps the full bar without slim (Review) and shows no Close or policy", () => {

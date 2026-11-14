@@ -28,18 +28,19 @@ export default function CancellationPolicy({
   block,
   titled,
   formatMoney,
-  startOpen = true,
+  compact = false,
 }: {
   block: PolicyBlock;
   /** Several policies: each block is named by its rooms (D7). */
   titled: boolean;
   formatMoney: (minor: string) => string;
-  /** VAY-2495: closed to its title and badge in the phone's price sheet. */
-  startOpen?: boolean;
+  /** VAY-2495 (Timo's boards): one plain sentence in the phone's price sheet, what cancelling
+   * costs; the table stays on Review & pay. */
+  compact?: boolean;
 }) {
   const t = useTranslations("beforeYouBook.policy");
   const locale = useLocale();
-  const [open, setOpen] = useState(startOpen);
+  const [open, setOpen] = useState(true);
   const panelId = useId();
   const { policy } = block;
   // A date in another year than the hotel's today says its year.
@@ -79,6 +80,13 @@ export default function CancellationPolicy({
     .join(" ");
   const amber = policy.tone === "amber";
   const title = titled ? t("titleRooms", { rooms: block.rooms.join(", ") }) : t("title");
+  if (compact)
+    return (
+      <p className="text-sm text-gray-600">
+        {titled && <span className="font-semibold text-gray-900">{block.rooms.join(", ")}: </span>}
+        {noteText}
+      </p>
+    );
   return (
     <div className="space-y-3.5">
       <h3>

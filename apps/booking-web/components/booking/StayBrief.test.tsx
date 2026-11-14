@@ -58,6 +58,9 @@ it("shows the room and rate, dates, nights and guests, and Edit goes back to the
   const edit = brief().querySelector("button")!;
   expect(edit.textContent).toBe("Edit");
   expect(edit.getAttribute("aria-label")).toBe("Edit your stay");
+  // Timo's boards: a tap anywhere on the card is Edit.
+  expect(brief().className).toContain("relative");
+  expect(edit.className).toContain("after:inset-0");
   act(() => edit.click());
   expect(onEdit).toHaveBeenCalledTimes(1);
   render({ locked: true });
