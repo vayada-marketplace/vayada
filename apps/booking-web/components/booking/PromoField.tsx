@@ -63,8 +63,8 @@ function PromoPopover({
 /**
  * The search card's promo field: "Add promo code" with its popover, or the applied code as a chip
  * with a remove button. What a code does is the page's (`onApply`, `onRemove`). Shared by a
- * hotel's page and an agency's (VAY-2459). On phones it is a small link under Check Availability
- * (VAY-2494): last in the card, without the tag icon.
+ * hotel's page and an agency's (VAY-2459). On phones it is a 44px row under Check Availability
+ * (VAY-2494): last in the card, the tag icon and "Add promo code" in 15px grey.
  */
 export default function PromoField({
   applied,
@@ -92,9 +92,9 @@ export default function PromoField({
 }) {
   const t = useTranslations("home");
   return (
-    <div className="relative order-last flex justify-center md:order-none md:justify-start w-full md:w-auto">
+    <div className="relative order-last flex justify-center md:order-none md:justify-start w-full md:w-auto max-md:mt-0.5">
       {applied ? (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 max-md:h-11">
           <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -127,10 +127,10 @@ export default function PromoField({
         <>
           <button
             onClick={() => (open ? onClose() : onOpen())}
-            className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
+            className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors max-md:h-11 max-md:text-gray-600"
           >
             <svg
-              className="hidden md:block w-5 h-5"
+              className="w-5 h-5 max-md:h-4 max-md:w-4"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -143,9 +143,7 @@ export default function PromoField({
               />
             </svg>
             <span className="hidden md:inline text-sm font-medium">{t("addPromo")}</span>
-            <span className="md:hidden text-sm text-gray-600 underline underline-offset-2">
-              {t("phoneSearch.addPromoCode")}
-            </span>
+            <span className="md:hidden text-[15px]">{t("phoneSearch.addPromoCode")}</span>
           </button>
           {open && (
             <PromoPopover

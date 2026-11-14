@@ -130,10 +130,10 @@ export default function StayRooms({
         type="button"
         onClick={openSort}
         aria-haspopup="dialog"
-        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-gray-200 bg-white px-4 text-sm font-medium text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 md:hidden"
+        className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 text-[15px] font-semibold text-gray-900 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 md:hidden"
       >
         <svg
-          className="h-4 w-4 text-gray-500"
+          className="h-4 w-4"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -302,26 +302,26 @@ export default function StayRooms({
   );
 
   // On the heading's row the "≈" note takes a line of its own below it, so the sort stays
-  // centred on the title.
+  // centred on the title. Phones (VAY-2494): the heading and what the search found make one
+  // column that takes the room left of the sort; a long translation wraps inside it.
   const heading = (
     <>
-      <h2 className="min-w-0 text-xl md:text-3xl font-heading text-gray-900">
-        {headingText ?? (
-          <>
-            <span className="md:hidden">{tp("availableStays")}</span>
-            <span className="hidden md:inline">{t("availableAccommodations")}</span>
-          </>
-        )}
-      </h2>
-      {rooms?.length ? (
-        // Phones: "5 options · 13–14 Nov · 2 adults", on its own line under the heading's row.
-        <p
-          data-testid="rooms-found"
-          className="order-last basis-full text-sm text-gray-500 md:hidden"
-        >
-          {tp("options", { count: shownRooms.length })} · {stayLine}
-        </p>
-      ) : null}
+      <div className="min-w-0 max-md:flex max-md:flex-1 max-md:basis-0 max-md:flex-col max-md:gap-1">
+        <h2 className="min-w-0 md:text-3xl font-heading text-gray-900 max-md:text-[32px] max-md:leading-[1.05]">
+          {headingText ?? (
+            <>
+              <span className="md:hidden">{tp("availableStays")}</span>
+              <span className="hidden md:inline">{t("availableAccommodations")}</span>
+            </>
+          )}
+        </h2>
+        {rooms?.length ? (
+          // Phones: "5 options · 13–14 Nov · 2 adults" under the heading.
+          <p data-testid="rooms-found" className="text-sm text-gray-500 md:hidden">
+            {tp("options", { count: shownRooms.length })} · {stayLine}
+          </p>
+        ) : null}
+      </div>
       {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
       <ApproximateAmountsNote currency={hotel.currency} className="order-last basis-full" />
     </>
@@ -331,10 +331,11 @@ export default function StayRooms({
     // VAY-2448: no stepper while choosing; the sort shares the heading's row.
     <div
       id="rooms"
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-9 md:pt-16 pb-12 scroll-mt-9 md:scroll-mt-36"
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-9 md:pt-16 pb-12 scroll-mt-20 md:scroll-mt-36"
     >
       {searchBar && (
         <StickySearchBar
+          title={hotel.name}
           label={stayLine}
           onEdit={onEditDates}
           onSort={canSort ? openSort : undefined}

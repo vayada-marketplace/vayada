@@ -636,16 +636,19 @@ test("scrolls the room tabs on a phone, with the Sort button on the heading's ro
       (rooms) =>
         rooms.getBoundingClientRect().right - parseFloat(getComputedStyle(rooms).paddingRight),
     );
-  // VAY-2494: on a phone a small Sort button sits on the heading's row; the tabs follow below.
+  // VAY-2494: on a phone a small Sort button sits beside the foot of the heading's column (the
+  // heading and the found line); the tabs follow below.
   const sort = page.getByRole("button", { name: "Sort", exact: true });
   const heading = page.getByRole("heading", { name: "Available stays" });
-  const [row, select, title] = await Promise.all([
+  const [row, select, title, found] = await Promise.all([
     tabs.boundingBox(),
     sort.boundingBox(),
     heading.boundingBox(),
+    page.getByTestId("rooms-found").boundingBox(),
   ]);
   expect(row!.x + row!.width).toBeLessThanOrEqual(right + 1);
-  expect(Math.abs(select!.y + select!.height / 2 - (title!.y + title!.height / 2))).toBeLessThan(4);
+  expect(Math.abs(select!.y + select!.height - (found!.y + found!.height))).toBeLessThan(2);
+  expect(select!.x).toBeGreaterThan(title!.x + title!.width);
   expect(row!.y).toBeGreaterThanOrEqual(
     Math.max(title!.y + title!.height, select!.y + select!.height),
   );

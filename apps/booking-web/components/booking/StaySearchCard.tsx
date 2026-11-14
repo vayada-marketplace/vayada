@@ -32,6 +32,9 @@ export function phoneStayDate(date: string, locale: string, thisYear = new Date(
  * On phones (VAY-2494) it never sticks: it overlaps the hero by 64px, the dates and the guests are
  * two full-width rows, Check Availability spans the card and the promo is a small link under it.
  * The hotel page shows a compact bar instead once the card is out of view (StickySearchBar).
+ * Timo's boards give the rows 64px, uppercase labels and a 54px button. Their values stay at
+ * 15px, not the boards' 17px: "Wed 15 Sept → Thu 16 Sept" must stay on one line in the five
+ * heading/body fonts at 390px (Inter's is the widest), so the rows have no chevrons either.
  */
 export default function StaySearchCard({
   panel,
@@ -81,12 +84,12 @@ export default function StaySearchCard({
       className={`${stickyOnTablets ? "relative md:sticky md:top-4" : "relative lg:sticky lg:top-4"} z-30 max-w-5xl mx-auto px-4 ${heroOnPhones ? "-mt-16 md:-mt-10" : "mt-4 lg:-mt-10"}`}
     >
       {/* Phones: one column. From `md` up these resolve to the row it has always been. */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 md:gap-6">
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 md:gap-6 max-md:gap-0 max-md:rounded-[20px] max-md:border-0 max-md:px-2 max-md:pb-1 max-md:pt-2 max-md:shadow-[0_12px_32px_rgba(31,26,22,0.12)]">
         {/* Dates — clickable to open calendar */}
         <div className="relative md:flex-1 md:min-w-[120px]">
           <button
             onClick={() => onPanel(panel === "calendar" ? null : "calendar")}
-            className="flex items-center gap-3 w-full text-left hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
+            className="flex items-center gap-3 w-full text-left hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors max-md:m-0 max-md:min-h-16 max-md:px-2 max-md:py-2.5"
           >
             <div className="w-10 h-10 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
               <svg
@@ -115,7 +118,7 @@ export default function StaySearchCard({
             {/* Phones: "Fri 13 Nov → Sat 14 Nov" on one line, the nights on the right. */}
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden">
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-gray-500">{tp("dates")}</p>
+                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{tp("dates")}</p>
                 <p
                   data-testid="phone-stay-dates"
                   className="text-[15px] font-semibold text-gray-900"
@@ -139,13 +142,13 @@ export default function StaySearchCard({
         </div>
 
         {/* Divider: a line between the rows on phones */}
-        <div className="h-px w-full bg-gray-200 md:w-px md:h-12" />
+        <div className="h-px w-full bg-gray-200 md:w-px md:h-12 max-md:mx-2 max-md:w-auto" />
 
         {/* Guests — clickable to open selector */}
         <div className="relative w-auto min-w-[100px]">
           <button
             onClick={() => onPanel(panel === "guests" ? null : "guests")}
-            className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
+            className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors max-md:m-0 max-md:min-h-16 max-md:px-2 max-md:py-2.5"
           >
             <div className="flex w-10 h-10 rounded-full bg-primary-50 items-center justify-center flex-shrink-0">
               <svg
@@ -174,7 +177,7 @@ export default function StaySearchCard({
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-2 text-left md:hidden">
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-gray-500">{tc("guests")}</p>
+                <p className="text-xs uppercase tracking-[0.08em] text-gray-500">{tc("guests")}</p>
                 <p className="text-[15px] font-semibold text-gray-900">
                   {t("roomsProgress.guests", { adults, children: childCount })}
                 </p>
@@ -205,7 +208,7 @@ export default function StaySearchCard({
             onPanel(null);
             onCheck();
           }}
-          className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2"
+          className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2 max-md:mx-2 max-md:mt-2 max-md:h-[54px] max-md:w-auto max-md:py-0 max-md:text-[19px] max-md:font-bold"
         >
           {tc("checkAvailability")}
         </button>
