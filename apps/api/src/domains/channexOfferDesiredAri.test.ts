@@ -143,13 +143,13 @@ describe("buildChannexOfferAriValue", () => {
 });
 
 describe("computeChannexOfferDesiredAri", () => {
-  it("starts the 500-day window at hotel-local today in the hotel's time zone", () => {
+  it("starts the 499-day window at hotel-local today in the hotel's time zone", () => {
     const colombo = desired();
     expect(colombo.from).toBe("2026-10-11");
     expect(colombo.values[0]!.date).toBe("2026-10-11");
     expect(colombo.values).toHaveLength(DEFAULT_FULL_ARI_DAYS_AHEAD + 1);
-    expect(colombo.through).toBe("2028-02-22");
-    expect(colombo.values.at(-1)!.date).toBe("2028-02-22");
+    expect(colombo.through).toBe("2028-02-21");
+    expect(colombo.values.at(-1)!.date).toBe("2028-02-21");
     const losAngeles = desired({ timeZone: "America/Los_Angeles" });
     expect(losAngeles.from).toBe("2026-10-10");
     expect(losAngeles.values[0]!.date).toBe("2026-10-10");
@@ -158,8 +158,8 @@ describe("computeChannexOfferDesiredAri", () => {
   it("never produces past dates or dates beyond the horizon", () => {
     const clipped = desired({ window: { from: "2026-09-01", through: "2031-01-01" } });
     expect(clipped.from).toBe("2026-10-11");
-    expect(clipped.through).toBe("2028-02-22");
-    expect(clipped.values.every(({ date }) => date >= "2026-10-11" && date <= "2028-02-22")).toBe(
+    expect(clipped.through).toBe("2028-02-21");
+    expect(clipped.values.every(({ date }) => date >= "2026-10-11" && date <= "2028-02-21")).toBe(
       true,
     );
     expect(
@@ -222,7 +222,7 @@ describe("computeChannexOfferDesiredAri", () => {
     });
   });
 
-  it("computes a realistic 500-day horizon quickly (the configuration is parsed once)", () => {
+  it("computes a realistic 499-day horizon quickly (the configuration is parsed once)", () => {
     const busy = room() as unknown as {
       capacity: Record<string, number>;
       offers: { price: { calendar: Record<string, unknown> } }[];

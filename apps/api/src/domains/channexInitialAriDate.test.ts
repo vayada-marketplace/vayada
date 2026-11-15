@@ -4,13 +4,14 @@ import { admitChannexInitialAriDate as admit } from "./channexInitialAriDate.js"
 
 describe("initial ARI property-local date admission", () => {
   const now = new Date("2026-01-01T12:00:00Z");
-  it("includes today and the existing full-ARI boundary, excluding adjacent dates", () => {
+  it("includes today and the 499-date boundary, excluding adjacent dates", () => {
     expect(admit("2026-01-01", "UTC", now)).toMatchObject({
       kind: "admitted",
-      through: "2027-05-15",
+      through: "2027-05-14",
     });
-    expect(admit("2027-05-15", "UTC", now).kind).toBe("admitted");
-    for (const date of ["2025-12-31", "2027-05-16"])
+    expect(admit("2027-05-14", "UTC", now).kind).toBe("admitted");
+    // VAY-2108: today + 499 is the day Channex opens only at its daily roll, hours after midnight.
+    for (const date of ["2025-12-31", "2027-05-15"])
       expect(admit(date, "UTC", now).kind).toBe("unavailable");
   });
   it("uses the hotel's date on either side of UTC midnight", () => {
@@ -70,14 +71,14 @@ describe("next initial ARI calendar date", () => {
   });
   it("includes the last horizon day and returns no date only after all days are covered", () => {
     const now = new Date("2026-01-01T12:00:00Z");
-    const days = Array.from({ length: 500 }, (_, i) =>
+    const days = Array.from({ length: 499 }, (_, i) =>
       new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
     );
-    expect(next("UTC", now, days.slice(0, -1))).toMatchObject({ date: "2027-05-15" });
+    expect(next("UTC", now, days.slice(0, -1))).toMatchObject({ date: "2027-05-14" });
     expect(next("UTC", now, days)).toMatchObject({ kind: "selected", date: null });
   });
   it("keeps a provisioning run anchored across hotel-local midnight", () => {
-    const days = Array.from({ length: 500 }, (_, i) =>
+    const days = Array.from({ length: 499 }, (_, i) =>
       new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
     );
     const beforeMidnight = next(
@@ -95,12 +96,12 @@ describe("next initial ARI calendar date", () => {
     expect(beforeMidnight).toMatchObject({
       kind: "selected",
       propertyLocalDate: "2026-01-01",
-      through: "2027-05-15",
+      through: "2027-05-14",
       date: null,
     });
     expect(afterMidnight).toEqual(beforeMidnight);
     expect(
-      admit("2027-05-16", "America/Los_Angeles", new Date("2026-01-02T08:00:01Z"), "2026-01-01")
+      admit("2027-05-15", "America/Los_Angeles", new Date("2026-01-02T08:00:01Z"), "2026-01-01")
         .kind,
     ).toBe("unavailable");
     expect(

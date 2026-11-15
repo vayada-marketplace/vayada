@@ -10,6 +10,7 @@ import {
   parseAgencyStayPricesQuery,
 } from "./agencyStayPrices.js";
 import { readFreeWindows } from "./agencyNextFreeDates.js";
+import { DEFAULT_FULL_ARI_DAYS_AHEAD } from "../jobs/pmsChannexAriHorizon.js";
 import { readLiveAccountBookingPageStays, readStaysWithPromoCode } from "./accountBookingPages.js";
 import { installPostgresPoolRuntime } from "../platform/postgresRuntime.js";
 import {
@@ -1039,7 +1040,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
          SELECT created.id AS creation_attempt_id,gen_random_uuid() AS attempt_id,
            gen_random_uuid() AS receipt_id,gen_random_uuid() AS task_id,day::date AS service_date
          FROM pms.channex_offer_create_attempts created
-         CROSS JOIN generate_series(current_date,current_date+499,interval '1 day') day
+         CROSS JOIN generate_series(current_date,current_date+${DEFAULT_FULL_ARI_DAYS_AHEAD},interval '1 day') day
          WHERE created.id=ANY($1::uuid[])
            AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_ari_attempts existing
              WHERE existing.creation_attempt_id=created.id AND existing.service_date=day::date)`,
@@ -2159,97 +2160,102 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows,
     ).toEqual([{ date: expected.toISOString().slice(0, 10) }]);
   });
-  it("retires a legacy completed task beyond the supported initial horizon", async () => {
-    const f = await initialAriFixture(),
-      claimed = await f.claimAri(initialAriDate);
-    if (claimed.kind !== "ari_claimed") throw new Error("claim required");
-    const date = (await pool.query("SELECT (current_date+500)::text AS date")).rows[0]
-      .date as string;
-    const client = await pool.connect();
-    try {
-      await client.query("SET session_replication_role='replica'");
-      await client.query(
-        `UPDATE pms.channex_offer_ari_attempts
+  // VAY-2108: today + 499 is the 2026-11-15 production case (sent before Channex's daily roll opened
+  // that day, so its readback never matched); today + 500 is a legacy task beyond any window.
+  it.each([499, 500])(
+    "retires a completed task %i days ahead, beyond the initial horizon",
+    async (ahead) => {
+      const f = await initialAriFixture(),
+        claimed = await f.claimAri(initialAriDate);
+      if (claimed.kind !== "ari_claimed") throw new Error("claim required");
+      const date = (await pool.query("SELECT (current_date+$1::int)::text AS date", [ahead]))
+        .rows[0].date as string;
+      const client = await pool.connect();
+      try {
+        await client.query("SET session_replication_role='replica'");
+        await client.query(
+          `UPDATE pms.channex_offer_ari_attempts
          SET service_date=$2::date,request_body=jsonb_set(
            request_body,'{values,0,date}',to_jsonb(to_char($2::date,'YYYY-MM-DD')))
          WHERE id=$1`,
-        [claimed.attemptId, date],
-      );
-    } finally {
-      await client.query("SET session_replication_role='origin'");
-      client.release();
-    }
-    await seedCompletedInitialAri(f);
-    await seedCurrentAvailability(f);
-    const request = (
-        await pool.query("SELECT request_body FROM pms.channex_offer_ari_attempts WHERE id=$1", [
-          claimed.attemptId,
-        ])
-      ).rows[0].request_body,
-      taskId = randomUUID(),
-      correlation = {
-        ...f.correlation,
-        receiptId: randomUUID(),
-        attemptId: claimed.attemptId,
-        jobAttemptId: claimed.jobAttemptId,
-        workerId: claimed.workerId,
-      };
-    await (
-      await prepareChannexAriReceiptPersistence(
-        pool,
-        correlation,
-        new Response(
-          JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
-        ),
-      )
-    )();
-    const get = vi.fn(async () => ({
-      data: {
-        type: "task",
-        id: taskId,
-        attributes: {
-          id: taskId,
-          task: "Property.UpdateRestrictions",
-          payload: request,
-          success: true,
-          errors: [],
-          received_at: "2026-09-14T00:00:00.000001",
-          executed_at: "2026-09-14T00:00:00.000002",
-          finished_at: "2026-09-14T00:00:00.000003",
-        },
-      },
-    }));
-    expect(
-      await reconcileCurrentChannexInitialAri(
-        pool,
-        f.input,
-        f.selection,
-        f.claim.attemptId,
-        claimed.attemptId,
-        get,
-      ),
-    ).toMatchObject({ kind: "ari_retired", ariAttemptId: claimed.attemptId });
-    expect(
-      (
-        await pool.query(
-          `SELECT state,reconciliation_evidence->>'completionBasis' AS basis
-       FROM pms.channex_offer_ari_attempts WHERE id=$1`,
-          [claimed.attemptId],
+          [claimed.attemptId, date],
+        );
+      } finally {
+        await client.query("SET session_replication_role='origin'");
+        client.release();
+      }
+      await seedCompletedInitialAri(f);
+      await seedCurrentAvailability(f);
+      const request = (
+          await pool.query("SELECT request_body FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+            claimed.attemptId,
+          ])
+        ).rows[0].request_body,
+        taskId = randomUUID(),
+        correlation = {
+          ...f.correlation,
+          receiptId: randomUUID(),
+          attemptId: claimed.attemptId,
+          jobAttemptId: claimed.jobAttemptId,
+          workerId: claimed.workerId,
+        };
+      await (
+        await prepareChannexAriReceiptPersistence(
+          pool,
+          correlation,
+          new Response(
+            JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
+          ),
         )
-      ).rows[0],
-    ).toEqual({
-      state: "outside_horizon",
-      basis: "finished_task_outside_initial_horizon",
-    });
-    expect(get).toHaveBeenCalledOnce();
-    expect(
-      await prepareNextChannexInitialAriDispatch(pool, f.input, f.selection, f.claim.attemptId),
-    ).toEqual({ kind: "initial_dates_reconciled" });
-    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
-      kind: "all_targets_active",
-      count: 2,
-    });
-  });
+      )();
+      const get = vi.fn(async () => ({
+        data: {
+          type: "task",
+          id: taskId,
+          attributes: {
+            id: taskId,
+            task: "Property.UpdateRestrictions",
+            payload: request,
+            success: true,
+            errors: [],
+            received_at: "2026-09-14T00:00:00.000001",
+            executed_at: "2026-09-14T00:00:00.000002",
+            finished_at: "2026-09-14T00:00:00.000003",
+          },
+        },
+      }));
+      expect(
+        await reconcileCurrentChannexInitialAri(
+          pool,
+          f.input,
+          f.selection,
+          f.claim.attemptId,
+          claimed.attemptId,
+          get,
+        ),
+      ).toMatchObject({ kind: "ari_retired", ariAttemptId: claimed.attemptId });
+      expect(
+        (
+          await pool.query(
+            `SELECT state,reconciliation_evidence->>'completionBasis' AS basis
+       FROM pms.channex_offer_ari_attempts WHERE id=$1`,
+            [claimed.attemptId],
+          )
+        ).rows[0],
+      ).toEqual({
+        state: "outside_horizon",
+        basis: "finished_task_outside_initial_horizon",
+      });
+      expect(get).toHaveBeenCalledOnce();
+      expect(
+        await prepareNextChannexInitialAriDispatch(pool, f.input, f.selection, f.claim.attemptId),
+      ).toEqual({ kind: "initial_dates_reconciled" });
+      expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+        kind: "all_targets_active",
+        count: 2,
+      });
+    },
+  );
   it.each(["timezone", "configuration", "lease"])(
     "does not automatically claim a date with missing %s authority",
     async (mode) => {
@@ -2450,7 +2456,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       )
     ).rows[0];
     const through = new Date(`${target.ariFrom}T00:00:00.000Z`);
-    through.setUTCDate(through.getUTCDate() + 499);
+    through.setUTCDate(through.getUTCDate() + DEFAULT_FULL_ARI_DAYS_AHEAD);
     expect(target).toEqual({
       active_version: "1",
       status: "sealed",
@@ -10105,7 +10111,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(open.values.map(({ value }) => value.stop_sell)).toEqual([false, false]);
     expect(open.values[0]!.valueSha256).not.toBe(closed.values[0]!.valueSha256);
     const horizon = await readDesired(f);
-    expect(horizon.kind === "desired" && horizon.values.length).toBe(500);
+    expect(horizon.kind === "desired" && horizon.values.length).toBe(
+      DEFAULT_FULL_ARI_DAYS_AHEAD + 1,
+    );
   });
   it("classifies a target that is not active, unknown or no longer current", async () => {
     const f = await initialAriFixture();
@@ -10135,7 +10143,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     const today = new Date().toISOString().slice(0, 10); // the fixture hotel is on Etc/UTC
     const horizon = new Date(`${today}T00:00:00.000Z`);
-    horizon.setUTCDate(horizon.getUTCDate() + 499);
+    horizon.setUTCDate(horizon.getUTCDate() + DEFAULT_FULL_ARI_DAYS_AHEAD);
     const accepted = (taskId = randomUUID()) =>
       new Response(
         JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
@@ -10244,7 +10252,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await f.request(first.deliveryId)).toEqual(body);
     let rows = (await f.deliveries()).rows;
     expect(rows).toMatchObject([
-      { id: first.deliveryId, state: "unresolved", entries: 1, dates: 500, receipts: 1 },
+      {
+        id: first.deliveryId,
+        state: "unresolved",
+        entries: 1,
+        dates: DEFAULT_FULL_ARI_DAYS_AHEAD + 1,
+        receipts: 1,
+      },
     ]);
     // The unresolved delivery blocks only its target; the whole run waits for reconciliation.
     expect(await f.next()).toEqual({
