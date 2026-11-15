@@ -214,7 +214,7 @@ const RESERVATION_PATH = "/properties/:propertyId/reservations/:guestBookingId/g
 const SETTINGS_PATH = "/properties/:propertyId/guest-data-settings";
 type GuestRoutePermission =
   | "pms.reservation.read"
-  | "pms.operations.manage"
+  | "pms.reservation.update"
   | "pms.settings.read"
   | "pms.settings.manage";
 
@@ -335,7 +335,7 @@ export async function registerPmsGuestProfileRoutes(
   });
 
   app.patch<{ Params: ProfileParams; Body: unknown }>(PROFILE_PATH, async (request, reply) => {
-    const allowed = await access(request, reply, "pms.operations.manage");
+    const allowed = await access(request, reply, "pms.reservation.update");
     if (!allowed) return reply;
     const guestProfileId = parseUuid(request.params.guestProfileId);
     if (!guestProfileId) return invalidRequest(reply, "The guest ID is invalid.");
@@ -366,7 +366,7 @@ export async function registerPmsGuestProfileRoutes(
   });
 
   app.post<{ Params: ProfileParams; Body: unknown }>(NOTES_PATH, async (request, reply) => {
-    const allowed = await access(request, reply, "pms.operations.manage");
+    const allowed = await access(request, reply, "pms.reservation.update");
     if (!allowed) return reply;
     const guestProfileId = parseUuid(request.params.guestProfileId);
     if (!guestProfileId) return invalidRequest(reply, "The guest ID is invalid.");
@@ -384,7 +384,7 @@ export async function registerPmsGuestProfileRoutes(
   });
 
   app.delete<{ Params: NoteParams }>(NOTE_PATH, async (request, reply) => {
-    const allowed = await access(request, reply, "pms.operations.manage");
+    const allowed = await access(request, reply, "pms.reservation.update");
     if (!allowed) return reply;
     const guestProfileId = parseUuid(request.params.guestProfileId);
     const noteId = parseUuid(request.params.noteId);
@@ -405,7 +405,7 @@ export async function registerPmsGuestProfileRoutes(
   });
 
   app.post<{ Params: ProfileParams; Body: unknown }>(SEPARATE_PATH, async (request, reply) => {
-    const allowed = await access(request, reply, "pms.operations.manage");
+    const allowed = await access(request, reply, "pms.reservation.update");
     if (!allowed) return reply;
     const guestProfileId = parseUuid(request.params.guestProfileId);
     const bookingGuestId = parseUuid(bodyObject(request.body)?.bookingGuestId);
@@ -427,7 +427,7 @@ export async function registerPmsGuestProfileRoutes(
   });
 
   app.post<{ Params: ProfileParams; Body: unknown }>(MERGE_PATH, async (request, reply) => {
-    const allowed = await access(request, reply, "pms.operations.manage");
+    const allowed = await access(request, reply, "pms.reservation.update");
     if (!allowed) return reply;
     const guestProfileId = parseUuid(request.params.guestProfileId);
     const otherGuestProfileId = parseUuid(bodyObject(request.body)?.guestProfileId);

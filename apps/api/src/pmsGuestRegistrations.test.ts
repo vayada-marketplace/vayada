@@ -1,5 +1,7 @@
 import {
   createFakeVerifier,
+  staffAccessPermissionKeys,
+  staffRoleDefaultPermissions,
   type IdentityRepository,
   type PermissionKey,
   type ResourceRelationship,
@@ -25,9 +27,16 @@ const actorUserId = "22222222-2222-2222-2222-222222222222";
 const url = `/api/pms/properties/${propertyId}/reservations/${bookingId}/guest-registrations`;
 const headers = { authorization: "Bearer valid-token" };
 const FULL: PermissionKey[] = [
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.guest_contact.read",
+];
+// VAY-2498: the account admin's grants hold the old broad keys and every staff key (0002, 0109).
+const OWNER: PermissionKey[] = [
   "pms.operations.read",
   "pms.operations.manage",
-  "pms.guest_contact.read",
+  "pms.finance.manage",
+  ...staffAccessPermissionKeys,
 ];
 
 const grace: PmsGuestRegistration = {
@@ -79,8 +88,10 @@ function buildAuthenticatedApp(
     repository?: PmsGuestRegistrationRepository;
     permissions?: PermissionKey[];
     relationship?: ResourceRelationship;
+    roleKey?: string;
   } = {},
 ) {
+  const roleKey = options.roleKey ?? "hotel_owner";
   const identityRepository: IdentityRepository = {
     async findUserByProviderUserId() {
       return { userId: actorUserId, email: "desk@example.com", status: "active" };
@@ -92,9 +103,9 @@ function buildAuthenticatedApp(
       return {
         membershipId: "33333333-3333-3333-3333-333333333333",
         status: "active",
-        roleKey: "hotel_owner",
+        roleKey,
         workosMembershipId: "workos-membership-1",
-        workosRoleSlugs: ["hotel_owner"],
+        workosRoleSlugs: [roleKey],
       };
     },
     async findLinkedResources() {
@@ -188,7 +199,9 @@ describe("PMS guest registration routes (VAY-2373)", () => {
   });
 
   it("hides the ID fields, but not which ones are filled, from staff without guest contact access", async () => {
-    app = buildAuthenticatedApp({ permissions: ["pms.operations.read", "pms.operations.manage"] });
+    app = buildAuthenticatedApp({
+      permissions: ["pms.reservation.read", "pms.reservation.update"],
+    });
     const response = await app.inject({ method: "GET", url, headers });
 
     expect(response.statusCode).toBe(200);
@@ -222,6 +235,42 @@ describe("PMS guest registration routes (VAY-2373)", () => {
     expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
     expect((await app.inject({ method: "GET", url })).statusCode).toBe(401);
   });
+
+  // VAY-2498: the check-in registration form is daily work for staff with "Reservations: modify".
+  it.each([
+    ["the account admin", "hotel_owner", OWNER, 200, 200],
+    ["front desk", "front_desk", [...staffRoleDefaultPermissions.front_desk], 200, 200],
+    [
+      "an agency manager",
+      "hotel_manager",
+      [...staffRoleDefaultPermissions.hotel_manager],
+      200,
+      200,
+    ],
+    ["housekeeping", "housekeeping", [...staffRoleDefaultPermissions.housekeeping], 403, 403],
+    [
+      "front desk without modify",
+      "front_desk",
+      staffRoleDefaultPermissions.front_desk.filter((key) => key !== "pms.reservation.update"),
+      200,
+      403,
+    ],
+  ] as [string, string, PermissionKey[], number, number][])(
+    "lets %s read and save the registration form: %s",
+    async (_name, roleKey, permissions, readStatus, saveStatus) => {
+      const repository = createRepository();
+      app = buildAuthenticatedApp({ repository, permissions, roleKey });
+      const read = await app.inject({ method: "GET", url, headers });
+      const save = await app.inject({
+        method: "PUT",
+        url: `${url}/${guestId}`,
+        headers,
+        payload: body,
+      });
+      expect([read.statusCode, save.statusCode]).toEqual([readStatus, saveStatus]);
+      expect(repository.saves).toHaveLength(saveStatus === 200 ? 1 : 0);
+    },
+  );
 
   it("saves a whole registration, trimmed, with the actor for the audit event", async () => {
     const repository = createRepository();

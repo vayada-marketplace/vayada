@@ -113,7 +113,7 @@ export async function registerPmsGuestRegistrationRoutes(
     const context = await authorize(reply, () =>
       enforcePmsPropertyRoutePolicy(
         request,
-        { propertyId, permission: "pms.operations.read", allowedRelationships: RELATIONSHIPS },
+        { propertyId, permission: "pms.reservation.read", allowedRelationships: RELATIONSHIPS },
         propertyAccessRepository,
       ),
     );
@@ -144,7 +144,7 @@ export async function registerPmsGuestRegistrationRoutes(
     const context = await authorize(reply, () =>
       enforcePmsPropertyRoutePolicy(
         request,
-        { propertyId, permission: "pms.operations.manage", allowedRelationships: RELATIONSHIPS },
+        { propertyId, permission: "pms.reservation.update", allowedRelationships: RELATIONSHIPS },
         propertyAccessRepository,
       ),
     );

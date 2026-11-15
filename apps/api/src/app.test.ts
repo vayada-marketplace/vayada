@@ -209,6 +209,23 @@ type PmsOperationsTestReservationListResponse = {
 };
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
+// VAY-2498: the account admin's PMS grants. Daily work checks the staff keys; money and setup
+// keep the owner-only pms.operations.* keys.
+const PMS_OWNER_PERMISSIONS: PermissionKey[] = [
+  "pms.operations.read",
+  "pms.operations.manage",
+  "pms.guest_contact.read",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.reservation.cancel",
+  "pms.calendar.read",
+  "pms.calendar.manage",
+  "pms.settings.read",
+  "pms.settings.manage",
+];
+// Assign, check in, status, no-show and check out.
+const PMS_STAY_PERMISSIONS: PermissionKey[] = ["pms.reservation.update", "pms.reservation.cancel"];
+
 const pmsOperationsContractCases = JSON.parse(
   readFileSync(
     new URL(
@@ -11132,7 +11149,7 @@ describe("vayada-api", () => {
       shuffleId: "10000000-0000-4000-8000-000000000001",
     };
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [{ product: "pms", key: "property-management", status: "active" }],
       linkedPmsRelationship: "owner",
       pmsOperationsAllowedOrigins: ["https://pms.localhost"],
@@ -11203,7 +11220,7 @@ describe("vayada-api", () => {
   it("reads and writes room-packing data for an assigned operator", async () => {
     const calls = { settingsReads: 0, settingsWrites: 0, historyReads: 0 };
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: ["pms.settings.read", "pms.settings.manage", "pms.calendar.read"],
       entitlements: [{ product: "pms", key: "property-management", status: "active" }],
       roleKey: "hotel_manager",
       linkedPmsRelationship: "operator",
@@ -11273,7 +11290,7 @@ describe("vayada-api", () => {
 
   it("sanitizes PMS room shuffle history storage failures", async () => {
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [{ product: "pms", key: "property-management", status: "active" }],
       pmsRoomAssignmentHistory: {
         async list() {
@@ -11366,8 +11383,8 @@ describe("vayada-api", () => {
         code: "missing_permission",
       },
       {
-        name: "settings manage permission",
-        appOptions: { permissions: ["pms.settings.manage"] },
+        name: "unrelated staff permission",
+        appOptions: { permissions: ["pms.inbox.reply"] },
         statusCode: 403,
         code: "missing_permission",
       },
@@ -11506,7 +11523,7 @@ describe("vayada-api", () => {
     for (const candidate of cases) {
       const calls = { settingsReads: 0, settingsWrites: 0, historyReads: 0, planReads: 0 };
       app = buildAuthenticatedApp({
-        permissions: ["pms.operations.read", "pms.operations.manage"],
+        permissions: PMS_OWNER_PERMISSIONS,
         entitlements: [entitlement],
         pmsRoomAssignmentSettings: {
           async find() {
@@ -11623,6 +11640,7 @@ describe("vayada-api", () => {
       permissions: [
         "pms.operations.read",
         "pms.operations.manage",
+        "pms.settings.manage",
         "pms.inbox.read",
         "pms.settings.read",
       ],
@@ -14525,7 +14543,7 @@ describe("vayada-api", () => {
   it("creates, updates, and releases target room blocks with refresh and ARI metadata", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -14690,7 +14708,7 @@ describe("vayada-api", () => {
       },
     };
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [entitlement],
       pmsOperationsCommandRepository: commandRepository,
     });
@@ -16290,9 +16308,9 @@ describe("vayada-api", () => {
     });
 
     it.each([
-      { permissions: ["pms.operations.manage"] as PermissionKey[], showsBreakdown: false },
+      { permissions: PMS_STAY_PERMISSIONS, showsBreakdown: false },
       {
-        permissions: ["pms.operations.manage", "pms.finance.read"] as PermissionKey[],
+        permissions: [...PMS_STAY_PERMISSIONS, "pms.finance.read"] as PermissionKey[],
         showsBreakdown: true,
       },
     ])(
@@ -16516,7 +16534,7 @@ describe("vayada-api", () => {
     const noteCase = pmsPrivateNoteCases["private-notes-excluded-from-public"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.read"],
+      permissions: ["pms.reservation.read"],
       entitlements: [
         {
           product: "pms",
@@ -16571,7 +16589,7 @@ describe("vayada-api", () => {
     const deleteCase = pmsPrivateNoteCases["private-note-delete"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -16662,7 +16680,7 @@ describe("vayada-api", () => {
   it("maps PMS private note not-found and manage authorization errors", async () => {
     const missingCase = pmsPrivateNoteCases["private-note-not-found"]!;
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -16684,7 +16702,7 @@ describe("vayada-api", () => {
     await app.close();
 
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.read"],
+      permissions: ["pms.reservation.read"],
       entitlements: [
         {
           product: "pms",
@@ -16719,7 +16737,7 @@ describe("vayada-api", () => {
     const boundaryCase = pmsAdditionalGuestCases["additional-guests-booking-pii-boundary"]!;
     const bookingGuestPiiPort = createBookingGuestPiiPort();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -16778,7 +16796,7 @@ describe("vayada-api", () => {
   it("routes authorized primary guest nationality correction through Booking ownership", async () => {
     const bookingGuestPiiPort = createBookingGuestPiiPort();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [{ product: "pms", key: "property-management", status: "active" }],
       bookingGuestPiiPort,
       pmsOperationsRepository: {
@@ -16880,7 +16898,7 @@ describe("vayada-api", () => {
     const chargeCase = pmsCheckoutChargeCases["checkout-charge-create-mark-paid-waive"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage", "pms.operations.read"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -16983,7 +17001,7 @@ describe("vayada-api", () => {
     const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17047,7 +17065,7 @@ describe("vayada-api", () => {
     const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17104,7 +17122,7 @@ describe("vayada-api", () => {
     const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17140,7 +17158,7 @@ describe("vayada-api", () => {
     const successCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17187,7 +17205,7 @@ describe("vayada-api", () => {
   it("executes PMS assignment assign/move/unassign/swap commands through the P1c contract", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17286,7 +17304,7 @@ describe("vayada-api", () => {
   it("maps PMS assignment command conflicts without queueing side effects", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17327,7 +17345,7 @@ describe("vayada-api", () => {
     const commandCase = pmsAssignmentCommandCases["assignment-command-idempotency-replay"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17365,7 +17383,7 @@ describe("vayada-api", () => {
   it("executes PMS check-in, operational status, and no-show commands with audit metadata", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17418,7 +17436,7 @@ describe("vayada-api", () => {
   it("accepts manual-payment bookings and marks received payments through target PMS commands", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [{ product: "pms", key: "property-management", status: "active" }],
       pmsOperationsCommandRepository: commandRepository,
     });
@@ -17472,7 +17490,7 @@ describe("vayada-api", () => {
     const commandCase = pmsOperationalCommandCases["no-show-command"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17507,7 +17525,7 @@ describe("vayada-api", () => {
   it("maps PMS operational invalid status transitions and version conflicts", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      permissions: PMS_OWNER_PERMISSIONS,
       entitlements: [
         {
           product: "pms",
@@ -17545,7 +17563,7 @@ describe("vayada-api", () => {
   it("reads PMS operational templates with read policy", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.read"],
+      permissions: ["pms.reservation.read"],
       entitlements: [
         {
           product: "pms",
@@ -17782,7 +17800,7 @@ describe("vayada-api", () => {
     };
     function authorizationCases(permission: PermissionKey): PmsAuthorizationRuntimeCase[] {
       const commandOptions =
-        permission === "pms.operations.manage"
+        permission === "pms.reservation.update"
           ? { pmsOperationsCommandRepository: createPmsOperationsCommandRepository() }
           : {};
       return [
@@ -17829,7 +17847,7 @@ describe("vayada-api", () => {
       const requestMethod = denialCase.request.method ?? "GET";
       const requiredPermission: PermissionKey =
         requestMethod !== "GET"
-          ? "pms.operations.manage"
+          ? "pms.reservation.update"
           : denialCase.request.path.endsWith("/rooms")
             ? "pms.room_status.read"
             : "pms.rooms_rates.read";

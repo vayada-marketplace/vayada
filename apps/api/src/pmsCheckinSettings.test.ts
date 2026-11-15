@@ -1,5 +1,6 @@
 import {
   createFakeVerifier,
+  staffRoleDefaultPermissions,
   type IdentityRepository,
   type PermissionKey,
   type ResourceRelationship,
@@ -202,6 +203,18 @@ describe("PMS check-in settings routes (VAY-2374)", () => {
     expect(write.statusCode).toBe(403);
     expect(repository.saves).toEqual([]);
   });
+
+  // VAY-2498: the front desk role checks guests in with "Reservations: view", not the old keys.
+  it.each([
+    ["front desk", [...staffRoleDefaultPermissions.front_desk], 200],
+    ["housekeeping", [...staffRoleDefaultPermissions.housekeeping], 403],
+  ] as [string, PermissionKey[], number][])(
+    "lets %s read the settings at check-in: %s",
+    async (_name, permissions, status) => {
+      app = buildAuthenticatedApp({ permissions, relationship: "front_desk" });
+      expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(status);
+    },
+  );
 
   it("refuses incomplete or inconsistent settings before saving", async () => {
     const repository = createRepository();

@@ -93,6 +93,29 @@ The editor cannot delegate `identity.staff.manage` or `finance.billing.manage`;
 grants, then role defaults. Compatibility keys such as `pms.operations.manage`
 do not imply new staff permissions.
 
+Daily PMS work checks these staff keys (VAY-2498), so a role's levels decide
+what its members can do:
+
+| Work                                                                                                                                                                                                                                                                         | Key                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Check in, check out, stay status, room assignment, accept a booking request, change dates or rooms, guest details, registration and nationality, additional guests, booking and guest notes, merge or separate guest profiles, add a checkout charge, unpaid manual bookings | `pms.reservation.update`                                     |
+| Read additional guests, booking notes, checkout charges, the check-in settings and checklist, and the check-out inspection                                                                                                                                                   | `pms.reservation.read`                                       |
+| Cancel, mark a no-show                                                                                                                                                                                                                                                       | `pms.reservation.cancel`                                     |
+| Create, change or release room blocks                                                                                                                                                                                                                                        | `pms.calendar.manage`                                        |
+| The calendar's room-move history                                                                                                                                                                                                                                             | `pms.calendar.read`                                          |
+| Calendar settings (room assignment)                                                                                                                                                                                                                                          | `pms.settings.read` to view, `pms.settings.manage` to change |
+
+These routes check the member's own property access, like every other staff
+route, and answers to members without `pms.guest_contact.read` hide guest email
+and phone.
+
+Money and setup keep the owner-only keys `pms.operations.manage` and
+`pms.finance.manage`: marking a booking or checkout charge paid, waiving a
+charge, refunds, price corrections, a paid manual booking, a cancel that keeps
+charges, room types, rooms and room status (VAY-2557), prices, the operating
+calendar and auto-open, check-in and check-out template edits, the channel manager
+(including the no-show report to Booking.com) and the property profile.
+
 Invite and edit commands accept only `hotel_manager`, `front_desk`,
 `housekeeping`, or `hotel_custom` as a staff role. They reject `hotel_owner`;
 owner creation or transfer is a separate identity lifecycle flow.

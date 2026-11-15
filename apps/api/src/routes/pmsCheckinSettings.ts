@@ -111,8 +111,13 @@ export type PmsCheckinSettingsRoutesOptions = {
   allowedOrigins?: string[];
 };
 
-// Front desk staff read the settings while they check guests in; owners and operators change them.
-const READ_PERMISSIONS = ["pms.operations.read", "pms.settings.read"] as const;
+// Front desk staff read the settings while they check guests in (VAY-2498: with "Reservations:
+// view"); owners and operators change them.
+const READ_PERMISSIONS = [
+  "pms.operations.read",
+  "pms.settings.read",
+  "pms.reservation.read",
+] as const;
 const MANAGE_RELATIONSHIPS = ["owner", "operator"] as const;
 const PATH = "/properties/:propertyId/check-in-settings";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

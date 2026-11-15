@@ -1005,17 +1005,22 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsPhysicalRoomOperationalLabels,
     });
   }
-  app.register(registerPmsManualBookingCapabilityRoutes, { prefix: "/api/pms" });
+  app.register(registerPmsManualBookingCapabilityRoutes, {
+    prefix: "/api/pms",
+    propertyAccessRepository: options.auth?.propertyAccessRepository,
+  });
   if (options.pmsManualBookingPreview) {
     app.register(registerPmsManualBookingPreviewRoutes, {
       prefix: "/api/pms",
       ...options.pmsManualBookingPreview,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.pmsManualBookingCreate) {
     app.register(registerPmsManualBookingCreateRoutes, {
       prefix: "/api/pms",
       ...options.pmsManualBookingCreate,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.pmsModuleActivationRepository) {

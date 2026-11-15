@@ -1,5 +1,7 @@
 import {
   createFakeVerifier,
+  staffAccessPermissionKeys,
+  staffRoleDefaultPermissions,
   type IdentityRepository,
   type PermissionKey,
 } from "@vayada/backend-auth";
@@ -22,9 +24,16 @@ const guestBookingId = "24200000-0000-4000-8000-000000000005";
 const organizationId = "11111111-1111-1111-1111-111111111111";
 const base = `/api/pms/properties/${propertyId}/guests`;
 const headers = { authorization: "Bearer valid-token" };
+// The account admin's grants hold the old broad keys and every staff key (0002, 0109).
+const OWNER: PermissionKey[] = [
+  "pms.operations.read",
+  "pms.operations.manage",
+  "pms.finance.manage",
+  ...staffAccessPermissionKeys,
+];
 const FULL: PermissionKey[] = [
   "pms.reservation.read",
-  "pms.operations.manage",
+  "pms.reservation.update",
   "pms.guest_contact.read",
 ];
 
@@ -207,9 +216,9 @@ describe("PMS guest profile routes (VAY-2420)", () => {
     ]);
   });
 
-  it("needs reservation access to read and operations access to write", async () => {
+  it("needs reservation access to read and reservation update to write", async () => {
     const { repository, calls } = createRepository();
-    app = buildAuthenticatedApp(repository, ["pms.operations.manage"]);
+    app = buildAuthenticatedApp(repository, ["pms.reservation.update"]);
     expect((await app.inject({ method: "GET", url: base, headers })).statusCode).toBe(403);
     await app.close();
 
@@ -224,9 +233,61 @@ describe("PMS guest profile routes (VAY-2420)", () => {
     expect(calls).toEqual([]);
   });
 
+  // VAY-2498: guest edits are daily work for staff with "Reservations: modify".
+  it.each([
+    ["the account admin", "hotel_owner", OWNER, true],
+    ["front desk", "front_desk", [...staffRoleDefaultPermissions.front_desk], true],
+    ["an agency manager", "hotel_manager", [...staffRoleDefaultPermissions.hotel_manager], true],
+    ["housekeeping", "housekeeping", [...staffRoleDefaultPermissions.housekeeping], false],
+    [
+      "front desk without modify",
+      "front_desk",
+      staffRoleDefaultPermissions.front_desk.filter((key) => key !== "pms.reservation.update"),
+      false,
+    ],
+  ] as [string, string, PermissionKey[], boolean][])(
+    "lets %s edit, note, merge and separate guests: %s",
+    async (_name, roleKey, permissions, allowed) => {
+      const { repository, calls } = createRepository();
+      app = buildAuthenticatedApp(repository, permissions, "owner", roleKey);
+      const writes = [
+        {
+          method: "PATCH" as const,
+          url: `${base}/${guestProfileId}`,
+          payload: { firstName: "Tim" },
+        },
+        {
+          method: "POST" as const,
+          url: `${base}/${guestProfileId}/notes`,
+          payload: { body: "Late" },
+        },
+        { method: "DELETE" as const, url: `${base}/${guestProfileId}/notes/${bookingGuestId}` },
+        {
+          method: "POST" as const,
+          url: `${base}/${guestProfileId}/separate`,
+          payload: { bookingGuestId },
+        },
+        {
+          method: "POST" as const,
+          url: `${base}/${guestProfileId}/merge`,
+          payload: { guestProfileId },
+        },
+      ];
+      for (const write of writes) {
+        const response = await app.inject({ ...write, headers });
+        expect([write.method, write.url, response.statusCode === 403]).toEqual([
+          write.method,
+          write.url,
+          !allowed,
+        ]);
+      }
+      if (!allowed) expect(calls).toEqual([]);
+    },
+  );
+
   it("refuses contact and ID fields from staff without guest contact access", async () => {
     const { repository, calls } = createRepository();
-    app = buildAuthenticatedApp(repository, ["pms.reservation.read", "pms.operations.manage"]);
+    app = buildAuthenticatedApp(repository, ["pms.reservation.read", "pms.reservation.update"]);
     const response = await app.inject({
       method: "PATCH",
       url: `${base}/${guestProfileId}`,
