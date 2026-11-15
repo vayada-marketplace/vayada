@@ -363,7 +363,13 @@ export function createChannexManagementProvider(config: {
                 : "invalid_state",
               new Error("Saved Channex uploads still require reconciliation."),
             );
-        } catch {
+        } catch (error) {
+          // VAY-2108: the job keeps a generic error; this line names the refusing check or SQLSTATE.
+          console.warn("Channex closed upload reconciliation failed.", {
+            jobId: job.jobId,
+            attemptNumber: job.attemptNumber,
+            ...reconciliationFailureCause(error),
+          });
           return failure("provider_unavailable", new Error("Channex completion read unavailable."));
         }
       }
@@ -1171,6 +1177,27 @@ function canonicalChannel(application: string) {
 
 function isTimeout(error: unknown): boolean {
   return error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name);
+}
+
+/** Loggable cause of a failed reconciliation: our own fixed reason text, or a database SQLSTATE,
+ * table and routine. Anything else (provider or value-bearing text) is reported as unclassified. */
+function reconciliationFailureCause(error: unknown) {
+  const cause = (error ?? {}) as {
+    name?: unknown;
+    message?: unknown;
+    code?: unknown;
+    table?: unknown;
+    routine?: unknown;
+  };
+  const text = (value: unknown, pattern: RegExp) =>
+    typeof value === "string" && pattern.test(value) ? value : undefined;
+  return {
+    reason: text(cause.message, /^[A-Za-z0-9_ .,()-]{1,120}$/) ?? "unclassified",
+    errorName: text(cause.name, /^[A-Za-z]{1,40}$/),
+    code: text(cause.code, /^[0-9A-Z]{5}$/),
+    table: text(cause.table, /^[a-z0-9_]{1,63}$/),
+    routine: text(cause.routine, /^[A-Za-z0-9_]{1,63}$/),
+  };
 }
 
 function required(value: string, label: string): string {

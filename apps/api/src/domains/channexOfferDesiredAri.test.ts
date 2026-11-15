@@ -143,7 +143,7 @@ describe("buildChannexOfferAriValue", () => {
 });
 
 describe("computeChannexOfferDesiredAri", () => {
-  it("starts the 500-day window at hotel-local today in the hotel's time zone", () => {
+  it("starts the 499-day window at hotel-local today in the hotel's time zone", () => {
     const colombo = desired();
     expect(colombo.from).toBe("2026-10-11");
     expect(colombo.values[0]!.date).toBe("2026-10-11");
@@ -222,7 +222,7 @@ describe("computeChannexOfferDesiredAri", () => {
     });
   });
 
-  it("computes a realistic 500-day horizon quickly (the configuration is parsed once)", () => {
+  it("computes a realistic 499-day horizon quickly (the configuration is parsed once)", () => {
     const busy = room() as unknown as {
       capacity: Record<string, number>;
       offers: { price: { calendar: Record<string, unknown> } }[];
