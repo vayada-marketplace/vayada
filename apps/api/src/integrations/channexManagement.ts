@@ -146,7 +146,11 @@ export function createChannexManagementProvider(config: {
     | { kind: "unavailable"; reason: string }
   >;
   /** VAY-2108 D3: claim the next ongoing offer ARI delivery of the owned hotel. */
-  prepareOfferDelivery?: (lease: { jobId: string; attemptNumber: number; workerId: string }) => Promise<
+  prepareOfferDelivery?: (lease: {
+    jobId: string;
+    attemptNumber: number;
+    workerId: string;
+  }) => Promise<
     | {
         kind: "offer_ari_current";
         targetCount: number;
@@ -299,8 +303,11 @@ export function createChannexManagementProvider(config: {
           "invalid_state",
           new Error("Complete pricing and availability reconciliation bundle required."),
         );
-      if (job.input.operationType === "sync_ari" && !job.input.restrictionsOnly &&
-          config.advancePublishedOffers) {
+      if (
+        job.input.operationType === "sync_ari" &&
+        !job.input.restrictionsOnly &&
+        config.advancePublishedOffers
+      ) {
         if (!input?.workerId)
           return failure("invalid_state", new Error("Current offer worker lease required."));
         try {
@@ -329,9 +336,13 @@ export function createChannexManagementProvider(config: {
           if (result.kind !== "offer_creates_current")
             return failure(
               result.kind === "unavailable" &&
-                ["creation_reconciliation_required", "creation_batch_pending"].includes(result.reason)
-                ? "provider_unavailable" : "invalid_state",
-              new Error("Published Channex offer creation is unavailable."),
+                ["creation_reconciliation_required", "creation_batch_pending"].includes(
+                  result.reason,
+                )
+                ? "provider_unavailable"
+                : "invalid_state",
+              // The fixed reason code names the refusing step in the job's last error (VAY-2108).
+              new Error(`Published Channex offer creation is unavailable (${result.reason}).`),
             );
         } catch {
           return failure("provider_unavailable", new Error("Channex offer creation unavailable."));
@@ -458,7 +469,10 @@ export function createChannexManagementProvider(config: {
                       // Activation's own report stays visible: with a changed sibling, D5 does
                       // not activate the hotel's pending targets either (follow-up in the contract).
                       skippedOfferTargets: changedTarget
-                        ? [{ targetId: "activation", reason: activated.reason }, ...delivery.skipped]
+                        ? [
+                            { targetId: "activation", reason: activated.reason },
+                            ...delivery.skipped,
+                          ]
                         : delivery.skipped,
                     };
                   if (delivery.kind !== "prepared")
@@ -481,7 +495,10 @@ export function createChannexManagementProvider(config: {
                     });
                   });
                   if (sent.kind === "receipt_pending") await sent.persist();
-                  if (sent.kind === "delivery_failed" || (sent.kind === "receipt_pending" && sent.failed))
+                  if (
+                    sent.kind === "delivery_failed" ||
+                    (sent.kind === "receipt_pending" && sent.failed)
+                  )
                     return failure(
                       "provider_unavailable",
                       new Error("Channex offer delivery was not accepted."),

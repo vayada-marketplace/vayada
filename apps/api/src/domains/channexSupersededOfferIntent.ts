@@ -5,6 +5,10 @@ import {
   channexCreationReceiptsResolved,
   readChannexCreationReceiptIdentity,
 } from "./channexCreationReceiptGate.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+
+/** Lock waits and serialization conflicts clear on a later attempt, so the job retries them. */
+const RETRYABLE_SQLSTATES = new Set(["55P03", "40001", "40P01"]);
 
 type Scope = {
   propertyId: string;
@@ -31,6 +35,12 @@ export async function retireSupersededChannexOfferIntent(
     await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
     await client.query("SET LOCAL statement_timeout='5s'");
     await client.query("SET LOCAL lock_timeout='150ms'");
+    // The pricing lock first, as every price save and the publication reader take it: once it is
+    // granted, the head revision cannot change until commit (the snapshot may predate a save that
+    // committed during the wait; a later revision only makes a pending intent more stale). The
+    // Channex worker login may read pms.pricing_v2_heads but not lock its rows (row locks need
+    // UPDATE; VAY-2108).
+    await lockPmsInventoryMutationScope(client, scope.propertyId);
     const authority = await lockChannexPricingPropertyAuthority(client, lease);
     if (
       authority.kind !== "authorized" ||
@@ -67,7 +77,7 @@ export async function retireSupersededChannexOfferIntent(
     if (!intent) return { kind: "unavailable" as const, reason: "intent_unavailable" };
     const head = (
       await client.query<{ revision: number }>(
-        "SELECT revision FROM pms.pricing_v2_heads WHERE property_id=$1 FOR SHARE NOWAIT",
+        "SELECT revision FROM pms.pricing_v2_heads WHERE property_id=$1",
         [scope.propertyId],
       )
     ).rows[0];
@@ -173,7 +183,20 @@ export async function retireSupersededChannexOfferIntent(
     await client.query("COMMIT");
     committed = true;
     return { kind: "retired" as const };
-  } catch {
+  } catch (error) {
+    // The job records only a generic failure; this line names the database cause (ids only).
+    const cause = (error ?? {}) as { code?: unknown; table?: unknown; routine?: unknown };
+    const code = cause.code;
+    const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+    console.warn("Channex offer intent retirement failed.", {
+      propertyId: scope.propertyId,
+      targetId: scope.targetId,
+      intentId: scope.intentId,
+      code: typeof code === "string" ? code : "unknown",
+      table: text(cause.table),
+      routine: text(cause.routine),
+    });
+    if (typeof code === "string" && RETRYABLE_SQLSTATES.has(code)) throw error;
     return { kind: "unavailable" as const, reason: "retirement_unavailable" };
   } finally {
     if (!committed) await client.query("ROLLBACK").catch(() => undefined);

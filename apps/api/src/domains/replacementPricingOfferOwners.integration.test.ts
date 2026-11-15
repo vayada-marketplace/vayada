@@ -68,6 +68,8 @@ import { lockPublicPricingComponents } from "./publicPricingComponents.js";
 import { createPublicPricingAddonCatalog } from "./publicPricingAddonCatalog.js";
 import { dispatchNextChannexClosedUpload } from "./channexNextClosedUpload.js";
 import { advancePublishedChannexOfferCreates } from "./channexPublishedOfferCreate.js";
+import { retireSupersededChannexOfferIntent } from "./channexSupersededOfferIntent.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { runPmsChannexManagementWorkerOnce } from "../jobs/pmsChannexManagementWorker.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import { createPgChannexAriSchedule } from "../jobs/pmsChannexAriSchedule.js";
@@ -2609,7 +2611,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   });
   // VAY-2108 D5: publication 2 over an active offer, declared through the real charges writer.
   async function publishRevisionTwo(
-    f: Awaited<ReturnType<typeof initialAriFixture>>,
+    f: Pick<
+      Awaited<ReturnType<typeof creationFixture>>,
+      "scope" | "snapshot" | "sources" | "terms" | "context"
+    >,
     change: (room: (typeof f.snapshot.rooms)[number]) => (typeof f.snapshot.rooms)[number] = (
       room,
     ) => room,
@@ -9757,11 +9762,16 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ),
     ).not.toBeNull();
   });
-  it.each(["create", "closed-ari", "activate"])(
+  it.each(["create", "sync", "reprice", "closed-ari", "activate"])(
     "runs %s through the exact restricted Channex login",
     async (stage) => {
-      const seeded = stage === "create" ? null : await initialAriFixture("10000", true);
-      const f = seeded ?? (await creationFixture("10000", true));
+      // "sync" and "reprice" keep the fixture's sync_ari job (the scheduled job path, not one-offer
+      // provisioning) and run in the VAY-2108 claimed scope, as production does.
+      const scheduled = stage === "sync" || stage === "reprice";
+      const seeded =
+        stage === "create" || scheduled ? null : await initialAriFixture("10000", true);
+      const f = seeded ?? (await creationFixture("10000", !scheduled));
+      let claimedOperations: string[] = [];
       if (stage === "activate" && seeded) {
         await seedCurrentAvailability(seeded!);
         await seedCompletedInitialAri(seeded!);
@@ -9780,9 +9790,22 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
             await pool.query(
               `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
             );
-        await pool.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [
-          f.scope.propertyId,
-        ]);
+        if (scheduled) {
+          // Production's claimed scope: no allowlist row; the platform's claimed grant and the
+          // admitted operations expose every hotel with an active claim on its connection.
+          await pool.query(
+            `GRANT SELECT ON platform.channex_management_worker_claimed_operations TO ${role}`,
+          );
+          claimedOperations = (
+            await pool.query<{ operation: string }>(
+              `INSERT INTO platform.channex_management_worker_claimed_operations VALUES('sync_ari'),('provision')
+               ON CONFLICT DO NOTHING RETURNING operation_type AS operation`,
+            )
+          ).rows.map((row) => row.operation);
+        } else
+          await pool.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [
+            f.scope.propertyId,
+          ]);
         const login = new URL(url!);
         login.username = role;
         login.password = "fixture";
@@ -9830,6 +9853,145 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
             await bootstrapPublishedChannexOffer(worker, job, f.input.workerId, { get, create }),
           ).toEqual({ kind: "ready" });
           expect(create).toHaveBeenCalledOnce();
+        } else if (scheduled) {
+          // VAY-2108: each later turn first retires or keeps the pending intent, then records the
+          // retained create and its configuration. That step must not lock rows of a table the
+          // login may only read (pms.pricing_v2_heads), or every turn after the first create stops.
+          const room = providerRoom(f);
+          Object.assign(room.data.attributes, { default_occupancy: 1 });
+          const created = new Map<string, unknown>();
+          let latest: unknown;
+          const create = vi.fn(async (request: { body: unknown }) => {
+            latest = createdResponse(request.body);
+            created.set((latest as { data: { id: string } }).data.id, latest);
+            return new Response(JSON.stringify(latest), { status: 201 });
+          });
+          const get = async (path: string) => {
+            if (path.startsWith("/api/v1/room_types/")) return room;
+            const id = /\/rate_plans\/([0-9a-f-]{36})/.exec(path)?.[1];
+            return id && created.has(id) ? created.get(id) : latest;
+          };
+          const turn = () => advancePublishedChannexOfferCreates(worker!, f.input, { get, create });
+          expect((await turn()).kind).toBe("retained");
+          const intents = () =>
+            pool
+              .query<{ status: string; state: string }>(
+                `SELECT i.status,a.state FROM pms.channex_offer_target_intents i
+                 JOIN pms.channex_offer_targets t ON t.id=i.target_id
+                 JOIN pms.channex_offer_create_attempts a ON a.intent_id=i.id
+                 WHERE t.property_id=$1 ORDER BY i.status`,
+                [f.scope.propertyId],
+              )
+              .then((result) => result.rows);
+          if (stage === "reprice") {
+            // A price save between turns supersedes the pending intent: the cleanup step records
+            // its create from the receipt, retires the intent, and the turn creates afresh.
+            await publishRevisionTwo(f);
+            expect((await turn()).kind).toBe("retained");
+            expect(create).toHaveBeenCalledTimes(2);
+            expect(await intents()).toEqual([
+              { status: "failed", state: "identified" },
+              { status: "pending", state: "unresolved" },
+            ]);
+            return;
+          }
+          // The cleanup step itself on the worker login: a price save holding the property's
+          // pricing lock makes it wait, time out and rethrow, so the job retries (VAY-2108).
+          const pending = (
+            await pool.query(
+              `SELECT t.id AS "targetId",t.connection_id AS "connectionId",t.room_type_id AS "roomTypeId",
+                 i.id AS "intentId",(i.proposal->>'publicationRevision')::int AS "publicationRevision",
+                 c.external_property_id AS "externalPropertyId",b.id AS "claimId"
+               FROM pms.channex_offer_targets t
+               JOIN pms.channex_offer_target_intents i ON i.target_id=t.id AND i.status='pending'
+               JOIN pms.channel_connections c ON c.id=t.connection_id
+               JOIN pms.channel_binding_claims b ON b.property_id=c.property_id AND b.provider=c.provider
+                 AND b.external_property_id=c.external_property_id AND b.claim_state='active'
+               WHERE t.property_id=$1`,
+              [f.scope.propertyId],
+            )
+          ).rows[0];
+          const cleanup = {
+            ...pending,
+            propertyId: f.scope.propertyId,
+            offerPresent: true,
+          };
+          const blocker = await pool.connect();
+          const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+          try {
+            await blocker.query("BEGIN");
+            await lockPmsInventoryMutationScope(blocker, f.scope.propertyId);
+            await expect(
+              retireSupersededChannexOfferIntent(worker, f.input, cleanup),
+            ).rejects.toMatchObject({ code: "55P03" });
+            expect(warn).toHaveBeenCalledWith(
+              "Channex offer intent retirement failed.",
+              expect.objectContaining({ intentId: pending.intentId, code: "55P03" }),
+            );
+          } finally {
+            warn.mockRestore();
+            await blocker.query("ROLLBACK");
+            blocker.release();
+          }
+          expect(await retireSupersededChannexOfferIntent(worker, f.input, cleanup)).toEqual({
+            kind: "current",
+          });
+          expect((await turn()).kind).toBe("retained");
+          expect(await turn()).toEqual({ kind: "offer_creates_current" });
+          expect(create).toHaveBeenCalledTimes(2);
+          expect(
+            (
+              await pool.query(
+                `SELECT a.state,i.status,i.result_evidence ? 'configuration' AS configured
+                 FROM pms.channex_offer_create_attempts a
+                 JOIN pms.channex_offer_target_intents i ON i.id=a.intent_id
+                 JOIN pms.channex_offer_targets t ON t.id=a.target_id WHERE t.property_id=$1`,
+                [f.scope.propertyId],
+              )
+            ).rows,
+          ).toEqual([
+            { state: "identified", status: "pending", configured: true },
+            { state: "identified", status: "pending", configured: true },
+          ]);
+          // The first closed prices go out through the same login, one upload per run.
+          await pool.query(
+            "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
+            [f.scope.propertyId],
+          );
+          const post = vi.fn(
+            async () =>
+              new Response(
+                JSON.stringify({
+                  data: [{ type: "task", id: randomUUID() }],
+                  meta: { warnings: [] },
+                }),
+              ),
+          );
+          expect(
+            await dispatchNextChannexClosedUpload(worker, f.input, {
+              post,
+              get: async (path: string) =>
+                path.includes("properties/")
+                  ? {
+                      data: {
+                        type: "property",
+                        id: f.scope.propertyId,
+                        attributes: { settings: { min_stay_type: "both" } },
+                      },
+                    }
+                  : await get(path),
+            }),
+          ).toMatchObject({ kind: "retained" });
+          expect(post).toHaveBeenCalledOnce();
+          // Closed, and only for the plans this login created: every value stops sales.
+          const sent = (post.mock.calls[0] as unknown[])[0] as {
+            body: { values: { stop_sell?: boolean; rate_plan_id?: string }[] };
+          };
+          expect(sent.body.values.length).toBeGreaterThan(0);
+          expect(sent.body.values.every((value) => value.stop_sell === true)).toBe(true);
+          expect(sent.body.values.every((value) => created.has(String(value.rate_plan_id)))).toBe(
+            true,
+          );
         } else if (stage === "closed-ari" && seeded) {
           const prepared = await prepareChannexInitialAriDispatch(
             worker,
@@ -9879,10 +10041,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           "DELETE FROM platform.channex_management_worker_properties WHERE property_id=$1",
           [f.scope.propertyId],
         );
+        await pool.query(
+          "DELETE FROM platform.channex_management_worker_claimed_operations WHERE operation_type = ANY($1::text[])",
+          [claimedOperations],
+        );
         await pool.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
       }
     },
-    20000,
+    60000,
   );
   // VAY-2108 D2b: desired ongoing ARI for one target, inside the caller's transaction.
   async function readDesired(
