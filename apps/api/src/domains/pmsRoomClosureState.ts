@@ -37,11 +37,24 @@ type Row = Omit<PmsRoomClosureState, "blockers"> & {
   unknownOwner: boolean;
 };
 
+export type PmsRoomClosureStateOptions = Readonly<{
+  /**
+   * VAY-2497, room type Delete only: empty nights after the covered range (no booking, block, limit,
+   * linked-room stop or closure) don't stop the closure, which closes every night from the cutoff.
+   * A migrated night without a calendar revision still does: the closure can't close it.
+   * A room change or setup's calendar save prepares one year and leaves auto-open's later nights
+   * outside coverage until auto-open's next run (VAY-2138). The room closure command keeps them
+   * protected: it checks Channex only through the covered range.
+   */
+  closeEmptyNightsAfterCoverage?: boolean;
+}>;
+
 /** Read under the closure command's inventory/facts/unit/publication locks. */
 export async function readPmsRoomClosureState(
   client: DistributionBookingPublicationTransaction,
   scope: Pick<PmsRoomClosureScope, "propertyId" | "roomTypeId">,
   acceptedAt: Date,
+  options: PmsRoomClosureStateOptions = {},
 ): Promise<PmsRoomClosureState | null> {
   const row = (
     await client.query<Row>(
@@ -103,11 +116,13 @@ export async function readPmsRoomClosureState(
       EXISTS(SELECT 1 FROM pms.inventory_days day WHERE day.property_id=room.property_id
         AND day.room_type_id=room.id AND day.stay_date>=calendar.cutoff
         AND (day.assigned_count<>0 OR day.blocked_count<>0
-          OR day.stay_date>coverage.coverage_through
           OR day.manual_sellable_limit_count IS NOT NULL OR day.channel_sellable_limit_count IS NOT NULL
-          OR day.calendar_revision IS DISTINCT FROM calendar.calendar_revision
-          OR day.generated_source_revision IS DISTINCT FROM calendar.calendar_revision
-          OR day.linked_stop_sell OR day.closure_source_revision<>0 OR day.inventory_revision>=2147483647)) AS "inventoryProtected",
+          OR day.linked_stop_sell OR day.closure_source_revision<>0 OR day.inventory_revision>=2147483647
+          OR ((day.stay_date>coverage.coverage_through
+              OR day.calendar_revision IS DISTINCT FROM calendar.calendar_revision
+              OR day.generated_source_revision IS DISTINCT FROM calendar.calendar_revision)
+            AND NOT ($4::boolean AND day.calendar_revision IS NOT NULL
+              AND COALESCE(day.stay_date>coverage.coverage_through,false))))) AS "inventoryProtected",
       EXISTS(SELECT 1 FROM pms.operational_booking_assignments assignment
         WHERE assignment.property_id=room.property_id AND assignment.room_type_id=room.id
           AND assignment.assignment_status IN ('pending','assigned','checked_in','in_house'))
@@ -129,7 +144,12 @@ export async function readPmsRoomClosureState(
     LEFT JOIN calendar ON true
     LEFT JOIN pms.inventory_materialization_coverage coverage ON coverage.property_id=room.property_id
     WHERE room.property_id=$1::uuid AND room.id=$2::uuid AND room.active`,
-      [scope.propertyId, scope.roomTypeId, acceptedAt.toISOString()],
+      [
+        scope.propertyId,
+        scope.roomTypeId,
+        acceptedAt.toISOString(),
+        options.closeEmptyNightsAfterCoverage === true,
+      ],
     )
   ).rows[0];
   if (!row) return null;

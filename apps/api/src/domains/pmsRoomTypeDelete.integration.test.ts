@@ -6,13 +6,23 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  createPgPmsCalendarAutoOpenWorkerStore,
+  runPmsCalendarAutoOpenWorkerOnce,
+} from "../jobs/pmsCalendarAutoOpenWorker.js";
+import {
+  PMS_CALENDAR_AUTO_OPEN_QUEUE,
+  createPgPmsCalendarAutoOpenSchedulerStore,
+} from "../jobs/pmsChannexScheduler.js";
 import type { PmsRoomTypeRetireCommand } from "../routes/pmsOperations.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgPmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
 import { createPgPmsLinkedInventoryGroupCommandRepository } from "./pmsLinkedInventoryGroupRepository.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { createPgPmsOperatingCalendarCommandRepository } from "./pmsOperatingCalendarCommandRepository.js";
+import { createPgPmsOperatingCalendarImpactService } from "./pmsOperatingCalendarImpact.js";
 import { createPgPmsOperatingCalendarReadModel } from "./pmsOperatingCalendarReadModel.js";
+import { refreshPmsOperatingCalendarRooms } from "./pmsOperatingCalendarRoomRefresh.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { createPgPmsPhysicalRoomManagementRepository } from "./pmsPhysicalRoomManagementRepository.js";
@@ -499,6 +509,290 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
       "closed",
     ]);
   });
+
+  // VAY-2497: auto-open opens nights through the month's end a year ahead; a room change prepares one
+  // year, so the later nights sit after the covered range until auto-open runs again (VAY-2138).
+  it("deletes a room added after auto-open right away, and auto-open still opens the later nights (VAY-2497)", async () => {
+    const autoOpen = await enableAutoOpen();
+    try {
+      await autoOpen.run();
+      expect(await coverage()).toEqual({ through: "2027-08-31", revision: 1, rooms: 3 });
+
+      // Duplicate, then "Total rooms" and the room's name: the calendar follows the new room.
+      const roomTypeD = await seedRoomOutsideCalendar(1);
+      expect(await refreshCalendar()).toMatchObject({ outcome: "refreshed", savedCalendar: true });
+      expect(await coverage()).toEqual({ through: "2027-08-04", revision: 2, rooms: 4 });
+      expect(await nightsAfterCoverage()).toEqual(
+        Object.fromEntries([roomTypeA, roomTypeB, roomTypeC, roomTypeD].map((id) => [id, 27])),
+      );
+
+      // The room closure command still protects those nights; the Delete closes them with the rest.
+      const closure = (options?: { closeEmptyNightsAfterCoverage: boolean }) =>
+        readPmsRoomClosureState(
+          admin,
+          { propertyId, roomTypeId: roomTypeD },
+          new Date(acceptedAt),
+          options,
+        );
+      expect((await closure())?.blockers).toEqual(["protected_inventory"]);
+      expect((await closure({ closeEmptyNightsAfterCoverage: true }))?.blockers).toEqual([]);
+      // 2026-08-04 through 2027-08-31.
+      const cleanup = { physicalUnits: 1, futureNights: 393, roomBlocks: 0, linkedGroups: 0 };
+      expect(await rooms.inspectRoomTypeRetirement(propertyId, roomTypeD)).toMatchObject({
+        canRetire: true,
+        blockers: [],
+        cleanup,
+      });
+      expect(
+        await rooms.retireRoomType(deleteCommand(roomTypeD, "room-type-facts-v1")),
+      ).toMatchObject({ ok: true, impact: { cleanup } });
+      const deleted = await snapshot(roomTypeD);
+      expect(deleted.room).toMatchObject({ active: false });
+      expect(deleted.unitStatuses).toEqual(["retired"]);
+      expect(deleted.nights).toHaveLength(393);
+      expect(new Set(deleted.nights.map((night: { status: string }) => night.status))).toEqual(
+        new Set(["closed"]),
+      );
+      expect(await coverage()).toEqual({ through: "2027-08-04", revision: 3, rooms: 3 });
+
+      // Auto-open's next run takes the later nights back into the calendar without the room.
+      await autoOpen.run();
+      expect(await coverage()).toEqual({ through: "2027-08-31", revision: 3, rooms: 3 });
+      expect(await nightsAfterCoverage()).toEqual({});
+      expect(
+        (
+          await admin.query(
+            `SELECT count(*)::int AS stale FROM pms.inventory_days
+             WHERE property_id=$1 AND room_type_id<>$2 AND stay_date>='2026-08-04'
+               AND calendar_revision<>3`,
+            [propertyId, roomTypeD],
+          )
+        ).rows[0],
+      ).toEqual({ stale: 0 });
+    } finally {
+      await autoOpen.close();
+    }
+  });
+
+  it("still stops the Delete for a booking or a limit after the covered range (VAY-2497)", async () => {
+    const autoOpen = await enableAutoOpen();
+    try {
+      await autoOpen.run();
+      const roomTypeD = await seedRoomOutsideCalendar(1);
+      expect(await refreshCalendar()).toMatchObject({ outcome: "refreshed" });
+
+      // A limit on the new room's later night.
+      const limit = (count: number | null) =>
+        admin.query(
+          `UPDATE pms.inventory_days SET manual_sellable_limit_count=$3::int,
+             effective_sellable_limit_count=COALESCE($3::int,generated_sellable_limit_count),
+             available_count=GREATEST(0,COALESCE($3::int,generated_sellable_limit_count)-assigned_count-blocked_count),
+             manual_source_revision=manual_source_revision+1, inventory_revision=inventory_revision+1
+           WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2027-08-20'`,
+          [propertyId, roomTypeD, count],
+        );
+      await limit(0);
+      expect(await rooms.inspectRoomTypeRetirement(propertyId, roomTypeD)).toMatchObject({
+        canRetire: false,
+        blockers: [expect.objectContaining({ code: "protected_inventory", affectedCount: 1 })],
+      });
+      expect(
+        await rooms.retireRoomType(deleteCommand(roomTypeD, "room-type-facts-v1")),
+      ).toMatchObject({ ok: false, code: "room_type_retirement_blocked" });
+      await limit(null);
+
+      // A booked night of an existing room, still from the calendar before the room was added.
+      await admin.query(
+        `UPDATE pms.inventory_days SET assigned_count=assigned_count+1,
+           available_count=CASE WHEN status='closed' OR linked_stop_sell THEN 0
+             ELSE GREATEST(0,effective_sellable_limit_count-assigned_count-1-blocked_count) END,
+           booking_source_revision=booking_source_revision+1, inventory_revision=inventory_revision+1
+         WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2027-08-20' AND calendar_revision=1`,
+        [propertyId, roomTypeA],
+      );
+      expect(
+        (
+          await readPmsRoomClosureState(
+            admin,
+            { propertyId, roomTypeId: roomTypeA },
+            new Date(acceptedAt),
+            { closeEmptyNightsAfterCoverage: true },
+          )
+        )?.blockers,
+      ).toEqual(["protected_inventory"]);
+      // Without a booking record behind it, the booked count reads as an out-of-date calendar.
+      expect(
+        await rooms.retireRoomType(deleteCommand(roomTypeA, "room-type-facts-v3")),
+      ).toMatchObject({
+        ok: false,
+        code: "room_type_retirement_blocked",
+        impact: { blockers: [expect.objectContaining({ code: "calendar_not_current" })] },
+      });
+
+      // Nothing else stops either room: the new one goes once its limit is gone.
+      expect(
+        await rooms.retireRoomType(deleteCommand(roomTypeD, "room-type-facts-v1")),
+      ).toMatchObject({ ok: true, impact: { cleanup: { futureNights: 393 } } });
+      expect((await snapshot()).room).toMatchObject({ active: true });
+
+      // A migrated night without a calendar revision can't be closed, so it still refuses the
+      // Delete instead of failing it.
+      await admin.query(
+        `INSERT INTO pms.inventory_days (property_id,room_type_id,stay_date,total_count,available_count)
+         VALUES ($1,$2,'2027-09-05',1,1)`,
+        [propertyId, roomTypeC],
+      );
+      expect(
+        (
+          await readPmsRoomClosureState(
+            admin,
+            { propertyId, roomTypeId: roomTypeC },
+            new Date(acceptedAt),
+            { closeEmptyNightsAfterCoverage: true },
+          )
+        )?.blockers,
+      ).toEqual(["protected_inventory"]);
+      expect(
+        await rooms.retireRoomType(deleteCommand(roomTypeC, "room-type-facts-v2")),
+      ).toMatchObject({
+        ok: false,
+        code: "room_type_retirement_blocked",
+        impact: { blockers: [expect.objectContaining({ code: "calendar_not_current" })] },
+      });
+      expect((await snapshot(roomTypeC)).room).toMatchObject({ active: true });
+    } finally {
+      await autoOpen.close();
+    }
+  });
+
+  /** Auto-open for this hotel only: other suites' hotels share the database. */
+  async function enableAutoOpen() {
+    await admin.query(
+      `INSERT INTO pms.property_pricing_settings (property_id, currency) VALUES ($1::uuid, 'EUR')`,
+      [propertyId],
+    );
+    await admin.query(
+      `INSERT INTO pms.calendar_auto_open_settings
+         (property_id, revision, enabled, mode, rolling_months, fixed_end_month)
+       VALUES ($1::uuid, 1, TRUE, 'rolling', 12, NULL)`,
+      [propertyId],
+    );
+    const scheduler = createPgPmsCalendarAutoOpenSchedulerStore({ connectionString });
+    const worker = createPgPmsCalendarAutoOpenWorkerStore({
+      connectionString,
+      propertyProfileEvidence: profileEvidence,
+    });
+    const at = new Date(acceptedAt);
+    const latestJob = async () =>
+      (
+        await admin.query<{ status: string }>(
+          `SELECT status FROM platform.jobs WHERE property_id=$1 AND queue_name=$2
+           ORDER BY created_at DESC LIMIT 1`,
+          [propertyId, PMS_CALENDAR_AUTO_OPEN_QUEUE],
+        )
+      ).rows[0];
+    return {
+      async run() {
+        const queued = await scheduler.withRunLock(async (session) => {
+          const { candidates } = await session.findCalendarAutoOpenCandidates(at, 1000);
+          const candidate = candidates.find((ready) => ready.propertyId === propertyId);
+          if (!candidate) throw new Error("Expected the hotel to be ready for auto-open");
+          return session.enqueueCalendarAutoOpenJob(candidate, {
+            now: at,
+            workerId: "vay-2497-test",
+            correlationId: `vay-2497-${propertyId}`,
+          });
+        });
+        expect(queued).toMatchObject({ ran: true, value: { createdNewJob: true } });
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          const status = (await latestJob())?.status;
+          if (status !== "pending" && status !== "running") break;
+          await runPmsCalendarAutoOpenWorkerOnce({
+            store: worker,
+            workerId: "vay-2497-test",
+            now: () => at,
+          });
+        }
+        expect(await latestJob()).toEqual({ status: "succeeded" });
+      },
+      async close() {
+        // Later suites' scheduler runs leave this hotel alone.
+        await admin.query(
+          `UPDATE pms.calendar_auto_open_settings SET enabled=FALSE WHERE property_id=$1::uuid`,
+          [propertyId],
+        );
+        await worker.close?.();
+        await scheduler.close();
+      },
+    };
+  }
+
+  /** What the room routes run after a room change (VAY-2469). */
+  async function refreshCalendar() {
+    const roomPorts = { roomFacts: roomEvidence, roomCapacity: roomEvidence };
+    const preview = createPgPmsOperatingCalendarImpactService({
+      connectionString,
+      max: 2,
+      confirmationSecret: "vay2497-room-type-delete-confirmation-secret",
+      propertyProfileEvidence: profileEvidence,
+      roomEvidence: roomPorts,
+      now: () => new Date(acceptedAt),
+    });
+    const materialization = createPgPmsInventoryMaterializationRepository({
+      connectionString,
+      authorization: { authorizeInventoryMaterialization: async () => true },
+      operatingCalendar: calendarRead,
+      propertyProfileEvidence: profileEvidence,
+      roomCapacity: roomEvidence,
+      now: () => new Date(acceptedAt),
+    });
+    try {
+      return await refreshPmsOperatingCalendarRooms(
+        {
+          pool: admin,
+          calendarRead,
+          rooms: roomPorts,
+          preview,
+          calendar,
+          materialization,
+          now: () => new Date(acceptedAt),
+        },
+        {
+          organizationId,
+          propertyId,
+          userId: actorUserId,
+          requestId: randomUUID(),
+          correlationId: null,
+        },
+      );
+    } finally {
+      await Promise.all([preview.close(), materialization.close()]);
+    }
+  }
+
+  async function coverage() {
+    return (
+      await admin.query(
+        `SELECT coverage_through::text AS through, calendar_revision::int AS revision,
+           room_type_count::int AS rooms
+         FROM pms.inventory_materialization_coverage WHERE property_id=$1`,
+        [propertyId],
+      )
+    ).rows[0];
+  }
+
+  /** Nights per room after the covered range that are not closed. */
+  async function nightsAfterCoverage(): Promise<Record<string, number>> {
+    const result = await admin.query<{ roomTypeId: string; nights: number }>(
+      `SELECT day.room_type_id::text AS "roomTypeId", count(*)::int AS nights
+       FROM pms.inventory_days day JOIN pms.inventory_materialization_coverage coverage
+         ON coverage.property_id=day.property_id
+       WHERE day.property_id=$1 AND day.stay_date>coverage.coverage_through AND day.status<>'closed'
+       GROUP BY day.room_type_id`,
+      [propertyId],
+    );
+    return Object.fromEntries(result.rows.map((row) => [row.roomTypeId, row.nights]));
+  }
 
   async function seedRoomOutsideCalendar(unitCount: number): Promise<string> {
     const roomTypeId = randomUUID();
