@@ -10111,7 +10111,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(open.values.map(({ value }) => value.stop_sell)).toEqual([false, false]);
     expect(open.values[0]!.valueSha256).not.toBe(closed.values[0]!.valueSha256);
     const horizon = await readDesired(f);
-    expect(horizon.kind === "desired" && horizon.values.length).toBe(500);
+    expect(horizon.kind === "desired" && horizon.values.length).toBe(
+      DEFAULT_FULL_ARI_DAYS_AHEAD + 1,
+    );
   });
   it("classifies a target that is not active, unknown or no longer current", async () => {
     const f = await initialAriFixture();
@@ -10250,7 +10252,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await f.request(first.deliveryId)).toEqual(body);
     let rows = (await f.deliveries()).rows;
     expect(rows).toMatchObject([
-      { id: first.deliveryId, state: "unresolved", entries: 1, dates: 500, receipts: 1 },
+      {
+        id: first.deliveryId,
+        state: "unresolved",
+        entries: 1,
+        dates: DEFAULT_FULL_ARI_DAYS_AHEAD + 1,
+        receipts: 1,
+      },
     ]);
     // The unresolved delivery blocks only its target; the whole run waits for reconciliation.
     expect(await f.next()).toEqual({
