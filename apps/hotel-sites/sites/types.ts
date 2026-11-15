@@ -87,11 +87,14 @@ export type HotelSite = {
     image: SiteImage;
     exploreUrl: string | null;
   };
+  /** The nav's "Contact" jumps here. Each contact detail is shown only once the hotel has given it. */
   footer: {
     headline: string;
     cta: string;
-    /** Shown only once the hotel has given them. */
+    /** As the hotel writes it, e.g. "+94 74 028 5070"; the call link drops the spaces. */
+    phone: string | null;
+    whatsappUrl: string | null;
+    email: string | null;
     instagramUrl: string | null;
-    contactUrl: string | null;
   };
 };

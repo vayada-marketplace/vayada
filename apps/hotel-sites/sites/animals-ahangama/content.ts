@@ -1,7 +1,8 @@
 import type { HotelSite } from "../types";
 import { brandFont, galleryPhotos, photos } from "./assets";
 
-// Copy from Timo's design ("Homepage" artboard, VAY-2422).
+// Copy from Timo's design ("Homepage" artboard, VAY-2422); gallery texts and contact details from
+// the hotel (VAY-2465).
 export const animalsAhangama: HotelSite = {
   slug: "animals-ahangama",
   name: "Animals Ahangama",
@@ -109,7 +110,7 @@ export const animalsAhangama: HotelSite = {
   gallery: {
     eyebrow: "Beyond your room",
     headline: ["Places to eat, work, swim, meet —", "or simply do very little."],
-    // PLACEHOLDER COPY: only slide 01 is final; the bracketed lines wait for the client's text.
+    // Slide texts from the hotel (Timo, 2026-11-16). The photos are still placeholders (assets.ts).
     slides: [
       {
         label: "Pool",
@@ -119,44 +120,44 @@ export const animalsAhangama: HotelSite = {
       },
       {
         label: "Cowork",
-        title: "[Cowork headline]",
-        text: "[Cowork subtitle]",
+        title: "Work with a view",
+        text: "Quiet desks, good Wi-Fi and palm trees outside the window.",
         image: { src: galleryPhotos.cowork, alt: "Cowork" },
       },
       {
         label: "Play",
-        title: "[Play headline]",
-        text: "[Play subtitle]",
+        title: "Room to play",
+        text: "Games, good company and nowhere you need to be.",
         image: { src: galleryPhotos.play, alt: "Play" },
       },
       {
         label: "Lounge",
-        title: "[Lounge headline]",
-        text: "[Lounge subtitle]",
+        title: "Lounge around",
+        text: "Deep cushions, cold drinks and the sound of the jungle.",
         image: { src: galleryPhotos.lounge, alt: "Lounge" },
       },
       {
         label: "Restaurant",
-        title: "[Restaurant headline]",
-        text: "[Restaurant subtitle]",
+        title: "Fresh from our kitchen",
+        text: "Island flavours and café classics, served all day.",
         image: { src: galleryPhotos.restaurant, alt: "Restaurant" },
       },
       {
         label: "Bar",
-        title: "[Bar headline]",
-        text: "[Bar subtitle]",
+        title: "Sundowners at the bar",
+        text: "Cocktails, cold beer and the best seat for golden hour.",
         image: { src: galleryPhotos.bar, alt: "Bar" },
       },
       {
         label: "Slow moments",
-        title: "[Slow moments headline]",
-        text: "[Slow moments subtitle]",
+        title: "Slow moments",
+        text: "Long breakfasts, lazy afternoons, no alarm clocks.",
         image: { src: galleryPhotos.slowMoments, alt: "Slow moments" },
       },
       {
         label: "Evenings",
-        title: "[Evenings headline]",
-        text: "[Evenings subtitle]",
+        title: "Evenings at Animals",
+        text: "Warm lights, good music and stories from the day.",
         image: { src: galleryPhotos.evenings, alt: "Evenings" },
       },
     ],
@@ -181,7 +182,9 @@ export const animalsAhangama: HotelSite = {
   footer: {
     headline: "Come stay awhile.",
     cta: "Book your stay",
-    instagramUrl: null,
-    contactUrl: null,
+    phone: "+94 74 028 5070",
+    whatsappUrl: "https://wa.me/94740285070",
+    email: "animalsahangama@gmail.com",
+    instagramUrl: "https://www.instagram.com/animalsahangama/",
   },
 };

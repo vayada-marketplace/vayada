@@ -37,6 +37,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function SitePage({ params }: Props) {
   const site = siteBySlug((await params).site);
   if (!site) notFound();
+  const { phone, email, instagramUrl } = site.footer;
   const structuredData = {
     "@context": "https://schema.org",
     "@type": "Hotel",
@@ -48,6 +49,9 @@ export default async function SitePage({ params }: Props) {
       addressLocality: site.address.locality,
       addressCountry: site.address.countryCode,
     },
+    ...(phone ? { telephone: phone } : {}),
+    ...(email ? { email } : {}),
+    ...(instagramUrl ? { sameAs: [instagramUrl] } : {}),
   };
   return (
     <>

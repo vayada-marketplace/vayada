@@ -222,6 +222,24 @@ picture > source {
   padding: 16px 30px;
 }
 
+/* The design has no contact block: one centred row under the button, in the footer's small caps. */
+.footer-contact {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px 32px;
+  font-size: 13px;
+  font-style: normal;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.footer-contact a,
+.footer-contact a:hover {
+  color: #ffffff;
+  text-decoration: none;
+}
+
 .footer-meta {
   width: 100%;
   margin-top: 40px;
@@ -232,12 +250,6 @@ picture > source {
   font-size: 13px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-}
-
-.footer-meta a,
-.footer-meta a:hover {
-  color: #ffffff;
-  text-decoration: none;
 }
 
 /* Shared */

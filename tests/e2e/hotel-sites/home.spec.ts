@@ -94,6 +94,9 @@ test("tells search engines and link previews what the page is, and keeps placeho
     "@type": "Hotel",
     name: "Animals Ahangama",
     address: { addressLocality: "Ahangama", addressCountry: "LK" },
+    telephone: "+94 74 028 5070",
+    email: "animalsahangama@gmail.com",
+    sameAs: ["https://www.instagram.com/animalsahangama/"],
   });
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
 });
@@ -151,9 +154,12 @@ test("switches the gallery's big slide from its thumbnails", async ({ page }) =>
 
   await thumb("^08 evenings$").click();
   await expect(gallery.getByText("08 / 08")).toBeVisible();
-  // Slides 02–08 keep the design's placeholder copy until the client's arrives.
+  // The hotel's own slide texts (VAY-2465); the photos are still placeholders.
   await expect(
-    gallery.getByRole("heading", { level: 3, name: /^\[evenings headline\]$/i }),
+    gallery.getByRole("heading", { level: 3, name: /^evenings at animals$/i }),
+  ).toBeVisible();
+  await expect(
+    gallery.getByText("Warm lights, good music and stories from the day.", { exact: true }),
   ).toBeVisible();
   await expect(gallery.getByRole("img", { name: "Evenings" })).toBeVisible();
   // The new slide's photo loads: the build made its AVIF file at every width the slide asks for.
@@ -177,16 +183,40 @@ test("shows no reviews until real ones are in, and no link the hotel hasn't give
   await expect(page.getByRole("heading", { name: /loved by our guests/i })).toHaveCount(0);
   // Not even the design's mock-up reviews.
   await expect(page.getByText("A little paradise in Ahangama")).toHaveCount(0);
-  for (const name of [
-    /read more reviews/i,
-    /view menus/i,
-    /book a table/i,
-    /explore ahangama/i,
-    /instagram/i,
-  ]) {
+  for (const name of [/read more reviews/i, /view menus/i, /book a table/i, /explore ahangama/i]) {
     await expect(page.getByRole("link", { name })).toHaveCount(0);
   }
 });
+
+for (const width of [1440, 390]) {
+  test(`shows the hotel's phone, WhatsApp, email and Instagram where the nav's Contact jumps at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    await page.goto("/");
+    await page.getByRole("navigation", { name: "Main" }).locator('a[href="#contact"]').click();
+    const footer = page.locator("footer#contact");
+    await expect(footer).toBeInViewport();
+    const contact = footer.locator("address");
+    await expect(contact.getByRole("link")).toHaveCount(4);
+    for (const [name, href] of [
+      ["+94 74 028 5070", "tel:+94740285070"],
+      ["WhatsApp", "https://wa.me/94740285070"],
+      ["animalsahangama@gmail.com", "mailto:animalsahangama@gmail.com"],
+      ["Instagram", "https://www.instagram.com/animalsahangama/"],
+    ] as const) {
+      const link = contact.getByRole("link", { name, exact: true });
+      await expect(link).toBeVisible();
+      await expect(link).toHaveAttribute("href", href);
+    }
+    // Each link fits on the screen, the long email address included.
+    for (const link of await contact.getByRole("link").all()) {
+      const box = (await link.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
+  });
+}
 
 test("lays the rooms and gallery out for laptop, tablet and phone", async ({ page }) => {
   const box = async (selector: string) => (await page.locator(selector).boundingBox())!;
