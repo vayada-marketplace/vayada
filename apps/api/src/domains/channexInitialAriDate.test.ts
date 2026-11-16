@@ -61,6 +61,27 @@ describe("next initial ARI calendar date", () => {
       ]),
     ).toMatchObject({ date: "2026-01-02" });
   });
+  // VAY-2108: a released upload can leave a gap behind the hotel's today; that night is over.
+  it("never selects a night that has passed in the hotel's zone, nor waits for it", () => {
+    const days = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) =>
+        new Date(Date.UTC(2026, 0, from + i)).toISOString().slice(0, 10),
+      );
+    // Anchored on 1 Jan, now 5 Jan: 3 Jan (released) is skipped, the first open night is today.
+    const covered = [...days(1, 2), "2026-01-04"];
+    expect(next("UTC", new Date("2026-01-05T12:00:00Z"), covered, "2026-01-01")).toMatchObject({
+      kind: "selected",
+      propertyLocalDate: "2026-01-01",
+      through: "2027-05-14",
+      date: "2026-01-05",
+    });
+    // Everything from today to the end of the anchored window covered: complete despite the gap.
+    const rest = days(5, 495);
+    expect(rest.at(-1)).toBe("2027-05-14");
+    expect(
+      next("UTC", new Date("2026-01-05T12:00:00Z"), [...covered, ...rest], "2026-01-01"),
+    ).toMatchObject({ kind: "selected", date: null });
+  });
   it("walks calendar days through DST and leap day", () => {
     expect(
       next("America/New_York", new Date("2026-03-08T07:30:00Z"), ["2026-03-08"]),

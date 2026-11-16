@@ -356,13 +356,24 @@ export function createChannexManagementProvider(config: {
             { jobId: job.jobId, attemptNumber: job.attemptNumber, workerId: input.workerId },
             readClosedUpload,
           );
-          if (result.kind !== "pending_uploads_reconciled")
-            return failure(
-              result.reason === "reconciliation_batch_pending"
+          if (result.kind !== "pending_uploads_reconciled") {
+            const stopped = failure(
+              // VAY-2108: an unanswered upload waits for its send to settle, then is sent again.
+              result.reason === "reconciliation_batch_pending" ||
+                result.reason === "ari_send_settling" ||
+                result.reason === "ari_release_contention"
                 ? "provider_unavailable"
                 : "invalid_state",
               new Error("Saved Channex uploads still require reconciliation."),
             );
+            // The release step says when the send settles, so one later turn releases it instead
+            // of several quick retries using up the job.
+            return result.reason === "ari_send_settling" &&
+              "retryAfterMs" in result &&
+              typeof result.retryAfterMs === "number"
+              ? { ...stopped, retryAfterMs: result.retryAfterMs }
+              : stopped;
+          }
         } catch (error) {
           // VAY-2108: the job keeps a generic error; this line names the refusing check or SQLSTATE.
           console.warn("Channex closed upload reconciliation failed.", {

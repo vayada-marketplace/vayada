@@ -46,6 +46,8 @@ export type ChannexManagementProviderFailure = {
   message: string;
   statusCode?: number;
   providerRequestId?: string;
+  /** Earliest retry, when the failure knows when it can pass (VAY-2108: a send settling). */
+  retryAfterMs?: number;
 };
 
 export type ChannexManagementProviderProgress =
@@ -145,7 +147,10 @@ export async function runPmsChannexManagementWorkerOnce(input: {
   const completedAt = clock();
   const retryAt =
     retryable && job.attemptNumber < job.maxAttempts
-      ? new Date(completedAt.getTime() + retryDelayMs(job.attemptNumber))
+      ? new Date(
+          completedAt.getTime() +
+            Math.max(retryDelayMs(job.attemptNumber), result.retryAfterMs ?? 0),
+        )
       : null;
   const outcome = await input.store.fail(job, result, {
     workerId: input.workerId,
