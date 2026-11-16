@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
+import { releaseUnansweredChannexInitialAri } from "./channexInitialAriRelease.js";
 import {
   readPublishedPricingForChannexJob,
   reconcileCurrentChannexInitialAri,
@@ -44,6 +45,13 @@ export async function reconcilePendingChannexUploads(
       get,
     );
     if (result.kind === "ari_reconciled" || result.kind === "ari_retired") continue;
+    // VAY-2108: an upload Channex never usably answered is released once its send has settled,
+    // and the next run sends its date again; a refusal keeps the original stop.
+    if (result.kind === "unavailable" && result.reason === "ari_receipt_history_unavailable") {
+      const released = await releaseUnansweredChannexInitialAri(pool, lease, candidate.attemptId);
+      if (released.kind !== "unavailable") continue;
+      if (released.reason !== "ari_reply_kept") return released;
+    }
     return result;
   }
   return candidates.length > 10

@@ -76,6 +76,7 @@ import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManag
 import { createPgChannexAriSchedule } from "../jobs/pmsChannexAriSchedule.js";
 import { prepareNextChannexInitialAriDispatch } from "./replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./channexPendingUploadReconciliation.js";
+import { releaseUnansweredChannexInitialAri } from "./channexInitialAriRelease.js";
 import { createChannexManagementProvider } from "../integrations/channexManagement.js";
 import { bootstrapPublishedChannexOffer } from "../integrations/channexPublishedOfferBootstrap.js";
 import { reconcileCurrentChannexInitialAri } from "./replacementPricingOfferOwners.js";
@@ -3039,14 +3040,305 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(f.get).not.toHaveBeenCalled();
     expect((await f.state()).state).toBe("unresolved");
   });
-  it("holds discovered uploads without original receipts", async () => {
+  it("holds a discovered upload without a reply while its sending attempt still runs", async () => {
     const f = await reconciliationFixture();
-    expect(await reconcilePendingChannexUploads(pool, f.input, f.get)).toMatchObject({
+    // VAY-2108: the claiming attempt holds the job lease, so its POST may still land; the job
+    // retries (provider_unavailable) instead of stopping.
+    expect(await reconcilePendingChannexUploads(pool, f.input, f.get)).toEqual({
       kind: "unavailable",
-      reason: "ari_receipt_history_unavailable",
+      reason: "ari_send_settling",
     });
     expect(f.get).not.toHaveBeenCalled();
     expect((await f.state()).state).toBe("unresolved");
+  });
+  // VAY-2108: the job's next attempt after the one that claimed an upload. "ended": that attempt
+  // failed a minute ago (Tiga, 2026-11-16 00:43Z). "died": its worker stopped, so the attempt is
+  // still marked running while the job has moved on.
+  async function nextJobAttempt(
+    input: { jobId: string; workerId: string; attemptNumber: number },
+    sender: "ended" | "died" = "ended",
+  ) {
+    if (sender === "ended")
+      await pool.query(
+        `UPDATE platform.job_attempts SET status='failed',
+           started_at=clock_timestamp()-interval '2 minutes',finished_at=clock_timestamp()-interval '1 minute'
+         WHERE job_id=$1 AND attempt_number=$2`,
+        [input.jobId, input.attemptNumber],
+      );
+    const next = input.attemptNumber + 1;
+    await pool.query(
+      "UPDATE platform.jobs SET status='running',attempts_count=$2,locked_by=$3,locked_at=clock_timestamp() WHERE id=$1",
+      [input.jobId, next, input.workerId],
+    );
+    await pool.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,$2,$3)",
+      [input.jobId, next, input.workerId],
+    );
+    return { ...input, attemptNumber: next };
+  }
+  // A Channex fake for whole worker turns: it answers each restrictions POST with a new task, and
+  // reads that night back exactly as it was sent.
+  function echoingChannex(f: Awaited<ReturnType<typeof reconciliationFixture>>) {
+    const sent = new Map<string, Record<string, unknown>>();
+    const posts: { date: string; stop_sell: boolean }[] = [];
+    const read = async (path: string) => {
+      if (path.includes("/properties/"))
+        return {
+          data: {
+            type: "property",
+            id: f.scope.propertyId,
+            attributes: { settings: { min_stay_type: "both" } },
+          },
+        };
+      if (path.includes("/room_types/")) return providerRoom(f);
+      const taskId = /\/tasks\/([0-9a-f-]{36})/.exec(path)?.[1];
+      if (taskId) {
+        const task = structuredClone(f.task);
+        Object.assign(task.data, { id: taskId });
+        Object.assign(task.data.attributes, {
+          id: taskId,
+          payload: { values: [sent.get(taskId) ?? f.stored] },
+        });
+        return task;
+      }
+      // The fixture answers the night it staged; other nights read back the same values.
+      const query = new URL(path, "https://staging.channex.io");
+      const date = query.searchParams.get("filter[date]");
+      if (!date || date === f.stored.date) return f.get(path);
+      query.searchParams.set("filter[date]", f.stored.date);
+      const staged = (await f.get(query.pathname + query.search)) as {
+        data: Record<string, Record<string, unknown>>;
+      };
+      return {
+        data: Object.fromEntries(
+          Object.entries(staged.data).map(([plan, nights]) => [
+            plan,
+            { [date]: nights[f.stored.date] },
+          ]),
+        ),
+      };
+    };
+    const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      expect(init?.redirect).toBe("error");
+      const parsed = new URL(String(url));
+      if (init?.method === "POST") {
+        expect(parsed.pathname).toBe("/api/v1/restrictions");
+        const value = JSON.parse(String(init.body)).values[0];
+        const id = randomUUID();
+        sent.set(id, value);
+        posts.push(value);
+        return new Response(
+          JSON.stringify({ data: [{ type: "task", id }], meta: { message: "Success" } }),
+        );
+      }
+      return Response.json(await read(parsed.pathname + parsed.search));
+    });
+    return { fetcher, posts };
+  }
+  async function uploadStates(f: Awaited<ReturnType<typeof reconciliationFixture>>) {
+    return (
+      await pool.query<{ date: string; state: string; receipts: number }>(
+        `SELECT a.service_date::text AS date,a.state,
+           (SELECT count(*)::int FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id) AS receipts
+         FROM pms.channex_offer_ari_attempts a WHERE a.creation_attempt_id=$1
+         ORDER BY a.created_at,a.id`,
+        [f.claim.attemptId],
+      )
+    ).rows;
+  }
+  it.each(["ended", "died"] as const)(
+    "releases an upload Channex never answered (sending attempt %s) and sends its date again once",
+    async (sender) => {
+      const day = (offset: number) =>
+        new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+      const f = await reconciliationFixture(day(0));
+      await f.retain();
+      expect((await f.reconcile()).kind).toBe("ari_reconciled");
+      // Tiga, 2026-11-16 00:43Z: the send step claimed the next night, then failed before a
+      // Channex reply was saved. That upload then stopped every later full sync (invalid_state).
+      expect(
+        (
+          await prepareChannexInitialAriDispatch(
+            pool,
+            f.input,
+            f.selection,
+            f.claim.attemptId,
+            day(1),
+          )
+        ).kind,
+      ).toBe("prepared");
+      const lease = await nextJobAttempt(f.input, sender);
+      const channex = echoingChannex(f);
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        plans: { plan: vi.fn(async () => ({ requests: [] })) },
+        fetch: channex.fetcher,
+        reconcileClosedUploads: (l, get) => reconcilePendingChannexUploads(pool, l, get),
+        dispatchClosedUpload: (l, ports) => dispatchNextChannexClosedUpload(pool, l, ports),
+        ...currentRoomAvailability,
+      });
+      const job = {
+        jobId: f.input.jobId,
+        propertyId: f.scope.propertyId,
+        correlationId: null,
+        attemptNumber: lease.attemptNumber,
+        maxAttempts: 2,
+        input: {
+          operationType: "sync_ari" as const,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+        },
+      };
+      await pool.query("UPDATE platform.jobs SET max_attempts=2,payload=$2::jsonb WHERE id=$1", [
+        job.jobId,
+        JSON.stringify(job.input),
+      ]);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        expect(
+          await runPmsChannexManagementWorkerOnce({
+            store: {
+              ...createPgPmsChannexManagementWorkerStore({
+                connectionString: url!,
+                pool,
+                targetState: { succeed: vi.fn(), fail: vi.fn() },
+              }),
+              claim: async () => job,
+            },
+            provider,
+            workerId: f.input.workerId,
+          }),
+        ).toMatchObject({ outcome: "continued" });
+        expect(warn).toHaveBeenCalledWith(
+          "Channex initial upload released to send again.",
+          expect.objectContaining({ jobId: job.jobId, reason: "no_reply" }),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+      expect(
+        (await pool.query("SELECT status FROM platform.jobs WHERE id=$1", [job.jobId])).rows[0],
+      ).toEqual({ status: "pending" });
+      expect(channex.posts).toEqual([expect.objectContaining({ date: day(1), stop_sell: true })]);
+      expect(await uploadStates(f)).toEqual([
+        { date: day(0), state: "reconciled", receipts: 1 },
+        { date: day(1), state: "released", receipts: 0 },
+        { date: day(1), state: "unresolved", receipts: 1 },
+      ]);
+      // The next turn reconciles the repeat and moves on: that night is never sent a third time.
+      const third = await nextJobAttempt(lease);
+      expect(
+        await provider.execute(
+          { ...job, attemptNumber: third.attemptNumber },
+          { workerId: f.input.workerId },
+        ),
+      ).toMatchObject({ ok: false, code: "initial_upload_retained" });
+      expect(channex.posts.map((value) => value.date)).toEqual([day(1), day(2)]);
+      expect((await uploadStates(f)).map(({ date, state }) => [date, state])).toEqual([
+        [day(0), "reconciled"],
+        [day(1), "released"],
+        [day(1), "reconciled"],
+        [day(2), "unresolved"],
+      ]);
+    },
+    60000,
+  );
+  it.each([
+    ["no response", true],
+    ["a 503", true],
+    ["a 422", false],
+    ["warnings", false],
+  ] as const)(
+    "after a reply with %s, releases only an unanswered upload, and only once settled",
+    async (reply, unanswered) => {
+      const f = await reconciliationFixture();
+      if (reply === "no response")
+        await (
+          await prepareChannexAriTransportFailurePersistence(pool, f.ariCorrelation)
+        )();
+      else
+        await f.retain(
+          new Response(
+            JSON.stringify({
+              data: [{ type: "task", id: f.taskId }],
+              meta: { warnings: reply === "warnings" ? ["partial"] : [] },
+            }),
+            { status: reply === "a 503" ? 503 : reply === "a 422" ? 422 : 200 },
+          ),
+        );
+      const lease = await nextJobAttempt(f.input);
+      const stopped = { kind: "unavailable", reason: "ari_receipt_history_unavailable" };
+      expect(await reconcilePendingChannexUploads(pool, lease, f.get)).toEqual(
+        unanswered ? { kind: "unavailable", reason: "ari_send_settling" } : stopped,
+      );
+      expect((await f.state()).state).toBe("unresolved");
+      // Ten seconds after the reply was saved, a request Channex was still taking in has landed.
+      const client = await pool.connect();
+      try {
+        await client.query("SET session_replication_role='replica'");
+        await client.query(
+          "UPDATE pms.channex_offer_ari_receipts SET captured_at=clock_timestamp()-interval '11 seconds' WHERE attempt_id=$1",
+          [f.ariCorrelation.attemptId],
+        );
+      } finally {
+        await client.query("SET session_replication_role='origin'");
+        client.release();
+      }
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        expect(await reconcilePendingChannexUploads(pool, lease, f.get)).toEqual(
+          unanswered ? { kind: "pending_uploads_reconciled", count: 1 } : stopped,
+        );
+      } finally {
+        warn.mockRestore();
+      }
+      expect((await f.state()).state).toBe(unanswered ? "released" : "unresolved");
+      expect(f.get).not.toHaveBeenCalled();
+    },
+  );
+  it("never releases an upload for a stale lease or while a receipt capture holds its target", async () => {
+    const f = await reconciliationFixture();
+    const lease = await nextJobAttempt(f.input);
+    expect(
+      await releaseUnansweredChannexInitialAri(pool, f.input, f.ariCorrelation.attemptId),
+    ).toEqual({
+      kind: "unavailable",
+      reason: "lease_unavailable",
+    });
+    const blocker = await pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT 1 FROM pms.channex_offer_targets WHERE id=$1 FOR UPDATE", [
+        f.claim.targetId,
+      ]);
+      expect(
+        await releaseUnansweredChannexInitialAri(pool, lease, f.ariCorrelation.attemptId),
+      ).toEqual({ kind: "unavailable", reason: "ari_release_contention" });
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+    expect((await f.state()).state).toBe("unresolved");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      expect(
+        await releaseUnansweredChannexInitialAri(pool, lease, f.ariCorrelation.attemptId),
+      ).toEqual({
+        kind: "ari_released",
+        ariAttemptId: f.ariCorrelation.attemptId,
+        reason: "no_reply",
+      });
+    } finally {
+      warn.mockRestore();
+    }
+    expect(
+      await releaseUnansweredChannexInitialAri(pool, lease, f.ariCorrelation.attemptId),
+    ).toEqual({
+      kind: "ari_attempt_resolved",
+    });
+    // A reply arriving after the release is refused: it can no longer bring the upload back.
+    await expect(f.retain()).rejects.toThrow("Channex receipt correlation unavailable");
   });
   it("reconciles closed ARI atomically with all provider observations and cannot replay", async () => {
     const f = await reconciliationFixture();
@@ -9768,7 +10060,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ),
     ).not.toBeNull();
   });
-  it.each(["create", "sync", "reprice", "closed-ari", "activate"])(
+  it.each(["create", "sync", "reprice", "closed-ari", "lost-send", "activate"])(
     "runs %s through the exact restricted Channex login",
     async (stage) => {
       // "sync" and "reprice" keep the fixture's sync_ari job (the scheduled job path, not one-offer
@@ -10035,6 +10327,72 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           expect(["retained", "receipt_pending"]).toContain(result.kind);
           if (result.kind === "receipt_pending") await result.persist();
           expect(post).toHaveBeenCalledOnce();
+        } else if (stage === "lost-send" && seeded) {
+          // VAY-2108: the release runs on the same login. An upload claimed by a send step that
+          // then failed before a reply was saved is released on the job's next attempt and sent
+          // again once.
+          expect(
+            (
+              await prepareChannexInitialAriDispatch(
+                worker,
+                f.input,
+                f.selection,
+                seeded!.claim.attemptId,
+                initialAriDate,
+              )
+            ).kind,
+          ).toBe("prepared");
+          const lease = await nextJobAttempt(f.input);
+          const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+          try {
+            expect(await reconcilePendingChannexUploads(worker, lease, vi.fn())).toEqual({
+              kind: "pending_uploads_reconciled",
+              count: 1,
+            });
+          } finally {
+            warn.mockRestore();
+          }
+          const post = vi.fn(
+            async () =>
+              new Response(
+                JSON.stringify({
+                  data: [{ type: "task", id: randomUUID() }],
+                  meta: { warnings: [] },
+                }),
+              ),
+          );
+          expect(
+            await dispatchNextChannexClosedUpload(worker, lease, {
+              post,
+              get: async (path: string) =>
+                path.includes("properties/")
+                  ? {
+                      data: {
+                        type: "property",
+                        id: f.scope.propertyId,
+                        attributes: { settings: { min_stay_type: "both" } },
+                      },
+                    }
+                  : path.includes("room_types")
+                    ? providerRoom(f)
+                    : seeded!.response().json(),
+            }),
+          ).toMatchObject({ kind: "retained" });
+          expect(post).toHaveBeenCalledOnce();
+          expect(
+            (
+              await pool.query(
+                `SELECT state,(SELECT count(*)::int FROM pms.channex_offer_ari_receipts r
+                   WHERE r.attempt_id=a.id) AS receipts
+                 FROM pms.channex_offer_ari_attempts a WHERE a.creation_attempt_id=$1
+                 ORDER BY a.created_at,a.id`,
+                [seeded!.claim.attemptId],
+              )
+            ).rows,
+          ).toEqual([
+            { state: "released", receipts: 0 },
+            { state: "unresolved", receipts: 1 },
+          ]);
         } else {
           expect(await activatePublishedChannexOffers(worker, f.input)).toEqual({
             kind: "all_targets_active",

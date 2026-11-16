@@ -358,7 +358,10 @@ export function createChannexManagementProvider(config: {
           );
           if (result.kind !== "pending_uploads_reconciled")
             return failure(
-              result.reason === "reconciliation_batch_pending"
+              // VAY-2108: an unanswered upload waits for its send to settle, then is sent again.
+              result.reason === "reconciliation_batch_pending" ||
+                result.reason === "ari_send_settling" ||
+                result.reason === "ari_release_contention"
                 ? "provider_unavailable"
                 : "invalid_state",
               new Error("Saved Channex uploads still require reconciliation."),

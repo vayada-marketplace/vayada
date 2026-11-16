@@ -677,7 +677,7 @@ describe("recovery after canonical stay-rule synchronization", () => {
 });
 
 describe("closed upload worker completion", () => {
-  it.each(["capability", "lease", "held", "retry", "foreign", "oversized"])(
+  it.each(["capability", "lease", "held", "retry", "settling", "foreign", "oversized"])(
     "stops %s completion before the outgoing plan",
     async (mode) => {
       const plan = vi.fn(async () => ({ requests: [] }));
@@ -693,7 +693,12 @@ describe("closed upload worker completion", () => {
         return {
           kind: "unavailable" as const,
           reason:
-            mode === "retry" ? "reconciliation_batch_pending" : "ari_receipt_history_unavailable",
+            mode === "retry"
+              ? "reconciliation_batch_pending"
+              : // VAY-2108: an unanswered upload whose send may still land is retried, not stopped.
+                mode === "settling"
+                ? "ari_send_settling"
+                : "ari_receipt_history_unavailable",
         };
       });
       const provider = createChannexManagementProvider({
@@ -719,7 +724,7 @@ describe("closed upload worker completion", () => {
       );
       expect(result).toMatchObject({
         ok: false,
-        code: ["retry", "foreign", "oversized"].includes(mode)
+        code: ["retry", "settling", "foreign", "oversized"].includes(mode)
           ? "provider_unavailable"
           : "invalid_state",
       });
