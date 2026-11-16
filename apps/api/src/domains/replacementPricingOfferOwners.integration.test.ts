@@ -3237,7 +3237,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           }),
         ).toMatchObject({ outcome: "continued" });
         expect(warn).toHaveBeenCalledWith(
-          "Channex initial upload released to send again.",
+          "Channex initial upload released.",
           expect.objectContaining({ jobId: job.jobId, reason: "no_reply" }),
         );
       } finally {

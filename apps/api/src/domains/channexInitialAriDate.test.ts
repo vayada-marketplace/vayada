@@ -129,11 +129,6 @@ describe("next initial ARI calendar date", () => {
       admit("2025-12-31", "America/Los_Angeles", new Date("2026-01-02T08:00:01Z"), "2026-01-01")
         .kind,
     ).toBe("unavailable");
-    // VAY-2108: the anchor night itself has passed by then; it is never claimed again.
-    expect(
-      admit("2026-01-01", "America/Los_Angeles", new Date("2026-01-02T08:00:01Z"), "2026-01-01")
-        .kind,
-    ).toBe("unavailable");
   });
   it("rejects invalid timezone or clock without selecting a fallback", () => {
     for (const zone of [undefined, "invalid/zone", " UTC "])

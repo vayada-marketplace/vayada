@@ -137,7 +137,8 @@ export async function releaseUnansweredChannexInitialAri(
       : { kind: "ari_attempt_resolved" as const };
   });
   if (result.kind === "ari_released")
-    console.warn("Channex initial upload released to send again.", {
+    // night_passed is never sent again; the other reasons are, on the next turn.
+    console.warn("Channex initial upload released.", {
       jobId: lease.jobId,
       attemptNumber: lease.attemptNumber,
       ariAttemptId,
