@@ -187,6 +187,35 @@ describe("PMS Channex management worker", () => {
     }
   });
 
+  // VAY-2108: an unanswered Channex upload settles within 10 s; one later turn releases it.
+  it("waits at least the failure's own retry time, never less than the backoff", async () => {
+    for (const [attemptNumber, retryAfterMs, wait] of [
+      [1, 11_000, 11_000],
+      [6, 11_000, 32_000],
+    ] as const) {
+      const claimed = { ...job(), attemptNumber, maxAttempts: 7 };
+      const failure = {
+        ok: false as const,
+        code: "provider_unavailable" as const,
+        message: "Saved Channex uploads still require reconciliation.",
+        retryAfterMs,
+      };
+      const harness = store(claimed);
+      harness.fail.mockResolvedValue("retry_scheduled");
+      await runPmsChannexManagementWorkerOnce({
+        store: harness.port,
+        provider: { execute: vi.fn().mockResolvedValue(failure) },
+        workerId: "worker-1",
+        now,
+      });
+      expect(harness.fail).toHaveBeenCalledWith(
+        claimed,
+        failure,
+        expect.objectContaining({ retryable: true, retryAt: new Date(now.getTime() + wait) }),
+      );
+    }
+  });
+
   it("dead-letters non-retryable rejection and exhausted transient work", async () => {
     for (const [claimed, failure] of [
       [job(), { ok: false, code: "invalid_state", message: "not connected" }],

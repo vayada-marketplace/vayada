@@ -677,7 +677,7 @@ describe("recovery after canonical stay-rule synchronization", () => {
 });
 
 describe("closed upload worker completion", () => {
-  it.each(["capability", "lease", "held", "retry", "settling", "foreign", "oversized"])(
+  it.each(["capability", "lease", "held", "retry", "settling", "contended", "foreign", "oversized"])(
     "stops %s completion before the outgoing plan",
     async (mode) => {
       const plan = vi.fn(async () => ({ requests: [] }));
@@ -698,7 +698,9 @@ describe("closed upload worker completion", () => {
               : // VAY-2108: an unanswered upload whose send may still land is retried, not stopped.
                 mode === "settling"
                 ? "ari_send_settling"
-                : "ari_receipt_history_unavailable",
+                : mode === "contended"
+                  ? "ari_release_contention"
+                  : "ari_receipt_history_unavailable",
         };
       });
       const provider = createChannexManagementProvider({
@@ -724,10 +726,13 @@ describe("closed upload worker completion", () => {
       );
       expect(result).toMatchObject({
         ok: false,
-        code: ["retry", "settling", "foreign", "oversized"].includes(mode)
+        code: ["retry", "settling", "contended", "foreign", "oversized"].includes(mode)
           ? "provider_unavailable"
           : "invalid_state",
       });
+      expect((result as { retryAfterMs?: number }).retryAfterMs).toBe(
+        mode === "settling" ? 11_000 : undefined,
+      );
       expect(plan).not.toHaveBeenCalled();
       if (["capability", "lease"].includes(mode)) expect(reconcile).not.toHaveBeenCalled();
       if (mode !== "oversized") expect(fetcher).not.toHaveBeenCalled();

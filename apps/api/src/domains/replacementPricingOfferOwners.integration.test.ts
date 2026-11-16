@@ -3052,17 +3052,20 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect((await f.state()).state).toBe("unresolved");
   });
   // VAY-2108: the job's next attempt after the one that claimed an upload. "ended": that attempt
-  // failed a minute ago (Tiga, 2026-11-16 00:43Z). "died": its worker stopped, so the attempt is
-  // still marked running while the job has moved on.
+  // failed a minute ago (Tiga, 2026-11-16 00:43Z); "just-ended": it failed now. "died": its worker
+  // stopped and nothing marked the attempt ended, while the job has moved on.
   async function nextJobAttempt(
     input: { jobId: string; workerId: string; attemptNumber: number },
-    sender: "ended" | "died" = "ended",
+    sender: "ended" | "just-ended" | "died" = "ended",
   ) {
-    if (sender === "ended")
+    if (sender !== "died")
       await pool.query(
-        `UPDATE platform.job_attempts SET status='failed',
-           started_at=clock_timestamp()-interval '2 minutes',finished_at=clock_timestamp()-interval '1 minute'
-         WHERE job_id=$1 AND attempt_number=$2`,
+        sender === "ended"
+          ? `UPDATE platform.job_attempts SET status='failed',
+               started_at=clock_timestamp()-interval '2 minutes',finished_at=clock_timestamp()-interval '1 minute'
+             WHERE job_id=$1 AND attempt_number=$2`
+          : `UPDATE platform.job_attempts SET status='failed',finished_at=clock_timestamp()
+             WHERE job_id=$1 AND attempt_number=$2`,
         [input.jobId, input.attemptNumber],
       );
     const next = input.attemptNumber + 1;
@@ -3135,13 +3138,23 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     return { fetcher, posts };
   }
+  async function ageUploadRows(sql: string, id: string) {
+    const client = await pool.connect();
+    try {
+      await client.query("SET session_replication_role='replica'");
+      await client.query(sql, [id]);
+    } finally {
+      await client.query("SET session_replication_role='origin'");
+      client.release();
+    }
+  }
   async function uploadStates(f: Awaited<ReturnType<typeof reconciliationFixture>>) {
     return (
       await pool.query<{ date: string; state: string; receipts: number }>(
         `SELECT a.service_date::text AS date,a.state,
            (SELECT count(*)::int FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id) AS receipts
          FROM pms.channex_offer_ari_attempts a WHERE a.creation_attempt_id=$1
-         ORDER BY a.created_at,a.id`,
+         ORDER BY a.service_date,a.created_at,a.id`,
         [f.claim.attemptId],
       )
     ).rows;
@@ -3167,6 +3180,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           )
         ).kind,
       ).toBe("prepared");
+      // A died worker's attempt is never marked ended; the 5-minute job lease bounds its send.
+      if (sender === "died")
+        await ageUploadRows(
+          `UPDATE pms.channex_offer_ari_attempts SET created_at=clock_timestamp()-interval '6 minutes'
+           WHERE creation_attempt_id=$1 AND state='unresolved'`,
+          f.claim.attemptId,
+        );
       const lease = await nextJobAttempt(f.input, sender);
       const channex = echoingChannex(f);
       const provider = createChannexManagementProvider({
@@ -3247,6 +3267,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it.each([
     ["no response", true],
     ["a 503", true],
+    ["a 429", true],
+    ["an unreadable 200", true],
     ["a 422", false],
     ["warnings", false],
   ] as const)(
@@ -3257,6 +3279,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         await (
           await prepareChannexAriTransportFailurePersistence(pool, f.ariCorrelation)
         )();
+      else if (reply === "an unreadable 200") await f.retain(new Response("<html>gateway</html>"));
       else
         await f.retain(
           new Response(
@@ -3264,7 +3287,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
               data: [{ type: "task", id: f.taskId }],
               meta: { warnings: reply === "warnings" ? ["partial"] : [] },
             }),
-            { status: reply === "a 503" ? 503 : reply === "a 422" ? 422 : 200 },
+            {
+              status:
+                reply === "a 503" ? 503 : reply === "a 429" ? 429 : reply === "a 422" ? 422 : 200,
+            },
           ),
         );
       const lease = await nextJobAttempt(f.input);
@@ -3274,17 +3300,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
       expect((await f.state()).state).toBe("unresolved");
       // Ten seconds after the reply was saved, a request Channex was still taking in has landed.
-      const client = await pool.connect();
-      try {
-        await client.query("SET session_replication_role='replica'");
-        await client.query(
-          "UPDATE pms.channex_offer_ari_receipts SET captured_at=clock_timestamp()-interval '11 seconds' WHERE attempt_id=$1",
-          [f.ariCorrelation.attemptId],
-        );
-      } finally {
-        await client.query("SET session_replication_role='origin'");
-        client.release();
-      }
+      await ageUploadRows(
+        "UPDATE pms.channex_offer_ari_receipts SET captured_at=clock_timestamp()-interval '11 seconds' WHERE attempt_id=$1",
+        f.ariCorrelation.attemptId,
+      );
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       try {
         expect(await reconcilePendingChannexUploads(pool, lease, f.get)).toEqual(
@@ -3339,6 +3358,80 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     // A reply arriving after the release is refused: it can no longer bring the upload back.
     await expect(f.retain()).rejects.toThrow("Channex receipt correlation unavailable");
+  });
+  it.each(["just-ended", "died"] as const)(
+    "waits for a send whose attempt %s before releasing it",
+    async (sender) => {
+      const f = await reconciliationFixture();
+      const lease = await nextJobAttempt(f.input, sender);
+      const release = () =>
+        releaseUnansweredChannexInitialAri(pool, lease, f.ariCorrelation.attemptId);
+      expect(await release()).toEqual({ kind: "unavailable", reason: "ari_send_settling" });
+      await ageUploadRows(
+        sender === "just-ended"
+          ? `UPDATE platform.job_attempts SET started_at=clock_timestamp()-interval '1 minute',
+               finished_at=clock_timestamp()-interval '11 seconds'
+             WHERE id=(SELECT job_attempt_id FROM pms.channex_offer_ari_attempts WHERE id=$1)`
+          : `UPDATE pms.channex_offer_ari_attempts SET created_at=clock_timestamp()-interval '6 minutes'
+             WHERE id=$1`,
+        f.ariCorrelation.attemptId,
+      );
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        expect(await release()).toMatchObject({ kind: "ari_released", reason: "no_reply" });
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+  it("stops sending a night again once Channex has failed it three times", async () => {
+    const f = await completedDateFixture();
+    const lease = await nextJobAttempt(f.input);
+    const failing = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ errors: { title: "Unavailable" } }), { status: 503 }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      for (let round = 1; round <= 4; round++) {
+        const next = await prepareChannexInitialAriDispatch(
+          pool,
+          lease,
+          f.selection,
+          f.claim.attemptId,
+          nextAriDate,
+        );
+        if (next.kind !== "prepared") throw new Error(`round ${round} must prepare`);
+        expect((await next.dispatch({ get: f.preflightGet, post: failing })).kind).toBe("retained");
+        const sent = (
+          await pool.query(
+            "SELECT id FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1 AND state='unresolved'",
+            [f.claim.attemptId],
+          )
+        ).rows[0].id as string;
+        await ageUploadRows(
+          "UPDATE pms.channex_offer_ari_receipts SET captured_at=clock_timestamp()-interval '11 seconds' WHERE attempt_id=$1",
+          sent,
+        );
+        expect(await releaseUnansweredChannexInitialAri(pool, lease, sent)).toEqual(
+          round <= 3
+            ? { kind: "ari_released", ariAttemptId: sent, reason: "reply_without_answer" }
+            : { kind: "unavailable", reason: "ari_release_limit" },
+        );
+      }
+      expect(warn).toHaveBeenLastCalledWith(
+        "Channex initial upload kept: Channex never answered this night.",
+        expect.objectContaining({ releasedReplies: 3 }),
+      );
+      // The job stops (invalid_state) instead of posting that night forever.
+      expect(await reconcilePendingChannexUploads(pool, lease, f.get)).toEqual({
+        kind: "unavailable",
+        reason: "ari_release_limit",
+      });
+    } finally {
+      warn.mockRestore();
+    }
+    expect(failing).toHaveBeenCalledTimes(4);
   });
   it("reconciles closed ARI atomically with all provider observations and cannot replay", async () => {
     const f = await reconciliationFixture();

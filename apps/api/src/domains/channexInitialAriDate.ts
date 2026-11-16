@@ -29,12 +29,12 @@ export function selectNextChannexInitialAriDate(
   const window = initialAriWindow(timeZone, now, anchorDate);
   if (window.kind !== "window") return window;
   const covered = new Set(completed);
-  const cursor = new Date(`${window.propertyLocalDate}T00:00:00.000Z`);
-  for (
-    let date = window.propertyLocalDate;
-    date <= window.through;
-    date = cursor.toISOString().slice(0, 10)
-  ) {
+  // VAY-2108: a night that has already passed in the hotel's zone is never sent (nor waited for).
+  // Only a released upload leaves such a gap; nothing can be sold for that night any more.
+  const today = channexPropertyLocalDate(timeZone, now)!;
+  const start = today > window.propertyLocalDate ? today : window.propertyLocalDate;
+  const cursor = new Date(`${start}T00:00:00.000Z`);
+  for (let date = start; date <= window.through; date = cursor.toISOString().slice(0, 10)) {
     if (!covered.has(date)) return { ...window, kind: "selected" as const, date };
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }

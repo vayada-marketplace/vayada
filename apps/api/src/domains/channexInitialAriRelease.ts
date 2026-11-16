@@ -5,6 +5,7 @@ import {
 } from "../jobs/pmsChannexPricingJobLease.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_UNANSWERED_REPLIES = 3;
 
 type Receipt = {
   outcome: string;
@@ -23,9 +24,13 @@ type Receipt = {
  * upload sets absolute values for one night (stop-sell, rates, stay rules), so a repeat that
  * meets a late original sets that night the same way.
  * It is released only once the send has settled: 10 s after a reply was saved; without one, once
- * the sending job attempt no longer runs (ended at least 10 s ago, or its job lease lapsed).
+ * the sending job attempt no longer runs and ended at least 10 s ago (or, never marked ended, was
+ * claimed at least 5 minutes ago: a job lease bounds every send). A night that has passed meanwhile
+ * is not sent again (selectNextChannexInitialAriDate).
  * A definite refusal (another 4xx, an answer with errors or warnings) or a second reply stays
- * unresolved: the same body would only be refused again, and someone has to look at it.
+ * unresolved: the same body would only be refused again, and someone has to look at it. So does
+ * a night already released MAX_UNANSWERED_REPLIES times after a reply without an answer: Channex
+ * keeps failing it, and resending forever would hide that.
  */
 export async function releaseUnansweredChannexInitialAri(
   pool: Pool,
@@ -60,22 +65,33 @@ export async function releaseUnansweredChannexInitialAri(
       // As for an offer delivery (channexOfferAriDelivery.ts): while the attempt that claimed the
       // upload still holds its job lease, its POST may still be under way.
       const sender = (
-        await client.query<{ running: boolean; endedRecently: boolean }>(
-          `SELECT EXISTS (SELECT 1 FROM platform.job_attempts s JOIN platform.jobs j ON j.id=s.job_id
+        await client.query<{ settled: boolean }>(
+          `SELECT NOT EXISTS (SELECT 1 FROM platform.job_attempts s JOIN platform.jobs j ON j.id=s.job_id
                WHERE s.id=a.job_attempt_id AND s.status='running' AND s.finished_at IS NULL
                  AND j.status='running' AND j.locked_by=a.worker_id AND j.attempts_count=s.attempt_number
-                 AND j.locked_at > clock_timestamp() - interval '5 minutes') AS running,
-             EXISTS (SELECT 1 FROM platform.job_attempts s WHERE s.id=a.job_attempt_id
-               AND s.finished_at > clock_timestamp() - interval '10 seconds') AS "endedRecently"
+                 AND j.locked_at > clock_timestamp() - interval '5 minutes')
+             AND COALESCE((SELECT s.finished_at<=clock_timestamp()-interval '10 seconds'
+                 FROM platform.job_attempts s WHERE s.id=a.job_attempt_id AND s.finished_at IS NOT NULL),
+               a.created_at<=clock_timestamp()-interval '5 minutes') AS settled
            FROM pms.channex_offer_ari_attempts a WHERE a.id=$1`,
           [ariAttemptId],
         )
       ).rows[0];
-      if (!sender || sender.running || sender.endedRecently)
-        return unavailable("ari_send_settling");
+      if (!sender?.settled) return unavailable("ari_send_settling");
       reason = "no_reply";
     } else if (receipts.length === 1 && withoutAnswer(receipts[0]!)) {
       if (!receipts[0]!.settled) return unavailable("ari_send_settling");
+      const earlier = (
+        await client.query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM pms.channex_offer_ari_attempts a
+           JOIN pms.channex_offer_ari_attempts x ON x.external_property_id=a.external_property_id
+             AND x.external_rate_plan_id=a.external_rate_plan_id AND x.service_date=a.service_date
+           WHERE a.id=$1 AND x.state='released'
+             AND EXISTS (SELECT 1 FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=x.id)`,
+          [ariAttemptId],
+        )
+      ).rows[0]!.count;
+      if (earlier >= MAX_UNANSWERED_REPLIES) return unavailable("ari_release_limit");
       reason = "reply_without_answer";
     } else return unavailable("ari_reply_kept");
     // readChannexInitialAriHistory leaves released uploads out, so the date is sent again.
@@ -94,6 +110,13 @@ export async function releaseUnansweredChannexInitialAri(
       attemptNumber: lease.attemptNumber,
       ariAttemptId,
       reason: result.reason,
+    });
+  else if (result.kind === "unavailable" && result.reason === "ari_release_limit")
+    console.warn("Channex initial upload kept: Channex never answered this night.", {
+      jobId: lease.jobId,
+      attemptNumber: lease.attemptNumber,
+      ariAttemptId,
+      releasedReplies: MAX_UNANSWERED_REPLIES,
     });
   return result;
 }
