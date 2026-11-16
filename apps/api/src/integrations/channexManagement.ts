@@ -366,10 +366,12 @@ export function createChannexManagementProvider(config: {
                 : "invalid_state",
               new Error("Saved Channex uploads still require reconciliation."),
             );
-            // Every settle window ends within 10 s of the reply or the sending attempt's end, so
-            // one later turn releases it instead of several quick retries using up the job.
-            return result.reason === "ari_send_settling"
-              ? { ...stopped, retryAfterMs: 11_000 }
+            // The release step says when the send settles, so one later turn releases it instead
+            // of several quick retries using up the job.
+            return result.reason === "ari_send_settling" &&
+              "retryAfterMs" in result &&
+              typeof result.retryAfterMs === "number"
+              ? { ...stopped, retryAfterMs: result.retryAfterMs }
               : stopped;
           }
         } catch (error) {

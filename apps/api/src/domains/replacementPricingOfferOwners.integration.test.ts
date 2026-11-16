@@ -3043,11 +3043,15 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("holds a discovered upload without a reply while its sending attempt still runs", async () => {
     const f = await reconciliationFixture();
     // VAY-2108: the claiming attempt holds the job lease, so its POST may still land; the job
-    // retries (provider_unavailable) instead of stopping.
-    expect(await reconcilePendingChannexUploads(pool, f.input, f.get)).toEqual({
+    // retries (provider_unavailable) when that lease would end, instead of stopping.
+    const held = await reconcilePendingChannexUploads(pool, f.input, f.get);
+    expect(held).toEqual({
       kind: "unavailable",
       reason: "ari_send_settling",
+      retryAfterMs: expect.any(Number),
     });
+    expect(retryAfter(held)).toBeGreaterThan(240_000);
+    expect(retryAfter(held)).toBeLessThanOrEqual(301_000);
     expect(f.get).not.toHaveBeenCalled();
     expect((await f.state()).state).toBe("unresolved");
   });
@@ -3138,11 +3142,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     return { fetcher, posts };
   }
-  async function ageUploadRows(sql: string, id: string) {
+  // The settling result's retry time; TypeScript folds it into the plain unavailable shape.
+  const retryAfter = (result: unknown) => (result as { retryAfterMs: number }).retryAfterMs;
+  async function ageUploadRows(sql: string, ...values: string[]) {
     const client = await pool.connect();
     try {
       await client.query("SET session_replication_role='replica'");
-      await client.query(sql, [id]);
+      await client.query(sql, values);
     } finally {
       await client.query("SET session_replication_role='origin'");
       client.release();
@@ -3295,9 +3301,18 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         );
       const lease = await nextJobAttempt(f.input);
       const stopped = { kind: "unavailable", reason: "ari_receipt_history_unavailable" };
-      expect(await reconcilePendingChannexUploads(pool, lease, f.get)).toEqual(
-        unanswered ? { kind: "unavailable", reason: "ari_send_settling" } : stopped,
+      const first = await reconcilePendingChannexUploads(pool, lease, f.get);
+      expect(first).toEqual(
+        unanswered
+          ? { kind: "unavailable", reason: "ari_send_settling", retryAfterMs: expect.any(Number) }
+          : stopped,
       );
+      if (unanswered) {
+        // Retried just after the 10 s window from the saved reply, not on the quick backoff.
+        const wait = retryAfter(first);
+        expect(wait).toBeGreaterThan(5_000);
+        expect(wait).toBeLessThanOrEqual(11_000);
+      }
       expect((await f.state()).state).toBe("unresolved");
       // Ten seconds after the reply was saved, a request Channex was still taking in has landed.
       await ageUploadRows(
@@ -3366,7 +3381,16 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       const lease = await nextJobAttempt(f.input, sender);
       const release = () =>
         releaseUnansweredChannexInitialAri(pool, lease, f.ariCorrelation.attemptId);
-      expect(await release()).toEqual({ kind: "unavailable", reason: "ari_send_settling" });
+      const waiting = await release();
+      expect(waiting).toEqual({
+        kind: "unavailable",
+        reason: "ari_send_settling",
+        retryAfterMs: expect.any(Number),
+      });
+      // 10 s after the attempt ended, or 5 minutes after a claim nothing marked ended.
+      const wait = retryAfter(waiting);
+      if (sender === "just-ended") expect(wait).toBeLessThanOrEqual(11_000);
+      else expect(wait).toBeGreaterThan(240_000);
       await ageUploadRows(
         sender === "just-ended"
           ? `UPDATE platform.job_attempts SET started_at=clock_timestamp()-interval '1 minute',
@@ -3427,6 +3451,26 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await reconcilePendingChannexUploads(pool, lease, f.get)).toEqual({
         kind: "unavailable",
         reason: "ari_release_limit",
+      });
+      // Once that night has passed in the hotel's zone, nothing can sell it: the upload is
+      // released and the hotel's syncs go on (selection never picks a passed night).
+      await ageUploadRows(
+        `UPDATE pms.channex_offer_ari_attempts
+         SET service_date=(clock_timestamp() AT TIME ZONE 'Etc/UTC')::date-1
+         WHERE creation_attempt_id=$1 AND service_date=$2::date`,
+        f.claim.attemptId,
+        nextAriDate,
+      );
+      const kept = (
+        await pool.query(
+          "SELECT id FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1 AND state='unresolved'",
+          [f.claim.attemptId],
+        )
+      ).rows[0].id as string;
+      expect(await releaseUnansweredChannexInitialAri(pool, lease, kept)).toEqual({
+        kind: "ari_released",
+        ariAttemptId: kept,
+        reason: "night_passed",
       });
     } finally {
       warn.mockRestore();

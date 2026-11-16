@@ -16,6 +16,9 @@ export function admitChannexInitialAriDate(
   const window = initialAriWindow(timeZone, now, anchorDate);
   if (window.kind !== "window" || date < window.propertyLocalDate || date > window.through)
     return unavailable;
+  // VAY-2108: as in selection, a night that has passed in the hotel's zone is never sent, even
+  // when the hotel's midnight falls between selecting and claiming it.
+  if (date < channexPropertyLocalDate(timeZone, now)!) return unavailable;
   return { ...window, kind: "admitted" as const, date };
 }
 
