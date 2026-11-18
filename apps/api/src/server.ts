@@ -1408,17 +1408,19 @@ const channexManagementProvider =
             : undefined,
         prepareRoomAvailability:
           channexUploadReconciliationPool && channexAvailabilityInventory
-            ? (lease) =>
+            ? (lease, get) =>
                 prepareNextChannexRoomAvailabilityDispatch(
                   channexUploadReconciliationPool,
                   channexAvailabilityInventory.inventory,
                   lease,
+                  get,
                 )
             : undefined,
         activatePublishedOffers:
           channexUploadReconciliationPool &&
           (config.channexManagement.stagingInventoryEnabled || channexClaimedAri)
-            ? (lease) => activatePublishedChannexOffers(channexUploadReconciliationPool, lease)
+            ? (lease, options) =>
+                activatePublishedChannexOffers(channexUploadReconciliationPool, lease, options)
             : undefined,
         reconcileOfferDeliveries:
           channexUploadReconciliationPool && config.channexManagement.offerAriDeliveryEnabled

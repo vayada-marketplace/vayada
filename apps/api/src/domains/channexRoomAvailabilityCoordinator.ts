@@ -1,11 +1,19 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Pool, PoolClient } from "pg";
 import { PMS_INVENTORY_HORIZON_MAX_DAYS } from "@vayada/domain-pms";
+import { observeChannexAvailabilityDate } from "../integrations/channexAvailabilityReadback.js";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import type { PmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
+import {
+  addDays,
+  CHANNEX_CUT_OFF_MAX_DAYS,
+  channexCutOffClosedDates,
+  readChannexPropertyCutOff,
+} from "../integrations/channexPropertyCutOff.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
+import { boundedProviderCall } from "./channexRoomAvailabilityEvidence.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 type Inventory = Pick<
@@ -17,6 +25,7 @@ type Scope = Readonly<{
   propertyId: string;
   connectionId: string;
   externalPropertyId: string;
+  externalRoomTypeIds: readonly string[];
   bindingGeneration: string;
   localToday: string;
   through: string;
@@ -24,6 +33,91 @@ type Scope = Readonly<{
   dayCount: number;
   fullPropertyReadinessRequired: boolean;
 }>;
+
+type ChannexRead = (path: string, signal: AbortSignal) => Promise<unknown>;
+
+// A cut-off closes at most 30 dates after Channex's date, which is at most two days after the
+// hotel's own (the two time zones may differ).
+const CUT_OFF_REACH_DAYS = CHANNEX_CUT_OFF_MAX_DAYS + 2;
+// Each closed night is confirmed with one bounded read; a longer closure than this is sent as
+// before, so the reads stay well inside the job's lease.
+const CUT_OFF_CONFIRMED_NIGHTS = 7;
+
+/**
+ * VAY-2108: whether the property's Channex cut-off has closed `date`, by the same rule the send
+ * step skips nights with, so the two never disagree about a night (a disagreement would resend it
+ * on every run). Read-only.
+ */
+export async function channexCutOffClosesNight(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  date: string,
+  get: ChannexRead,
+  now: () => Date = () => new Date(),
+) {
+  const lease = { ...input };
+  const scope = await readScope(pool, lease, false);
+  if (scope.kind !== "scope" || date > addDays(scope.value.localToday, CUT_OFF_REACH_DAYS))
+    return false;
+  const openFrom = await channexCutOffOpenFrom(scope.value, date, get, now, lease);
+  return openFrom !== null && date < openFrom;
+}
+
+/**
+ * The Channex dates the property's cut-off closes now. Channex ignores availability for them
+ * while its task still reports success, so a send can never read back. Read-only.
+ */
+async function readChannexAvailabilityClosedDates(
+  externalPropertyId: string,
+  get: ChannexRead,
+  now: () => Date,
+) {
+  const cutOff = await boundedProviderCall((signal) =>
+    readChannexPropertyCutOff(externalPropertyId, (_method, path) => {
+      signal.throwIfAborted();
+      return get(path, signal);
+    }),
+  );
+  return channexCutOffClosedDates(cutOff, now());
+}
+
+/**
+ * VAY-2108: the first night to send when the property's cut-off has closed the nights before it,
+ * or null to send as usual. Only nights Channex itself shows as 0 for every room are skipped, so a
+ * wrong reading of the cut-off never leaves a sellable night stale; an unreadable property or
+ * night is sent as usual (as before this rule).
+ */
+async function channexCutOffOpenFrom(
+  scope: Scope,
+  selectedDate: string,
+  get: ChannexRead,
+  now: () => Date,
+  lease: ChannexPricingJobLeaseInput,
+) {
+  try {
+    const closed = await readChannexAvailabilityClosedDates(scope.externalPropertyId, get, now);
+    if (!closed || closed.through < selectedDate) return null;
+    if (closed.through > addDays(scope.localToday, CUT_OFF_CONFIRMED_NIGHTS - 1)) return null;
+    for (let date = scope.localToday; date <= closed.through; date = addDays(date, 1)) {
+      const night = date;
+      const count = await boundedProviderCall((signal) =>
+        observeChannexAvailabilityDate(scope.externalPropertyId, night, (_method, path) => {
+          signal.throwIfAborted();
+          return get(path, signal);
+        }),
+      );
+      if (!scope.externalRoomTypeIds.every((room) => count(room) === 0)) return null;
+    }
+    return addDays(closed.through, 1);
+  } catch (error) {
+    console.warn("Channex cut-off unavailable; its nights are treated as open.", {
+      jobId: lease.jobId,
+      attemptNumber: lease.attemptNumber,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+    return null;
+  }
+}
 
 /** Rechecks complete room availability evidence inside a caller-owned activation transaction. */
 export async function lockCurrentChannexRoomAvailability(
@@ -34,6 +128,8 @@ export async function lockCurrentChannexRoomAvailability(
     externalPropertyId: string;
     bindingGeneration: string;
     roomTypeId: string;
+    /** The sync's first open night (after a Channex cut-off); never before the hotel's today. */
+    from?: string;
   }>,
 ) {
   await lockPmsInventoryMutationScope(client, input.propertyId);
@@ -90,7 +186,8 @@ export async function lockCurrentChannexRoomAvailability(
   const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]?.now;
   const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
   const horizon = coverage && localToday ? availabilityWindow(localToday, coverage.through) : null;
-  if (!coverage || !localToday || !horizon)
+  const from = localToday ? windowStart(localToday, input.from) : null;
+  if (!coverage || !localToday || !horizon || !from)
     return unavailable("room_availability_coverage_unavailable");
   const candidate = (
     await client.query<{ valid: boolean | null }>(selectionSql, [
@@ -98,7 +195,7 @@ export async function lockCurrentChannexRoomAvailability(
       input.connectionId,
       input.externalPropertyId,
       input.bindingGeneration,
-      localToday,
+      from,
       horizon.through,
       coverage.materializedRevision,
       input.roomTypeId,
@@ -108,18 +205,23 @@ export async function lockCurrentChannexRoomAvailability(
     ? unavailable("room_availability_coverage_unavailable")
     : {
         kind: "current" as const,
-        from: localToday,
+        from,
         through: horizon.through,
         roomCount: mappings.rows.length,
-        dayCount: horizon.dayCount,
+        dayCount: nightCount(from, horizon.through),
       };
 }
 
-/** Selects and claims one current room/day. It performs no provider IO itself. */
+/**
+ * Selects and claims one current room/day. Its only provider IO is reading the property's cut-off
+ * when the selected night is close enough to be closed by it.
+ */
 export async function prepareNextChannexRoomAvailabilityDispatch(
   pool: Pool,
   inventory: Inventory,
   input: ChannexPricingJobLeaseInput,
+  get: ChannexRead,
+  now: () => Date = () => new Date(),
 ) {
   const lease = { ...input };
   const before = await readScope(pool, lease, false);
@@ -132,15 +234,33 @@ export async function prepareNextChannexRoomAvailabilityDispatch(
     if (!readiness?.ready)
       return { kind: "unavailable" as const, reason: "room_availability_coverage_unavailable" };
   }
-  const selected = await readScope(pool, lease, true, before.value);
+  let selected = await readScope(pool, lease, true, before.value);
   if (selected.kind !== "selected") return selected;
+  // VAY-2108: nights Channex's cut-off closed are skipped; Channex shows them as 0 until they pass.
+  // Sent anyway, they would never read back and would stop every sync of the hotel that day.
+  if (
+    selected.selection &&
+    selected.selection.date <= addDays(selected.scope.localToday, CUT_OFF_REACH_DAYS)
+  ) {
+    const openFrom = await channexCutOffOpenFrom(
+      selected.scope,
+      selected.selection.date,
+      get,
+      now,
+      lease,
+    );
+    if (openFrom) {
+      selected = await readScope(pool, lease, true, before.value, openFrom);
+      if (selected.kind !== "selected") return selected;
+    }
+  }
   if (!selected.selection)
     return {
       kind: "room_availability_current" as const,
-      from: selected.scope.localToday,
+      from: selected.from,
       through: selected.scope.through,
       roomCount: selected.scope.roomCount,
-      dayCount: selected.scope.dayCount,
+      dayCount: nightCount(selected.from, selected.scope.through),
     };
   const prepared = await prepareChannexRoomAvailabilityDispatch(
     pool,
@@ -156,6 +276,7 @@ async function readScope(
   lease: ChannexPricingJobLeaseInput,
   select: boolean,
   expected?: Scope,
+  openFrom?: string,
 ) {
   const client = await pool.connect();
   let committed = false,
@@ -269,6 +390,7 @@ async function readScope(
       propertyId: authority.lease.propertyId,
       connectionId: authority.connectionId,
       externalPropertyId: authority.externalPropertyId,
+      externalRoomTypeIds: mappings.rows.map((row) => row.externalRoomTypeId),
       bindingGeneration: mappings.rows[0]!.bindingGeneration,
       localToday,
       through: horizon.through,
@@ -278,6 +400,8 @@ async function readScope(
     };
     if (expected && !isDeepStrictEqual(expected, scope))
       return unavailable("room_availability_coverage_unavailable");
+    const from = windowStart(localToday, openFrom);
+    if (!from) return unavailable("room_availability_coverage_unavailable");
     if (!select) {
       await client.query("COMMIT");
       committed = true;
@@ -293,7 +417,7 @@ async function readScope(
         scope.connectionId,
         scope.externalPropertyId,
         scope.bindingGeneration,
-        scope.localToday,
+        from,
         scope.through,
         coverage.materializedRevision,
         provisionRoomTypeId,
@@ -309,6 +433,7 @@ async function readScope(
     return {
       kind: "selected" as const,
       scope,
+      from,
       selection: candidate ? { roomTypeId: candidate.roomTypeId, date: candidate.date } : null,
     };
   } finally {
@@ -340,6 +465,26 @@ function availabilityWindow(localToday: string, coverageThrough: string) {
     through: new Date(last).toISOString().slice(0, 10),
     dayCount: (last - start) / 86_400_000 + 1,
   };
+}
+
+/** The window's first night: the hotel's today, or the given later night a cut-off left open. */
+function windowStart(localToday: string, openFrom: string | undefined) {
+  if (openFrom === undefined) return localToday;
+  const parsed = Date.parse(`${openFrom}T00:00:00.000Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(openFrom) ||
+    !Number.isFinite(parsed) ||
+    new Date(parsed).toISOString().slice(0, 10) !== openFrom ||
+    openFrom > addDays(localToday, CUT_OFF_REACH_DAYS + 1)
+  )
+    return null;
+  return openFrom > localToday ? openFrom : localToday;
+}
+
+function nightCount(from: string, through: string) {
+  const days =
+    (Date.parse(`${through}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000;
+  return Math.max(0, days + 1);
 }
 
 async function lockSelectedRoomMaterializationCurrent(

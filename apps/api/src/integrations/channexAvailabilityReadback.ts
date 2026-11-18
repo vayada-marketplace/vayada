@@ -14,7 +14,37 @@ export async function verifyChannexRoomAvailability(
     "filter[date][gte]": expected.date,
     "filter[date][lte]": expected.date,
   });
-  const response = await get("GET", `/api/v1/availability?${query}`);
+  const data = availabilityData(await get("GET", `/api/v1/availability?${query}`));
+  const dates = data[expected.externalRoomTypeId],
+    actual = pricingObject(dates) ? dates[expected.date] : undefined,
+    count = exactCount(actual);
+  if (count === null || count !== expected.availableCount)
+    // VAY-2108: the count Channex showed lets the caller recognise a night its cut-off closed.
+    throw Object.assign(new Error("availability_readback_mismatch"), { observedCount: count });
+  return { kind: "availability_observed" as const, ...expected };
+}
+
+/** VAY-2108: every room's count Channex shows for one date (null when unreadable). Read-only. */
+export async function observeChannexAvailabilityDate(
+  externalPropertyId: string,
+  date: string,
+  get: (method: "GET", path: string) => Promise<unknown>,
+) {
+  if (!uuid.test(externalPropertyId) || !validDate(date))
+    throw new Error("availability_request_unavailable");
+  const query = new URLSearchParams({
+    "filter[property_id]": externalPropertyId,
+    "filter[date][gte]": date,
+    "filter[date][lte]": date,
+  });
+  const data = availabilityData(await get("GET", `/api/v1/availability?${query}`));
+  return (externalRoomTypeId: string) => {
+    const dates = Object.hasOwn(data, externalRoomTypeId) ? data[externalRoomTypeId] : undefined;
+    return exactCount(pricingObject(dates) && Object.hasOwn(dates, date) ? dates[date] : undefined);
+  };
+}
+
+function availabilityData(response: unknown) {
   if (
     !pricingObject(response) ||
     Object.hasOwn(response, "errors") ||
@@ -26,12 +56,7 @@ export async function verifyChannexRoomAvailability(
           (!Array.isArray(response.meta.warnings) || response.meta.warnings.length !== 0))))
   )
     throw new Error("availability_readback_unavailable");
-  const dates = response.data[expected.externalRoomTypeId],
-    actual = pricingObject(dates) ? dates[expected.date] : undefined,
-    count = exactCount(actual);
-  if (count === null || count !== expected.availableCount)
-    throw new Error("availability_readback_mismatch");
-  return { kind: "availability_observed" as const, ...expected };
+  return response.data;
 }
 
 function parseRequest(value: unknown) {

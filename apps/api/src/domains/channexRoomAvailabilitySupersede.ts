@@ -36,7 +36,9 @@ type UnresolvedAttempt = {
  *   exactly the request it sent, so the current value, sent next, can't be overtaken by it;
  * - its outcome is unknown (timeout, cut-off or unreadable response, crash before the receipt):
  *   after a settle window for a request Channex may still be taking in; the current value is
- *   then sent again. Availability values are absolute, so a repeat sets the same count.
+ *   then sent again. Availability values are absolute, so a repeat sets the same count;
+ * - VAY-2108: the caller found its night closed by the property's Channex cut-off (it reads back 0
+ *   whatever was sent) and its task has ended. The night is not sent again while it stays closed.
  * A definite Channex refusal (4xx, a response with warnings) is left as it is: resending the same
  * value would only be refused again, and someone has to look at it.
  */
@@ -46,6 +48,7 @@ export async function supersedeChannexRoomAvailabilityAttempt(
   input: ChannexPricingJobLeaseInput,
   attemptId: string,
   get: (path: string, signal: AbortSignal) => Promise<unknown>,
+  options: Readonly<{ channexCutOff?: boolean }> = {},
 ) {
   const lease = { ...input };
   const read = await inTransaction(pool, async (client) => {
@@ -90,8 +93,9 @@ export async function supersedeChannexRoomAvailabilityAttempt(
   if (!attempt) return { kind: "availability_attempt_resolved" as const };
 
   const localToday = channexPropertyLocalDate(attempt.timeZone, attempt.now);
-  let reason: "service_date_passed" | "inventory_changed" | "receipt_ambiguous";
+  let reason: "service_date_passed" | "inventory_changed" | "receipt_ambiguous" | "channex_cut_off";
   if (localToday && attempt.date < localToday) reason = "service_date_passed";
+  else if (options.channexCutOff && attempt.clean) reason = "channex_cut_off";
   else if (attempt.clean) {
     let changed = false;
     const current = await inventory.getCurrentInventoryDay(
@@ -116,7 +120,7 @@ export async function supersedeChannexRoomAvailabilityAttempt(
   } else return unavailable("availability_supersede_unavailable");
 
   let tasks: Awaited<ReturnType<typeof observeChannexAvailabilityTaskEnd>>[] = [];
-  if (reason === "inventory_changed")
+  if (reason === "inventory_changed" || reason === "channex_cut_off")
     tasks = await boundedProviderCall(async (signal) => {
       const observe = (_method: "GET", path: string) => {
         signal.throwIfAborted();

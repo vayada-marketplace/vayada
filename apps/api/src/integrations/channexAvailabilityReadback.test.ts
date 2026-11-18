@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { verifyChannexRoomAvailability } from "./channexAvailabilityReadback.js";
+import {
+  observeChannexAvailabilityDate,
+  verifyChannexRoomAvailability,
+} from "./channexAvailabilityReadback.js";
 
 function fixture(count: unknown = 2) {
   const propertyId = randomUUID(),
@@ -54,15 +57,64 @@ describe("Channex room availability readback", () => {
     });
   });
 
-  it.each([0, 3, -1, 2.1, true, null, "02", "2.0", "two"])(
-    "rejects mismatched or malformed value %s",
-    async (count) => {
+  it.each([
+    [0, 0],
+    [3, 3],
+    [-1, null],
+    [2.1, null],
+    [true, null],
+    [null, null],
+    ["02", null],
+    ["2.0", null],
+    ["two", null],
+  ])(
+    "rejects mismatched or malformed value %s, naming the count Channex showed",
+    async (count, observedCount) => {
       const f = fixture(count);
-      await expect(verifyChannexRoomAvailability(f.request, f.get)).rejects.toThrow(
-        "availability_readback_mismatch",
-      );
+      await expect(verifyChannexRoomAvailability(f.request, f.get)).rejects.toMatchObject({
+        message: "availability_readback_mismatch",
+        observedCount,
+      });
     },
   );
+
+  // VAY-2108: what Channex shows for every room on one night, for its cut-off check.
+  it("reads every room's count for one night", async () => {
+    const propertyId = randomUUID(),
+      rooms = [randomUUID(), randomUUID(), randomUUID(), randomUUID()],
+      date = "2026-11-18";
+    const get = vi.fn(async (_method: "GET", _path: string) => ({
+      data: {
+        [rooms[0]!]: { [date]: 0 },
+        [rooms[1]!]: { [date]: "2" },
+        [rooms[2]!]: { [date]: null },
+      },
+      meta: { warnings: [] },
+    }));
+    const count = await observeChannexAvailabilityDate(propertyId, date, get);
+    expect(rooms.map(count)).toEqual([0, 2, null, null]);
+    const url = new URL(get.mock.calls[0]![1], "https://staging.channex.io");
+    expect(url.pathname).toBe("/api/v1/availability");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      "filter[property_id]": propertyId,
+      "filter[date][gte]": date,
+      "filter[date][lte]": date,
+    });
+    for (const response of [{}, { errors: {} }, { data: {}, meta: { warnings: ["unsafe"] } }]) {
+      get.mockResolvedValueOnce(response as never);
+      await expect(observeChannexAvailabilityDate(propertyId, date, get)).rejects.toThrow(
+        "availability_readback_unavailable",
+      );
+    }
+    get.mockClear();
+    await expect(observeChannexAvailabilityDate("other", date, get)).rejects.toThrow(
+      "availability_request_unavailable",
+    );
+    await expect(observeChannexAvailabilityDate(propertyId, "2026-02-30", get)).rejects.toThrow(
+      "availability_request_unavailable",
+    );
+    expect(get).not.toHaveBeenCalled();
+  });
 
   it.each([
     null,

@@ -5,6 +5,7 @@ const dependencies = vi.hoisted(() => ({
   authority: vi.fn(),
   reconcile: vi.fn(),
   supersede: vi.fn(),
+  closed: vi.fn(),
 }));
 vi.mock("./channexPricingPropertyAuthority.js", () => ({
   lockChannexPricingPropertyAuthority: dependencies.authority,
@@ -14,6 +15,9 @@ vi.mock("./channexRoomAvailabilityEvidence.js", () => ({
 }));
 vi.mock("./channexRoomAvailabilitySupersede.js", () => ({
   supersedeChannexRoomAvailabilityAttempt: dependencies.supersede,
+}));
+vi.mock("./channexRoomAvailabilityCoordinator.js", () => ({
+  channexCutOffClosesNight: dependencies.closed,
 }));
 import { reconcilePendingChannexRoomAvailability } from "./channexPendingRoomAvailabilityReconciliation.js";
 
@@ -117,5 +121,66 @@ describe("pending Channex room availability reconciliation", () => {
     expect(dependencies.reconcile.mock.calls.map((call) => call[3])).toEqual(
       candidates.slice(0, 10).map(({ roomTypeId, date }) => ({ roomTypeId, date })),
     );
+  });
+
+  // VAY-2108: after the property's Channex cut-off, tonight reads back 0 whatever was sent.
+  it("supersedes a mismatched send only while Channex's cut-off closes its night", async () => {
+    dependencies.authority.mockResolvedValue({
+      kind: "authorized",
+      lease: { operationType: "sync_ari", propertyId: "property" },
+    });
+    const send = { attemptId: "send", roomTypeId: "room", date: "2026-11-18", admissible: true };
+    // Channex shows the closed night as 0.
+    const mismatch = Object.assign(new Error("availability_readback_mismatch"), {
+      observedCount: 0,
+    });
+    const get = vi.fn();
+    const now = () => new Date("2026-11-18T12:52:00Z");
+    const pool = pendingPool([send]);
+    const run = () => reconcilePendingChannexRoomAvailability(pool, {} as never, lease, get, now);
+    dependencies.reconcile.mockReset().mockRejectedValue(mismatch);
+    dependencies.supersede.mockReset().mockResolvedValue({ kind: "availability_superseded" });
+
+    dependencies.closed.mockReset().mockResolvedValue(true);
+    await expect(run()).resolves.toEqual({ kind: "pending_availability_reconciled", count: 1 });
+    // The send step's own rule decides whether the night is closed, so the two never disagree.
+    expect(dependencies.closed).toHaveBeenCalledExactlyOnceWith(
+      pool,
+      lease,
+      "2026-11-18",
+      get,
+      now,
+    );
+    expect(dependencies.supersede).toHaveBeenCalledExactlyOnceWith(pool, {}, lease, "send", get, {
+      channexCutOff: true,
+    });
+
+    // While the night is open (before the cut-off, or the cut-off unconfirmed), the mismatch stands.
+    dependencies.supersede.mockClear();
+    dependencies.closed.mockResolvedValueOnce(false);
+    await expect(run()).rejects.toBe(mismatch);
+    expect(dependencies.supersede).not.toHaveBeenCalled();
+
+    // Any other failure, or a night Channex shows as sellable, never asks for the cut-off.
+    dependencies.closed.mockClear();
+    for (const failure of [
+      new Error("availability_readback_unavailable"),
+      Object.assign(new Error("availability_readback_mismatch"), { observedCount: 1 }),
+      Object.assign(new Error("availability_readback_mismatch"), { observedCount: null }),
+      new Error("availability_readback_mismatch"),
+    ]) {
+      dependencies.reconcile.mockRejectedValueOnce(failure);
+      await expect(run()).rejects.toBe(failure);
+    }
+    expect(dependencies.closed).not.toHaveBeenCalled();
+    expect(dependencies.supersede).not.toHaveBeenCalled();
+
+    // A send that can't be superseded yet is retried, as before.
+    dependencies.closed.mockResolvedValue(true);
+    dependencies.supersede.mockResolvedValueOnce({
+      kind: "unavailable",
+      reason: "availability_supersede_unavailable",
+    });
+    await expect(run()).rejects.toBe(mismatch);
   });
 });
