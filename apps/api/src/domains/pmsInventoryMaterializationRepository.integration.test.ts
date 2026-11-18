@@ -1829,7 +1829,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           "getCurrentInventoryDay"
         > = f.repository,
       ) => prepareChannexRoomAvailabilityDispatch(channelPool, inventory, lease, selection),
-      next: () => prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease),
+      next: () =>
+        prepareNextChannexRoomAvailabilityDispatch(
+          channelPool,
+          f.repository,
+          lease,
+          channexWithoutCutOff,
+        ),
     };
   }
   it.each(["sync_ari", "provision"])(
@@ -1893,6 +1899,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
                 worker,
                 { ...inventory, getCurrentInventoryDay, getInventoryLaunchReadiness },
                 f.lease,
+                channexWithoutCutOff,
               )
             : await prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection);
         expect(prepared.kind).toBe("prepared");
@@ -4378,6 +4385,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     /** Channex's availability API: each POST is one task; readback returns the last value sent. */
     function fakeChannex(f: HeldHotel) {
       const nights = new Map<string, number>(),
+        // VAY-2108: the property's cut-off settings, and the nights it has closed. Channex shows a
+        // closed night as 0 and ignores updates for it, while the task still reports success.
+        cutOff: { time: string | null; days: number | null } = { time: null, days: null },
+        closed = new Set<string>(),
+        failingPropertyReads = { on: false },
         tasks = new Map<string, unknown>(),
         posts: { date: string; availability: number }[] = [],
         readbacks: string[] = [],
@@ -4407,7 +4419,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
               value.date_to !== value.date_from
             )
               foreign.push(value);
-            nights.set(value.date_from, value.availability);
+            if (!closed.has(value.date_from)) nights.set(value.date_from, value.availability);
             posts.push({ date: value.date_from, availability: value.availability });
           }
           const id = randomUUID();
@@ -4442,14 +4454,47 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           const date = url.searchParams.get("filter[date][gte]")!;
           readbacks.push(date);
           return respond({
-            data: { [f.externalRoomTypeId]: { [date]: nights.get(date) } },
+            data: { [f.externalRoomTypeId]: { [date]: closed.has(date) ? 0 : nights.get(date) } },
             meta: { warnings: [] },
+          });
+        }
+        if (init?.method === "GET" && url.pathname === `/api/v1/properties/${f.propertyId}`) {
+          propertyReads.push(url.pathname);
+          if (failingPropertyReads.on) return new Response("unavailable", { status: 503 });
+          return respond({
+            data: {
+              type: "property",
+              id: f.propertyId,
+              attributes: {
+                id: f.propertyId,
+                timezone: "Europe/Berlin",
+                settings: {
+                  min_stay_type: "both",
+                  cut_off_time: cutOff.time,
+                  cut_off_days: cutOff.days,
+                },
+              },
+            },
           });
         }
         throw new Error(`Unexpected Channex request ${init?.method} ${url.pathname}`);
       });
+      const propertyReads: string[] = [];
       return {
         send,
+        propertyReads,
+        /** The property's cut-off settings, as the old system set them (Tiga: 16:30, same day). */
+        setCutOff: (time: string, days: number) => {
+          cutOff.time = time;
+          cutOff.days = days;
+        },
+        /** Channex's cut-off ran: the night shows 0 and ignores updates until it passes. */
+        closeNight: (date: string) => closed.add(date),
+        failPropertyReads: () => {
+          failingPropertyReads.on = true;
+        },
+        /** Another writer (the old system's push) changed the night in Channex. */
+        overwriteNight: (date: string, availability: number) => nights.set(date, availability),
         foreign,
         readbacks,
         taskReads,
@@ -4470,6 +4515,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       channex: ReturnType<typeof fakeChannex>,
       scope: WorkerScope,
     ) {
+      // The clock the availability steps check Channex's cut-off against (VAY-2108).
+      let clock: Date | null = null;
+      const now = () => clock ?? new Date();
+      const activations: unknown[] = [];
       // The production claim query, limited to this hotel so other suites' jobs stay where they are.
       const limitToHotel = (text: string) => {
         if (!text.includes('max_attempts AS "maxAttempts"')) return text;
@@ -4512,11 +4561,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           count: 0,
         }),
         dispatchClosedUpload: async () => ({ kind: "no_closed_upload" as const }),
-        activatePublishedOffers: async () => ({ kind: "no_targets" as const }),
+        activatePublishedOffers: async (_lease, options) => {
+          activations.push(options);
+          return { kind: "no_targets" as const };
+        },
         reconcileRoomAvailability: (lease, get) =>
-          reconcilePendingChannexRoomAvailability(channelPool, f.repository, lease, get),
-        prepareRoomAvailability: (lease) =>
-          prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease),
+          reconcilePendingChannexRoomAvailability(channelPool, f.repository, lease, get, now),
+        prepareRoomAvailability: (lease, get) =>
+          prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease, get, now),
       });
       const step = async () => {
         // A continued upload waits one second before its next attempt; skip the wait.
@@ -4530,6 +4582,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       return {
         store,
         step,
+        activations,
+        setClock: (at: Date) => {
+          clock = at;
+        },
         /** Runs the hotel's queue until it is empty; returns each run's outcome. */
         async drain() {
           const outcomes: string[] = [];
@@ -5089,6 +5145,179 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         expect(await unresolvedSends(f.propertyId)).toBe(0);
         expect(channex.nights()).toMatchObject({ [d0]: 2, [d1]: 2, [d2]: 2, [d3]: 2 });
         expect(await schedule.enqueue()).toBe(0);
+      } finally {
+        await hotel.close();
+      }
+    });
+
+    // VAY-2108: Tiga's Channex property cuts off same-day sales at 16:30 hotel time (set by the old
+    // system). After that Channex shows tonight as 0 and ignores updates for it, while the task
+    // still reports success. On 2026-11-18 a send at 20:52 could never read back, and every Tiga
+    // sync dead-lettered until midnight.
+    const hotelTime = async (date: string, time: string) =>
+      (
+        await admin.query<{ at: Date }>(
+          "SELECT ($1::date+$2::time) AT TIME ZONE 'Europe/Berlin' AS at",
+          [date, time],
+        )
+      ).rows[0]!.at;
+
+    const lastError = async (propertyId: string) =>
+      (
+        await admin.query(
+          `SELECT status,job_metadata->>'lastErrorCode' AS code FROM platform.jobs
+           WHERE property_id=$1 AND queue_name='pms.channex.management'
+           ORDER BY created_at DESC,id DESC LIMIT 1`,
+          [propertyId],
+        )
+      ).rows[0];
+
+    it("skips tonight after Channex's same-day cut-off instead of stopping every sync (VAY-2108)", async () => {
+      const hotel = await ownedHotel();
+      const { f, channex, worker, schedule } = hotel;
+      const [d0, d1, d2, d3] = f.days;
+      try {
+        channex.setCutOff("16:30:00", 0);
+        channex.closeNight(d0);
+        worker.setClock(await hotelTime(d0, "20:52"));
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.drain()).toEqual(["continued", "continued", "continued", "succeeded"]);
+        // Tonight is never sent: Channex keeps it closed whatever we send.
+        expect(channex.sent()).toEqual([d1, d2, d3].map((date) => ({ date, availability: 2 })));
+        expect(channex.nights()).toEqual({ [d1]: 2, [d2]: 2, [d3]: 2 });
+        expect(await unresolvedSends(f.propertyId)).toBe(0);
+        expect(await lastError(f.propertyId)).toMatchObject({ status: "succeeded" });
+        // Offer activation rechecks the same nights.
+        expect(worker.activations).toEqual([{ availabilityFrom: d1 }]);
+        const connection = (
+          await admin.query(
+            `SELECT id::text,binding_generation::text AS "bindingGeneration"
+             FROM pms.channel_connections WHERE property_id=$1`,
+            [f.propertyId],
+          )
+        ).rows[0];
+        const recheck = async (from?: string) => {
+          await admin.query("BEGIN");
+          try {
+            return await lockCurrentChannexRoomAvailability(admin, {
+              propertyId: f.propertyId,
+              connectionId: connection.id,
+              externalPropertyId: f.propertyId,
+              bindingGeneration: connection.bindingGeneration,
+              roomTypeId: f.roomTypeId,
+              ...(from === undefined ? {} : { from }),
+            });
+          } finally {
+            await admin.query("ROLLBACK");
+          }
+        };
+        expect(await recheck(d1)).toEqual({
+          kind: "current",
+          from: d1,
+          through: d3,
+          roomCount: 1,
+          dayCount: 3,
+        });
+        // From today the recheck still finds tonight unsent, and it never skips further than a
+        // cut-off can reach.
+        const unavailable = {
+          kind: "unavailable",
+          reason: "room_availability_coverage_unavailable",
+        };
+        expect(await recheck()).toEqual(unavailable);
+        const farAway = (
+          await admin.query<{ day: string }>("SELECT ($1::date+40)::text AS day", [d0])
+        ).rows[0]!.day;
+        expect(await recheck(farAway)).toEqual(unavailable);
+        // Another full sync that evening finds nothing to send, and does not loop on tonight.
+        await admin.query("SELECT pms.enqueue_inventory_ari($1::uuid,'vay-2108-cut-off-rerun')", [
+          f.propertyId,
+        ]);
+        expect(await worker.drain()).toEqual(["succeeded"]);
+        expect(channex.sent()).toEqual([]);
+        expect(channex.foreign).toEqual([]);
+      } finally {
+        await hotel.close();
+      }
+    });
+
+    it("settles tonight's send when Channex's cut-off passes before its check (VAY-2108)", async () => {
+      const hotel = await ownedHotel();
+      const { f, channex, worker, schedule } = hotel;
+      const [d0, d1, d2, d3] = f.days;
+      try {
+        channex.setCutOff("16:30:00", 0);
+        worker.setClock(await hotelTime(d0, "16:29"));
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.step()).toMatchObject({ outcome: "continued" });
+        expect(channex.sent()).toEqual([{ date: d0, availability: 2 }]);
+        // 16:30: Channex closes tonight before the next run checks the send.
+        channex.closeNight(d0);
+        worker.setClock(await hotelTime(d0, "16:31"));
+        expect(await worker.drain()).toEqual(["continued", "continued", "continued", "succeeded"]);
+        expect(channex.sent()).toEqual([d1, d2, d3].map((date) => ({ date, availability: 2 })));
+        expect(await supersededSends(f.propertyId)).toEqual([
+          {
+            date: d0,
+            availableCount: 2,
+            reason: "channex_cut_off",
+            receiptOutcome: "complete_json",
+          },
+        ]);
+        expect(await unresolvedSends(f.propertyId)).toBe(0);
+        expect(worker.activations).toEqual([{ availabilityFrom: d1 }]);
+      } finally {
+        await hotel.close();
+      }
+    });
+
+    it.each([
+      ["Channex still shows tonight sellable after the cut-off time", "sellable"],
+      ["the property's cut-off can't be read", "unreadable"],
+    ] as const)("sends tonight as usual when %s (VAY-2108)", async (_label, way) => {
+      const hotel = await ownedHotel();
+      const { f, channex, worker, schedule } = hotel;
+      const [d0, d1, d2, d3] = f.days;
+      try {
+        channex.setCutOff("16:30:00", 0);
+        if (way === "unreadable") channex.failPropertyReads();
+        worker.setClock(await hotelTime(d0, "20:52"));
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.drain()).toEqual([
+          "continued",
+          "continued",
+          "continued",
+          "continued",
+          "succeeded",
+        ]);
+        expect(channex.sent()).toEqual([d0, d1, d2, d3].map((date) => ({ date, availability: 2 })));
+        expect(channex.propertyReads.length).toBeGreaterThan(0);
+        expect(worker.activations).toEqual([{ availabilityFrom: d0 }]);
+      } finally {
+        await hotel.close();
+      }
+    });
+
+    it("still stops on a wrong count read back before the cut-off (VAY-2108)", async () => {
+      const hotel = await ownedHotel();
+      const { f, channex, worker, schedule } = hotel;
+      const [d0] = f.days;
+      try {
+        channex.setCutOff("16:30:00", 0);
+        worker.setClock(await hotelTime(d0, "10:00"));
+        expect(await schedule.enqueue()).toBe(1);
+        expect(await worker.step()).toMatchObject({ outcome: "continued" });
+        expect(channex.sent()).toEqual([{ date: d0, availability: 2 }]);
+        // Another writer (the old system's push) changes tonight before the check.
+        channex.overwriteNight(d0, 1);
+        expect(await worker.step()).toMatchObject({ outcome: "retry_scheduled" });
+        expect(await lastError(f.propertyId)).toEqual({
+          status: "pending",
+          code: "provider_unavailable",
+        });
+        expect(channex.sent()).toEqual([]);
+        expect(await supersededSends(f.propertyId)).toEqual([]);
+        expect(await unresolvedSends(f.propertyId)).toBe(1);
       } finally {
         await hotel.close();
       }
@@ -5671,4 +5900,21 @@ function stableJson(value: unknown): string {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+/** A Channex property read for a hotel without a cut-off (VAY-2108); any other read fails. */
+async function channexWithoutCutOff(path: string) {
+  const id = /^\/api\/v1\/properties\/([0-9a-f-]{36})$/.exec(path)?.[1];
+  if (!id) throw new Error(`Unexpected Channex read ${path}`);
+  return {
+    data: {
+      type: "property",
+      id,
+      attributes: {
+        id,
+        timezone: "Europe/Berlin",
+        settings: { cut_off_time: null, cut_off_days: null },
+      },
+    },
+  };
 }

@@ -388,7 +388,7 @@ type TargetWork =
       observation?: Awaited<ReturnType<typeof verifyChannexOfferConfiguration>>;
       nextDate?: true;
     }
-  | { kind: "activate"; attemptId: string }
+  | { kind: "activate"; attemptId: string; availabilityFrom?: string }
   | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
   | ({ attemptId: string } & ReturnType<typeof readChannexCreatedRateIdentity>);
 
@@ -396,6 +396,8 @@ type TargetWork =
 export async function activatePublishedChannexOffers(
   pool: Pool,
   input: ChannexPricingJobLeaseInput,
+  /** VAY-2108: the availability sync's first night, after the property's Channex cut-off. */
+  options: Readonly<{ availabilityFrom?: string }> = {},
 ) {
   const current = await readPublishedPricingForChannexJob(pool, input);
   if (current.kind !== "available") return current;
@@ -519,6 +521,7 @@ export async function activatePublishedChannexOffers(
     const result = await withSelectedChannexTarget(pool, input, candidate, {
       kind: "activate",
       attemptId: candidate.creationAttemptId,
+      availabilityFrom: options.availabilityFrom,
     });
     if (result.kind !== "available") return result;
     if (!result.activation) throw new Error("Target activation missing");
@@ -2026,6 +2029,7 @@ async function withPublishedChannexPricing(
                 externalPropertyId: authority.externalPropertyId,
                 bindingGeneration: binding.binding_generation,
                 roomTypeId: room.roomTypeId,
+                from: work.availabilityFrom,
               });
               if (availability.kind !== "current") return availability;
               const readbackEvidence = {

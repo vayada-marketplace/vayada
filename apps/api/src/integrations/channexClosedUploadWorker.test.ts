@@ -192,19 +192,25 @@ describe("closed upload worker gates", () => {
         kind: "all_targets_active" as const,
         count: 2,
       }));
+    const prepareRoomAvailability = vi.fn(async () => ({
+      kind: "room_availability_current" as const,
+      from: "2026-09-17",
+      through: "2026-09-17",
+      roomCount: 1,
+      dayCount: 1,
+    }));
     const result = await createChannexManagementProvider({
       ...f.config,
-      prepareRoomAvailability: async () => ({
-        kind: "room_availability_current" as const,
-        from: "2026-09-17",
-        through: "2026-09-17",
-        roomCount: 1,
-        dayCount: 1,
-      }),
+      prepareRoomAvailability,
       activatePublishedOffers,
     }).execute(job, { workerId: "worker" });
     expect(result).toEqual({ ok: true });
-    expect(activatePublishedOffers).toHaveBeenCalledOnce();
+    // VAY-2108: the availability step can read the property's cut-off, and activation rechecks
+    // the nights from the same first night.
+    expect(prepareRoomAvailability).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+    expect(activatePublishedOffers).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      availabilityFrom: "2026-09-17",
+    });
     expect(f.plan).not.toHaveBeenCalled();
   });
   it("fails closed when a published target cannot activate", async () => {

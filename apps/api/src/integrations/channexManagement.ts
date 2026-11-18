@@ -129,9 +129,11 @@ export function createChannexManagementProvider(config: {
   ) => ReturnType<typeof reconcilePendingChannexRoomAvailability>;
   prepareRoomAvailability?: (
     lease: Parameters<typeof prepareNextChannexRoomAvailabilityDispatch>[2],
+    get: Parameters<typeof prepareNextChannexRoomAvailabilityDispatch>[3],
   ) => ReturnType<typeof prepareNextChannexRoomAvailabilityDispatch>;
   activatePublishedOffers?: (
     lease: Parameters<typeof activatePublishedChannexOffers>[1],
+    options: Parameters<typeof activatePublishedChannexOffers>[2],
   ) => ReturnType<typeof activatePublishedChannexOffers>;
   advancePublishedOffers?: (
     lease: Parameters<typeof advancePublishedChannexOfferCreates>[1],
@@ -447,10 +449,13 @@ export function createChannexManagementProvider(config: {
                 new Error("Saved Channex availability still requires reconciliation."),
               );
             await input.onProgress?.();
-            const prepared = await config.prepareRoomAvailability(lease);
+            const prepared = await config.prepareRoomAvailability(lease, readClosedUpload);
             if (prepared.kind === "room_availability_current") {
               if (config.activatePublishedOffers) {
-                const activated = await config.activatePublishedOffers(lease);
+                // VAY-2108: activation rechecks the same nights, from after a Channex cut-off.
+                const activated = await config.activatePublishedOffers(lease, {
+                  availabilityFrom: prepared.from,
+                });
                 // VAY-2108 D3: after activation, keep every active rate plan current. A target
                 // whose configuration or binding changed (D5) does not block the others: the
                 // delivery step skips and reports it per target. Only a full sync_ari job
