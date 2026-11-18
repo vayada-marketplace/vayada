@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Pool, PoolClient } from "pg";
+import { PMS_INVENTORY_HORIZON_MAX_DAYS } from "@vayada/domain-pms";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import type { PmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
@@ -88,7 +89,8 @@ export async function lockCurrentChannexRoomAvailability(
     return unavailable("room_availability_coverage_unavailable");
   const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]?.now;
   const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
-  if (!coverage || !localToday || !inclusiveDayCount(localToday, coverage.through))
+  const horizon = coverage && localToday ? availabilityWindow(localToday, coverage.through) : null;
+  if (!coverage || !localToday || !horizon)
     return unavailable("room_availability_coverage_unavailable");
   const candidate = (
     await client.query<{ valid: boolean | null }>(selectionSql, [
@@ -97,7 +99,7 @@ export async function lockCurrentChannexRoomAvailability(
       input.externalPropertyId,
       input.bindingGeneration,
       localToday,
-      coverage.through,
+      horizon.through,
       coverage.materializedRevision,
       input.roomTypeId,
     ])
@@ -107,9 +109,9 @@ export async function lockCurrentChannexRoomAvailability(
     : {
         kind: "current" as const,
         from: localToday,
-        through: coverage.through,
+        through: horizon.through,
         roomCount: mappings.rows.length,
-        dayCount: inclusiveDayCount(localToday, coverage.through)!,
+        dayCount: horizon.dayCount,
       };
 }
 
@@ -259,9 +261,9 @@ async function readScope(
     const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
     if (!coverage || !localToday || coverage.from > localToday || coverage.through < localToday)
       return unavailable("room_availability_coverage_unavailable");
-    const dayCount = inclusiveDayCount(localToday, coverage.through);
+    const horizon = availabilityWindow(localToday, coverage.through);
     const bindingGenerations = new Set(mappings.rows.map((row) => row.bindingGeneration));
-    if (!dayCount || bindingGenerations.size !== 1)
+    if (!horizon || bindingGenerations.size !== 1)
       return unavailable("room_availability_coverage_unavailable");
     const scope: Scope = {
       propertyId: authority.lease.propertyId,
@@ -269,9 +271,9 @@ async function readScope(
       externalPropertyId: authority.externalPropertyId,
       bindingGeneration: mappings.rows[0]!.bindingGeneration,
       localToday,
-      through: coverage.through,
+      through: horizon.through,
       roomCount: mappings.rows.length,
-      dayCount,
+      dayCount: horizon.dayCount,
       fullPropertyReadinessRequired: authority.lease.operationType !== "provision",
     };
     if (expected && !isDeepStrictEqual(expected, scope))
@@ -324,11 +326,20 @@ function unavailable(reason: string) {
   return { kind: "unavailable" as const, reason };
 }
 
-function inclusiveDayCount(from: string, through: string) {
-  const start = Date.parse(`${from}T00:00:00.000Z`),
-    end = Date.parse(`${through}T00:00:00.000Z`),
-    count = (end - start) / 86_400_000 + 1;
-  return Number.isSafeInteger(count) && count >= 1 && count <= 366 ? count : null;
+/**
+ * VAY-2108: availability covers the hotel's today and the next 365 nights, the PMS inventory
+ * horizon (launch readiness checks no more). Auto-open can keep the calendar open further (Tiga:
+ * 379 nights); those later nights stay as they are in Channex instead of stopping every full sync.
+ */
+function availabilityWindow(localToday: string, coverageThrough: string) {
+  const start = Date.parse(`${localToday}T00:00:00.000Z`),
+    end = Date.parse(`${coverageThrough}T00:00:00.000Z`);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) return null;
+  const last = Math.min(end, start + (PMS_INVENTORY_HORIZON_MAX_DAYS - 1) * 86_400_000);
+  return {
+    through: new Date(last).toISOString().slice(0, 10),
+    dayCount: (last - start) / 86_400_000 + 1,
+  };
 }
 
 async function lockSelectedRoomMaterializationCurrent(

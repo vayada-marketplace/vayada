@@ -2785,6 +2785,114 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       date: f.selection.date,
     });
   });
+  it("sends availability for today and the next 365 nights when auto-open covers more (VAY-2108)", async () => {
+    // Tiga's auto-opened calendar ran 379 nights ahead, and every full sync stopped here.
+    const f = await availabilityReconciliationFixture(true);
+    await f.reconcile();
+    const day = (offset: number) =>
+      new Date(Date.parse(`${f.selection.date}T00:00:00.000Z`) + offset * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+    await writeStoredTail(admin, f, day(1), day(366), true);
+    await writeStoredTail(admin, f, day(367), day(378), true);
+    // Nights 1..365 read back like night 0; nights 366..378 are never sent.
+    await admin.query("BEGIN");
+    try {
+      await admin.query("SET LOCAL session_replication_role=replica");
+      await admin.query(
+        `CREATE TEMP TABLE availability_seed ON COMMIT DROP AS
+         SELECT day::date::text AS date,gen_random_uuid() AS attempt_id,
+           gen_random_uuid() AS receipt_id,gen_random_uuid() AS task_id
+         FROM generate_series($1::date,$2::date,interval '1 day') day`,
+        [day(1), day(365)],
+      );
+      await admin.query(
+        `INSERT INTO pms.channex_room_availability_attempts
+           (id,property_id,connection_id,mapping_id,room_type_id,binding_generation,
+            external_property_id,external_room_type_id,job_attempt_id,worker_id,service_date,
+            available_count,inventory_evidence,request_body,state,reconciliation_evidence,
+            inventory_evidence_sha256)
+         SELECT seed.attempt_id,a.property_id,a.connection_id,a.mapping_id,a.room_type_id,
+           a.binding_generation,a.external_property_id,a.external_room_type_id,a.job_attempt_id,
+           a.worker_id,seed.date::date,a.available_count,
+           jsonb_set(a.inventory_evidence,'{day,stayDate}',to_jsonb(seed.date)),
+           jsonb_set(jsonb_set(a.request_body,'{values,0,date_from}',to_jsonb(seed.date)),
+             '{values,0,date_to}',to_jsonb(seed.date)),
+           'reconciled',
+           jsonb_set(jsonb_set(a.reconciliation_evidence,'{originalReceiptId}',
+             to_jsonb(seed.receipt_id::text)),'{availability,date}',to_jsonb(seed.date)),
+           a.inventory_evidence_sha256
+         FROM availability_seed seed
+         CROSS JOIN pms.channex_room_availability_attempts a WHERE a.id=$1`,
+        [f.prepared.attemptId],
+      );
+      await admin.query(
+        `INSERT INTO pms.channex_room_availability_receipts
+           (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
+         SELECT seed.receipt_id,seed.attempt_id,r.job_attempt_id,r.worker_id,r.outcome,
+           r.http_status,ARRAY[seed.task_id],r.has_warnings
+         FROM availability_seed seed
+         CROSS JOIN pms.channex_room_availability_receipts r WHERE r.attempt_id=$1`,
+        [f.prepared.attemptId],
+      );
+      await admin.query(
+        `INSERT INTO pms.channex_room_availability_reconciliation_attestations
+           (attempt_id,receipt_id,inventory_evidence_sha256,observations_sha256,
+            reconciliation_evidence)
+         SELECT seed.attempt_id,seed.receipt_id,t.inventory_evidence_sha256,
+           t.observations_sha256,a.reconciliation_evidence
+         FROM availability_seed seed
+         JOIN pms.channex_room_availability_attempts a ON a.id=seed.attempt_id
+         CROSS JOIN pms.channex_room_availability_reconciliation_attestations t
+         WHERE t.attempt_id=$1`,
+        [f.prepared.attemptId],
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    const current = {
+      from: f.selection.date,
+      through: day(365),
+      roomCount: 1,
+      dayCount: 366,
+    };
+    await expect(f.next()).resolves.toEqual({ kind: "room_availability_current", ...current });
+    const connection = (
+      await admin.query(
+        "SELECT binding_generation::text FROM pms.channel_connections WHERE id=$1",
+        [f.connectionId],
+      )
+    ).rows[0];
+    await admin.query("BEGIN");
+    try {
+      await expect(
+        lockCurrentChannexRoomAvailability(admin, {
+          propertyId: f.propertyId,
+          connectionId: f.connectionId,
+          externalPropertyId: f.propertyId,
+          bindingGeneration: connection.binding_generation,
+          roomTypeId: f.roomTypeId,
+        }),
+      ).resolves.toEqual({ kind: "current", ...current });
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    // The last night of the window is still checked.
+    await admin.query(
+      `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+         booking_source_revision=booking_source_revision+1,
+         inventory_revision=inventory_revision+1
+       WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3`,
+      [f.propertyId, f.roomTypeId, day(365)],
+    );
+    await expect(f.next()).resolves.toMatchObject({
+      kind: "prepared",
+      roomTypeId: f.roomTypeId,
+      date: day(365),
+    });
+  });
   it("does not treat an arbitrary storage-level reconciliation as current coverage", async () => {
     const f = await availabilityReconciliationFixture(true);
     const stored = (
