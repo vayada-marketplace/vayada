@@ -112,8 +112,7 @@ export default function DataProcessingAgreementPage() {
                   <a href="/privacy" className={LINK}>
                     privacy page
                   </a>
-                  : its server logs, the partner-link records, and the Hotel&apos;s own account and
-                  staff login data.
+                  : its server logs and the Hotel&apos;s own account and staff login data.
                 </li>
                 <li>
                   <strong>Order of precedence: </strong>if this agreement and the hotel terms
@@ -183,6 +182,16 @@ export default function DataProcessingAgreementPage() {
                     "Stay data in the PMS",
                     "check-in and check-out, room assignment, notes the Hotel adds",
                     "as the Hotel instructs",
+                  ],
+                  [
+                    "Check-in registration and guest profile",
+                    "date of birth, type and number of the identity document, gender, nationality, room, staff notes, and the guest's past and upcoming stays at the Hotel",
+                    "as the Hotel instructs; the identity document's type and number 7, 30 or 90 days after the guest's last stay, if the Hotel chooses",
+                  ],
+                  [
+                    "Booking agreement record",
+                    "when the guest agreed and to what: the wording shown, the room and rate terms, the Hotel's guest rules and terms",
+                    "as booking data",
                   ],
                   [
                     "Channel bookings",
