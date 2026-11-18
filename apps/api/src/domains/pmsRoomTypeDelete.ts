@@ -43,13 +43,19 @@ type CountsRow = {
   unavailableUnits: number;
 };
 
-/** Reads the plan; under the delete's locks when it runs inside the command. */
+/**
+ * Reads the plan; under the delete's locks when it runs inside the command. Auto-open's empty nights
+ * after the covered range are closed with the rest instead of reading as an out-of-date calendar
+ * (VAY-2497); the Delete refuses rooms a channel still sells.
+ */
 export async function readPmsRoomTypeDeletePlan(
   client: Client,
   scope: { propertyId: string; roomTypeId: string },
   at: Date,
 ): Promise<PmsRoomTypeDeletePlan | null> {
-  const closure = await readPmsRoomClosureState(client, scope, at);
+  const closure = await readPmsRoomClosureState(client, scope, at, {
+    closeEmptyNightsAfterCoverage: true,
+  });
   if (!closure) return null;
   const cutoffDate = closure.cutoffDate ?? at.toISOString().slice(0, 10);
   const counts = (
