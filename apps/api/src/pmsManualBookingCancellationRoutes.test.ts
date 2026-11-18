@@ -2,6 +2,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import {
   registerPmsOperationsRoutes,
   type PmsManualCancellationCommand,
@@ -17,7 +18,7 @@ const now = "2026-08-13T10:00:00.000Z";
 type State = { calls: PmsManualCancellationCommand[] };
 type Auth = Partial<{
   token: boolean;
-  operationsPermission: boolean;
+  cancelPermission: boolean;
   entitlement: "missing" | "inactive";
   resource: boolean;
   financePermission: boolean;
@@ -110,7 +111,7 @@ describe("manual booking cancellation route", () => {
 
   it.each([
     [{ token: false }, 401],
-    [{ operationsPermission: false }, 403],
+    [{ cancelPermission: false }, 403],
     [{ entitlement: "missing" }, 403],
     [{ entitlement: "inactive" }, 403],
     [{ resource: false }, 403],
@@ -135,11 +136,19 @@ async function testApp(state: State, auth: Auth = {}) {
   app.addHook("onRequest", async (request) => {
     if (auth.token === false) return;
     request.authContext = {
-      actor: { internalUserId: actorId },
-      selectedOrganization: { organizationId, kind: "hotel_group" },
+      actor: { internalUserId: actorId, status: "active" },
+      selectedOrganization: { organizationId, kind: "hotel_group", status: "active" },
       membership: {
+        roleKey: "hotel_manager",
+        status: "active",
+        propertyAccess: {
+          mode: "all",
+          roleKey: "hotel_manager",
+          accessOrigin: "agency",
+          assignedPropertyIds: [],
+        },
         permissions: [
-          ...(auth.operationsPermission === false ? [] : ["pms.operations.manage"]),
+          ...(auth.cancelPermission === false ? [] : ["pms.reservation.cancel"]),
           ...(auth.financePermission === false ? [] : ["pms.finance.manage"]),
         ],
       },
@@ -172,21 +181,20 @@ async function testApp(state: State, auth: Auth = {}) {
       linkedResources:
         auth.resource === false
           ? []
-          : [
-              {
-                product: "pms",
-                resourceType: "pms_property",
-                resourceId: propertyId,
-                relationship: auth.relationship ?? "operator",
-                status: "active",
-              },
-            ],
+          : (["pms_property", "property"] as const).map((resourceType) => ({
+              product: resourceType === "property" ? "hotel_catalog" : "pms",
+              resourceType,
+              resourceId: propertyId,
+              relationship: auth.relationship ?? "operator",
+              status: "active",
+            })),
       audit: { requestId: "request-1", source: "api", receivedAt: now },
-    } as RequestContext;
+    } as unknown as RequestContext;
   });
   await app.register(registerPmsOperationsRoutes, {
     repository: { async close() {} } as unknown as PmsOperationsReadRepository,
     commandRepository: commandPort(state),
+    propertyAccessRepository: agencyPropertyAccessRepository,
   });
   return app;
 }

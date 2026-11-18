@@ -430,7 +430,13 @@ describe.skipIf(!url)("PMS dashboard reads and settings writes per role (VAY-215
     { label: "owner", allowed: settingsWrites.map((write) => write.name) },
     {
       label: "agency manager",
-      allowed: ["same-day booking", "check-in settings", "arrival times"],
+      // Room assignment is a settings change since VAY-2498; auto-open stays with the owner.
+      allowed: [
+        "same-day booking",
+        "check-in settings",
+        "calendar auto-rearrange",
+        "arrival times",
+      ],
     },
     { label: "settings viewer", allowed: [] },
     { label: "front desk", allowed: [] },

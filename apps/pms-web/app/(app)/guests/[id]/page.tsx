@@ -92,8 +92,8 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
   const [editing, setEditing] = useState<{ shown: GuestForm; form: GuestForm } | null>(null);
   const [triedSave, setTriedSave] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Edits, merges, separations and notes need the operations permission (front desk can only read).
-  const canManage = useHasPmsPermission("pms.operations.manage");
+  // Edits, merges, separations and notes need "Reservations: modify" (VAY-2498).
+  const canManage = useHasPmsPermission("pms.reservation.update");
   // Settings › Guest data: fields set to Off don't show here (VAY-2420 P5).
   const [fieldStatus, setFieldStatus] = useState<GuestDataSettings["fields"] | null>(null);
   useEffect(() => {

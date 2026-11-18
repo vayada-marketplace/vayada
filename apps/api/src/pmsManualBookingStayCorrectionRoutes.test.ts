@@ -2,6 +2,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import {
   registerPmsOperationsRoutes,
   type PmsManualStayCorrectionCommand,
@@ -135,9 +136,19 @@ async function testApp(state: State, auth: Auth = {}) {
   app.addHook("onRequest", async (request) => {
     if (auth.token === false) return;
     request.authContext = {
-      actor: { internalUserId: actorId },
-      selectedOrganization: { organizationId, kind: "hotel_group" },
-      membership: { permissions: auth.permission === false ? [] : ["pms.operations.manage"] },
+      actor: { internalUserId: actorId, status: "active" },
+      selectedOrganization: { organizationId, kind: "hotel_group", status: "active" },
+      membership: {
+        roleKey: "hotel_manager",
+        status: "active",
+        propertyAccess: {
+          mode: "all",
+          roleKey: "hotel_manager",
+          accessOrigin: "agency",
+          assignedPropertyIds: [],
+        },
+        permissions: auth.permission === false ? [] : ["pms.reservation.update"],
+      },
       entitlements: [
         {
           product: "pms",
@@ -146,19 +157,18 @@ async function testApp(state: State, auth: Auth = {}) {
           resource: { product: "pms", resourceType: "pms_property", resourceId: propertyId },
         },
       ],
-      linkedResources: [
-        {
-          product: "pms",
-          resourceType: "pms_property",
-          resourceId: auth.linkedPropertyId ?? propertyId,
-          relationship: "operator",
-          status: "active",
-        },
-      ],
+      linkedResources: (["pms_property", "property"] as const).map((resourceType) => ({
+        product: resourceType === "property" ? "hotel_catalog" : "pms",
+        resourceType,
+        resourceId: auth.linkedPropertyId ?? propertyId,
+        relationship: "operator",
+        status: "active",
+      })),
       audit: { requestId: "request-1", source: "api", receivedAt: now },
-    } as RequestContext;
+    } as unknown as RequestContext;
   });
   await app.register(registerPmsOperationsRoutes, {
+    propertyAccessRepository: agencyPropertyAccessRepository,
     repository: { async close() {} } as unknown as PmsOperationsReadRepository,
     commandRepository: {
       async correctManualBookingStays(command: PmsManualStayCorrectionCommand) {

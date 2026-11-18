@@ -1755,7 +1755,16 @@ export async function registerPmsOperationsRoutes(
           return sendPmsOperationsError(reply, originNotAllowed());
         }
         const { propertyId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.calendar.manage",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
         const command = toRoomBlockCreateCommand(propertyId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
         const result = await commandRepository.createRoomBlocks!(command.value);
@@ -1776,7 +1785,16 @@ export async function registerPmsOperationsRoutes(
           return sendPmsOperationsError(reply, originNotAllowed());
         }
         const { propertyId, blockId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.calendar.manage",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
         const command = toRoomBlockUpdateCommand(propertyId, blockId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
         const result = await commandRepository.updateRoomBlock!(command.value);
@@ -1797,7 +1815,16 @@ export async function registerPmsOperationsRoutes(
           return sendPmsOperationsError(reply, originNotAllowed());
         }
         const { propertyId, blockId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.calendar.manage",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
         const command = toRoomBlockReleaseCommand(propertyId, blockId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
         const result = await commandRepository.releaseRoomBlock!(command.value);
@@ -2063,7 +2090,7 @@ export async function registerPmsOperationsRoutes(
           request,
           reply,
           propertyId,
-          "pms.operations.manage",
+          "pms.settings.read",
           options.propertyAccessRepository,
           ["owner", "operator"],
         ))
@@ -2100,7 +2127,7 @@ export async function registerPmsOperationsRoutes(
           request,
           reply,
           request.params.propertyId,
-          "pms.operations.manage",
+          "pms.settings.manage",
           options.propertyAccessRepository,
           ["owner", "operator"],
         );
@@ -2152,7 +2179,7 @@ export async function registerPmsOperationsRoutes(
           request,
           reply,
           propertyId,
-          "pms.operations.manage",
+          "pms.calendar.read",
           options.propertyAccessRepository,
           ["owner", "operator"],
         ))
@@ -3036,7 +3063,7 @@ export async function registerPmsOperationsRoutes(
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
           items: result.items.map((item) =>
-            redactReservationFinance(
+            redactReservationForActor(
               canReadGuestContact ? item : redactReservationGuestContact(item),
               context,
             ),
@@ -3097,7 +3124,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          item: redactReservationFinance(
+          item: redactReservationForActor(
             await withAdditionalGuestProjection(
               item,
               bookingGuestPiiPort,
@@ -3131,7 +3158,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toPrimaryGuestNationalityCorrectionCommand(
           propertyId,
@@ -3154,7 +3190,7 @@ export async function registerPmsOperationsRoutes(
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
           guestBookingId,
-          primaryGuest,
+          primaryGuest: guestForActor(primaryGuest, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsPrimaryGuestNationalityCommandResponse;
       },
@@ -3172,12 +3208,19 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+        const context = await enforcePmsPropertyAccessPolicy(
+          request,
+          reply,
+          propertyId,
+          "pms.reservation.read",
+          options.propertyAccessRepository,
+        );
+        if (!context) return reply;
 
         const projection = await bookingGuestPiiPort.listGuestPiiForPmsOperations({
           propertyId,
           guestBookingId,
-          canReadGuestContact: true,
+          canReadGuestContact: hasPermission(context, "pms.guest_contact.read"),
         });
         if (!projection) {
           return sendPmsOperationsError(reply, {
@@ -3208,7 +3251,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toAdditionalGuestCreateCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -3230,8 +3282,8 @@ export async function registerPmsOperationsRoutes(
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
           guestBookingId,
-          additionalGuest: result.additionalGuest,
-          reservation: redactReservationFinance(reservation, request.authContext),
+          additionalGuest: guestForActor(result.additionalGuest, request.authContext),
+          reservation: redactReservationForActor(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestCommandResponse;
       },
@@ -3249,7 +3301,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId, guestId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toAdditionalGuestUpdateCommand(
           propertyId,
@@ -3276,8 +3337,8 @@ export async function registerPmsOperationsRoutes(
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
           guestBookingId,
-          additionalGuest: result.additionalGuest,
-          reservation: redactReservationFinance(reservation, request.authContext),
+          additionalGuest: guestForActor(result.additionalGuest, request.authContext),
+          reservation: redactReservationForActor(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestCommandResponse;
       },
@@ -3295,7 +3356,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId, guestId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toAdditionalGuestDeleteCommand(
           propertyId,
@@ -3323,7 +3393,7 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           guestBookingId,
           guestId: result.guestId,
-          reservation: redactReservationFinance(reservation, request.authContext),
+          reservation: redactReservationForActor(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestDeleteResponse;
       },
@@ -3616,7 +3686,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.read",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         try {
           const charges = await commandRepository.listCheckoutCharges(propertyId, guestBookingId);
@@ -3649,7 +3728,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toCheckoutChargeCreateCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -3709,7 +3797,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toCheckOutCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -3721,7 +3818,7 @@ export async function registerPmsOperationsRoutes(
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
           guestBookingId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           checkout: result.checkout,
           charges: result.charges,
           commandMeta: result.commandMeta,
@@ -3753,7 +3850,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId } = request.params;
-        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.read",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         try {
           const template = await commandRepository.getOperationalTemplate(
@@ -3826,7 +3932,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.read",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         try {
           const notes = await commandRepository.listPrivateNotes(propertyId, guestBookingId);
@@ -3866,7 +3981,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toPrivateNoteCreateCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -3903,7 +4027,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId, noteId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toPrivateNoteDeleteCommand(propertyId, guestBookingId, noteId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -3940,7 +4073,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId, noteId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toPrivateNoteUpdateCommand(propertyId, guestBookingId, noteId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -3977,7 +4119,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toAssignmentCommand(propertyId, guestBookingId, request.body);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -3995,7 +4146,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4013,7 +4164,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toOperationalStatusCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -4024,7 +4184,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4042,7 +4202,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
         const command = toBookingLifecycleCommand(
           propertyId,
           guestBookingId,
@@ -4055,7 +4224,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4103,7 +4272,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4121,7 +4290,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toCheckInCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -4132,7 +4310,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4150,7 +4328,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.cancel",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
 
         const command = toNoShowCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -4161,7 +4348,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4179,7 +4366,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.cancel",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
         if (
           requestsRetainedCharge(request.body) &&
           !enforcePmsFinanceManagePolicy(request, reply, propertyId)
@@ -4197,7 +4393,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4225,7 +4421,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4242,7 +4438,16 @@ export async function registerPmsOperationsRoutes(
             message: "PMS operations origin is not allowed.",
           });
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (
+          !(await enforcePmsPropertyAccessPolicy(
+            request,
+            reply,
+            propertyId,
+            "pms.reservation.update",
+            options.propertyAccessRepository,
+          ))
+        )
+          return reply;
         const command = toManualStayCorrectionCommand(propertyId, guestBookingId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
         if (!commandRepository.correctManualBookingStays)
@@ -4255,7 +4460,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4286,7 +4491,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: redactReservationFinance(result.reservation, request.authContext),
+          reservation: redactReservationForActor(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -5698,15 +5903,34 @@ function applyAdditionalGuestProjection(
 }
 
 // The Stripe fee, Vayada commission and net payout are Financials data, not desk data (VAY-2152).
-function redactReservationFinance<T extends PmsOperationalReservation>(
+// Guest email and phone need guest contact access: staff without it run these commands (VAY-2498).
+function redactReservationForActor<T extends PmsOperationalReservation>(
   reservation: T,
   context: RequestContext | null | undefined,
 ): T {
-  if (!reservation.payment?.breakdown || (context && hasPermission(context, "pms.finance.read")))
-    return reservation;
-  const payment = { ...reservation.payment };
-  delete payment.breakdown;
-  return { ...reservation, payment };
+  let visible = reservation;
+  if (reservation.payment?.breakdown && !(context && hasPermission(context, "pms.finance.read"))) {
+    const payment = { ...reservation.payment };
+    delete payment.breakdown;
+    visible = { ...visible, payment };
+  }
+  if (context && hasPermission(context, "pms.guest_contact.read")) return visible;
+  const additionalGuests = (visible as unknown as Partial<PmsOperationalReservationDetail>)
+    .additionalGuests;
+  return {
+    ...visible,
+    ...(visible.primaryGuest ? { primaryGuest: redactGuestContact(visible.primaryGuest) } : {}),
+    ...(additionalGuests ? { additionalGuests: additionalGuests.map(redactGuestContact) } : {}),
+  };
+}
+
+function guestForActor<T extends { email: string | null; phone: string | null }>(
+  guest: T,
+  context: RequestContext | null | undefined,
+): T {
+  return context && hasPermission(context, "pms.guest_contact.read")
+    ? guest
+    : redactGuestContact(guest);
 }
 
 function redactReservationGuestContact(

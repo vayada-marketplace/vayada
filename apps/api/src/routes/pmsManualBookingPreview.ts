@@ -1,5 +1,5 @@
 import { UnauthorizedError } from "@vayada/backend-auth";
-import { AuthorizationError } from "@vayada/backend-authorization";
+import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import { roundBookingPriceDecimalToMinorUnits } from "@vayada/domain-booking";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -14,6 +14,7 @@ import {
   type ManualBookingPreviewResult,
   type PmsManualBookingPreviewRoutesOptions,
 } from "./pmsManualBookingPreviewCalculation.js";
+import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 export type { ManualBookingPreviewResult, PmsManualBookingPreviewRoutesOptions };
@@ -67,13 +68,15 @@ const commandInput = z.strictObject({
 
 export async function registerPmsManualBookingPreviewRoutes(
   app: FastifyInstance,
-  ports: PmsManualBookingPreviewRoutesOptions,
+  ports: PmsManualBookingPreviewRoutesOptions & {
+    propertyAccessRepository?: PropertyAccessRepository;
+  },
 ): Promise<void> {
   app.get<{ Params: { propertyId: string }; Querystring: unknown }>(
     "/properties/:propertyId/manual-bookings/addons",
     async (request, reply) => {
       try {
-        const { propertyId } = authorize(request);
+        const { propertyId } = await authorize(request, ports.propertyAccessRepository);
         if (Object.keys(request.query as object).length) fail(400, "unknown_field");
         const context = await ports.booking.listAddonItemsByHotelId(propertyId);
         if (!context) fail(404, "property_not_found");
@@ -101,7 +104,7 @@ export async function registerPmsManualBookingPreviewRoutes(
       try {
         return reply.send(
           await calculateManualBookingPreview(
-            authorize(request),
+            await authorize(request, ports.propertyAccessRepository),
             parseRequest(request.query, request.body),
             ports,
             { planTotals: true },
@@ -182,22 +185,26 @@ export function parseManualBookingPreviewCommand(value: unknown): ManualBookingP
   return { contractVersion: parsed.data.contractVersion, stays, addOns };
 }
 
-function authorize(request: FastifyRequest): { propertyId: string; organizationId: string } {
-  const base = enforceRoutePolicy(request, { permission: "pms.operations.manage" });
+async function authorize(
+  request: FastifyRequest,
+  propertyAccessRepository: PropertyAccessRepository | undefined,
+): Promise<{ propertyId: string; organizationId: string }> {
+  const base = enforceRoutePolicy(request, { permission: "pms.reservation.update" });
   const raw = (request.params as { propertyId?: unknown }).propertyId;
   if (base.selectedOrganization.kind !== "hotel_group") fail(403, "forbidden");
   if (typeof raw !== "string" || !UUID.test(raw)) fail(400, "invalid_body", "propertyId");
   const propertyId = raw.toLowerCase();
-  const resource = {
-    product: "pms",
-    resourceType: "pms_property",
-    resourceId: propertyId,
-  } as const;
-  enforceRoutePolicy(request, {
-    permission: "pms.operations.manage",
-    entitlement: { product: "pms", key: "property-management", resource },
-    resource: { ...resource, allowedRelationships: ["owner", "operator", "front_desk"] },
-  });
+  // VAY-2498: staff may hold only some properties, so check this member's own property access.
+  if (!propertyAccessRepository) throw new Error("PMS property access repository is unavailable");
+  await enforcePmsPropertyRoutePolicy(
+    request,
+    {
+      propertyId,
+      permission: "pms.reservation.update",
+      allowedRelationships: ["owner", "operator", "front_desk"],
+    },
+    propertyAccessRepository,
+  );
   return { propertyId, organizationId: base.selectedOrganization.organizationId };
 }
 

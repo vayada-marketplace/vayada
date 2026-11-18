@@ -1,4 +1,9 @@
-import type { RequestContext } from "@vayada/backend-auth";
+import {
+  staffAccessPermissionKeys,
+  staffRoleDefaultPermissions,
+  type PermissionKey,
+  type RequestContext,
+} from "@vayada/backend-auth";
 import {
   PMS_MANUAL_BOOKING_DIRECT_SOURCES,
   PmsManualBookingCreateError,
@@ -9,6 +14,7 @@ import {
 import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import { buildApp } from "./app.js";
 import {
   registerPmsManualBookingCapabilityRoutes,
@@ -28,13 +34,33 @@ type State = {
 };
 type Auth = Partial<{
   token: boolean;
-  operationsPermission: boolean;
+  reservationPermission: boolean;
+  assignedElsewhere: boolean;
+  permissions: readonly PermissionKey[];
   financePermission: boolean;
   pmsEntitlement: boolean;
   financeEntitlement: boolean;
   relationship: string;
   organizationKind: "hotel_group" | "platform";
 }>;
+
+// VAY-2498: the account admin's grants hold the old broad keys and every staff key (0002, 0109).
+const ownerKeys: readonly PermissionKey[] = [
+  "pms.operations.manage",
+  "pms.finance.manage",
+  ...staffAccessPermissionKeys,
+];
+const frontDeskWithoutModify = staffRoleDefaultPermissions.front_desk.filter(
+  (key) => key !== "pms.reservation.update",
+);
+const staffRoles: [string, readonly PermissionKey[], boolean][] = [
+  ["the account admin", ownerKeys, true],
+  ["front desk", staffRoleDefaultPermissions.front_desk, true],
+  ["an agency manager", staffRoleDefaultPermissions.hotel_manager, true],
+  ["a reservation manager", ["pms.reservation.read", "pms.reservation.update"], true],
+  ["housekeeping", staffRoleDefaultPermissions.housekeeping, false],
+  ["front desk without modify", frontDeskWithoutModify, false],
+];
 
 describe("target manual-booking create route", () => {
   let app: Awaited<ReturnType<typeof testApp>> | undefined;
@@ -121,6 +147,47 @@ describe("target manual-booking create route", () => {
         requestedAt: now,
       },
     });
+  });
+
+  it.each(staffRoles)(
+    "lets %s create an unpaid booking: %s",
+    async (_name, permissions, allowed) => {
+      const state: State = { calls: [] };
+      app = await testApp(state, { permissions, relationship: "owner" });
+      const response = await request(app, command("unpaid", "cash"));
+      expect(response.statusCode).toBe(allowed ? 201 : 403);
+      if (!allowed) expect(response.json()).toMatchObject({ code: "forbidden" });
+      expect(state.calls).toHaveLength(allowed ? 1 : 0);
+    },
+  );
+
+  it("refuses staff assigned only to another property (VAY-2498)", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state, {
+      permissions: staffRoleDefaultPermissions.front_desk,
+      assignedElsewhere: true,
+    });
+    const response = await request(app, command("unpaid", "cash"));
+    expect([response.statusCode, response.json().code]).toEqual([403, "forbidden"]);
+    expect((await capabilities(app)).statusCode).toBe(403);
+    expect(state.calls).toEqual([]);
+  });
+
+  it("keeps a paid booking with the finance permission, which no staff role holds", async () => {
+    const staff: State = { calls: [] };
+    app = await testApp(staff, {
+      permissions: staffRoleDefaultPermissions.hotel_manager,
+      relationship: "owner",
+    });
+    const refused = await request(app, command("paid", "cash"));
+    expect([refused.statusCode, refused.json().code]).toEqual([403, "paid_forbidden"]);
+    expect(staff.calls).toEqual([]);
+    await app.close();
+
+    const owner: State = { calls: [] };
+    app = await testApp(owner, { permissions: ownerKeys, relationship: "owner" });
+    expect((await request(app, command("paid", "cash"))).statusCode).toBe(201);
+    expect(owner.calls).toHaveLength(1);
   });
 
   it.each(["pay_at_property", "bank_transfer", "manual_card", "cash", "other"] as const)(
@@ -332,7 +399,7 @@ describe("target manual-booking create route", () => {
 
   it.each([
     ["unauthenticated", { token: false }],
-    ["forbidden", { operationsPermission: false }],
+    ["forbidden", { reservationPermission: false }],
     ["entitlement_required", { pmsEntitlement: false }],
     ["forbidden", { relationship: "viewer" }],
     ["forbidden", { organizationKind: "platform" }],
@@ -416,16 +483,29 @@ async function testApp(state: State, auth: Auth = {}) {
   app.addHook("onRequest", async (request) => {
     if (request.headers.authorization !== "Bearer valid" || auth.token === false) return;
     request.authContext = {
-      actor: { internalUserId: actorId },
+      actor: { internalUserId: actorId, status: "active" },
       selectedOrganization: {
         organizationId,
         kind: auth.organizationKind ?? "hotel_group",
+        status: "active",
       },
       membership: {
-        permissions: [
-          ...(auth.operationsPermission === false ? [] : ["pms.operations.manage"]),
-          ...(auth.financePermission === false ? [] : ["pms.finance.manage"]),
-        ],
+        roleKey: "hotel_manager",
+        status: "active",
+        propertyAccess: {
+          mode: auth.assignedElsewhere ? "assigned" : "all",
+          roleKey: "hotel_manager",
+          accessOrigin: "agency",
+          assignedPropertyIds: auth.assignedElsewhere
+            ? ["81000000-0000-4000-8000-000000000098"]
+            : [],
+        },
+        permissions: auth.permissions
+          ? [...auth.permissions]
+          : [
+              ...(auth.reservationPermission === false ? [] : ["pms.reservation.update"]),
+              ...(auth.financePermission === false ? [] : ["pms.finance.manage"]),
+            ],
       },
       entitlements: [
         ...(auth.pmsEntitlement === false
@@ -449,20 +529,22 @@ async function testApp(state: State, auth: Auth = {}) {
               },
             ]),
       ],
-      linkedResources: [
-        {
-          product: "pms",
-          resourceType: "pms_property",
-          resourceId: propertyId,
-          relationship: auth.relationship ?? "operator",
-          status: "active",
-        },
-      ],
+      linkedResources: (["pms_property", "property"] as const).map((resourceType) => ({
+        product: resourceType === "property" ? "hotel_catalog" : "pms",
+        resourceType,
+        resourceId: propertyId,
+        relationship: auth.relationship ?? "operator",
+        status: "active",
+      })),
       audit: { requestId: "request-1", source: "api", receivedAt: now },
-    } as RequestContext;
+    } as unknown as RequestContext;
   });
-  await app.register(registerPmsManualBookingCapabilityRoutes);
-  await app.register(registerPmsManualBookingCreateRoutes, { command: port(state) });
+  const propertyAccessRepository = agencyPropertyAccessRepository;
+  await app.register(registerPmsManualBookingCapabilityRoutes, { propertyAccessRepository });
+  await app.register(registerPmsManualBookingCreateRoutes, {
+    command: port(state),
+    propertyAccessRepository,
+  });
   return app;
 }
 

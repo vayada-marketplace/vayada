@@ -29,9 +29,10 @@ export default function CalendarSettingsPage() {
   const [calendarLoading, setCalendarLoading] = useState(true);
   const [calendarSaving, setCalendarSaving] = useState(false);
   const [calendarLoadError, setCalendarLoadError] = useState("");
-  // Room assignment and auto-open take operations access, even to read; same-day booking can be
-  // read with settings access and changed only with settings manage (VAY-2154).
-  const canEditAssignments = useHasPmsPermission("pms.operations.manage");
+  // Room assignment and same-day booking change with settings manage (VAY-2154, VAY-2498).
+  // Auto-open stays with the account admin: it changes which nights can be sold.
+  const canEditAssignments = useHasPmsPermission("pms.settings.manage");
+  const canEditAutoOpen = useHasPmsPermission("pms.operations.manage");
   const canEditSameDay = useHasPmsPermission("pms.settings.manage");
 
   const loadCalendarSettings = useCallback(async () => {
@@ -126,7 +127,7 @@ export default function CalendarSettingsPage() {
         loadError={calendarLoadError}
         onToggle={(next) => void saveAutoRearrange(next)}
         onRetry={() => void loadCalendarSettings()}
-        autoOpenEditor={canEditAssignments ? <CalendarAutoOpenEditor /> : null}
+        autoOpenEditor={canEditAutoOpen ? <CalendarAutoOpenEditor /> : null}
         sameDayEnabled={sameDayEnabled}
         sameDayCutoffTime={sameDayCutoffTime}
         sameDayTimeZone={sameDayTimeZone}

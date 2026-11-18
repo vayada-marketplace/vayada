@@ -35,7 +35,7 @@ export function GuestNotes({
   compact?: boolean;
 }) {
   const { locale, t } = useTranslation();
-  const canWrite = useHasPmsPermission("pms.operations.manage");
+  const canWrite = useHasPmsPermission("pms.reservation.update");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);

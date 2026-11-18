@@ -1,5 +1,5 @@
 import { UnauthorizedError } from "@vayada/backend-auth";
-import { AuthorizationError } from "@vayada/backend-authorization";
+import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import { roundBookingPriceDecimalToMinorUnits } from "@vayada/domain-booking";
 import {
   PMS_MANUAL_BOOKING_CONTRACT_VERSION,
@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import { PreviewError } from "./pmsManualBookingPreviewCalculation.js";
 import { parseManualBookingPreviewCommand } from "./pmsManualBookingPreview.js";
+import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -112,16 +113,18 @@ const bodySchema = z.strictObject({
 
 export type PmsManualBookingCreateRoutesOptions = {
   command: PmsManualBookingCreatePort;
+  propertyAccessRepository?: PropertyAccessRepository;
 };
 
 export async function registerPmsManualBookingCapabilityRoutes(
   app: FastifyInstance,
+  options: { propertyAccessRepository?: PropertyAccessRepository } = {},
 ): Promise<void> {
   app.get<{ Params: { propertyId: string }; Querystring: unknown }>(
     "/properties/:propertyId/manual-bookings/capabilities",
     async (request, reply) => {
       try {
-        const scope = authorize(request, false);
+        const scope = await authorize(request, false, options.propertyAccessRepository);
         if (
           !request.query ||
           typeof request.query !== "object" ||
@@ -165,7 +168,11 @@ export async function registerPmsManualBookingCreateRoutes(
     "/properties/:propertyId/manual-bookings",
     async (request, reply) => {
       try {
-        const scope = authorize(request, requestsPaidSettlement(request.body));
+        const scope = await authorize(
+          request,
+          requestsPaidSettlement(request.body),
+          options.propertyAccessRepository,
+        );
         const command = parseCreateCommand(request.query, request.body, scope);
         const result = await options.command.createManualBooking(command);
         return reply.status(result.outcome === "created" ? 201 : 200).send(result);
@@ -255,24 +262,29 @@ type AuthorizedScope = {
   audit: PmsManualBookingCreateCommand["audit"];
 };
 
-function authorize(request: FastifyRequest, paid: boolean): AuthorizedScope {
-  const base = enforceRoutePolicy(request, { permission: "pms.operations.manage" });
+async function authorize(
+  request: FastifyRequest,
+  paid: boolean,
+  propertyAccessRepository: PropertyAccessRepository | undefined,
+): Promise<AuthorizedScope> {
+  const base = enforceRoutePolicy(request, { permission: "pms.reservation.update" });
   const raw = (request.params as { propertyId?: unknown }).propertyId;
   if (base.selectedOrganization.kind !== "hotel_group")
     throw new PmsManualBookingCreateError("forbidden");
   if (typeof raw !== "string" || !UUID.test(raw))
     throw new PmsManualBookingCreateError("invalid_body", "propertyId");
   const propertyId = raw.toLowerCase();
-  const resource = {
-    product: "pms",
-    resourceType: "pms_property",
-    resourceId: propertyId,
-  } as const;
-  enforceRoutePolicy(request, {
-    permission: "pms.operations.manage",
-    entitlement: { product: "pms", key: "property-management", resource },
-    resource: { ...resource, allowedRelationships: ["owner", "operator", "front_desk"] },
-  });
+  // VAY-2498: staff may hold only some properties, so check this member's own property access.
+  if (!propertyAccessRepository) throw new Error("PMS property access repository is unavailable");
+  await enforcePmsPropertyRoutePolicy(
+    request,
+    {
+      propertyId,
+      permission: "pms.reservation.update",
+      allowedRelationships: ["owner", "operator", "front_desk"],
+    },
+    propertyAccessRepository,
+  );
   if (paid) enforcePaidPolicy(request, propertyId);
   return {
     propertyId,
