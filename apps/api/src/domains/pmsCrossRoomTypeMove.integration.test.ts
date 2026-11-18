@@ -381,12 +381,39 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
         requestedAt: acceptedAt,
       },
     };
+    // VAY-2561: the copy keeps the room size, and a room type saved without one (the quick first-run
+    // setup saves none) gives a copy without one.
+    const size = { value: 32, unit: "sqm" };
+    for (const [roomTypeId, attributes] of [
+      [I.sourceType, { size }],
+      [I.thirdType, { size: null }],
+    ] as const)
+      await pool.query(
+        `UPDATE pms.room_types SET room_attributes=room_attributes||$2::jsonb WHERE id=$1`,
+        [roomTypeId, JSON.stringify(attributes)],
+      );
     const duplicated = await lifecycle.duplicateRoomType(command);
     expect(duplicated).toMatchObject({
       ok: true,
       roomType: { name: "Double Copy", ratePlans: [], roomCount: 0 },
     });
-    if (!duplicated.ok) return;
+    const sizeless = await lifecycle.duplicateRoomType({
+      ...command,
+      roomTypeId: I.thirdType,
+      commandId: "duplicate-family",
+      idempotencyKey: "duplicate-family",
+    });
+    if (!duplicated.ok || !sizeless.ok) throw new Error("duplicate failed");
+    // What the PMS room form reads for each copy.
+    const copied = await Promise.all(
+      [duplicated, sizeless].map(({ roomType }) =>
+        readRepository.findRoomTypeById(I.property, roomType.roomTypeId),
+      ),
+    );
+    expect(copied.map((room) => [room?.name, room?.attributes])).toEqual([
+      ["Double Copy", { size }],
+      ["Family Copy", { size: null }],
+    ]);
     await expect(lifecycle.duplicateRoomType(command)).resolves.toEqual({
       ...duplicated,
       replayed: true,
