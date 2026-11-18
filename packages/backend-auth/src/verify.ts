@@ -19,7 +19,7 @@ export type WorkOSVerifierConfig = {
   jwksUrl: string;
   /** Expected `iss` claim in the JWT. */
   issuer: string;
-  /** Expected WorkOS application client ID. */
+  /** Expected WorkOS application client ID: the token's `client_id` must equal it. */
   audience: string;
 };
 
@@ -32,6 +32,7 @@ export function extractBearerToken(authorizationHeader: string | undefined): str
 
 /** Creates a production verifier that validates WorkOS JWTs against the JWKS endpoint. */
 export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifier {
+  if (!config.audience) throw new Error("WorkOS verifier needs the app client ID");
   const jwks = createRemoteJWKSet(new URL(config.jwksUrl));
 
   return async (token: string) => {
@@ -48,11 +49,20 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
       if (payload.exp === undefined) {
         throw new AuthError("TOKEN_INVALID", "JWT is missing required exp claim");
       }
-      if (!hasExpectedClientId(claims, config.audience)) {
+      // Only tokens WorkOS minted for our own app reach /api. Tokens for MCP or other
+      // AI apps (WorkOS Connect) and WorkOS agent tokens can share our issuer and keys,
+      // so each check below refuses one of them (VAY-2501).
+      if (claims["client_id"] !== config.audience) {
         throw new AuthError(
           "TOKEN_INVALID",
           "JWT client_id claim does not match expected client ID",
         );
+      }
+      if (claims["sub_profile"] !== undefined) {
+        throw new AuthError("TOKEN_INVALID", "JWT is a WorkOS agent token");
+      }
+      if (!isAppAudience(claims["aud"], config.audience)) {
+        throw new AuthError("TOKEN_INVALID", "JWT audience is not the app client ID");
       }
 
       return {
@@ -77,20 +87,11 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
   };
 }
 
-function hasExpectedClientId(claims: Record<string, unknown>, expectedClientId: string): boolean {
-  if (typeof claims["client_id"] === "string") {
-    return claims["client_id"] === expectedClientId;
-  }
-
-  const audience = claims["aud"];
-  if (typeof audience === "string") {
-    return audience === expectedClientId;
-  }
-  if (Array.isArray(audience)) {
-    return audience.includes(expectedClientId);
-  }
-
-  return false;
+/** App tokens carry no `aud`; if one is present it may name only our own client. */
+function isAppAudience(audience: unknown, clientId: string): boolean {
+  if (audience === undefined) return true;
+  const audiences = Array.isArray(audience) ? audience : [audience];
+  return audiences.length > 0 && audiences.every((value) => value === clientId);
 }
 
 /**
