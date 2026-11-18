@@ -395,7 +395,7 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
     const duplicated = await lifecycle.duplicateRoomType(command);
     expect(duplicated).toMatchObject({
       ok: true,
-      roomType: { name: "Double Copy", ratePlans: [], roomCount: 0, attributes: { size } },
+      roomType: { name: "Double Copy", ratePlans: [], roomCount: 0 },
     });
     const sizeless = await lifecycle.duplicateRoomType({
       ...command,

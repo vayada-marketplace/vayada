@@ -172,8 +172,10 @@ it("shows no size as an empty box, not 0, and saves it as none when editing (VAY
   act(() => roomSize().props.onBlur());
   expect(roomSize().props.value).toBe("");
   expect(onChange).toHaveBeenCalledTimes(calls);
+});
 
-  // A stored size shows as it is; emptying it saves no size.
+it("shows a stored size as it is, and emptying it saves no size (VAY-2561)", async () => {
+  const onChange = vi.fn();
   await mount({ form: { name: "Suite", totalRooms: 2, size: 32 }, onChange });
   expect(roomSize().props.value).toBe("32");
   act(() => roomSize().props.onChange({ target: { value: "" } }));
