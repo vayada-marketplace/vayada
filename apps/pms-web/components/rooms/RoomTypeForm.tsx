@@ -275,7 +275,10 @@ export default function RoomTypeForm({
   );
   const [bedroomsInput, setBedroomsInput] = useState(String(form.bedrooms ?? 1));
   const [bathroomsInput, setBathroomsInput] = useState(String(form.bathrooms ?? 1));
-  const [sizeInput, setSizeInput] = useState(String(form.size ?? 1));
+  // A room type saved without a size (the quick first-run setup saves none, and Duplicate copies that) shows an
+  // empty box, not 0. Only a new room type needs one (VAY-2561).
+  const sizeRequired = mode === "create";
+  const [sizeInput, setSizeInput] = useState((form.size ?? 0) > 0 ? String(form.size) : "");
   const [totalRoomsInput, setTotalRoomsInput] = useState(String(form.totalRooms ?? 2));
 
   // Sync beds -> form.bedType
@@ -565,23 +568,28 @@ export default function RoomTypeForm({
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">
-                  {t("rooms.form.roomSize")} <span className="text-red-500">*</span>
+                  {t("rooms.form.roomSize")}
+                  {sizeRequired && <span className="text-red-500"> *</span>}
                 </label>
               </div>
               <input
                 type="number"
                 min={1}
                 max={15000}
+                required={sizeRequired}
                 value={sizeInput}
                 onChange={(e) => {
                   const v = e.target.value;
                   setSizeInput(v);
-                  if (v !== "") {
+                  // Empty is no size, saved as none.
+                  if (v === "") updateForm({ size: 0 });
+                  else {
                     const n = parseInt(v, 10);
                     if (Number.isFinite(n) && n >= 1 && n <= 15000) updateForm({ size: n });
                   }
                 }}
                 onBlur={() => {
+                  if (sizeInput.trim() === "") return;
                   const n = clampNumberInput(sizeInput, 1, 15000);
                   setSizeInput(String(n));
                   updateForm({ size: n });

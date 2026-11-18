@@ -155,6 +155,45 @@ it("keeps the room's place on its own Location tab, saved by the form's one Save
   });
 });
 
+const roomSize = () => view.root.findByProps({ placeholder: "50" });
+const roomSizeMarkedRequired = () =>
+  view.root
+    .find((node) => node.type === "label" && node.children.includes("rooms.form.roomSize"))
+    .findAllByType("span").length > 0;
+
+it("shows no size as an empty box, not 0, and saves it as none when editing (VAY-2561)", async () => {
+  // A room type saved without a size, and its Duplicate copy, reach the form as size 0.
+  const onChange = vi.fn();
+  await mount({ form: { name: "Test Room Copy", totalRooms: 2, size: 0 }, onChange });
+  expect(roomSize().props).toMatchObject({ value: "", required: false });
+  expect(roomSizeMarkedRequired()).toBe(false);
+  // Leaving it empty makes up no size.
+  const calls = onChange.mock.calls.length;
+  act(() => roomSize().props.onBlur());
+  expect(roomSize().props.value).toBe("");
+  expect(onChange).toHaveBeenCalledTimes(calls);
+
+  // A stored size shows as it is; emptying it saves no size.
+  await mount({ form: { name: "Suite", totalRooms: 2, size: 32 }, onChange });
+  expect(roomSize().props.value).toBe("32");
+  act(() => roomSize().props.onChange({ target: { value: "" } }));
+  act(() => roomSize().props.onBlur());
+  expect(roomSize().props.value).toBe("");
+  expect(onChange).toHaveBeenLastCalledWith({ name: "Suite", totalRooms: 2, size: 0 });
+
+  // A size below 1 still becomes 1 when the box is left.
+  act(() => roomSize().props.onChange({ target: { value: "0" } }));
+  act(() => roomSize().props.onBlur());
+  expect(roomSize().props.value).toBe("1");
+  expect(onChange).toHaveBeenLastCalledWith({ name: "Suite", totalRooms: 2, size: 1 });
+});
+
+it("still asks a new room type for its size (VAY-2561)", async () => {
+  await mount({ mode: "create", form: { name: "", totalRooms: 2, size: 0 } });
+  expect(roomSize().props).toMatchObject({ value: "", required: true });
+  expect(roomSizeMarkedRequired()).toBe(true);
+});
+
 it("shows the page's note beside the buttons and its text while saving (VAY-2147)", async () => {
   await mount({
     mode: "create",
