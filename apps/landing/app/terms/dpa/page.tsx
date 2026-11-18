@@ -144,7 +144,7 @@ export default function DataProcessingAgreementPage() {
                   asks, changes data in the Hotel&apos;s account with that user&apos;s rights; and,
                   if the Hotel turns it on, Concierge, which answers guests&apos; Instagram messages
                   for the Hotel. An AI model receives only the data a task needs, and never the
-                  details of a guest&apos;s identity document. Replies to guests from the PMS and
+                  identity document details recorded at check-in. Replies to guests from the PMS and
                   the assistant are sent only after a user confirms them. Concierge answers guests
                   on its own and tells them in its first reply that an AI is answering.
                 </li>
@@ -158,8 +158,9 @@ export default function DataProcessingAgreementPage() {
             <section className="mt-12 space-y-4">
               <h2 className={H2}>3. Data and data subjects</h2>
               <p>
-                The data subjects are the Hotel&apos;s guests and people who start a booking on its
-                booking site. The categories match Section 9 of the{" "}
+                The data subjects are the Hotel&apos;s guests, people who start a booking on its
+                booking site and people who message the Hotel through Concierge. The categories
+                match Section 9 of the{" "}
                 <a href="/privacy#booking-guests" className={LINK}>
                   privacy page
                 </a>
@@ -205,7 +206,7 @@ export default function DataProcessingAgreementPage() {
                   ],
                   [
                     "AI records",
-                    "the assistant's conversations; translations, summaries and drafts made by AI; the earlier values needed to undo an AI change; a record of each AI request and change (which user, which AI feature or app, what was read or changed), without the personal details themselves",
+                    "the assistant's conversations; translations, summaries and drafts made by AI; the earlier values needed to undo an AI change; a record of each AI request and change (which user, which AI feature or app, which records were read or changed), without the records' contents",
                     "conversations 30 days, or the period the Hotel chooses (at most 90 days); translations, summaries and drafts 30 days; undo details until the undo period ends; requests waiting for a user's yes 90 days; the record of requests and changes 2 years",
                   ],
                   [
@@ -227,10 +228,10 @@ export default function DataProcessingAgreementPage() {
                 <li>
                   <strong>Instructions: </strong>vayada processes the data only on the Hotel&apos;s
                   documented instructions. The hotel terms, this agreement and the Hotel&apos;s
-                  settings and actions in the services are those instructions. So are the requests a
-                  user of the Hotel makes through an AI feature or an AI app they connected, within
-                  that user&apos;s rights in vayada. If vayada thinks an instruction breaks data
-                  protection law, it tells the Hotel without delay.
+                  settings and actions in the services are those instructions. So are requests made
+                  through an AI feature a user of the Hotel uses or an AI app a user connected,
+                  within that user&apos;s rights in vayada. If vayada thinks an instruction breaks
+                  data protection law, it tells the Hotel without delay.
                 </li>
                 <li>
                   <strong>Confidentiality: </strong>everyone at vayada who can access the data is
@@ -313,13 +314,13 @@ export default function DataProcessingAgreementPage() {
                 <li>
                   AI apps that the Hotel&apos;s users connect to vayada themselves, for example
                   Claude or ChatGPT through vayada&apos;s MCP connection. vayada sends such an app
-                  only the data its user asks for and may see in vayada, on the Hotel&apos;s
-                  instruction (Section 4). Guests&apos; names, messages and contact details reach
-                  these apps only if the Hotel turns that on. The Hotel and its users choose these
-                  apps and their plans, business or personal, and are responsible for that choice,
-                  including whether the app&apos;s provider may use the data to train AI models and
-                  where it processes the data. vayada does not send the data to those providers on
-                  its own.
+                  only the data it asks for through its user&apos;s connection, limited to what that
+                  user may see in vayada, on the Hotel&apos;s instruction (Section 4). Guests&apos;
+                  names, messages and contact details reach these apps only if the Hotel turns that
+                  on. The Hotel and its users choose these apps and their plans, business or
+                  personal, and are responsible for that choice, including whether the app&apos;s
+                  provider may use the data to train AI models and where it processes the data.
+                  vayada does not send the data to those providers on its own.
                 </li>
                 <li>
                   Meta (Instagram): if the Hotel connects its Instagram account to Concierge,
@@ -350,9 +351,10 @@ export default function DataProcessingAgreementPage() {
                 standard contractual clauses (Decision (EU) 2021/914) apply instead.
               </p>
               <p>
-                The AI models in Section 5 run in AWS regions in the EU; vayada does not send AI
-                requests outside the EU. Where an AI app that a user of the Hotel connected
-                processes the data is decided by the Hotel and that app&apos;s provider (Section 5).
+                vayada uses AI models for the Hotel&apos;s data only where they run in the EU or the
+                EEA; the AI models in Section 5 run in AWS regions in the EU. Where an AI app that a
+                user of the Hotel connected processes the data is decided by the Hotel and that
+                app&apos;s provider (Section 5).
               </p>
             </section>
 
@@ -396,7 +398,7 @@ export default function DataProcessingAgreementPage() {
                   ["Abuse protection", "rate limits on booking lookups and public endpoints"],
                   [
                     "AI features",
-                    "an AI gets only the data its user may see; text written by guests is treated as untrusted and cannot start an action on its own; identity document details are never sent to an AI; AI changes are logged and can be undone for a limited time; actions that can't be undone, such as cancellations, refunds and messages to guests, need a person's yes in vayada; daily limits; AI can be switched off per hotel, per feature or for everyone",
+                    "the assistant and connected AI apps get only the data their user may see, and Concierge only what it needs to answer guests about the Hotel's rooms and prices; text written by guests is treated as untrusted and cannot make the assistant change data or write to a guest; identity document details recorded at check-in are never sent to an AI; AI changes are logged and can be undone for a limited time; in the PMS and the assistant, actions that can't be undone, such as cancellations, refunds and messages to guests, need a person's yes in vayada; daily limits; AI can be switched off per hotel, per feature or for everyone",
                   ],
                   [
                     "Connected AI apps",

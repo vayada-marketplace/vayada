@@ -57,8 +57,8 @@ export default function TermsPage() {
                   a Hotel, such as an owner, manager or staff member.
                 </p>
                 <p>
-                  <strong>Guest: </strong>A person who views a Hotel&apos;s booking site or books a
-                  stay through it.
+                  <strong>Guest: </strong>A person who views a Hotel&apos;s booking site, books a
+                  stay through it or messages the Hotel through Concierge.
                 </p>
                 <p>
                   <strong>Hotel Content:</strong> Any text, images, rates, availability, policies
@@ -176,7 +176,7 @@ export default function TermsPage() {
                     count as that User&apos;s changes; they are logged and, where the Services offer
                     it, can be undone for a limited time. Actions that can&apos;t be undone, such as
                     cancellations, refunds and messages to Guests, need the User&apos;s yes in
-                    vayada first.
+                    vayada first. Concierge&apos;s answers are the exception you turn on.
                   </p>
                   <p>
                     <strong>Usage allowance: </strong>AI Features come with a usage allowance that
@@ -210,12 +210,13 @@ export default function TermsPage() {
                   <p>
                     <strong>Your choice: </strong>You and your Users choose the AI app and its plan,
                     business or personal, and are responsible for that choice. vayada sends data to
-                    a Connected AI App only when its User asks for it through the app; vayada does
-                    not send the data to that AI company on its own. The AI company handles the data
-                    under its own terms with you or your User. Depending on the plan and its
-                    settings, it may use chats to train its models, so check the AI app&apos;s
-                    training setting before connecting. vayada is not responsible for Connected AI
-                    Apps, their availability, their answers or the way their providers handle data.
+                    a Connected AI App only in answer to the app&apos;s requests through its
+                    User&apos;s connection; vayada does not send the data to that AI company on its
+                    own. The AI company handles the data under its own terms with you or your User.
+                    Depending on the plan and its settings, it may use chats to train its models, so
+                    check the AI app&apos;s training setting before connecting. vayada is not
+                    responsible for Connected AI Apps, their availability, their answers or the way
+                    their providers handle data.
                   </p>
                   <p>
                     <strong>Records and alerts: </strong>vayada logs each connection and every

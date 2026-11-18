@@ -124,7 +124,7 @@ describe.skipIf(!url)("hotel account agreements on the real database (VAY-2246)"
       expect(await repository.findAcceptance(otherAccount, current)).toBeNull();
 
       // A new version of the DPA needs a new acceptance; the old one stays on record.
-      const newer = { termsVersion: "2026-10-24", dpaVersion: "2027-01-01" };
+      const newer = { ...current, dpaVersion: "2027-01-01" };
       expect(await repository.findAcceptance(hotelAccount, newer)).toBeNull();
       expect(
         await repository.accept({

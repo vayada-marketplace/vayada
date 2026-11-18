@@ -28,7 +28,8 @@ export default function PrivacyPage() {
               accommodation business (&quot;Hotel&quot;).
             </p>
             <p className="text-lg leading-relaxed">
-              If you are visiting or booking on a hotel&apos;s booking site that runs on vayada, see{" "}
+              If you are visiting or booking on a hotel&apos;s booking site that runs on vayada, or
+              messaging a hotel that uses vayada&apos;s Concierge, see{" "}
               <a href="#booking-guests" className={LINK}>
                 Section 9
               </a>
@@ -172,8 +173,8 @@ export default function PrivacyPage() {
                         <td className={`${TD} font-medium`}>Connected AI Apps</td>
                         <td className={TD}>
                           Which AI apps you connect to vayada, when, for which account and
-                          properties, and a record of each request an app makes: what it read or
-                          changed, without the personal details themselves.
+                          properties, and a record of each request an app makes: which records it
+                          read or changed, without their contents.
                         </td>
                         <td className={TD}>
                           To run the connection, protect your Hotel&apos;s account and let your
@@ -410,8 +411,8 @@ export default function PrivacyPage() {
                 support requests from the apps are emailed to our team and deleted from our database
                 90 days after you send them. Conversations with the in-app AI assistant are deleted
                 after 30 days, or after the period your Hotel chooses (at most 90 days). Records of
-                AI requests and changes are kept for 2 years, without the personal details
-                themselves.
+                AI requests and changes are kept for 2 years, without the contents of the records
+                read or changed.
               </p>
               <p className="mb-4">You have the following rights regarding your Personal Data:</p>
               <ul className="list-disc list-inside ml-4 space-y-2">
@@ -565,16 +566,17 @@ export default function PrivacyPage() {
               <p className="mb-4">
                 Hotels use vayada to run their own booking sites (for example
                 hotel-name.booking.vayada.com, or a hotel&apos;s own domain). This section explains
-                how your data is handled when you visit or book on such a site.
+                how your data is handled when you visit or book on such a site, or message a hotel
+                that uses vayada&apos;s Concierge on Instagram.
               </p>
 
               <div className="mt-6">
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">A. Who Is Responsible</h3>
                 <p>
-                  The hotel named on the booking site is the controller for your booking and for the
-                  optional analytics on its booking site. vayada runs the booking site and processes
-                  this data on the hotel&apos;s behalf and on its instructions (Article 28 GDPR).
-                  The hotel and vayada have a{" "}
+                  The hotel named on the booking site is the controller for your booking, your
+                  messages to it and the optional analytics on its booking site. vayada runs the
+                  booking site and processes this data on the hotel&apos;s behalf and on its
+                  instructions (Article 28 GDPR). The hotel and vayada have a{" "}
                   <a href="/terms/dpa" className={LINK}>
                     data processing agreement
                   </a>{" "}
@@ -602,11 +604,12 @@ export default function PrivacyPage() {
                     identity document, your gender, which room you sleep in and internal notes, for
                     example to meet local guest registration rules (Article 6(1) lit. c GDPR) and to
                     look after your stay (Article 6(1) lit. b GDPR). Only the hotel&apos;s staff,
-                    and the AI tools they use (see D), see this data; the details of your identity
-                    document are never sent to an AI. Your date of birth and identity document are
-                    kept on your guest profile (below); the hotel can have the document&apos;s type
-                    and number deleted 7, 30 or 90 days after your last stay with it ends. Your
-                    gender, room and the staff&apos;s notes for the stay are kept with your booking.
+                    and the AI tools they use (see D), see this data; the identity document details
+                    recorded at check-in are never sent to an AI. Your date of birth and identity
+                    document are kept on your guest profile (below); the hotel can have the
+                    document&apos;s type and number deleted 7, 30 or 90 days after your last stay
+                    with it ends. Your gender, room and the staff&apos;s notes for the stay are kept
+                    with your booking.
                   </li>
                   <li>
                     <strong>Your guest profile (at the hotel): </strong>the hotel keeps one guest
@@ -706,10 +709,11 @@ export default function PrivacyPage() {
                     <strong>vayada&apos;s AI features: </strong>the hotel&apos;s staff may use AI
                     features in vayada, for example to translate and summarise your messages, draft
                     replies or look up your booking. A member of the hotel&apos;s staff confirms
-                    every reply before it is sent. vayada runs these features for the hotel with AI
-                    models by Anthropic (Claude) on Amazon Web Services in the European Union;
-                    neither AWS nor Anthropic uses your data to train models. Translations,
-                    summaries and drafts are kept for 30 days.
+                    every reply these features draft before it is sent (Concierge, below, works
+                    differently). vayada runs these features for the hotel with AI models by
+                    Anthropic (Claude) on Amazon Web Services in the European Union; neither AWS nor
+                    Anthropic uses your data to train models. Translations, summaries and drafts are
+                    kept for 30 days.
                   </li>
                   <li>
                     <strong>AI apps the staff connect: </strong>the hotel&apos;s staff may connect
