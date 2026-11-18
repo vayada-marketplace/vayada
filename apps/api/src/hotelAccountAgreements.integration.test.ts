@@ -7,7 +7,7 @@ import { createPgHotelAccountAgreementsRepository } from "./domains/hotelAccount
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 
 const url = process.env["TEST_DATABASE_URL"];
-const current = { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" };
+const current = { termsVersion: "2026-11-18", dpaVersion: "2026-11-18" };
 
 /**
  * VAY-2246: a hotel account's acceptance of the hotel terms and the DPA (migration 0511), recorded and
