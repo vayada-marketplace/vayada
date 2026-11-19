@@ -1378,6 +1378,8 @@ const channexAvailabilityInventory = channexManagementDatabase.availabilityInven
   : undefined;
 // VAY-2108 D7: the claimed ARI scope runs the published-offer bundle for the owned hotels.
 const channexClaimedAri = channexClaimedAriScope(config.channexManagement);
+// VAY-2108: set on shutdown, so a paced availability turn ends before its next send.
+let channexManagementStopping = false;
 const channexManagementProvider =
   channexManagementPlans && config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
     ? createChannexManagementProvider({
@@ -1386,7 +1388,10 @@ const channexManagementProvider =
         plans: channexManagementPlans,
         canSyncAri: config.channexManagement.capabilityModes.ariSync === "mutating",
         // VAY-2108: several room-nights per sync turn, spaced for Channex's rate limit.
-        availabilityPacing: CHANNEX_PRODUCTION_AVAILABILITY_PACING,
+        availabilityPacing: {
+          ...CHANNEX_PRODUCTION_AVAILABILITY_PACING,
+          stopping: () => channexManagementStopping,
+        },
         dispatchClosedUpload: channexUploadReconciliationPool
           ? (lease, ports) =>
               dispatchNextChannexClosedUpload(channexUploadReconciliationPool, lease, ports)
@@ -2869,6 +2874,7 @@ const channexManagementTimer = channexManagementWorkerStore
 channexManagementTimer?.unref();
 if (channexManagementWorkerStore) runChannexManagement();
 app.addHook("onClose", async () => {
+  channexManagementStopping = true;
   if (channexManagementTimer) clearInterval(channexManagementTimer);
   if (channexOfferScheduleTimer) clearInterval(channexOfferScheduleTimer);
   await activeChannexOfferSchedule;

@@ -791,6 +791,7 @@ describe("closed upload worker completion", () => {
         maxSends?: number;
         turnBudgetMs?: number;
         reconcile?: "ok" | "settling" | "throw";
+        stopping?: () => boolean;
       } = {},
     ) {
       let clock = 0,
@@ -810,6 +811,7 @@ describe("closed upload worker completion", () => {
           spacingMs: 6_100,
           maxSends: options.maxSends ?? 25,
           turnBudgetMs: options.turnBudgetMs ?? 180_000,
+          stopping: options.stopping ?? (() => false),
           now: () => clock,
           sleep: async (ms) => {
             sleeps.push(ms);
@@ -864,9 +866,9 @@ describe("closed upload worker completion", () => {
       const turn = pacedProvider(["send", "send", "send"]);
       expect(await turn.run()).toEqual({ ok: true });
       expect(turn.sent).toEqual(["attempt-1", "attempt-2", "attempt-3"]);
-      // Each later send waits 3 s, reconciles the last one, then keeps 6.1 s since that send
-      // returned: 3 s settle + 1 s reconcile + 0.5 s prepare = 4.5 s, so 1.6 s more.
-      expect(turn.sleeps).toEqual([3_000, 1_600, 3_000, 1_600, 3_000]);
+      // After each send: 3 s settle, 1 s reconcile, then 6.1 s since the send returned before the
+      // next claim (3 s + 1 s = 4 s, so 2.1 s more). The last wait precedes the final prepare.
+      expect(turn.sleeps).toEqual([3_000, 2_100, 3_000, 2_100, 3_000, 2_100]);
       expect(turn.reconciles()).toBe(4);
       expect(turn.activate).toHaveBeenCalledOnce();
     });
@@ -878,9 +880,31 @@ describe("closed upload worker completion", () => {
         attemptId: "attempt-2",
       });
       expect(turn.sent).toEqual(["attempt-1", "attempt-2"]);
+      // The limit is checked once the last send is reconciled: the next turn starts clean.
+      expect(turn.reconciles()).toBe(3);
+    });
+    it("ends the turn before its next send once the process is stopping", async () => {
+      // Checked only after a send is reconciled, before the next night is claimed.
+      const turn = pacedProvider(["send", "send"], { stopping: () => true });
+      expect(await turn.run()).toEqual({
+        ok: false,
+        code: "availability_upload_retained",
+        attemptId: "attempt-1",
+      });
+      expect(turn.sent).toEqual(["attempt-1"]);
+    });
+    it("keeps one send per turn without pacing, reconciled by the next attempt", async () => {
+      const turn = pacedProvider(["send", "send"], { maxSends: 1 });
+      expect(await turn.run()).toEqual({
+        ok: false,
+        code: "availability_upload_retained",
+        attemptId: "attempt-1",
+      });
+      expect(turn.reconciles()).toBe(1);
+      expect(turn.sleeps).toEqual([]);
     });
     it("ends the turn as a continuation once its time budget is used", async () => {
-      // The second send returns at 9.1 s, past a 9 s budget.
+      // The second send is reconciled at 15.1 s, past a 9 s budget, before a third claim.
       const turn = pacedProvider(["send", "send", "send"], { turnBudgetMs: 9_000 });
       expect(await turn.run()).toEqual({
         ok: false,

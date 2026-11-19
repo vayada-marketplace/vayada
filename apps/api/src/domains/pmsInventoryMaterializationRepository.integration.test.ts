@@ -4678,9 +4678,30 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       expect(await worker.drain()).toEqual(["succeeded"]);
       expect(channex.sent()).toEqual([d0, d1, d2, d3].map((date) => ({ date, availability: 2 })));
       expect(channex.nights()).toEqual({ [d0]: 2, [d1]: 2, [d2]: 2, [d3]: 2 });
-      // A settle wait after each of the four sends, and a spacing wait before sends two to four.
+      // A settle wait after each of the four sends, and a spacing wait after each reconcile
+      // before the next claim (the last one before the prepare that finds the hotel current).
       expect(sleeps.filter((ms) => ms === 3_000)).toHaveLength(4);
-      expect(sleeps).toHaveLength(7);
+      expect(sleeps).toHaveLength(8);
+      expect(await schedule.enqueue()).toBe(0);
+    });
+    it("continues a paced pass across turns with each turn's last send reconciled (VAY-2108)", async () => {
+      const f = await heldHotelFixture();
+      const [d0, d1, d2, d3] = f.days;
+      const channex = fakeChannex(f);
+      const worker = managementWorker(
+        f,
+        channex,
+        { ariSyncMutating: true, claimedOwnedPropertyIds: [f.propertyId] },
+        { maxSends: 2, sleep: async () => {} },
+      );
+      const schedule = createPgChannexAriSchedule(TEST_DATABASE_URL!, {
+        propertyIds: [f.propertyId],
+      });
+      expect(await schedule.enqueue()).toBe(1);
+      // Two nights per turn, each turn ending with its last send reconciled, then current.
+      expect(await worker.drain()).toEqual(["continued", "continued", "succeeded"]);
+      expect(channex.sent()).toEqual([d0, d1, d2, d3].map((date) => ({ date, availability: 2 })));
+      expect(channex.nights()).toEqual({ [d0]: 2, [d1]: 2, [d2]: 2, [d3]: 2 });
       expect(await schedule.enqueue()).toBe(0);
     });
     it("lowers each held night once and raises it once on release, with the hold on the API login", async () => {

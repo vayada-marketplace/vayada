@@ -111,15 +111,18 @@ export class ChannexAriMappingMissingError extends Error {
 
 /** VAY-2108: one sync turn sends several room-nights instead of one. Channex allows 10
  * availability requests a minute per property, so sends are spaced; each send is reconciled in
- * the same turn after Channex had time to finish its task. A turn ends after `maxSends` sends or
- * `turnBudgetMs`, well inside the 5-minute job lease (refreshed on every send). */
+ * the same turn after Channex had time to finish its task. A turn checks its limits only once its
+ * last send is reconciled, so the next turn starts with nothing pending and well after that send.
+ * It stays well inside the 5-minute job lease (refreshed on every send). */
 export type ChannexAvailabilityPacing = Readonly<{
   /** Wait after a send before reconciling it. */
   settleMs: number;
-  /** Minimum time between two availability POSTs of one turn. */
+  /** Minimum time from one availability POST returning to the next night's claim. */
   spacingMs: number;
   maxSends: number;
   turnBudgetMs: number;
+  /** True once the process is shutting down: the turn ends before its next send. */
+  stopping: () => boolean;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
 }>;
@@ -127,15 +130,17 @@ export type ChannexAvailabilityPacing = Readonly<{
 /** One send per turn unless the caller opts in (the production wiring does). */
 const DEFAULT_AVAILABILITY_PACING: ChannexAvailabilityPacing = {
   settleMs: 3_000,
-  spacingMs: 6_100,
+  spacingMs: 7_000,
   maxSends: 1,
-  turnBudgetMs: 180_000,
+  turnBudgetMs: 120_000,
+  stopping: () => false,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: () => Date.now(),
 };
 
-/** Production pacing: up to 25 room-nights per turn (about 8 a minute, under Channex's 10). */
-export const CHANNEX_PRODUCTION_AVAILABILITY_PACING = { maxSends: 25 } as const;
+/** Production pacing: up to 15 room-nights per turn of at most about 2 minutes (about 7 a
+ * minute, under Channex's 10), so other hotels' jobs on the same worker wait little. */
+export const CHANNEX_PRODUCTION_AVAILABILITY_PACING = { maxSends: 15 } as const;
 
 export function createChannexManagementProvider(config: {
   apiBaseUrl: string;
@@ -468,9 +473,10 @@ export function createChannexManagementProvider(config: {
           };
           const pacing = { ...DEFAULT_AVAILABILITY_PACING, ...config.availabilityPacing };
           const turnStarted = pacing.now();
-          // VAY-2108: the last room-night this turn sent. Once one is sent, anything that is not
-          // ready yet ends the turn exactly as one send did before (the next attempt reconciles
-          // it), so a turn that sends several nights never costs the job a retry.
+          // VAY-2108: the last room-night this turn sent. Once one is sent, a send that is not
+          // ready yet, an error or a stopped check ends the turn exactly as one send did before
+          // (the next attempt reconciles it), so sending several nights adds no retries. Activation
+          // and delivery keep their own outcomes.
           let sentAttemptId: string | undefined;
           let sentAt = 0;
           const continued = (attemptId: string) => ({
@@ -495,6 +501,17 @@ export function createChannexManagementProvider(config: {
                 );
               }
               await input.onProgress?.();
+              if (sentAttemptId !== undefined) {
+                // The turn's last send is reconciled here, so ending now leaves nothing pending.
+                if (
+                  sends >= pacing.maxSends ||
+                  pacing.now() - turnStarted >= pacing.turnBudgetMs ||
+                  pacing.stopping()
+                )
+                  return continued(sentAttemptId);
+                // Space sends for Channex before the next night is claimed.
+                await pacing.sleep(Math.max(0, sentAt + pacing.spacingMs - pacing.now()));
+              }
               const prepared = await config.prepareRoomAvailability(lease, readClosedUpload);
               if (prepared.kind === "room_availability_current") {
                 if (config.activatePublishedOffers) {
@@ -599,8 +616,6 @@ export function createChannexManagementProvider(config: {
                 }
                 break;
               } else if (prepared.kind === "prepared") {
-                if (sentAttemptId !== undefined)
-                  await pacing.sleep(Math.max(0, sentAt + pacing.spacingMs - pacing.now()));
                 const result = await prepared.dispatch(async (request, signal) => {
                   if (request.method !== "POST" || request.path !== "/api/v1/availability")
                     throw new Error("Invalid Channex availability scope.");
@@ -618,8 +633,8 @@ export function createChannexManagementProvider(config: {
                   sends++;
                   sentAttemptId = result.attemptId;
                   sentAt = pacing.now();
-                  if (sends >= pacing.maxSends || sentAt - turnStarted >= pacing.turnBudgetMs)
-                    return continued(sentAttemptId);
+                  // Unpaced (the default): one send per turn, reconciled by the next attempt.
+                  if (pacing.maxSends <= 1) return continued(sentAttemptId);
                   await input.onProgress?.();
                   continue;
                 }
