@@ -616,45 +616,57 @@ WITH mapped AS (
       'date_from',service_date::text,'date_to',service_date::text,
       'availability',available_count))) AS current_request
   FROM candidates
+), covered AS MATERIALIZED (
+  -- VAY-2108: every reconciled write of the window, read once. As a NOT EXISTS correlated per
+  -- night, the worker login's row security ran for each candidate night against every stored
+  -- write, and the scan passed the 5 s statement timeout at about a thousand reconciled nights of
+  -- one hotel. The night-independent checks live here, the per-night ones in uncovered.
+  SELECT attempt.mapping_id,attempt.room_type_id,attempt.external_room_type_id,
+    attempt.service_date,attempt.available_count,attempt.inventory_evidence,attempt.request_body,
+    attempt.reconciliation_evidence->'availability' AS availability
+  FROM pms.channex_room_availability_attempts attempt
+  JOIN pms.channex_room_availability_receipts receipt ON receipt.attempt_id=attempt.id
+  JOIN pms.channex_room_availability_reconciliation_attestations attestation
+    ON attestation.attempt_id=attempt.id AND attestation.receipt_id=receipt.id
+  WHERE attempt.state='reconciled' AND attempt.property_id=$1
+    AND attempt.connection_id=$2 AND attempt.binding_generation=$4
+    AND attempt.external_property_id=$3
+    AND attempt.service_date BETWEEN $5::date AND $6::date
+    AND ($8::uuid IS NULL OR attempt.room_type_id=$8::uuid)
+    AND attempt.reconciliation_evidence->>'schemaVersion'='1'
+    AND attempt.reconciliation_evidence->>'completionBasis'='finished_task_fifo'
+    AND attempt.reconciliation_evidence->>'observationsSha256' ~ '^[a-f0-9]{64}$'
+    AND attempt.reconciliation_evidence->>'inventoryEvidenceSha256' ~ '^[a-f0-9]{64}$'
+    AND attempt.inventory_evidence_sha256 IS NOT NULL
+    AND attempt.inventory_evidence_sha256=
+      attempt.reconciliation_evidence->>'inventoryEvidenceSha256'
+    AND attestation.inventory_evidence_sha256=attempt.inventory_evidence_sha256
+    AND attestation.observations_sha256=
+      attempt.reconciliation_evidence->>'observationsSha256'
+    AND attestation.reconciliation_evidence=attempt.reconciliation_evidence
+    AND receipt.id::text=attempt.reconciliation_evidence->>'originalReceiptId'
+    AND receipt.outcome='complete_json' AND receipt.http_status=200
+    AND NOT receipt.has_warnings AND receipt.warning_reason IS NULL
+    AND cardinality(receipt.task_ids) BETWEEN 1 AND 100
+    AND cardinality(receipt.task_ids)=(SELECT count(DISTINCT task) FROM unnest(receipt.task_ids) task)
+    AND attempt.reconciliation_evidence->'taskCount'=to_jsonb(cardinality(receipt.task_ids))
+    AND (SELECT count(*) FROM pms.channex_room_availability_receipts other
+      WHERE other.attempt_id=attempt.id)=1
 ), uncovered AS (
+  -- A join, not NOT EXISTS under the OR, so the match can hash; duplicates are harmless here.
   SELECT evidence.* FROM evidence
-  WHERE valid IS DISTINCT FROM TRUE OR NOT EXISTS (
-    SELECT 1 FROM pms.channex_room_availability_attempts attempt
-    JOIN pms.channex_room_availability_receipts receipt ON receipt.attempt_id=attempt.id
-    JOIN pms.channex_room_availability_reconciliation_attestations attestation
-      ON attestation.attempt_id=attempt.id AND attestation.receipt_id=receipt.id
-    WHERE attempt.state='reconciled' AND attempt.property_id=$1
-      AND attempt.connection_id=$2 AND attempt.mapping_id=evidence.id
-      AND attempt.binding_generation=$4 AND attempt.room_type_id=evidence.mapped_room_type_id
-      AND attempt.external_property_id=$3
-      AND attempt.external_room_type_id=evidence.external_room_type_id
-      AND attempt.service_date=evidence.service_date
-      AND attempt.available_count=evidence.available_count
-      AND attempt.inventory_evidence=evidence.current_evidence
-      AND attempt.request_body=evidence.current_request
-      AND attempt.reconciliation_evidence->>'schemaVersion'='1'
-      AND attempt.reconciliation_evidence->>'completionBasis'='finished_task_fifo'
-      AND attempt.reconciliation_evidence->>'observationsSha256' ~ '^[a-f0-9]{64}$'
-      AND attempt.reconciliation_evidence->>'inventoryEvidenceSha256' ~ '^[a-f0-9]{64}$'
-      AND attempt.inventory_evidence_sha256 IS NOT NULL
-      AND attempt.inventory_evidence_sha256=
-        attempt.reconciliation_evidence->>'inventoryEvidenceSha256'
-      AND attestation.inventory_evidence_sha256=attempt.inventory_evidence_sha256
-      AND attestation.observations_sha256=
-        attempt.reconciliation_evidence->>'observationsSha256'
-      AND attestation.reconciliation_evidence=attempt.reconciliation_evidence
-      AND receipt.id::text=attempt.reconciliation_evidence->>'originalReceiptId'
-      AND receipt.outcome='complete_json' AND receipt.http_status=200
-      AND NOT receipt.has_warnings AND receipt.warning_reason IS NULL
-      AND cardinality(receipt.task_ids) BETWEEN 1 AND 100
-      AND cardinality(receipt.task_ids)=(SELECT count(DISTINCT task) FROM unnest(receipt.task_ids) task)
-      AND attempt.reconciliation_evidence->'taskCount'=to_jsonb(cardinality(receipt.task_ids))
-      AND attempt.reconciliation_evidence->'availability'=jsonb_build_object(
-        'kind','availability_observed','externalPropertyId',$3::text,
-        'externalRoomTypeId',evidence.external_room_type_id,
-        'date',evidence.service_date::text,'availableCount',evidence.available_count)
-      AND (SELECT count(*) FROM pms.channex_room_availability_receipts other
-        WHERE other.attempt_id=attempt.id)=1)
+  LEFT JOIN covered
+    ON covered.mapping_id=evidence.id AND covered.room_type_id=evidence.mapped_room_type_id
+   AND covered.external_room_type_id=evidence.external_room_type_id
+   AND covered.service_date=evidence.service_date
+   AND covered.available_count=evidence.available_count
+   AND covered.inventory_evidence=evidence.current_evidence
+   AND covered.request_body=evidence.current_request
+   AND covered.availability=jsonb_build_object(
+     'kind','availability_observed','externalPropertyId',$3::text,
+     'externalRoomTypeId',evidence.external_room_type_id,
+     'date',evidence.service_date::text,'availableCount',evidence.available_count)
+  WHERE evidence.valid IS DISTINCT FROM TRUE OR covered.mapping_id IS NULL
 )
 SELECT mapped_room_type_id::text AS "roomTypeId",service_date::text AS date,valid
 FROM uncovered ORDER BY mapped_room_type_id::text COLLATE "C",service_date LIMIT 1`;
