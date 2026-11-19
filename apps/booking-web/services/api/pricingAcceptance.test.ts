@@ -340,7 +340,7 @@ it("returns a card payment step and confirms it with the same request key", asyn
   ).rejects.toThrow("confirmation could not be verified");
 });
 
-it("takes a vayada Payment card step: no connected account, the test-mode key it is paid with (VAY-2442)", async () => {
+it("takes a vayada Payment card step: no connected account, the test-mode or live-mode key it is paid with (VAY-2442)", async () => {
   const card = { ...quote, paymentMethod: "card", dueNowMinor: "20600", dueLaterMinor: "0" };
   const payment = {
     provider: "stripe",
@@ -358,14 +358,24 @@ it("takes a vayada Payment card step: no connected account, the test-mode key it
     acceptedAt: fresh.acceptedAt,
     payment,
   };
-  fetcher.mockResolvedValueOnce(new Response(JSON.stringify(required)));
-  await expect(
-    acceptPricingQuote("hotel", card as PublicBookingQuote, disclosure, guest),
-  ).resolves.toMatchObject({ kind: "payment_required", payment });
+  // A test hotel's payment comes with the test key, a live hotel's (real money) with the live key.
+  for (const valid of [payment, { ...payment, publishableKey: "pk_live_vayada123" }]) {
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...required, payment: valid })));
+    await expect(
+      acceptPricingQuote("hotel", card as PublicBookingQuote, disclosure, guest),
+    ).resolves.toMatchObject({ kind: "payment_required", payment: valid });
+  }
   for (const invalid of [
-    { ...payment, publishableKey: "pk_live_vayada123" },
     { ...payment, stripeAccountId: "acct_789" },
+    { ...payment, stripeAccountId: "acct_789", publishableKey: "pk_live_vayada123" },
     { ...payment, publishableKey: undefined },
+    { ...payment, publishableKey: "" },
+    { ...payment, publishableKey: "pk_vayada123" },
+    { ...payment, publishableKey: "pk_prod_vayada123" },
+    { ...payment, publishableKey: "pk_live_" },
+    { ...payment, publishableKey: "pk_live_vayada-123" },
+    { ...payment, publishableKey: "sk_live_vayada123" },
+    { ...payment, publishableKey: "rk_live_vayada123" },
   ]) {
     fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...required, payment: invalid })));
     await expect(

@@ -111,8 +111,9 @@ function parseCardPaymentRequired(
   const payment =
     exact(v.payment, keys) || exact(v.payment, [...keys, "publishableKey"]) ? v.payment : null;
   if (!payment) return null;
-  // A hotel's connected account, or vayada Payment (VAY-2442): no account and the test-mode
-  // publishable key of the Stripe account that takes the payment.
+  // A hotel's connected account, or vayada Payment (VAY-2442): no account and the publishable key
+  // of the Stripe account that takes the payment, test mode or live mode as the server routed the
+  // hotel (a live hotel's payment is real money and comes with the live key).
   const connect =
     !("publishableKey" in payment) &&
     typeof payment.stripeAccountId === "string" &&
@@ -120,7 +121,7 @@ function parseCardPaymentRequired(
   const vayada =
     payment.stripeAccountId === null &&
     typeof payment.publishableKey === "string" &&
-    /^pk_test_[A-Za-z0-9]+$/.test(payment.publishableKey);
+    /^pk_(test|live)_[A-Za-z0-9]+$/.test(payment.publishableKey);
   if (
     !uuid(v.bookingId) ||
     !bookingReference(v.bookingReference) ||
