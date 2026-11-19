@@ -748,6 +748,42 @@ describe("closed upload worker completion", () => {
     if (["capability", "lease"].includes(mode)) expect(reconcile).not.toHaveBeenCalled();
     if (mode !== "oversized") expect(fetcher).not.toHaveBeenCalled();
   });
+  it.each([
+    ["availability_dispatch_stale", "provider_unavailable"],
+    ["dispatch_already_used", "invalid_state"],
+  ] as const)(
+    "retries a room-night whose final check stopped it before the POST (%s, VAY-2108)",
+    async (reason, code) => {
+      const fetcher = vi.fn<typeof fetch>();
+      const dispatch = vi.fn(async () => ({ kind: "unavailable" as const, reason }));
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        plans: { plan: async () => ({ requests: [] }) },
+        canSyncAri: true,
+        fetch: fetcher,
+        reconcileClosedUploads: async () => ({
+          kind: "pending_uploads_reconciled" as const,
+          count: 0,
+        }),
+        dispatchClosedUpload: async () => ({ kind: "no_closed_upload" as const }),
+        reconcileRoomAvailability: async () => ({
+          kind: "pending_availability_reconciled" as const,
+          count: 0,
+        }),
+        prepareRoomAvailability: (async () => ({
+          kind: "prepared" as const,
+          roomTypeId: "room-1",
+          date: "2027-06-08",
+          dispatch,
+        })) as never,
+      });
+      const result = await provider.execute(job("sync_ari"), { workerId: "worker" });
+      expect(result).toMatchObject({ ok: false, code });
+      expect(dispatch).toHaveBeenCalledOnce();
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
   it("does not run pricing completion for booking synchronization", async () => {
     const reconcile = vi.fn();
     const provider = createChannexManagementProvider({

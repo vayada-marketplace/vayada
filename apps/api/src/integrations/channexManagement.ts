@@ -569,6 +569,15 @@ export function createChannexManagementProvider(config: {
                   code: "availability_upload_retained",
                   attemptId: result.attemptId,
                 };
+              // VAY-2108: the final check before the POST failed (a lock wait, or the night or
+              // its owner changed). Nothing was sent and the night is marked not_sent, so the
+              // job retries and selects the night again from current evidence. Before, one such
+              // check dead-lettered the job mid-pass.
+              if (result.reason === "availability_dispatch_stale")
+                return failure(
+                  "provider_unavailable",
+                  new Error("Channex availability was not sent; the next attempt retries it."),
+                );
               return failure(
                 "invalid_state",
                 new Error("Channex availability dispatch is unavailable."),
