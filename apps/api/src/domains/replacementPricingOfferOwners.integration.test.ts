@@ -2434,6 +2434,50 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows[0].count,
     ).toBe(1);
   });
+  it("activates when a room's availability recheck takes longer than 5 s (VAY-2108)", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    // The first recheck takes 6 s, about what a room's scan can take at Tiga's size. A one-time
+    // filter, so it sleeps even when every night is covered.
+    let slowScans = 0;
+    const slowFirstScan = (text: unknown) => {
+      if (typeof text !== "string" || !text.includes("FROM uncovered ORDER BY") || slowScans)
+        return text;
+      slowScans += 1;
+      return text.replace(
+        "FROM uncovered ORDER BY",
+        "FROM uncovered WHERE (SELECT count(*) FROM pg_sleep(6))=1 ORDER BY",
+      );
+    };
+    const bound = <T extends object>(target: T, key: string | symbol) => {
+      const value = Reflect.get(target, key, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    };
+    const slowPool = new Proxy(pool, {
+      get: (target, key) =>
+        key !== "connect"
+          ? bound(target, key)
+          : async () => {
+              const client = await target.connect();
+              return new Proxy(client, {
+                get: (inner, name) =>
+                  name !== "query"
+                    ? bound(inner, name)
+                    : (text: unknown, values?: unknown) =>
+                        inner.query(slowFirstScan(text) as string, values as unknown[]),
+              });
+            },
+    });
+    const started = performance.now();
+    // Before: the 5 s budget of the activation transaction cancelled the recheck.
+    expect(await activatePublishedChannexOffers(slowPool, f.input)).toEqual({
+      kind: "all_targets_active",
+      count: 2,
+    });
+    expect(slowScans).toBe(1);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(6_000);
+  }, 30_000);
   it("activates exactly once after complete ARI and current room availability", async () => {
     const f = await initialAriFixture();
     await seedCurrentAvailability(f);
