@@ -423,7 +423,7 @@ type PromoCodeRow = {
 
 // VAY-2390: quotes charge in the PMS pricing currency, so promo amounts are in it; before the hotel
 // has prices, in Booking settings' default.
-const PROPERTY_CURRENCY_SQL = `COALESCE(
+export const PROPERTY_CURRENCY_SQL = `COALESCE(
   (SELECT currency::text FROM pms.property_pricing_settings WHERE property_id = $1),
   (SELECT default_currency::text FROM booking.booking_settings WHERE property_id = $1)
 )`;

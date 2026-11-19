@@ -11,6 +11,9 @@ import {
   registerBookingRoomSortingRoutes,
   type BookingRoomSortingRoutesOptions,
 } from "./routes/bookingRoomSorting.js";
+import type { PartnerConnectionsRepository } from "./domains/partnerConnections.js";
+import { registerPartnerApiRoutes } from "./routes/partnerApi.js";
+import { registerPartnerConnectionRoutes } from "./routes/partnerConnections.js";
 import {
   registerAccountBookingPageRoutes,
   type AccountBookingPageRoutesOptions,
@@ -358,6 +361,11 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingGuestChoices?: BookingGuestChoiceRoutesOptions;
   bookingLocationMap?: BookingLocationMapRoutesOptions;
   bookingRoomSorting?: BookingRoomSortingRoutesOptions;
+  /** VAY-2436: partner apps (/partner) and the hotel's approval and Disconnect (/api/booking). */
+  partnerConnections?: {
+    repository: PartnerConnectionsRepository;
+    propertyAccessRepository: PropertyAccessRepository;
+  };
   accountBookingPage?: AccountBookingPageRoutesOptions;
   bookingHostNotifications?: BookingHostNotificationRoutesOptions;
   financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
@@ -560,6 +568,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     } = options.auth;
     app.register(backendAuthPlugin, {
       ...authOptions,
+      // Partner apps send their own tokens to /partner; they are never WorkOS tokens (VAY-2436).
+      skipPathPrefixes: ["/partner/"],
       authorizationResolver: createAuthorizationResolver(
         rolePermissionRepository,
         entitlementRepository,
@@ -859,6 +869,16 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/booking",
       ...options.bookingRoomSorting,
     });
+  if (options.partnerConnections) {
+    app.register(registerPartnerApiRoutes, {
+      prefix: "/partner",
+      repository: options.partnerConnections.repository,
+    });
+    app.register(registerPartnerConnectionRoutes, {
+      prefix: "/api/booking",
+      ...options.partnerConnections,
+    });
+  }
   if (options.accountBookingPage)
     app.register(registerAccountBookingPageRoutes, {
       prefix: "/api/booking",

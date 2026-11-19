@@ -36,8 +36,13 @@ function LoginContent() {
 
   const redirectAfterLogin = useCallback(async () => {
     // /handoff and /setup carry their own context (entry product, step, PMS return); the
-    // setup page checks access itself, so the booking guard must not rewrite them.
-    if (["/handoff", "/setup"].includes(new URL(returnTo, "https://vayada.local").pathname)) {
+    // setup page checks access itself, so the booking guard must not rewrite them. Neither may it
+    // rewrite a partner app's approval page, which carries the app's request (VAY-2436).
+    if (
+      ["/handoff", "/setup", "/partner/oauth/authorize"].includes(
+        new URL(returnTo, "https://vayada.local").pathname,
+      )
+    ) {
       router.replace(returnTo);
       return;
     }

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { BookDirectBenefitsPage } from "@/components/settings/BookDirectBenefitsPage";
+import { ConnectedAppsPage } from "@/components/settings/ConnectedAppsPage";
 import { GuestFormPage } from "@/components/settings/GuestFormPage";
 import { MultiPropertyBookingPage } from "@/components/settings/MultiPropertyBookingPage";
 import { DataExportPage } from "@/components/settings/DataExportPage";
@@ -27,6 +28,7 @@ export default async function SettingsRoute({
   if (page === "guest-form") return <GuestFormPage />;
   if (page === "multi-property") return <MultiPropertyBookingPage />;
   if (page === "privacy") return <PrivacyPage />;
+  if (page === "connected-apps") return <ConnectedAppsPage />;
   if (page === "data-export") return <DataExportPage />;
   if (page === "delete-account") return <DeleteAccountPage />;
   if (!isSettingsPage(page)) notFound();

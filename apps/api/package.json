@@ -22,6 +22,8 @@
     "pms:pricing:publication-freshness": "tsx src/cli/pricingPublicationFreshness.ts",
     "pms:pricing:publication-freshness:dist": "node dist/cli/pricingPublicationFreshness.js",
     "identity:workos-user-resync:dist": "node dist/cli/workosUserResync.js",
+    "partner:register-app": "tsx src/cli/registerPartnerApp.ts",
+    "partner:register-app:dist": "node dist/cli/registerPartnerApp.js",
     "pretypecheck": "npm run build:backend-packages",
     "typecheck": "tsc --noEmit"
   },

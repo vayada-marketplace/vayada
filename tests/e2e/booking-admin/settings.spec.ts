@@ -1121,6 +1121,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
       ["Room Sorting", "/settings/room-sorting"],
       ["Guest Form", "/settings/guest-form"],
       ["Billing", "/settings/billing"],
+      // VAY-2436: partner apps the hotel allowed.
+      ["Connected apps", "/settings/connected-apps"],
       ["Privacy & data", "/settings/privacy"],
       ["Account", null],
     ];
