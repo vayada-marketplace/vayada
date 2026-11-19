@@ -4517,6 +4517,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       availabilityPacing?: Parameters<
         typeof createChannexManagementProvider
       >[0]["availabilityPacing"],
+      availabilityPool: pg.Pool = channelPool,
     ) {
       // The clock the availability steps check Channex's cut-off against (VAY-2108).
       let clock: Date | null = null;
@@ -4572,7 +4573,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         reconcileRoomAvailability: (lease, get) =>
           reconcilePendingChannexRoomAvailability(channelPool, f.repository, lease, get, now),
         prepareRoomAvailability: (lease, get) =>
-          prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease, get, now),
+          prepareNextChannexRoomAvailabilityDispatch(
+            availabilityPool,
+            f.repository,
+            lease,
+            get,
+            now,
+          ),
       });
       const step = async () => {
         // A continued upload waits one second before its next attempt; skip the wait.
@@ -4704,6 +4711,63 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       expect(channex.nights()).toEqual({ [d0]: 2, [d1]: 2, [d2]: 2, [d3]: 2 });
       expect(await schedule.enqueue()).toBe(0);
     });
+    it("selects the next night when the scan takes longer than 5 s (VAY-2108)", async () => {
+      const f = await heldHotelFixture();
+      const [d0, d1, d2, d3] = f.days;
+      const channex = fakeChannex(f);
+      // The first next-night scan takes 6 s, as Tiga's did at about 1,040 reconciled writes.
+      let slowScans = 0;
+      const limits: unknown[] = [];
+      const slowFirstScan = (text: unknown, values?: unknown) => {
+        if (typeof text === "string" && text.includes("set_config('statement_timeout'"))
+          limits.push((values as unknown[])[0]);
+        if (typeof text !== "string" || !text.includes("FROM uncovered ORDER BY") || slowScans)
+          return text;
+        slowScans += 1;
+        return text.replace(
+          "FROM uncovered ORDER BY",
+          "FROM uncovered CROSS JOIN pg_sleep(6) ORDER BY",
+        );
+      };
+      const bound = <T extends object>(target: T, key: string | symbol) => {
+        const value = Reflect.get(target, key, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      };
+      const pool = new Proxy(channelPool, {
+        get: (target, key) =>
+          key !== "connect"
+            ? bound(target, key)
+            : async () => {
+                const client = await target.connect();
+                return new Proxy(client, {
+                  get: (inner, name) =>
+                    name !== "query"
+                      ? bound(inner, name)
+                      : (text: unknown, values?: unknown) =>
+                          inner.query(slowFirstScan(text, values) as string, values as unknown[]),
+                });
+              },
+      });
+      const worker = managementWorker(
+        f,
+        channex,
+        { ariSyncMutating: true, claimedOwnedPropertyIds: [f.propertyId] },
+        { maxSends: 25, sleep: async () => {} },
+        pool,
+      );
+      const schedule = createPgChannexAriSchedule(TEST_DATABASE_URL!, {
+        propertyIds: [f.propertyId],
+      });
+      expect(await schedule.enqueue()).toBe(1);
+      // Before: the slow scan hit the transaction's 5 s limit and the turn failed.
+      expect(await worker.drain()).toEqual(["succeeded"]);
+      expect(slowScans).toBe(1);
+      expect(channex.sent()).toEqual([d0, d1, d2, d3].map((date) => ({ date, availability: 2 })));
+      // Each scan runs under 30 s and puts the transaction's 5 s back right after.
+      expect(limits.length).toBeGreaterThanOrEqual(2);
+      expect(limits).toEqual(limits.map((_, index) => (index % 2 ? "5s" : "30s")));
+      expect(await schedule.enqueue()).toBe(0);
+    }, 30_000);
     it("lowers each held night once and raises it once on release, with the hold on the API login", async () => {
       const f = await heldHotelFixture();
       const [d0, d1, d2, d3] = f.days;
