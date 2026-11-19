@@ -276,7 +276,10 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexFeedPulls } from "./jobs/channexFeedPull.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
-import { createChannexManagementProvider } from "./integrations/channexManagement.js";
+import {
+  CHANNEX_PRODUCTION_AVAILABILITY_PACING,
+  createChannexManagementProvider,
+} from "./integrations/channexManagement.js";
 import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
 import { resolveChannexManagementDatabaseRouting } from "./channexManagementDatabaseRouting.js";
 import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
@@ -1382,6 +1385,8 @@ const channexManagementProvider =
         apiKey: config.channexManagement.apiKey,
         plans: channexManagementPlans,
         canSyncAri: config.channexManagement.capabilityModes.ariSync === "mutating",
+        // VAY-2108: several room-nights per sync turn, spaced for Channex's rate limit.
+        availabilityPacing: CHANNEX_PRODUCTION_AVAILABILITY_PACING,
         dispatchClosedUpload: channexUploadReconciliationPool
           ? (lease, ports) =>
               dispatchNextChannexClosedUpload(channexUploadReconciliationPool, lease, ports)

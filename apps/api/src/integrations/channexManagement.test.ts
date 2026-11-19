@@ -784,6 +784,128 @@ describe("closed upload worker completion", () => {
       expect(fetcher).not.toHaveBeenCalled();
     },
   );
+  describe("paced availability turn (VAY-2108)", () => {
+    function pacedProvider(
+      steps: ReadonlyArray<"send" | "stale" | "current" | "throw">,
+      options: {
+        maxSends?: number;
+        turnBudgetMs?: number;
+        reconcile?: "ok" | "settling" | "throw";
+      } = {},
+    ) {
+      let clock = 0,
+        step = 0,
+        reconciles = 0;
+      const sleeps: number[] = [];
+      const sent: string[] = [];
+      const activate = vi.fn(async () => ({ kind: "no_targets" as const }));
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        plans: { plan: async () => ({ requests: [] }) },
+        canSyncAri: true,
+        fetch: vi.fn<typeof fetch>(),
+        availabilityPacing: {
+          settleMs: 3_000,
+          spacingMs: 6_100,
+          maxSends: options.maxSends ?? 25,
+          turnBudgetMs: options.turnBudgetMs ?? 180_000,
+          now: () => clock,
+          sleep: async (ms) => {
+            sleeps.push(ms);
+            clock += ms;
+          },
+        },
+        reconcileClosedUploads: async () => ({
+          kind: "pending_uploads_reconciled" as const,
+          count: 0,
+        }),
+        dispatchClosedUpload: async () => ({ kind: "no_closed_upload" as const }),
+        reconcileRoomAvailability: (async () => {
+          clock += 1_000;
+          reconciles++;
+          if (reconciles > 1 && options.reconcile === "throw") throw new Error("task unfinished");
+          if (reconciles > 1 && options.reconcile === "settling")
+            return { kind: "unavailable" as const, reason: "availability_send_settling" };
+          return { kind: "pending_availability_reconciled" as const, count: 0 };
+        }) as never,
+        prepareRoomAvailability: (async () => {
+          clock += 500;
+          const now = steps[step++] ?? "current";
+          if (now === "throw") throw new Error("selection failed");
+          if (now === "current")
+            return {
+              kind: "room_availability_current" as const,
+              from: "2026-11-19",
+              through: "2027-11-19",
+              roomCount: 4,
+              dayCount: 366,
+            };
+          return {
+            kind: "prepared" as const,
+            roomTypeId: "room-1",
+            date: `night-${step}`,
+            dispatch: async () => {
+              clock += 1_500;
+              if (now === "stale")
+                return { kind: "unavailable" as const, reason: "availability_dispatch_stale" };
+              sent.push(`attempt-${step}`);
+              return { kind: "retained" as const, attemptId: `attempt-${step}` };
+            },
+          };
+        }) as never,
+        activatePublishedOffers: activate as never,
+      });
+      const run = () => provider.execute(job("sync_ari"), { workerId: "worker" });
+      return { run, sleeps, sent, activate, reconciles: () => reconciles };
+    }
+
+    it("sends several nights in one turn, spaced for Channex, then activates", async () => {
+      const turn = pacedProvider(["send", "send", "send"]);
+      expect(await turn.run()).toEqual({ ok: true });
+      expect(turn.sent).toEqual(["attempt-1", "attempt-2", "attempt-3"]);
+      // Each later send waits 3 s, reconciles the last one, then keeps 6.1 s since that send
+      // returned: 3 s settle + 1 s reconcile + 0.5 s prepare = 4.5 s, so 1.6 s more.
+      expect(turn.sleeps).toEqual([3_000, 1_600, 3_000, 1_600, 3_000]);
+      expect(turn.reconciles()).toBe(4);
+      expect(turn.activate).toHaveBeenCalledOnce();
+    });
+    it("ends the turn as a continuation at the send limit", async () => {
+      const turn = pacedProvider(["send", "send", "send"], { maxSends: 2 });
+      expect(await turn.run()).toEqual({
+        ok: false,
+        code: "availability_upload_retained",
+        attemptId: "attempt-2",
+      });
+      expect(turn.sent).toEqual(["attempt-1", "attempt-2"]);
+    });
+    it("ends the turn as a continuation once its time budget is used", async () => {
+      // The second send returns at 9.1 s, past a 9 s budget.
+      const turn = pacedProvider(["send", "send", "send"], { turnBudgetMs: 9_000 });
+      expect(await turn.run()).toEqual({
+        ok: false,
+        code: "availability_upload_retained",
+        attemptId: "attempt-2",
+      });
+    });
+    it.each([
+      ["a send still settling", { reconcile: "settling" as const }, ["send", "send"]],
+      ["a reconcile error", { reconcile: "throw" as const }, ["send", "send"]],
+      ["a stopped final check", {}, ["send", "stale"]],
+      ["a selection error", {}, ["send", "throw"]],
+    ] as const)(
+      "after a send, %s ends the turn as a continuation, never a failure",
+      async (_name, options, steps) => {
+        const turn = pacedProvider(steps, options);
+        expect(await turn.run()).toEqual({
+          ok: false,
+          code: "availability_upload_retained",
+          attemptId: "attempt-1",
+        });
+        expect(turn.activate).not.toHaveBeenCalled();
+      },
+    );
+  });
   it("does not run pricing completion for booking synchronization", async () => {
     const reconcile = vi.fn();
     const provider = createChannexManagementProvider({

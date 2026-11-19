@@ -109,12 +109,42 @@ export class ChannexAriMappingMissingError extends Error {
   }
 }
 
+/** VAY-2108: one sync turn sends several room-nights instead of one. Channex allows 10
+ * availability requests a minute per property, so sends are spaced; each send is reconciled in
+ * the same turn after Channex had time to finish its task. A turn ends after `maxSends` sends or
+ * `turnBudgetMs`, well inside the 5-minute job lease (refreshed on every send). */
+export type ChannexAvailabilityPacing = Readonly<{
+  /** Wait after a send before reconciling it. */
+  settleMs: number;
+  /** Minimum time between two availability POSTs of one turn. */
+  spacingMs: number;
+  maxSends: number;
+  turnBudgetMs: number;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+}>;
+
+/** One send per turn unless the caller opts in (the production wiring does). */
+const DEFAULT_AVAILABILITY_PACING: ChannexAvailabilityPacing = {
+  settleMs: 3_000,
+  spacingMs: 6_100,
+  maxSends: 1,
+  turnBudgetMs: 180_000,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: () => Date.now(),
+};
+
+/** Production pacing: up to 25 room-nights per turn (about 8 a minute, under Channex's 10). */
+export const CHANNEX_PRODUCTION_AVAILABILITY_PACING = { maxSends: 25 } as const;
+
 export function createChannexManagementProvider(config: {
   apiBaseUrl: string;
   apiKey: string;
   plans: ChannexManagementPlanPort;
   fetch?: typeof fetch;
   canSyncAri?: boolean;
+  /** VAY-2108: how one sync turn paces its room-night availability sends (defaults below). */
+  availabilityPacing?: Partial<ChannexAvailabilityPacing>;
   dispatchClosedUpload?: (
     lease: Parameters<typeof dispatchNextChannexClosedUpload>[1],
     ports: Parameters<typeof dispatchNextChannexClosedUpload>[2],
@@ -436,159 +466,187 @@ export function createChannexManagementProvider(config: {
             attemptNumber: job.attemptNumber,
             workerId: input.workerId,
           };
+          const pacing = { ...DEFAULT_AVAILABILITY_PACING, ...config.availabilityPacing };
+          const turnStarted = pacing.now();
+          // VAY-2108: the last room-night this turn sent. Once one is sent, anything that is not
+          // ready yet ends the turn exactly as one send did before (the next attempt reconciles
+          // it), so a turn that sends several nights never costs the job a retry.
+          let sentAttemptId: string | undefined;
+          let sentAt = 0;
+          const continued = (attemptId: string) => ({
+            ok: false as const,
+            code: "availability_upload_retained" as const,
+            attemptId,
+          });
           try {
-            const reconciled = await config.reconcileRoomAvailability(lease, readClosedUpload);
-            if (reconciled.kind !== "pending_availability_reconciled")
-              return failure(
-                // VAY-2352: a lost response is resent once it has settled, on a later try.
-                "reason" in reconciled &&
-                  (reconciled.reason === "availability_reconciliation_batch_pending" ||
-                    reconciled.reason === "availability_send_settling")
-                  ? "provider_unavailable"
-                  : "invalid_state",
-                new Error("Saved Channex availability still requires reconciliation."),
-              );
-            await input.onProgress?.();
-            const prepared = await config.prepareRoomAvailability(lease, readClosedUpload);
-            if (prepared.kind === "room_availability_current") {
-              if (config.activatePublishedOffers) {
-                // VAY-2108: activation rechecks the same nights, from after a Channex cut-off.
-                const activated = await config.activatePublishedOffers(lease, {
-                  availabilityFrom: prepared.from,
-                });
-                // VAY-2108 D3: after activation, keep every active rate plan current. A target
-                // whose configuration or binding changed (D5) does not block the others: the
-                // delivery step skips and reports it per target. Only a full sync_ari job
-                // delivers; a provisioning job's work ends at activation (0520 guard).
-                const deliveries =
-                  job.input.operationType === "sync_ari" &&
-                  config.reconcileOfferDeliveries &&
-                  config.prepareOfferDelivery
-                    ? {
-                        reconcile: config.reconcileOfferDeliveries,
-                        prepare: config.prepareOfferDelivery,
-                      }
-                    : null;
-                const changedTarget =
-                  activated.kind === "unavailable" &&
-                  (activated.reason === "active_offer_configuration_changed" ||
-                    activated.reason === "active_offer_binding_changed");
-                if (activated.kind === "all_targets_active" || (changedTarget && deliveries)) {
-                  if (!deliveries) return { ok: true };
-                  const delivered = await deliveries.reconcile(lease, readClosedUpload);
-                  if (delivered.kind !== "pending_deliveries_reconciled")
-                    return failure(
-                      transientDeliveryReason(delivered.reason)
-                        ? "provider_unavailable"
-                        : "invalid_state",
-                      new Error("Saved Channex offer deliveries still require reconciliation."),
-                    );
-                  await input.onProgress?.();
-                  const delivery = await deliveries.prepare(lease);
-                  if (delivery.kind === "offer_ari_current")
-                    return {
-                      ok: true,
-                      // Activation's own report stays visible: with a changed sibling, D5 does
-                      // not activate the hotel's pending targets either (follow-up in the contract).
-                      skippedOfferTargets: changedTarget
-                        ? [
-                            { targetId: "activation", reason: activated.reason },
-                            ...delivery.skipped,
-                          ]
-                        : delivery.skipped,
-                    };
-                  if (delivery.kind !== "prepared")
-                    return failure(
-                      transientDeliveryReason(delivery.reason)
-                        ? "provider_unavailable"
-                        : "invalid_state",
-                      new Error("Channex offer delivery is unavailable."),
-                    );
-                  const sent = await delivery.dispatch(async (request, signal) => {
-                    if (request.method !== "POST" || request.path !== "/api/v1/restrictions")
-                      throw new Error("Invalid Channex delivery scope.");
-                    signal.throwIfAborted();
-                    return fetcher(new URL(request.path, apiBaseUrl), {
-                      method: "POST",
-                      headers: { "user-api-key": apiKey, "content-type": "application/json" },
-                      body: JSON.stringify(request.body),
-                      signal,
-                      redirect: "error",
-                    });
-                  });
-                  if (sent.kind === "receipt_pending") await sent.persist();
-                  if (
-                    sent.kind === "delivery_failed" ||
-                    (sent.kind === "receipt_pending" && sent.failed)
-                  )
-                    return failure(
-                      "provider_unavailable",
-                      new Error("Channex offer delivery was not accepted."),
-                    );
-                  if (sent.kind === "retained" || sent.kind === "receipt_pending")
-                    return {
-                      ok: false,
-                      code: "offer_delivery_retained",
-                      attemptId: sent.deliveryId,
-                    };
-                  return failure(
-                    transientDeliveryReason(sent.reason) ? "provider_unavailable" : "invalid_state",
-                    new Error("Channex offer delivery dispatch is unavailable."),
-                  );
-                }
-                if (activated.kind !== "no_targets")
-                  return failure(
-                    activated.reason === "target_activation_pending"
-                      ? "provider_unavailable"
-                      : "invalid_state",
-                    new Error("Verified Channex offer activation is unavailable."),
-                  );
-                // VAY-2108 D6: a hotel without published offer targets yet has sent its room
-                // availability and has no rates to deliver; the legacy plan has nothing for it.
-                // This holds with or without the delivery switch, so an owned hotel's scheduled
-                // sync never dead-letters before its first offer.
-                return { ok: true };
-              }
-            } else if (prepared.kind === "prepared") {
-              const result = await prepared.dispatch(async (request, signal) => {
-                if (request.method !== "POST" || request.path !== "/api/v1/availability")
-                  throw new Error("Invalid Channex availability scope.");
-                signal.throwIfAborted();
-                return fetcher(new URL(request.path, apiBaseUrl), {
-                  method: "POST",
-                  headers: { "user-api-key": apiKey, "content-type": "application/json" },
-                  body: JSON.stringify(request.body),
-                  signal,
-                  redirect: "error",
-                });
-              });
-              if (result.kind === "receipt_pending") await result.persist();
-              if (result.kind === "retained" || result.kind === "receipt_pending")
-                return {
-                  ok: false,
-                  code: "availability_upload_retained",
-                  attemptId: result.attemptId,
-                };
-              // VAY-2108: the final check before the POST failed (a lock wait, or the night or
-              // its owner changed). Nothing was sent and the night is marked not_sent, so the
-              // job retries and selects the night again from current evidence. Before, one such
-              // check dead-lettered the job mid-pass.
-              if (result.reason === "availability_dispatch_stale")
+            for (let sends = 0; ; ) {
+              if (sentAttemptId !== undefined) await pacing.sleep(pacing.settleMs);
+              const reconciled = await config.reconcileRoomAvailability(lease, readClosedUpload);
+              if (reconciled.kind !== "pending_availability_reconciled") {
+                if (sentAttemptId !== undefined) return continued(sentAttemptId);
                 return failure(
-                  "provider_unavailable",
-                  new Error("Channex availability was not sent; the next attempt retries it."),
+                  // VAY-2352: a lost response is resent once it has settled, on a later try.
+                  "reason" in reconciled &&
+                    (reconciled.reason === "availability_reconciliation_batch_pending" ||
+                      reconciled.reason === "availability_send_settling")
+                    ? "provider_unavailable"
+                    : "invalid_state",
+                  new Error("Saved Channex availability still requires reconciliation."),
                 );
-              return failure(
-                "invalid_state",
-                new Error("Channex availability dispatch is unavailable."),
-              );
-            } else {
-              return failure(
-                "invalid_state",
-                new Error("Current Channex availability is unavailable."),
-              );
+              }
+              await input.onProgress?.();
+              const prepared = await config.prepareRoomAvailability(lease, readClosedUpload);
+              if (prepared.kind === "room_availability_current") {
+                if (config.activatePublishedOffers) {
+                  // VAY-2108: activation rechecks the same nights, from after a Channex cut-off.
+                  const activated = await config.activatePublishedOffers(lease, {
+                    availabilityFrom: prepared.from,
+                  });
+                  // VAY-2108 D3: after activation, keep every active rate plan current. A target
+                  // whose configuration or binding changed (D5) does not block the others: the
+                  // delivery step skips and reports it per target. Only a full sync_ari job
+                  // delivers; a provisioning job's work ends at activation (0520 guard).
+                  const deliveries =
+                    job.input.operationType === "sync_ari" &&
+                    config.reconcileOfferDeliveries &&
+                    config.prepareOfferDelivery
+                      ? {
+                          reconcile: config.reconcileOfferDeliveries,
+                          prepare: config.prepareOfferDelivery,
+                        }
+                      : null;
+                  const changedTarget =
+                    activated.kind === "unavailable" &&
+                    (activated.reason === "active_offer_configuration_changed" ||
+                      activated.reason === "active_offer_binding_changed");
+                  if (activated.kind === "all_targets_active" || (changedTarget && deliveries)) {
+                    if (!deliveries) return { ok: true };
+                    const delivered = await deliveries.reconcile(lease, readClosedUpload);
+                    if (delivered.kind !== "pending_deliveries_reconciled")
+                      return failure(
+                        transientDeliveryReason(delivered.reason)
+                          ? "provider_unavailable"
+                          : "invalid_state",
+                        new Error("Saved Channex offer deliveries still require reconciliation."),
+                      );
+                    await input.onProgress?.();
+                    const delivery = await deliveries.prepare(lease);
+                    if (delivery.kind === "offer_ari_current")
+                      return {
+                        ok: true,
+                        // Activation's own report stays visible: with a changed sibling, D5 does
+                        // not activate the hotel's pending targets either (follow-up in the contract).
+                        skippedOfferTargets: changedTarget
+                          ? [
+                              { targetId: "activation", reason: activated.reason },
+                              ...delivery.skipped,
+                            ]
+                          : delivery.skipped,
+                      };
+                    if (delivery.kind !== "prepared")
+                      return failure(
+                        transientDeliveryReason(delivery.reason)
+                          ? "provider_unavailable"
+                          : "invalid_state",
+                        new Error("Channex offer delivery is unavailable."),
+                      );
+                    const sent = await delivery.dispatch(async (request, signal) => {
+                      if (request.method !== "POST" || request.path !== "/api/v1/restrictions")
+                        throw new Error("Invalid Channex delivery scope.");
+                      signal.throwIfAborted();
+                      return fetcher(new URL(request.path, apiBaseUrl), {
+                        method: "POST",
+                        headers: { "user-api-key": apiKey, "content-type": "application/json" },
+                        body: JSON.stringify(request.body),
+                        signal,
+                        redirect: "error",
+                      });
+                    });
+                    if (sent.kind === "receipt_pending") await sent.persist();
+                    if (
+                      sent.kind === "delivery_failed" ||
+                      (sent.kind === "receipt_pending" && sent.failed)
+                    )
+                      return failure(
+                        "provider_unavailable",
+                        new Error("Channex offer delivery was not accepted."),
+                      );
+                    if (sent.kind === "retained" || sent.kind === "receipt_pending")
+                      return {
+                        ok: false,
+                        code: "offer_delivery_retained",
+                        attemptId: sent.deliveryId,
+                      };
+                    return failure(
+                      transientDeliveryReason(sent.reason)
+                        ? "provider_unavailable"
+                        : "invalid_state",
+                      new Error("Channex offer delivery dispatch is unavailable."),
+                    );
+                  }
+                  if (activated.kind !== "no_targets")
+                    return failure(
+                      activated.reason === "target_activation_pending"
+                        ? "provider_unavailable"
+                        : "invalid_state",
+                      new Error("Verified Channex offer activation is unavailable."),
+                    );
+                  // VAY-2108 D6: a hotel without published offer targets yet has sent its room
+                  // availability and has no rates to deliver; the legacy plan has nothing for it.
+                  // This holds with or without the delivery switch, so an owned hotel's scheduled
+                  // sync never dead-letters before its first offer.
+                  return { ok: true };
+                }
+                break;
+              } else if (prepared.kind === "prepared") {
+                if (sentAttemptId !== undefined)
+                  await pacing.sleep(Math.max(0, sentAt + pacing.spacingMs - pacing.now()));
+                const result = await prepared.dispatch(async (request, signal) => {
+                  if (request.method !== "POST" || request.path !== "/api/v1/availability")
+                    throw new Error("Invalid Channex availability scope.");
+                  signal.throwIfAborted();
+                  return fetcher(new URL(request.path, apiBaseUrl), {
+                    method: "POST",
+                    headers: { "user-api-key": apiKey, "content-type": "application/json" },
+                    body: JSON.stringify(request.body),
+                    signal,
+                    redirect: "error",
+                  });
+                });
+                if (result.kind === "receipt_pending") await result.persist();
+                if (result.kind === "retained" || result.kind === "receipt_pending") {
+                  sends++;
+                  sentAttemptId = result.attemptId;
+                  sentAt = pacing.now();
+                  if (sends >= pacing.maxSends || sentAt - turnStarted >= pacing.turnBudgetMs)
+                    return continued(sentAttemptId);
+                  await input.onProgress?.();
+                  continue;
+                }
+                if (sentAttemptId !== undefined) return continued(sentAttemptId);
+                // VAY-2108: the final check before the POST failed (a lock wait, or the night or
+                // its owner changed). Nothing was sent and the night is marked not_sent, so the
+                // job retries and selects the night again from current evidence. Before, one such
+                // check dead-lettered the job mid-pass.
+                if (result.reason === "availability_dispatch_stale")
+                  return failure(
+                    "provider_unavailable",
+                    new Error("Channex availability was not sent; the next attempt retries it."),
+                  );
+                return failure(
+                  "invalid_state",
+                  new Error("Channex availability dispatch is unavailable."),
+                );
+              } else {
+                if (sentAttemptId !== undefined) return continued(sentAttemptId);
+                return failure(
+                  "invalid_state",
+                  new Error("Current Channex availability is unavailable."),
+                );
+              }
             }
           } catch {
+            if (sentAttemptId !== undefined) return continued(sentAttemptId);
             return failure(
               "provider_unavailable",
               new Error("Channex availability reconciliation or upload unavailable."),
