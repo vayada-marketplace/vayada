@@ -1417,6 +1417,12 @@ async function withPublishedChannexPricing(
   };
   const connection = await pool.connect();
   const started = performance.now();
+  // VAY-2108: activation rechecks the room's whole availability pass and its initial ARI on the
+  // worker login, where every row read runs the row-access functions. At Tiga's size (about 366
+  // nights per room) the recheck alone is estimated at about 2 s of the 5 s. Activation gets 30 s;
+  // every other step keeps 5 s.
+  const budgetMs =
+    typeof work === "object" && "kind" in work && work.kind === "activate" ? 30_000 : 5_000;
   const deadlineError = () =>
     Object.assign(new Error("Pricing read deadline exceeded"), { code: "57014" });
   // Owner ports share this transaction client, so their loops cannot reset the
@@ -1425,10 +1431,10 @@ async function withPublishedChannexPricing(
     get(target, key) {
       if (key !== "query") return Reflect.get(target, key);
       return async (sql: string, values?: unknown[]) => {
-        const remaining = Math.floor(5_000 - (performance.now() - started));
+        const remaining = Math.floor(budgetMs - (performance.now() - started));
         if (remaining <= 0) throw deadlineError();
         await target.query("SELECT set_config('statement_timeout',$1,true)", [`${remaining}ms`]);
-        if (performance.now() - started >= 5_000) throw deadlineError();
+        if (performance.now() - started >= budgetMs) throw deadlineError();
         return target.query(sql, values);
       };
     },
@@ -2224,7 +2230,7 @@ async function withPublishedChannexPricing(
     const finalAuthority = await lockChannexPricingPropertyAuthority(client, leaseInput);
     if (finalAuthority.kind !== "authorized") return finalAuthority;
     const readAt = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
-    if (performance.now() - started >= 5_000) throw deadlineError();
+    if (performance.now() - started >= budgetMs) throw deadlineError();
     await client.query("COMMIT");
     return structuredClone({
       kind: "available" as const,
