@@ -161,3 +161,41 @@ it("lists the PMS rooms' types over a booked room selection", () => {
     { roomTypeId: twin!, roomName: "Twin", roomCount: 1 },
   ]);
 });
+
+// VAY-2562: the list carries no ID data; a row that still holds some (an older query) loses it.
+it("drops passport number, birth date and gender from a reservation row", () => {
+  const row = {
+    id: "booking",
+    bookingReference: "VAY-3",
+    roomTypeId: "type-a",
+    roomName: "Double",
+    roomMaxOccupancy: 2,
+    guestFirstName: "Test",
+    guestLastName: "Guest",
+    guestEmail: "",
+    guestPhone: "",
+    specialRequests: "",
+    checkIn: "2027-02-01",
+    checkOut: "2027-02-03",
+    adults: 2,
+    children: 0,
+    nightlyRate: 100,
+    totalAmount: 200,
+    currency: "EUR",
+    status: "confirmed",
+    createdAt: "2027-01-01",
+    updatedAt: "2027-01-01",
+  } satisfies BookingReservationReadModelRow;
+
+  const result = toBookingReservationReadModel({
+    ...row,
+    guestPassportNumber: "TEST-ONLY-DOC-2562",
+    guestDateOfBirth: "1901-02-03",
+    guestGender: "prefer_not_to_say",
+  } as BookingReservationReadModelRow);
+
+  for (const key of ["guestPassportNumber", "guestDateOfBirth", "guestGender"]) {
+    expect(result).not.toHaveProperty(key);
+  }
+  expect(JSON.stringify(result)).not.toMatch(/TEST-ONLY-DOC-2562|1901-02-03|prefer_not_to_say/);
+});

@@ -991,9 +991,6 @@ const reservation: BookingReservationReadModel = {
   guestEmail: "ada@example.com",
   guestPhone: "+15555550123",
   guestCountry: "GB",
-  guestGender: "",
-  guestDateOfBirth: null,
-  guestPassportNumber: "",
   specialRequests: "Late arrival",
   estimatedArrivalTime: "21:00",
   numberOfGuests: 2,
@@ -6380,9 +6377,6 @@ describe("vayada-api", () => {
           guestEmail: "ada@example.com",
           guestPhone: "+15555550123",
           guestCountry: "GB",
-          guestGender: "",
-          guestDateOfBirth: null,
-          guestPassportNumber: "",
           specialRequests: "Late arrival",
           estimatedArrivalTime: "21:00",
           numberOfGuests: 2,
@@ -6503,6 +6497,74 @@ describe("vayada-api", () => {
       canReadGuestContact: false,
     });
   });
+
+  // VAY-2562: the list never carries ID data, with or without the guest-contact right. The PMS
+  // keeps ID details behind that right (guest profile, check-in registration).
+  it.each([
+    ["without", ["booking.reservation.read"], HIDDEN_GUEST_CONTACT, HIDDEN_GUEST_CONTACT],
+    [
+      "with",
+      ["booking.reservation.read", "pms.guest_contact.read"],
+      "mira.guest@example.test",
+      "+15555550123",
+    ],
+  ] satisfies Array<[string, PermissionKey[], string, string]>)(
+    "returns no passport number, birth date or gender %s the guest-contact right",
+    async (_name, permissions, guestEmail, guestPhone) => {
+      const queries: string[] = [];
+      const row = {
+        ...reservation,
+        id: "d6000000-0000-0000-0000-000000002562",
+        propertyId: pmsPropertyId,
+        guestContactAccepted: true,
+        guestEmail: "mira.guest@example.test",
+        // Made-up values a stored booking copy could hold; none may reach the response.
+        guestPassportNumber: "TEST-ONLY-DOC-2562",
+        guestDateOfBirth: "1901-02-03",
+        guestGender: "prefer_not_to_say",
+      };
+      const pool: BookingReservationsReadPool = {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+        ): Promise<Pick<QueryResult<T>, "rows">> {
+          queries.push(text);
+          if (text.includes("SELECT plan_key AS plan")) {
+            return { rows: [{ plan: "fixed" }] as unknown as T[] };
+          }
+          if (text.includes("SELECT COUNT(*)::text AS total")) {
+            return { rows: [{ total: "1" }] as unknown as T[] };
+          }
+          return { rows: [row] as unknown as T[] };
+        },
+        async end() {},
+      };
+      app = buildAuthenticatedApp({
+        permissions,
+        linkedHotelId: "booking_hotel_checkout_alpenrose",
+        reservationsRepository: createTargetBookingReservationsReadRepository({
+          connectionString: "postgresql://target-db",
+          pool,
+        }),
+      });
+
+      const response = await injectJson(app, {
+        method: "GET",
+        url: "/api/booking/hotels/booking_hotel_checkout_alpenrose/reservations",
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const [booking] = (response.body as { bookings: Record<string, unknown>[] }).bookings;
+      expect(booking).toMatchObject({ id: row.id, guestEmail, guestPhone });
+      for (const key of ["guestPassportNumber", "guestDateOfBirth", "guestGender"]) {
+        expect(booking).not.toHaveProperty(key);
+      }
+      expect(JSON.stringify(response.body)).not.toMatch(
+        /TEST-ONLY-DOC-2562|1901-02-03|prefer_not_to_say/,
+      );
+      expect(queries.join("\n")).not.toMatch(/passportNumber|dateOfBirth|booker,gender/);
+    },
+  );
 
   it.each([
     [

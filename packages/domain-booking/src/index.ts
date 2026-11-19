@@ -199,9 +199,6 @@ export type BookingReservationReadModel = {
   guestEmail: string;
   guestPhone: string;
   guestCountry: string;
-  guestGender: string;
-  guestDateOfBirth: BookingDate | null;
-  guestPassportNumber: string;
   specialRequests: string;
   estimatedArrivalTime: string | null;
   numberOfGuests: number | null;

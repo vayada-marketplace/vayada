@@ -31,9 +31,6 @@ export interface BookingReservation {
   guestEmail: string;
   guestPhone: string;
   guestCountry: string;
-  guestGender: string;
-  guestDateOfBirth: string | null;
-  guestPassportNumber: string;
   specialRequests: string;
   estimatedArrivalTime: string | null;
   numberOfGuests: number | null;
