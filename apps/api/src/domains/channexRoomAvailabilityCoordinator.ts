@@ -190,16 +190,18 @@ export async function lockCurrentChannexRoomAvailability(
   if (!coverage || !localToday || !horizon || !from)
     return unavailable("room_availability_coverage_unavailable");
   const candidate = (
-    await client.query<{ valid: boolean | null }>(selectionSql, [
-      input.propertyId,
-      input.connectionId,
-      input.externalPropertyId,
-      input.bindingGeneration,
-      from,
-      horizon.through,
-      coverage.materializedRevision,
-      input.roomTypeId,
-    ])
+    await withSelectionTimeout(client, () =>
+      client.query<{ valid: boolean | null }>(selectionSql, [
+        input.propertyId,
+        input.connectionId,
+        input.externalPropertyId,
+        input.bindingGeneration,
+        from,
+        horizon.through,
+        coverage.materializedRevision,
+        input.roomTypeId,
+      ]),
+    )
   ).rows[0];
   return candidate
     ? unavailable("room_availability_coverage_unavailable")
@@ -408,20 +410,22 @@ async function readScope(
       return { kind: "scope" as const, value: scope };
     }
     const candidate = (
-      await client.query<{
-        roomTypeId: string;
-        date: string;
-        valid: boolean | null;
-      }>(selectionSql, [
-        scope.propertyId,
-        scope.connectionId,
-        scope.externalPropertyId,
-        scope.bindingGeneration,
-        from,
-        scope.through,
-        coverage.materializedRevision,
-        provisionRoomTypeId,
-      ])
+      await withSelectionTimeout(client, () =>
+        client.query<{
+          roomTypeId: string;
+          date: string;
+          valid: boolean | null;
+        }>(selectionSql, [
+          scope.propertyId,
+          scope.connectionId,
+          scope.externalPropertyId,
+          scope.bindingGeneration,
+          from,
+          scope.through,
+          coverage.materializedRevision,
+          provisionRoomTypeId,
+        ]),
+      )
     ).rows[0];
     const finalAuthority = await lockChannexPricingPropertyAuthority(client, lease);
     if (!isDeepStrictEqual(authority, finalAuthority))
@@ -534,6 +538,31 @@ async function lockSelectedRoomMaterializationCurrent(
     )
   ).rows[0];
   return row?.valid === true;
+}
+
+/**
+ * VAY-2108: the next-night scan reads every reconciled write of the pass, and on the worker login
+ * each row it reads runs the row-access functions. In production that passed the 5 s statement
+ * limit again at about 1,040 writes of Tiga's 1,464. Only this statement gets 30 s; the
+ * transaction's own limit is restored right after it. A failed scan aborts the transaction, which
+ * its owner rolls back.
+ */
+const SELECTION_STATEMENT_TIMEOUT = "30s";
+
+async function withSelectionTimeout<T>(
+  client: Pick<PoolClient, "query">,
+  select: () => Promise<T>,
+): Promise<T> {
+  const previous = (
+    await client.query<{ value: string }>("SELECT current_setting('statement_timeout') AS value")
+  ).rows[0]?.value;
+  if (!previous) throw new Error("The statement limit is unavailable");
+  await client.query("SELECT set_config('statement_timeout',$1,true)", [
+    SELECTION_STATEMENT_TIMEOUT,
+  ]);
+  const result = await select();
+  await client.query("SELECT set_config('statement_timeout',$1,true)", [previous]);
+  return result;
 }
 
 const selectionSql = `
