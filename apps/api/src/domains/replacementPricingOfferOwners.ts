@@ -670,13 +670,42 @@ export async function readChannexOfferDesiredAri(
 
 /** Stored configurations are JSONB: compare the plan as JSON so an undefined optional key in the
  * plan can never differ from a JSONB comparison of the same values. */
-function channexConfigurationMatches(
+export function channexConfigurationMatches(
   plan: ReturnType<typeof planChannexOfferConfiguration>,
   stored: unknown,
 ): boolean {
   return (
     plan.kind === "planned" &&
     isDeepStrictEqual(JSON.parse(JSON.stringify(plan.configuration)), stored)
+  );
+}
+
+/** VAY-2108: the pending intent of a target that was never active, whose rate already holds
+ * initial ARI, stays usable across a newer publication that plans the same Channex rate
+ * (binding, Channex property, room, offer, primary occupancy, currency and provider
+ * configuration). Intents are immutable (0314), so the proposal keeps the publication it was made
+ * from; once activation seals it, ongoing ARI sends the nights whose values differ from what
+ * Channex last accepted. A replacement for an active target is never kept: activating it would
+ * move the target off the rate the OTAs are mapped to. */
+function keepsChannexOfferRate(
+  existing: { status: string; stored: unknown; uploaded: boolean },
+  proposal: Record<string, unknown>,
+) {
+  const stored = existing.stored;
+  if (existing.status !== "pending" || !existing.uploaded) return false;
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return false;
+  const kept = stored as Record<string, unknown>;
+  const roomTypeId = (room: unknown) =>
+    room && typeof room === "object" && "roomTypeId" in room ? room.roomTypeId : undefined;
+  return (
+    kept.expectedActiveVersion === undefined &&
+    proposal.expectedActiveVersion === undefined &&
+    ["bindingGeneration", "externalPropertyId", "offerId", "primaryOccupancy", "currency"].every(
+      (key) => kept[key] === proposal[key],
+    ) &&
+    typeof roomTypeId(kept.room) === "string" &&
+    roomTypeId(kept.room) === roomTypeId(proposal.room) &&
+    isDeepStrictEqual(kept.providerConfiguration, proposal.providerConfiguration)
   );
 }
 
@@ -1537,12 +1566,19 @@ async function withPublishedChannexPricing(
       });
       const existing = (
         await client.query(
-          `SELECT id,version,status,proposal=$3::jsonb AS matches
-        FROM pms.channex_offer_target_intents WHERE target_id=$1 AND operation_key=$2`,
+          `SELECT id,version,status,proposal=$3::jsonb AS matches,
+             CASE WHEN proposal=$3::jsonb THEN NULL ELSE proposal END AS stored,
+             proposal<>$3::jsonb AND EXISTS (SELECT 1 FROM pms.channex_offer_ari_attempts a
+               WHERE a.intent_id=i.id) AS uploaded
+        FROM pms.channex_offer_target_intents i WHERE target_id=$1 AND operation_key=$2`,
           [target.id, selection.operationKey, proposal],
         )
       ).rows[0];
-      if (existing && (!existing.matches || existing.status !== "pending"))
+      if (
+        existing &&
+        ((!existing.matches && !keepsChannexOfferRate(existing, JSON.parse(proposal))) ||
+          existing.status !== "pending")
+      )
         return unavailable("operation_conflict");
       if (
         !existing &&

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { Pool } from "pg";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
@@ -21,6 +22,9 @@ type Scope = {
   roomTypeId: string;
   offerPresent: boolean;
   primaryOccupancy?: number;
+  /** The Channex rate configuration the current publication plans for this intent's offer and
+   * primary occupancy (as JSON), when it plans one. */
+  providerConfiguration?: unknown;
 };
 
 /** Retire only a superseded closed intent under the target lock shared by create/ARI receipts. */
@@ -52,8 +56,8 @@ export async function retireSupersededChannexOfferIntent(
     )
       return { kind: "unavailable" as const, reason: "authority_unavailable" };
     const target = (
-      await client.query<{ id: string }>(
-        `SELECT id FROM pms.channex_offer_targets
+      await client.query<{ id: string; active_version: string | null }>(
+        `SELECT id,active_version FROM pms.channex_offer_targets
        WHERE id=$1 AND property_id=$2 AND connection_id=$3 AND room_type_id=$4
        FOR UPDATE NOWAIT`,
         [scope.targetId, scope.propertyId, scope.connectionId, scope.roomTypeId],
@@ -67,6 +71,8 @@ export async function retireSupersededChannexOfferIntent(
           bindingGeneration?: string;
           externalPropertyId?: string;
           primaryOccupancy?: number;
+          providerConfiguration?: unknown;
+          expectedActiveVersion?: unknown;
         };
       }>(
         `SELECT proposal FROM pms.channex_offer_target_intents
@@ -119,10 +125,9 @@ export async function retireSupersededChannexOfferIntent(
         [scope.intentId],
       )
     ).rows;
-    const stale =
+    const rateStale =
       !scope.offerPresent ||
       !mapping ||
-      intent.proposal.publicationRevision !== scope.publicationRevision ||
       intent.proposal.bindingGeneration !== connection.generation ||
       intent.proposal.externalPropertyId !== scope.externalPropertyId ||
       (scope.primaryOccupancy !== undefined &&
@@ -132,7 +137,7 @@ export async function retireSupersededChannexOfferIntent(
           attempt.state !== "released" &&
           attempt.externalRoomTypeId !== mapping?.externalRoomTypeId,
       );
-    if (!stale) {
+    if (!rateStale && intent.proposal.publicationRevision === scope.publicationRevision) {
       await client.query("COMMIT");
       committed = true;
       return { kind: "current" as const };
@@ -144,8 +149,26 @@ export async function retireSupersededChannexOfferIntent(
           [scope.intentId],
         )
       ).rowCount
-    )
+    ) {
+      // VAY-2108: a newer publication that plans the same Channex rate (binding, property, room,
+      // primary occupancy and provider configuration) keeps the intent of a target that was
+      // never active. Its rate already holds initial ARI and cannot be retired; activation seals
+      // it, and ongoing ARI then sends the nights whose values differ from what Channex last
+      // accepted, as for an active target (D5). A replacement for an active target is never
+      // kept: activating it would move the target off the rate the OTAs are mapped to.
+      if (
+        !rateStale &&
+        target.active_version === null &&
+        intent.proposal.expectedActiveVersion === undefined &&
+        scope.providerConfiguration !== undefined &&
+        isDeepStrictEqual(intent.proposal.providerConfiguration, scope.providerConfiguration)
+      ) {
+        await client.query("COMMIT");
+        committed = true;
+        return { kind: "current" as const };
+      }
       return { kind: "unavailable" as const, reason: "stale_ari_requires_reconciliation" };
+    }
     for (const attempt of attempts) {
       if (attempt.state !== "unresolved") continue;
       const receipts = (
