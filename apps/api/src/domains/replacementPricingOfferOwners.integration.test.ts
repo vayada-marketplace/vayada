@@ -2777,6 +2777,157 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     expect(await activeTargetState(f)).toEqual(before);
   });
+  const priceOnlyChange = (
+    room: Parameters<NonNullable<Parameters<typeof publishRevisionTwo>[1]>>[0],
+  ) => ({
+    ...room,
+    offers: room.offers.map((offer) =>
+      offer.price.kind === "independent"
+        ? {
+            ...offer,
+            price: {
+              ...offer.price,
+              calendar: {
+                ...offer.price.calendar,
+                base: { mode: "flat" as const, amountMinor: "12500" },
+              },
+            },
+          }
+        : offer,
+    ),
+  });
+  async function offerIntentState(f: Awaited<ReturnType<typeof initialAriFixture>>) {
+    return (
+      await pool.query<{
+        offerId: string;
+        status: string;
+        revision: number;
+        active: string | null;
+      }>(
+        `SELECT t.offer_id AS "offerId",i.status,(i.proposal->>'publicationRevision')::int AS revision,
+           t.active_version AS active
+         FROM pms.channex_offer_targets t JOIN pms.channex_offer_target_intents i ON i.target_id=t.id
+         WHERE t.property_id=$1 ORDER BY t.offer_id,i.version`,
+        [f.scope.propertyId],
+      )
+    ).rows;
+  }
+  it("activates an uploaded, never-active offer after a price-only publication without a new Channex rate (VAY-2108)", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    await publishRevisionTwo(f, priceOnlyChange);
+    const get = vi.fn(async () => {
+      throw new Error("no provider read expected");
+    });
+    const create = vi.fn(async () => {
+      throw new Error("no new Channex rate expected");
+    });
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "offer_creates_current",
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "all_targets_active",
+      count: 2,
+    });
+    expect(await offerIntentState(f)).toEqual([
+      { offerId: "flex", status: "sealed", revision: 1, active: expect.any(String) },
+      { offerId: "other", status: "sealed", revision: 1, active: expect.any(String) },
+    ]);
+  });
+  it("still refuses an uploaded, never-active offer whose provider configuration changed (VAY-2108)", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    await publishRevisionTwo(f, (room) => ({
+      ...room,
+      offers: room.offers.map((offer) => ({
+        ...offer,
+        meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "0" } },
+      })),
+    }));
+    const create = vi.fn();
+    expect(
+      await advancePublishedChannexOfferCreates(pool, f.input, { get: vi.fn(), create }),
+    ).toEqual({ kind: "unavailable", reason: "stale_ari_requires_reconciliation" });
+    expect(create).not.toHaveBeenCalled();
+    expect(await offerIntentState(f)).toEqual([
+      { offerId: "flex", status: "pending", revision: 1, active: null },
+      { offerId: "other", status: "pending", revision: 1, active: null },
+    ]);
+  });
+  it("keeps an active offer's Channex rate across a price-only publication on the next full sync (VAY-2108)", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    const before = await offerIntentState(f);
+    await publishRevisionTwo(f, priceOnlyChange);
+    const room = providerRoom(f);
+    Object.assign(room.data.attributes, { default_occupancy: 1 });
+    const get = vi.fn(async () => room);
+    const create = vi.fn(async () => {
+      throw new Error("no new Channex rate expected");
+    });
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "offer_creates_current",
+    });
+    expect(get).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(await offerIntentState(f)).toEqual(before);
+  });
+  it("never keeps a stale replacement with initial ARI over an active target (VAY-2108)", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    const replacement = await reservePublishedChannexOfferTarget(pool, f.input, {
+      ...f.selection,
+      operationKey: "replacement-uploaded",
+    });
+    if (replacement.kind !== "reserved") throw new Error("replacement reservation required");
+    // A replacement whose rate already holds initial ARI (the shape main's create step could
+    // leave behind after a price-only publication); only the intent link matters here.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role='replica'");
+      await client.query(
+        `INSERT INTO pms.channex_offer_ari_attempts
+          (id,creation_attempt_id,target_id,intent_id,version,binding_generation,
+           external_property_id,external_room_type_id,external_rate_plan_id,job_attempt_id,
+           worker_id,service_date,request_body,state,reconciliation_evidence)
+         SELECT gen_random_uuid(),a.creation_attempt_id,a.target_id,$2,$3,a.binding_generation,
+           a.external_property_id,a.external_room_type_id,a.external_rate_plan_id,a.job_attempt_id,
+           a.worker_id,a.service_date+1000,a.request_body,a.state,a.reconciliation_evidence
+         FROM pms.channex_offer_ari_attempts a WHERE a.target_id=$1 ORDER BY a.service_date LIMIT 1`,
+        [replacement.targetId, replacement.intentId, replacement.version],
+      );
+      await client.query("COMMIT");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    const before = await activeTargetState(f);
+    await publishRevisionTwo(f, priceOnlyChange);
+    const get = vi.fn(async () => {
+      throw new Error("no provider read expected");
+    });
+    const create = vi.fn(async () => {
+      throw new Error("no new Channex rate expected");
+    });
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "unavailable",
+      reason: "stale_ari_requires_reconciliation",
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(await activeTargetState(f)).toEqual(before);
+  });
   it("does not accept an incomplete replacement over the active version", async () => {
     const f = await initialAriFixture();
     await seedCurrentAvailability(f);
@@ -10629,10 +10780,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   });
 
   // VAY-2108 D3: ongoing offer ARI delivery after activation.
-  async function deliveryFixture() {
+  async function deliveryFixture(
+    beforeActivation?: (f: Awaited<ReturnType<typeof initialAriFixture>>) => Promise<void>,
+  ) {
     const f = await initialAriFixture();
     await seedCurrentAvailability(f);
     await seedCompletedInitialAri(f);
+    await beforeActivation?.(f);
     expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
       kind: "all_targets_active",
     });
@@ -10781,6 +10935,39 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     ]);
     expect(await f.reconcile()).toMatchObject({ kind: "pending_deliveries_reconciled" });
     expect(await f.next()).toMatchObject({ kind: "offer_ari_current", skipped: [] });
+  });
+  it("delivers the newer prices, closed, after activating an offer kept across a price-only publication (VAY-2108)", async () => {
+    const f = await deliveryFixture(async (fixture) => {
+      await publishRevisionTwo(fixture, priceOnlyChange);
+      const fail = vi.fn(async () => {
+        throw new Error("no provider call expected");
+      });
+      expect(
+        await advancePublishedChannexOfferCreates(pool, fixture.input, { get: fail, create: fail }),
+      ).toEqual({ kind: "offer_creates_current" });
+    });
+    type Value = { date_from?: string; date_to?: string; stop_sell?: unknown; rates?: unknown };
+    const posted = new Map<string, Value[]>();
+    for (let turn = 0; turn < 2; turn++) {
+      const sent = await f.send(f.accepted());
+      expect(sent.result).toMatchObject({ kind: "retained" });
+      posted.set(sent.targetId, (sent.posted[0] as { values: Value[] }).values);
+      expect(await f.reconcile()).toEqual({ kind: "pending_deliveries_reconciled", count: 1 });
+    }
+    expect(await f.next()).toEqual({ kind: "offer_ari_current", targetCount: 2, skipped: [] });
+    // Sales stay closed on both targets; the kept offer's every night carries publication 2's price.
+    expect([...posted.values()].flat().every((value) => value.stop_sell === true)).toBe(true);
+    expect(posted.get(f.claim.targetId)).toEqual([
+      expect.objectContaining({
+        date_from: f.today,
+        date_to: f.horizon,
+        stop_sell: true,
+        rates: [
+          { occupancy: 1, rate: "125.00" },
+          { occupancy: 2, rate: "125.00" },
+        ],
+      }),
+    ]);
   });
   it("resends after a transport failure, stops on a provider rejection and releases a lost claim", async () => {
     const f = await deliveryFixture();

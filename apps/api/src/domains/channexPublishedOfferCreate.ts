@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
-import { verifyChannexOfferRoom } from "../integrations/channexOfferConfiguration.js";
+import {
+  planChannexOfferConfiguration,
+  verifyChannexOfferRoom,
+} from "../integrations/channexOfferConfiguration.js";
 import { retireSupersededChannexOfferIntent } from "./channexSupersededOfferIntent.js";
 import {
+  channexConfigurationMatches,
   prepareChannexOfferDispatch,
   readPublishedPricingForChannexJob,
   recordRetainedChannexOfferCreate,
@@ -31,8 +35,10 @@ export async function advancePublishedChannexOfferCreates(
     targetId: string;
     roomTypeId: string;
     offerId: string;
+    primaryOccupancy: number | null;
   }>(
-    `SELECT i.id,t.id AS "targetId",t.room_type_id AS "roomTypeId",t.offer_id AS "offerId"
+    `SELECT i.id,t.id AS "targetId",t.room_type_id AS "roomTypeId",t.offer_id AS "offerId",
+       (i.proposal->>'primaryOccupancy')::int AS "primaryOccupancy"
      FROM pms.channex_offer_target_intents i
      JOIN pms.channex_offer_targets t ON t.id=i.target_id
      WHERE t.property_id=$1 AND t.connection_id=$2 AND i.status='pending'
@@ -43,6 +49,10 @@ export async function advancePublishedChannexOfferCreates(
     return { kind: "unavailable" as const, reason: "creation_batch_pending" };
   for (const intent of pendingIntents.rows) {
     const room = current.publication.rooms.find((item) => item.roomTypeId === intent.roomTypeId);
+    const plan =
+      room && intent.primaryOccupancy !== null
+        ? planChannexOfferConfiguration(room, intent.offerId, intent.primaryOccupancy)
+        : null;
     const progress = await retireSupersededChannexOfferIntent(pool, lease, {
       propertyId,
       connectionId,
@@ -53,6 +63,9 @@ export async function advancePublishedChannexOfferCreates(
       intentId: intent.id,
       roomTypeId: intent.roomTypeId,
       offerPresent: Boolean(room?.offers.some((offer) => offer.id === intent.offerId)),
+      // Compared as JSON, like the stored proposal and the active version's configuration.
+      providerConfiguration:
+        plan?.kind === "planned" ? JSON.parse(JSON.stringify(plan.configuration)) : undefined,
     });
     if (progress.kind === "unavailable") return progress;
   }
@@ -107,6 +120,8 @@ export async function advancePublishedChannexOfferCreates(
     activeBindingGeneration: string | null;
     activeExternalPropertyId: string | null;
     activeExternalRoomTypeId: string | null;
+    activeConfiguration: unknown;
+    activePrimaryOccupancy: number | null;
     pending: boolean;
     hasAttempt: boolean;
     hasUnconfiguredAttempt: boolean;
@@ -120,6 +135,8 @@ export async function advancePublishedChannexOfferCreates(
        v.binding_generation AS "activeBindingGeneration",
        v.external_property_id AS "activeExternalPropertyId",
        v.external_room_type_id AS "activeExternalRoomTypeId",
+       v.configuration AS "activeConfiguration",
+       (i.proposal->>'primaryOccupancy')::int AS "activePrimaryOccupancy",
        EXISTS (SELECT 1 FROM pms.channex_offer_target_intents i
          WHERE i.target_id=t.id AND i.status='pending') AS pending,
        EXISTS (SELECT 1 FROM pms.channex_offer_create_attempts a
@@ -163,13 +180,21 @@ export async function advancePublishedChannexOfferCreates(
       const target = targets.rows.find(
         (row) => row.roomTypeId === room.roomTypeId && row.offerId === offer.id,
       );
+      // VAY-2108 D5: an active target stays current across publications while its binding,
+      // Channex room and provider configuration are unchanged; ongoing ARI sends the new values.
+      // Creating a replacement rate here would move it off the rate the OTAs are mapped to.
       if (
         target?.activeVersion &&
         !target.pending &&
-        target.activeRevision === current.publication.revision &&
         target.activeBindingGeneration === generation &&
         target.activeExternalPropertyId === current.authority.externalPropertyId &&
-        target.activeExternalRoomTypeId === mapping.externalRoomTypeId
+        target.activeExternalRoomTypeId === mapping.externalRoomTypeId &&
+        (target.activeRevision === current.publication.revision ||
+          (target.activePrimaryOccupancy !== null &&
+            channexConfigurationMatches(
+              planChannexOfferConfiguration(room, offer.id, target.activePrimaryOccupancy),
+              target.activeConfiguration,
+            )))
       )
         continue;
       if (target?.pending && target.hasAttempt) {
