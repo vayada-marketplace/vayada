@@ -15,9 +15,6 @@ export type BookingReservationReadModelRow = {
   guestEmail: string;
   guestPhone: string;
   guestCountry?: string | null;
-  guestGender?: string | null;
-  guestDateOfBirth?: Date | string | null;
-  guestPassportNumber?: string | null;
   specialRequests: string;
   estimatedArrivalTime?: string | null;
   numberOfGuests?: number | null;
@@ -103,11 +100,6 @@ export function toBookingReservationReadModel(
     guestEmail: reservation.guestEmail,
     guestPhone: reservation.guestPhone,
     guestCountry: reservation.guestCountry ?? "",
-    guestGender: reservation.guestGender ?? "",
-    guestDateOfBirth: reservation.guestDateOfBirth
-      ? toDateOnly(reservation.guestDateOfBirth)
-      : null,
-    guestPassportNumber: reservation.guestPassportNumber ?? "",
     specialRequests: reservation.specialRequests,
     estimatedArrivalTime: reservation.estimatedArrivalTime ?? null,
     numberOfGuests: reservation.numberOfGuests ?? null,
