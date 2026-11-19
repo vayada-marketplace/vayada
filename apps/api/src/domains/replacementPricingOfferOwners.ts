@@ -1418,10 +1418,11 @@ async function withPublishedChannexPricing(
   const connection = await pool.connect();
   const started = performance.now();
   // VAY-2108: activation rechecks the room's whole availability pass and its initial ARI on the
-  // worker login, where every row read runs the row-access functions; at Tiga's size (about 366
-  // nights per room) that alone took about 2 s of the 5 s. Activation gets 30 s; every other step
-  // keeps 5 s.
-  const budgetMs = typeof work === "object" && work.kind === "activate" ? 30_000 : 5_000;
+  // worker login, where every row read runs the row-access functions. At Tiga's size (about 366
+  // nights per room) the recheck alone is estimated at about 2 s of the 5 s. Activation gets 30 s;
+  // every other step keeps 5 s.
+  const budgetMs =
+    typeof work === "object" && "kind" in work && work.kind === "activate" ? 30_000 : 5_000;
   const deadlineError = () =>
     Object.assign(new Error("Pricing read deadline exceeded"), { code: "57014" });
   // Owner ports share this transaction client, so their loops cannot reset the
