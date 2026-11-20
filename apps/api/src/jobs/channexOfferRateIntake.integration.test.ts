@@ -21,7 +21,16 @@ const URL = process.env["TEST_DATABASE_URL"],
   RETIRED = "21080000-0000-4000-8000-0000000000c4",
   CLOSED = "21080000-0000-4000-8000-0000000000c5",
   REMAPPED = "21080000-0000-4000-8000-0000000000c6",
-  EXTERNAL = "chx-vay-2108-w2c";
+  EXTERNAL = "chx-vay-2108-w2c",
+  // Per-person offer plans: Channex books a non-primary occupancy option under the option's own id
+  // and names the plan in the room's meta.parent_rate_plan_id. Channex ids are UUIDs.
+  PLAN = "21080000-0000-4000-8000-0000000000d1",
+  OPTION = "21080000-0000-4000-8000-0000000000d2",
+  MOVING_PLAN_1 = "21080000-0000-4000-8000-0000000000d3",
+  MOVING_PLAN_2 = "21080000-0000-4000-8000-0000000000d4",
+  MOVING_OPTION = "21080000-0000-4000-8000-0000000000d5",
+  LEGACY_PLAN = "21080000-0000-4000-8000-0000000000d6",
+  UNOWNED_PLAN = "21080000-0000-4000-8000-0000000000d7";
 if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathname))
   throw new Error("Refusing non-test database");
 
@@ -154,6 +163,24 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
       "later",
       [{ room: "provider-room-b", rate: "offer-rate-later-1" }],
       1,
+    );
+    targets["option"] = await seedOffer(B, "option", [{ room: "provider-room-b", rate: PLAN }], 1);
+    // Moves on to a new Channex plan during the occupancy option alteration case below.
+    targets["option-moving"] = await seedOffer(
+      B,
+      "option-moving",
+      [{ room: "provider-room-b", rate: MOVING_PLAN_1 }],
+      1,
+    );
+    // An adopted CH- plan with a UUID id: a parent never resolves through legacy mappings.
+    await db.query(
+      `WITH rate AS (
+         INSERT INTO pms.rate_plans(property_id,room_type_id,code,name,currency)
+         VALUES($1,$2,'channel-uuid','Channel UUID rate','EUR') RETURNING id)
+       INSERT INTO pms.channel_rate_plan_mappings(property_id,connection_id,room_type_id,rate_plan_id,
+         external_room_type_id,external_rate_plan_id)
+       SELECT $1,$3,$2,id,'provider-room',$4 FROM rate`,
+      [P, roomA, C, LEGACY_PLAN],
     );
     login = await createHotelSetupOrdinaryLoginFixture(db, URL!);
   }, 60_000);
@@ -520,6 +547,200 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
       await close("open");
     }
   });
+
+  it("lands a booking on an occupancy option of an offer plan through meta.parent_rate_plan_id", async () => {
+    const booked = onOption(
+      revision("option-new-1", "option-new", [["provider-room-b", OPTION]]),
+      PLAN,
+    );
+    const first = await job("option-new", booked);
+    expect(await run()).toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    // The link keeps the booked option id, as channexStay does, so the hotel still sees the offer.
+    expect(await assignments("option-new")).toEqual([
+      { roomTypeId: B, ratePlanId: null, channexOffer: link("option", "1", "option", B, OPTION) },
+    ]);
+    expect(await providerStays("option-new")).toEqual([
+      { externalRatePlanId: OPTION, externalParentRatePlanId: PLAN },
+    ]);
+    expect(await rateNames("option-new")).toEqual([{ ratePlanId: null, pricingOfferId: "option" }]);
+
+    // The handled-revision fingerprint leaves the parent out. A job that handled the revision
+    // before intake read meta (simulated: without meta) and retries it with meta keeps its
+    // fingerprint instead of failing with revision_fingerprint_conflict.
+    const replay = structuredClone(booked);
+    delete (replay.attributes.rooms[0] as Record<string, unknown>).meta;
+    const second = await job("option-new", replay);
+    expect((await run()).succeeded).toBe(1);
+    const handled = await fingerprint(second, "option-new-1");
+    expect(handled).toMatch(/^[a-f0-9]{64}$/);
+    expect(await fingerprint(first, "option-new-1")).toBe(handled);
+    await db.query(
+      `UPDATE platform.jobs SET status='pending',finished_at=NULL,run_after=now(),
+         payload=jsonb_set(payload,'{rawPayload,payload}',$2::jsonb) WHERE id=$1::uuid`,
+      [second, booked],
+    );
+    expect(await run()).toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(await fingerprint(second, "option-new-1")).toBe(handled);
+
+    // A new revision that changes only the guest keeps the stay and its offer link unwritten.
+    const guestOnly = onOption(
+      revision("option-new-2", "option-new", [["provider-room-b", OPTION]], "modified"),
+      PLAN,
+    );
+    guestOnly.attributes.customer.name = "Grace";
+    await job("option-new", guestOnly);
+    expect((await run()).succeeded).toBe(1);
+    expect(await assignments("option-new")).toEqual([
+      { roomTypeId: B, ratePlanId: null, channexOffer: link("option", "1", "option", B, OPTION) },
+    ]);
+  });
+
+  it("keeps taking OTA changes to an occupancy option booking after its offer moves to a new plan", async () => {
+    await job(
+      "option-alter",
+      onOption(
+        revision("option-alter-1", "option-alter", [["provider-room-b", MOVING_OPTION]]),
+        MOVING_PLAN_1,
+      ),
+    );
+    expect((await run()).succeeded).toBe(1);
+    await addVersion(
+      targets["option-moving"]!,
+      2,
+      { room: "provider-room-b", rate: MOVING_PLAN_2 },
+      true,
+    );
+
+    // New dates on the same option of the now superseded plan.
+    const changed = onOption(
+      revision("option-alter-2", "option-alter", [["provider-room-b", MOVING_OPTION]], "modified"),
+      MOVING_PLAN_1,
+    );
+    Object.assign(changed.attributes, { arrival_date: "2026-09-05", departure_date: "2026-09-07" });
+    Object.assign(changed.attributes.rooms[0]!, {
+      days: { "2026-09-05": "60.00", "2026-09-06": "60.00" },
+    });
+    await job("option-alter", changed);
+    expect((await run()).succeeded).toBe(1);
+    expect(await stay("option-alter")).toEqual({ checkIn: "2026-09-05", checkOut: "2026-09-07" });
+    expect(await assignments("option-alter")).toEqual([
+      {
+        roomTypeId: B,
+        ratePlanId: null,
+        channexOffer: link("option-moving", "1", "option-moving", B, MOVING_OPTION),
+      },
+    ]);
+
+    // A second guest moves the stay onto the primary option, which Channex books under the plan id.
+    const primary = revision(
+      "option-alter-3",
+      "option-alter",
+      [["provider-room-b", MOVING_PLAN_1]],
+      "modified",
+    );
+    Object.assign(primary.attributes, { arrival_date: "2026-09-05", departure_date: "2026-09-07" });
+    Object.assign(primary.attributes.rooms[0]!, {
+      occupancy: { adults: 2, children: 0 },
+      days: { "2026-09-05": "60.00", "2026-09-06": "60.00" },
+    });
+    await job("option-alter", primary);
+    expect((await run()).succeeded).toBe(1);
+    expect(await assignments("option-alter")).toEqual([
+      {
+        roomTypeId: B,
+        ratePlanId: null,
+        channexOffer: link("option-moving", "1", "option-moving", B, MOVING_PLAN_1),
+      },
+    ]);
+
+    // A new booking on the superseded plan itself refuses, even with a parent Channex should
+    // not send: a plan the registry holds never resolves through a parent.
+    const known = await job(
+      "option-known",
+      onOption(
+        revision("option-known-1", "option-known", [["provider-room-b", MOVING_PLAN_1]]),
+        PLAN,
+      ),
+      1,
+    );
+    expect((await run()).deadLettered).toBe(1);
+    expect(await refusal(known, "option-known")).toEqual({
+      code: "operational_mapping_unavailable",
+      bookings: 0,
+    });
+
+    // A new booking on an option of the superseded plan still refuses.
+    const refused = await job(
+      "option-alter-new",
+      onOption(
+        revision("option-alter-new-1", "option-alter-new", [["provider-room-b", MOVING_OPTION]]),
+        MOVING_PLAN_1,
+      ),
+      1,
+    );
+    expect((await run()).deadLettered).toBe(1);
+    expect(await refusal(refused, "option-alter-new")).toEqual({
+      code: "operational_mapping_unavailable",
+      bookings: 0,
+    });
+  });
+
+  it.each([
+    ["no-meta", "without meta.parent_rate_plan_id", "provider-room-b", undefined],
+    [
+      "not-uuid",
+      "whose parent is not a UUID, even an owned plan",
+      "provider-room-b",
+      "offer-rate-b",
+    ],
+    ["unowned", "whose parent no offer owns", "provider-room-b", UNOWNED_PLAN],
+    ["legacy", "whose parent is an adopted CH- plan", "provider-room", LEGACY_PLAN],
+    ["other-room", "whose parent offer sells another Channex room", "provider-room", PLAN],
+  ])("refuses an occupancy option (%s) %s", async (key, _case, channexRoom, parent) => {
+    const channelBookingId = `option-refused-${key}`;
+    const id = await job(
+      channelBookingId,
+      onOption(
+        revision(`${channelBookingId}-1`, channelBookingId, [[channexRoom, OPTION]]),
+        parent,
+      ),
+      1,
+    );
+    expect((await run()).deadLettered).toBe(1);
+    expect(await refusal(id, channelBookingId)).toEqual({
+      code: "operational_mapping_unavailable",
+      bookings: 0,
+    });
+  });
+
+  /** Gives every room of the revision Channex's meta.parent_rate_plan_id (none when undefined). */
+  function onOption(value: Revision, parent: string | undefined): Revision {
+    if (parent !== undefined)
+      for (const room of value.attributes.rooms)
+        Object.assign(room, { meta: { parent_rate_plan_id: parent, rate_plan_code: "1 adult" } });
+    return value;
+  }
+
+  async function providerStays(channelBookingId: string) {
+    return (
+      await db.query(
+        `SELECT assignment_payload->'channexStay'->>'externalRatePlanId' AS "externalRatePlanId",
+           assignment_payload->'channexStay'->>'externalParentRatePlanId' AS "externalParentRatePlanId"
+         FROM pms.operational_booking_assignments
+         WHERE guest_booking_id=$1::uuid AND assignment_status<>'released' ORDER BY position`,
+        [await bookingId(channelBookingId)],
+      )
+    ).rows;
+  }
+
+  async function fingerprint(jobId: string, revisionId: string) {
+    return (
+      await db.query<{ fingerprint: string | null }>(
+        "SELECT job_metadata->'handledRevisions'->$2::text->>'fingerprint' AS fingerprint FROM platform.jobs WHERE id=$1::uuid",
+        [jobId, revisionId],
+      )
+    ).rows[0]?.fingerprint;
+  }
 
   function link(
     target: string,
