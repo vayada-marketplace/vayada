@@ -10,6 +10,26 @@ export type ChannexOfferLink = {
 };
 
 /**
+ * VAY-2108: whether 0314's registry holds this Channex rate plan on the connection, as a legacy
+ * (CH-) or an offer plan. Rows are never deleted. An occupancy option or derived plan books under
+ * its own id, which is never registered, so only such an id may resolve through its parent.
+ */
+export async function isRegisteredChannexRatePlan(
+  client: PoolClient,
+  connectionId: string,
+  externalRatePlanId: string,
+) {
+  return Boolean(
+    (
+      await client.query(
+        "SELECT 1 FROM pms.channex_external_rate_owners WHERE connection_id=$1::uuid AND external_rate_plan_id=$2",
+        [connectionId, externalRatePlanId],
+      )
+    ).rowCount,
+  );
+}
+
+/**
  * VAY-2108: from the switch-day remap on, OTAs sell the Channex rate plans our published offers
  * create. 0314 records each one as owned by its offer target and forbids a legacy mapping row for
  * it, so intake resolves it here instead, to the target's room type, which the stay's Channex

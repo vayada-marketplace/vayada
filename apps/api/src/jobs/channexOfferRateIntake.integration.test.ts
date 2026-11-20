@@ -564,16 +564,23 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
     ]);
     expect(await rateNames("option-new")).toEqual([{ ratePlanId: null, pricingOfferId: "option" }]);
 
-    // The handled-revision fingerprint leaves the parent out: the same revision without meta
-    // replays with the same fingerprint, so a retry across this change never conflicts.
+    // The handled-revision fingerprint leaves the parent out. A job that handled the revision
+    // before intake read meta (simulated: without meta) and retries it with meta keeps its
+    // fingerprint instead of failing with revision_fingerprint_conflict.
     const replay = structuredClone(booked);
     delete (replay.attributes.rooms[0] as Record<string, unknown>).meta;
     const second = await job("option-new", replay);
     expect((await run()).succeeded).toBe(1);
-    expect(await fingerprint(first, "option-new-1")).toMatch(/^[a-f0-9]{64}$/);
-    expect(await fingerprint(second, "option-new-1")).toBe(
-      await fingerprint(first, "option-new-1"),
+    const handled = await fingerprint(second, "option-new-1");
+    expect(handled).toMatch(/^[a-f0-9]{64}$/);
+    expect(await fingerprint(first, "option-new-1")).toBe(handled);
+    await db.query(
+      `UPDATE platform.jobs SET status='pending',finished_at=NULL,run_after=now(),
+         payload=jsonb_set(payload,'{rawPayload,payload}',$2::jsonb) WHERE id=$1::uuid`,
+      [second, booked],
     );
+    expect(await run()).toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(await fingerprint(second, "option-new-1")).toBe(handled);
 
     // A new revision that changes only the guest keeps the stay and its offer link unwritten.
     const guestOnly = onOption(
@@ -645,6 +652,22 @@ describe.skipIf(!URL)("Channex intake of offer-owned rate plans (PostgreSQL)", (
         channexOffer: link("option-moving", "1", "option-moving", B, MOVING_PLAN_1),
       },
     ]);
+
+    // A new booking on the superseded plan itself refuses, even with a parent Channex should
+    // not send: a plan the registry holds never resolves through a parent.
+    const known = await job(
+      "option-known",
+      onOption(
+        revision("option-known-1", "option-known", [["provider-room-b", MOVING_PLAN_1]]),
+        PLAN,
+      ),
+      1,
+    );
+    expect((await run()).deadLettered).toBe(1);
+    expect(await refusal(known, "option-known")).toEqual({
+      code: "operational_mapping_unavailable",
+      bookings: 0,
+    });
 
     // A new booking on an option of the superseded plan still refuses.
     const refused = await job(

@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import {
+  isRegisteredChannexRatePlan,
   resolveChannexOfferRatePlan,
   type ChannexOfferLink,
 } from "./channexOfferRateResolution.js";
@@ -17,7 +18,7 @@ import {
 
 export type ChannexRoomStay = {
   externalRoomTypeId: string;
-  /** The rate plan id the booking room names (for an occupancy option, the option's own id). */
+  /** The rate plan id the booking room names (an occupancy option or derived plan: its own id). */
   externalRatePlanId: string;
   /** VAY-2108: the room's meta.parent_rate_plan_id (UUIDs only), the plan behind that option. */
   externalParentRatePlanId?: string;
@@ -159,12 +160,19 @@ export async function persistChannexAssignments(
           ...offerScope,
           externalRatePlanId: room.externalRatePlanId,
         });
-        // Our offer plans sell per person: Channex books a non-primary occupancy option under the
-        // option's own id and names our plan in meta.parent_rate_plan_id. Only this offer path
-        // reads the parent, which must pass every check of the resolver. The link keeps the
-        // booked id, as channexStay does, so the read model still names the offer.
+        // Our offer plans sell per person: Channex books a non-primary occupancy option (or a
+        // plan derived from ours) under its own id and names our plan in
+        // meta.parent_rate_plan_id. Only this offer path reads the parent, only for a booked id
+        // the registry does not hold (a known plan that fails above stays refused), and the
+        // parent must pass every check of the resolver. The link keeps the booked id, as
+        // channexStay does, so the read model still names the offer.
         const parent = room.externalParentRatePlanId;
-        if (mapped.length === 0 && parent && parent !== room.externalRatePlanId)
+        if (
+          mapped.length === 0 &&
+          parent &&
+          parent !== room.externalRatePlanId &&
+          !(await isRegisteredChannexRatePlan(client, input.connectionId, room.externalRatePlanId))
+        )
           mapped = (
             await resolveChannexOfferRatePlan(client, { ...offerScope, externalRatePlanId: parent })
           ).map((row) => ({
