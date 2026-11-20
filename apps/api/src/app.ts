@@ -400,6 +400,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
+  /** Rehearsal only: true refuses desk-charge "paid" (VAY-810). Off unless set (VAY-2573). */
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
   pmsRoomClosureRepository?: PmsRoomClosureRepository;

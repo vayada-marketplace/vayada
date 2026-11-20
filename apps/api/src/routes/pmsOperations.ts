@@ -1052,6 +1052,7 @@ export type PmsOperationsCommandRepository = {
 export type PmsOperationsRoutesOptions = {
   repository: PmsOperationsReadRepository;
   propertyAccessRepository?: PropertyAccessRepository;
+  /** Rehearsal-only switch (VAY-810): true refuses desk-charge "paid". Off unless set (VAY-2573). */
   checkoutChargeMarkPaidFreezeEnabled?: boolean;
   commandRepository?: PmsOperationsCommandRepository;
   roomClosureRepository?: PmsRoomClosureRepository;
@@ -3421,8 +3422,9 @@ export async function registerPmsOperationsRoutes(
     const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
     if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
 
-    const freezeEnabled = options.checkoutChargeMarkPaidFreezeEnabled ?? true;
-    if (freezeEnabled) {
+    // VAY-2573: production never set this, so a default of "on" refused every desk charge paid at
+    // check-in and check-out. The charge itself is PMS state; Finance has never read desk charges.
+    if (options.checkoutChargeMarkPaidFreezeEnabled === true) {
       return sendPmsOperationsError(reply, {
         statusCode: 409,
         code: "finance_bridge_required",
