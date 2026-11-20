@@ -162,10 +162,25 @@ async function staticallyRegisteredRoutes(): Promise<
   for (const file of await sourceFiles(SOURCE)) {
     if (file.includes(`${join("src", "ai")}`)) continue;
     const text = await readFile(file, "utf8");
-    const calls = /\b\w+\.(get|post|put|patch|delete)\s*(?:<[^()]*?>)?\s*\(\s*"(\/[^"]*)"/gs;
+    // app.get("/path", …), and app.get(PATH, …) with `const PATH = "/path"` in the same file.
+    const constants = new Map(
+      [...text.matchAll(/\bconst\s+(\w+)\s*=\s*"(\/[^"]*)"/g)].map((m) => [m[1]!, m[2]!]),
+    );
+    const calls =
+      /\b\w+\.(get|post|put|patch|delete)\s*(?:<[^()]*?>)?\s*\(\s*(?:"(\/[^"]*)"|([A-Za-z_]\w*)\s*,)/gs;
     for (const match of text.matchAll(calls)) {
-      found.push({ file, method: match[1]!.toUpperCase(), path: match[2]! });
+      const path = match[2] ?? constants.get(match[3]!);
+      if (path) found.push({ file, method: match[1]!.toUpperCase(), path });
     }
+    // route("GET", "/path", …) helpers (pricing-v2).
+    for (const match of text.matchAll(
+      /\broute\(\s*"(GET|POST|PUT|PATCH|DELETE)",\s*"(\/[^"]*)"/g,
+    )) {
+      found.push({ file, method: match[1]!, path: match[2]! });
+    }
+    // Not seen here: paths built from template strings and app.route({ url }) loops (about 20
+    // registrations, e.g. guest profiles, guest registrations, payout destination). The onRoute
+    // capture records those; this check guards the capture for everything else.
   }
   return found;
 }

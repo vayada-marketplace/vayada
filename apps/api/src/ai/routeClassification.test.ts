@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AI_ACTIONS } from "./actions/registry.js";
+import { NEVER_ROUTES, NEVER_RULES, neverArea } from "./neverList.js";
 import {
   classifyRoute,
   ROUTE_CLASS_RULES,
@@ -33,17 +34,36 @@ describe("AI route classification (VAY-2507)", () => {
   it("has no entry for a route that no longer exists, and no rule that sorts nothing", () => {
     const manifest = new Set<string>(ROUTE_MANIFEST);
     expect(exactEntries.filter((route) => !manifest.has(route))).toEqual([]);
-    const ruleSorts = ROUTE_CLASS_RULES.map((rule) =>
-      ROUTE_MANIFEST.filter((route) => !(route in ROUTE_CLASSES) && rule.match.test(route)),
+    expect(Object.keys(NEVER_ROUTES).filter((route) => !manifest.has(route))).toEqual([]);
+    const free = ROUTE_MANIFEST.filter((route) => !(route in ROUTE_CLASSES) && !neverArea(route));
+    expect(
+      ROUTE_CLASS_RULES.filter((rule) => !free.some((route) => rule.match.test(route))),
+    ).toEqual([]);
+    expect(NEVER_RULES.filter((rule) => !ROUTE_MANIFEST.some((r) => rule.match.test(r)))).toEqual(
+      [],
     );
-    expect(ROUTE_CLASS_RULES.filter((_rule, i) => ruleSorts[i]!.length === 0)).toEqual([]);
     // No route falls under two rules: the order of the rules never decides.
-    const twice = ROUTE_MANIFEST.filter(
-      (route) =>
-        !(route in ROUTE_CLASSES) &&
-        ROUTE_CLASS_RULES.filter((rule) => rule.match.test(route)).length > 1,
+    const twice = free.filter(
+      (route) => ROUTE_CLASS_RULES.filter((rule) => rule.match.test(route)).length > 1,
     );
     expect(twice).toEqual([]);
+  });
+
+  it("puts nothing on top of the never list", () => {
+    // Every never route is sorted never, and no classification entry or rule even mentions one.
+    const neverRoutes = ROUTE_MANIFEST.filter((route) => neverArea(route));
+    expect(neverRoutes.filter((route) => classifyRoute(route)?.class !== "never")).toEqual([]);
+    expect(neverRoutes.filter((route) => route in ROUTE_CLASSES)).toEqual([]);
+    expect(
+      neverRoutes.filter((route) => ROUTE_CLASS_RULES.some((rule) => rule.match.test(route))),
+    ).toEqual([]);
+  });
+
+  it("only ever grows the never list (shortening it needs Flamur's decision)", () => {
+    // Raise these floors when routes are added to the never list; lowering them is a decision.
+    expect(Object.keys(NEVER_ROUTES).length).toBeGreaterThanOrEqual(52);
+    expect(NEVER_RULES.length).toBeGreaterThanOrEqual(4);
+    expect(ROUTE_MANIFEST.filter((route) => neverArea(route)).length).toBeGreaterThanOrEqual(119);
   });
 
   // Flamur's never list (2026-11-20): one real route per area, so a renamed or reclassified route

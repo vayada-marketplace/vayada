@@ -40,6 +40,11 @@ export type RouteActionDefinition<Output extends z.ZodType = z.ZodType> = {
   contractVersion?: string;
   /** Who reviewed the description, the allow-list and the group (plan v3.7 `source`). */
   reviewedBy: string;
+  /**
+   * MCP only: allow-list paths whose name looks sensitive but is not guest data, contact details
+   * or money, each with the reason (e.g. a property's own public name).
+   */
+  mcpReviewedFields?: Readonly<Record<string, string>>;
 };
 
 export type RouteAction<Output extends z.ZodType = z.ZodType> = Readonly<
@@ -105,7 +110,9 @@ export function defineRouteAction<Output extends z.ZodType>(
   }
 
   assertAllowList(definition.output, key);
-  if (definition.surfaces.includes("mcp")) assertMcpSafeSlice(definition.output, key);
+  if (definition.surfaces.includes("mcp")) {
+    assertMcpSafeSlice(definition.output, key, definition.mcpReviewedFields ?? {});
+  }
 
   const check = definition.check;
   const input = z.strictObject(shape).superRefine((value, ctx) => {
@@ -200,13 +207,36 @@ export function allowListPaths(schema: z.ZodType, path = ""): string[] {
  * (VAY-2529; Flamur 2026-11-20). Until that opt-in exists, an MCP action may not keep a field
  * whose name says it is one. Sell prices are not money in this sense (design note §3.2).
  */
-const MCP_BLOCKED_KEY =
-  /guest|email|phone|contact|address|passport|document|birth|nationality|amount|balance|revenue|payment|payout|fee|commission|refund|adr\b|invoice|folio/i;
+const MCP_BLOCKED_KEY = new RegExp(
+  [
+    // guest data and guest-written text
+    "guest|passport|document|birth|nationality|countryCode|specialRequest|request$|requests$",
+    "note|message|body|text|comment|review|author|sender|recipient|participant|assignee",
+    // contact details
+    "email|phone|contact|address",
+    // money (sell prices are not money here; per-booking amounts are)
+    "amount|balance|revenue|payment|payout|fee|commission|refund|adr$|invoice|folio|pricing",
+    "^totals?$|applied|rateSummary|nightlyRate|avgNightly|cancellationOutcome|charge",
+  ].join("|"),
+  "i",
+);
+/** Any name (guest, staff, reviewer): only a reviewed path may keep one on MCP. */
+const NAME_KEY = /name$/i;
 
-export function assertMcpSafeSlice(schema: z.ZodType, action: string): void {
-  for (const path of allowListPaths(schema)) {
+export function assertMcpSafeSlice(
+  schema: z.ZodType,
+  action: string,
+  reviewed: Readonly<Record<string, string>> = {},
+): void {
+  const paths = allowListPaths(schema);
+  for (const path of Object.keys(reviewed)) {
+    if (!paths.includes(path)) {
+      throw new ActionDefinitionError(action, `mcpReviewedFields.${path} is not in the output`);
+    }
+  }
+  for (const path of paths) {
     const key = path.split(".").pop()!.replace("[]", "");
-    if (MCP_BLOCKED_KEY.test(key)) {
+    if ((MCP_BLOCKED_KEY.test(key) || NAME_KEY.test(key)) && !reviewed[path]) {
       throw new ActionDefinitionError(
         action,
         `MCP may not return ${path} without the owner's opt-in`,

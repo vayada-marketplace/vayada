@@ -99,7 +99,8 @@ export const ACTION_FIXTURES: readonly ActionFixture[] = [
             properties: propertyIds.map((propertyId) => ({
               propertyId,
               publicId: `${FORBIDDEN}-${propertyId}`,
-              displayName: `Hotel ${propertyId.slice(-1)}`,
+              // P2 is still in setup without a name: the action must still answer.
+              displayName: propertyId === WORLD.P2 ? null : `Hotel ${propertyId.slice(-1)}`,
               locationSummary: "Munich, DE",
               taskFacts: { shared_identity },
             })),

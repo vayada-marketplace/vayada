@@ -675,7 +675,9 @@ Owner-only and in-app-only, later and on demand: no-show reports, folio finalise
 merge, currency change. Card refunds and refunding cancellations are **not** on the list: they are
 Ask first (VAY-2560) for the roles that may refund today.
 
-The routes behind each item are sorted in `apps/api/src/ai/routeClassification.ts`; inventory
+The routes behind each item are listed in `apps/api/src/ai/neverList.ts`, a file of its own: the
+registry checks it directly, no classification entry can override it, and a test keeps a floor on
+its size, so taking a route off it is a visible decision. Inventory
 [F](ai-actions-authority-inventory.md#f-never-list-routes) has the evidence for each.
 
 ## 7. Audit and attribution

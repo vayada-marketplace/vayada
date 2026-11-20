@@ -4,6 +4,7 @@
 import type { DelegatedRouteGate, RequestContext } from "@vayada/backend-auth";
 import { z } from "zod";
 
+import { neverArea } from "../neverList.js";
 import { classifyRoute } from "../routeClassification.js";
 import { ROUTE_MANIFEST } from "../routeManifest.generated.js";
 import { calendarDays } from "./calendarDays.js";
@@ -29,8 +30,16 @@ export function findAction(key: string): RouteAction | undefined {
   return BY_KEY.get(key);
 }
 
-/** The actions to offer this user on this surface: only those whose route would let them in. */
-export function listActionsFor(context: RequestContext, surface: AiSurface): RouteAction[] {
+/** The surface a delegated context runs on, from its delegation (never from the caller). */
+export function surfaceOf(context: RequestContext): AiSurface | undefined {
+  const channel = context.delegation?.channel;
+  return channel === "mcp" || channel === "in_app" ? channel : undefined;
+}
+
+/** The actions to offer this user here: only those whose route would let them in. */
+export function listActionsFor(context: RequestContext): RouteAction[] {
+  const surface = surfaceOf(context);
+  if (!surface) return [];
   return AI_ACTIONS.filter(
     (action) =>
       action.surfaces.includes(surface) &&
@@ -72,7 +81,14 @@ export function assertRegistry(actions: readonly RouteAction[]): readonly RouteA
     if (!manifest.has(action.route)) {
       throw new Error(`AI action ${action.key}: ${action.route} is not in the route list`);
     }
-    // An action's route may not be sorted at all: not never, not deny-listed, not even "later".
+    // The never list first, on its own (it can not be overridden by the classification).
+    const never = neverArea(action.route);
+    if (never) {
+      throw new Error(
+        `AI action ${action.key}: ${action.route} is on the never list (${never.area})`,
+      );
+    }
+    // An action's route may not be sorted at all: not deny-listed, not even "later".
     const routeClass = classifyRoute(action.route);
     if (routeClass) {
       throw new Error(

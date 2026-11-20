@@ -5,7 +5,8 @@ import { DelegationRefusedError, type RequestContext } from "@vayada/backend-aut
 import type { FastifyInstance } from "fastify";
 
 import { runDelegatedRead } from "../delegatedRead.js";
-import type { AiSurface, RouteAction } from "./defineRouteAction.js";
+import type { RouteAction } from "./defineRouteAction.js";
+import { surfaceOf } from "./registry.js";
 
 export type ActionErrorCode =
   | "invalid_input"
@@ -30,9 +31,10 @@ export async function runRouteAction(
   context: RequestContext,
   action: RouteAction,
   rawInput: unknown,
-  surface: AiSurface,
 ): Promise<ActionResult> {
-  if (!action.surfaces.includes(surface)) {
+  // The surface comes from the delegation itself, so an MCP call can never run an in-app action.
+  const surface = surfaceOf(context);
+  if (!surface || !action.surfaces.includes(surface)) {
     return failure("not_allowed", "This action is not available here.");
   }
   const parsed = action.input.safeParse(rawInput ?? {});
@@ -67,7 +69,8 @@ export async function runRouteAction(
     if (error instanceof DelegationRefusedError) {
       return failure("not_allowed", "You do not have access to this.");
     }
-    throw error;
+    // Never pass an error's own text on: it can carry bytes of a route's body.
+    return failure("failed", "The request did not succeed.");
   }
 
   const { statusCode, body } = response;
