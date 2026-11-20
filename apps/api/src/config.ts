@@ -487,13 +487,31 @@ export function vayadaPaymentOpenFor(
     | "vayadaPaymentStripeLive"
   >,
 ): (propertyId: string) => boolean {
-  const ids = config.vayadaPaymentPropertyIds;
   const stopped = config.vayadaPaymentStoppedPropertyIds;
+  const manageable = vayadaPaymentManageableFor(config);
+  return (propertyId) => manageable(propertyId) && !stopped.includes(propertyId.toLowerCase());
+}
+
+/** VAY-2570: whether a hotel may manage its vayada Payment setup (choose it in its payment settings,
+ * save those settings, read and replace its payout bank account): vayadaPaymentOpenFor without the
+ * stop list. A stopped hotel keeps this, so its owner can still turn card off and fix the bank
+ * account its live money is paid out to; its new card charges stay refused (vayadaPaymentOpenFor). */
+export function vayadaPaymentManageableFor(
+  config: Pick<
+    ApiConfig,
+    | "vayadaPaymentEnabled"
+    | "vayadaPaymentPropertyIds"
+    | "vayadaPaymentStripe"
+    | "vayadaPaymentLivePropertyIds"
+    | "vayadaPaymentTestPropertyIds"
+    | "vayadaPaymentStripeLive"
+  >,
+): (propertyId: string) => boolean {
+  const ids = config.vayadaPaymentPropertyIds;
   const live = vayadaPaymentLiveFor(config);
   return (propertyId) =>
     config.vayadaPaymentEnabled &&
     (ids === "all" || ids.includes(propertyId.toLowerCase())) &&
-    !stopped.includes(propertyId.toLowerCase()) &&
     // A live hotel never falls back to the test keys, nor a test hotel to the live ones. Real money
     // also needs the live webhook: without it disputes and dashboard refunds never reach the
     // hotel's balance, and Vayada would pay out money it no longer has.

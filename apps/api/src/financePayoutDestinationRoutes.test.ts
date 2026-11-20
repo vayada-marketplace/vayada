@@ -1,7 +1,12 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import { expect, it, vi } from "vitest";
-import { loadConfig, vayadaPaymentLiveFor, vayadaPaymentOpenFor } from "./config.js";
+import {
+  loadConfig,
+  vayadaPaymentLiveFor,
+  vayadaPaymentManageableFor,
+  vayadaPaymentOpenFor,
+} from "./config.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
 
 const propertyId = "24420000-0000-4000-8000-000000000002";
@@ -449,4 +454,52 @@ it("keeps vayada Payment off unless VAYADA_PAYMENT_ENABLED is set", () => {
   expect(() => loadConfig({ VAYADA_PAYMENT_ENABLED: "maybe" })).toThrow(
     "VAYADA_PAYMENT_ENABLED must be true or false",
   );
+});
+
+it("lets a stopped hotel manage its vayada Payment setup but take no new charges (VAY-2570)", () => {
+  const stoppedHotel = "25700000-0000-4000-8000-0000000000aa";
+  const testHotel = "25700000-0000-4000-8000-0000000000bb";
+  const keys = {
+    VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2570",
+    VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2570",
+    VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2570",
+    VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2570",
+    VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_vay2570",
+  };
+  const everyHotel = {
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_TEST_PROPERTY_IDS: testHotel,
+    VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: stoppedHotel,
+  };
+  const config = loadConfig({ ...keys, ...everyHotel });
+  const manageable = vayadaPaymentManageableFor(config);
+  const open = vayadaPaymentOpenFor(config);
+  // The stopped hotel: its owner can still save payment settings (turn card off) and fix the
+  // payout bank account, but no new card charge starts.
+  expect([manageable(stoppedHotel), manageable(stoppedHotel.toUpperCase())]).toEqual([true, true]);
+  expect([open(stoppedHotel), open(stoppedHotel.toUpperCase())]).toEqual([false, false]);
+  // Every other hotel, live or test, both.
+  expect([manageable(propertyId), open(propertyId)]).toEqual([true, true]);
+  expect([manageable(testHotel), open(testHotel)]).toEqual([true, true]);
+  // Everything else that closes vayada Payment closes managing it too: the switch, the charge
+  // list, and the keys of the hotel's mode (live keys with the live webhook).
+  const listed = {
+    ...keys,
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: testHotel,
+  };
+  expect(
+    vayadaPaymentManageableFor(
+      loadConfig({ ...keys, ...everyHotel, VAYADA_PAYMENT_ENABLED: "false" }),
+    )(stoppedHotel),
+  ).toBe(false);
+  expect(vayadaPaymentManageableFor(loadConfig(listed))(propertyId)).toBe(false);
+  expect(vayadaPaymentManageableFor(loadConfig(listed))(testHotel)).toBe(true);
+  expect(
+    vayadaPaymentManageableFor(
+      loadConfig({ ...keys, ...everyHotel, VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "" }),
+    )(stoppedHotel),
+  ).toBe(false);
 });
