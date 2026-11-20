@@ -13,10 +13,13 @@ export type LegacyHistoricalBindingTargetSnapshot = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 // Applicable SELECT/ALL policy inventory through 0474 (the native hotel-setup guards are gone), and
 // with the VAY-2108 claimed Channex worker branch (0519), both checked on PG16 and PG17. Accepting
-// both lets this image run on either side of 0519, so it stays a safe rollback target.
+// both lets this image run on either side of 0519, so it stays a safe rollback target. The third is
+// the 0519 inventory with 0542's claimed-branch-first order on the claim and connection policies
+// (VAY-2108, PG16 and PG17), accepted one release before 0542 ships.
 const TARGET_SELECT_POLICY_SHA256 = new Set([
   "73ee252f11346c9246610df0d54bf0d93002b82d030f1df246cd6df3a3067388",
   "5b6851751ae4311bcb83095845994857c7f12cae65249214ef65a2358c7c7e35",
+  "fcf953889d03f754d4d2d6a729e8be3bc25ca4de55ae84ec2f4145861a0942a6",
 ]);
 
 async function assertRestrictedReaderIdentity(client: pg.PoolClient): Promise<void> {
