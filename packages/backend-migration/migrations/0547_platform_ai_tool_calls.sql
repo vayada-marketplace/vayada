@@ -8,8 +8,9 @@
 -- operation id, idempotency_key_hash the SHA-256 of the Idempotency-Key it sent (the same hash as
 -- platform.idempotency_keys.key_hash).
 --
--- No guest text and no tool output is stored: arguments keep ids, dates, numbers, booleans and
--- named enum tokens, any other string only as its length; records are a type and a UUID. Rows are
+-- No guest text and no tool output is stored: arguments keep only the keys the action declares,
+-- each checked against its kind (id, date, enum value...); records are a type and a UUID; ids that
+-- are not plain tokens are stored as their SHA-256. Rows are
 -- deleted after two years by the API's retention worker, so this is an ordinary table (the API
 -- login gets its DML from the default privileges, no GRANT here), not append-only evidence.
 
@@ -44,12 +45,12 @@ CREATE TABLE platform.ai_tool_calls (
   latency_ms            INTEGER     NOT NULL CHECK (latency_ms >= 0),
   -- Guest text, contact data or finance read (R2): a security event.
   sensitive             BOOLEAN     NOT NULL DEFAULT FALSE,
-  request_id            TEXT        NOT NULL CHECK (char_length(request_id) BETWEEN 1 AND 128),
-  correlation_id        TEXT        CHECK (char_length(correlation_id) BETWEEN 1 AND 128),
+  request_id            TEXT        NOT NULL CHECK (request_id ~ '^[A-Za-z0-9._:-]{1,128}$'),
+  correlation_id        TEXT        CHECK (correlation_id ~ '^[A-Za-z0-9._:-]{1,128}$'),
   idempotency_key_hash  TEXT        CHECK (idempotency_key_hash ~ '^[0-9a-f]{64}$'),
   operation_id          UUID,
   -- Provider tool-call id or MCP JSON-RPC id: logged, never the identity.
-  external_call_id      TEXT        CHECK (char_length(external_call_id) BETWEEN 1 AND 128),
+  external_call_id      TEXT        CHECK (external_call_id ~ '^[A-Za-z0-9._:-]{1,128}$'),
   -- provider/model/region of a model call vayada pays for.
   model                 TEXT        CHECK (model ~ '^[A-Za-z0-9:/._-]{1,200}$')
 );

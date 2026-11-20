@@ -659,7 +659,11 @@ async function insertAiAction(
       "throughMessageId" in input
         ? { kind: input.kind, throughMessageId: input.throughMessageId }
         : { kind: input.kind, targetLanguage: input.targetLanguage },
-    keepArgumentKeys: ["kind", "targetLanguage"],
+    argumentKinds: {
+      kind: { oneOf: ["translate_message", "translate_draft", "summarize", "draft_reply"] },
+      targetLanguage: "language",
+      throughMessageId: "id",
+    },
     recordsRead: [{ type: "message_thread", id: input.threadId }],
     outcome: result.ok ? "ok" : "failed",
     errorCode: result.ok ? null : result.error.code,
