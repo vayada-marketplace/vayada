@@ -361,9 +361,9 @@ uses the PMS operations read policy; `POST /checkout-charges`,
 `POST /checkout-charges/:chargeId/mark-paid`, and
 `POST /checkout-charges/:chargeId/waive` use the PMS operations manage policy
 and persist only `pms.booking_checkout_charges` operational state plus PMS audit
-events. The legacy F1a guard path
-`POST /checkout-charges/:chargeId/paid` remains as a compatibility alias for
-the same operational mark-paid command. The check-out command is still VAY-784
+events. `POST /checkout-charges/:chargeId/paid` is the path PMS Web calls (one
+idempotency key per charge since VAY-2573); `/mark-paid` is an alias for the
+same operational mark-paid command. The check-out command is still VAY-784
 and is not implemented by this slice.
 
 `mark-paid` on checkout charges means a front-desk operator marked the
@@ -494,6 +494,9 @@ routes for inventory, operational reservations, room assignment, check-in/out,
 notes, or guest operations. If F1a is not complete, paid checkout charges must
 be explicitly frozen or routed through an accepted finance contract for the
 rehearsal window; PMS operations must not implement provider settlement itself.
+Since VAY-2573 (2026-11-20) the freeze is off unless a setup turns it on
+(`pmsCheckoutChargeMarkPaidFreezeEnabled: true`): marking paid records PMS
+state only, as described in [`finance-route-contracts.md`](finance-route-contracts.md#f1a-pms-checkout-charge-settlement-bridge).
 
 ## First Implementation Tickets
 

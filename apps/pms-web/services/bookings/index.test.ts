@@ -348,6 +348,24 @@ describe("PMS target booking projection", () => {
     );
   });
 
+  it("sends the same key for every try at marking one desk charge paid (VAY-2573)", async () => {
+    // prettier-ignore
+    mocks.post.mockResolvedValue({ charge: { chargeId: "charge-1", label: "Minibar", amount: { amountDecimal: "12.00", currency: "EUR" }, originalAmount: { amountDecimal: "12.00", currency: "EUR" }, status: "paid", createdAt: "2026-10-26T10:00:00Z", settledAt: "2026-10-26T10:05:00Z", waivedAt: null } });
+
+    await bookingsService.markCheckoutChargePaid("booking-1", "charge-1");
+    await bookingsService.markCheckoutChargePaid("booking-1", "charge-1");
+
+    const key = "pms.checkout-charge.paid:charge-1:v1";
+    expect(mocks.post).toHaveBeenCalledTimes(2);
+    for (const call of mocks.post.mock.calls) {
+      expect(call).toEqual([
+        "/api/pms/properties/property-1/reservations/booking-1/checkout-charges/charge-1/paid",
+        { commandId: key, idempotencyKey: key },
+        expect.anything(),
+      ]);
+    }
+  });
+
   it("defaults additive booking evidence while an older API instance rolls out", async () => {
     const { addOns: _addOns, ...legacyReservation } = reservation;
     mocks.get.mockImplementation(async (endpoint: string) =>

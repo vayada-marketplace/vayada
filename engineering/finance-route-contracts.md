@@ -547,7 +547,10 @@ now records the operational state: status `paid`, `settled_at`, an idempotency
 row and a `product_audit_events` row, with no Finance write and no provider
 call. Finance has never read desk charges (pending, paid or waived), so Finance
 numbers are unchanged. Building the bridge remains open; it also needs a
-decision on commission for desk charges and how they appear in revenue.
+decision on commission for desk charges, how they appear in revenue, and whether
+to backfill charges marked paid before it exists. A check-out with a paid charge
+still writes the `finance_settlement_handoff_required` flag into the check-out
+record's `pending_flags`; nothing reads or clears it yet.
 
 ## Legacy Scheduler Dispositions
 

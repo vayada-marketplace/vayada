@@ -16965,7 +16965,9 @@ describe("vayada-api", () => {
 
   it("freezes PMS checkout-charge mark-paid when the F1a finance bridge is disabled", async () => {
     const freezeRequest = checkoutChargeMarkPaidFreezeCase.request!;
+    const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
+      pmsOperationsCommandRepository: commandRepository,
       permissions: ["pms.operations.manage"],
       linkedPmsPropertyId: "f3000000-0000-0000-0000-000000000686",
       entitlements: [
@@ -16992,6 +16994,8 @@ describe("vayada-api", () => {
       code: checkoutChargeMarkPaidFreezeCase.expected.errorCode,
       category: "conflict",
     });
+    expect(commandRepository.checkoutChargeMarkPaids).toEqual([]);
+    expect(commandRepository.auditEvents).toEqual([]);
   });
 
   it("lists, creates, marks paid, and waives PMS checkout charges as operational state only", async () => {
