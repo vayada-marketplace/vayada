@@ -444,6 +444,8 @@ if (!targetDatabaseUrl) {
 }
 
 const { publicHotelProfileRepository } = createPublicRuntimeRepositories(config);
+// VAY-2508: the AI action log behind GET /api/ai/activity.
+const aiActivityStore = createPgAiActivityStore({ connectionString: targetDatabaseUrl });
 
 const bookingSettingsRepository = createPgTargetBookingSettingsRepository({
   connectionString: targetDatabaseUrl,
@@ -2537,7 +2539,7 @@ const app = buildApp({
   staffInvitations: staffInvitationRuntime,
   identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
-  aiActivityStore: createPgAiActivityStore({ connectionString: targetDatabaseUrl }),
+  aiActivityStore,
   bookingWebCheckoutAdapter,
   bookingWebDisplayRates,
   bookingWebAttributionSink:
@@ -3856,6 +3858,10 @@ const contactIntakeRetentionWorker = startContactIntakeRetentionWorker({
 
 app.addHook("onClose", async () => {
   await contactIntakeRetentionWorker.close();
+});
+
+app.addHook("onClose", async () => {
+  await aiActivityStore.close();
 });
 
 // VAY-2508: AI action log rows go after two years; expired Inbox assist results are emptied.

@@ -14,10 +14,18 @@ import type { AiActivityItem, AiActivityStore } from "../ai/actionLog/aiActivity
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// The store's own timestamp form (to_json of a timestamptz), nothing looser.
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
-type Query = { limit?: string; cursor?: string; propertyId?: string; userId?: string };
+type Query = {
+  limit?: string;
+  cursor?: string;
+  propertyId?: string;
+  userId?: string;
+  sensitive?: string;
+};
 
 function sendError(
   reply: FastifyReply,
@@ -45,6 +53,7 @@ function decodeCursor(cursor: string): { occurredAt: string; id: string } | null
       Array.isArray(value) &&
       value.length === 2 &&
       typeof value[0] === "string" &&
+      TIMESTAMP.test(value[0]) &&
       !Number.isNaN(Date.parse(value[0])) &&
       typeof value[1] === "string" &&
       UUID.test(value[1])
@@ -75,6 +84,8 @@ export async function registerAiActivityRoutes(
       return sendError(reply, 422, "invalid_query", "propertyId must be a UUID.");
     if (query.userId !== undefined && !UUID.test(query.userId))
       return sendError(reply, 422, "invalid_query", "userId must be a UUID.");
+    if (query.sensitive !== undefined && query.sensitive !== "true" && query.sensitive !== "false")
+      return sendError(reply, 422, "invalid_query", "sensitive must be true or false.");
     const before = query.cursor === undefined ? undefined : decodeCursor(query.cursor);
     if (before === null) return sendError(reply, 422, "invalid_query", "cursor is not valid.");
 
@@ -88,13 +99,25 @@ export async function registerAiActivityRoutes(
         "Only the account owner sees other users' AI activity.",
       );
 
-    const rows = await options.store.list({
-      organizationId: context.selectedOrganization.organizationId,
-      userId: owner ? query.userId : self,
-      propertyId: query.propertyId,
-      before,
-      limit: limit + 1,
-    });
+    let rows: AiActivityItem[];
+    try {
+      rows = await options.store.list({
+        organizationId: context.selectedOrganization.organizationId,
+        userId: owner ? query.userId : self,
+        propertyId: query.propertyId,
+        sensitiveOnly: query.sensitive === "true",
+        before,
+        limit: limit + 1,
+      });
+    } catch (error) {
+      // A cursor date the database still refuses (e.g. 30 February).
+      if (
+        (error as { code?: string }).code === "22008" ||
+        (error as { code?: string }).code === "22007"
+      )
+        return sendError(reply, 422, "invalid_query", "cursor is not valid.");
+      throw error;
+    }
     const items = rows.slice(0, limit);
     return {
       items,

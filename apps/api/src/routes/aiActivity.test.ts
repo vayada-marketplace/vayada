@@ -93,6 +93,7 @@ describe("GET /api/ai/activity", () => {
       organizationId: ORG,
       userId: STAFF,
       propertyId: undefined,
+      sensitiveOnly: false,
       before: undefined,
       limit: 51,
     });
@@ -138,7 +139,10 @@ describe("GET /api/ai/activity", () => {
 
   it("rejects bad limits, ids and cursors", async () => {
     const { app, list } = await routeApp();
+    const loose = Buffer.from(JSON.stringify(["1", item(1).id])).toString("base64url");
     for (const query of [
+      `cursor=${loose}`,
+      "sensitive=yes",
       "limit=0",
       "limit=101",
       "limit=abc",
@@ -150,5 +154,27 @@ describe("GET /api/ai/activity", () => {
         (await app.inject({ method: "GET", url: `/api/ai/activity?${query}` })).statusCode,
       ).toBe(422);
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it("lists only the sensitive reads on request", async () => {
+    const { app, list } = await routeApp({ userId: OWNER, roleKey: "hotel_owner" });
+    await app.inject({ method: "GET", url: "/api/ai/activity?sensitive=true" });
+    expect(list.mock.calls[0]![0].sensitiveOnly).toBe(true);
+  });
+
+  it("answers 422 when the database refuses a cursor date", async () => {
+    const { app: failing, list } = await routeApp();
+    list.mockRejectedValueOnce(
+      Object.assign(new Error("date/time field value out of range"), { code: "22008" }),
+    );
+    const cursor = Buffer.from(JSON.stringify(["2026-02-30T00:00:00Z", item(1).id])).toString(
+      "base64url",
+    );
+    const response = await failing.inject({
+      method: "GET",
+      url: `/api/ai/activity?cursor=${cursor}`,
+    });
+    expect(response.statusCode).toBe(422);
+    expect(response.body).not.toContain("out of range");
   });
 });

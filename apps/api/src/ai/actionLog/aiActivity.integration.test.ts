@@ -13,7 +13,8 @@ const OTHER_ORG = "25080000-0000-4000-8000-0000000000a2";
 const USER = "25080000-0000-4000-8000-0000000000b1";
 const OTHER_USER = "25080000-0000-4000-8000-0000000000b2";
 const PROPERTY = "25080000-0000-4000-8000-0000000000c1";
-const NOW = new Date("2028-12-01T00:00:00.000Z");
+// Far in the future: the purge must still use the database clock.
+const NOW = new Date("2099-12-01T00:00:00.000Z");
 
 describe.skipIf(!URL)("PostgreSQL AI action log: activity list and retention", () => {
   const admin = new pg.Client({ connectionString: URL });
@@ -97,32 +98,61 @@ describe.skipIf(!URL)("PostgreSQL AI action log: activity list and retention", (
     expect(seen).toEqual(mine.map((row) => row.id));
   });
 
-  it("deletes log rows after two years and empties expired Inbox assist results", async () => {
-    const twoYears = new Date("2026-12-01T00:00:00.000Z");
+  it("filters by property and to the sensitive reads", async () => {
+    const OTHER_PROPERTY = "25080000-0000-4000-8000-0000000000c2";
     await seed(async (client) => {
-      await insertAiToolCall(client, entry({ occurredAt: new Date(twoYears.getTime() - 60_000) }));
-      await insertAiToolCall(client, entry({ occurredAt: new Date(twoYears.getTime() + 60_000) }));
+      await insertAiToolCall(client, entry({ requestId: "plain" }));
+      await insertAiToolCall(
+        client,
+        entry({ requestId: "sensitive", sensitive: true, group: "R2" }),
+      );
+      await insertAiToolCall(client, entry({ requestId: "elsewhere", propertyId: OTHER_PROPERTY }));
+    });
+    const ids = async (query: Partial<Parameters<typeof activity.list>[0]>) =>
+      (await activity.list({ organizationId: ORG, limit: 10, ...query }))
+        .map((row) => row.requestId)
+        .sort();
+    expect(await ids({ propertyId: PROPERTY })).toEqual(["plain", "sensitive"]);
+    expect(await ids({ sensitiveOnly: true })).toEqual(["sensitive"]);
+  });
+
+  it("deletes log rows after two years and empties expired Inbox assist results", async () => {
+    // Rows are placed around the database clock: the purge clamps the cutoff to it, so a far
+    // future "now" from the app must not purge anything early.
+    const { rows } = await admin.query<{ now: Date }>("SELECT now() AS now");
+    const dbNow = rows[0]!.now.getTime();
+    const twoYearsAgo = dbNow - 2 * 365.25 * 24 * 3_600_000;
+    const day = 24 * 3_600_000;
+    await seed(async (client) => {
+      await insertAiToolCall(
+        client,
+        entry({ requestId: "expired", occurredAt: new Date(twoYearsAgo - 3 * day) }),
+      );
+      await insertAiToolCall(
+        client,
+        entry({ requestId: "kept", occurredAt: new Date(twoYearsAgo + 3 * day) }),
+      );
       for (const [retainUntil, text] of [
-        ["2028-11-30T00:00:00.000Z", "expired draft"],
-        ["2028-12-02T00:00:00.000Z", "current draft"],
-      ])
+        [new Date(dbNow - day), "expired draft"],
+        [new Date(dbNow + day), "current draft"],
+      ] as const)
         await client.query(
           `INSERT INTO pms.message_assistance_results
              (property_id, thread_id, idempotency_key_id, kind, assisted_text, created_at,
               pii_retention_until)
-           VALUES ($1::uuid, $2::uuid, $3::uuid, 'translate_draft', $4, $5::timestamptz - interval '30 days',
-                   $5::timestamptz)`,
-          [PROPERTY, randomUUID(), randomUUID(), text, retainUntil],
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 'translate_draft', $4,
+                   $5::timestamptz - interval '30 days', $5::timestamptz)`,
+          [PROPERTY, randomUUID(), randomUUID(), text, retainUntil.toISOString()],
         );
     });
 
-    // The database is shared with other suites in CI: count only this suite's rows.
+    // The database is shared with other suites in CI: check only this suite's rows.
     const first = await retention.purgeExpiredBatch(NOW, 1_000);
     expect(first.logRows).toBeGreaterThanOrEqual(1);
     expect(first.assistResults).toBeGreaterThanOrEqual(1);
     expect(await retention.purgeExpiredBatch(NOW, 1_000)).toEqual({ logRows: 0, assistResults: 0 });
     const left = await activity.list({ organizationId: ORG, limit: 10 });
-    expect(left.map((row) => row.occurredAt.slice(0, 10))).toEqual(["2026-12-01"]);
+    expect(left.map((row) => row.requestId)).toEqual(["kept"]);
     const results = await admin.query(
       `SELECT assisted_text, purged_at IS NOT NULL AS purged
          FROM pms.message_assistance_results WHERE property_id = $1::uuid ORDER BY pii_retention_until`,

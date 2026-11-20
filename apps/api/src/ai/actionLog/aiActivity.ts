@@ -6,7 +6,8 @@ import type { AiActionGroup, AiActionOutcome, AiRecordRef, AiSurface } from "./a
  * VAY-2508 part 2: reading the AI action log for the "AI activity" API, and its retention.
  * The log keeps rows two years (design note §7.3). The same worker also empties Inbox assist
  * results whose own 30-day retention passed: `pms.purge_expired_message_assistance_results`
- * (0146) is operator-only and nothing ran it, so the API does the same UPDATE as plain DML.
+ * (0146) is operator-only and nothing ran it, so the API does the same UPDATE as plain DML,
+ * clamped to the database clock like that function.
  */
 export const AI_ACTION_LOG_RETENTION = "2 years";
 
@@ -37,6 +38,8 @@ export type AiActivityQuery = {
   /** Only this user's rows; absent for the account owner's whole-account view. */
   userId?: string;
   propertyId?: string;
+  /** Only guest-text, contact and finance reads (the security events). */
+  sensitiveOnly?: boolean;
   /** Rows strictly older than this (the previous page's last row). */
   before?: { occurredAt: string; id: string };
   limit: number;
@@ -87,6 +90,7 @@ export function createPgAiActivityStore(config: {
             AND ($2::uuid IS NULL OR user_id = $2::uuid)
             AND ($3::uuid IS NULL OR property_id = $3::uuid)
             AND ($4::timestamptz IS NULL OR (occurred_at, id) < ($4::timestamptz, $5::uuid))
+            AND (NOT $7::boolean OR sensitive)
           ORDER BY occurred_at DESC, id DESC
           LIMIT $6`,
         [
@@ -96,6 +100,7 @@ export function createPgAiActivityStore(config: {
           query.before?.occurredAt ?? null,
           query.before?.id ?? null,
           query.limit,
+          query.sensitiveOnly === true,
         ],
       );
       return result.rows;
@@ -117,7 +122,7 @@ export function createPgAiActionLogRetentionStore(config: {
       const log = await db.query<{ n: number }>(
         `WITH expired AS (
            SELECT id FROM platform.ai_tool_calls
-            WHERE occurred_at < $1::timestamptz - $3::text::interval
+            WHERE occurred_at < LEAST($1::timestamptz, now()) - $3::text::interval
             ORDER BY occurred_at
             LIMIT $2
             FOR UPDATE SKIP LOCKED
@@ -132,13 +137,13 @@ export function createPgAiActionLogRetentionStore(config: {
       const assist = await db.query<{ n: number }>(
         `WITH expired AS (
            SELECT id FROM pms.message_assistance_results
-            WHERE purged_at IS NULL AND pii_retention_until <= $1::timestamptz
+            WHERE purged_at IS NULL AND pii_retention_until <= LEAST($1::timestamptz, now())
             ORDER BY pii_retention_until
             LIMIT $2
             FOR UPDATE SKIP LOCKED
          ), purged AS (
            UPDATE pms.message_assistance_results result
-              SET assisted_text = NULL, purged_at = $1::timestamptz
+              SET assisted_text = NULL, purged_at = LEAST($1::timestamptz, now())
              FROM expired
             WHERE result.id = expired.id
            RETURNING 1
