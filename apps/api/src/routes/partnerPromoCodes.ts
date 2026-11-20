@@ -24,7 +24,7 @@ import {
 type Fail = (
   reply: FastifyReply,
   status: number,
-  code: "invalid_payload" | "forbidden" | "not_found" | "conflict",
+  code: "invalid_payload" | "unauthenticated" | "forbidden" | "not_found" | "conflict",
   message: string,
   details?: string[],
 ) => FastifyReply;
@@ -44,7 +44,11 @@ export function registerPartnerPromoCodeRoutes(
   const scopeOf = (request: FastifyRequest, reply: FastifyReply) => {
     const access = options.accessOf(request);
     if (access.scopes.includes("promo_codes"))
-      return { appId: access.appId, propertyId: access.propertyId };
+      return {
+        appId: access.appId,
+        propertyId: access.propertyId,
+        connectionId: access.connectionId,
+      };
     fail(reply, 403, "forbidden", "This connection may not manage promo codes.");
     return null;
   };
@@ -79,6 +83,8 @@ export function registerPartnerPromoCodeRoutes(
         ...parsed.value,
         externalId: split.externalId ?? null,
       });
+      if (!created)
+        return fail(reply, 401, "unauthenticated", "This connection is no longer active.");
       return reply.status(201).send(created);
     } catch (error) {
       return writeError(reply, error);
@@ -135,7 +141,12 @@ function splitExternalId(
     return { ok: false, details: ["Body must be an object."] };
   const { externalId, ...rest } = body as Record<string, unknown>;
   if (externalId === undefined || externalId === null) return { ok: true, externalId, rest };
-  if (typeof externalId !== "string" || externalId.length < 1 || externalId.length > 200)
+  if (
+    typeof externalId !== "string" ||
+    externalId.length < 1 ||
+    externalId.length > 200 ||
+    externalId.includes("\u0000")
+  )
     return { ok: false, details: ["externalId must be a string of 1 to 200 characters."] };
   return { ok: true, externalId, rest };
 }

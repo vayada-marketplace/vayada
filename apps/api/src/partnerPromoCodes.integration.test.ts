@@ -309,6 +309,19 @@ describe.skipIf(!url)("a partner app's own promo codes (VAY-2437)", () => {
     });
   });
 
+  it("retires an app's codes when it is approved again without promo_codes", async () => {
+    const token = await connect(apps.b);
+    const code = (
+      await call(token, "POST", "", { ...mia10, code: "NARROWB", externalId: "n" })
+    ).json();
+    await connect(apps.b, ["bookings"]);
+    const row = await admin.query(
+      "SELECT status, is_active FROM booking.promo_definitions WHERE id = $1",
+      [code.promoCodeId],
+    );
+    expect(row.rows[0]).toEqual({ status: "retired", is_active: false });
+  });
+
   it("retires an app's active codes at the hotel when the hotel disconnects it or the app revokes", async () => {
     const tokenA = await connect(apps.a);
     await call(tokenA, "POST", "", { ...mia10, code: "BYEA", externalId: "bye-a" });
@@ -341,6 +354,27 @@ describe.skipIf(!url)("a partner app's own promo codes (VAY-2437)", () => {
     const partnerB = (await connections.findApp(apps.b))!;
     await connections.revokeByPartner({ app: partnerB, token: tokenB });
     expect(await active(apps.b)).toEqual([]);
+
+    // A code can't be made on a connection that is gone (the create locks and rechecks it).
+    const partnerA = (await connections.findApp(apps.a))!;
+    const late = await createPgPartnerPromoCodesRepository({ pool }).create(
+      { appId: partnerA.appId, propertyId: hotelId, connectionId: connectionA.connectionId },
+      {
+        code: "TOOLATE",
+        discountType: "percentage",
+        discountValue: "5",
+        minBookingValue: null,
+        applicableRoomIds: null,
+        validFrom: null,
+        validUntil: null,
+        stayDateFrom: null,
+        stayDateUntil: null,
+        isActive: true,
+        maxUses: 10,
+        externalId: null,
+      },
+    );
+    expect(late).toBeNull();
     // The hotel's own code is untouched.
     const hotelCode = await admin.query(
       "SELECT status FROM booking.promo_definitions WHERE property_id = $1 AND code = 'HOTEL15'",

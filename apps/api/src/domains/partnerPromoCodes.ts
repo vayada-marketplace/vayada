@@ -31,15 +31,17 @@ export type PartnerPromoCode = {
   updatedAt: string;
 };
 
-export type PartnerPromoCodeScope = { appId: string; propertyId: string };
+/** The app, the hotel and the connection its token belongs to. */
+export type PartnerPromoCodeScope = { appId: string; propertyId: string; connectionId: string };
 
 export type PartnerPromoCodesRepository = {
   list(scope: PartnerPromoCodeScope): Promise<PartnerPromoCode[]>;
   find(scope: PartnerPromoCodeScope, promoCodeId: string): Promise<PartnerPromoCode | null>;
+  /** Null when the connection was disconnected (or lost promo_codes) meanwhile. */
   create(
     scope: PartnerPromoCodeScope,
     body: CreateBookingPromoCodeBody & { externalId: string | null },
-  ): Promise<PartnerPromoCode>;
+  ): Promise<PartnerPromoCode | null>;
   /** Null when the code isn't this app's at this hotel, or is retired. */
   update(
     scope: PartnerPromoCodeScope,
@@ -117,8 +119,25 @@ export function createPgPartnerPromoCodesRepository(config: {
 
     async create(scope, body) {
       await checkPromoFixedAmountStep(pool, scope.propertyId, null, body);
-      const result = await pool.query<Row>(
-        `WITH inserted AS (
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // A disconnect locks the connection row to revoke it and retires the app's codes in a later
+        // statement: holding the row while inserting means the code is either made before (and then
+        // retired) or refused after it (VAY-2437 review).
+        const connection = await client.query(
+          `SELECT 1 FROM distribution.partner_connections
+           WHERE id = $1::uuid AND client_id = $2::uuid AND property_id = $3::uuid
+             AND status = 'active' AND 'promo_codes' = ANY(scopes)
+           FOR SHARE`,
+          [scope.connectionId, scope.appId, scope.propertyId],
+        );
+        if (connection.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return null;
+        }
+        const result = await client.query<Row>(
+          `WITH inserted AS (
            INSERT INTO booking.promo_definitions (
              property_id, code, discount_type, discount_value, min_booking_value,
              applicable_room_ids, valid_from, valid_until, stay_date_from, stay_date_until,
@@ -129,24 +148,31 @@ export function createPgPartnerPromoCodesRepository(config: {
            RETURNING *
          )
          ${SELECT("inserted")}`,
-        [
-          scope.propertyId,
-          body.code,
-          body.discountType,
-          body.discountValue,
-          body.minBookingValue,
-          body.applicableRoomIds,
-          body.validFrom,
-          body.validUntil,
-          body.stayDateFrom,
-          body.stayDateUntil,
-          body.isActive,
-          body.maxUses,
-          scope.appId,
-          body.externalId,
-        ],
-      );
-      return toCode(result.rows[0]!);
+          [
+            scope.propertyId,
+            body.code,
+            body.discountType,
+            body.discountValue,
+            body.minBookingValue,
+            body.applicableRoomIds,
+            body.validFrom,
+            body.validUntil,
+            body.stayDateFrom,
+            body.stayDateUntil,
+            body.isActive,
+            body.maxUses,
+            scope.appId,
+            body.externalId,
+          ],
+        );
+        await client.query("COMMIT");
+        return toCode(result.rows[0]!);
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async update(scope, promoCodeId, body) {

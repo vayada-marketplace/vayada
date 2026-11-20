@@ -8526,6 +8526,9 @@ describe("vayada-api", () => {
           };
         if (text.includes("FROM booking.booking_settings"))
           return { rows: [{ currency: "IDR", ...stored }] as unknown as T[] };
+        // VAY-2437: the read that refuses a connected partner app's code.
+        if (text.includes("partner_client_id IS NOT NULL AS managed"))
+          return { rows: [{ managed: false }] as unknown as T[] };
         writes.push(text);
         return { rows: [] as T[] };
       },

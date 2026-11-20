@@ -202,6 +202,8 @@ export type PartnerConnectionsRepository = {
   close?(): Promise<void>;
 };
 
+type EndedConnection = { id: string; clientId: string; propertyId: string };
+
 type AppRow = {
   appId: string;
   clientId: string;
@@ -228,15 +230,6 @@ const toApp = (row: AppRow): PartnerApp => ({
 
 const knownScopes = (scopes: readonly string[]) =>
   PARTNER_SCOPES.filter((scope) => scopes.includes(scope));
-
-/** VAY-2437: a disconnect retires the app's active codes at that hotel (decided 2026-10-31), so no
- * discount is given without the partner behind it. Used inside a statement whose `revoked` CTE
- * returns the revoked connections' client_id and property_id. */
-const RETIRE_CONNECTION_CODES_SQL = (at: string) => `UPDATE booking.promo_definitions promo
-           SET status = 'retired', is_active = false, updated_at = ${at}
-           FROM revoked
-           WHERE promo.partner_client_id = revoked.client_id
-             AND promo.property_id = revoked.property_id AND promo.status <> 'retired'`;
 
 /** An https origin, else null (as the AI hotel profiles read the booking page address). */
 function httpsOrigin(value: string | null): string | null {
@@ -318,6 +311,34 @@ export function createPgPartnerConnectionsRepository(config: {
       [familyId, at.toISOString()],
     );
 
+  /** VAY-2437: the app's active codes at the hotel are retired when it is disconnected or loses
+   * promo_codes (decided 2026-10-31), so no discount stays without the partner behind it. A statement
+   * of its own after the connection's UPDATE, so it sees a code made just before the disconnect; rows
+   * are locked in id order, as checkout locks them. */
+  const retireAppCodes = (client: PoolClient, appId: string, propertyId: string, at: string) =>
+    client.query(
+      `WITH doomed AS (
+         SELECT id FROM booking.promo_definitions
+         WHERE partner_client_id = $1::uuid AND property_id = $2::uuid AND status <> 'retired'
+         ORDER BY id
+         FOR UPDATE
+       )
+       UPDATE booking.promo_definitions promo
+       SET status = 'retired', is_active = false, updated_at = $3
+       FROM doomed WHERE promo.id = doomed.id`,
+      [appId, propertyId, at],
+    );
+
+  /** A revoked connection: every token stops and the app's codes there are retired. */
+  async function endConnection(client: PoolClient, connection: EndedConnection, at: string) {
+    await client.query(
+      `UPDATE distribution.partner_tokens SET revoked_at = $2
+       WHERE connection_id = $1::uuid AND revoked_at IS NULL`,
+      [connection.id, at],
+    );
+    await retireAppCodes(client, connection.clientId, connection.propertyId, at);
+  }
+
   return {
     async findApp(clientId) {
       const row = (await pool.query<AppRow>(APP_SELECT, [clientId])).rows[0];
@@ -347,6 +368,9 @@ export function createPgPartnerConnectionsRepository(config: {
            RETURNING id::text`,
           [request.app.appId, propertyId, request.scopes, approvedByUserId, at.toISOString()],
         );
+        // Approved again without promo_codes: the app can't manage its codes any more, so they go.
+        if (!request.scopes.includes("promo_codes"))
+          await retireAppCodes(client, request.app.appId, propertyId, at.toISOString());
         await client.query(
           `INSERT INTO distribution.partner_authorization_codes
              (code_hash, connection_id, redirect_uri, code_challenge, scopes, expires_at, created_at)
@@ -502,25 +526,19 @@ export function createPgPartnerConnectionsRepository(config: {
 
     async revokeByPartner({ app, token }) {
       const at = now().toISOString();
-      await pool.query(
-        `WITH target AS (
-           SELECT connection.id
-           FROM distribution.partner_tokens token
-           JOIN distribution.partner_connections connection ON connection.id = token.connection_id
-           WHERE token.token_hash = $1 AND connection.client_id = $2::uuid
-             AND connection.status = 'active'
-         ), revoked AS (
-           UPDATE distribution.partner_connections connection
+      await transaction(async (client) => {
+        const revoked = await client.query<EndedConnection>(
+          `UPDATE distribution.partner_connections connection
            SET status = 'revoked', revoked_at = $3, revocation_reason = 'partner_revoked', updated_at = $3
-           FROM target WHERE connection.id = target.id
-           RETURNING connection.id, connection.client_id, connection.property_id
-         ), retired_codes AS (
-           ${RETIRE_CONNECTION_CODES_SQL("$3")}
-         )
-         UPDATE distribution.partner_tokens token SET revoked_at = $3
-         FROM revoked WHERE token.connection_id = revoked.id AND token.revoked_at IS NULL`,
-        [sha256Hex(token), app.appId, at],
-      );
+           FROM distribution.partner_tokens token
+           WHERE token.token_hash = $1 AND token.connection_id = connection.id
+             AND connection.client_id = $2::uuid AND connection.status = 'active'
+           RETURNING connection.id::text AS id, connection.client_id::text AS "clientId",
+                     connection.property_id::text AS "propertyId"`,
+          [sha256Hex(token), app.appId, at],
+        );
+        for (const connection of revoked.rows) await endConnection(client, connection, at);
+      });
     },
 
     async authenticateAccessToken(token) {
@@ -641,23 +659,20 @@ export function createPgPartnerConnectionsRepository(config: {
 
     async disconnect({ propertyId, connectionId, userId }) {
       const at = now().toISOString();
-      const result = await pool.query<{ id: string }>(
-        `WITH revoked AS (
-           UPDATE distribution.partner_connections
+      return transaction(async (client) => {
+        const revoked = await client.query<EndedConnection>(
+          `UPDATE distribution.partner_connections
            SET status = 'revoked', revoked_at = $4, revoked_by_user_id = $3::uuid,
                revocation_reason = 'hotel_disconnected', updated_at = $4
            WHERE id = $2::uuid AND property_id = $1::uuid AND status = 'active'
-           RETURNING id, client_id, property_id
-         ), tokens AS (
-           UPDATE distribution.partner_tokens token SET revoked_at = $4
-           FROM revoked WHERE token.connection_id = revoked.id AND token.revoked_at IS NULL
-         ), retired_codes AS (
-           ${RETIRE_CONNECTION_CODES_SQL("$4")}
-         )
-         SELECT id::text FROM revoked`,
-        [propertyId, connectionId, userId, at],
-      );
-      return result.rows.length > 0;
+           RETURNING id::text AS id, client_id::text AS "clientId", property_id::text AS "propertyId"`,
+          [propertyId, connectionId, userId, at],
+        );
+        const connection = revoked.rows[0];
+        if (!connection) return false;
+        await endConnection(client, connection, at);
+        return true;
+      });
     },
 
     async close() {
