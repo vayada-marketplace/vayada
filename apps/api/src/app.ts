@@ -90,6 +90,7 @@ import type {
   BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
+import { aiActionRouteGate } from "./ai/actions/registry.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAiActivityRoutes } from "./routes/aiActivity.js";
 import type { AiActivityStore } from "./ai/actionLog/aiActivity.js";
@@ -578,6 +579,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     } = options.auth;
     app.register(backendAuthPlugin, {
       ...authOptions,
+      // AI actions may run exactly the routes of registered actions as the user (VAY-2506/2507).
+      delegation: authOptions.delegation ?? aiActionRouteGate,
       // Partner apps send their own tokens to /partner; they are never WorkOS tokens (VAY-2436).
       skipPathPrefixes: ["/partner/"],
       authorizationResolver: createAuthorizationResolver(
