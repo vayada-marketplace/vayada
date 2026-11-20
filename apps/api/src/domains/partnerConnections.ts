@@ -269,9 +269,16 @@ export function createPgPartnerConnectionsRepository(config: {
     }
   }
 
+  /** A refresh token keeps the family's scopes; the access token may carry fewer (RFC 6749 6). */
   async function issuePair(
     client: PoolClient,
-    input: { connectionId: string; familyId: string; scopes: PartnerScope[]; at: Date },
+    input: {
+      connectionId: string;
+      familyId: string;
+      scopes: PartnerScope[];
+      refreshScopes?: PartnerScope[];
+      at: Date;
+    },
   ) {
     const accessToken = newSecretValue("access");
     const refreshToken = newSecretValue("refresh");
@@ -279,7 +286,7 @@ export function createPgPartnerConnectionsRepository(config: {
       `INSERT INTO distribution.partner_tokens
          (token_hash, connection_id, token_kind, family_id, scopes, expires_at, created_at)
        VALUES ($1, $3::uuid, 'access', $4::uuid, $5::text[], $6::timestamptz + make_interval(secs => $7), $6),
-              ($2, $3::uuid, 'refresh', $4::uuid, $5::text[], $6::timestamptz + make_interval(secs => $8), $6)`,
+              ($2, $3::uuid, 'refresh', $4::uuid, $9::text[], $6::timestamptz + make_interval(secs => $8), $6)`,
       [
         sha256Hex(accessToken),
         sha256Hex(refreshToken),
@@ -289,6 +296,7 @@ export function createPgPartnerConnectionsRepository(config: {
         input.at.toISOString(),
         ACCESS_TOKEN_TTL_SECONDS,
         REFRESH_TOKEN_TTL_SECONDS,
+        input.refreshScopes ?? input.scopes,
       ],
     );
     return { accessToken, refreshToken };
@@ -458,9 +466,10 @@ export function createPgPartnerConnectionsRepository(config: {
         const granted = knownScopes(row.scopes);
         if (requested && requested.some((scope) => !granted.includes(scope)))
           return { error: "invalid_scope" as const };
-        const scopes = (requested ?? granted).filter((scope) =>
-          row.connectionScopes.includes(scope),
-        );
+        // The new refresh token keeps what was granted (still approved by the hotel); a narrower
+        // request narrows only the access token (RFC 6749 6).
+        const kept = granted.filter((scope) => row.connectionScopes.includes(scope));
+        const scopes = (requested ?? kept).filter((scope) => kept.includes(scope));
         if (scopes.length === 0) return { error: "invalid_grant" as const };
         await client.query(
           `UPDATE distribution.partner_tokens SET used_at = $2 WHERE token_hash = $1`,
@@ -470,6 +479,7 @@ export function createPgPartnerConnectionsRepository(config: {
           connectionId: row.connectionId,
           familyId: row.familyId,
           scopes,
+          refreshScopes: kept,
           at,
         });
         return {
@@ -559,6 +569,9 @@ export function createPgPartnerConnectionsRepository(config: {
            FROM hotel_catalog.properties property
            LEFT JOIN distribution.public_hotel_bookability_profiles profile
              ON profile.property_id = property.id
+            AND profile.public_visibility = 'public_safe'
+            AND profile.profile_status = 'public'
+            AND (profile.expires_at IS NULL OR profile.expires_at > now())
            WHERE property.id = $1`,
           [propertyId],
         )
@@ -568,7 +581,7 @@ export function createPgPartnerConnectionsRepository(config: {
         hotelId: row.hotelId,
         name: row.name,
         currency: row.currency,
-        // The hotel's own domain when it has one, else its booking page; null until it is published.
+        // The hotel's own domain when it has one, else its booking page; null while it isn't public.
         bookingPageUrl: httpsOrigin(row.customDomainUrl) ?? httpsOrigin(row.bookingBaseUrl),
         promoCodesEnabled: row.promoCodesEnabled,
         rooms: row.rooms,

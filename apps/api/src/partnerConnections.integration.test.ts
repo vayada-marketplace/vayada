@@ -401,12 +401,20 @@ describe.skipIf(!url)("partner apps and the hotel's one-time approval (VAY-2436)
     });
     expect(narrowed.json().scope).toBe("bookings");
     const third = narrowed.json();
+    // Only that access token was narrowed: the refresh token keeps both scopes (RFC 6749 6).
+    const widened = await token({
+      grant_type: "refresh_token",
+      refresh_token: third.refresh_token,
+      scope: "promo_codes",
+    });
+    expect(widened.json().scope).toBe("promo_codes");
+    const fourth = widened.json();
     expect(
       (
         await token({
           grant_type: "refresh_token",
-          refresh_token: third.refresh_token,
-          scope: "promo_codes",
+          refresh_token: fourth.refresh_token,
+          scope: "guests",
         })
       ).json(),
     ).toEqual({ error: "invalid_scope" });
@@ -415,9 +423,9 @@ describe.skipIf(!url)("partner apps and the hotel's one-time approval (VAY-2436)
     expect(
       (await token({ grant_type: "refresh_token", refresh_token: first.refresh_token })).json(),
     ).toEqual({ error: "invalid_grant" });
-    expect((await hotel(third.access_token)).statusCode).toBe(401);
+    expect((await hotel(fourth.access_token)).statusCode).toBe(401);
     expect(
-      (await token({ grant_type: "refresh_token", refresh_token: third.refresh_token })).json(),
+      (await token({ grant_type: "refresh_token", refresh_token: fourth.refresh_token })).json(),
     ).toEqual({ error: "invalid_grant" });
   });
 

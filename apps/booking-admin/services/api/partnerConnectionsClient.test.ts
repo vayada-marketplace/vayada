@@ -31,7 +31,10 @@ describe("partner connections client", () => {
       scopes: ["promo_codes", "bookings"],
       properties: [{ propertyId, name: "Alpina", promoCodesEnabled: false }],
     });
-    expect(http.get.mock.calls[0]![0]).toBe(`/api/booking/partner-authorizations?${query}`);
+    expect(http.get).toHaveBeenCalledWith(
+      `/api/booking/partner-authorizations?${query}`,
+      expect.anything(),
+    );
     expect(await client.decide(query, "allow", propertyId)).toBe(
       "https://partner.example/callback?code=c&state=s",
     );
@@ -86,8 +89,9 @@ describe("partner connections client", () => {
     };
     const client = createPartnerConnectionsClient(http as never);
     expect(await client.list(propertyId)).toEqual({ connections: [connection], canManage: true });
-    expect(http.get.mock.calls[0]![0]).toBe(
+    expect(http.get).toHaveBeenCalledWith(
       "/api/booking/properties/a1b2c3d4-0000-4000-8000-000000000001/partner-connections",
+      expect.anything(),
     );
     await client.disconnect(propertyId, connection.connectionId);
     expect(http.delete).toHaveBeenCalledWith(

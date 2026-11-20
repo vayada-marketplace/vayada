@@ -87,7 +87,13 @@ export function PartnerAuthorizePage({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      if (decision === "allow" && selected && !selected.promoCodesEnabled && turnOnPromos) {
+      if (
+        decision === "allow" &&
+        selected &&
+        !selected.promoCodesEnabled &&
+        request?.scopes.includes("promo_codes") &&
+        turnOnPromos
+      ) {
         try {
           await enablePromos(selected.propertyId);
         } catch {

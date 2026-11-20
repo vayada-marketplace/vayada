@@ -306,6 +306,7 @@ describe("partner app registration (VAY-2436)", () => {
       webhookUrl: "https://partner.example/hooks",
       contactEmail: null,
       termsVersion: "partner-contract-2026-10-31",
+      secretFile: null,
       apply: true,
     });
     expect(checkRedirectUri("http://localhost:3000/callback")).toBe(true);

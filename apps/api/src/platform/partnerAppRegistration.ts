@@ -19,6 +19,8 @@ export type PartnerAppRegistration = {
   webhookUrl: string | null;
   contactEmail: string | null;
   termsVersion: string;
+  /** Where --apply writes the client secret (a new file, readable only by its owner), never stdout. */
+  secretFile: string | null;
   apply: boolean;
 };
 
@@ -68,6 +70,7 @@ export function parsePartnerAppRegistrationArgs(argv: readonly string[]): Partne
     "--webhook-url",
     "--contact-email",
     "--terms-version",
+    "--secret-file",
   ];
   const unknown = [...values.keys()].find((flag) => !known.includes(flag));
   if (unknown) throw new PartnerAppRegistrationRefusal(`Unknown option ${unknown}`);
@@ -90,6 +93,7 @@ export function parsePartnerAppRegistrationArgs(argv: readonly string[]): Partne
     webhookUrl,
     contactEmail: one("--contact-email"),
     termsVersion: one("--terms-version") ?? "partner-contract-2026-10-31",
+    secretFile: one("--secret-file"),
     apply,
   };
 }
@@ -101,7 +105,7 @@ type Queryable = {
 /** Stores the app and returns its client id and secret, the only time the secret exists in full. */
 export async function registerPartnerApp(
   db: Queryable,
-  registration: Omit<PartnerAppRegistration, "apply">,
+  registration: Omit<PartnerAppRegistration, "apply" | "secretFile">,
 ): Promise<{ appId: string; clientId: string; clientSecret: string }> {
   const clientId = `partner_${randomBytes(12).toString("hex")}`;
   const clientSecret = newSecretValue("secret");

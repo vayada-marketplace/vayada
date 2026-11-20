@@ -34,7 +34,8 @@ ALTER TABLE distribution.external_api_clients
     CHECK (
       NOT ('partner_connection' = ANY(allowed_surfaces))
       OR (
-        credential_hash_ref ~ '^sha256:[0-9a-f]{64}$'
+        credential_hash_ref IS NOT NULL
+        AND credential_hash_ref ~ '^sha256:[0-9a-f]{64}$'
         AND cardinality(redirect_uris) > 0
         AND array_position(redirect_uris, NULL) IS NULL
         AND cardinality(allowed_scopes) > 0

@@ -52,8 +52,10 @@ export async function registerPartnerApiRoutes(
   options: PartnerApiRoutesOptions,
 ) {
   app.addHook("onClose", async () => options.repository.close?.());
-  await app.register(registerOAuthRoutes, { prefix: "/oauth", ...options });
-  await app.register(registerV1Routes, { prefix: "/v1", ...options });
+  // The parent's own options carry its prefix (/partner): it must not replace the children's.
+  const { repository, requestsPerMinute, now } = options;
+  await app.register(registerOAuthRoutes, { repository, prefix: "/oauth" });
+  await app.register(registerV1Routes, { repository, requestsPerMinute, now, prefix: "/v1" });
 }
 
 async function registerOAuthRoutes(app: FastifyInstance, { repository }: PartnerApiRoutesOptions) {
