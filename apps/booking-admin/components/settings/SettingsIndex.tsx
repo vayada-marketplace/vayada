@@ -13,6 +13,7 @@ import {
   DocumentTextIcon,
   FunnelIcon,
   GiftIcon,
+  LinkIcon,
   ReceiptPercentIcon,
   ShieldCheckIcon,
   UserCircleIcon,
@@ -96,6 +97,13 @@ const CARDS: SettingsCardLink[] = [
     description: "settings.cards.billing.description",
     icon: ReceiptPercentIcon,
     href: "/settings/billing",
+  },
+  // Partner apps the hotel allowed, such as Creator Links (VAY-2436).
+  {
+    title: "settings.cards.connectedApps.title",
+    description: "settings.cards.connectedApps.description",
+    icon: LinkIcon,
+    href: "/settings/connected-apps",
   },
   {
     title: "settings.cards.privacy.title",

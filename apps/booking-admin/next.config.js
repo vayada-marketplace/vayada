@@ -13,6 +13,17 @@ const nextConfig = {
   logging: { incomingRequests: { ignore: [/^\/setup\/airbnb-return(?:\/|\?|$)/] } },
   async headers() {
     return [
+      // VAY-2436: a partner app's approval page must never sit in another site's frame (a hidden
+      // "Allow" click), and its address carries the app's one-time request.
+      {
+        source: "/partner/oauth/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
       {
         source: "/setup/airbnb-return/:path*",
         headers: [

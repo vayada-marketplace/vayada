@@ -27,6 +27,11 @@ export type BackendAuthPluginOptions = {
   defaultLocale?: string;
   /** Default currency. Defaults to "USD". */
   defaultCurrency?: string;
+  /**
+   * Paths that never take a WorkOS token, such as /partner/ (VAY-2436): partner apps send their own
+   * tokens there, which are never looked at as WorkOS tokens. Skipping only ever leaves authContext null.
+   */
+  skipPathPrefixes?: readonly string[];
 };
 
 declare module "fastify" {
@@ -51,6 +56,7 @@ const backendAuthPluginFn: FastifyPluginAsync<BackendAuthPluginOptions> = async 
   app.decorateRequest(CONTEXT_DECORATION, null);
 
   app.addHook("onRequest", async (request: FastifyRequest) => {
+    if (options.skipPathPrefixes?.some((prefix) => request.url.startsWith(prefix))) return;
     const token = extractBearerToken(request.headers.authorization);
     if (!token) return;
 
