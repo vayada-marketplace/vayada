@@ -62,12 +62,18 @@ type CandidateRow = {
   sentHash: string | null;
 };
 
+/** The booking's code: applied, or reversed by the booking's own cancellation (both cancel paths
+ * reverse it in the same transaction), so a cancelled booking still names its code. */
+const CODE_IN_USE_SQL = (booking: string) => `(application.application_status = 'applied'
+    OR (application.application_status = 'reversed' AND ${booking}.lifecycle_status = 'canceled'))`;
+
 const CANDIDATES_SQL = `
 WITH pairs AS (
   SELECT application.guest_booking_id AS booking_id, promo.partner_client_id AS app_id
   FROM booking.promo_applications application
   JOIN booking.promo_definitions promo ON promo.id = application.promo_definition_id
-  WHERE application.guest_booking_id IS NOT NULL AND promo.partner_client_id IS NOT NULL
+  JOIN booking.guest_bookings used ON used.id = application.guest_booking_id
+  WHERE promo.partner_client_id IS NOT NULL AND ${CODE_IN_USE_SQL("used")}
   UNION
   SELECT guest_booking_id, client_id FROM distribution.partner_booking_states
 )
@@ -111,7 +117,7 @@ FROM pairs
 JOIN booking.guest_bookings booking ON booking.id = pairs.booking_id
 JOIN distribution.partner_connections connection
   ON connection.client_id = pairs.app_id AND connection.property_id = booking.property_id
- AND connection.status = 'active'
+ AND connection.status = 'active' AND 'bookings' = ANY(connection.scopes)
 JOIN distribution.external_api_clients app
   ON app.id = pairs.app_id AND app.status = 'active' AND app.webhook_url IS NOT NULL
 LEFT JOIN distribution.partner_booking_states sent
@@ -120,10 +126,14 @@ LEFT JOIN LATERAL (
   SELECT promo.code, promo.id::text AS id, application.discount_amount::text AS discount_amount
   FROM booking.promo_applications application
   JOIN booking.promo_definitions promo ON promo.id = application.promo_definition_id
-  WHERE application.guest_booking_id = booking.id AND application.application_status = 'applied'
-    AND promo.partner_client_id = pairs.app_id
+  WHERE application.guest_booking_id = booking.id AND promo.partner_client_id = pairs.app_id
+    AND ${CODE_IN_USE_SQL("booking")}
+  ORDER BY application.application_status = 'applied' DESC
   LIMIT 1
-) applied ON true`;
+) applied ON true
+-- Recent stays and anything not sent yet; a stay that ended 90 days ago no longer changes.
+WHERE booking.check_out >= CURRENT_DATE - 90 OR sent.guest_booking_id IS NULL
+ORDER BY sent.updated_at NULLS FIRST, booking.id`;
 
 /** The booking as the app should see it now, or null when it isn't reported (never confirmed). */
 export function partnerBookingSnapshot(row: CandidateRow): PartnerBookingSnapshot | null {
@@ -178,20 +188,26 @@ export async function runPartnerBookingSweep(options: {
   pool: pg.Pool;
   now?: () => Date;
   maxWrites?: number;
-}): Promise<{ queued: number }> {
+}): Promise<{ queued: number; failed: { bookingId: string; appId: string }[] }> {
   const { pool } = options;
   const now = options.now ?? (() => new Date());
   const rows = (await pool.query<CandidateRow>(CANDIDATES_SQL)).rows;
   let queued = 0;
+  const failed: { bookingId: string; appId: string }[] = [];
   for (const row of rows) {
     if (queued >= (options.maxWrites ?? 200)) break;
     const snapshot = partnerBookingSnapshot(row);
     if (!snapshot) continue;
     const hash = snapshotHash(snapshot);
     if (hash === row.sentHash) continue;
-    if (await queueVersion(pool, row, snapshot, hash, now().toISOString())) queued += 1;
+    try {
+      if (await queueVersion(pool, row, snapshot, hash, now().toISOString())) queued += 1;
+    } catch {
+      // One booking that fails must not stop the others; it is tried again next minute.
+      failed.push({ bookingId: row.bookingId, appId: row.appId });
+    }
   }
-  return { queued };
+  return { queued, failed };
 }
 
 async function queueVersion(
@@ -204,11 +220,12 @@ async function queueVersion(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // The connection must still be active: a disconnect holds this row while it revokes, and its
-    // connection.revoked is the last event the app gets.
+    // The connection must still be active with the bookings scope. A disconnect holds this row
+    // while it revokes and cancels the app's queued events, so nothing queued here outlives it.
     const connection = await client.query(
       `SELECT 1 FROM distribution.partner_connections
        WHERE client_id = $1::uuid AND property_id = $2::uuid AND status = 'active'
+         AND 'bookings' = ANY(scopes)
        FOR SHARE`,
       [row.appId, row.propertyId],
     );
@@ -228,15 +245,26 @@ async function queueVersion(
       return false;
     }
     const version = (previous?.version ?? 0) + 1;
-    await client.query(
-      `INSERT INTO distribution.partner_booking_states
-         (guest_booking_id, client_id, property_id, version, status, snapshot_hash, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $7)
-       ON CONFLICT (guest_booking_id, client_id)
-       DO UPDATE SET version = EXCLUDED.version, status = EXCLUDED.status,
-                     snapshot_hash = EXCLUDED.snapshot_hash, updated_at = EXCLUDED.updated_at`,
-      [row.bookingId, row.appId, row.propertyId, version, snapshot.status, hash, at],
-    );
+    // Two overlapping sweeps (a deploy) must not both send a version: the insert of a first version
+    // and the update from the version read each succeed only once.
+    const written = previous
+      ? await client.query(
+          `UPDATE distribution.partner_booking_states
+           SET version = $3, status = $4, snapshot_hash = $5, updated_at = $6
+           WHERE guest_booking_id = $1::uuid AND client_id = $2::uuid AND version = $3 - 1`,
+          [row.bookingId, row.appId, version, snapshot.status, hash, at],
+        )
+      : await client.query(
+          `INSERT INTO distribution.partner_booking_states
+             (guest_booking_id, client_id, property_id, version, status, snapshot_hash, created_at, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 1, $4, $5, $6, $6)
+           ON CONFLICT (guest_booking_id, client_id) DO NOTHING`,
+          [row.bookingId, row.appId, row.propertyId, snapshot.status, hash, at],
+        );
+    if (written.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return false;
+    }
     const { bookingId, reference, ...rest } = snapshot;
     await enqueuePartnerEvent(client, {
       appId: row.appId,

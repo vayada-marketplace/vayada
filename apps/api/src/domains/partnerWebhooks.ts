@@ -196,6 +196,8 @@ export async function deliverPartnerWebhooks(options: {
         });
         outcome =
           response.status >= 200 && response.status < 300 ? "ok" : `http_${response.status}`;
+        // The answer's body is never read; let the connection go.
+        await response.body?.cancel().catch(() => undefined);
       } catch (error) {
         outcome =
           error instanceof Error && error.name === "TimeoutError" ? "timeout" : "unreachable";
@@ -215,7 +217,7 @@ export async function deliverPartnerWebhooks(options: {
       continue;
     }
     const attempts = event.attempts + 1;
-    const exhausted = attempts >= event.maxAttempts || outcome === "app_unavailable";
+    const exhausted = attempts >= event.maxAttempts;
     await pool.query(
       `UPDATE platform.outbox_events
        SET status = $3, leased_until = NULL, attempts_count = $4,

@@ -133,6 +133,12 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
       ownerId,
       `${ownerId}@example.test`,
     ]);
+    // Other partner suites in this database leave their own events queued (connection.revoked to
+    // addresses that don't answer); this suite only delivers its own.
+    await admin.query(
+      `UPDATE platform.outbox_events SET status = 'canceled', leased_until = NULL
+       WHERE destination = 'partner_webhook' AND status IN ('pending', 'leased')`,
+    );
     fixture = await createHotelSetupOrdinaryLoginFixture(admin, url!);
     pool = new pg.Pool({ connectionString: fixture.connectionString, max: 3 });
     connections = createPgPartnerConnectionsRepository({ pool });
@@ -195,8 +201,8 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
     );
     await insertBooking("pending_payment"); // never confirmed: never reported
 
-    expect(await sweep()).toEqual({ queued: 1 });
-    expect(await sweep()).toEqual({ queued: 0 });
+    expect(await sweep()).toEqual({ queued: 1, failed: [] });
+    expect(await sweep()).toEqual({ queued: 0, failed: [] });
     expect(await deliver()).toEqual({ delivered: 1, retrying: 0, failed: [] });
 
     const [delivery] = received;
@@ -233,7 +239,7 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
     expect(row.rows[0]).toEqual({ status: "published", attempts_count: 1 });
   });
 
-  it("sends changes, a code taken off and a cancellation as the next versions", async () => {
+  it("sends changes and a cancellation as the next versions, the cancellation still naming its code", async () => {
     received.length = 0;
     const bookingId = await insertBooking("confirmed");
     await sweep();
@@ -241,13 +247,13 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
       bookingId,
     ]);
     await sweep();
-    await admin.query(
-      "UPDATE booking.promo_applications SET application_status = 'reversed' WHERE guest_booking_id = $1",
-      [bookingId],
-    );
-    await sweep();
+    // As both cancel paths do: the booking is cancelled and its code reversed in one go.
     await admin.query(
       "UPDATE booking.guest_bookings SET lifecycle_status = 'canceled' WHERE id = $1",
+      [bookingId],
+    );
+    await admin.query(
+      "UPDATE booking.promo_applications SET application_status = 'reversed' WHERE guest_booking_id = $1",
       [bookingId],
     );
     await admin.query(
@@ -258,22 +264,44 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
     );
     await sweep();
     await deliver();
-    const mine = events().filter((e) => e.booking?.bookingId === bookingId);
+    // Delivered in any order (they were queued at the same instant); version orders them.
+    const mine = events()
+      .filter((e) => e.booking?.bookingId === bookingId)
+      .sort((x, y) => x.booking!.version - y.booking!.version);
     expect(mine.map((e) => [e.type, e.booking!.version])).toEqual([
       ["booking.confirmed", 1],
       ["booking.changed", 2],
-      ["booking.changed", 3],
-      ["booking.cancelled", 4],
+      ["booking.cancelled", 3],
     ]);
     expect(mine[1]!.booking!.checkOut).toBe("2026-12-05");
     expect(mine[2]!.booking!).toMatchObject({
+      status: "cancelled",
+      cancelledAt: expect.any(String),
+      promoCode: "MIA10",
+      promoCodeId,
+      discountAmount: "46.67",
+    });
+  });
+
+  it("reports a code taken off a confirmed booking as promoCode null", async () => {
+    received.length = 0;
+    const bookingId = await insertBooking("confirmed");
+    await sweep();
+    await admin.query(
+      "UPDATE booking.promo_applications SET application_status = 'reversed' WHERE guest_booking_id = $1",
+      [bookingId],
+    );
+    await sweep();
+    await deliver();
+    const mine = events()
+      .filter((e) => e.booking?.bookingId === bookingId)
+      .sort((x, y) => x.booking!.version - y.booking!.version);
+    expect(mine.map((e) => e.type)).toEqual(["booking.confirmed", "booking.changed"]);
+    expect(mine[1]!.booking!).toMatchObject({
+      status: "confirmed",
       promoCode: null,
       promoCodeId: null,
       discountAmount: "0.00",
-    });
-    expect(mine[3]!.booking!).toMatchObject({
-      status: "cancelled",
-      cancelledAt: expect.any(String),
     });
   });
 
@@ -321,24 +349,86 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
     answer = 200;
   });
 
-  it("sends connection.revoked when the hotel disconnects, and nothing after it", async () => {
+  it("sends connection.revoked when the hotel disconnects, drops what was still queued, and sends nothing after it", async () => {
     received.length = 0;
-    const bookingId = await insertBooking("confirmed");
+    const queuedId = await insertBooking("confirmed");
+    expect((await sweep()).queued).toBe(1); // queued, not sent yet
     const connection = (await connections.listConnections(hotelId))[0]!;
     await connections.disconnect({
       propertyId: hotelId,
       connectionId: connection.connectionId,
       userId: ownerId,
     });
-    expect(await sweep()).toEqual({ queued: 0 });
+    const afterId = await insertBooking("confirmed");
+    expect((await sweep()).queued).toBe(0);
     await deliver();
-    expect(events().map((e) => e.type)).toEqual(["connection.revoked"]);
-    expect(events()[0]).toEqual({
-      id: expect.any(String),
-      type: "connection.revoked",
-      occurredAt: expect.any(String),
-      hotelId,
+    expect(events()).toEqual([
+      {
+        id: expect.any(String),
+        type: "connection.revoked",
+        occurredAt: expect.any(String),
+        hotelId,
+      },
+    ]);
+    const dropped = await admin.query(
+      `SELECT status FROM platform.outbox_events
+       WHERE destination = 'partner_webhook' AND payload#>>'{booking,bookingId}' = $1`,
+      [queuedId],
+    );
+    expect(dropped.rows).toEqual([{ status: "canceled" }]);
+    expect(events().some((e) => e.booking?.bookingId === afterId)).toBe(false);
+  });
+
+  it("sends nothing for a hotel that approved the app without the bookings scope", async () => {
+    received.length = 0;
+    const otherHotel = randomUUID();
+    await admin.query(
+      `INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES ($1::uuid, $1::text, 'Seeblick')`,
+      [otherHotel],
+    );
+    const app = (await connections.findApp(clientId))!;
+    await connections.approve({
+      request: {
+        app,
+        redirectUri: "https://partner.example/callback",
+        scopes: ["promo_codes"],
+        codeChallenge: pkceChallenge(randomBytes(32).toString("base64url")),
+        state: null,
+      },
+      propertyId: otherHotel,
+      approvedByUserId: ownerId,
     });
-    expect(events().some((e) => e.booking?.bookingId === bookingId)).toBe(false);
+    const connectionId = (await connections.listConnections(otherHotel))[0]!.connectionId;
+    const code = await createPgPartnerPromoCodesRepository({ pool }).create(
+      { appId: app.appId, propertyId: otherHotel, connectionId },
+      {
+        code: "SEE5",
+        discountType: "percentage",
+        discountValue: "5",
+        minBookingValue: null,
+        applicableRoomIds: null,
+        validFrom: null,
+        validUntil: null,
+        stayDateFrom: null,
+        stayDateUntil: null,
+        isActive: true,
+        maxUses: 10,
+        externalId: null,
+      },
+    );
+    const bookingId = randomUUID();
+    await admin.query(
+      `INSERT INTO booking.guest_bookings
+         (id, property_id, public_reference, lifecycle_status, check_in, check_out, currency, total_amount)
+       VALUES ($1, $2, $3, 'confirmed', '2026-12-01', '2026-12-03', 'EUR', 200.00)`,
+      [bookingId, otherHotel, `VAY-${bookingId.slice(0, 8)}`],
+    );
+    await admin.query(
+      `INSERT INTO booking.promo_applications
+         (property_id, guest_booking_id, promo_code, application_status, discount_amount, currency, promo_definition_id)
+       VALUES ($1, $2, 'SEE5', 'applied', 10.00, 'EUR', $3)`,
+      [otherHotel, bookingId, code!.promoCodeId],
+    );
+    expect((await sweep()).queued).toBe(0);
   });
 });

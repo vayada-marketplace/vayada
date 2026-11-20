@@ -3745,7 +3745,10 @@ const runPartnerSweep = () => {
   if (!config.backgroundWorkersEnabled || !partnerUpdatesPool || activePartnerSweep) return;
   activePartnerSweep = runPartnerBookingSweep({ pool: partnerUpdatesPool })
     .then((result) => {
-      if (result.queued > 0) app.log.info(result, "Partner booking updates queued");
+      if (result.queued > 0)
+        app.log.info({ queued: result.queued }, "Partner booking updates queued");
+      if (result.failed.length > 0)
+        app.log.warn({ failed: result.failed }, "Partner booking updates will be retried");
     })
     .catch((error: unknown) => app.log.warn({ err: error }, "Partner booking update sweep failed"))
     .finally(() => {

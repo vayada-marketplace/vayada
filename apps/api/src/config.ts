@@ -171,7 +171,8 @@ export type ApiConfig = {
   port: number;
   apiRuntime: ApiRuntime;
   backgroundWorkersEnabled: boolean;
-  /** VAY-2438: PARTNER_WEBHOOK_SIGNING_KEY. Unset: no partner booking updates are written or sent. */
+  /** VAY-2438: PARTNER_WEBHOOK_SIGNING_KEY. Unset: the booking update sweep and webhook delivery don't
+   * run (a disconnect still queues connection.revoked, sent once the key is set). */
   partnerWebhookSigningKey: Buffer | null;
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
