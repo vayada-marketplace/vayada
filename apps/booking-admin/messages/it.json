@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} perde subito l'accesso a questo hotel. Per usarla di nuovo, collegala da {app}.",
   "settings.connectedApps.disconnected": "{app} è scollegata.",
   "settings.connectedApps.disconnectError": "Impossibile scollegare l'app. Riprova.",
-  "settings.connectedApps.noAccess": "Solo i membri che gestiscono i codici sconto possono vedere le app collegate."
+  "settings.connectedApps.noAccess": "Solo i membri che gestiscono i codici sconto possono vedere le app collegate.",
+  "promos.managedBy": "Gestito da {app}",
+  "promos.managedByHint": "Modificalo in {app}"
 }

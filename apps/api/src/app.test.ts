@@ -83,6 +83,7 @@ import type {
 } from "./routes/bookingPromoCodes.js";
 import {
   BookingPromoCodeAmountError,
+  PartnerManagedPromoCodeError,
   createPgTargetBookingPromoCodesRepository,
 } from "./routes/bookingPromoCodes.js";
 import {
@@ -6214,6 +6215,40 @@ describe("vayada-api", () => {
     ]);
   });
 
+  it("refuses to change or retire a connected partner app's code with 409 managed_by_partner (VAY-2437)", async () => {
+    app = buildAuthenticatedApp({
+      bookingPromoCodesRepository: {
+        ...bookingPromoCodesRepository,
+        async listPromoCodesByHotelId() {
+          return [{ ...bookingPromoCode, managedBy: "Partner App" }];
+        },
+        async updatePromoCodeByHotelId() {
+          throw new PartnerManagedPromoCodeError("Managed by a connected partner app");
+        },
+        async retirePromoCodeByHotelId() {
+          throw new PartnerManagedPromoCodeError("Managed by a connected partner app");
+        },
+      },
+    });
+    const url = `/api/booking/hotels/booking_hotel_alpenrose/promo-codes/${bookingPromoCode.promoCodeId}`;
+    const headers = { authorization: "Bearer valid-token" };
+
+    const listed = await injectJson<{ promoCodes: { managedBy?: string | null }[] }>(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/promo-codes",
+      headers,
+    });
+    expect(listed.body.promoCodes[0]?.managedBy).toBe("Partner App");
+    for (const request of [
+      { method: "PATCH" as const, url, headers, payload: { isActive: false } },
+      { method: "DELETE" as const, url, headers },
+    ]) {
+      const response = await injectJson<Record<string, unknown>>(app, request);
+      expect(response.statusCode).toBe(409);
+      expect(response.body).toMatchObject({ code: "managed_by_partner" });
+    }
+  });
+
   it("retires booking promo codes instead of deleting usage history", async () => {
     app = buildAuthenticatedApp();
 
@@ -8491,6 +8526,9 @@ describe("vayada-api", () => {
           };
         if (text.includes("FROM booking.booking_settings"))
           return { rows: [{ currency: "IDR", ...stored }] as unknown as T[] };
+        // VAY-2437: the read that refuses a connected partner app's code.
+        if (text.includes("partner_client_id IS NOT NULL AS managed"))
+          return { rows: [{ managed: false }] as unknown as T[] };
         writes.push(text);
         return { rows: [] as T[] };
       },

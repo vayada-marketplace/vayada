@@ -355,6 +355,7 @@ import { createPgBookingModuleRepository } from "./routes/pmsBookingModules.js";
 import { createPgBookingLocationMapRepository } from "./domains/bookingLocationMap.js";
 import { createPgBookingRoomSortingRepository } from "./domains/bookingRoomSorting.js";
 import { createPgPartnerConnectionsRepository } from "./domains/partnerConnections.js";
+import { createPgPartnerPromoCodesRepository } from "./domains/partnerPromoCodes.js";
 import { createPgAccountBookingPagesRepository } from "./domains/accountBookingPages.js";
 import { createPgBookingHostNotificationsRepository } from "./domains/bookingHostNotifications.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
@@ -729,6 +730,10 @@ const bookingRoomSortingRepository = config.auth
 // Partner apps such as Creator Links and the hotel's one-time approval (VAY-2436).
 const partnerConnectionsRepository = config.auth
   ? createPgPartnerConnectionsRepository({ connectionString: targetDatabaseUrl, max: 2 })
+  : undefined;
+// A connected partner app's own promo codes (VAY-2437).
+const partnerPromoCodesRepository = config.auth
+  ? createPgPartnerPromoCodesRepository({ connectionString: targetDatabaseUrl, max: 2 })
   : undefined;
 // Booking Admin › Settings › Multi-property booking engine: the agency booking page (VAY-2456).
 const accountBookingPagesRepository = config.auth
@@ -2050,6 +2055,7 @@ const app = buildApp({
     ? {
         repository: partnerConnectionsRepository,
         propertyAccessRepository: bookingPropertyAccessRepository,
+        promoCodes: partnerPromoCodesRepository,
       }
     : undefined,
   accountBookingPage: accountBookingPagesRepository

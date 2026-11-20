@@ -5028,7 +5028,7 @@ async function applyAcceptedTargetDateChange(
   return updated;
 }
 
-async function validateTargetPromo(
+export async function validateTargetPromo(
   pool: BookingWebQueryExecutor,
   property: TargetCheckoutPropertyRow,
   code: string,

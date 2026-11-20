@@ -98,12 +98,14 @@ export async function lockReplacementPromoCode(
   for (const room of request.rooms)
     if (!(await lockPmsPricingRoomScope(client, propertyId, room.roomTypeId.toLowerCase())))
       return null;
+  // `source` fingerprints the hotel's promo rows for the quote. VAY-2437's partner columns don't
+  // change a price, so they stay out: quotes from before 0545 and partner externalId edits stay valid.
   const rows = (
     await client.query(
       `SELECT p.*,discount_value::text AS discount, min_booking_value::text AS minimum,
     valid_from::text AS booking_from,valid_until::text AS booking_until,
     stay_date_from::text AS arrival_from,stay_date_until::text AS arrival_until,
-    (to_jsonb(p)-'created_at'-'updated_at')::text AS source
+    (to_jsonb(p)-'created_at'-'updated_at'-'partner_client_id'-'external_id')::text AS source
     FROM booking.promo_definitions p WHERE property_id=$1 ORDER BY id FOR UPDATE`,
       [propertyId],
     )

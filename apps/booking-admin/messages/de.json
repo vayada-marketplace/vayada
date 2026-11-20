@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} verliert sofort den Zugriff auf dieses Hotel. Um die App wieder zu nutzen, verbinden Sie sie in {app}.",
   "settings.connectedApps.disconnected": "{app} ist getrennt.",
   "settings.connectedApps.disconnectError": "Die App konnte nicht getrennt werden. Versuchen Sie es erneut.",
-  "settings.connectedApps.noAccess": "Nur Mitglieder, die Rabattcodes verwalten, sehen verbundene Apps."
+  "settings.connectedApps.noAccess": "Nur Mitglieder, die Rabattcodes verwalten, sehen verbundene Apps.",
+  "promos.managedBy": "Verwaltet von {app}",
+  "promos.managedByHint": "In {app} ändern"
 }

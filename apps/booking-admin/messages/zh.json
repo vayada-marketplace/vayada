@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} 将立即失去对本酒店的访问权限。如需再次使用，请从 {app} 中连接。",
   "settings.connectedApps.disconnected": "{app} 已断开连接。",
   "settings.connectedApps.disconnectError": "无法断开该应用的连接。请重试。",
-  "settings.connectedApps.noAccess": "只有管理折扣码的成员才能查看已连接的应用。"
+  "settings.connectedApps.noAccess": "只有管理折扣码的成员才能查看已连接的应用。",
+  "promos.managedBy": "由 {app} 管理",
+  "promos.managedByHint": "请在 {app} 中修改"
 }

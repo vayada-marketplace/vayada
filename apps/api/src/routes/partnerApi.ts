@@ -7,6 +7,8 @@ import {
   type PartnerApp,
   type PartnerConnectionsRepository,
 } from "../domains/partnerConnections.js";
+import type { PartnerPromoCodesRepository } from "../domains/partnerPromoCodes.js";
+import { registerPartnerPromoCodeRoutes } from "./partnerPromoCodes.js";
 
 /**
  * VAY-2436: what partner apps call (contract "What Vayada accepts and sends", P-VAY-32). Mounted at
@@ -19,6 +21,7 @@ import {
  *   POST /partner/oauth/revoke   form field token (RFC 7009): any of the app's tokens disconnects its
  *                                hotel. Always 200 for a known client.
  *   GET  /partner/v1/hotel       Bearer access token: the hotel it works for.
+ *   /partner/v1/promo-codes      the app's own promo codes there (VAY-2437, partnerPromoCodes.ts).
  *
  * /partner/v1 errors are { "error": { "code", "message", "details"? } }; up to 60 requests a minute
  * per hotel (next-api runs as one task, so the count is global), then 429 rate_limited + Retry-After.
@@ -27,6 +30,7 @@ export const PARTNER_REQUESTS_PER_MINUTE = 60;
 
 export type PartnerApiRoutesOptions = {
   repository: PartnerConnectionsRepository;
+  promoCodes?: PartnerPromoCodesRepository;
   requestsPerMinute?: number;
   now?: () => number;
 };
@@ -44,6 +48,7 @@ type PartnerErrorCode =
   | "unauthenticated"
   | "forbidden"
   | "not_found"
+  | "conflict"
   | "rate_limited"
   | "internal_error";
 
@@ -51,11 +56,20 @@ export async function registerPartnerApiRoutes(
   app: FastifyInstance,
   options: PartnerApiRoutesOptions,
 ) {
-  app.addHook("onClose", async () => options.repository.close?.());
+  app.addHook("onClose", async () => {
+    await options.repository.close?.();
+    await options.promoCodes?.close?.();
+  });
   // The parent's own options carry its prefix (/partner): it must not replace the children's.
-  const { repository, requestsPerMinute, now } = options;
+  const { repository, promoCodes, requestsPerMinute, now } = options;
   await app.register(registerOAuthRoutes, { repository, prefix: "/oauth" });
-  await app.register(registerV1Routes, { repository, requestsPerMinute, now, prefix: "/v1" });
+  await app.register(registerV1Routes, {
+    repository,
+    promoCodes,
+    requestsPerMinute,
+    now,
+    prefix: "/v1",
+  });
 }
 
 async function registerOAuthRoutes(app: FastifyInstance, { repository }: PartnerApiRoutesOptions) {
@@ -128,6 +142,7 @@ async function registerV1Routes(
   app: FastifyInstance,
   {
     repository,
+    promoCodes,
     requestsPerMinute = PARTNER_REQUESTS_PER_MINUTE,
     now = Date.now,
   }: PartnerApiRoutesOptions,
@@ -174,6 +189,9 @@ async function registerV1Routes(
     if (!hotel) return partnerError(reply, 404, "not_found", "The hotel no longer exists.");
     return reply.header("Cache-Control", "private, no-store").send(hotel);
   });
+
+  if (promoCodes)
+    registerPartnerPromoCodeRoutes(app, { repository: promoCodes, accessOf, fail: partnerError });
 }
 
 /** RFC 6749 2.3.1: HTTP Basic with the form-encoded client id and secret. */
