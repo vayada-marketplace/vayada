@@ -7,7 +7,7 @@ import { createPgHotelAccountAgreementsRepository } from "./domains/hotelAccount
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 
 const url = process.env["TEST_DATABASE_URL"];
-const current = { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" };
+const current = { termsVersion: "2026-11-20", dpaVersion: "2026-10-24" };
 
 /**
  * VAY-2246: a hotel account's acceptance of the hotel terms and the DPA (migration 0511), recorded and
@@ -124,7 +124,7 @@ describe.skipIf(!url)("hotel account agreements on the real database (VAY-2246)"
       expect(await repository.findAcceptance(otherAccount, current)).toBeNull();
 
       // A new version of the DPA needs a new acceptance; the old one stays on record.
-      const newer = { termsVersion: "2026-10-24", dpaVersion: "2027-01-01" };
+      const newer = { ...current, dpaVersion: "2027-01-01" };
       expect(await repository.findAcceptance(hotelAccount, newer)).toBeNull();
       expect(
         await repository.accept({

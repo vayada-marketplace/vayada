@@ -14,7 +14,7 @@ import {
 } from "./hotelAccountAgreementsApi";
 import SharedSignupPage from "./SharedSignupPage";
 
-const current = { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" };
+const current = { termsVersion: "2026-11-20", dpaVersion: "2026-10-24" };
 const accepted = {
   ...current,
   acceptedAt: "2026-10-24T09:00:00.000Z",
@@ -113,7 +113,7 @@ describe("hotel account agreements (VAY-2246)", () => {
     });
     const section = view!.root.findByType("section");
     expect(textOf(section)).toContain("As account admin, you accept it for your hotel account");
-    expect(textOf(section)).toContain("Version of October 24, 2026");
+    expect(textOf(section)).toContain("Version of November 20, 2026");
     const acceptButton = view!.root.findAll(
       (node) => node.type === "button" && textOf(node) === "Accept",
     )[0]!;

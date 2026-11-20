@@ -202,7 +202,14 @@ export default function HotelAccountAgreementsBanner({
             </p>
             <p className="mt-1 text-xs text-gray-500">
               {fillTemplate(messages.meta, {
-                date: formatAgreementVersion(status.current.dpaVersion, locale),
+                // The banner asks for both documents, so it names the newer one's date
+                // (ISO dates order as strings): the terms and the DPA can change separately.
+                date: formatAgreementVersion(
+                  status.current.termsVersion > status.current.dpaVersion
+                    ? status.current.termsVersion
+                    : status.current.dpaVersion,
+                  locale,
+                ),
               })}
             </p>
             {phase === "failed" && (

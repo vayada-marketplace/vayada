@@ -6,7 +6,7 @@ import { watchPageHealth } from "../support/pageHealth";
 // between the password and "Create account"; it gates "Continue with Google" too (Paper: VAY-2246, row 2).
 const BOX = /I accept the Terms and the Data Processing Agreement for my hotel/;
 const ERROR = "Tick the box to accept the Terms and the Data Processing Agreement first.";
-const accepted = { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" };
+const accepted = { termsVersion: "2026-11-20", dpaVersion: "2026-10-24" };
 
 async function fillForm(page: Page) {
   await page.goto("/signup");

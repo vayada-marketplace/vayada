@@ -41,7 +41,7 @@ test("the account admin accepts from the banner on any page", async ({ page }, t
   expect(writes).toEqual([
     {
       path: "/api/hotel-account/agreements/accept",
-      body: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
+      body: { termsVersion: "2026-11-20", dpaVersion: "2026-10-24" },
     },
   ]);
   await assertHealthy();
