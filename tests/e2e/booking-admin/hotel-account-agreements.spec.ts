@@ -13,7 +13,7 @@ import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2246: an existing hotel account accepts the hotel terms and the data processing agreement through its
 // account admin (Paper: VAY-2246 DPA acceptance, rows 3 and 4).
-const current = { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" };
+const current = { termsVersion: "2026-11-18", dpaVersion: "2026-11-18" };
 const notAccepted = acceptedAgreementsStatus({ accepted: null });
 
 function corsHeaders(route: Route): Record<string, string> {
@@ -44,7 +44,7 @@ test("the account admin accepts the data processing agreement from the banner", 
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("As account admin, you accept it for Alpenrose Hotels");
   await expect(banner).toContainText(
-    "Version of October 24, 2026 · Only the account admin sees this.",
+    "Version of November 18, 2026 · Only the account admin sees this.",
   );
   await expect(banner.getByRole("link", { name: "hotel terms" })).toHaveAttribute(
     "href",
@@ -141,7 +141,7 @@ test.describe("Settings › Privacy & data", () => {
     const terms = page.getByRole("listitem").filter({ hasText: "Terms of Service (hotel terms)" });
     const dpa = page.getByRole("listitem").filter({ hasText: "Data processing agreement" });
     for (const row of [terms, dpa]) {
-      await expect(row).toContainText("Version of October 24, 2026");
+      await expect(row).toContainText("Version of November 18, 2026");
       await expect(row).toContainText("Accepted on Oct 24, 2026 by Anna Keller");
     }
     await expect(terms.getByRole("link", { name: "Read" })).toHaveAttribute("href", /\/terms$/);

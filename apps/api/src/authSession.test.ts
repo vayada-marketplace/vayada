@@ -1667,7 +1667,7 @@ describe("AuthKit session routes", () => {
       method: "GET",
       url:
         "/auth/oauth/google/start?surface=booking-admin&flow=signup&type=hotel" +
-        "&accepted_terms=2026-10-24&accepted_dpa=2026-10-24" +
+        "&accepted_terms=2026-11-18&accepted_dpa=2026-11-18" +
         "&return_to=https%3A%2F%2Fadmin.booking.localhost%2Flogin%3Fauth%3Dcallback%26returnTo%3D%252Fdashboard" +
         "&error_return_to=https%3A%2F%2Fadmin.booking.localhost%2Fsignup",
       headers: { host: "api.localhost", "x-forwarded-proto": "https" },
@@ -1725,7 +1725,7 @@ describe("AuthKit session routes", () => {
       organizationId: "org_google_hotel",
       userId: "user_google_hotel",
       source: "signup",
-      versions: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
+      versions: { termsVersion: "2026-11-18", dpaVersion: "2026-11-18" },
     });
   });
 
@@ -2215,7 +2215,7 @@ describe("AuthKit session routes", () => {
       email: webhookUser.email,
       surface: "pms-web",
       type: "hotel",
-      acceptedAgreements: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
+      acceptedAgreements: { termsVersion: "2026-11-18", dpaVersion: "2026-11-18" },
     });
     // The tickbox's versions wait in the signed verification state until the account exists.
     expect(accept).not.toHaveBeenCalled();
@@ -2242,7 +2242,7 @@ describe("AuthKit session routes", () => {
       organizationId: "org_webhook_first_hotel",
       userId: webhookUser.userId,
       source: "signup",
-      versions: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
+      versions: { termsVersion: "2026-11-18", dpaVersion: "2026-11-18" },
     });
     expect(commands).toEqual([
       expect.objectContaining({
@@ -2433,7 +2433,7 @@ describe("AuthKit session routes", () => {
       workosOrgId: "org_workos_booking_hotel",
       organizationId: "org_booking_hotel",
       selectedSession: "selected_booking_hotel_session",
-      acceptedAgreements: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
+      acceptedAgreements: { termsVersion: "2026-11-18", dpaVersion: "2026-11-18" },
     },
     {
       surface: "pms-web" as const,

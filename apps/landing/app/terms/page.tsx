@@ -14,7 +14,7 @@ export default function TermsPage() {
               Terms of Service (AGB)
             </h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 24, 2026
+              <strong>Effective Date:</strong> November 18, 2026
             </p>
           </div>
 
@@ -57,12 +57,22 @@ export default function TermsPage() {
                   a Hotel, such as an owner, manager or staff member.
                 </p>
                 <p>
-                  <strong>Guest: </strong>A person who views a Hotel&apos;s booking site or books a
-                  stay through it.
+                  <strong>Guest: </strong>A person who views a Hotel&apos;s booking site, books a
+                  stay through it or messages the Hotel through Concierge.
                 </p>
                 <p>
                   <strong>Hotel Content:</strong> Any text, images, rates, availability, policies
                   and other data a Hotel enters into or uploads to the Platform.
+                </p>
+                <p>
+                  <strong>AI Features: </strong>Features of the Services that use AI models run for
+                  vayada, such as translating, summarising and drafting replies to Guest messages,
+                  the in-app assistant and Concierge.
+                </p>
+                <p>
+                  <strong>Connected AI App: </strong>An AI app, such as Claude or ChatGPT, that a
+                  User connects to the Hotel&apos;s account, for example through vayada&apos;s MCP
+                  connection.
                 </p>
               </div>
             </section>
@@ -131,10 +141,11 @@ export default function TermsPage() {
                 <h3 className={H3}>3.3 Third-Party Connections</h3>
                 <p>
                   The Services can connect to third-party services you choose to use, such as a
-                  channel manager and online travel agencies, an Airbnb listing import, or Stripe
-                  for card payments and payouts. Those services run under their own terms and
-                  require your own accounts with them. vayada is not responsible for their
-                  availability, their fees or the way they handle your data.
+                  channel manager and online travel agencies, an Airbnb listing import, Stripe for
+                  card payments and payouts, Instagram for Concierge, or the AI apps your Users
+                  connect (Section 3.6). Those services run under their own terms and require your
+                  own accounts with them. vayada is not responsible for their availability, their
+                  fees or the way they handle your data.
                 </p>
               </div>
 
@@ -146,6 +157,74 @@ export default function TermsPage() {
                   interrupt the Services for maintenance, security or legal reasons. Where a change
                   materially reduces the Services you pay for, we will inform you in advance.
                 </p>
+              </div>
+
+              <div className="mt-6">
+                <h3 className={H3}>3.5 AI Features</h3>
+                <div className="space-y-3">
+                  <p>
+                    <strong>Results: </strong>AI Features help you and your Users, but their results
+                    can be wrong or incomplete. Check translations, summaries, drafts and
+                    suggestions before you rely on them. You remain responsible for what you send to
+                    Guests and for the changes made in your account.
+                  </p>
+                  <p>
+                    <strong>Replies and changes: </strong>Replies to Guests from the PMS and the
+                    in-app assistant are sent only after a User confirms them. Concierge, once you
+                    turn it on, answers Guests&apos; Instagram messages on its own and tells them
+                    that an AI is answering. Changes the assistant makes at a User&apos;s request
+                    count as that User&apos;s changes; they are logged and, where the Services offer
+                    it, can be undone for a limited time. Actions that can&apos;t be undone, such as
+                    cancellations, refunds and messages to Guests, need the User&apos;s yes in
+                    vayada first. Concierge&apos;s answers are the exception you turn on.
+                  </p>
+                  <p>
+                    <strong>Usage allowance: </strong>AI Features come with a usage allowance that
+                    vayada sets for your account. When it is used up, AI Features pause until the
+                    next period, unless vayada raises the allowance.
+                  </p>
+                  <p>
+                    <strong>No training: </strong>vayada does not use your data or your Guests&apos;
+                    data to train AI models, and does not let the AI providers it uses do so.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h3 className={H3}>3.6 Connected AI Apps</h3>
+                <div className="space-y-3">
+                  <p>
+                    <strong>Switched on: </strong>AI connections are switched on for every Hotel
+                    account. Your account admin can switch them off and revoke any connection at any
+                    time in the Services.
+                  </p>
+                  <p>
+                    <strong>Who may connect: </strong>Any User may connect an AI app that vayada
+                    supports. vayada lists the supported apps and may add others at a Hotel&apos;s
+                    request after checking them. A Connected AI App can see and do only what its
+                    User can see and do in vayada; Guests&apos; names, messages and contact details
+                    are available to it only if you turn that on. Actions taken through a Connected
+                    AI App count as actions of the User who connected it. Actions that can&apos;t be
+                    undone need that User&apos;s yes on a vayada page.
+                  </p>
+                  <p>
+                    <strong>Your choice: </strong>You and your Users choose the AI app and its plan,
+                    business or personal, and are responsible for that choice. vayada sends data to
+                    a Connected AI App only in answer to the app&apos;s requests through its
+                    User&apos;s connection; vayada does not send the data to that AI company on its
+                    own. The AI company handles the data under its own terms with you or your User.
+                    Depending on the plan and its settings, it may use chats to train its models, so
+                    check the AI app&apos;s training setting before connecting. vayada is not
+                    responsible for Connected AI Apps, their availability, their answers or the way
+                    their providers handle data.
+                  </p>
+                  <p>
+                    <strong>Records and alerts: </strong>vayada logs each connection and every
+                    request made through it, emails your account admin about each new connection and
+                    a daily summary of changes made with AI, and may suspend a connection to protect
+                    your account or the Platform.
+                  </p>
+                </div>
               </div>
             </section>
 
@@ -171,6 +250,11 @@ export default function TermsPage() {
                 </li>
                 <li>
                   account for all taxes and tourist levies that apply to your bookings;
+                </li>
+                <li>
+                  make sure your Users use AI Features and Connected AI Apps lawfully, including
+                  that sharing Guest data with an AI app they connect is allowed, and inform your
+                  Guests about it where data protection law requires;
                 </li>
                 <li>
                   not upload unlawful, misleading or infringing content, not interfere with the
@@ -271,7 +355,9 @@ export default function TermsPage() {
                   >
                     Data Processing Agreement
                   </a>
-                  , an annex to these Terms.
+                  , an annex to these Terms. It also covers the AI Features. Connected AI Apps are
+                  not vayada&apos;s sub-processors: vayada passes data to them on your instruction,
+                  given by the User who connected the app (Section 3.6).
                 </p>
               </div>
             </section>

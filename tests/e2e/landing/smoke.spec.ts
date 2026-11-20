@@ -69,7 +69,7 @@ test.describe("landing smoke", () => {
     ).toBeVisible();
     await expect(
       page.locator("p", { has: page.getByText("Version:", { exact: true }) }),
-    ).toHaveText("Version: October 24, 2026");
+    ).toHaveText("Version: November 18, 2026");
     await expect(page.getByRole("main").getByRole("heading", { level: 2 })).toHaveText([
       "1. Parties and subject matter",
       "2. Nature, purpose and duration",
@@ -83,6 +83,28 @@ test.describe("landing smoke", () => {
       "10. Audits and information",
     ]);
     await expect(page.getByRole("table")).toHaveCount(3);
+
+    await assertHealthy();
+  });
+
+  // VAY-2502: the Terms, the DPA and the Privacy Policy describe the AI features and connected AI apps.
+  test("the legal pages cover AI features and connected AI apps", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+
+    await page.goto("/terms");
+    for (const name of ["3.5 AI Features", "3.6 Connected AI Apps"])
+      await expect(page.getByRole("heading", { name, level: 3 })).toBeVisible();
+
+    await page.goto("/terms/dpa");
+    await expect(page.getByRole("main")).toContainText("Amazon Web Services (Amazon Bedrock)");
+    await expect(page.getByRole("main")).toContainText(
+      "AI apps that the Hotel's users connect to vayada themselves",
+    );
+
+    await page.goto("/privacy");
+    for (const name of ["C. AI Apps You Connect", "D. AI Tools at the Hotel"])
+      await expect(page.getByRole("heading", { name, level: 3 })).toBeVisible();
+    await expect(page.getByRole("main")).toContainText("check your AI app's training setting");
 
     await assertHealthy();
   });
