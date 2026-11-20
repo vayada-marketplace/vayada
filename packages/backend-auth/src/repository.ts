@@ -46,11 +46,20 @@ export type IdentityMembershipOrganization = IdentityOrganization & {
   membership: IdentityMembership;
 };
 
+/** An internal user with the WorkOS identity it signs in with (null when it has none). */
+export type IdentityUserWithWorkosIdentity = IdentityUser & { workosUserId: string | null };
+
 /** Read-only identity queries needed to resolve a RequestContext. */
 export interface IdentityRepository {
   findUserByProviderUserId(provider: string, providerUserId: string): Promise<IdentityUser | null>;
 
   findOrganizationByWorkosOrgId(workosOrgId: string): Promise<IdentityOrganization | null>;
+
+  /** By internal id; used when an AI action acts as a user (VAY-2506). */
+  findUserById?(userId: string): Promise<IdentityUserWithWorkosIdentity | null>;
+
+  /** By internal id; used when an AI action acts as a user (VAY-2506). */
+  findOrganizationById?(organizationId: string): Promise<IdentityOrganization | null>;
 
   findActiveMembership(userId: string, organizationId: string): Promise<IdentityMembership | null>;
 
@@ -126,6 +135,68 @@ export function createPgIdentityRepository(config: RepositoryConfig): IdentityRe
          WHERE workos_org_id = $1
          LIMIT 1`,
         [workosOrgId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        organizationId: row.id,
+        workosOrgId: row.workos_org_id,
+        name: row.name,
+        kind: row.kind,
+        status: row.status,
+      };
+    },
+
+    async findUserById(userId) {
+      const result = await pool.query<{
+        user_id: string;
+        email: string;
+        name: string | null;
+        phone: string | null;
+        profile_picture_url: string | null;
+        profile_picture_media_object_id: string | null;
+        status: InternalUserStatus;
+        workos_user_id: string | null;
+      }>(
+        `SELECT u.id AS user_id, u.email, u.name, u.phone,
+                u.profile_picture_url, u.profile_picture_media_object_id, u.status,
+                (SELECT ei.provider_user_id
+                 FROM identity.external_identities ei
+                 WHERE ei.user_id = u.id AND ei.provider = 'workos'
+                 ORDER BY ei.provider_user_id
+                 LIMIT 1) AS workos_user_id
+         FROM identity.users u
+         WHERE u.id = $1::uuid
+         LIMIT 1`,
+        [userId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        userId: row.user_id,
+        email: row.email,
+        name: row.name,
+        phone: row.phone,
+        profilePictureUrl: row.profile_picture_url,
+        profilePictureMediaObjectId: row.profile_picture_media_object_id,
+        status: row.status,
+        workosUserId: row.workos_user_id,
+      };
+    },
+
+    async findOrganizationById(organizationId) {
+      const result = await pool.query<{
+        id: string;
+        name: string;
+        workos_org_id: string | null;
+        kind: OrganizationKind;
+        status: OrganizationStatus;
+      }>(
+        `SELECT id, name, workos_org_id, kind, status
+         FROM identity.organizations
+         WHERE id = $1::uuid
+         LIMIT 1`,
+        [organizationId],
       );
       const row = result.rows[0];
       if (!row) return null;

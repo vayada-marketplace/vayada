@@ -16,6 +16,7 @@ export type {
   RequestActor,
   RequestAuditMetadata,
   RequestContext,
+  RequestDelegation,
   RequestSource,
   ResourceRelationship,
   ResourceType,
@@ -98,6 +99,7 @@ export {
 export {
   AuthError,
   AuthorizationResolutionError,
+  DelegationRefusedError,
   UnauthorizedError,
   type AuthErrorCode,
 } from "./errors.js";
@@ -121,6 +123,7 @@ export {
   type IdentityRepository,
   type IdentityResourceLink,
   type IdentityUser,
+  type IdentityUserWithWorkosIdentity,
   type RepositoryConfig,
 } from "./repository.js";
 
@@ -183,6 +186,23 @@ export {
   requireAuthContext,
   type BackendAuthPluginOptions,
 } from "./plugin.js";
+
+// AI actions that run a route as the signed-in user (VAY-2506). The scope's AsyncLocalStorage is
+// private to delegatedScope.ts; only the auth plugin reads it.
+export {
+  delegatedPropertyIds,
+  isDelegatedContext,
+  narrowDelegatedContext,
+  resolveDelegatedContext,
+  type DelegatedContextInput,
+  type DelegatedContextOptions,
+} from "./delegatedContext.js";
+export {
+  injectAsDelegate,
+  type DelegatedInject,
+  type DelegatedMethod,
+  type DelegatedRouteGate,
+} from "./delegatedScope.js";
 export { createPgTeamRoleRepository, type TeamRole } from "./teamRoles.js";
 export type { TeamRoleCreateCommand, TeamRoleChangeCommand } from "./teamRoleCreate.js";
 

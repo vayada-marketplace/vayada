@@ -150,6 +150,16 @@ export type RequestAuditMetadata = {
   receivedAt: string;
 };
 
+/** Where an AI action that acts as the user came from (VAY-2506). */
+export type RequestDelegation = {
+  channel: "mcp" | "in_app";
+  /** The MCP connection (channel "mcp") or the in-app conversation (channel "in_app"). */
+  connectionId?: string;
+  conversationId?: string;
+  /** The AI tool call this request serves; it is also the request id. */
+  toolCallId: string;
+};
+
 export type RequestContext = {
   actor: RequestActor;
   selectedOrganization: SelectedOrganization;
@@ -160,4 +170,6 @@ export type RequestContext = {
   locale: string;
   currency: string;
   audit: RequestAuditMetadata;
+  /** Present only when an AI action runs a route as this user (audit.source = "agent"). */
+  delegation?: RequestDelegation;
 };
