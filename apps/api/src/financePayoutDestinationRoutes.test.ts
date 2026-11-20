@@ -140,6 +140,9 @@ it("refuses bad input, reports conflicts and hides failures", async () => {
   try {
     for (const payload of [
       { ...body, countryCode: "id" },
+      // Payouts go to banks in Indonesia and Sri Lanka only.
+      { ...body, countryCode: "TH" },
+      { ...body, countryCode: "DE" },
       { ...body, details: { ...details, accountHolder: "" } },
       { ...body, details: { ...details, extra: "secret" } },
       { action: "delete", commandId: body.commandId, expectedVersion: 0 },
@@ -412,6 +415,24 @@ it("refuses vayada Payment lists that would mix test money and real money", () =
   ).toThrow(
     'VAYADA_PAYMENT_PROPERTY_IDS="*" with live keys needs VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*"',
   );
+  // Every hotel live while the test keys are set but no test hotel is named: a lost test list
+  // would send the test hotels' stored test payments (captures, cancels, refunds) to the live keys.
+  const testKeys = {
+    VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2442mix",
+    VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2442mix",
+  };
+  for (const test of [undefined, "", " "])
+    expect(() =>
+      loadConfig({
+        ...testKeys,
+        ...liveKeys,
+        VAYADA_PAYMENT_PROPERTY_IDS: "*",
+        VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "*",
+        ...(test === undefined ? {} : { VAYADA_PAYMENT_TEST_PROPERTY_IDS: test }),
+      }),
+    ).toThrow(
+      'VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*" with test keys needs VAYADA_PAYMENT_TEST_PROPERTY_IDS',
+    );
   // Without live keys (a test-only setup such as staging), "*" charges everyone on the test keys.
   expect(loadConfig({ VAYADA_PAYMENT_PROPERTY_IDS: "*" }).vayadaPaymentPropertyIds).toBe("all");
   // The test and stop lists take property UUIDs only, never "*".

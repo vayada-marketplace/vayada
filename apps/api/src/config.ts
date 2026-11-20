@@ -516,10 +516,16 @@ export function vayadaPaymentLiveFor(
 }
 
 /** VAY-2442: the vayada Payment hotel lists, with the rules that keep test money and real money
- * apart: a test hotel is never on an explicit live list, and with the live keys set the charge list
+ * apart: a test hotel is never on an explicit live list; with the live keys set the charge list
  * "*" needs the live list "*" (or a real hotel missing from the live list would take test-mode
- * charges: a confirmed booking for no money). */
-function loadVayadaPaymentLists(env: NodeJS.ProcessEnv, liveKeysSet: boolean) {
+ * charges: a confirmed booking for no money); and with the test keys set the live list "*" needs
+ * the test hotels named (or a lost test list would send their stored test payments, and every
+ * capture, cancel and refund of them, to the live keys). */
+function loadVayadaPaymentLists(
+  env: NodeJS.ProcessEnv,
+  liveKeysSet: boolean,
+  testKeysSet: boolean,
+) {
   const all = (key: string) => readOptionalEnv(env, key) === "*";
   const lists = {
     vayadaPaymentPropertyIds: all("VAYADA_PAYMENT_PROPERTY_IDS")
@@ -545,6 +551,10 @@ function loadVayadaPaymentLists(env: NodeJS.ProcessEnv, liveKeysSet: boolean) {
   if (liveKeysSet && lists.vayadaPaymentPropertyIds === "all" && live !== "all")
     throw new Error(
       'VAYADA_PAYMENT_PROPERTY_IDS="*" with live keys needs VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*"',
+    );
+  if (testKeysSet && live === "all" && lists.vayadaPaymentTestPropertyIds.length === 0)
+    throw new Error(
+      'VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*" with test keys needs VAYADA_PAYMENT_TEST_PROPERTY_IDS',
     );
   return lists;
 }
@@ -1435,7 +1445,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     vayadaPaymentEnabled: readBooleanEnv(env, "VAYADA_PAYMENT_ENABLED"),
     vayadaPaymentStripe: loadVayadaPaymentStripe(env, "test"),
     vayadaPaymentStripeLive: loadVayadaPaymentStripe(env, "live"),
-    ...loadVayadaPaymentLists(env, loadVayadaPaymentStripe(env, "live") !== undefined),
+    ...loadVayadaPaymentLists(
+      env,
+      loadVayadaPaymentStripe(env, "live") !== undefined,
+      loadVayadaPaymentStripe(env, "test") !== undefined,
+    ),
     vayadaPaymentFeePercent: readVayadaPaymentFeePercent(env),
     identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),
     // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
