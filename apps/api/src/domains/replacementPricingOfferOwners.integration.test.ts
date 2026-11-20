@@ -10732,7 +10732,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           });
           // VAY-2108 (0543): the first ongoing delivery after activation, on the same login. Its
           // guard trigger used to lock the active version FOR SHARE, which needs an UPDATE grant
-          // the worker does not have (42501 on Tiga Lombok's first production delivery).
+          // the worker does not have (42501 on Tiga Lombok's first production delivery). In
+          // production a full sync activates and then delivers, so the job takes that shape.
+          await pool.query(
+            `UPDATE platform.jobs SET job_type='channex.sync_ari',
+               payload='{"operationType":"sync_ari"}'::jsonb WHERE id=$1`,
+            [f.input.jobId],
+          );
           const delivery = await prepareNextChannexOfferAriDelivery(worker, f.input);
           expect(delivery.kind).toBe("prepared");
         }
