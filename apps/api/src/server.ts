@@ -390,6 +390,11 @@ import {
   startContactIntakeRetentionWorker,
 } from "./jobs/contactIntakeRetention.js";
 import {
+  createPgAiActionLogRetentionStore,
+  createPgAiActivityStore,
+} from "./ai/actionLog/aiActivity.js";
+import { startAiActionLogRetentionWorker } from "./jobs/aiActionLogRetention.js";
+import {
   createPgGuestProfileLinkStore,
   startGuestProfileLinkWorker,
 } from "./jobs/bookingGuestProfileLinks.js";
@@ -2532,6 +2537,7 @@ const app = buildApp({
   staffInvitations: staffInvitationRuntime,
   identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
+  aiActivityStore: createPgAiActivityStore({ connectionString: targetDatabaseUrl }),
   bookingWebCheckoutAdapter,
   bookingWebDisplayRates,
   bookingWebAttributionSink:
@@ -3850,6 +3856,17 @@ const contactIntakeRetentionWorker = startContactIntakeRetentionWorker({
 
 app.addHook("onClose", async () => {
   await contactIntakeRetentionWorker.close();
+});
+
+// VAY-2508: AI action log rows go after two years; expired Inbox assist results are emptied.
+const aiActionLogRetentionWorker = startAiActionLogRetentionWorker({
+  store: createPgAiActionLogRetentionStore({ connectionString: targetDatabaseUrl, max: 1 }),
+  enabled: config.backgroundWorkersEnabled,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await aiActionLogRetentionWorker.close();
 });
 
 // VAY-2420: every booking guest gets one guest profile per person and account.
