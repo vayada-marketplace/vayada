@@ -144,7 +144,9 @@ export const CHANNEX_PRODUCTION_AVAILABILITY_PACING = { maxSends: 15 } as const;
 
 /** VAY-2108: the same pacing for a new plan's initial (closed) uploads, one plan night per
  * restrictions POST: up to 15 per turn instead of one. Channex's limit is per property and kind. */
-export const CHANNEX_PRODUCTION_UPLOAD_PACING = { maxSends: 15 } as const;
+// 8 s spacing (not availability's 7 s): the next turn's first upload can follow the last one by
+// about 6-9 s, and a 429 uses up one of a night's three unanswered replies.
+export const CHANNEX_PRODUCTION_UPLOAD_PACING = { maxSends: 15, spacingMs: 8_000 } as const;
 
 export function createChannexManagementProvider(config: {
   apiBaseUrl: string;
@@ -474,8 +476,17 @@ export function createChannexManagementProvider(config: {
           // reconciled; when nothing is left, the next turn finds that and moves on to availability.
           let sentAttemptId = result.attemptId;
           let sentAt = uploadPacing.now();
+          // A heartbeat failure after a send ends the turn like any other stop after a send.
+          const heartbeat = async () => {
+            try {
+              await input.onProgress?.();
+              return true;
+            } catch {
+              return false;
+            }
+          };
           for (let sends = 1; ; ) {
-            await input.onProgress?.();
+            if (!(await heartbeat())) return retained(sentAttemptId);
             await uploadPacing.sleep(uploadPacing.settleMs);
             try {
               const reconciled = await config.reconcileClosedUploads(lease, readClosedUpload);
@@ -488,7 +499,7 @@ export function createChannexManagementProvider(config: {
               });
               return retained(sentAttemptId);
             }
-            await input.onProgress?.();
+            if (!(await heartbeat())) return retained(sentAttemptId);
             if (
               sends >= uploadPacing.maxSends ||
               uploadPacing.now() - uploadTurnStarted >= uploadPacing.turnBudgetMs ||
@@ -499,6 +510,8 @@ export function createChannexManagementProvider(config: {
             await uploadPacing.sleep(
               Math.max(0, sentAt + uploadPacing.spacingMs - uploadPacing.now()),
             );
+            // Shutdown may have started during the spacing wait: claim nothing more.
+            if (uploadPacing.stopping()) return retained(sentAttemptId);
             let next: Awaited<ReturnType<NonNullable<typeof config.dispatchClosedUpload>>>;
             try {
               next = await config.dispatchClosedUpload(lease, ports);

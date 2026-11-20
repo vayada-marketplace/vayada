@@ -952,6 +952,7 @@ describe("closed upload worker completion", () => {
         reconcile?: "ok" | "settling" | "throw";
         stopping?: () => boolean;
         paced?: false;
+        heartbeat?: () => Promise<void>;
       } = {},
     ) {
       let clock = 0,
@@ -1017,7 +1018,11 @@ describe("closed upload worker completion", () => {
         prepareRoomAvailability: prepareRoomAvailability as never,
         activatePublishedOffers: (async () => ({ kind: "no_targets" as const })) as never,
       });
-      const run = () => provider.execute(job("sync_ari"), { workerId: "worker" });
+      const run = () =>
+        provider.execute(job("sync_ari"), {
+          workerId: "worker",
+          ...(options.heartbeat ? { onProgress: options.heartbeat } : {}),
+        });
       return { run, sleeps, sent, prepareRoomAvailability, reconciles: () => reconciles };
     }
     const retained = (attemptId: string) => ({
@@ -1060,6 +1065,23 @@ describe("closed upload worker completion", () => {
       expect(await turn.run()).toEqual(retained("upload-1"));
       expect(turn.sent).toEqual(["upload-1"]);
       expect(turn.reconciles()).toBe(2);
+    });
+    it("claims nothing more when the stop starts during the spacing wait", async () => {
+      // Not stopping when the limits are checked, stopping once the spacing wait is over.
+      let checks = 0;
+      const turn = pacedUploads(["send", "send"], { stopping: () => ++checks > 1 });
+      expect(await turn.run()).toEqual(retained("upload-1"));
+      expect(turn.sent).toEqual(["upload-1"]);
+      expect(checks).toBe(2);
+    });
+    it("ends the turn as a continuation when the heartbeat fails after an upload", async () => {
+      const turn = pacedUploads(["send", "send"], {
+        heartbeat: async () => {
+          throw new Error("lease heartbeat unavailable");
+        },
+      });
+      expect(await turn.run()).toEqual(retained("upload-1"));
+      expect(turn.sent).toEqual(["upload-1"]);
     });
     it("ends the turn once its time budget is used", async () => {
       // The second upload is reconciled at 14.1 s, past a 9 s budget, before a third claim.
