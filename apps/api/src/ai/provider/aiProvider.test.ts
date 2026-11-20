@@ -1,3 +1,4 @@
+import { registerTelemetry } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAiProvider, enabledAiProvidersFromEnv, type AiRunOptions } from "./aiProvider.js";
@@ -25,15 +26,15 @@ const CREDENTIALS = async () => ({ accessKeyId: "AKIAFAKEFAKEFAKEFAKE", secretAc
 
 type Call = { url: string; headers: Headers; body: Record<string, unknown> };
 
-function anthropicReply(text: string, usage: Record<string, number>) {
+function anthropicReply(text: string, usage: Record<string, number>, stopReason = "end_turn") {
   return new Response(
     JSON.stringify({
       id: "msg_1",
       type: "message",
       role: "assistant",
       model: "claude-haiku-5-5",
-      content: [{ type: "text", text }],
-      stop_reason: "end_turn",
+      content: text ? [{ type: "text", text }] : [],
+      stop_reason: stopReason,
       stop_sequence: null,
       usage,
     }),
@@ -104,7 +105,6 @@ describe("createAiProvider", () => {
     expect(result).toEqual({
       ok: true,
       text: "Good morning, is the room free?",
-      finishReason: "stop",
       route: HAIKU,
       usage: {
         inputTokens: 1_000,
@@ -219,6 +219,96 @@ describe("createAiProvider", () => {
       "AI provider call failed",
     );
     expect(JSON.stringify(warn.mock.calls)).not.toContain("Guten Morgen");
+  });
+
+  it("never passes a refused, cut-off or empty answer as usable, but still reports what it cost", async () => {
+    const usage = { input_tokens: 100, output_tokens: 4_096 };
+    const replies = [
+      anthropicReply("", { input_tokens: 100, output_tokens: 20 }, "refusal"),
+      anthropicReply("Good mor", usage, "max_tokens"),
+      anthropicReply("   ", { input_tokens: 100, output_tokens: 1 }),
+    ];
+    const network = fakeFetch(() => replies.shift()!);
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+    });
+
+    expect(await provider.run("inbox_translate", INPUT, OPTIONS)).toMatchObject({
+      ok: false,
+      reason: "refused",
+      usage: { inputTokens: 100, outputTokens: 20 },
+      costMicroUsd: 22, // 100 x 110 + 20 x 550 nano-dollars
+    });
+    expect(await provider.run("inbox_translate", INPUT, OPTIONS)).toMatchObject({
+      ok: false,
+      reason: "truncated",
+      costMicroUsd: 2_264, // 100 x 110 + 4,096 x 550 nano-dollars, rounded up
+    });
+    expect(await provider.run("inbox_translate", INPUT, OPTIONS)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+  });
+
+  it("logs the provider's status when it keeps throttling", async () => {
+    const network = fakeFetch(
+      () =>
+        new Response(JSON.stringify({ message: "Too many requests" }), {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after-ms": "1" },
+        }),
+    );
+    const warn = vi.fn();
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      log: { warn },
+    });
+
+    expect(await provider.run("inbox_translate", INPUT, OPTIONS)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(network.calls).toHaveLength(2);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: { name: "AI_RetryError", statusCode: 429 } }),
+      "AI provider call failed",
+    );
+  });
+
+  it("keeps prompts and answers out of telemetry", async () => {
+    const events: string[] = [];
+    const capture = (event: unknown) => {
+      events.push(JSON.stringify(event));
+    };
+    registerTelemetry({
+      onStart: capture,
+      onStepStart: capture,
+      onLanguageModelCallStart: capture,
+      onLanguageModelCallEnd: capture,
+      onStepEnd: capture,
+      onStepFinish: capture,
+      onStepError: capture,
+    });
+    const network = fakeFetch(() =>
+      anthropicReply("Good morning, is the room free?", { input_tokens: 10, output_tokens: 5 }),
+    );
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+    });
+
+    expect(await provider.run("inbox_translate", INPUT, OPTIONS)).toMatchObject({ ok: true });
+
+    expect(events.length).toBeGreaterThan(0);
+    const recorded = events.join("\n");
+    expect(recorded).not.toContain("Guten Morgen");
+    expect(recorded).not.toContain("Translate the guest message");
+    expect(recorded).not.toContain("is the room free");
   });
 
   it("gives up after the timeout", async () => {

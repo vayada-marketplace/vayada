@@ -50,17 +50,20 @@ export type AiRunOptions = {
   abortSignal?: AbortSignal;
 };
 
+/** What a model call that got an answer used and cost. */
+export type AiCallRecord = {
+  route: ModelRoute;
+  usage: TokenUsage;
+  costMicroUsd: number;
+  priceTableVersion: string;
+  latencyMs: number;
+};
+
 export type AiRunResult =
-  | {
-      ok: true;
-      text: string;
-      finishReason: string;
-      route: ModelRoute;
-      usage: TokenUsage;
-      costMicroUsd: number;
-      priceTableVersion: string;
-      latencyMs: number;
-    }
+  | ({ ok: true; text: string } & AiCallRecord)
+  /** The model answered, but refused or ran out of output tokens: no usable text, still billed. */
+  | ({ ok: false; reason: "refused" | "truncated" } & AiCallRecord)
+  /** "unavailable": no model was called. "failed": the call errored, timed out or came back empty. */
   | { ok: false; reason: "unavailable" | "failed" };
 
 export type AiProvider = {
@@ -77,7 +80,7 @@ export type AiProviderConfig = {
   /** Tests replace the network, the AWS credentials and the job settings. */
   fetch?: typeof globalThis.fetch;
   awsCredentials?: () => Promise<AwsCredentials>;
-  tasks?: Record<AiTask, TaskSetting>;
+  tasks?: Readonly<Record<AiTask, TaskSetting>>;
   timeoutMs?: number;
   now?: () => number;
 };
@@ -125,15 +128,16 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
 
   return {
     async run(task, input, options) {
-      const setting = tasks[task];
-      const route = options.route ?? setting.routes.find((each) => enabled.has(each.provider));
+      const setting = tasks[task] as TaskSetting | undefined;
+      const route = options.route ?? setting?.routes.find((each) => enabled.has(each.provider));
       const fields = {
         task,
         surface: options.context.surface,
         requestId: options.context.requestId,
         route: route ? routeKey(route) : null,
       };
-      if (!route || !enabled.has(route.provider)) return { ok: false, reason: "unavailable" };
+      if (!setting || !route || !enabled.has(route.provider))
+        return { ok: false, reason: "unavailable" };
       if ((options.data ?? "customer") === "customer" && !allowed.has(routeKey(route))) {
         config.log?.warn(fields, "AI route is not cleared for customer data");
         return { ok: false, reason: "unavailable" };
@@ -163,16 +167,25 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
           telemetry: { recordInputs: false, recordOutputs: false, functionId: `ai.${task}` },
         });
         const usage = tokenUsage(result.totalUsage);
-        return {
-          ok: true,
-          text: result.text,
-          finishReason: result.finishReason,
-          route,
+        const record: AiCallRecord = {
+          route: { ...route },
           usage,
           costMicroUsd: costMicroUsd(route, usage) ?? 0,
           priceTableVersion: PRICE_TABLE_VERSION,
           latencyMs: now() - started,
         };
+        // A refusal or a cut-off answer must never pass as a usable one.
+        if (result.finishReason === "content-filter")
+          return { ok: false, reason: "refused", ...record };
+        if (result.finishReason === "length") return { ok: false, reason: "truncated", ...record };
+        if (result.finishReason !== "stop" || !result.text.trim()) {
+          config.log?.warn(
+            { ...fields, finishReason: result.finishReason },
+            "AI answer was not usable",
+          );
+          return { ok: false, reason: "failed" };
+        }
+        return { ok: true, text: result.text, ...record };
       } catch (error) {
         config.log?.warn({ ...fields, error: errorSummary(error) }, "AI provider call failed");
         return { ok: false, reason: "failed" };
@@ -195,9 +208,13 @@ function emptyUsage(): TokenUsage {
   return { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
 }
 
-/** Error name and HTTP status only: provider messages can quote the prompt. */
+/**
+ * Error name and HTTP status only: provider messages can quote the prompt. After the retry is
+ * used up the SDK throws a RetryError, whose last attempt holds the status (e.g. 429).
+ */
 function errorSummary(error: unknown): { name: string; statusCode?: number } {
   if (!(error instanceof Error)) return { name: typeof error };
-  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  const last = (error as { lastError?: unknown }).lastError ?? error;
+  const statusCode = (last as { statusCode?: unknown }).statusCode;
   return typeof statusCode === "number" ? { name: error.name, statusCode } : { name: error.name };
 }

@@ -20,11 +20,8 @@ export type AiProviderName = (typeof AI_PROVIDERS)[number];
 export type ModelRoute = { provider: AiProviderName; region: string; model: string };
 
 /** Claude on Bedrock through the `eu.` inference profile, called from Ireland (plan 3.11). */
-const bedrockEu = (model: string): ModelRoute => ({
-  provider: "bedrock",
-  region: "eu-west-1",
-  model: `eu.anthropic.${model}`,
-});
+const bedrockEu = (model: string): ModelRoute =>
+  Object.freeze({ provider: "bedrock", region: "eu-west-1", model: `eu.anthropic.${model}` });
 const SONNET = bedrockEu("claude-sonnet-5-5");
 const HAIKU = bedrockEu("claude-haiku-5-5");
 const OPUS = bedrockEu("claude-opus-5-5");
@@ -34,13 +31,13 @@ const OPUS = bedrockEu("claude-opus-5-5");
  * next-api task role's). Add one only together with its DPA row and privacy page text
  * (VAY-2502). Anything else may run only on made-up test data.
  */
-export const CUSTOMER_DATA_ROUTES: readonly ModelRoute[] = [SONNET, HAIKU, OPUS];
+export const CUSTOMER_DATA_ROUTES: readonly ModelRoute[] = Object.freeze([SONNET, HAIKU, OPUS]);
 
 export type TaskSetting = {
   /** The first route whose provider is switched on is used; the rest are the fallback order. */
   routes: readonly ModelRoute[];
   maxOutputTokens: number;
-  /** Claude's thinking and answer effort; thinking can not be switched off on the 5.5 models. */
+  /** Claude's effort for thinking and answering. Thinking stays on; the model test may change that. */
   effort: "low" | "medium" | "high";
   /** The model test run that chose these routes. */
   pickedBy: string;
@@ -48,49 +45,30 @@ export type TaskSetting = {
 
 const BEFORE_MODEL_TEST = "placeholder until the VAY-2520 model test";
 
-export const TASK_SETTINGS: Record<AiTask, TaskSetting> = {
-  inbox_translate: {
-    routes: [HAIKU],
+const setting = (route: ModelRoute, effort: TaskSetting["effort"]): TaskSetting =>
+  Object.freeze({
+    routes: Object.freeze([route]),
+    // Thinking counts against this limit, so it is generous; an answer that hits it comes back
+    // as "truncated". The streaming assistant engine (VAY-2518) sets its own for long answers,
+    // because a non-streamed call must finish within the 45 s timeout.
     maxOutputTokens: 4_096,
-    effort: "low",
+    effort,
     pickedBy: BEFORE_MODEL_TEST,
-  },
-  inbox_summarise: {
-    routes: [HAIKU],
-    maxOutputTokens: 2_048,
-    effort: "low",
-    pickedBy: BEFORE_MODEL_TEST,
-  },
-  inbox_draft: {
-    routes: [SONNET],
-    maxOutputTokens: 4_096,
-    effort: "low",
-    pickedBy: BEFORE_MODEL_TEST,
-  },
-  assistant_chat: {
-    routes: [SONNET],
-    maxOutputTokens: 16_000,
-    effort: "medium",
-    pickedBy: BEFORE_MODEL_TEST,
-  },
-  concierge_understand: {
-    routes: [HAIKU],
-    maxOutputTokens: 2_048,
-    effort: "low",
-    pickedBy: BEFORE_MODEL_TEST,
-  },
-  concierge_reply: {
-    routes: [SONNET],
-    maxOutputTokens: 4_096,
-    effort: "low",
-    pickedBy: BEFORE_MODEL_TEST,
-  },
-};
+  });
+
+export const TASK_SETTINGS: Readonly<Record<AiTask, TaskSetting>> = Object.freeze({
+  inbox_translate: setting(HAIKU, "low"),
+  inbox_summarise: setting(HAIKU, "low"),
+  inbox_draft: setting(SONNET, "low"),
+  assistant_chat: setting(SONNET, "medium"),
+  concierge_understand: setting(HAIKU, "low"),
+  concierge_reply: setting(SONNET, "low"),
+});
 
 /** Nano-dollars per token: $2.20 per million tokens is 2,200. Integers keep costs exact. */
 type Rates = { input: number; cacheRead: number; cacheWrite1h: number; output: number };
 type ModelPrice = Rates & {
-  /** Above this many input tokens in one request, every token of it is billed at `long`. */
+  /** Above this many input tokens in one request, every token of it is billed at these rates. */
   longContext?: { aboveInputTokens: number; rates: Rates };
 };
 
