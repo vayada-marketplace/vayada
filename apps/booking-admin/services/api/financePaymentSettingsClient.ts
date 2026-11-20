@@ -91,7 +91,9 @@ export interface FinancePaymentSettingsPatchResponse {
 export interface FinancePaymentSettingsResponse {
   bankDestination?: SavedBankTransferDestination | null;
   /** VAY-2442: whether the hotel can choose vayada Payment yet, and its fee then. */
-  vayadaPayment?: { available: boolean; feePercent?: number };
+  /** VAY-2570: `stopped`: no new vayada Payment card payments for this hotel (it can still turn
+   * card off and change its payout account). */
+  vayadaPayment?: { available: boolean; feePercent?: number; stopped?: boolean };
   contractVersion: string;
   propertyId: string;
   paymentSettings: {

@@ -717,6 +717,7 @@
   "settings.billing.switchFromNextMonth": "Beralih mulai bulan depan",
   "settings.billing.cancelSwitch": "Batalkan peralihan",
   "settings.billing.comingSoon": "Xendit dan vayada Payments belum bisa menerima pembayaran kartu online. Pilih Stripe Connect untuk menyimpan.",
+  "settings.billing.vayadaStopped": "Pembayaran kartu baru dengan vayada Payment dijeda untuk hotel ini. Matikan kartu untuk menyimpan, atau ubah rekening bank pembayaran di bawah.",
   "settings.billing.onlineCard": "Kartu kredit",
   "settings.billing.cardNotReadyTitle": "Tamu belum bisa membayar dengan kartu.",
   "settings.billing.cardNotReadyNotConnected": "Kartu kredit sudah aktif, tetapi belum ada akun pembayaran yang terhubung.",

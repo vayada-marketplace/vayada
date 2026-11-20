@@ -796,6 +796,8 @@ const financeRepository =
         afterPaymentChange,
         // A hotel can choose vayada Payment only where it can also save its payout account.
         vayadaPaymentOpen: payoutDestinationRepository ? vayadaPaymentManageable : undefined,
+        vayadaPaymentStopped: (propertyId: string) =>
+          vayadaPaymentManageable(propertyId) && !vayadaPaymentOpen(propertyId),
         vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
       })
     : undefined;

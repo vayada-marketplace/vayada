@@ -717,6 +717,7 @@
   "settings.billing.switchFromNextMonth": "下月起切换",
   "settings.billing.cancelSwitch": "取消切换",
   "settings.billing.comingSoon": "Xendit 和 vayada Payments 暂不支持在线银行卡支付。请选择 Stripe Connect 后保存。",
+  "settings.billing.vayadaStopped": "此酒店已暂停通过 vayada Payment 的新银行卡付款。请关闭银行卡以保存，或在下方更改收款银行账户。",
   "settings.billing.onlineCard": "信用卡",
   "settings.billing.cardNotReadyTitle": "客人暂时还不能用银行卡付款。",
   "settings.billing.cardNotReadyNotConnected": "信用卡已开启，但尚未连接收款账户。",

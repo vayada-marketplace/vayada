@@ -218,7 +218,9 @@ export type FinancePaymentSettingsResponse = {
   /** VAY-2442: whether this hotel can choose vayada Payment yet (VAYADA_PAYMENT_ENABLED and the
    * hotel on VAYADA_PAYMENT_PROPERTY_IDS). */
   /** feePercent: the vayada Payment fee on top of the plan fee, shown to the hotel. */
-  vayadaPayment?: { available: boolean; feePercent?: number };
+  /** VAY-2570: `stopped`: the hotel takes no new vayada Payment charges (the stop list); it can
+   * still turn card off and fix its payout account. */
+  vayadaPayment?: { available: boolean; feePercent?: number; stopped?: boolean };
 };
 
 export type FinancePaymentSettingsPatchPayload = Partial<
@@ -1047,6 +1049,9 @@ export type FinancePropertyReadRepository = FinancePropertySettingsReadRepositor
     readonly vayadaPaymentAvailable?: (propertyId: string) => boolean;
     /** VAY-2442: VAYADA_PAYMENT_FEE_PERCENT, shown to hotels choosing vayada Payment. */
     readonly vayadaPaymentFeePercent?: number;
+    /** VAY-2570: whether the hotel is on the vayada Payment stop list: it may still save its
+     * settings and payout account, but not put card on with vayada Payment. */
+    readonly vayadaPaymentStopped?: (propertyId: string) => boolean;
   };
 
 export function toFinancePaymentSettingsResponse(

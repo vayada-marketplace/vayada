@@ -717,6 +717,7 @@
   "settings.billing.switchFromNextMonth": "来月から切り替え",
   "settings.billing.cancelSwitch": "切り替えをキャンセル",
   "settings.billing.comingSoon": "Xendit と vayada Payments はまだオンラインのカード決済に対応していません。保存するには Stripe Connect を選択してください。",
+  "settings.billing.vayadaStopped": "この施設では vayada Payment による新しいカード決済が一時停止されています。保存するにはカードをオフにするか、下の振込先口座を変更してください。",
   "settings.billing.onlineCard": "クレジットカード",
   "settings.billing.cardNotReadyTitle": "ゲストはまだカードで支払えません。",
   "settings.billing.cardNotReadyNotConnected": "クレジットカードはオンですが、決済アカウントが接続されていません。",

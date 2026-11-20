@@ -717,6 +717,7 @@
   "settings.billing.switchFromNextMonth": "Overstappen vanaf volgende maand",
   "settings.billing.cancelSwitch": "Overstap annuleren",
   "settings.billing.comingSoon": "Xendit en vayada Payments kunnen nog geen online kaartbetalingen verwerken. Kies Stripe Connect om op te slaan.",
+  "settings.billing.vayadaStopped": "Nieuwe kaartbetalingen met vayada Payment zijn gepauzeerd voor dit hotel. Zet kaart uit om op te slaan, of wijzig hieronder de bankrekening voor uitbetalingen.",
   "settings.billing.onlineCard": "Creditcard",
   "settings.billing.cardNotReadyTitle": "Gasten kunnen nog niet met een kaart betalen.",
   "settings.billing.cardNotReadyNotConnected": "Creditcard staat aan, maar er is geen betaalaccount gekoppeld.",

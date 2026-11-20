@@ -519,6 +519,27 @@ export async function registerFinanceRoutes(
           message: "vayada Payment is not available yet.",
         } satisfies FinanceCommandError;
       }
+      // VAY-2570: a stopped hotel can still save its settings (turn card off, fix the payout
+      // account), but not end up with card on through vayada Payment: card would show on its
+      // booking page and every card checkout would be refused. The patch is partial, so this
+      // judges the settings as they will be after it.
+      if (options.repository.vayadaPaymentStopped?.(propertyId) === true) {
+        const saved = await options.repository.getPaymentSettings(propertyId);
+        const provider = parsed.payload.paymentProvider ?? saved?.paymentProvider;
+        const methods: readonly string[] =
+          parsed.payload.acceptedMethods ?? saved?.acceptedMethods ?? [];
+        const enabled = parsed.payload.paymentsEnabled ?? saved?.paymentsEnabled ?? false;
+        if (provider === "vayada" && enabled && methods.includes("card")) {
+          reply.code(409);
+          return {
+            statusCode: 409,
+            code: "vayada_payment_stopped",
+            category: "conflict",
+            message:
+              "New card payments with vayada Payment are paused for this hotel. Card can be turned off and the payout account changed.",
+          } satisfies FinanceCommandError;
+        }
+      }
 
       const result = await options.repository.updatePaymentSettings(parsed);
       if (!result.ok) {
@@ -1189,9 +1210,12 @@ export function createTargetFinancePropertySettingsRepository(config: {
   stripeConnectProvider?: FinanceStripeConnectProvider;
   /** VAY-2304: runs after a payment write has committed, to re-publish the hotel's prices. */
   afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
-  /** VAY-2442: whether a hotel gets vayada Payment (VAYADA_PAYMENT_ENABLED and the hotel list).
-   * Missing or false: that hotel can't choose vayada Payment and Vayada can't approve it. */
+  /** VAY-2442: whether a hotel may manage vayada Payment (VAYADA_PAYMENT_ENABLED, the hotel list
+   * and the keys of its mode; since VAY-2570 also when the hotel is stopped). Missing or false: that
+   * hotel can't choose vayada Payment and Vayada can't approve it. */
   vayadaPaymentOpen?: (propertyId: string) => boolean;
+  /** VAY-2570: whether the hotel is on the stop list (manageable, but no new charges). */
+  vayadaPaymentStopped?: (propertyId: string) => boolean;
   /** VAY-2442: VAYADA_PAYMENT_FEE_PERCENT, shown to hotels choosing vayada Payment. */
   vayadaPaymentFeePercent?: number;
 }): FinancePropertyReadRepository {
@@ -1247,6 +1271,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
   return {
     ...onlineCardEvidenceWrites,
     vayadaPaymentAvailable: (propertyId: string) => config.vayadaPaymentOpen?.(propertyId) === true,
+    vayadaPaymentStopped: (propertyId: string) =>
+      config.vayadaPaymentStopped?.(propertyId) === true,
     vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
     async getPaymentSettings(propertyId) {
       const row = await loadPaymentSettingsRow(pool, propertyId);
@@ -6719,11 +6745,17 @@ function vayadaPaymentChoice(
   repository: {
     vayadaPaymentAvailable?: (propertyId: string) => boolean;
     vayadaPaymentFeePercent?: number;
+    vayadaPaymentStopped?: (propertyId: string) => boolean;
   },
   propertyId: string,
-): { available: boolean; feePercent?: number } {
+): { available: boolean; feePercent?: number; stopped?: boolean } {
   const available = repository.vayadaPaymentAvailable?.(propertyId) === true;
-  return available && repository.vayadaPaymentFeePercent !== undefined
-    ? { available, feePercent: repository.vayadaPaymentFeePercent }
-    : { available };
+  const choice =
+    available && repository.vayadaPaymentFeePercent !== undefined
+      ? { available, feePercent: repository.vayadaPaymentFeePercent }
+      : { available };
+  // VAY-2570: a stopped hotel can manage its setup but takes no new card payments.
+  return available && repository.vayadaPaymentStopped?.(propertyId) === true
+    ? { ...choice, stopped: true }
+    : choice;
 }
