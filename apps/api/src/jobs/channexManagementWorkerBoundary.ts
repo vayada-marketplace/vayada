@@ -10,10 +10,13 @@ import {
 // delivery scope (0521), both checked on PG16 and PG17. This image lists the 0520 delivery tables
 // in its privilege matrix, so it needs 0519 and 0520 (cloud job 6dc8de37 computed both values on
 // that base); accepting both lets it start on either side of 0521, so it is released before 0521
-// and stays a safe rollback target once 0521 ships.
+// and stays a safe rollback target once 0521 ships. The third value is the same catalog with
+// 0542's claimed-branch-first order on the claim and connection policies (VAY-2108, PG16 and PG17,
+// cloud job bfd1c0c7); this image ships one release before 0542 so the rollback target accepts it.
 const POLICY_DIGESTS = new Set([
   "f9a53a613884875be8387bfb59bf5772038eda202d0f213c32854585d247b7be",
   "4b14279a210c9f240ea9fefbc8c78dd3886dcccd5e42c1f7f67a436fe6685e3a",
+  "ed4d1b523dba2945ac5af65932049a941f4f8ecd5e8699f2c03d270655dd1b11",
 ]);
 // Shared trigger catalog over the privilege-matrix relations plus the pinned helpers: with 0519
 // and 0520 (the delivery tables' guard triggers are attested through the matrix), and with 0521's
