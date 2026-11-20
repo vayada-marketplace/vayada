@@ -786,6 +786,39 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       await boundary(false);
       await boundary(true);
       await scans();
+      // VAY-2108 (0542): a claimed hotel's claim and connection rows pass on the claimed branch,
+      // so the worker's row checks never ask 0473's enable-job scope (and its platform.jobs
+      // lookup) for them. The unclaimed hotel still falls through to it.
+      const scopeCalls = async (sql: string, values: unknown[]) => {
+        const counter = new pg.Client({ connectionString: pool.options.connectionString });
+        await counter.connect();
+        try {
+          await counter.query("BEGIN");
+          await counter.query(sql, values);
+          return (
+            await counter.query<{ calls: number }>(
+              `SELECT COALESCE(sum(calls),0)::int AS calls FROM pg_stat_xact_user_functions
+               WHERE schemaname='platform' AND funcname='channex_management_worker_connection_scope'`,
+            )
+          ).rows[0]!.calls;
+        } finally {
+          await counter.query("ROLLBACK");
+          await counter.end();
+        }
+      };
+      await owner.query(`ALTER ROLE ${role} SET track_functions = 'pl'`);
+      try {
+        for (const table of ["pms.channel_binding_claims", "pms.channel_connections"]) {
+          expect(
+            await scopeCalls(`SELECT count(*) FROM ${table} WHERE property_id=$1`, [claimed]),
+          ).toBe(0);
+          expect(
+            await scopeCalls(`SELECT count(*) FROM ${table} WHERE property_id=$1`, [unclaimed]),
+          ).toBeGreaterThan(0);
+        }
+      } finally {
+        await owner.query(`ALTER ROLE ${role} RESET track_functions`);
+      }
       // Queue rows follow the admitted operation (as 0473's enable jobs); sources, connections and
       // evidence follow the claim, so the other hotel's job stays inert.
       expect(await jobs()).toEqual([claimedJob, unclaimedJob].sort());
@@ -841,7 +874,10 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     const boundary = async (offerDelivery: boolean) => {
       const client = await pool.connect();
       try {
-        await assertChannexManagementWorkerBoundary(client, { propertyId: property, offerDelivery });
+        await assertChannexManagementWorkerBoundary(client, {
+          propertyId: property,
+          offerDelivery,
+        });
       } finally {
         client.release();
       }

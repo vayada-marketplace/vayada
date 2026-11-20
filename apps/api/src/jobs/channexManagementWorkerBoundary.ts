@@ -21,10 +21,13 @@ const POLICY_DIGESTS = new Set([
 // Shared trigger catalog over the privilege-matrix relations plus the pinned helpers: with 0519
 // and 0520 (the delivery tables' guard triggers are attested through the matrix), and with 0521's
 // delivery helper and sales reset trigger. Earlier catalogs are unreachable for this image, which
-// refuses a database without the delivery tables (relation_missing).
+// refuses a database without the delivery tables (relation_missing). The third is the same catalog
+// with 0543's delivery guard, which reads the active target version without FOR SHARE (VAY-2108,
+// PG16 and PG17, cloud job d9a340f4); accepted one release before 0543 ships.
 const CATALOG_DIGESTS = new Set([
   "64b538202053714d7a486cbdfd8940ce55a063db5618e6eef123859f9e0e1139",
   "3ffdd1b6dcb578a87c62bdcc7b04828fbaee45596cfaa1601a73f15f95f294bb",
+  "8f32b0e5b5bc5829da64dddf148d7329583d95423478d3d9f9d4dff93c410c8d",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",

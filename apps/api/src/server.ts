@@ -278,6 +278,7 @@ import { runChannexFeedPulls } from "./jobs/channexFeedPull.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import {
   CHANNEX_PRODUCTION_AVAILABILITY_PACING,
+  CHANNEX_PRODUCTION_UPLOAD_PACING,
   createChannexManagementProvider,
 } from "./integrations/channexManagement.js";
 import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
@@ -1395,6 +1396,11 @@ const channexManagementProvider =
         // VAY-2108: several room-nights per sync turn, spaced for Channex's rate limit.
         availabilityPacing: {
           ...CHANNEX_PRODUCTION_AVAILABILITY_PACING,
+          stopping: () => channexManagementStopping,
+        },
+        // VAY-2108: several initial plan uploads per sync turn, paced the same way.
+        uploadPacing: {
+          ...CHANNEX_PRODUCTION_UPLOAD_PACING,
           stopping: () => channexManagementStopping,
         },
         dispatchClosedUpload: channexUploadReconciliationPool

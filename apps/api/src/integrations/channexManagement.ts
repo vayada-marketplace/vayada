@@ -142,6 +142,12 @@ const DEFAULT_AVAILABILITY_PACING: ChannexAvailabilityPacing = {
  * minute, under Channex's 10), so other hotels' jobs on the same worker wait little. */
 export const CHANNEX_PRODUCTION_AVAILABILITY_PACING = { maxSends: 15 } as const;
 
+/** VAY-2108: the same pacing for a new plan's initial (closed) uploads, one plan night per
+ * restrictions POST: up to 15 per turn instead of one. Channex's limit is per property and kind. */
+// 8 s spacing (not availability's 7 s): the next turn's first upload can follow the last one by
+// about 6-9 s, and a 429 uses up one of a night's three unanswered replies.
+export const CHANNEX_PRODUCTION_UPLOAD_PACING = { maxSends: 15, spacingMs: 8_000 } as const;
+
 export function createChannexManagementProvider(config: {
   apiBaseUrl: string;
   apiKey: string;
@@ -150,6 +156,8 @@ export function createChannexManagementProvider(config: {
   canSyncAri?: boolean;
   /** VAY-2108: how one sync turn paces its room-night availability sends (defaults below). */
   availabilityPacing?: Partial<ChannexAvailabilityPacing>;
+  /** VAY-2108: how one sync turn paces its initial plan uploads (same defaults: one per turn). */
+  uploadPacing?: Partial<ChannexAvailabilityPacing>;
   dispatchClosedUpload?: (
     lease: Parameters<typeof dispatchNextChannexClosedUpload>[1],
     ports: Parameters<typeof dispatchNextChannexClosedUpload>[2],
@@ -385,6 +393,9 @@ export function createChannexManagementProvider(config: {
           return failure("provider_unavailable", new Error("Channex offer creation unavailable."));
         }
       }
+      // VAY-2108: the initial-upload turn starts with the reconcile below (see the loop further on).
+      const uploadPacing = { ...DEFAULT_AVAILABILITY_PACING, ...config.uploadPacing };
+      const uploadTurnStarted = uploadPacing.now();
       if (pricingDelivery && config.reconcileClosedUploads) {
         if (!input?.workerId)
           return failure("invalid_state", new Error("Current worker lease required."));
@@ -424,35 +435,100 @@ export function createChannexManagementProvider(config: {
       if (pricingDelivery && !job.input.restrictionsOnly && config.dispatchClosedUpload) {
         if (!input?.workerId || !config.reconcileClosedUploads)
           return failure("invalid_state", new Error("Current worker and reconciliation required."));
+        const lease = {
+          jobId: job.jobId,
+          attemptNumber: job.attemptNumber,
+          workerId: input.workerId,
+        };
+        const ports: Parameters<NonNullable<typeof config.dispatchClosedUpload>>[1] = {
+          get: readClosedUpload,
+          post: async (request, signal) => {
+            if (request.method !== "POST" || request.path !== "/api/v1/restrictions")
+              throw new Error("Invalid Channex upload scope.");
+            signal.throwIfAborted();
+            return fetcher(new URL(request.path, apiBaseUrl), {
+              method: "POST",
+              headers: { "user-api-key": apiKey, "content-type": "application/json" },
+              body: JSON.stringify(request.body),
+              signal,
+              redirect: "error",
+            });
+          },
+        };
+        const retained = (attemptId: string) => ({
+          ok: false as const,
+          code: "initial_upload_retained" as const,
+          attemptId,
+        });
+        let result: Awaited<ReturnType<NonNullable<typeof config.dispatchClosedUpload>>>;
         try {
-          const result = await config.dispatchClosedUpload(
-            { jobId: job.jobId, attemptNumber: job.attemptNumber, workerId: input.workerId },
-            {
-              get: readClosedUpload,
-              post: async (request, signal) => {
-                if (request.method !== "POST" || request.path !== "/api/v1/restrictions")
-                  throw new Error("Invalid Channex upload scope.");
-                signal.throwIfAborted();
-                return fetcher(new URL(request.path, apiBaseUrl), {
-                  method: "POST",
-                  headers: { "user-api-key": apiKey, "content-type": "application/json" },
-                  body: JSON.stringify(request.body),
-                  signal,
-                  redirect: "error",
-                });
-              },
-            },
-          );
-          if (result.kind === "retained")
-            return { ok: false, code: "initial_upload_retained", attemptId: result.attemptId };
-          if (result.kind !== "no_closed_upload")
-            return failure(
-              "invalid_state",
-              new Error("Initial Channex preparation does not complete full sync."),
-            );
+          result = await config.dispatchClosedUpload(lease, ports);
         } catch {
           return failure("provider_unavailable", new Error("Initial Channex upload unavailable."));
         }
+        if (result.kind === "retained") {
+          // Unpaced (the default): one upload per turn, reconciled by the next attempt.
+          if (uploadPacing.maxSends <= 1) return retained(result.attemptId);
+          // VAY-2108: send more plan nights in this turn, each reconciled before the next, as the
+          // availability turn does. Once one is sent, anything not ready, an error or a stop ends
+          // the turn exactly as one send did before (the next attempt reconciles it), so sending
+          // several adds no retries. The limits are checked only after the last send is
+          // reconciled; when nothing is left, the next turn finds that and moves on to availability.
+          let sentAttemptId = result.attemptId;
+          let sentAt = uploadPacing.now();
+          // A heartbeat failure after a send ends the turn like any other stop after a send.
+          const heartbeat = async () => {
+            try {
+              await input.onProgress?.();
+              return true;
+            } catch {
+              return false;
+            }
+          };
+          for (let sends = 1; ; ) {
+            if (!(await heartbeat())) return retained(sentAttemptId);
+            await uploadPacing.sleep(uploadPacing.settleMs);
+            try {
+              const reconciled = await config.reconcileClosedUploads(lease, readClosedUpload);
+              if (reconciled.kind !== "pending_uploads_reconciled") return retained(sentAttemptId);
+            } catch (error) {
+              console.warn("Channex closed upload reconciliation failed.", {
+                jobId: job.jobId,
+                attemptNumber: job.attemptNumber,
+                ...reconciliationFailureCause(error),
+              });
+              return retained(sentAttemptId);
+            }
+            if (!(await heartbeat())) return retained(sentAttemptId);
+            if (
+              sends >= uploadPacing.maxSends ||
+              uploadPacing.now() - uploadTurnStarted >= uploadPacing.turnBudgetMs ||
+              uploadPacing.stopping()
+            )
+              return retained(sentAttemptId);
+            // Space restriction POSTs for Channex before the next plan night is claimed.
+            await uploadPacing.sleep(
+              Math.max(0, sentAt + uploadPacing.spacingMs - uploadPacing.now()),
+            );
+            // Shutdown may have started during the spacing wait: claim nothing more.
+            if (uploadPacing.stopping()) return retained(sentAttemptId);
+            let next: Awaited<ReturnType<NonNullable<typeof config.dispatchClosedUpload>>>;
+            try {
+              next = await config.dispatchClosedUpload(lease, ports);
+            } catch {
+              return retained(sentAttemptId);
+            }
+            if (next.kind !== "retained") return retained(sentAttemptId);
+            sends++;
+            sentAttemptId = next.attemptId;
+            sentAt = uploadPacing.now();
+          }
+        }
+        if (result.kind !== "no_closed_upload")
+          return failure(
+            "invalid_state",
+            new Error("Initial Channex preparation does not complete full sync."),
+          );
       }
       if (pricingDelivery && !job.input.restrictionsOnly) {
         if (Boolean(config.reconcileRoomAvailability) !== Boolean(config.prepareRoomAvailability))
