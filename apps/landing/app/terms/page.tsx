@@ -21,8 +21,8 @@ export default function TermsPage() {
           <div className="prose prose-lg max-w-none space-y-8 text-gray-700">
             <p className="text-lg leading-relaxed">
               These Terms of Service (&quot;Terms&quot;) are a legally binding agreement between
-              vayada UG (haftungsbeschränkt) (&quot;vayada,&quot; &quot;we,&quot; &quot;us,&quot;
-              or &quot;our&quot;) and the hotel, villa or other accommodation business
+              vayada UG (haftungsbeschränkt) (&quot;vayada,&quot; &quot;we,&quot; &quot;us,&quot; or
+              &quot;our&quot;) and the hotel, villa or other accommodation business
               (&quot;Hotel,&quot; &quot;you,&quot; or &quot;your&quot;) that registers for or uses
               the vayada property management system, booking engine and related services.
             </p>
@@ -45,16 +45,16 @@ export default function TermsPage() {
                 </p>
                 <p>
                   <strong>Services:</strong> The property management system (PMS), the booking
-                  engine with the hosted booking sites it serves, the channel connections, the
-                  hotel setup and all related features, tools and support offered by vayada.
+                  engine with the hosted booking sites it serves, the channel connections, the hotel
+                  setup and all related features, tools and support offered by vayada.
                 </p>
                 <p>
                   <strong>Hotel:</strong> The business that holds the account. Hotels may run one or
                   more properties from the same account.
                 </p>
                 <p>
-                  <strong>User:</strong> Any natural person who accesses the Services on behalf of
-                  a Hotel, such as an owner, manager or staff member.
+                  <strong>User:</strong> Any natural person who accesses the Services on behalf of a
+                  Hotel, such as an owner, manager or staff member.
                 </p>
                 <p>
                   <strong>Guest: </strong>A person who views a Hotel&apos;s booking site or books a
@@ -154,12 +154,12 @@ export default function TermsPage() {
               <p>You agree to:</p>
               <ul className="list-disc list-inside ml-4 space-y-2 mt-2">
                 <li>
-                  operate your property lawfully and hold every licence, registration and
-                  insurance your business requires;
+                  operate your property lawfully and hold every licence, registration and insurance
+                  your business requires;
                 </li>
                 <li>
-                  describe your property accurately and keep rates, availability and policies on
-                  the Platform correct and up to date;
+                  describe your property accurately and keep rates, availability and policies on the
+                  Platform correct and up to date;
                 </li>
                 <li>
                   honour every booking taken through the Services at the price and under the
@@ -169,9 +169,7 @@ export default function TermsPage() {
                   handle Guest data lawfully, inform your Guests as required by data protection law
                   and use Guest data only for the stay and your own lawful purposes;
                 </li>
-                <li>
-                  account for all taxes and tourist levies that apply to your bookings;
-                </li>
+                <li>account for all taxes and tourist levies that apply to your bookings;</li>
                 <li>
                   not upload unlawful, misleading or infringing content, not interfere with the
                   Platform and not use it to send unsolicited messages.
@@ -264,13 +262,14 @@ export default function TermsPage() {
               <p>
                 Every booking made on your booking site is a contract between you and the Guest.
                 vayada is not a party to that contract, does not act as a travel agent and is not
-                responsible for the stay, its price, cancellations, refunds or disputes between
-                you and a Guest. With vayada Payment, vayada only receives the Guest&apos;s card
-                payment on your behalf, as described in Section 5. Guest payments are handled according to the payment methods and
-                policies you configure. Refunds to Guests are your responsibility and are executed
-                through the payment method the Guest used: for card payments on your booking site,
-                vayada sends them to Stripe automatically on your behalf, as described in Section 5;
-                for bank transfer, PayPal and payment at the property, you make them yourself.
+                responsible for the stay, its price, cancellations, refunds or disputes between you
+                and a Guest. With vayada Payment, vayada only receives the Guest&apos;s card payment
+                on your behalf, as described in Section 5. Guest payments are handled according to
+                the payment methods and policies you configure. Refunds to Guests are your
+                responsibility and are executed through the payment method the Guest used: for card
+                payments on your booking site, vayada sends them to Stripe automatically on your
+                behalf, as described in Section 5; for bank transfer, PayPal and payment at the
+                property, you make them yourself.
               </p>
             </section>
 
@@ -310,19 +309,19 @@ export default function TermsPage() {
                 <p>
                   You keep all rights in your Hotel Content. By entering it into the Platform you
                   grant vayada a non-exclusive, worldwide, royalty-free licence to host, display,
-                  reproduce and transmit it as far as necessary to provide the Services, for
-                  example to show your property on your booking site and to send it to the
-                  channels you connect. You warrant that you hold the rights needed for this.
+                  reproduce and transmit it as far as necessary to provide the Services, for example
+                  to show your property on your booking site and to send it to the channels you
+                  connect. You warrant that you hold the rights needed for this.
                 </p>
               </div>
 
               <div className="mt-6">
                 <h3 className={H3}>8.2 vayada Software</h3>
                 <p>
-                  The Platform, its software, design and documentation remain the property of
-                  vayada or its licensors. You receive a non-exclusive, non-transferable right to
-                  use them for your business during the term of these Terms. You may not copy,
-                  modify, resell or reverse-engineer the Platform.
+                  The Platform, its software, design and documentation remain the property of vayada
+                  or its licensors. You receive a non-exclusive, non-transferable right to use them
+                  for your business during the term of these Terms. You may not copy, modify, resell
+                  or reverse-engineer the Platform.
                 </p>
               </div>
             </section>
@@ -372,9 +371,9 @@ export default function TermsPage() {
                   renew automatically unless terminated before the period ends.
                 </p>
                 <p>
-                  <strong>Termination by the Hotel:</strong> You may terminate at any time from
-                  your account or by writing to us; a subscription ends at the end of the current
-                  billing period.
+                  <strong>Termination by the Hotel:</strong> You may terminate at any time from your
+                  account or by writing to us; a subscription ends at the end of the current billing
+                  period.
                 </p>
                 <p>
                   <strong>Termination by vayada: </strong>vayada may terminate or suspend your

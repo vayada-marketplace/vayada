@@ -124,9 +124,9 @@ export default function PrivacyPage() {
                           Company details, VAT number, invoice address, the plan you chose,
                           invoices, and the Stripe account used for card payouts. With Stripe
                           Connect, bank and identity details for payouts are collected and held by
-                          Stripe, not by vayada. With vayada Payment, we store the bank account we pay
-                          you out to (account holder, account number, bank and branch codes, address),
-                          encrypted, and only our finance team can see it in full.
+                          Stripe, not by vayada. With vayada Payment, we store the bank account we
+                          pay you out to (account holder, account number, bank and branch codes,
+                          address), encrypted, and only our finance team can see it in full.
                         </td>
                         <td className={TD}>
                           To bill you, pay out card payments and meet tax and accounting rules
