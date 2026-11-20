@@ -140,6 +140,9 @@ it("refuses bad input, reports conflicts and hides failures", async () => {
   try {
     for (const payload of [
       { ...body, countryCode: "id" },
+      // Payouts go to banks in Indonesia and Sri Lanka only.
+      { ...body, countryCode: "TH" },
+      { ...body, countryCode: "DE" },
       { ...body, details: { ...details, accountHolder: "" } },
       { ...body, details: { ...details, extra: "secret" } },
       { action: "delete", commandId: body.commandId, expectedVersion: 0 },
@@ -301,12 +304,143 @@ it("opens a live hotel only with the live keys and never falls back to test mode
       loadConfig({ ...testKeys, ...liveKeys, ...on, VAYADA_PAYMENT_ENABLED: "false" }),
     )(live),
   ).toBe(false);
-  // Real money only for hotels named one by one.
-  for (const ids of ["*", "not-a-property"])
-    expect(() => loadConfig({ VAYADA_PAYMENT_LIVE_PROPERTY_IDS: ids })).toThrow(
-      "VAYADA_PAYMENT_LIVE_PROPERTY_IDS requires up to 100 property UUIDs",
-    );
+  // The live list takes property UUIDs, or "*" (below); nothing else.
+  expect(() => loadConfig({ VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "not-a-property" })).toThrow(
+    "VAYADA_PAYMENT_LIVE_PROPERTY_IDS requires up to 100 property UUIDs",
+  );
   expect(loadConfig({}).vayadaPaymentLivePropertyIds).toEqual([]);
+});
+
+it("with the live list *, every hotel takes real money except Vayada's test hotels; stopped hotels take none", () => {
+  const testHotel = "24420000-0000-4000-8000-0000000000bb";
+  const stoppedHotel = "24420000-0000-4000-8000-0000000000cc";
+  const testKeys = {
+    VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2442all",
+    VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2442all",
+  };
+  const liveKeys = {
+    VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2442all",
+    VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2442all",
+    VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_vay2442all",
+  };
+  const everyHotel = {
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_TEST_PROPERTY_IDS: testHotel.toUpperCase(),
+    VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: stoppedHotel,
+  };
+  const config = loadConfig({ ...testKeys, ...liveKeys, ...everyHotel });
+  expect(config.vayadaPaymentLivePropertyIds).toBe("all");
+  expect(config.vayadaPaymentTestPropertyIds).toEqual([testHotel]);
+  expect(config.vayadaPaymentStoppedPropertyIds).toEqual([stoppedHotel]);
+  const live = vayadaPaymentLiveFor(config);
+  const open = vayadaPaymentOpenFor(config);
+  // Any hotel, today's or a new one, is live; the test hotel stays on the test keys.
+  expect([live(propertyId), live(testHotel), live(testHotel.toUpperCase())]).toEqual([
+    true,
+    false,
+    false,
+  ]);
+  expect([open(propertyId), open(testHotel)]).toEqual([true, true]);
+  // The per-hotel stop: no new charges, but it stays live, so refunds of its money keep working.
+  expect([open(stoppedHotel), open(stoppedHotel.toUpperCase()), live(stoppedHotel)]).toEqual([
+    false,
+    false,
+    true,
+  ]);
+  // Real money still needs the live keys and webhook: without them a live hotel stays closed
+  // rather than taking test money, while the test hotel opens on the test keys.
+  const testKeysOnly = loadConfig({ ...testKeys, ...everyHotel });
+  expect([
+    vayadaPaymentOpenFor(testKeysOnly)(propertyId),
+    vayadaPaymentOpenFor(testKeysOnly)(testHotel),
+  ]).toEqual([false, true]);
+  const noWebhook = loadConfig({
+    ...testKeys,
+    ...liveKeys,
+    ...everyHotel,
+    VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "",
+  });
+  expect(vayadaPaymentOpenFor(noWebhook)(propertyId)).toBe(false);
+  // The stop list works with an explicit charge list too.
+  expect(
+    vayadaPaymentOpenFor(
+      loadConfig({
+        ...testKeys,
+        VAYADA_PAYMENT_ENABLED: "true",
+        VAYADA_PAYMENT_PROPERTY_IDS: `${propertyId},${stoppedHotel}`,
+        VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: stoppedHotel,
+      }),
+    )(stoppedHotel),
+  ).toBe(false);
+  // With an explicit live list, the test list changes nothing (only listed hotels are live).
+  const explicit = loadConfig({
+    ...testKeys,
+    ...liveKeys,
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: `${propertyId},${testHotel}`,
+    VAYADA_PAYMENT_LIVE_PROPERTY_IDS: propertyId,
+    VAYADA_PAYMENT_TEST_PROPERTY_IDS: testHotel,
+  });
+  expect([
+    vayadaPaymentLiveFor(explicit)(propertyId),
+    vayadaPaymentLiveFor(explicit)(testHotel),
+  ]).toEqual([true, false]);
+});
+
+it("refuses vayada Payment lists that would mix test money and real money", () => {
+  const liveKeys = {
+    VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2442mix",
+    VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2442mix",
+    VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_vay2442mix",
+  };
+  // A test hotel on an explicit live list: its open test payments would go to the live keys.
+  expect(() =>
+    loadConfig({
+      VAYADA_PAYMENT_LIVE_PROPERTY_IDS: propertyId,
+      VAYADA_PAYMENT_TEST_PROPERTY_IDS: propertyId.toUpperCase(),
+    }),
+  ).toThrow(
+    "VAYADA_PAYMENT_TEST_PROPERTY_IDS and VAYADA_PAYMENT_LIVE_PROPERTY_IDS must not share a hotel",
+  );
+  // Every hotel charging but only some live, with real keys: the others would take test-mode
+  // charges, a confirmed booking for no money.
+  expect(() =>
+    loadConfig({
+      ...liveKeys,
+      VAYADA_PAYMENT_PROPERTY_IDS: "*",
+      VAYADA_PAYMENT_LIVE_PROPERTY_IDS: propertyId,
+    }),
+  ).toThrow(
+    'VAYADA_PAYMENT_PROPERTY_IDS="*" with live keys needs VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*"',
+  );
+  // Every hotel live while the test keys are set but no test hotel is named: a lost test list
+  // would send the test hotels' stored test payments (captures, cancels, refunds) to the live keys.
+  const testKeys = {
+    VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2442mix",
+    VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2442mix",
+  };
+  for (const test of [undefined, "", " "])
+    expect(() =>
+      loadConfig({
+        ...testKeys,
+        ...liveKeys,
+        VAYADA_PAYMENT_PROPERTY_IDS: "*",
+        VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "*",
+        ...(test === undefined ? {} : { VAYADA_PAYMENT_TEST_PROPERTY_IDS: test }),
+      }),
+    ).toThrow(
+      'VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*" with test keys needs VAYADA_PAYMENT_TEST_PROPERTY_IDS',
+    );
+  // Without live keys (a test-only setup such as staging), "*" charges everyone on the test keys.
+  expect(loadConfig({ VAYADA_PAYMENT_PROPERTY_IDS: "*" }).vayadaPaymentPropertyIds).toBe("all");
+  // The test and stop lists take property UUIDs only, never "*".
+  for (const key of ["VAYADA_PAYMENT_TEST_PROPERTY_IDS", "VAYADA_PAYMENT_STOPPED_PROPERTY_IDS"])
+    for (const ids of ["*", "not-a-property"])
+      expect(() => loadConfig({ [key]: ids })).toThrow(`${key} requires up to 100 property UUIDs`);
+  expect(loadConfig({}).vayadaPaymentTestPropertyIds).toEqual([]);
+  expect(loadConfig({}).vayadaPaymentStoppedPropertyIds).toEqual([]);
 });
 
 it("keeps vayada Payment off unless VAYADA_PAYMENT_ENABLED is set", () => {

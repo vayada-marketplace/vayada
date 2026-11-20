@@ -778,6 +778,7 @@
   "settings.billing.card": "Carte",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "Nous encaissons les paiements par carte et vous payons chaque lundi.",
+  "settings.billing.providerVayadaWhere": "Versements sur des comptes bancaires en Indonésie et au Sri Lanka.",
   "settings.billing.vayadaPayout.intro": "Les clients paient par carte sur votre page de réservation. vayada encaisse les paiements et vous verse chaque lundi les séjours terminés au plus tard le dimanche précédent.",
   "settings.billing.vayadaPayout.fee": "Frais : les frais de votre formule plus {percent}% de chaque paiement par carte. Les remboursements et les litiges sont déduits de votre prochain versement.",
   "settings.billing.vayadaPayout.feeNoPercent": "Frais : les frais de votre formule plus les frais vayada Payment sur chaque paiement par carte. Les remboursements et les litiges sont déduits de votre prochain versement.",

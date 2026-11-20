@@ -778,6 +778,7 @@
   "settings.billing.card": "Karte",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "Wir nehmen Kartenzahlungen entgegen und zahlen Sie jeden Montag aus.",
+  "settings.billing.providerVayadaWhere": "Auszahlungen auf Bankkonten in Indonesien und Sri Lanka.",
   "settings.billing.vayadaPayout.intro": "Gäste zahlen auf Ihrer Buchungsseite mit Karte. vayada nimmt die Zahlungen entgegen und zahlt Ihnen jeden Montag die Aufenthalte aus, die bis zum Sonntag davor ausgecheckt haben.",
   "settings.billing.vayadaPayout.fee": "Gebühr: Ihre Tarifgebühr plus {percent}% jeder Kartenzahlung. Erstattungen und Kartenrückbuchungen werden von Ihrer nächsten Auszahlung abgezogen.",
   "settings.billing.vayadaPayout.feeNoPercent": "Gebühr: Ihre Tarifgebühr plus die vayada-Payment-Gebühr auf jede Kartenzahlung. Erstattungen und Kartenrückbuchungen werden von Ihrer nächsten Auszahlung abgezogen.",

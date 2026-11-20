@@ -778,6 +778,7 @@
   "settings.billing.card": "Carta",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "Incassiamo i pagamenti con carta e ti paghiamo ogni lunedì.",
+  "settings.billing.providerVayadaWhere": "Pagamenti su conti bancari in Indonesia e Sri Lanka.",
   "settings.billing.vayadaPayout.intro": "Gli ospiti pagano con carta sulla tua pagina di prenotazione. vayada incassa i pagamenti e ti paga ogni lunedì i soggiorni con check-out entro la domenica precedente.",
   "settings.billing.vayadaPayout.fee": "Commissione: la commissione del tuo piano più il {percent}% di ogni pagamento con carta. Rimborsi e contestazioni vengono detratti dal prossimo pagamento.",
   "settings.billing.vayadaPayout.feeNoPercent": "Commissione: la commissione del tuo piano più la commissione vayada Payment su ogni pagamento con carta. Rimborsi e contestazioni vengono detratti dal prossimo pagamento.",

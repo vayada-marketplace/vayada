@@ -778,6 +778,7 @@
   "settings.billing.card": "Карта",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "Мы принимаем платежи картой и выплачиваем вам деньги каждый понедельник.",
+  "settings.billing.providerVayadaWhere": "Выплаты на банковские счета в Индонезии и Шри-Ланке.",
   "settings.billing.vayadaPayout.intro": "Гости оплачивают картой на вашей странице бронирования. vayada принимает платежи и каждый понедельник выплачивает вам деньги за проживания с выездом не позднее предыдущего воскресенья.",
   "settings.billing.vayadaPayout.fee": "Комиссия: комиссия вашего тарифа плюс {percent}% от каждого платежа картой. Возвраты и споры по картам вычитаются из следующей выплаты.",
   "settings.billing.vayadaPayout.feeNoPercent": "Комиссия: комиссия вашего тарифа плюс комиссия vayada Payment с каждого платежа картой. Возвраты и споры по картам вычитаются из следующей выплаты.",
