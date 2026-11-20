@@ -384,7 +384,8 @@ type FinanceCommandError = {
     | "write_unavailable"
     | "provider_unavailable"
     | "provider_rejected"
-    | "vayada_payment_unavailable";
+    | "vayada_payment_unavailable"
+    | "vayada_payment_stopped";
   category: "validation" | "not_found" | "conflict" | "rate_limit" | "write_model" | "provider";
   message: string;
 };
