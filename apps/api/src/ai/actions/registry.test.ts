@@ -68,14 +68,41 @@ describe("defineRouteAction (VAY-2507)", () => {
     ["contact details", z.object({ email: z.string() })],
     ["money", z.object({ totalAmount: z.string() })],
     ["payouts", z.object({ payout: z.object({ id: z.string() }) })],
+    ["staff names", z.object({ items: z.array(z.object({ assignedToName: z.string() })) })],
+    ["booking prices", z.object({ pricing: z.object({ currency: z.string() }) })],
+    ["special requests", z.object({ specialRequests: z.string() })],
+    ["message text", z.object({ body: z.string() })],
   ])("keeps %s off MCP until the owner turns them on (VAY-2529)", (_label, output) => {
     expect(() => defineRouteAction({ ...base, surfaces: ["mcp"], output })).toThrow(/MCP/);
     expect(() => defineRouteAction({ ...base, surfaces: ["in_app"], output })).not.toThrow();
   });
 });
 
+describe("reviewed MCP fields", () => {
+  it("lets a reviewed path through, with its reason, and refuses a stale one", () => {
+    const output = z.object({ hotel: z.object({ displayName: z.string() }) });
+    expect(() => defineRouteAction({ ...base, surfaces: ["mcp"], output })).toThrow(/MCP/);
+    expect(() =>
+      defineRouteAction({
+        ...base,
+        surfaces: ["mcp"],
+        output,
+        mcpReviewedFields: { "hotel.displayName": "the property's own public name" },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      defineRouteAction({
+        ...base,
+        surfaces: ["mcp"],
+        output,
+        mcpReviewedFields: { "hotel.name": "stale" },
+      }),
+    ).toThrow(/not in the output/);
+  });
+});
+
 describe("the registry", () => {
-  it("refuses an action on a never-list route at load", () => {
+  it("refuses an action on a never-list route at load, from the never list itself", () => {
     const payouts = defineRouteAction({
       ...base,
       name: "payout_destination",
@@ -117,13 +144,17 @@ describe("the registry", () => {
     );
   });
 
-  it("offers an action only to users whose route would let them in", () => {
-    const context = (permissions: string[]) =>
-      ({ membership: { permissions } }) as unknown as RequestContext;
-    const names = (permissions: string[]) =>
-      listActionsFor(context(permissions), "mcp").map((action) => action.name);
-    expect(names([])).toEqual([]);
-    expect(names(["pms.calendar.read"])).toEqual(["calendar_days"]);
+  it("offers an action only to users whose route would let them in, on the delegation's surface", () => {
+    const context = (permissions: string[], channel?: "mcp" | "in_app") =>
+      ({
+        membership: { permissions },
+        ...(channel ? { delegation: { channel, toolCallId: "t" } } : {}),
+      }) as unknown as RequestContext;
+    const names = (permissions: string[], channel?: "mcp" | "in_app") =>
+      listActionsFor(context(permissions, channel)).map((action) => action.name);
+    expect(names([], "mcp")).toEqual([]);
+    expect(names(["pms.calendar.read"], "mcp")).toEqual(["calendar_days"]);
+    expect(names(["pms.calendar.read"])).toEqual([]);
   });
 
   it("gives both surfaces one tool definition with a closed input schema", () => {
@@ -138,32 +169,28 @@ describe("the registry", () => {
   it("checks input before anything runs: the calendar range is capped at 62 nights", async () => {
     const context = {
       membership: { permissions: ["pms.calendar.read"] },
+      delegation: { channel: "in_app", toolCallId: "t" },
     } as unknown as RequestContext;
     const app = {} as never; // never reached
     const propertyId = crypto.randomUUID();
-    const tooLong = await runRouteAction(
-      app,
-      context,
-      calendarDays,
-      { propertyId, from: "2026-12-01", to: "2027-02-15" },
-      "in_app",
-    );
+    const tooLong = await runRouteAction(app, context, calendarDays, {
+      propertyId,
+      from: "2026-12-01",
+      to: "2027-02-15",
+    });
     expect(tooLong).toMatchObject({ ok: false, error: { code: "invalid_input" } });
-    const backwards = await runRouteAction(
-      app,
-      context,
-      calendarDays,
-      { propertyId, from: "2026-12-05", to: "2026-12-01" },
-      "in_app",
-    );
+    const backwards = await runRouteAction(app, context, calendarDays, {
+      propertyId,
+      from: "2026-12-05",
+      to: "2026-12-01",
+    });
     expect(backwards).toMatchObject({ ok: false, error: { code: "invalid_input" } });
-    const smuggled = await runRouteAction(
-      app,
-      context,
-      calendarDays,
-      { propertyId, from: "2026-12-01", to: "2026-12-02", hotelId: propertyId },
-      "in_app",
-    );
+    const smuggled = await runRouteAction(app, context, calendarDays, {
+      propertyId,
+      from: "2026-12-01",
+      to: "2026-12-02",
+      hotelId: propertyId,
+    });
     expect(smuggled).toMatchObject({ ok: false, error: { code: "invalid_input" } });
   });
 });

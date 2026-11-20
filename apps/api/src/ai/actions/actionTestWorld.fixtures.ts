@@ -187,17 +187,17 @@ export async function worldContext(
   userId: string,
   organizationId: string,
   permissions: readonly PermissionKey[],
+  channel: "in_app" | "mcp" = "in_app",
 ): Promise<RequestContext> {
   return resolveDelegatedContext(
     worldIdentity,
     {
       userId,
       organizationId,
-      delegation: {
-        channel: "in_app",
-        conversationId: WORLD.CONVERSATION,
-        toolCallId: `call_${++toolCalls}`,
-      },
+      delegation:
+        channel === "mcp"
+          ? { channel, connectionId: WORLD.CONVERSATION, toolCallId: `call_${++toolCalls}` }
+          : { channel, conversationId: WORLD.CONVERSATION, toolCallId: `call_${++toolCalls}` },
     },
     { authorizationResolver: worldAuthorization(permissions).resolver },
   );

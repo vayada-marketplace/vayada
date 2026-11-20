@@ -2,28 +2,18 @@
 //
 // A route is either the route of a registered action (actions/registry.ts; those are NOT listed
 // here) or listed here with one class:
-//   never           Flamur's never list: no action, for any role, on any surface.
+//   never           Flamur's never list (src/ai/neverList.ts): no action, for any role, on any
+//                   surface. It wins over every entry and rule here and is checked on its own.
 //   ask_first_later rare setup tasks: no action yet; each becomes Ask first when its screen does.
 //   not_for_ai      not a user feature, or unsafe as it is today (broken, dead, a second writer,
 //                   a read with side effects; VAY-2567 ranks 2-3).
 //   later           a hotel user's route that is not an action yet. VAY-2567 ranks the order.
 // A registered action whose route is listed here fails at module load (actions/registry.ts), and
 // a route in the generated route list that is neither an action nor listed fails CI.
+import { neverArea, type NeverArea } from "./neverList.js";
 import { ROUTE_MANIFEST, type RouteKey } from "./routeManifest.generated.js";
 
-export type NeverArea =
-  | "bank_accounts_and_payouts"
-  | "team_members_and_permissions"
-  | "property_deletion"
-  | "login_and_security"
-  | "legal_terms"
-  | "billing_and_plan"
-  | "bulk_exports"
-  | "privacy_export_and_delete"
-  | "guest_id_documents"
-  | "ai_connections"
-  | "partner_app_approvals"
-  | "platform_and_staff";
+export type { NeverArea } from "./neverList.js";
 
 export type AskFirstLaterArea =
   | "custom_domain"
@@ -70,7 +60,6 @@ export type RouteClass =
   | { class: "not_for_ai"; reason: NotForAiReason; note?: string }
   | { class: "later"; note?: string };
 
-const never = (area: NeverArea, note?: string): RouteClass => ({ class: "never", area, note });
 const askLater = (area: AskFirstLaterArea, note?: string): RouteClass => ({
   class: "ask_first_later",
   area,
@@ -82,6 +71,9 @@ const notForAi = (reason: NotForAiReason, note?: string): RouteClass => ({
   note,
 });
 const later = (note?: string): RouteClass => ({ class: "later", note });
+
+/** pricing-v2 reads take the inventory lock and the account row FOR UPDATE (VAY-2510 decides). */
+const PRICING_LOCK = "write-grade locks on read; VAY-2510's load test decides";
 
 /**
  * Whole areas sorted by path. An exact entry below overrides a rule; every rule must still sort
@@ -95,23 +87,11 @@ export const ROUTE_CLASS_RULES: readonly { match: RegExp; routeClass: RouteClass
   },
   { match: /^POST \/webhooks\//, routeClass: notForAi("infrastructure", "provider webhook") },
   // The area rules never take a preflight or a health check (the two rules above do).
-  { match: /^(?!OPTIONS)[A-Z]+ \/auth\//, routeClass: never("login_and_security") },
   { match: /^(?!OPTIONS)[A-Z]+ \/partner\//, routeClass: notForAi("partner_api") },
   {
-    match: /^(?!OPTIONS)[A-Z]+ \/api\/(booking-web|ai)\/(?!health$)/,
+    // Named paths only: a new /api/ai route (e.g. AI connections) must be sorted by a person.
+    match: /^(?!OPTIONS)[A-Z]+ \/api\/(booking-web\/|ai\/hotels\/)/,
     routeClass: notForAi("public_guest_page"),
-  },
-  {
-    match: /^(?!OPTIONS)[A-Z]+ \/api\/(platform|finance\/platform|identity\/admin)\/(?!health$)/,
-    routeClass: never("platform_and_staff"),
-  },
-  {
-    match: /^(?!OPTIONS)[A-Z]+ \/api\/identity\/staff\//,
-    routeClass: never("team_members_and_permissions"),
-  },
-  {
-    match: /^(?!OPTIONS)[A-Z]+ \/api\/identity\/gdpr\//,
-    routeClass: never("privacy_export_and_delete"),
   },
 ];
 
@@ -184,8 +164,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "PUT /api/booking/hotels/:hotelId/settings/room-filters": later(),
   "GET /api/booking/hotels/:hotelId/settings/same-day-booking": later(),
   "PUT /api/booking/hotels/:hotelId/settings/same-day-booking": later(),
-  "GET /api/booking/partner-authorizations": never("partner_app_approvals"),
-  "POST /api/booking/partner-authorizations": never("partner_app_approvals"),
   "GET /api/booking/properties/:propertyId/booking-design": later(),
   "PUT /api/booking/properties/:propertyId/booking-design": later(),
   "GET /api/booking/properties/:propertyId/booking-design/readiness": later(),
@@ -227,23 +205,10 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
     "read markers",
   ),
   "GET /api/booking/properties/:propertyId/partner-connections": later(),
-  "DELETE /api/booking/properties/:propertyId/partner-connections/:connectionId": never(
-    "partner_app_approvals",
-    "disconnecting a partner app",
-  ),
   "GET /api/booking/properties/:propertyId/room-sorting": later(),
   "PUT /api/booking/properties/:propertyId/room-sorting": later(),
   "POST /api/contact": notForAi("public_guest_page", "landing page contact form"),
-  "GET /api/finance/properties/:propertyId/bank-transfer-destination": never(
-    "bank_accounts_and_payouts",
-  ),
-  "PUT /api/finance/properties/:propertyId/bank-transfer-destination": never(
-    "bank_accounts_and_payouts",
-  ),
-  "GET /api/finance/properties/:propertyId/billing": never("billing_and_plan"),
-  "PATCH /api/finance/properties/:propertyId/billing-details": never("billing_and_plan"),
   "GET /api/finance/properties/:propertyId/cancellation-policy": later(),
-  "POST /api/finance/properties/:propertyId/customer-portal": never("billing_and_plan"),
   "GET /api/finance/properties/:propertyId/financials/access": later(),
   "GET /api/finance/properties/:propertyId/financials/dashboard": later(),
   "GET /api/finance/properties/:propertyId/financials/expense-categories": later(),
@@ -257,9 +222,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "PATCH /api/finance/properties/:propertyId/financials/expenses/:expenseId": later(),
   "GET /api/finance/properties/:propertyId/financials/expenses/:expenseId/receipt":
     notForAi("file_link"),
-  "POST /api/finance/properties/:propertyId/financials/exports": never("bulk_exports"),
-  "GET /api/finance/properties/:propertyId/financials/exports/:exportId": never("bulk_exports"),
-  "POST /api/finance/properties/:propertyId/financials/exports/auto": never("bulk_exports"),
   "GET /api/finance/properties/:propertyId/financials/folios": later(),
   "POST /api/finance/properties/:propertyId/financials/folios": later(),
   "DELETE /api/finance/properties/:propertyId/financials/folios/:folioId": later(
@@ -277,11 +239,7 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "GET /api/finance/properties/:propertyId/financials/recurring-expenses/:ruleId": later(),
   "PATCH /api/finance/properties/:propertyId/financials/recurring-expenses/:ruleId": later(),
   "GET /api/finance/properties/:propertyId/financials/revenue": later(),
-  "POST /api/finance/properties/:propertyId/fixed-plan/card": never("billing_and_plan"),
-  "POST /api/finance/properties/:propertyId/fixed-plan/checkout": never("billing_and_plan"),
-  "POST /api/finance/properties/:propertyId/fixed-plan/invoice": never("billing_and_plan"),
   "GET /api/finance/properties/:propertyId/manual-payment-methods": later(),
-  "PATCH /api/finance/properties/:propertyId/payment-method": never("billing_and_plan"),
   "PUT /api/finance/properties/:propertyId/payment-methods": askLater(
     "payment_settings_and_windows",
   ),
@@ -293,52 +251,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "GET /api/finance/properties/:propertyId/payment-windows": later(),
   "PUT /api/finance/properties/:propertyId/payment-windows": askLater(
     "payment_settings_and_windows",
-  ),
-  "GET /api/finance/properties/:propertyId/payout-destination": never("bank_accounts_and_payouts"),
-  "PUT /api/finance/properties/:propertyId/payout-destination": never("bank_accounts_and_payouts"),
-  "GET /api/finance/properties/:propertyId/payouts": never("bank_accounts_and_payouts"),
-  "POST /api/finance/properties/:propertyId/payouts/:payoutId/dispatch": never(
-    "bank_accounts_and_payouts",
-  ),
-  "GET /api/finance/properties/:propertyId/plan-status": never("billing_and_plan"),
-  "POST /api/finance/properties/:propertyId/provider-accounts/:providerAccountId/onboarding-link":
-    never("bank_accounts_and_payouts"),
-  "POST /api/finance/properties/:propertyId/provider-accounts/stripe": never(
-    "bank_accounts_and_payouts",
-  ),
-  "POST /api/finance/properties/:propertyId/provider-accounts/stripe/dashboard-link": never(
-    "bank_accounts_and_payouts",
-  ),
-  "POST /api/finance/properties/:propertyId/provider-accounts/stripe/reconcile": never(
-    "bank_accounts_and_payouts",
-  ),
-  "POST /api/finance/properties/:propertyId/provider-accounts/xendit/bank-validation": never(
-    "bank_accounts_and_payouts",
-  ),
-  "GET /api/finance/properties/:propertyId/reconciliation/payments": never(
-    "bank_accounts_and_payouts",
-  ),
-  "GET /api/finance/properties/:propertyId/reconciliation/payouts": never(
-    "bank_accounts_and_payouts",
-  ),
-  "GET /api/finance/properties/:propertyId/reconciliation/provider-accounts": never(
-    "bank_accounts_and_payouts",
-  ),
-  "POST /api/finance/properties/:propertyId/reconciliation/xendit-payouts": never(
-    "bank_accounts_and_payouts",
-  ),
-  "POST /api/finance/properties/:propertyId/select-commission": never("billing_and_plan"),
-  "POST /api/finance/properties/:propertyId/switch-to-commission": never("billing_and_plan"),
-  "POST /api/finance/properties/:propertyId/switch-to-commission-now": never("billing_and_plan"),
-  "GET /api/hotel-account/agreements": never("legal_terms"),
-  "POST /api/hotel-account/agreements/accept": never("legal_terms"),
-  "POST /api/hotel-setup/hotel-account-invites/lookup": never(
-    "team_members_and_permissions",
-    "joining an account",
-  ),
-  "POST /api/hotel-setup/hotel-account-invites/redeem": never(
-    "team_members_and_permissions",
-    "joining an account",
   ),
   "GET /api/hotel-setup/imports/prepared": notForAi(
     "duplicate",
@@ -369,13 +281,7 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "POST /api/hotel-setup/properties/:propertyId/checklist/v2/acknowledgements":
     notForAi("owner_session"),
   "PUT /api/hotel-setup/properties/:propertyId/checklist/v2/viewer": notForAi("owner_session"),
-  "POST /api/hotel-setup/properties/:propertyId/delete": never("property_deletion"),
-  "GET /api/hotel-setup/properties/:propertyId/deletion-check": never("property_deletion"),
   "GET /api/hotel-setup/properties/:propertyId/first-run": notForAi("owner_session"),
-  "POST /api/hotel-setup/properties/:propertyId/first-run": never(
-    "billing_and_plan",
-    "sets the Commission plan",
-  ),
   "GET /api/hotel-setup/properties/:propertyId/import": notForAi(
     "duplicate",
     "side door around the profile command",
@@ -411,11 +317,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "PUT /api/hotel-setup/properties/:propertyId/steps/present-hotel": later(),
   "GET /api/hotel-setup/property-types": notForAi("plumbing", "static list"),
   "PUT /api/hotel-setup/tracks": askLater("product_tracks_and_modules"),
-  "GET /api/identity/consent/cookies": never("legal_terms", "cookie and privacy consent"),
-  "POST /api/identity/consent/cookies": never("legal_terms", "cookie and privacy consent"),
-  "GET /api/identity/consent/history": never("legal_terms", "cookie and privacy consent"),
-  "GET /api/identity/consent/me": never("legal_terms", "cookie and privacy consent"),
-  "PUT /api/identity/consent/me": never("legal_terms", "cookie and privacy consent"),
   "POST /api/maps-links/resolve": notForAi("server_fetch"),
   "POST /api/media/imports": notForAi("server_fetch"),
   "GET /api/media/pms/properties/:propertyId/messaging/threads/:threadId/attachments/:attachmentId":
@@ -473,7 +374,10 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "PUT /api/pms/properties/:propertyId/check-out-inspection": later(),
   "GET /api/pms/properties/:propertyId/guest-data-settings": later(),
   "PUT /api/pms/properties/:propertyId/guest-data-settings": askLater("data_retention"),
-  "GET /api/pms/properties/:propertyId/guest-reviews": later(),
+  "GET /api/pms/properties/:propertyId/guest-reviews": notForAi(
+    "side_effect_read",
+    "calls Channex on every read; VAY-2567 rank 2",
+  ),
   "GET /api/pms/properties/:propertyId/guest-reviews/:reviewId": notForAi(
     "side_effect_read",
     "checks with Channex; VAY-2567 rank 2",
@@ -496,10 +400,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "DELETE /api/pms/properties/:propertyId/linked-inventory-groups/:groupId": later(),
   "PUT /api/pms/properties/:propertyId/linked-inventory-groups/:groupId": later(),
   "GET /api/pms/properties/:propertyId/mandatory-charge-confirmation": notForAi("no_caller"),
-  "PUT /api/pms/properties/:propertyId/mandatory-charge-confirmation": never(
-    "legal_terms",
-    "a permanent charges statement",
-  ),
   "POST /api/pms/properties/:propertyId/manual-bookings": later(),
   "GET /api/pms/properties/:propertyId/manual-bookings/addons": later(),
   "GET /api/pms/properties/:propertyId/manual-bookings/capabilities": later(),
@@ -537,7 +437,10 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
     "product_tracks_and_modules",
   ),
   "GET /api/pms/properties/:propertyId/navigation-modules": later(),
-  "PATCH /api/pms/properties/:propertyId/navigation-modules/:moduleId": later(),
+  "PATCH /api/pms/properties/:propertyId/navigation-modules/:moduleId": askLater(
+    "product_tracks_and_modules",
+    "Feature Hub navigation switch",
+  ),
   "GET /api/pms/properties/:propertyId/operating-calendar": later(),
   "PUT /api/pms/properties/:propertyId/operating-calendar": later(),
   "POST /api/pms/properties/:propertyId/operating-calendar/impact-preview": notForAi(
@@ -566,22 +469,41 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
     "no_caller",
     "recurring pricing",
   ),
-  "GET /api/pms/properties/:propertyId/pricing-v2": later(),
-  "GET /api/pms/properties/:propertyId/pricing-v2/card-readiness": later(),
+  "GET /api/pms/properties/:propertyId/pricing-v2": notForAi("side_effect_read", PRICING_LOCK),
+  "GET /api/pms/properties/:propertyId/pricing-v2/card-readiness": notForAi(
+    "side_effect_read",
+    PRICING_LOCK,
+  ),
   "POST /api/pms/properties/:propertyId/pricing-v2/charges": later(),
-  "GET /api/pms/properties/:propertyId/pricing-v2/drafts/:draftId": later(),
+  "GET /api/pms/properties/:propertyId/pricing-v2/drafts/:draftId": notForAi(
+    "side_effect_read",
+    PRICING_LOCK,
+  ),
   "PUT /api/pms/properties/:propertyId/pricing-v2/drafts/:draftId": later(),
-  "GET /api/pms/properties/:propertyId/pricing-v2/drafts/:draftId/charge-review": later(),
+  "GET /api/pms/properties/:propertyId/pricing-v2/drafts/:draftId/charge-review": notForAi(
+    "side_effect_read",
+    PRICING_LOCK,
+  ),
   "GET /api/pms/properties/:propertyId/pricing-v2/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms":
-    later(),
+    notForAi("side_effect_read", PRICING_LOCK),
   "PUT /api/pms/properties/:propertyId/pricing-v2/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms":
     later(),
-  "GET /api/pms/properties/:propertyId/pricing-v2/guest-display-rate": later(),
-  "GET /api/pms/properties/:propertyId/pricing-v2/not-selling": later(),
-  "GET /api/pms/properties/:propertyId/pricing-v2/payment-methods": later(),
+  "GET /api/pms/properties/:propertyId/pricing-v2/guest-display-rate": notForAi(
+    "side_effect_read",
+    PRICING_LOCK,
+  ),
+  "GET /api/pms/properties/:propertyId/pricing-v2/not-selling": notForAi(
+    "side_effect_read",
+    PRICING_LOCK,
+  ),
+  "GET /api/pms/properties/:propertyId/pricing-v2/payment-methods": notForAi(
+    "side_effect_read",
+    PRICING_LOCK,
+  ),
   "POST /api/pms/properties/:propertyId/pricing-v2/prepare": later(),
   "POST /api/pms/properties/:propertyId/pricing-v2/publish": later(),
-  "GET /api/pms/properties/:propertyId/pricing-v2/rooms/:roomTypeId/offers/:offerId/terms": later(),
+  "GET /api/pms/properties/:propertyId/pricing-v2/rooms/:roomTypeId/offers/:offerId/terms":
+    notForAi("side_effect_read", PRICING_LOCK),
   "PUT /api/pms/properties/:propertyId/pricing-v2/rooms/:roomTypeId/offers/:offerId/terms":
     notForAi("broken", "always answers 403; the draft terms route owns it"),
   "GET /api/pms/properties/:propertyId/profile": notForAi("broken", "always answers 500"),
@@ -623,10 +545,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
     "side_effect_read",
     "writes guest profiles",
   ),
-  "GET /api/pms/properties/:propertyId/reservations/:guestBookingId/guest-registrations":
-    never("guest_id_documents"),
-  "PUT /api/pms/properties/:propertyId/reservations/:guestBookingId/guest-registrations/:guestId":
-    never("guest_id_documents"),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/host-actions/apply": later(),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/host-actions/card-refund-retry":
     later(),
@@ -693,16 +611,13 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
     later(),
   "GET /api/pms/setup/properties/:propertyId/room-types/:roomTypeId/units": later(),
   "POST /api/support": later(),
-  "GET /auth/admin-transfer/callback": never("team_members_and_permissions"),
-  "POST /auth/admin-transfer/complete": never("team_members_and_permissions"),
-  "POST /auth/admin-transfer/start": never("team_members_and_permissions"),
-  "POST /auth/invitations/accept": never("team_members_and_permissions"),
-  "POST /auth/invitations/preview": never("team_members_and_permissions"),
-  "POST /auth/workos/webhook": notForAi("infrastructure", "WorkOS webhook"),
 };
 
 /** The class of a route that is not an action's, or undefined when nobody sorted it. */
 export function classifyRoute(route: string): RouteClass | undefined {
+  // The never list wins over everything: no entry or rule here can take a route off it.
+  const never = neverArea(route);
+  if (never) return { class: "never", ...never };
   const exact = (ROUTE_CLASSES as Record<string, RouteClass | undefined>)[route];
   if (exact) return exact;
   return ROUTE_CLASS_RULES.find((rule) => rule.match.test(route))?.routeClass;

@@ -15,7 +15,8 @@ export const propertiesList = defineRouteAction({
       availableProperties: z.array(
         z.object({
           propertyId: z.string(),
-          displayName: z.string(),
+          // Null while a property in setup has no name yet.
+          displayName: z.string().nullable(),
           locationSummary: z.string().nullable(),
         }),
       ),
@@ -26,4 +27,7 @@ export const propertiesList = defineRouteAction({
   surfaces: ["mcp", "in_app"],
   contractVersion: "adaptive-hotel-setup.v1",
   reviewedBy: "VAY-2507",
+  mcpReviewedFields: {
+    "propertySelection.availableProperties[].displayName": "the property's own public name",
+  },
 });
