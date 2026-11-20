@@ -13,9 +13,10 @@ export type SiteRoom = {
   features: string[];
   /** Not bookable yet: no "View rooms" button. */
   comingSoon?: boolean;
-  /** The booking page's room type, once the hotel has said which it is. Its "View rooms" then
-   * opens that room (booking page `?room=`); until then, the booking page's room list. */
-  roomTypeId?: string;
+  /** The booking page's room types this room stands for, as the hotel matched them. "View rooms"
+   * opens the first one's details over the booking page's room list (`?room=`), where the others
+   * are; with none, just the room list. */
+  roomTypeIds?: string[];
 };
 
 /** A real guest review, quoted from Google or Booking.com with the guest's first name. */
