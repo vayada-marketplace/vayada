@@ -84,7 +84,7 @@ describe("redactArguments", () => {
   it("caps arrays and depth", () => {
     const out = redactArguments({
       ids: Array.from({ length: 52 }, () => BOOKING),
-      a: { b: { c: { d: { e: "x" } } } },
+      a: { b: { c: { d: { e: { f: "x" } } } } },
     });
     expect((out as { ids: unknown[] }).ids).toHaveLength(51);
     expect((out as { ids: unknown[] }).ids.at(-1)).toBe("[+2 more]");
