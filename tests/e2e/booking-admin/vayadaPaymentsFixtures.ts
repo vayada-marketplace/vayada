@@ -14,6 +14,8 @@ export async function mockVayadaPayments(
   page: Page,
   options: {
     available: boolean;
+    /** On the stop list: no new card charges, the setup stays manageable (VAY-2570). */
+    stopped?: boolean;
     provider?: "stripe" | "vayada";
     destination?: Record<string, unknown> | null;
   },
@@ -43,7 +45,7 @@ export async function mockVayadaPayments(
           },
         },
         vayadaPayment: options.available
-          ? { available: true, feePercent: 6 }
+          ? { available: true, feePercent: 6, ...(options.stopped ? { stopped: true } : {}) }
           : { available: false },
       },
     }),

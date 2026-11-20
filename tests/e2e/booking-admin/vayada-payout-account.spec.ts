@@ -179,3 +179,60 @@ test("staff who aren't the owner see the payout account masked and can't change 
   await expect(page.getByRole("button", { name: "Change", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0);
 });
+
+test("a stopped hotel still changes its payout account and turns card off, but can't save card on (VAY-2570)", async ({
+  page,
+}) => {
+  test.skip(
+    !PROD,
+    "Requires a production booking-admin build so the authenticated shell hydrates.",
+  );
+  const { writes, settingsWrites } = await mockVayadaPayments(page, {
+    available: true,
+    stopped: true,
+    destination: {
+      id: "d0000000-0000-4000-8000-000000000001",
+      revision: 1,
+      version: 1,
+      enabled: true,
+      deleted: false,
+      countryCode: "LK",
+      maskedAccount: "•••• 4321",
+    },
+  });
+  await page.goto("/settings/payments");
+  await expect(page.getByRole("radio", { name: /vayada Payment/ })).toBeChecked();
+
+  // The payout account panel is there, and the owner can replace the account.
+  await expect(page.getByText("Sri Lanka · account •••• 4321")).toBeVisible();
+  await page.getByRole("button", { name: "Change", exact: true }).click();
+  await page.getByLabel("Country of the bank").selectOption("ID");
+  await page.getByLabel("Account holder name").fill("PT Lumbung Ubud Lestari");
+  await page.getByLabel("Account number").fill("8730 1122 6789");
+  await page.getByLabel("Bank name").fill("Bank Central Asia (BCA)");
+  await page.getByLabel("Bank code").fill("014");
+  await page.getByRole("button", { name: "Save bank account" }).click();
+  await expect(page.getByText("Bank account saved.")).toBeVisible();
+  await expect(page.getByText("Indonesia · account •••• 6789")).toBeVisible();
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({ action: "replace", countryCode: "ID" });
+
+  // With card still on, the page refuses to save and says why; nothing is sent.
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await page.getByRole("switch", { name: "Offer Pay at hotel" }).click();
+  await save.click();
+  await expect(
+    page.getByText(/New card payments with vayada Payment are paused for this hotel\./),
+  ).toBeVisible();
+  expect(settingsWrites).toEqual([]);
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
+
+  // Card off saves (Pay at hotel stays on).
+  await page.getByRole("switch", { name: "Offer Credit card" }).click();
+  await save.click();
+  await expect.poll(() => settingsWrites.length).toBe(1);
+  // Card off sends no provider: the server keeps vayada Payment and its payout account.
+  expect(settingsWrites[0]).toMatchObject({
+    paymentSettings: { paymentsEnabled: true, acceptedMethods: ["pay_at_property"] },
+  });
+});

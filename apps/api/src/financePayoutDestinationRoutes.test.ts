@@ -39,7 +39,7 @@ const summary = {
 };
 const path = `/api/finance/properties/${propertyId}/payout-destination`;
 
-async function appFor(variant: string) {
+async function appFor(variant: string, open?: (propertyId: string) => boolean) {
   const repository = {
     read: vi.fn(async () => summary),
     execute: vi.fn(async () => ({ status: "applied" as const, summary })),
@@ -83,7 +83,7 @@ async function appFor(variant: string) {
     prefix: "/api",
     repository,
     // "unlisted": an owner whose hotel isn't on VAYADA_PAYMENT_PROPERTY_IDS.
-    open: (id: string) => variant !== "unlisted" && id === propertyId,
+    open: open ?? ((id: string) => variant !== "unlisted" && id === propertyId),
     propertyAccessRepository: {
       findMembershipPropertyScope: async () => ({
         mode: "assigned",
@@ -456,16 +456,19 @@ it("keeps vayada Payment off unless VAYADA_PAYMENT_ENABLED is set", () => {
   );
 });
 
+// VAY-2570: option B's production shape (every hotel live, one test hotel, one stopped hotel).
+const vay2570Keys = {
+  VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2570",
+  VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2570",
+  VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2570",
+  VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2570",
+  VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_vay2570",
+};
+
 it("lets a stopped hotel manage its vayada Payment setup but take no new charges (VAY-2570)", () => {
   const stoppedHotel = "25700000-0000-4000-8000-0000000000aa";
   const testHotel = "25700000-0000-4000-8000-0000000000bb";
-  const keys = {
-    VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2570",
-    VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2570",
-    VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2570",
-    VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2570",
-    VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_vay2570",
-  };
+  const keys = vay2570Keys;
   const everyHotel = {
     VAYADA_PAYMENT_ENABLED: "true",
     VAYADA_PAYMENT_PROPERTY_IDS: "*",
@@ -502,4 +505,33 @@ it("lets a stopped hotel manage its vayada Payment setup but take no new charges
       loadConfig({ ...keys, ...everyHotel, VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "" }),
     )(stoppedHotel),
   ).toBe(false);
+});
+
+it("serves a stopped hotel's payout account with the rule server.ts gives the routes (VAY-2570)", async () => {
+  const config = loadConfig({
+    ...vay2570Keys,
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_TEST_PROPERTY_IDS: "25700000-0000-4000-8000-0000000000bb",
+    VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: propertyId,
+  });
+  // With the new-charge rule (before VAY-2570) the owner was locked out; with the manageable rule
+  // the owner reads and replaces the account as usual.
+  for (const [rule, status] of [
+    [vayadaPaymentOpenFor(config), 404],
+    [vayadaPaymentManageableFor(config), 200],
+  ] as const) {
+    const { app, repository, publisher } = await appFor("owner", rule);
+    try {
+      const read = await app.inject({ method: "GET", url: path });
+      const write = await app.inject({ method: "PUT", url: path, payload: body });
+      expect([read.statusCode, write.statusCode]).toEqual([status, status]);
+      expect(repository.execute).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+      expect(publisher.publish).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+      if (status === 200) expect(write.json().destination.maskedAccount).toBe("•••• 6789");
+    } finally {
+      await app.close();
+    }
+  }
 });
