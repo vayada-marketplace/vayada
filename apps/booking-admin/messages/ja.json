@@ -1545,7 +1545,7 @@
   "admin.customDomainRecordMissing": "{domain} の CNAME レコードがまだ見つかりません。下のレコードを DNS プロバイダーで追加してから、「更新」を押してください。新しいレコードが反映されるまで最大 48 時間かかることがあります。",
   "admin.customDomainRecordWrongTarget": "{domain} の CNAME レコードは {target} を指しています。custom.booking.vayada.com を指すように変更してから、「更新」を押してください。",
   "admin.customDomainCertificatePending": "DNS レコードは正しく設定されています。現在セキュリティ証明書を発行しています。通常は数分で完了します。もう一度確認するには「更新」を押してください。",
-  "admin.customDomainRoutingPending": "DNS レコードとセキュリティ証明書の準備ができました。現在 Vayada 側で設定を仕上げています。このドメインで予約ページが公開されたらお知らせします。",
+  "admin.customDomainRoutingPending": "DNS レコードとセキュリティ証明書の準備ができました。現在 Vayada 側で設定を仕上げています。このドメインで予約ページが公開されたかどうかは、後で「更新」を押して確認してください。",
   "admin.customDomainSettingUp": "設定中",
   "admin.customDomainRejected": "このドメインは自動で接続できません。Vayada サポートにお問い合わせください。",
   "admin.customDomainCheckUnavailable": "現在ドメインを確認できませんでした。数分後にもう一度お試しください。",

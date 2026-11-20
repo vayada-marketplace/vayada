@@ -1545,7 +1545,7 @@
   "admin.customDomainRecordMissing": "We can't find a CNAME record for {domain} yet. Add the record below at your DNS provider, then press Refresh. A new record can take up to 48 hours to show up.",
   "admin.customDomainRecordWrongTarget": "The CNAME record for {domain} points to {target}. Change it to point to custom.booking.vayada.com, then press Refresh.",
   "admin.customDomainCertificatePending": "Your DNS record is correct. We're now issuing the security certificate, which usually takes a few minutes. Press Refresh to check again.",
-  "admin.customDomainRoutingPending": "Your DNS record and security certificate are ready. Vayada is finishing the setup on our side and will let you know when your booking page is live on this domain.",
+  "admin.customDomainRoutingPending": "Your DNS record and security certificate are ready. Vayada is finishing the setup on our side; press Refresh later to see when your booking page is live on this domain.",
   "admin.customDomainSettingUp": "Setting up",
   "admin.customDomainRejected": "This domain can't be connected automatically. Please contact Vayada support.",
   "admin.customDomainCheckUnavailable": "We couldn't check your domain right now. Please try again in a few minutes.",

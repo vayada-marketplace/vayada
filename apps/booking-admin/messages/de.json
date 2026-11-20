@@ -1545,7 +1545,7 @@
   "admin.customDomainRecordMissing": "Wir finden noch keinen CNAME-Eintrag für {domain}. Fügen Sie den Eintrag unten bei Ihrem DNS-Anbieter hinzu und klicken Sie dann auf Aktualisieren. Ein neuer Eintrag kann bis zu 48 Stunden brauchen, bis er sichtbar ist.",
   "admin.customDomainRecordWrongTarget": "Der CNAME-Eintrag für {domain} verweist auf {target}. Ändern Sie ihn so, dass er auf custom.booking.vayada.com verweist, und klicken Sie dann auf Aktualisieren.",
   "admin.customDomainCertificatePending": "Ihr DNS-Eintrag ist korrekt. Wir stellen jetzt das Sicherheitszertifikat aus, was meist einige Minuten dauert. Klicken Sie auf Aktualisieren, um erneut zu prüfen.",
-  "admin.customDomainRoutingPending": "Ihr DNS-Eintrag und das Sicherheitszertifikat sind bereit. Vayada schließt die Einrichtung auf unserer Seite ab und informiert Sie, sobald Ihre Buchungsseite unter dieser Domain erreichbar ist.",
+  "admin.customDomainRoutingPending": "Ihr DNS-Eintrag und das Sicherheitszertifikat sind bereit. Vayada schließt die Einrichtung auf unserer Seite ab. Klicken Sie später auf Aktualisieren, um zu sehen, ob Ihre Buchungsseite unter dieser Domain erreichbar ist.",
   "admin.customDomainSettingUp": "Wird eingerichtet",
   "admin.customDomainRejected": "Diese Domain kann nicht automatisch verbunden werden. Bitte wenden Sie sich an den Vayada-Support.",
   "admin.customDomainCheckUnavailable": "Wir konnten Ihre Domain gerade nicht prüfen. Bitte versuchen Sie es in einigen Minuten erneut.",

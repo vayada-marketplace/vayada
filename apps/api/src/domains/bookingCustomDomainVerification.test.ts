@@ -281,6 +281,7 @@ describe("custom-domain verifier", () => {
       { ...pending, sslStatus: "validation_timed_out" },
       { ...pending, sslStatus: "deployment_timed_out" },
       { ...active, sslStatus: "expired" },
+      { ...pending, sslStatus: "inactive" },
       { ...pending, status: "moved" },
     ]) {
       const { cloudflare, check } = verifier(stale, { target: "custom.booking.vayada.com" });
@@ -308,5 +309,15 @@ describe("custom-domain verifier", () => {
       });
       expect(cloudflare.restartValidation).not.toHaveBeenCalled();
     }
+
+    const { check } = verifier(
+      { ...pending, sslStatus: "deleted" },
+      { target: "custom.booking.vayada.com" },
+    );
+    await expect(check()).resolves.toMatchObject({
+      status: "failed",
+      issue: { code: "hostname_rejected" },
+      errors: ["Cloudflare rejected booking.hotel.example (certificate deleted)."],
+    });
   });
 });

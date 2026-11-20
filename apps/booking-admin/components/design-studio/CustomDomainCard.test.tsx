@@ -104,7 +104,7 @@ describe("custom domain card (VAY-2568)", () => {
 
     expect(text).toContain("Setting up");
     expect(text).not.toContain("Verifying...");
-    expect(text).toContain("Vayada is finishing the setup on our side");
+    expect(text).toContain("Vayada is finishing the setup on our side; press Refresh later");
   });
 
   it("says the check could not run, without claiming to verify", () => {

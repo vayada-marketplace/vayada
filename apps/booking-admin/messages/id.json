@@ -1545,7 +1545,7 @@
   "admin.customDomainRecordMissing": "Kami belum menemukan data CNAME untuk {domain}. Tambahkan data di bawah ini di penyedia DNS Anda, lalu tekan Segarkan. Data baru bisa memerlukan hingga 48 jam untuk muncul.",
   "admin.customDomainRecordWrongTarget": "Data CNAME untuk {domain} mengarah ke {target}. Ubah agar mengarah ke custom.booking.vayada.com, lalu tekan Segarkan.",
   "admin.customDomainCertificatePending": "Data DNS Anda sudah benar. Kami sedang menerbitkan sertifikat keamanan, yang biasanya memerlukan beberapa menit. Tekan Segarkan untuk memeriksa lagi.",
-  "admin.customDomainRoutingPending": "Data DNS dan sertifikat keamanan Anda sudah siap. Vayada sedang menyelesaikan pengaturan di pihak kami dan akan memberi tahu Anda saat halaman pemesanan Anda aktif di domain ini.",
+  "admin.customDomainRoutingPending": "Data DNS dan sertifikat keamanan Anda sudah siap. Vayada sedang menyelesaikan pengaturan di pihak kami; tekan Segarkan nanti untuk melihat apakah halaman pemesanan Anda sudah aktif di domain ini.",
   "admin.customDomainSettingUp": "Sedang disiapkan",
   "admin.customDomainRejected": "Domain ini tidak dapat dihubungkan secara otomatis. Silakan hubungi dukungan Vayada.",
   "admin.customDomainCheckUnavailable": "Kami tidak dapat memeriksa domain Anda saat ini. Silakan coba lagi dalam beberapa menit.",

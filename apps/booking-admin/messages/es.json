@@ -1545,7 +1545,7 @@
   "admin.customDomainRecordMissing": "Todavía no encontramos un registro CNAME para {domain}. Agrega el registro de abajo en tu proveedor de DNS y pulsa Actualizar. Un registro nuevo puede tardar hasta 48 horas en aparecer.",
   "admin.customDomainRecordWrongTarget": "El registro CNAME de {domain} apunta a {target}. Cámbialo para que apunte a custom.booking.vayada.com y pulsa Actualizar.",
   "admin.customDomainCertificatePending": "Tu registro DNS es correcto. Ahora estamos emitiendo el certificado de seguridad, lo que suele tardar unos minutos. Pulsa Actualizar para comprobarlo de nuevo.",
-  "admin.customDomainRoutingPending": "Tu registro DNS y el certificado de seguridad están listos. Vayada está terminando la configuración por nuestra parte y te avisará cuando tu página de reservas esté activa en este dominio.",
+  "admin.customDomainRoutingPending": "Tu registro DNS y el certificado de seguridad están listos. Vayada está terminando la configuración por nuestra parte; pulsa Actualizar más tarde para ver si tu página de reservas ya está activa en este dominio.",
   "admin.customDomainSettingUp": "En configuración",
   "admin.customDomainRejected": "Este dominio no se puede conectar automáticamente. Ponte en contacto con el soporte de Vayada.",
   "admin.customDomainCheckUnavailable": "No hemos podido comprobar tu dominio en este momento. Inténtalo de nuevo en unos minutos.",

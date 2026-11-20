@@ -226,18 +226,22 @@ export function createBookingCustomDomainVerifier(dependencies: {
       }
 
       let custom = found ?? (await dependencies.cloudflare.create(hostname));
-      if (REJECTED_STATUSES.has(custom.status)) {
+      if (REJECTED_STATUSES.has(custom.status) || REJECTED_STATUSES.has(custom.sslStatus)) {
         return {
           status: "failed",
           issue: { code: "hostname_rejected", foundTarget: null },
           recordHost,
-          errors: [`Cloudflare rejected ${hostname} (${custom.status}).`, ...custom.errors],
+          errors: [
+            `Cloudflare rejected ${hostname} (${REJECTED_STATUSES.has(custom.status) ? custom.status : `certificate ${custom.sslStatus}`}).`,
+            ...custom.errors,
+          ],
         };
       }
       // The record is right now: validation that timed out, expired or lost the CNAME starts over.
       if (
         custom.sslStatus.endsWith("_timed_out") ||
         custom.sslStatus === "expired" ||
+        custom.sslStatus === "inactive" ||
         custom.status === "moved"
       ) {
         custom = await dependencies.cloudflare.restartValidation(custom.id);
