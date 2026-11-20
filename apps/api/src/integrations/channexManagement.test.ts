@@ -11,23 +11,34 @@ import {
 describe("Channex management provider", () => {
   it("sends one retained published rate creation before the ordinary ARI plan", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(201, { data: {} }));
-    const unused = async (): Promise<never> => { throw new Error("ARI must wait for creation"); };
+    const unused = async (): Promise<never> => {
+      throw new Error("ARI must wait for creation");
+    };
     const provider = createChannexManagementProvider({
       apiBaseUrl: "https://staging.channex.io",
       apiKey: "test",
       fetch: fetcher,
-      plans: { plan: async () => { throw new Error("ARI plan must wait for rate creation"); } },
+      plans: {
+        plan: async () => {
+          throw new Error("ARI plan must wait for rate creation");
+        },
+      },
       reconcileClosedUploads: unused,
       dispatchClosedUpload: unused,
       reconcileRoomAvailability: unused,
       prepareRoomAvailability: unused,
       advancePublishedOffers: async (_lease, ports) => {
-        await ports.create({ method: "POST", path: "/api/v1/rate_plans", body: { rate_plan: {} } }, new AbortController().signal);
+        await ports.create(
+          { method: "POST", path: "/api/v1/rate_plans", body: { rate_plan: {} } },
+          new AbortController().signal,
+        );
         return { kind: "retained", attemptId: "saved-rate" };
       },
     });
     expect(await provider.execute(job("sync_ari"), { workerId: "worker" })).toEqual({
-      ok: false, code: "offer_create_retained", attemptId: "saved-rate",
+      ok: false,
+      code: "offer_create_retained",
+      attemptId: "saved-rate",
     });
     expect(fetcher).toHaveBeenCalledWith(
       new URL("/api/v1/rate_plans", "https://staging.channex.io"),
@@ -37,12 +48,14 @@ describe("Channex management provider", () => {
   it("refuses rate creation without the complete ARI continuation bundle", async () => {
     const advance = vi.fn(async () => ({ kind: "offer_creates_current" as const }));
     const provider = createChannexManagementProvider({
-      apiBaseUrl: "https://staging.channex.io", apiKey: "test",
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "test",
       plans: { plan: async () => ({ requests: [] }) },
       advancePublishedOffers: advance,
     });
     expect(await provider.execute(job("sync_ari"), { workerId: "worker" })).toMatchObject({
-      ok: false, code: "invalid_state",
+      ok: false,
+      code: "invalid_state",
     });
     expect(advance).not.toHaveBeenCalled();
   });
@@ -929,6 +942,174 @@ describe("closed upload worker completion", () => {
         expect(turn.activate).not.toHaveBeenCalled();
       },
     );
+  });
+  describe("paced initial upload turn (VAY-2108)", () => {
+    function pacedUploads(
+      steps: ReadonlyArray<"send" | "none" | "refused" | "throw">,
+      options: {
+        maxSends?: number;
+        turnBudgetMs?: number;
+        reconcile?: "ok" | "settling" | "throw";
+        stopping?: () => boolean;
+        paced?: false;
+        heartbeat?: () => Promise<void>;
+      } = {},
+    ) {
+      let clock = 0,
+        step = 0,
+        reconciles = 0;
+      const sleeps: number[] = [];
+      const sent: string[] = [];
+      const prepareRoomAvailability = vi.fn(async () => ({
+        kind: "room_availability_current" as const,
+        from: "2026-11-20",
+        through: "2027-11-20",
+        roomCount: 5,
+        dayCount: 366,
+      }));
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        plans: { plan: async () => ({ requests: [] }) },
+        canSyncAri: true,
+        fetch: vi.fn<typeof fetch>(),
+        ...(options.paced === false
+          ? {}
+          : {
+              uploadPacing: {
+                settleMs: 3_000,
+                spacingMs: 6_100,
+                maxSends: options.maxSends ?? 25,
+                turnBudgetMs: options.turnBudgetMs ?? 180_000,
+                stopping: options.stopping ?? (() => false),
+                now: () => clock,
+                sleep: async (ms: number) => {
+                  sleeps.push(ms);
+                  clock += ms;
+                },
+              },
+            }),
+        reconcileClosedUploads: (async () => {
+          clock += 1_000;
+          reconciles++;
+          if (reconciles > 1 && options.reconcile === "throw") throw new Error("task unfinished");
+          if (reconciles > 1 && options.reconcile === "settling")
+            return {
+              kind: "unavailable" as const,
+              reason: "ari_send_settling",
+              retryAfterMs: 5_000,
+            };
+          return { kind: "pending_uploads_reconciled" as const, count: 0 };
+        }) as never,
+        dispatchClosedUpload: (async () => {
+          clock += 1_500;
+          const now = steps[step++] ?? "none";
+          if (now === "throw") throw new Error("upload failed");
+          if (now === "none") return { kind: "no_closed_upload" as const };
+          if (now === "refused")
+            return { kind: "unavailable" as const, reason: "lease_unavailable" };
+          sent.push(`upload-${step}`);
+          return { kind: "retained" as const, attemptId: `upload-${step}` };
+        }) as never,
+        reconcileRoomAvailability: async () => ({
+          kind: "pending_availability_reconciled" as const,
+          count: 0,
+        }),
+        prepareRoomAvailability: prepareRoomAvailability as never,
+        activatePublishedOffers: (async () => ({ kind: "no_targets" as const })) as never,
+      });
+      const run = () =>
+        provider.execute(job("sync_ari"), {
+          workerId: "worker",
+          ...(options.heartbeat ? { onProgress: options.heartbeat } : {}),
+        });
+      return { run, sleeps, sent, prepareRoomAvailability, reconciles: () => reconciles };
+    }
+    const retained = (attemptId: string) => ({
+      ok: false,
+      code: "initial_upload_retained",
+      attemptId,
+    });
+
+    it("sends several plan nights in one turn, each reconciled once, spaced for Channex", async () => {
+      const turn = pacedUploads(["send", "send", "send", "send"], { maxSends: 3 });
+      expect(await turn.run()).toEqual(retained("upload-3"));
+      expect(turn.sent).toEqual(["upload-1", "upload-2", "upload-3"]);
+      // After each send: 3 s settle, 1 s reconcile, then 6.1 s from the send before the next claim
+      // (2.1 s more). The limit is checked once the third send is reconciled, so no wait follows.
+      expect(turn.sleeps).toEqual([3_000, 2_100, 3_000, 2_100, 3_000]);
+      // The turn's first reconcile, then one per send: each send reconciled exactly once.
+      expect(turn.reconciles()).toBe(4);
+      expect(turn.prepareRoomAvailability).not.toHaveBeenCalled();
+    });
+    it("leaves availability to the next turn once every plan night is sent", async () => {
+      const turn = pacedUploads(["send", "none"]);
+      expect(await turn.run()).toEqual(retained("upload-1"));
+      expect(turn.reconciles()).toBe(2);
+      expect(turn.prepareRoomAvailability).not.toHaveBeenCalled();
+      // The next turn finds nothing to upload and continues with room availability as before.
+      expect(await turn.run()).toEqual({ ok: true });
+      expect(turn.prepareRoomAvailability).toHaveBeenCalledOnce();
+    });
+    it("keeps one upload per turn without pacing, reconciled by the next attempt", async () => {
+      for (const options of [{ maxSends: 1 }, { paced: false as const }]) {
+        const turn = pacedUploads(["send", "send"], options);
+        expect(await turn.run()).toEqual(retained("upload-1"));
+        expect(turn.sent).toEqual(["upload-1"]);
+        expect(turn.reconciles()).toBe(1);
+        expect(turn.sleeps).toEqual([]);
+      }
+    });
+    it("ends the turn before its next upload once the process is stopping", async () => {
+      const turn = pacedUploads(["send", "send"], { stopping: () => true });
+      expect(await turn.run()).toEqual(retained("upload-1"));
+      expect(turn.sent).toEqual(["upload-1"]);
+      expect(turn.reconciles()).toBe(2);
+    });
+    it("claims nothing more when the stop starts during the spacing wait", async () => {
+      // Not stopping when the limits are checked, stopping once the spacing wait is over.
+      let checks = 0;
+      const turn = pacedUploads(["send", "send"], { stopping: () => ++checks > 1 });
+      expect(await turn.run()).toEqual(retained("upload-1"));
+      expect(turn.sent).toEqual(["upload-1"]);
+      expect(checks).toBe(2);
+    });
+    it("ends the turn as a continuation when the heartbeat fails after an upload", async () => {
+      const turn = pacedUploads(["send", "send"], {
+        heartbeat: async () => {
+          throw new Error("lease heartbeat unavailable");
+        },
+      });
+      expect(await turn.run()).toEqual(retained("upload-1"));
+      expect(turn.sent).toEqual(["upload-1"]);
+    });
+    it("ends the turn once its time budget is used", async () => {
+      // The second upload is reconciled at 14.1 s, past a 9 s budget, before a third claim.
+      const turn = pacedUploads(["send", "send", "send"], { turnBudgetMs: 9_000 });
+      expect(await turn.run()).toEqual(retained("upload-2"));
+      expect(turn.sent).toEqual(["upload-1", "upload-2"]);
+    });
+    it.each([
+      ["an upload still settling", { reconcile: "settling" as const }, ["send", "send"]],
+      ["a reconcile error", { reconcile: "throw" as const }, ["send", "send"]],
+      ["a refused next upload", {}, ["send", "refused"]],
+      ["an upload error", {}, ["send", "throw"]],
+    ] as const)(
+      "after an upload, %s ends the turn as a continuation, never a failure",
+      async (_name, options, steps) => {
+        const turn = pacedUploads(steps, options);
+        expect(await turn.run()).toEqual(retained("upload-1"));
+        expect(turn.prepareRoomAvailability).not.toHaveBeenCalled();
+      },
+    );
+    it.each([
+      ["refused", "invalid_state", "Initial Channex preparation does not complete full sync."],
+      ["throw", "provider_unavailable", "Initial Channex upload unavailable."],
+    ] as const)("keeps the failure for a first upload that is %s", async (first, code, message) => {
+      const turn = pacedUploads([first]);
+      expect(await turn.run()).toEqual({ ok: false, code, message });
+      expect(turn.sleeps).toEqual([]);
+    });
   });
   it("does not run pricing completion for booking synchronization", async () => {
     const reconcile = vi.fn();
