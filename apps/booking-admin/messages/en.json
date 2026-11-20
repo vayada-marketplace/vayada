@@ -780,6 +780,7 @@
   "settings.billing.card": "Card",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "We collect card payments and pay you every Monday.",
+  "settings.billing.providerVayadaWhere": "Payouts to bank accounts in Indonesia and Sri Lanka.",
   "settings.billing.vayadaPayout.intro": "Guests pay by card on your booking page. vayada collects the payments and pays you every Monday for stays that checked out by the Sunday before.",
   "settings.billing.vayadaPayout.fee": "Fee: your plan fee plus {percent}% of each card payment. Refunds and card disputes come off your next payout.",
   "settings.billing.vayadaPayout.feeNoPercent": "Fee: your plan fee plus the vayada Payment fee on each card payment. Refunds and card disputes come off your next payout.",

@@ -778,6 +778,7 @@
   "settings.billing.card": "银行卡",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "我们代收银行卡付款，并在每周一向您付款。",
+  "settings.billing.providerVayadaWhere": "付款至印度尼西亚和斯里兰卡的银行账户。",
   "settings.billing.vayadaPayout.intro": "客人在您的预订页面上用银行卡付款。vayada 代收款项，并在每周一向您支付截至前一个周日已退房的住宿款项。",
   "settings.billing.vayadaPayout.fee": "费用：您的套餐费用，外加每笔银行卡付款的 {percent}%。退款和银行卡争议会从您的下一笔付款中扣除。",
   "settings.billing.vayadaPayout.feeNoPercent": "费用：您的套餐费用，外加每笔银行卡付款的 vayada Payment 费用。退款和银行卡争议会从您的下一笔付款中扣除。",

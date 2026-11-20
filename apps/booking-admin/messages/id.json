@@ -778,6 +778,7 @@
   "settings.billing.card": "Kartu",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "Kami menerima pembayaran kartu dan membayar Anda setiap Senin.",
+  "settings.billing.providerVayadaWhere": "Pembayaran ke rekening bank di Indonesia dan Sri Lanka.",
   "settings.billing.vayadaPayout.intro": "Tamu membayar dengan kartu di halaman pemesanan Anda. vayada menerima pembayarannya dan membayar Anda setiap Senin untuk menginap yang check-out paling lambat hari Minggu sebelumnya.",
   "settings.billing.vayadaPayout.fee": "Biaya: biaya paket Anda ditambah {percent}% dari setiap pembayaran kartu. Pengembalian dana dan sengketa kartu dipotong dari pembayaran Anda berikutnya.",
   "settings.billing.vayadaPayout.feeNoPercent": "Biaya: biaya paket Anda ditambah biaya vayada Payment untuk setiap pembayaran kartu. Pengembalian dana dan sengketa kartu dipotong dari pembayaran Anda berikutnya.",

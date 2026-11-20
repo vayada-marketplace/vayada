@@ -2221,6 +2221,13 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                           />
                         </span>
                         <span className="text-[13px] leading-[1.45] text-slate-600">{t(desc)}</span>
+                        {/* VAY-2481: what vayada Payment needs, so a hotel elsewhere knows why
+                          it can't use it (payout bank accounts in Indonesia and Sri Lanka only). */}
+                        {id === "vayada" && (
+                          <span className="text-[12px] leading-[1.45] text-slate-500">
+                            {t("settings.billing.providerVayadaWhere")}
+                          </span>
+                        )}
                       </label>
                     );
                   })}

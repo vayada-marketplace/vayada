@@ -778,6 +778,7 @@
   "settings.billing.card": "Kaart",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "Wij ontvangen kaartbetalingen en betalen je elke maandag uit.",
+  "settings.billing.providerVayadaWhere": "Uitbetalingen op bankrekeningen in Indonesië en Sri Lanka.",
   "settings.billing.vayadaPayout.intro": "Gasten betalen met hun kaart op je boekingspagina. vayada ontvangt de betalingen en betaalt je elke maandag uit voor verblijven die uiterlijk de zondag ervoor zijn uitgecheckt.",
   "settings.billing.vayadaPayout.fee": "Kosten: de kosten van je abonnement plus {percent}% van elke kaartbetaling. Terugbetalingen en kaartgeschillen gaan van je volgende uitbetaling af.",
   "settings.billing.vayadaPayout.feeNoPercent": "Kosten: de kosten van je abonnement plus de vayada Payment-kosten op elke kaartbetaling. Terugbetalingen en kaartgeschillen gaan van je volgende uitbetaling af.",

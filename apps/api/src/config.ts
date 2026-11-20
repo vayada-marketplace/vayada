@@ -202,10 +202,18 @@ export type ApiConfig = {
    * for the hotels on vayadaPaymentLivePropertyIds. */
   vayadaPaymentStripeLive?: { secretKey: string; publishableKey: string; webhookSecret?: string };
   /** VAY-2442: the hotels whose vayada Payment money is real (VAYADA_PAYMENT_LIVE_PROPERTY_IDS:
-   * property UUIDs, never "*"). Their charges, refunds and captures all go to the live keys, never
-   * to the test ones. A hotel stays on it once it has taken live money, so its refunds keep
-   * working; to stop its new charges, take it off VAYADA_PAYMENT_PROPERTY_IDS. */
-  vayadaPaymentLivePropertyIds: readonly string[];
+   * property UUIDs, or "*" for every hotel except the test hotels below). Their charges, refunds
+   * and captures all go to the live keys, never to the test ones. A hotel stays live once it has
+   * taken live money, so its refunds keep working; to stop its new charges, take it off
+   * VAYADA_PAYMENT_PROPERTY_IDS or put it on VAYADA_PAYMENT_STOPPED_PROPERTY_IDS. */
+  vayadaPaymentLivePropertyIds: readonly string[] | "all";
+  /** VAY-2442: Vayada's own test hotels (VAYADA_PAYMENT_TEST_PROPERTY_IDS), which stay on the test
+   * keys when the live list is "*". Never on an explicit live list. */
+  vayadaPaymentTestPropertyIds: readonly string[];
+  /** VAY-2442: hotels that take no new vayada Payment charges even when the charge list is "*"
+   * (VAYADA_PAYMENT_STOPPED_PROPERTY_IDS): the per-hotel stop. Refunds, disputes and payouts of
+   * money already taken keep working. */
+  vayadaPaymentStoppedPropertyIds: readonly string[];
   /** VAY-2442: Vayada's vayada Payment fee, in percent of each card payment, on top of the plan's
    * fee and kept on refunds. Default 6 (Flamur, 2026-10-31). */
   vayadaPaymentFeePercent: number;
@@ -460,12 +468,13 @@ export function replacementPricingManualPaymentMethods(
 }
 
 /** VAY-2442: whether a hotel gets vayada Payment: the switch is on, the hotel is on
- * VAYADA_PAYMENT_PROPERTY_IDS and the Stripe keys of its mode are set (live keys for a hotel on
- * VAYADA_PAYMENT_LIVE_PROPERTY_IDS, test keys otherwise). Choosing it, the payout account and new
- * card charges all ask this, so a hotel can't be set up for charges that would fail; refunds,
- * disputes and payouts of money already taken do not. Card readiness doesn't (no Vayada approval
- * since 2026-11-03): a hotel taken off the list keeps showing card until it turns card off, and
- * its card checkouts are refused before any money is taken. */
+ * VAYADA_PAYMENT_PROPERTY_IDS (or it is "*") and not on VAYADA_PAYMENT_STOPPED_PROPERTY_IDS, and
+ * the Stripe keys of its mode are set (live keys for a live hotel, test keys otherwise). Choosing
+ * it, the payout account and new card charges all ask this, so a hotel can't be set up for
+ * charges that would fail; refunds, disputes and payouts of money already taken do not. Card
+ * readiness doesn't (no Vayada approval since 2026-11-03): a hotel taken off the list keeps
+ * showing card until it turns card off, and its card checkouts are refused before any money is
+ * taken. */
 export function vayadaPaymentOpenFor(
   config: Pick<
     ApiConfig,
@@ -473,14 +482,18 @@ export function vayadaPaymentOpenFor(
     | "vayadaPaymentPropertyIds"
     | "vayadaPaymentStripe"
     | "vayadaPaymentLivePropertyIds"
+    | "vayadaPaymentTestPropertyIds"
+    | "vayadaPaymentStoppedPropertyIds"
     | "vayadaPaymentStripeLive"
   >,
 ): (propertyId: string) => boolean {
   const ids = config.vayadaPaymentPropertyIds;
+  const stopped = config.vayadaPaymentStoppedPropertyIds;
   const live = vayadaPaymentLiveFor(config);
   return (propertyId) =>
     config.vayadaPaymentEnabled &&
     (ids === "all" || ids.includes(propertyId.toLowerCase())) &&
+    !stopped.includes(propertyId.toLowerCase()) &&
     // A live hotel never falls back to the test keys, nor a test hotel to the live ones. Real money
     // also needs the live webhook: without it disputes and dashboard refunds never reach the
     // hotel's balance, and Vayada would pay out money it no longer has.
@@ -490,12 +503,50 @@ export function vayadaPaymentOpenFor(
 }
 
 /** VAY-2442: whether a hotel's vayada Payment money is real (Stripe live mode): every Stripe call
- * for its payments goes to the live keys. */
+ * for its payments goes to the live keys. With the live list "*", every hotel is live except
+ * Vayada's own test hotels (VAYADA_PAYMENT_TEST_PROPERTY_IDS), so new hotels take real money too. */
 export function vayadaPaymentLiveFor(
-  config: Pick<ApiConfig, "vayadaPaymentLivePropertyIds">,
+  config: Pick<ApiConfig, "vayadaPaymentLivePropertyIds" | "vayadaPaymentTestPropertyIds">,
 ): (propertyId: string) => boolean {
   const ids = config.vayadaPaymentLivePropertyIds;
-  return (propertyId) => ids.includes(propertyId.toLowerCase());
+  const test = config.vayadaPaymentTestPropertyIds;
+  return ids === "all"
+    ? (propertyId) => !test.includes(propertyId.toLowerCase())
+    : (propertyId) => ids.includes(propertyId.toLowerCase());
+}
+
+/** VAY-2442: the vayada Payment hotel lists, with the rules that keep test money and real money
+ * apart: a test hotel is never on an explicit live list, and with the live keys set the charge list
+ * "*" needs the live list "*" (or a real hotel missing from the live list would take test-mode
+ * charges: a confirmed booking for no money). */
+function loadVayadaPaymentLists(env: NodeJS.ProcessEnv, liveKeysSet: boolean) {
+  const all = (key: string) => readOptionalEnv(env, key) === "*";
+  const lists = {
+    vayadaPaymentPropertyIds: all("VAYADA_PAYMENT_PROPERTY_IDS")
+      ? ("all" as const)
+      : readPropertyIdAllowlistEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS"),
+    vayadaPaymentLivePropertyIds: all("VAYADA_PAYMENT_LIVE_PROPERTY_IDS")
+      ? ("all" as const)
+      : readPropertyIdAllowlistEnv(env, "VAYADA_PAYMENT_LIVE_PROPERTY_IDS"),
+    vayadaPaymentTestPropertyIds: readPropertyIdAllowlistEnv(
+      env,
+      "VAYADA_PAYMENT_TEST_PROPERTY_IDS",
+    ),
+    vayadaPaymentStoppedPropertyIds: readPropertyIdAllowlistEnv(
+      env,
+      "VAYADA_PAYMENT_STOPPED_PROPERTY_IDS",
+    ),
+  };
+  const live = lists.vayadaPaymentLivePropertyIds;
+  if (live !== "all" && lists.vayadaPaymentTestPropertyIds.some((id) => live.includes(id)))
+    throw new Error(
+      "VAYADA_PAYMENT_TEST_PROPERTY_IDS and VAYADA_PAYMENT_LIVE_PROPERTY_IDS must not share a hotel",
+    );
+  if (liveKeysSet && lists.vayadaPaymentPropertyIds === "all" && live !== "all")
+    throw new Error(
+      'VAYADA_PAYMENT_PROPERTY_IDS="*" with live keys needs VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*"',
+    );
+  return lists;
 }
 
 function loadVayadaPaymentStripe(
@@ -1382,16 +1433,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     vayadaPaymentEnabled: readBooleanEnv(env, "VAYADA_PAYMENT_ENABLED"),
-    vayadaPaymentPropertyIds:
-      readOptionalEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS") === "*"
-        ? "all"
-        : readPropertyIdAllowlistEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS"),
     vayadaPaymentStripe: loadVayadaPaymentStripe(env, "test"),
     vayadaPaymentStripeLive: loadVayadaPaymentStripe(env, "live"),
-    vayadaPaymentLivePropertyIds: readPropertyIdAllowlistEnv(
-      env,
-      "VAYADA_PAYMENT_LIVE_PROPERTY_IDS",
-    ),
+    ...loadVayadaPaymentLists(env, loadVayadaPaymentStripe(env, "live") !== undefined),
     vayadaPaymentFeePercent: readVayadaPaymentFeePercent(env),
     identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),
     // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.

@@ -534,7 +534,8 @@ const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
       handleVayadaPaymentWebhookEvent(vayadaPaymentWebhookPool, event, app.log)
   : undefined;
 // VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account, with
-// the live keys for hotels on VAYADA_PAYMENT_LIVE_PROPERTY_IDS and the test keys for the rest;
+// the live keys for live hotels (VAYADA_PAYMENT_LIVE_PROPERTY_IDS, or every hotel except
+// VAYADA_PAYMENT_TEST_PROPERTY_IDS when it is "*") and the test keys for the rest;
 // every other card payment goes through Stripe Connect as before.
 const vayadaPaymentAccount = (keys: ApiConfig["vayadaPaymentStripe"]) =>
   keys

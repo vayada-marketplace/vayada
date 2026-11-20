@@ -778,6 +778,7 @@
   "settings.billing.card": "カード",
   "settings.billing.providerVayada": "vayada Payment",
   "settings.billing.providerVayadaDesc": "カード決済を代行し、毎週月曜日にお支払いします。",
+  "settings.billing.providerVayadaWhere": "インドネシアとスリランカの銀行口座への支払い。",
   "settings.billing.vayadaPayout.intro": "ゲストは予約ページでカード決済します。vayadaが決済を受け取り、前の日曜日までにチェックアウトした滞在分を毎週月曜日にお支払いします。",
   "settings.billing.vayadaPayout.fee": "手数料：プラン手数料に加えて、カード決済ごとに{percent}%。返金とカードの異議申し立ては次回のお支払いから差し引かれます。",
   "settings.billing.vayadaPayout.feeNoPercent": "手数料：プラン手数料に加えて、カード決済ごとにvayada Paymentの手数料。返金とカードの異議申し立ては次回のお支払いから差し引かれます。",
