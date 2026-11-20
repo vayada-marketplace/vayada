@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} сразу потеряет доступ к этому отелю. Чтобы снова им пользоваться, подключите его в {app}.",
   "settings.connectedApps.disconnected": "{app} отключено.",
   "settings.connectedApps.disconnectError": "Не удалось отключить приложение. Попробуйте ещё раз.",
-  "settings.connectedApps.noAccess": "Подключённые приложения видят только участники, которые управляют промокодами."
+  "settings.connectedApps.noAccess": "Подключённые приложения видят только участники, которые управляют промокодами.",
+  "promos.managedBy": "Управляется {app}",
+  "promos.managedByHint": "Изменяется в {app}"
 }

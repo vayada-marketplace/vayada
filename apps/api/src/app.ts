@@ -12,6 +12,7 @@ import {
   type BookingRoomSortingRoutesOptions,
 } from "./routes/bookingRoomSorting.js";
 import type { PartnerConnectionsRepository } from "./domains/partnerConnections.js";
+import type { PartnerPromoCodesRepository } from "./domains/partnerPromoCodes.js";
 import { registerPartnerApiRoutes } from "./routes/partnerApi.js";
 import { registerPartnerConnectionRoutes } from "./routes/partnerConnections.js";
 import {
@@ -365,6 +366,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   partnerConnections?: {
     repository: PartnerConnectionsRepository;
     propertyAccessRepository: PropertyAccessRepository;
+    /** VAY-2437: the partner's own promo codes (/partner/v1/promo-codes). */
+    promoCodes?: PartnerPromoCodesRepository;
   };
   accountBookingPage?: AccountBookingPageRoutesOptions;
   bookingHostNotifications?: BookingHostNotificationRoutesOptions;
@@ -873,10 +876,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPartnerApiRoutes, {
       prefix: "/partner",
       repository: options.partnerConnections.repository,
+      promoCodes: options.partnerConnections.promoCodes,
     });
     app.register(registerPartnerConnectionRoutes, {
       prefix: "/api/booking",
-      ...options.partnerConnections,
+      repository: options.partnerConnections.repository,
+      propertyAccessRepository: options.partnerConnections.propertyAccessRepository,
     });
   }
   if (options.accountBookingPage)

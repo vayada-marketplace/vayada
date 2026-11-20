@@ -196,7 +196,8 @@ export default function PromoCodesTab({
   useEffect(() => {
     if (!openPromoCodeId) return;
     const promo = promoCodes.find((item) => item.promoCodeId === openPromoCodeId);
-    if (promo) openEditor(promo);
+    // A connected app's code is changed only in that app (VAY-2437).
+    if (promo && !promo.managedBy) openEditor(promo);
     onPromoCodeOpened?.();
     // Opens once per link; the editor's own state takes over from there.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -377,6 +378,11 @@ export default function PromoCodesTab({
                         >
                           {t(`promos.status.${status}`)}
                         </span>
+                        {promo.managedBy && (
+                          <div className="mt-1 text-[11px] font-medium text-gray-500">
+                            {t("promos.managedBy", { app: promo.managedBy })}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-4 font-medium text-gray-900">
                         {promo.discountType === "percentage"
@@ -415,47 +421,53 @@ export default function PromoCodesTab({
                         </div>
                       </td>
                       <td className="px-5 py-4">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={promo.isActive}
-                            aria-label={`${promo.isActive ? t("featureHub.copy.deactivate") : t("admin.activate")} ${promo.code}`}
-                            disabled={busyPromoId === promo.promoCodeId}
-                            onClick={async () => {
-                              setBusyPromoId(promo.promoCodeId);
-                              try {
-                                await onTogglePromoCode(promo);
-                              } catch {
-                                setPromoError(t("admin.failedToUpdatePromoCode"));
-                              } finally {
-                                setBusyPromoId(null);
-                              }
-                            }}
-                            className={`relative order-3 ml-2 h-5 w-9 rounded-full transition-colors disabled:opacity-50 ${promo.isActive ? "bg-primary-600" : "bg-gray-300"}`}
-                          >
-                            <span
-                              className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${promo.isActive ? "translate-x-4" : "translate-x-0"}`}
-                            />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openEditor(promo)}
-                            aria-label={t("admin.editName", { name: promo.code })}
-                            className="order-1 rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
-                          >
-                            <PencilSquareIcon className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDelete(promo)}
-                            disabled={busyPromoId === promo.promoCodeId}
-                            aria-label={t("admin.deleteName2", { name: promo.code })}
-                            className="order-2 rounded-md p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
-                        </div>
+                        {promo.managedBy ? (
+                          <p className="text-right text-xs text-gray-500">
+                            {t("promos.managedByHint", { app: promo.managedBy })}
+                          </p>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={promo.isActive}
+                              aria-label={`${promo.isActive ? t("featureHub.copy.deactivate") : t("admin.activate")} ${promo.code}`}
+                              disabled={busyPromoId === promo.promoCodeId}
+                              onClick={async () => {
+                                setBusyPromoId(promo.promoCodeId);
+                                try {
+                                  await onTogglePromoCode(promo);
+                                } catch {
+                                  setPromoError(t("admin.failedToUpdatePromoCode"));
+                                } finally {
+                                  setBusyPromoId(null);
+                                }
+                              }}
+                              className={`relative order-3 ml-2 h-5 w-9 rounded-full transition-colors disabled:opacity-50 ${promo.isActive ? "bg-primary-600" : "bg-gray-300"}`}
+                            >
+                              <span
+                                className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${promo.isActive ? "translate-x-4" : "translate-x-0"}`}
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEditor(promo)}
+                              aria-label={t("admin.editName", { name: promo.code })}
+                              className="order-1 rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                            >
+                              <PencilSquareIcon className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(promo)}
+                              disabled={busyPromoId === promo.promoCodeId}
+                              aria-label={t("admin.deleteName2", { name: promo.code })}
+                              className="order-2 rounded-md p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                            >
+                              <TrashIcon className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

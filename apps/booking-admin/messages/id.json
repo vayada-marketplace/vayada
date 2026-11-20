@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} langsung kehilangan akses ke hotel ini. Untuk menggunakannya lagi, hubungkan dari {app}.",
   "settings.connectedApps.disconnected": "{app} telah diputuskan.",
   "settings.connectedApps.disconnectError": "Aplikasi tidak dapat diputuskan. Coba lagi.",
-  "settings.connectedApps.noAccess": "Hanya anggota yang mengelola kode promo yang dapat melihat aplikasi terhubung."
+  "settings.connectedApps.noAccess": "Hanya anggota yang mengelola kode promo yang dapat melihat aplikasi terhubung.",
+  "promos.managedBy": "Dikelola oleh {app}",
+  "promos.managedByHint": "Ubah di {app}"
 }

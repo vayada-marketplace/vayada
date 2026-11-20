@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} pierde el acceso a este hotel al instante. Para volver a usarla, conéctala desde {app}.",
   "settings.connectedApps.disconnected": "{app} está desconectada.",
   "settings.connectedApps.disconnectError": "No se pudo desconectar la app. Inténtalo de nuevo.",
-  "settings.connectedApps.noAccess": "Solo los miembros que gestionan códigos de descuento pueden ver las apps conectadas."
+  "settings.connectedApps.noAccess": "Solo los miembros que gestionan códigos de descuento pueden ver las apps conectadas.",
+  "promos.managedBy": "Gestionado por {app}",
+  "promos.managedByHint": "Cámbialo en {app}"
 }

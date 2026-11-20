@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} はこのホテルへのアクセスをすぐに失います。再び使うには {app} から連携してください。",
   "settings.connectedApps.disconnected": "{app} の連携を解除しました。",
   "settings.connectedApps.disconnectError": "アプリの連携を解除できませんでした。もう一度お試しください。",
-  "settings.connectedApps.noAccess": "割引コードを管理するメンバーだけが連携アプリを確認できます。"
+  "settings.connectedApps.noAccess": "割引コードを管理するメンバーだけが連携アプリを確認できます。",
+  "promos.managedBy": "{app} が管理",
+  "promos.managedByHint": "{app} で変更してください"
 }

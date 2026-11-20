@@ -2257,5 +2257,7 @@
   "settings.connectedApps.confirmMessage": "{app} verliest meteen de toegang tot dit hotel. Om de app weer te gebruiken, koppel je hem vanuit {app}.",
   "settings.connectedApps.disconnected": "{app} is ontkoppeld.",
   "settings.connectedApps.disconnectError": "De app kon niet worden ontkoppeld. Probeer het opnieuw.",
-  "settings.connectedApps.noAccess": "Alleen leden die kortingscodes beheren, kunnen gekoppelde apps zien."
+  "settings.connectedApps.noAccess": "Alleen leden die kortingscodes beheren, kunnen gekoppelde apps zien.",
+  "promos.managedBy": "Beheerd door {app}",
+  "promos.managedByHint": "Wijzig dit in {app}"
 }

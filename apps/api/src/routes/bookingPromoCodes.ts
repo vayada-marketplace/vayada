@@ -27,6 +27,8 @@ export type BookingPromoCode = {
   currentUses: number;
   createdAt: string;
   updatedAt: string;
+  /** VAY-2437: the connected partner app that manages this code; the hotel can't change it here. */
+  managedBy?: string | null;
 };
 
 export type CreateBookingPromoCodeBody = {
@@ -83,6 +85,7 @@ type PromoCodeParams = PromoCodesParams & {
 type BookingPromoCodesError = {
   statusCode: 401 | 403 | 404 | 409 | 422 | 500;
   code:
+    | "managed_by_partner"
     | "unauthenticated"
     | "missing_permission"
     | "missing_entitlement"
@@ -181,6 +184,8 @@ export async function registerBookingPromoCodeRoutes(
         if (!promoCode) return sendPromoCodesError(reply, writeNotFoundError());
         return promoCode;
       } catch (error) {
+        if (error instanceof PartnerManagedPromoCodeError)
+          return sendPromoCodesError(reply, partnerManagedError());
         if (error instanceof BookingPromoCodeAmountError)
           return sendInvalidPayload(reply, [error.message]);
         if (isUniqueViolation(error)) return sendPromoCodesError(reply, duplicateCodeError());
@@ -205,7 +210,9 @@ export async function registerBookingPromoCodeRoutes(
         const retired = await repository.retirePromoCodeByHotelId(hotelId, promoCodeId);
         if (!retired) return sendPromoCodesError(reply, writeNotFoundError());
         return reply.status(204).send();
-      } catch {
+      } catch (error) {
+        if (error instanceof PartnerManagedPromoCodeError)
+          return sendPromoCodesError(reply, partnerManagedError());
         return sendPromoCodesError(reply, writeUnavailableError());
       }
     },
@@ -214,6 +221,45 @@ export async function registerBookingPromoCodeRoutes(
 
 /** A promo amount the hotel's currency cannot charge (fractional rupiah for IDR). */
 export class BookingPromoCodeAmountError extends Error {}
+
+/** VAY-2437: a connected partner app's code; only that app changes or retires it. */
+export class PartnerManagedPromoCodeError extends Error {}
+
+/** A fixed amount off must fit the hotel currency's price step: whole rupiah for IDR (VAY-2085).
+ * Booking reads refuse other amounts, which would hide the code at checkout. */
+export async function checkPromoFixedAmountStep(
+  pool: BookingPromoCodesPool,
+  propertyId: string,
+  promoCodeId: string | null,
+  body: { discountType?: string; discountValue?: string },
+): Promise<void> {
+  if (
+    body.discountType === "percentage" ||
+    (body.discountType === undefined && body.discountValue === undefined)
+  )
+    return;
+  const row = (
+    await pool.query<{
+      currency: string | null;
+      discountType: string | null;
+      discountValue: string | null;
+    }>(
+      `SELECT
+         ${PROPERTY_CURRENCY_SQL} AS currency,
+         promo.discount_type AS "discountType",
+         promo.discount_value::text AS "discountValue"
+       FROM (SELECT 1) one
+       LEFT JOIN booking.promo_definitions promo
+         ON promo.property_id = $1 AND promo.id::text = $2`,
+      [propertyId, promoCodeId],
+    )
+  ).rows[0];
+  const discountType = body.discountType ?? row?.discountType;
+  const discountValue = body.discountValue ?? row?.discountValue;
+  if (discountType === "percentage" || !row?.currency || !discountValue) return;
+  const issue = pricingDecimalStepIssue("discountValue", discountValue, row.currency);
+  if (issue) throw new BookingPromoCodeAmountError(issue);
+}
 
 export function createPgTargetBookingPromoCodesRepository(config: {
   connectionString: string;
@@ -259,39 +305,21 @@ export function createPgTargetBookingPromoCodesRepository(config: {
     return result.rows[0]?.propertyId ?? null;
   }
 
-  /** A fixed amount off must fit the hotel currency's price step: whole rupiah for IDR
-   * (VAY-2085). Booking reads refuse other amounts, which would hide the code at checkout. */
-  async function checkFixedAmountStep(
+  const checkFixedAmountStep = (
     propertyId: string,
     promoCodeId: string | null,
     body: { discountType?: string; discountValue?: string },
-  ): Promise<void> {
-    if (
-      body.discountType === "percentage" ||
-      (body.discountType === undefined && body.discountValue === undefined)
-    )
-      return;
-    const row = (
-      await pool.query<{
-        currency: string | null;
-        discountType: string | null;
-        discountValue: string | null;
-      }>(
-        `SELECT
-           ${PROPERTY_CURRENCY_SQL} AS currency,
-           promo.discount_type AS "discountType",
-           promo.discount_value::text AS "discountValue"
-         FROM (SELECT 1) one
-         LEFT JOIN booking.promo_definitions promo
-           ON promo.property_id = $1 AND promo.id::text = $2`,
-        [propertyId, promoCodeId],
-      )
-    ).rows[0];
-    const discountType = body.discountType ?? row?.discountType;
-    const discountValue = body.discountValue ?? row?.discountValue;
-    if (discountType === "percentage" || !row?.currency || !discountValue) return;
-    const issue = pricingDecimalStepIssue("discountValue", discountValue, row.currency);
-    if (issue) throw new BookingPromoCodeAmountError(issue);
+  ) => checkPromoFixedAmountStep(pool, propertyId, promoCodeId, body);
+
+  /** VAY-2437: a partner app's code is changed and retired only through /partner/v1. */
+  async function refusePartnerManaged(propertyId: string, promoCodeId: string): Promise<void> {
+    const result = await pool.query<{ managed: boolean }>(
+      `SELECT partner_client_id IS NOT NULL AS managed
+       FROM booking.promo_definitions WHERE property_id = $1 AND id::text = $2`,
+      [propertyId, promoCodeId],
+    );
+    if (result.rows[0]?.managed)
+      throw new PartnerManagedPromoCodeError("Managed by a connected partner app");
   }
 
   return {
@@ -355,6 +383,7 @@ export function createPgTargetBookingPromoCodesRepository(config: {
     async updatePromoCodeByHotelId(hotelId, promoCodeId, body) {
       const propertyId = await resolvePropertyId(hotelId);
       if (!propertyId) return null;
+      await refusePartnerManaged(propertyId, promoCodeId);
       await checkFixedAmountStep(propertyId, promoCodeId, body);
       const values: unknown[] = [propertyId, promoCodeId];
       const sets: string[] = [];
@@ -376,6 +405,7 @@ export function createPgTargetBookingPromoCodesRepository(config: {
            UPDATE booking.promo_definitions
            SET ${sets.join(", ")}
            WHERE property_id = $1 AND id::text = $2 AND status <> 'retired'
+             AND partner_client_id IS NULL
            RETURNING *
          )
          ${promoCodeSelectSql("updated")}`,
@@ -387,10 +417,12 @@ export function createPgTargetBookingPromoCodesRepository(config: {
     async retirePromoCodeByHotelId(hotelId, promoCodeId) {
       const propertyId = await resolvePropertyId(hotelId);
       if (!propertyId) return false;
+      await refusePartnerManaged(propertyId, promoCodeId);
       const result = await pool.query<{ id: string }>(
         `UPDATE booking.promo_definitions
          SET status = 'retired', is_active = false, updated_at = now()
          WHERE property_id = $1 AND id::text = $2 AND status <> 'retired'
+           AND partner_client_id IS NULL
          RETURNING id::text AS id`,
         [propertyId, promoCodeId],
       );
@@ -419,6 +451,7 @@ type PromoCodeRow = {
   currentUses: number;
   createdAt: Date | string;
   updatedAt: Date | string;
+  managedBy: string | null;
 };
 
 // VAY-2390: quotes charge in the PMS pricing currency, so promo amounts are in it; before the hotel
@@ -445,7 +478,9 @@ function promoCodeSelectSql(source = "booking.promo_definitions"): string {
     promo_definitions.max_uses AS "maxUses",
     promo_definitions.current_uses AS "currentUses",
     promo_definitions.created_at AS "createdAt",
-    promo_definitions.updated_at AS "updatedAt"
+    promo_definitions.updated_at AS "updatedAt",
+    (SELECT app.client_name FROM distribution.external_api_clients app
+     WHERE app.id = promo_definitions.partner_client_id) AS "managedBy"
    FROM ${source} promo_definitions`;
 }
 
@@ -480,10 +515,11 @@ function toPromoCode(row: PromoCodeRow, hotelId: string): BookingPromoCode {
     currentUses: row.currentUses,
     createdAt: new Date(row.createdAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
+    managedBy: row.managedBy,
   };
 }
 
-function parseCreateBody(body: unknown): ValidationResult<CreateBookingPromoCodeBody> {
+export function parseCreateBody(body: unknown): ValidationResult<CreateBookingPromoCodeBody> {
   const parsed = expectObject(body);
   if (!parsed.ok) return parsed;
   const input = parsed.value;
@@ -521,7 +557,7 @@ function parseCreateBody(body: unknown): ValidationResult<CreateBookingPromoCode
   };
 }
 
-function parseUpdateBody(body: unknown): ValidationResult<UpdateBookingPromoCodeBody> {
+export function parseUpdateBody(body: unknown): ValidationResult<UpdateBookingPromoCodeBody> {
   const parsed = expectObject(body);
   if (!parsed.ok) return parsed;
   const input = parsed.value;
@@ -559,8 +595,11 @@ function parseUpdateBody(body: unknown): ValidationResult<UpdateBookingPromoCode
   return { ok: true, value };
 }
 
-function validateEffectiveUpdate(
-  existing: BookingPromoCode,
+export function validateEffectiveUpdate(
+  existing: Pick<
+    BookingPromoCode,
+    "discountType" | "discountValue" | "validFrom" | "validUntil" | "stayDateFrom" | "stayDateUntil"
+  >,
   body: UpdateBookingPromoCodeBody,
 ): string[] {
   const details: string[] = [];
@@ -902,6 +941,15 @@ function writeUnavailableError(): BookingPromoCodesError {
   };
 }
 
+function partnerManagedError(): BookingPromoCodesError {
+  return {
+    statusCode: 409,
+    code: "managed_by_partner",
+    category: "write_model",
+    message: "A connected app manages this code. Change it in that app.",
+  };
+}
+
 function sendPromoCodesError(reply: FastifyReply, error: BookingPromoCodesError): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }
@@ -917,11 +965,11 @@ function isStatusError(error: unknown): error is { statusCode: number; message: 
   );
 }
 
-function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown): boolean {
   return isRecord(error) && error.code === "23505";
 }
 
-function isInvalidTargetPayloadError(error: unknown): boolean {
+export function isInvalidTargetPayloadError(error: unknown): boolean {
   return isRecord(error) && (error.code === "23514" || error.code === "22003");
 }
 

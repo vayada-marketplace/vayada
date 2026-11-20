@@ -34,6 +34,8 @@ export interface BookingPromoCode {
   currentUses: number;
   createdAt: string;
   updatedAt: string;
+  /** VAY-2437: the connected app that manages this code; the hotel changes it only in that app. */
+  managedBy?: string | null;
 }
 
 export interface ListBookingPromoCodesResponse {

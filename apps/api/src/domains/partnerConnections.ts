@@ -229,6 +229,15 @@ const toApp = (row: AppRow): PartnerApp => ({
 const knownScopes = (scopes: readonly string[]) =>
   PARTNER_SCOPES.filter((scope) => scopes.includes(scope));
 
+/** VAY-2437: a disconnect retires the app's active codes at that hotel (decided 2026-10-31), so no
+ * discount is given without the partner behind it. Used inside a statement whose `revoked` CTE
+ * returns the revoked connections' client_id and property_id. */
+const RETIRE_CONNECTION_CODES_SQL = (at: string) => `UPDATE booking.promo_definitions promo
+           SET status = 'retired', is_active = false, updated_at = ${at}
+           FROM revoked
+           WHERE promo.partner_client_id = revoked.client_id
+             AND promo.property_id = revoked.property_id AND promo.status <> 'retired'`;
+
 /** An https origin, else null (as the AI hotel profiles read the booking page address). */
 function httpsOrigin(value: string | null): string | null {
   if (!value) return null;
@@ -504,7 +513,9 @@ export function createPgPartnerConnectionsRepository(config: {
            UPDATE distribution.partner_connections connection
            SET status = 'revoked', revoked_at = $3, revocation_reason = 'partner_revoked', updated_at = $3
            FROM target WHERE connection.id = target.id
-           RETURNING connection.id
+           RETURNING connection.id, connection.client_id, connection.property_id
+         ), retired_codes AS (
+           ${RETIRE_CONNECTION_CODES_SQL("$3")}
          )
          UPDATE distribution.partner_tokens token SET revoked_at = $3
          FROM revoked WHERE token.connection_id = revoked.id AND token.revoked_at IS NULL`,
@@ -636,10 +647,12 @@ export function createPgPartnerConnectionsRepository(config: {
            SET status = 'revoked', revoked_at = $4, revoked_by_user_id = $3::uuid,
                revocation_reason = 'hotel_disconnected', updated_at = $4
            WHERE id = $2::uuid AND property_id = $1::uuid AND status = 'active'
-           RETURNING id
+           RETURNING id, client_id, property_id
          ), tokens AS (
            UPDATE distribution.partner_tokens token SET revoked_at = $4
            FROM revoked WHERE token.connection_id = revoked.id AND token.revoked_at IS NULL
+         ), retired_codes AS (
+           ${RETIRE_CONNECTION_CODES_SQL("$4")}
          )
          SELECT id::text FROM revoked`,
         [propertyId, connectionId, userId, at],
