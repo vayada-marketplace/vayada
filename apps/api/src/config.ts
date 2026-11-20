@@ -1,4 +1,5 @@
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
+import { parseWebhookSigningKey } from "./domains/partnerWebhooks.js";
 import { CHANNEX_RESERVED_TEST_IDS } from "./domains/channexOwnershipGate.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
@@ -170,6 +171,8 @@ export type ApiConfig = {
   port: number;
   apiRuntime: ApiRuntime;
   backgroundWorkersEnabled: boolean;
+  /** VAY-2438: PARTNER_WEBHOOK_SIGNING_KEY. Unset: no partner booking updates are written or sent. */
+  partnerWebhookSigningKey: Buffer | null;
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
@@ -1365,6 +1368,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ...server,
     apiRuntime,
     backgroundWorkersEnabled,
+    partnerWebhookSigningKey: parseWebhookSigningKey(
+      readOptionalEnv(env, "PARTNER_WEBHOOK_SIGNING_KEY"),
+    ),
     auth,
     authSession,
     targetDatabaseUrl,

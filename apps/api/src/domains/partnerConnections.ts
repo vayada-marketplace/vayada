@@ -3,6 +3,7 @@ import pg, { type PoolClient } from "pg";
 
 import { PROPERTY_CURRENCY_SQL } from "../routes/bookingPromoCodes.js";
 import { LIVE_PROMO_CODES_SQL } from "./bookingGuestModules.js";
+import { enqueuePartnerEvent } from "./partnerWebhooks.js";
 
 /**
  * VAY-2436: partner apps (Creator Links first) and a hotel's one-time approval of one: the OAuth 2.0
@@ -329,7 +330,8 @@ export function createPgPartnerConnectionsRepository(config: {
       [appId, propertyId, at],
     );
 
-  /** A revoked connection: every token stops and the app's codes there are retired. */
+  /** A revoked connection: every token stops, the app's codes there are retired and the app is
+   * told with `connection.revoked` (VAY-2438), all in the revoking transaction. */
   async function endConnection(client: PoolClient, connection: EndedConnection, at: string) {
     await client.query(
       `UPDATE distribution.partner_tokens SET revoked_at = $2
@@ -337,6 +339,12 @@ export function createPgPartnerConnectionsRepository(config: {
       [connection.id, at],
     );
     await retireAppCodes(client, connection.clientId, connection.propertyId, at);
+    await enqueuePartnerEvent(client, {
+      appId: connection.clientId,
+      propertyId: connection.propertyId,
+      type: "connection.revoked",
+      occurredAt: at,
+    });
   }
 
   return {
