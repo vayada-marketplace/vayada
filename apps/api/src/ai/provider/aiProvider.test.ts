@@ -1,0 +1,281 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { createAiProvider, enabledAiProvidersFromEnv, type AiRunOptions } from "./aiProvider.js";
+import { TASK_SETTINGS, costMicroUsd, type ModelRoute } from "./catalog.js";
+
+const HAIKU: ModelRoute = {
+  provider: "bedrock",
+  region: "eu-west-1",
+  model: "eu.anthropic.claude-haiku-5-5",
+};
+const OPTIONS: AiRunOptions = {
+  context: {
+    organizationId: "00000000-0000-4000-8000-000000000001",
+    propertyId: "00000000-0000-4000-8000-000000000002",
+    userId: "00000000-0000-4000-8000-000000000003",
+    surface: "inbox",
+    requestId: "req-1",
+  },
+};
+const INPUT = {
+  instructions: "Translate the guest message into English.",
+  messages: [{ role: "user" as const, content: "Guten Morgen, ist das Zimmer frei?" }],
+};
+const CREDENTIALS = async () => ({ accessKeyId: "AKIAFAKEFAKEFAKEFAKE", secretAccessKey: "fake" });
+
+type Call = { url: string; headers: Headers; body: Record<string, unknown> };
+
+function anthropicReply(text: string, usage: Record<string, number>) {
+  return new Response(
+    JSON.stringify({
+      id: "msg_1",
+      type: "message",
+      role: "assistant",
+      model: "claude-haiku-5-5",
+      content: [{ type: "text", text }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage,
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function fakeFetch(respond: (call: Call) => Response | Promise<Response>) {
+  const calls: Call[] = [];
+  const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const call = {
+      url: String(input instanceof Request ? input.url : input),
+      headers: new Headers(init?.headers),
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    };
+    calls.push(call);
+    return respond(call);
+  });
+  return { calls, fetch: fetch as unknown as typeof globalThis.fetch };
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("createAiProvider", () => {
+  it("calls Claude on Bedrock in the EU with signed requests and returns text, tokens and cost", async () => {
+    // Both would move the call elsewhere if the provider read them (research 09c a).
+    vi.stubEnv(
+      "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
+      "https://bedrock-runtime.us-east-1.amazonaws.com",
+    );
+    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "bearer-from-env");
+    const network = fakeFetch(() =>
+      anthropicReply("Good morning, is the room free?", {
+        input_tokens: 1_000,
+        cache_read_input_tokens: 2_000,
+        cache_creation_input_tokens: 500,
+        output_tokens: 300,
+      }),
+    );
+    let clock = 1_000;
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      now: () => (clock += 250),
+    });
+
+    const result = await provider.run("inbox_translate", INPUT, OPTIONS);
+
+    expect(network.calls).toHaveLength(1);
+    const [call] = network.calls;
+    expect(call!.url).toBe(
+      "https://bedrock-runtime.eu-west-1.amazonaws.com/model/eu.anthropic.claude-haiku-5-5/invoke",
+    );
+    expect(call!.headers.get("authorization")).toMatch(
+      /^AWS4-HMAC-SHA256 Credential=AKIAFAKEFAKEFAKEFAKE\/\d{8}\/eu-west-1\/bedrock\//,
+    );
+    expect(call!.body).toMatchObject({
+      anthropic_version: "bedrock-2023-05-31",
+      max_tokens: TASK_SETTINGS.inbox_translate.maxOutputTokens,
+      output_config: { effort: "low" },
+      messages: [{ role: "user", content: [{ type: "text", text: INPUT.messages[0]!.content }] }],
+    });
+    expect(JSON.stringify(call!.body.system)).toContain(INPUT.instructions);
+    expect(call!.body).not.toHaveProperty("model");
+    expect(result).toEqual({
+      ok: true,
+      text: "Good morning, is the room free?",
+      finishReason: "stop",
+      route: HAIKU,
+      usage: {
+        inputTokens: 1_000,
+        cacheReadTokens: 2_000,
+        cacheWriteTokens: 500,
+        outputTokens: 300,
+      },
+      // 1,000 x 110 + 2,000 x 11 + 500 x 220 + 300 x 550 nano-dollars
+      costMicroUsd: 407,
+      priceTableVersion: "2026-11-20",
+      latencyMs: 250,
+    });
+  });
+
+  it("calls no model while no provider is switched on", async () => {
+    const network = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
+    const provider = createAiProvider({
+      enabledProviders: [],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+    });
+
+    expect(await provider.run("inbox_draft", INPUT, OPTIONS)).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(network.calls).toHaveLength(0);
+  });
+
+  it("falls back to the next route whose provider is on", async () => {
+    const network = fakeFetch(() => anthropicReply("ok", { input_tokens: 10, output_tokens: 2 }));
+    const offProvider = { provider: "other", region: "eu", model: "m" } as unknown as ModelRoute;
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      tasks: {
+        ...TASK_SETTINGS,
+        inbox_draft: { ...TASK_SETTINGS.inbox_draft, routes: [offProvider, HAIKU] },
+      },
+    });
+
+    const result = await provider.run("inbox_draft", INPUT, OPTIONS);
+
+    expect(result).toMatchObject({ ok: true, route: HAIKU });
+    expect(network.calls[0]!.url).toContain("/model/eu.anthropic.claude-haiku-5-5/");
+  });
+
+  it("sends customer data only to routes cleared for it", async () => {
+    const network = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
+    const warn = vi.fn();
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      log: { warn },
+    });
+    const global: ModelRoute = {
+      provider: "bedrock",
+      region: "eu-west-1",
+      model: "global.anthropic.claude-sonnet-5-5",
+    };
+
+    expect(await provider.run("inbox_draft", INPUT, { ...OPTIONS, route: global })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(warn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ route: "bedrock:eu-west-1:global.anthropic.claude-sonnet-5-5" }),
+      "AI route is not cleared for customer data",
+    );
+    // Made-up test data may use it, but an unpriced route still can not be budgeted.
+    expect(
+      await provider.run("inbox_draft", INPUT, { ...OPTIONS, data: "synthetic", route: global }),
+    ).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(warn).toHaveBeenLastCalledWith(expect.any(Object), "AI route has no price");
+    expect(network.calls).toHaveLength(0);
+  });
+
+  it("reports a refused call as failed and logs no prompt text", async () => {
+    const network = fakeFetch(
+      () =>
+        new Response(
+          JSON.stringify({ message: `Malformed input: ${INPUT.messages[0]!.content}` }),
+          {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+    );
+    const warn = vi.fn();
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      log: { warn },
+    });
+
+    expect(await provider.run("inbox_translate", INPUT, OPTIONS)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: "inbox_translate",
+        requestId: "req-1",
+        error: expect.objectContaining({ statusCode: 400 }),
+      }),
+      "AI provider call failed",
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("Guten Morgen");
+  });
+
+  it("gives up after the timeout", async () => {
+    const slowFetch = (async (_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+      })) as typeof globalThis.fetch;
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      fetch: slowFetch,
+      awsCredentials: CREDENTIALS,
+      timeoutMs: 20,
+    });
+
+    expect(await provider.run("inbox_summarise", INPUT, OPTIONS)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+  });
+});
+
+describe("costMicroUsd", () => {
+  it("bills a long Haiku prompt at the long-context rates", () => {
+    const usage = {
+      inputTokens: 100_001,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 1_000,
+    };
+    // 100,001 x 550 + 1,000 x 2,750 nano-dollars, rounded up to whole micro-dollars
+    expect(costMicroUsd(HAIKU, usage)).toBe(57_751);
+    expect(costMicroUsd(HAIKU, { ...usage, inputTokens: 100_000 })).toBe(11_550);
+  });
+
+  it("has no price for routes outside the table", () => {
+    const route: ModelRoute = {
+      provider: "bedrock",
+      region: "us-east-1",
+      model: "us.anthropic.claude-haiku-5-5",
+    };
+    expect(
+      costMicroUsd(route, {
+        inputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        outputTokens: 0,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("enabledAiProvidersFromEnv", () => {
+  it("is off unless named and rejects unknown providers", () => {
+    expect(enabledAiProvidersFromEnv({})).toEqual([]);
+    expect(enabledAiProvidersFromEnv({ AI_PROVIDERS_ENABLED: " bedrock " })).toEqual(["bedrock"]);
+    expect(() => enabledAiProvidersFromEnv({ AI_PROVIDERS_ENABLED: "bedrock,openai" })).toThrow(
+      "AI_PROVIDERS_ENABLED names an unknown AI provider: openai",
+    );
+  });
+});
