@@ -246,6 +246,12 @@ export type ApiConfig = {
   /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
   hotelFirstRunEnabled: boolean;
   bookingHostBase?: string;
+  /** VAY-2568: Cloudflare for SaaS (zone vayada.com) for hotels' own booking domains; without it
+   * a domain check answers "could not be checked". The token needs SSL and Certificates: Edit. */
+  bookingCustomDomainCloudflare?: { apiToken: string; zoneId: string };
+  /** VAY-2568: hotel domains the ALB sends to the new booking frontend, each with the property it
+   * belongs to (platform's next_booking_custom_domains). Only these can be verified. */
+  bookingCustomDomainRoutes: ReadonlyMap<string, string>;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
   platformMediaCleanupIntervalMs: number;
@@ -316,6 +322,24 @@ function loadPlatformMediaRetiredPurgeConfig(
     );
   }
   return { cdnDistributionId };
+}
+
+function readBookingCustomDomainCloudflare(
+  env: NodeJS.ProcessEnv,
+): ApiConfig["bookingCustomDomainCloudflare"] {
+  const apiToken = readOptionalEnv(env, "CLOUDFLARE_API_TOKEN");
+  const zoneId = readOptionalEnv(env, "CLOUDFLARE_ZONE_ID");
+  return apiToken && zoneId ? { apiToken, zoneId } : undefined;
+}
+
+/** "host=propertyId,host=propertyId"; Terraform validates it, so a malformed entry is skipped. */
+function readBookingCustomDomainRoutes(env: NodeJS.ProcessEnv): ReadonlyMap<string, string> {
+  const routes = new Map<string, string>();
+  for (const entry of (readOptionalEnv(env, "BOOKING_CUSTOM_DOMAIN_ROUTES") ?? "").split(",")) {
+    const [host, propertyId, ...rest] = entry.split("=").map((part) => part.trim().toLowerCase());
+    if (host && propertyId && rest.length === 0) routes.set(host.replace(/\.$/, ""), propertyId);
+  }
+  return routes;
 }
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -1493,6 +1517,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
+    bookingCustomDomainCloudflare: readBookingCustomDomainCloudflare(env),
+    bookingCustomDomainRoutes: readBookingCustomDomainRoutes(env),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
     platformMediaCleanupIntervalMs: readPositiveIntegerEnv(

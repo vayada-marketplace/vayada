@@ -6,6 +6,7 @@ import type {
 import type { BookingAcceptanceSettingsPort } from "../domains/bookingAcceptanceSettings.js";
 import type { SameDayBookingSettingsPort } from "../domains/sameDayBookingSettings.js";
 import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
+import type { BookingCustomDomainVerifier } from "../domains/bookingCustomDomainVerification.js";
 
 import {
   registerBookingAddonItemRoutes,
@@ -37,6 +38,7 @@ import {
   type BookingSettingsWriteRepository,
 } from "./bookingSettings.js";
 import { enforceRoutePolicy } from "./policy.js";
+import { livePublicPageRefresh } from "./publicPageRefresh.js";
 
 type BookingHotelParams = {
   hotelId: string;
@@ -59,6 +61,8 @@ export type BookingRoutesOptions = {
   publicPageRefresh?: (propertyId: string) => Promise<void>;
   inventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
   customDomainRepository?: BookingCustomDomainRepository;
+  /** Checks a hotel's domain with DNS and Cloudflare for SaaS (VAY-2568). */
+  customDomainVerifier?: BookingCustomDomainVerifier;
   changeRequestRepository?: BookingHotelChangeRequestRepository;
 };
 
@@ -118,6 +122,13 @@ export async function registerBookingRoutes(
       app,
       options.customDomainRepository,
       options.propertyAccessRepository,
+      {
+        verifier: options.customDomainVerifier,
+        refreshPublicPage: livePublicPageRefresh({
+          bookingPublicationRefresh: options.bookingPublicationRefresh,
+          refreshPublicPage: options.publicPageRefresh,
+        }),
+      },
     );
   }
 

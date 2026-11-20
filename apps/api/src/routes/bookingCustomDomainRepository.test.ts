@@ -48,4 +48,49 @@ describe("target booking custom-domain repository", () => {
     expect(queries[3]!.text).toContain("pg_advisory_xact_lock(hashtextextended($2,0))");
     expect(queries[3]!.values).toEqual([propertyId, lockKey]);
   });
+
+  it("records a check under the same lock, for the current hostname only (VAY-2568)", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: BookingCustomDomainPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ) {
+        queries.push({ text, values });
+        if (!text.includes("UPDATE hotel_catalog.property_domains")) return { rows: [] };
+        return {
+          rows: [
+            {
+              propertyId,
+              domain: "book.hotel.example",
+              verificationStatus: values?.[2],
+              verifiedAt: null,
+              updatedAt: new Date(),
+            } as unknown as T,
+          ],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingCustomDomainRepository({
+      connectionString: "postgres://target",
+      pool,
+    });
+
+    await expect(
+      repository.recordCheckResult(propertyId, "book.hotel.example", "failed"),
+    ).resolves.toMatchObject({ verificationStatus: "failed" });
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.text).toContain("pg_advisory_xact_lock(hashtextextended($4,0))");
+    expect(queries[0]!.text).toContain("AND hostname = $2");
+    expect(queries[0]!.values).toEqual([
+      propertyId,
+      "book.hotel.example",
+      "failed",
+      bookingCustomDomainLockKey(propertyId),
+    ]);
+
+    await repository.projectPublicProfile(propertyId);
+    expect(queries[1]!.text).toContain("hotel_catalog");
+  });
 });

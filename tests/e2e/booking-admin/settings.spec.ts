@@ -569,6 +569,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
             },
           ],
           verificationErrors: [],
+          verificationIssue: null,
           checkedAt: "2026-06-22T10:00:00.000Z",
           updatedAt: "2026-06-22T10:00:00.000Z",
         };
@@ -580,6 +581,25 @@ test.describe("booking-admin settings no-legacy guard", () => {
         await route.fulfill({ status: 204 });
         return;
       }
+      await route.fulfill({ json: customDomain });
+    });
+    // VAY-2568: Connect checks the domain at once; this hotel has not added its record yet.
+    const domainChecks: string[] = [];
+    await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}/check`, async (route) => {
+      domainChecks.push(route.request().method());
+      customDomain = {
+        ...customDomain,
+        status: "failed",
+        sslStatus: "failed",
+        dnsRecords: customDomain.dnsRecords.map((record) => ({
+          ...record,
+          host: "book",
+          status: "failed",
+        })),
+        verificationErrors: ["No CNAME record found for book.alpenrose.example."],
+        verificationIssue: { code: "dns_record_missing", foundTarget: null },
+        checkedAt: "2026-11-20T20:00:00.000Z",
+      };
       await route.fulfill({ json: customDomain });
     });
 
@@ -645,7 +665,16 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await expect(preview).toContainText("book.alpenrose.example");
     await expect(preview).not.toContainText(canonicalBookingUrl);
+    await expect(page.getByText("Not verified", { exact: true })).toBeVisible();
+    expect(domainChecks).toEqual(["POST"]);
     await expect(page.getByText("custom.booking.vayada.com")).toBeVisible();
+    await expect(page.getByText("Verifying...")).toHaveCount(0);
+    await expect(
+      page.getByText("We can't find a CNAME record for book.alpenrose.example yet."),
+    ).toBeVisible();
+    await expect(page.getByText("book", { exact: true })).toBeVisible();
+    await page.getByText("DNS record for your domain").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("design-studio-domain-record-missing.png") });
 
     await page.getByRole("button", { name: "Remove domain" }).click();
 

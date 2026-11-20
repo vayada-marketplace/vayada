@@ -7,6 +7,7 @@ import {
 } from "../api/bookingPropertyLinkClient";
 import { sharedHotelSetupApi } from "../api/sharedHotelSetupClient";
 import {
+  checkBookingCustomDomain,
   deleteBookingCustomDomain,
   getBookingCustomDomain,
   upsertBookingCustomDomain,
@@ -483,15 +484,29 @@ export const settingsService = {
     );
   },
 
-  getCustomDomainStatus: async (): Promise<CustomDomainStatus> =>
-    getBookingCustomDomain({ hotelId: await resolveBookingHotelId() }),
+  /** The stored status; a domain that is not verified yet is checked again (VAY-2568). */
+  getCustomDomainStatus: async (): Promise<CustomDomainStatus> => {
+    const hotelId = await resolveBookingHotelId();
+    const status = await getBookingCustomDomain({ hotelId });
+    return status.configured && status.status !== "verified"
+      ? checkBookingCustomDomain({ hotelId }).catch(() => checkUnavailable(status))
+      : status;
+  },
 
-  connectCustomDomain: async (domain: string): Promise<CustomDomainStatus> =>
-    upsertBookingCustomDomain({ hotelId: await resolveBookingHotelId(), domain }),
+  connectCustomDomain: async (domain: string): Promise<CustomDomainStatus> => {
+    const hotelId = await resolveBookingHotelId();
+    const saved = await upsertBookingCustomDomain({ hotelId, domain });
+    return checkBookingCustomDomain({ hotelId }).catch(() => checkUnavailable(saved));
+  },
 
   disconnectCustomDomain: async (): Promise<void> =>
     deleteBookingCustomDomain({ hotelId: await resolveBookingHotelId() }),
 };
+
+// The check itself failed: say so, rather than showing the stored "pending" as "Verifying...".
+function checkUnavailable(status: CustomDomainStatus): CustomDomainStatus {
+  return { ...status, verificationIssue: { code: "check_unavailable", foundTarget: null } };
+}
 
 function unavailableTargetRoute<T>(surface: string): Promise<T> {
   return Promise.reject(new Error(`${surface} is not available on the target API yet.`));
