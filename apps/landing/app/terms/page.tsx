@@ -14,15 +14,15 @@ export default function TermsPage() {
               Terms of Service (AGB)
             </h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> October 24, 2026
+              <strong>Effective Date:</strong> November 20, 2026
             </p>
           </div>
 
           <div className="prose prose-lg max-w-none space-y-8 text-gray-700">
             <p className="text-lg leading-relaxed">
               These Terms of Service (&quot;Terms&quot;) are a legally binding agreement between
-              vayada UG (haftungsbeschränkt) (&quot;vayada,&quot; &quot;we,&quot; &quot;us,&quot;
-              or &quot;our&quot;) and the hotel, villa or other accommodation business
+              vayada UG (haftungsbeschränkt) (&quot;vayada,&quot; &quot;we,&quot; &quot;us,&quot; or
+              &quot;our&quot;) and the hotel, villa or other accommodation business
               (&quot;Hotel,&quot; &quot;you,&quot; or &quot;your&quot;) that registers for or uses
               the vayada property management system, booking engine and related services.
             </p>
@@ -45,16 +45,16 @@ export default function TermsPage() {
                 </p>
                 <p>
                   <strong>Services:</strong> The property management system (PMS), the booking
-                  engine with the hosted booking sites it serves, the channel connections, the
-                  hotel setup and all related features, tools and support offered by vayada.
+                  engine with the hosted booking sites it serves, the channel connections, the hotel
+                  setup and all related features, tools and support offered by vayada.
                 </p>
                 <p>
                   <strong>Hotel:</strong> The business that holds the account. Hotels may run one or
                   more properties from the same account.
                 </p>
                 <p>
-                  <strong>User:</strong> Any natural person who accesses the Services on behalf of
-                  a Hotel, such as an owner, manager or staff member.
+                  <strong>User:</strong> Any natural person who accesses the Services on behalf of a
+                  Hotel, such as an owner, manager or staff member.
                 </p>
                 <p>
                   <strong>Guest: </strong>A person who views a Hotel&apos;s booking site or books a
@@ -154,12 +154,12 @@ export default function TermsPage() {
               <p>You agree to:</p>
               <ul className="list-disc list-inside ml-4 space-y-2 mt-2">
                 <li>
-                  operate your property lawfully and hold every licence, registration and
-                  insurance your business requires;
+                  operate your property lawfully and hold every licence, registration and insurance
+                  your business requires;
                 </li>
                 <li>
-                  describe your property accurately and keep rates, availability and policies on
-                  the Platform correct and up to date;
+                  describe your property accurately and keep rates, availability and policies on the
+                  Platform correct and up to date;
                 </li>
                 <li>
                   honour every booking taken through the Services at the price and under the
@@ -169,9 +169,7 @@ export default function TermsPage() {
                   handle Guest data lawfully, inform your Guests as required by data protection law
                   and use Guest data only for the stay and your own lawful purposes;
                 </li>
-                <li>
-                  account for all taxes and tourist levies that apply to your bookings;
-                </li>
+                <li>account for all taxes and tourist levies that apply to your bookings;</li>
                 <li>
                   not upload unlawful, misleading or infringing content, not interfere with the
                   Platform and not use it to send unsolicited messages.
@@ -194,32 +192,57 @@ export default function TermsPage() {
                   invoiced afterwards. All prices are net of VAT unless stated otherwise.
                 </p>
                 <p>
-                  <strong>Card Payments:</strong> Card payments from Guests are processed by Stripe
-                  on a Stripe account in your name. Guest funds are paid out to you by Stripe; our
-                  fees are deducted or invoiced as described in your plan. vayada does not hold
-                  Guest funds.
+                  <strong>Card Payments:</strong> You choose how card payments from Guests reach
+                  you. With Stripe Connect, card payments are processed by Stripe on a Stripe
+                  account in your name. Guest funds are paid out to you by Stripe; our fees are
+                  deducted or invoiced as described in your plan, and vayada does not hold those
+                  funds. With vayada Payment, the next paragraph applies.
+                </p>
+                <p>
+                  <strong>vayada Payment: </strong>If you choose vayada Payment, you appoint vayada
+                  to receive card payments from Guests on your behalf. Guests pay into vayada&apos;s
+                  Stripe account, and their card statement shows vayada and your property&apos;s
+                  name. We keep the amounts received for you until they are paid out and pay them to
+                  the bank account you give us, less our fees: the fee of your plan and a vayada
+                  Payment fee of 6% of each card payment. Payouts are made weekly, on Mondays, for
+                  stays that checked out on or before the previous Sunday, in the currency of your
+                  prices; vayada bears the cost of currency conversion. Each payout comes with a
+                  statement of the bookings, fees, refunds and disputes it covers. You must keep
+                  your payout bank account correct and up to date; a payout sent to the account you
+                  gave us settles what we owed for it. We may hold back a payout while we look into
+                  suspected fraud, a dispute or an error, and we will tell you why.
                 </p>
                 <p>
                   <strong>Card Refunds: </strong>When a booking paid by card on your booking site is
                   cancelled, vayada instructs Stripe to refund the Guest automatically. The amount
                   follows the cancellation terms of the booked rate: if the Guest cancels, the Guest
                   gets back what those terms do not let you keep; if you cancel for a reason on your
-                  side, the Guest gets back everything paid by card. Refunds are paid from your
-                  Stripe account. The part of our fee on the refunded amount is returned to you;
-                  Stripe&apos;s own processing fees are not. If a refund fails, it is shown in your
-                  account so that you can retry it or settle it with the Guest.
+                  side, the Guest gets back everything paid by card. With Stripe Connect, refunds
+                  are paid from your Stripe account. The part of our fee on the refunded amount is
+                  returned to you; Stripe&apos;s own processing fees are not. With vayada Payment,
+                  refunds are paid from vayada&apos;s Stripe account and deducted from your next
+                  payouts; the part of your plan&apos;s fee on the refunded amount is returned to
+                  you, the vayada Payment fee is not. A refund never exceeds what the Guest paid by
+                  card. If a refund fails, it is shown in your account so that you can retry it or
+                  settle it with the Guest.
                 </p>
                 <p>
-                  <strong>Disputes:</strong> If a Guest disputes a card payment with their bank (a
+                  <strong>Disputes: </strong>If a Guest disputes a card payment with their bank (a
                   chargeback), Stripe handles the dispute on your Stripe account. You are
                   responsible for responding to it and for the disputed amount and any dispute fee
-                  charged by Stripe.
+                  charged by Stripe. With vayada Payment, vayada answers the dispute on its Stripe
+                  account with the information you give us, and you must answer our requests
+                  promptly. The disputed amount and Stripe&apos;s dispute fee are deducted from your
+                  next payouts and are paid back to you if the dispute is decided in your favour.
                 </p>
                 <p>
                   <strong>Negative Balance:</strong> If your Stripe balance cannot cover a refund, a
                   dispute or a fee, Stripe may recover the amount from your bank account. If Stripe
                   charges vayada for a negative balance on your Stripe account, you must reimburse
-                  vayada for that amount, and we may set it off against amounts we owe you.
+                  vayada for that amount, and we may set it off against amounts we owe you. With
+                  vayada Payment, if refunds, disputes and fees exceed what we owe you, the
+                  difference is deducted from later payouts; if it is still open after 30 days, we
+                  invoice it to you.
                 </p>
                 <p>
                   <strong>Late Payment:</strong> If an invoice is not paid when due, we may remind
@@ -239,12 +262,14 @@ export default function TermsPage() {
               <p>
                 Every booking made on your booking site is a contract between you and the Guest.
                 vayada is not a party to that contract, does not act as a travel agent and is not
-                responsible for the stay, its price, cancellations, refunds or disputes between
-                you and a Guest. Guest payments are handled according to the payment methods and
-                policies you configure. Refunds to Guests are your responsibility and are executed
-                through the payment method the Guest used: for card payments on your booking site,
-                vayada sends them to Stripe automatically on your behalf, as described in Section 5;
-                for bank transfer, PayPal and payment at the property, you make them yourself.
+                responsible for the stay, its price, cancellations, refunds or disputes between you
+                and a Guest. With vayada Payment, vayada only receives the Guest&apos;s card payment
+                on your behalf, as described in Section 5. Guest payments are handled according to
+                the payment methods and policies you configure. Refunds to Guests are your
+                responsibility and are executed through the payment method the Guest used: for card
+                payments on your booking site, vayada sends them to Stripe automatically on your
+                behalf, as described in Section 5; for bank transfer, PayPal and payment at the
+                property, you make them yourself.
               </p>
             </section>
 
@@ -284,19 +309,19 @@ export default function TermsPage() {
                 <p>
                   You keep all rights in your Hotel Content. By entering it into the Platform you
                   grant vayada a non-exclusive, worldwide, royalty-free licence to host, display,
-                  reproduce and transmit it as far as necessary to provide the Services, for
-                  example to show your property on your booking site and to send it to the
-                  channels you connect. You warrant that you hold the rights needed for this.
+                  reproduce and transmit it as far as necessary to provide the Services, for example
+                  to show your property on your booking site and to send it to the channels you
+                  connect. You warrant that you hold the rights needed for this.
                 </p>
               </div>
 
               <div className="mt-6">
                 <h3 className={H3}>8.2 vayada Software</h3>
                 <p>
-                  The Platform, its software, design and documentation remain the property of
-                  vayada or its licensors. You receive a non-exclusive, non-transferable right to
-                  use them for your business during the term of these Terms. You may not copy,
-                  modify, resell or reverse-engineer the Platform.
+                  The Platform, its software, design and documentation remain the property of vayada
+                  or its licensors. You receive a non-exclusive, non-transferable right to use them
+                  for your business during the term of these Terms. You may not copy, modify, resell
+                  or reverse-engineer the Platform.
                 </p>
               </div>
             </section>
@@ -346,9 +371,9 @@ export default function TermsPage() {
                   renew automatically unless terminated before the period ends.
                 </p>
                 <p>
-                  <strong>Termination by the Hotel:</strong> You may terminate at any time from
-                  your account or by writing to us; a subscription ends at the end of the current
-                  billing period.
+                  <strong>Termination by the Hotel:</strong> You may terminate at any time from your
+                  account or by writing to us; a subscription ends at the end of the current billing
+                  period.
                 </p>
                 <p>
                   <strong>Termination by vayada: </strong>vayada may terminate or suspend your

@@ -17,7 +17,7 @@ import { registerHotelAccountAgreementsRoutes } from "./hotelAccountAgreements.j
 
 const organizationId = "9a8b7c6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d";
 const userId = "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e";
-const current = { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" };
+const current = { termsVersion: "2026-11-20", dpaVersion: "2026-10-24" };
 const accountName = "Alpenrose Hotels";
 const accepted = {
   ...current,

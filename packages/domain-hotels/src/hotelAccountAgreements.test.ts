@@ -6,9 +6,9 @@ import {
 } from "./hotelAccountAgreements.js";
 
 describe("hotel account agreements (VAY-2246)", () => {
-  it("are the terms and the DPA of 24 October 2026", () => {
+  it("are the terms of 20 November 2026 (VAY-2442: vayada Payment) and the DPA of 24 October 2026", () => {
     expect(CURRENT_HOTEL_ACCOUNT_AGREEMENTS).toEqual({
-      termsVersion: "2026-10-24",
+      termsVersion: "2026-11-20",
       dpaVersion: "2026-10-24",
     });
     expect(Object.isFrozen(CURRENT_HOTEL_ACCOUNT_AGREEMENTS)).toBe(true);
@@ -22,7 +22,8 @@ describe("hotel account agreements (VAY-2246)", () => {
       [],
       {},
       { termsVersion: "2026-10-20", dpaVersion: "2026-10-24" },
-      { termsVersion: "2026-10-24", dpaVersion: "2026-10-23" },
+      { termsVersion: "2026-11-20", dpaVersion: "2026-10-23" },
+      { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
       { termsVersion: "2026-10-24" },
       { ...CURRENT_HOTEL_ACCOUNT_AGREEMENTS, extra: true },
     ])

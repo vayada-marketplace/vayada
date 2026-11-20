@@ -11,7 +11,7 @@ export type HotelAccountAgreementVersions = {
 };
 
 export const CURRENT_HOTEL_ACCOUNT_AGREEMENTS: Readonly<HotelAccountAgreementVersions> =
-  Object.freeze({ termsVersion: "2026-10-24", dpaVersion: "2026-10-24" });
+  Object.freeze({ termsVersion: "2026-11-20", dpaVersion: "2026-10-24" });
 
 /** Where an acceptance came from: the sign-up tickbox, or the account admin's banner or settings card. */
 export type HotelAccountAgreementSource = "signup" | "account_admin";

@@ -141,7 +141,7 @@ for (const surface of firstPartyAuthSurfaces.filter(({ key }) =>
       email: `${surface.key}-signup@example.test`,
       surface: surface.surface,
       // VAY-2246: the required tickbox accepts the hotel terms and the DPA.
-      acceptedAgreements: { termsVersion: "2026-10-24", dpaVersion: "2026-10-24" },
+      acceptedAgreements: { termsVersion: "2026-11-20", dpaVersion: "2026-10-24" },
     });
     await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
 
