@@ -5,10 +5,15 @@
 // which an outside request can never set. The store is not exported; only the auth plugin reads it
 // through `takeDelegatedContext`.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { FastifyInstance, FastifyRequest, LightMyRequestResponse } from "fastify";
 
-import { isDelegatedContext } from "./delegatedContext.js";
+import {
+  DELEGATED_CONTEXT_MAX_AGE_MS,
+  isDelegatedContext,
+  isMintedDelegatedContext,
+} from "./delegatedContext.js";
 import { DelegationRefusedError } from "./errors.js";
 import type { RequestContext } from "./types.js";
 
@@ -18,8 +23,13 @@ type DelegatedScope = {
   readonly context: RequestContext;
   readonly method: DelegatedMethod;
   readonly routeUrl: string;
+  /** Sent only on the injected request: binds the scope to that one request, not to whatever
+   * request a callback-style hook might resume inside the async context (review M3). */
+  readonly nonce: Buffer;
   state: ScopeState;
 };
+
+const NONCE_HEADER = "x-vayada-delegation-nonce";
 
 /** Phase 1 is read-only: write delegation is VAY-2522. */
 export type DelegatedMethod = "GET";
@@ -57,23 +67,41 @@ export async function injectAsDelegate(
 ): Promise<LightMyRequestResponse> {
   if (storage.getStore()) throw new DelegationRefusedError("nested delegated request");
   if (input.method !== "GET") throw new DelegationRefusedError("only GET routes can be delegated");
-  if (!isDelegatedContext(input.context)) {
-    throw new DelegationRefusedError("not a narrowed delegated context");
+  if (!isMintedDelegatedContext(input.context) || !isDelegatedContext(input.context)) {
+    throw new DelegationRefusedError("not a context resolveDelegatedContext returned");
+  }
+  const age = Date.now() - Date.parse(input.context.audit.receivedAt);
+  if (!(age >= 0 && age <= DELEGATED_CONTEXT_MAX_AGE_MS)) {
+    throw new DelegationRefusedError("the delegated context expired; resolve it per tool call");
   }
   if (!input.url.startsWith("/") || input.url.startsWith("//")) {
     throw new DelegationRefusedError("the URL must be a path on this server");
   }
+  // Boot outside the scope, so no boot hook or timer ever holds it (review L3).
+  await app.ready();
+  // Each request gets its own copy with its own request id: the route may change its copy, and
+  // tool-call ids are not unique enough to be request ids (review M2).
+  const context: RequestContext = structuredClone(input.context);
+  context.audit.requestId = randomUUID();
+  const nonce = randomBytes(24);
   const scope: DelegatedScope = {
-    context: input.context,
+    context,
     method: input.method,
     routeUrl: input.routeUrl,
+    nonce,
     state: "armed",
   };
   try {
     return await new Promise<LightMyRequestResponse>((resolve, reject) => {
       storage.run(scope, () => {
-        app.inject({ method: input.method, url: input.url }, (error, response) =>
-          error || !response ? reject(error ?? new Error("No response")) : resolve(response),
+        app.inject(
+          {
+            method: input.method,
+            url: input.url,
+            headers: { [NONCE_HEADER]: nonce.toString("base64url") },
+          },
+          (error, response) =>
+            error || !response ? reject(error ?? new Error("No response")) : resolve(response),
         );
       });
     });
@@ -100,6 +128,12 @@ export function takeDelegatedContext(
   if (scope.state === "consumed") throw new DelegationRefusedError("scope already used");
   if (scope.state === "closed") throw new DelegationRefusedError("scope closed");
   scope.state = "consumed";
+  const sent = request.headers[NONCE_HEADER];
+  delete request.headers[NONCE_HEADER];
+  const nonce = typeof sent === "string" ? Buffer.from(sent, "base64url") : Buffer.alloc(0);
+  if (nonce.length !== scope.nonce.length || !timingSafeEqual(nonce, scope.nonce)) {
+    throw new DelegationRefusedError("not the request this scope was opened for");
+  }
   if (request.headers.authorization !== undefined) {
     throw new DelegationRefusedError("bearer token on a delegated request");
   }

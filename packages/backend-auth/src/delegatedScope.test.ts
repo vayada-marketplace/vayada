@@ -7,7 +7,9 @@ import type { AddressInfo } from "node:net";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { narrowDelegatedContext } from "./delegatedContext.js";
+import { randomUUID } from "node:crypto";
+
+import { resolveDelegatedContext } from "./delegatedContext.js";
 import { injectAsDelegate, type DelegatedRouteGate } from "./delegatedScope.js";
 import { DelegationRefusedError } from "./errors.js";
 import { backendAuthPlugin, requireAuthContext } from "./plugin.js";
@@ -16,30 +18,48 @@ import type { RequestContext } from "./types.js";
 import { createFakeVerifier } from "./verify.js";
 
 const PROPERTY = "11111111-1111-4111-8111-111111111111";
+const ORG = "22222222-2222-4222-8222-222222222222";
+const CONVERSATION = "33333333-3333-4333-8333-333333333333";
+const ids = new Map<string, string>();
+/** A stable UUID per test label ("u_1" -> uuid). */
+const uid = (label: string) => ids.get(label) ?? ids.set(label, randomUUID()).get(label)!;
 
-function delegatedContext(userId: string): RequestContext {
-  return narrowDelegatedContext({
-    actor: {
-      internalUserId: userId,
-      providerIdentity: { provider: "workos", providerUserId: `wos_${userId}` },
+// Just enough identity for resolveDelegatedContext: every user owns the one property of ORG.
+const mintingRepository: IdentityRepository = {
+  async findUserByProviderUserId() {
+    return null;
+  },
+  async findOrganizationByWorkosOrgId() {
+    return null;
+  },
+  async findUserById(userId) {
+    return {
+      userId,
       email: `${userId}@example.test`,
       status: "active",
-    },
-    selectedOrganization: { organizationId: "org_1", kind: "hotel_group", status: "active" },
-    membership: {
+      workosUserId: `wos_${userId}`,
+    };
+  },
+  async findOrganizationById(organizationId) {
+    return {
+      organizationId,
+      workosOrgId: null,
+      name: "Hotel",
+      kind: "hotel_group",
+      status: "active",
+    };
+  },
+  async findActiveMembership(userId) {
+    return {
       membershipId: `m_${userId}`,
       status: "active",
       roleKey: "hotel_owner",
-      workosRoleSlugs: ["hotel_owner"],
-      permissions: [],
-      propertyAccess: {
-        mode: "all",
-        roleKey: "hotel_owner",
-        accessOrigin: "agency",
-        assignedPropertyIds: [],
-      },
-    },
-    linkedResources: [
+      workosMembershipId: null,
+      workosRoleSlugs: [],
+    };
+  },
+  async findLinkedResources() {
+    return [
       {
         product: "hotel_catalog",
         resourceType: "property",
@@ -47,17 +67,36 @@ function delegatedContext(userId: string): RequestContext {
         relationship: "owner",
         status: "active",
       },
-    ],
-    entitlements: [],
-    locale: "en",
-    currency: "USD",
-    audit: {
-      requestId: `tool_call_${userId}`,
-      source: "agent",
-      receivedAt: "1970-01-01T00:00:00Z",
+    ];
+  },
+};
+
+/** A context exactly as the AI layer gets it: resolved per tool call by resolveDelegatedContext. */
+function mint(label: string, options: { resolvedAt?: Date } = {}): Promise<RequestContext> {
+  return resolveDelegatedContext(
+    mintingRepository,
+    {
+      userId: uid(label),
+      organizationId: ORG,
+      delegation: {
+        channel: "in_app",
+        conversationId: CONVERSATION,
+        toolCallId: `tool_call_${label}`,
+      },
     },
-    delegation: { channel: "in_app", conversationId: PROPERTY, toolCallId: `tool_call_${userId}` },
-  });
+    {
+      authorizationResolver: async () => ({
+        permissions: [],
+        propertyAccess: {
+          mode: "all",
+          roleKey: "hotel_owner",
+          accessOrigin: "agency",
+          assignedPropertyIds: [],
+        },
+      }),
+      ...(options.resolvedAt ? { now: () => options.resolvedAt! } : {}),
+    },
+  );
 }
 
 const refusingRepository = new Proxy({} as IdentityRepository, {
@@ -87,6 +126,8 @@ function whoami(request: FastifyRequest) {
     source: ctx.audit.source,
     sessionId: ctx.actor.providerIdentity.sessionId ?? null,
     toolCallId: ctx.delegation?.toolCallId ?? null,
+    requestId: ctx.audit.requestId,
+    correlationId: ctx.audit.correlationId ?? null,
   };
 }
 
@@ -94,13 +135,23 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const allowAll: DelegatedRouteGate = { allowsRoute: () => true };
 
 async function buildTestApp(
-  options: { gate?: DelegatedRouteGate | null; addBearerFirst?: boolean } = {},
+  options: {
+    gate?: DelegatedRouteGate | null;
+    addBearerFirst?: boolean;
+    dropNonceFirst?: boolean;
+  } = {},
 ) {
   const instance = Fastify({ logger: false });
   if (options.addBearerFirst) {
     // Runs before the auth hook: a delegated request must never also carry a bearer token.
     instance.addHook("onRequest", async (request) => {
       request.headers.authorization = "Bearer smuggled";
+    });
+  }
+  if (options.dropNonceFirst) {
+    // Stands for an outside request resumed inside an armed scope: it never has the nonce.
+    instance.addHook("onRequest", async (request) => {
+      delete request.headers["x-vayada-delegation-nonce"];
     });
   }
   await instance.register(backendAuthPlugin, {
@@ -112,6 +163,13 @@ async function buildTestApp(
 
   instance.get("/api/test/whoami", async (request) => whoami(request));
   instance.get("/api/test/other", async (request) => whoami(request));
+  // A route that changes its own context must not change the caller's.
+  instance.get("/api/test/mutate", async (request) => {
+    const ctx = requireAuthContext(request);
+    ctx.membership.permissions.push("pms.operations.manage");
+    ctx.actor.internalUserId = "changed";
+    return { ok: true };
+  });
   instance.post("/api/test/whoami", async (request) => whoami(request));
   instance.get("/partner/v1/hotel", async (request) => ({ context: request.authContext !== null }));
   instance.get("/api/test/slow/:ms", async (request) => {
@@ -129,7 +187,7 @@ async function buildTestApp(
     whoami(request);
     try {
       await injectAsDelegate(instance, {
-        context: delegatedContext("u_nested"),
+        context: await mint("u_nested"),
         method: "GET",
         routeUrl: "/api/test/whoami",
         url: "/api/test/whoami",
@@ -180,8 +238,12 @@ function startProbeServer(): Promise<number> {
   );
 }
 
-const asDelegate = (instance: FastifyInstance, routeUrl: string, url = routeUrl, user = "u_1") =>
-  injectAsDelegate(instance, { context: delegatedContext(user), method: "GET", routeUrl, url });
+const asDelegate = async (
+  instance: FastifyInstance,
+  routeUrl: string,
+  url = routeUrl,
+  user = "u_1",
+) => injectAsDelegate(instance, { context: await mint(user), method: "GET", routeUrl, url });
 
 describe("delegated scope (VAY-2506)", () => {
   it("reaches the auth hook: the user's context, source agent, no session id", async () => {
@@ -189,11 +251,29 @@ describe("delegated scope (VAY-2506)", () => {
     const res = await asDelegate(instance, "/api/test/whoami");
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      userId: "u_1",
+      userId: uid("u_1"),
       source: "agent",
       sessionId: null,
       toolCallId: "tool_call_u_1",
+      requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      correlationId: "tool_call_u_1",
     });
+  });
+
+  it("gives every request its own request id; the tool-call id is the correlation id", async () => {
+    const instance = await buildTestApp();
+    const context = await mint("u_1");
+    const call = () =>
+      injectAsDelegate(instance, {
+        context,
+        method: "GET",
+        routeUrl: "/api/test/whoami",
+        url: "/api/test/whoami",
+      }).then((res) => res.json());
+    const [first, second] = [await call(), await call()];
+    expect(first.requestId).not.toBe(second.requestId);
+    expect(first.requestId).not.toBe(context.audit.requestId);
+    expect([first.correlationId, second.correlationId]).toEqual(["tool_call_u_1", "tool_call_u_1"]);
   });
 
   it("is never visible to an outside request, before, during or after", async () => {
@@ -202,11 +282,16 @@ describe("delegated scope (VAY-2506)", () => {
     const port = (instance.server.address() as AddressInfo).port;
     const outside = () =>
       fetch(`http://127.0.0.1:${port}/api/test/whoami`, {
-        headers: { "x-delegation": "u_1", "x-vayada-agent": "true", "x-tool-call-id": "t" },
+        headers: {
+          "x-delegation": "u_1",
+          "x-vayada-agent": "true",
+          "x-tool-call-id": "t",
+          "x-vayada-delegation-nonce": "AAAA",
+        },
       });
     expect((await outside()).status).toBe(401);
     const during = injectAsDelegate(instance, {
-      context: delegatedContext("u_1"),
+      context: await mint("u_1"),
       method: "GET",
       routeUrl: "/api/test/slow/:ms",
       url: "/api/test/slow/40",
@@ -218,6 +303,13 @@ describe("delegated scope (VAY-2506)", () => {
     expect((await instance.inject({ method: "GET", url: "/api/test/whoami" })).statusCode).toBe(
       401,
     );
+  });
+
+  it("refuses a request inside the scope that is not the one it was opened for", async () => {
+    const instance = await buildTestApp({ dropNonceFirst: true });
+    const res = await asDelegate(instance, "/api/test/whoami");
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toContain("not the request this scope was opened for");
   });
 
   it("refuses a route the action did not declare, including a 404", async () => {
@@ -259,55 +351,46 @@ describe("delegated scope (VAY-2506)", () => {
     expect(res.json().message).toContain("bearer token");
   });
 
-  it("only takes GET, and only a narrowed agent context", async () => {
+  it("only takes GET, only a context resolveDelegatedContext returned, and only while fresh", async () => {
     const instance = await buildTestApp();
-    const call = (context: RequestContext, method = "GET") =>
+    const call = (context: RequestContext, method = "GET", url = "/api/test/whoami") =>
       injectAsDelegate(instance, {
         context,
         method: method as "GET",
         routeUrl: "/api/test/whoami",
-        url: "/api/test/whoami",
+        url,
       });
-    await expect(call(delegatedContext("u_1"), "POST")).rejects.toThrow(DelegationRefusedError);
+    const minted = await mint("u_1");
+    expect((await call(minted)).statusCode).toBe(200);
+    await expect(call(minted, "POST")).rejects.toThrow(/only GET/);
+    // A copy with exactly the same content was not minted, so it is refused (review M1).
+    await expect(call(structuredClone(minted))).rejects.toThrow(/resolveDelegatedContext/);
+    await expect(call({ ...minted })).rejects.toThrow(/resolveDelegatedContext/);
+    // Resolved more than a minute ago: resolve it again per tool call.
+    const stale = await mint("u_1", { resolvedAt: new Date(Date.now() - 61_000) });
+    await expect(call(stale)).rejects.toThrow(/expired/);
+    const future = await mint("u_1", { resolvedAt: new Date(Date.now() + 61_000) });
+    await expect(call(future)).rejects.toThrow(/expired/);
+    await expect(call(minted, "GET", "//evil.example/api/test/whoami")).rejects.toThrow(
+      DelegationRefusedError,
+    );
+  });
 
-    const base = delegatedContext("u_1");
-    const withSession: RequestContext = {
-      ...base,
-      actor: {
-        ...base.actor,
-        providerIdentity: { ...base.actor.providerIdentity, sessionId: "s" },
-      },
-    };
-    const apiSource: RequestContext = { ...base, audit: { ...base.audit, source: "api" } };
-    const platform: RequestContext = {
-      ...base,
-      selectedOrganization: { ...base.selectedOrganization, kind: "platform" },
-    };
-    const extraLink: RequestContext = {
-      ...base,
-      linkedResources: [
-        ...base.linkedResources,
-        {
-          product: "booking",
-          resourceType: "booking_hotel",
-          resourceId: "22222222-2222-4222-8222-222222222222",
-          relationship: "owner",
-          status: "active",
-        },
-      ],
-    };
-    const noDelegation: RequestContext = { ...base, delegation: undefined };
-    for (const context of [withSession, apiSource, platform, extraLink, noDelegation]) {
-      await expect(call(context)).rejects.toThrow(DelegationRefusedError);
-    }
-    await expect(
-      injectAsDelegate(instance, {
-        context: base,
-        method: "GET",
-        routeUrl: "/api/test/whoami",
-        url: "//evil.example/api/test/whoami",
-      }),
-    ).rejects.toThrow(DelegationRefusedError);
+  it("hands each request its own copy: minted contexts are frozen, route changes stay local", async () => {
+    const instance = await buildTestApp();
+    const minted = await mint("u_1");
+    expect(() => {
+      (minted.membership.permissions as string[]).push("pms.operations.manage");
+    }).toThrow(TypeError);
+    const res = await injectAsDelegate(instance, {
+      context: minted,
+      method: "GET",
+      routeUrl: "/api/test/mutate",
+      url: "/api/test/mutate",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(minted.membership.permissions).toEqual([]);
+    expect(minted.actor.internalUserId).toBe(uid("u_1"));
   });
 
   it("is one-shot: a raw inject from the handler is refused", async () => {
@@ -365,7 +448,7 @@ describe("delegated scope (VAY-2506)", () => {
     );
     for (const r of results) {
       expect(r.status).toBe(200);
-      expect(r.userId).toBe(`u_${r.i}`);
+      expect(r.userId).toBe(uid(`u_${r.i}`));
     }
   });
 });

@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-const DELEGATION_API = /\b(injectAsDelegate|resolveDelegatedContext|narrowDelegatedContext)\b/;
+const DELEGATION_API =
+  /\b(injectAsDelegate|resolveDelegatedContext|narrowDelegatedContext|runDelegatedRead)\b|ai\/delegatedRead/;
 
 async function sourceFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);

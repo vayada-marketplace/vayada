@@ -5,10 +5,15 @@
 //   stops the very next call;
 // - only hotel accounts (`hotel_group`); platform accounts are refused;
 // - never a session id, so no owner-session gate (`requireOwnerSession`) ever passes;
-// - `audit.source = "agent"`, request and correlation id = the tool-call id;
+// - `audit.source = "agent"`, correlation id = the tool-call id, and a fresh random request id for
+//   every request (tool-call ids come from AI clients and are not unique);
+// - only contexts this module minted are accepted by injectAsDelegate: they are deep-frozen, and
+//   expire after DELEGATED_CONTEXT_MAX_AGE_MS so a cached one stops working;
 // - narrowed to the member's own properties (VAY-2567 rank 1a): about 21 route files only check that
 //   a property is linked to the hotel group, so the delegated context keeps only the links of the
 //   properties this member may use. Narrowing can only take rights away, never add one.
+import { randomUUID } from "node:crypto";
+
 import { AuthError, DelegationRefusedError } from "./errors.js";
 import { type IdentityRepository } from "./repository.js";
 import { type AuthorizationResolver } from "./resolve.js";
@@ -22,6 +27,14 @@ import {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,200}$/;
+const LOCALE = /^[a-z]{2}(-[A-Z]{2})?$/;
+const CURRENCY = /^[A-Z]{3}$/;
+
+/** A delegated context is resolved per tool call; after this it is refused (VAY-2506 review M1). */
+export const DELEGATED_CONTEXT_MAX_AGE_MS = 60_000;
+
+/** Contexts resolveDelegatedContext returned. Nothing else can be injected as a user. */
+const minted = new WeakSet<RequestContext>();
 
 /** Link types whose resource id is a canonical property id. Every other link is dropped. */
 const PROPERTY_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set([
@@ -135,7 +148,7 @@ export async function resolveDelegatedContext(
     locale: input.locale ?? "en",
     currency: input.currency ?? "USD",
     audit: {
-      requestId: input.delegation.toolCallId,
+      requestId: randomUUID(),
       correlationId: input.delegation.toolCallId,
       source: "agent",
       receivedAt: (options.now?.() ?? new Date()).toISOString(),
@@ -153,7 +166,22 @@ export async function resolveDelegatedContext(
     },
     entitlements: [...(authorization.entitlements ?? [])],
   };
-  return narrowDelegatedContext(resolved, input.propertyIds);
+  const narrowed = deepFreeze(narrowDelegatedContext(resolved, input.propertyIds));
+  minted.add(narrowed);
+  return narrowed;
+}
+
+/** True only for a context resolveDelegatedContext returned (package-internal; not exported). */
+export function isMintedDelegatedContext(context: RequestContext): boolean {
+  return minted.has(context);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 /**
@@ -226,7 +254,7 @@ export function isDelegatedContext(context: RequestContext): boolean {
   if (
     context.audit.source !== "agent" ||
     !context.delegation ||
-    context.delegation.toolCallId !== context.audit.requestId ||
+    context.delegation.toolCallId !== context.audit.correlationId ||
     context.actor.providerIdentity.sessionId !== undefined ||
     context.actor.status !== "active" ||
     context.selectedOrganization.kind !== "hotel_group" ||
@@ -270,5 +298,11 @@ function assertDelegatedInput(input: DelegatedContextInput): void {
   }
   if (input.propertyIds && !input.propertyIds.every((id) => UUID.test(id))) {
     throw new DelegationRefusedError("malformed property id");
+  }
+  if (input.locale !== undefined && !LOCALE.test(input.locale)) {
+    throw new DelegationRefusedError("malformed locale");
+  }
+  if (input.currency !== undefined && !CURRENCY.test(input.currency)) {
+    throw new DelegationRefusedError("malformed currency");
   }
 }

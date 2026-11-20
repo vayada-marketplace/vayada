@@ -35,6 +35,7 @@ const DELEGABLE = new Set([ROOMS, PROMOS]);
 const member = randomUUID();
 const orgA = randomUUID();
 const orgB = randomUUID();
+const platformOrg = randomUUID();
 const p1 = randomUUID();
 const p2 = randomUUID();
 const p3 = randomUUID();
@@ -83,6 +84,12 @@ describe.skipIf(!url)("AI reads as the user on real PostgreSQL (VAY-2506)", () =
         [id],
       );
     }
+    // A platform account the user is also a member of: delegation must still refuse it.
+    await admin.query(
+      `INSERT INTO identity.organizations (id, kind, name, slug, status)
+       VALUES ($1::uuid, 'platform', 'vayada', $2, 'active')`,
+      [platformOrg, `${PREFIX}-platform`],
+    );
     for (const [propertyId, organizationId] of [
       [p1, orgA],
       [p2, orgA],
@@ -126,6 +133,11 @@ describe.skipIf(!url)("AI reads as the user on real PostgreSQL (VAY-2506)", () =
          (organization_id, user_id, status, role_key, access_origin, property_access_mode)
        VALUES ($1, $2, 'active', 'hotel_owner', 'agency', 'all')`,
       [orgB, member],
+    );
+    await admin.query(
+      `INSERT INTO identity.organization_memberships (organization_id, user_id, status, role_key, access_origin)
+       VALUES ($1, $2, 'active', 'platform_admin', 'agency')`,
+      [platformOrg, member],
     );
 
     identity = createPgIdentityRepository({ connectionString: url! });
@@ -173,7 +185,7 @@ describe.skipIf(!url)("AI reads as the user on real PostgreSQL (VAY-2506)", () =
     await admin.query(
       `DELETE FROM identity.membership_property_assignments WHERE membership_id IN (
          SELECT id FROM identity.organization_memberships WHERE organization_id = ANY($1::uuid[]))`,
-      [[orgA, orgB]],
+      [[orgA, orgB, platformOrg]],
     );
     for (const table of [
       "identity.organization_memberships",
@@ -181,7 +193,7 @@ describe.skipIf(!url)("AI reads as the user on real PostgreSQL (VAY-2506)", () =
       "identity.product_entitlements",
     ])
       await admin.query(`DELETE FROM ${table} WHERE organization_id = ANY($1::uuid[])`, [
-        [orgA, orgB],
+        [orgA, orgB, platformOrg],
       ]);
     await admin.query(`DELETE FROM identity.external_identities WHERE user_id = $1`, [member]);
     await admin.query(`DELETE FROM identity.users WHERE id = $1`, [member]);
@@ -189,7 +201,7 @@ describe.skipIf(!url)("AI reads as the user on real PostgreSQL (VAY-2506)", () =
       [p1, p2, p3],
     ]);
     await admin.query(`DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])`, [
-      [orgA, orgB],
+      [orgA, orgB, platformOrg],
     ]);
     await admin.query("COMMIT");
     await admin.end();
@@ -284,11 +296,6 @@ describe.skipIf(!url)("AI reads as the user on real PostgreSQL (VAY-2506)", () =
   it("refuses accounts the user is not a member of, and platform accounts", async () => {
     const stranger = await as(randomUUID()).catch((error: unknown) => error);
     expect((stranger as AuthError).code).toBe("ORGANIZATION_NOT_FOUND");
-    const platform = await admin.query<{ id: string }>(
-      `SELECT id::text FROM identity.organizations WHERE kind = 'platform' LIMIT 1`,
-    );
-    if (platform.rows[0]) {
-      await expect(as(platform.rows[0].id)).rejects.toThrow(DelegationRefusedError);
-    }
+    await expect(as(platformOrg)).rejects.toThrow(DelegationRefusedError);
   });
 });

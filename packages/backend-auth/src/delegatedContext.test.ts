@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   delegatedPropertyIds,
   isDelegatedContext,
+  isMintedDelegatedContext,
   narrowDelegatedContext,
   resolveDelegatedContext,
   type DelegatedContextInput,
@@ -218,7 +219,7 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
   it("builds an agent context: tool-call ids, no session id, the user's own permissions", async () => {
     const context = await resolve();
     expect(context.audit).toEqual({
-      requestId: "call_1",
+      requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       correlationId: "call_1",
       source: "agent",
       receivedAt: "2026-11-20T12:00:00.000Z",
@@ -386,6 +387,8 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
       },
     ],
     ["a malformed property id", { propertyIds: ["p1"] }],
+    ["a malformed locale", { locale: "en; drop" }],
+    ["a malformed currency", { currency: "usd" }],
   ])("refuses %s", async (_label, overrides) => {
     await expect(resolve(overrides)).rejects.toThrow(DelegationRefusedError);
   });
@@ -400,6 +403,51 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
     });
     expect(context.linkedResources).toEqual([]);
     expect(context.membership.permissions).toEqual([]);
+  });
+});
+
+describe("minted delegated contexts", () => {
+  it("are frozen and recognised; copies and hand-built variants are not", async () => {
+    const context = await resolve();
+    expect(isMintedDelegatedContext(context)).toBe(true);
+    expect(Object.isFrozen(context.linkedResources[0])).toBe(true);
+    expect(isMintedDelegatedContext(structuredClone(context))).toBe(false);
+    expect(isMintedDelegatedContext(narrowDelegatedContext(context))).toBe(false);
+  });
+
+  it("isDelegatedContext refuses session ids, other sources, platform accounts and extra links", async () => {
+    const base = await resolve();
+    const variants = [
+      {
+        ...base,
+        actor: {
+          ...base.actor,
+          providerIdentity: { ...base.actor.providerIdentity, sessionId: "s" },
+        },
+      },
+      { ...base, audit: { ...base.audit, source: "api" as const } },
+      { ...base, audit: { ...base.audit, correlationId: "another_call" } },
+      {
+        ...base,
+        selectedOrganization: { ...base.selectedOrganization, kind: "platform" as const },
+      },
+      {
+        ...base,
+        linkedResources: [
+          ...base.linkedResources,
+          {
+            product: "booking" as const,
+            resourceType: "booking_hotel" as const,
+            resourceId: P2,
+            relationship: "owner" as const,
+            status: "active" as const,
+          },
+        ],
+      },
+      { ...base, delegation: undefined },
+    ];
+    expect(isDelegatedContext(base)).toBe(true);
+    for (const variant of variants) expect(isDelegatedContext(variant)).toBe(false);
   });
 });
 

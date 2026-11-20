@@ -163,7 +163,8 @@ export function createPgIdentityRepository(config: RepositoryConfig): IdentityRe
                 (SELECT ei.provider_user_id
                  FROM identity.external_identities ei
                  WHERE ei.user_id = u.id AND ei.provider = 'workos'
-                 ORDER BY ei.provider_user_id
+                   AND ei.provider_user_id IS NOT NULL
+                 ORDER BY ei.last_login_at DESC NULLS LAST, ei.created_at DESC, ei.id
                  LIMIT 1) AS workos_user_id
          FROM identity.users u
          WHERE u.id = $1::uuid

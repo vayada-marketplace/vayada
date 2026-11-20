@@ -34,7 +34,11 @@ export type DelegatedReadResult = {
   body: unknown;
 };
 
-/** Runs `GET routeUrl` as the delegated user. Throws DelegationRefusedError before any route runs. */
+/**
+ * Runs `GET routeUrl` as the delegated user. Throws DelegationRefusedError when the delegation is
+ * refused, whether before the route (property scope, template) or by the auth hook (gate, reuse,
+ * expiry); a 401/403 the route itself answers comes back as its result.
+ */
 export async function runDelegatedRead(
   app: FastifyInstance,
   request: DelegatedReadRequest,
@@ -42,11 +46,14 @@ export async function runDelegatedRead(
   const params = request.params ?? {};
   const path = fillRouteTemplate(request.routeUrl, params);
 
+  // Property ids in the path or the query string (e.g. /api/hotel-setup/status?propertyId=).
   const allowed = new Set(delegatedPropertyIds(request.context));
   for (const name of request.propertyParams ?? DEFAULT_PROPERTY_PARAMS) {
-    const value = params[name];
-    if (value !== undefined && !allowed.has(value)) {
-      throw new DelegationRefusedError("property not in the member's scope");
+    const values = [params[name], request.query?.[name]].flat();
+    for (const value of values) {
+      if (value !== undefined && !allowed.has(String(value))) {
+        throw new DelegationRefusedError("property not in the member's scope");
+      }
     }
   }
 
@@ -57,10 +64,17 @@ export async function runDelegatedRead(
     url: path + queryString(request.query),
   });
   const isJson = /^application\/json\b/i.test(String(response.headers["content-type"] ?? ""));
-  return {
-    statusCode: response.statusCode,
-    body: isJson && response.body ? (response.json() as unknown) : response.body,
-  };
+  const body: unknown = isJson && response.body ? response.json() : response.body;
+  // Only the auth hook answers with this code: a refused delegation, not the route's own answer.
+  if (
+    response.statusCode === 403 &&
+    (body as { code?: unknown } | null)?.code === "delegation_refused"
+  ) {
+    throw new DelegationRefusedError(
+      String((body as { message?: unknown }).message ?? "refused by the auth hook"),
+    );
+  }
+  return { statusCode: response.statusCode, body };
 }
 
 /** Fills `:name` segments; refuses missing, empty, extra or wildcard parameters. */

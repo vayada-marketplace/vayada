@@ -355,7 +355,31 @@ describe("runDelegatedRead (VAY-2506)", () => {
       routeUrl: MODULES,
       params: { propertyId: P1 },
     });
+    // The route's own refusal: a refused delegation would have thrown instead.
     expect(result.statusCode).toBe(403);
+    expect((result.body as { code?: string }).code).not.toBe("delegation_refused");
+  });
+
+  it("refuses a property id in the query string outside the member's scope", async () => {
+    const context = await as(MEMBER, ORG_A);
+    await expect(
+      runDelegatedRead(app, {
+        context,
+        routeUrl: ROOMS,
+        params: { propertyId: P1 },
+        query: { propertyId: P2 },
+      }),
+    ).rejects.toThrow(DelegationRefusedError);
+  });
+
+  it("throws, not answers, when the auth hook refuses the delegation", async () => {
+    await expect(
+      runDelegatedRead(app, {
+        context: await as(MEMBER, ORG_A),
+        routeUrl: "/api/pms/properties/:propertyId/room-types",
+        params: { propertyId: P1 },
+      }),
+    ).rejects.toThrow(/not delegable/);
   });
 
   it("refuses platform accounts", async () => {
@@ -378,6 +402,8 @@ describe("runDelegatedRead (VAY-2506)", () => {
       url: `/api/booking/hotels/${P1}/promo-codes`,
     });
     expect(mismatch.statusCode).toBe(403);
+    expect(notListed.json().code).toBe("delegation_refused");
+    expect(mismatch.json().code).toBe("delegation_refused");
   });
 
   it("is never reached by an outside request", async () => {
