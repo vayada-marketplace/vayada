@@ -8,7 +8,7 @@ import { LIVE_PROMO_CODES_SQL } from "./bookingGuestModules.js";
  * VAY-2436: partner apps (Creator Links first) and a hotel's one-time approval of one: the OAuth 2.0
  * authorization code flow with PKCE (RFC 6749, RFC 7636) behind /partner (contract "What Vayada
  * accepts and sends", project P-VAY-32). A partner app is a distribution.external_api_clients row with
- * the 'partner_connection' surface; a hotel's approval is a partner_connections row (migration 0542).
+ * the 'partner_connection' surface; a hotel's approval is a partner_connections row (migration 0543).
  *
  * Codes and tokens are random 256-bit values with a readable prefix, stored only as SHA-256 hashes.
  * They are opaque, never WorkOS tokens: a partner token can't pass the /api check (VAY-2501), and a

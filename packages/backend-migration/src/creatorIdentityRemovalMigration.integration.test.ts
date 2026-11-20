@@ -330,7 +330,7 @@ const REFERENCES = [
   "identity.users <- identity.cookie_consents(user_id) n",
   "identity.users <- identity.gdpr_requests(user_id) c",
   "identity.users <- pms.booking_notes_private(edited_by_user_id) n",
-  // 0542 (VAY-2436): who approved or disconnected a partner app clears with the user.
+  // 0543 (VAY-2436): who approved or disconnected a partner app clears with the user.
   "identity.users <- distribution.partner_connections(approved_by_user_id) n",
   "identity.users <- distribution.partner_connections(revoked_by_user_id) n",
   // 0540 (VAY-2457): the agency page's header image clears with its media.
