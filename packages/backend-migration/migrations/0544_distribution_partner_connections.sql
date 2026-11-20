@@ -1,4 +1,4 @@
--- Migration: 0543_distribution_partner_connections
+-- Migration: 0544_distribution_partner_connections
 -- Owner: distribution / VAY-2436
 --
 -- Partner apps (Creator Links first) and a hotel's one-time approval of one, the OAuth 2.0
