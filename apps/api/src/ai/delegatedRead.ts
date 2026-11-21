@@ -64,7 +64,14 @@ export async function runDelegatedRead(
     url: path + queryString(request.query),
   });
   const isJson = /^application\/json\b/i.test(String(response.headers["content-type"] ?? ""));
-  const body: unknown = isJson && response.body ? response.json() : response.body;
+  let body: unknown = response.body;
+  if (isJson && response.body) {
+    try {
+      body = response.json();
+    } catch {
+      body = undefined; // malformed JSON: never hand its bytes on
+    }
+  }
   // Only the auth hook answers with this code: a refused delegation, not the route's own answer.
   if (
     response.statusCode === 403 &&
