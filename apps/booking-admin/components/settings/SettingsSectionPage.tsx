@@ -1197,6 +1197,10 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     let part: PaymentsPart = "bank";
     try {
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
+      // VAY-2583: bank transfer switched off saves the ways to pay first, so Finance judges the
+      // change while the bank details still count; removed first, the page could already list no
+      // rooms before the check runs.
+      const turningBankOff = paymentBaseline.bankTransfer && !(settings.bank_transfer ?? false);
       const saveBank = async () => {
         part = "bank";
         const destination = bankChanged
@@ -1217,6 +1221,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         if (destination !== bankDestination && current()) {
           saved.push("bank");
           setBankDestination(destination ?? null);
+          // Bank transfer counted as saved off only once its details are gone (see saveMethods).
+          if (turningBankOff)
+            setPaymentBaseline((previous) => previous && { ...previous, bankTransfer: false });
           setSettings((previous) => ({
             ...previous,
             payout_account_holder: "",
@@ -1248,7 +1255,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         }
         saved.push("methods");
         if (!current()) return false;
-        setPaymentBaseline(paymentsForm);
+        // While its bank details are still to go, bank transfer stays "on" as saved, so Try again
+        // after a failed bank step runs that step again.
+        setPaymentBaseline(turningBankOff ? { ...paymentsForm, bankTransfer: true } : paymentsForm);
         setPlainPayAtHotel(keptPlain);
         // VAY-2583: the rates as the saved settings leave them.
         setRateCoverage(
@@ -1261,10 +1270,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         );
         return true;
       };
-      // VAY-2583: bank transfer switched off saves the ways to pay first, so Finance judges the
-      // change while the bank details still count; removed first, the page could already list no
-      // rooms before the check runs.
-      const turningBankOff = paymentBaseline.bankTransfer && !(settings.bank_transfer ?? false);
       if (turningBankOff) {
         if (!(await saveMethods())) return null;
         await saveBank();

@@ -159,23 +159,28 @@ export function createRatePaymentCoverage(
   };
 }
 
+type SavedPaymentSettings = { paymentsEnabled: boolean; acceptedMethods: readonly string[] };
+/** The change to judge, or how to make it from the settings as saved (a write that keeps some of
+ * them, like setup's payment-methods save). */
+export type ProposedPaymentChange =
+  | ProposedPaymentSettings
+  | ((saved: SavedPaymentSettings) => ProposedPaymentSettings);
+
 /** VAY-2583: whether a payment-settings change must be refused because it would leave a live
  * booking page with no rate guests can pay for. Only a change that takes a way to pay away (a
  * method off, payments off) is refused, and only when the page had a payable rate before:
  * turning something on never is (a card not ready yet must stay switchable on to set it up), and a
  * page already without one can still save. Returns the coverage after the change when refused. */
 export async function refusedPaymentChange<
-  C extends {
-    payable: number;
-    settings: { paymentsEnabled: boolean; acceptedMethods: readonly string[] };
-  },
+  C extends { payable: number; settings: SavedPaymentSettings },
 >(
   coverage: (propertyId: string, proposed?: ProposedPaymentSettings) => Promise<C | null>,
   propertyId: string,
-  proposed: ProposedPaymentSettings,
+  change: ProposedPaymentChange,
 ): Promise<C | null> {
   const before = await coverage(propertyId);
   if (!before || before.payable === 0) return null;
+  const proposed = typeof change === "function" ? change(before.settings) : change;
   const takesAway =
     (before.settings.paymentsEnabled && proposed.paymentsEnabled === false) ||
     before.settings.acceptedMethods.some((method) => !proposed.acceptedMethods.includes(method));
@@ -188,10 +193,7 @@ export async function refusedPaymentChange<
  * null when it may be saved, also when the coverage couldn't be read: a read failure never blocks a
  * payment save, it is only logged. */
 export async function refusedRatePaymentChange<
-  C extends {
-    payable: number;
-    settings: { paymentsEnabled: boolean; acceptedMethods: readonly string[] };
-  },
+  C extends { payable: number; settings: SavedPaymentSettings },
 >(
   repository: {
     ratePaymentCoverage?: (
@@ -200,12 +202,12 @@ export async function refusedRatePaymentChange<
     ) => Promise<C | null>;
   },
   propertyId: string,
-  proposed: ProposedPaymentSettings,
+  change: ProposedPaymentChange,
   log: { error(obj: object, msg: string): void },
 ): Promise<C | null> {
   if (!repository.ratePaymentCoverage) return null;
   try {
-    return await refusedPaymentChange(repository.ratePaymentCoverage, propertyId, proposed);
+    return await refusedPaymentChange(repository.ratePaymentCoverage, propertyId, change);
   } catch (error) {
     log.error({ err: error, propertyId }, "rate payment coverage read failed");
     return null;

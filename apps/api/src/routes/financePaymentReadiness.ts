@@ -2,6 +2,8 @@ import { UnauthorizedError } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import {
   FINANCE_PAYMENT_READINESS_AUTHORIZATION,
+  financeStoredMethodsAfterSetupSelection,
+  type FinancePaymentReadinessMethod,
   parseFinancePaymentReadinessSnapshot,
   parseReplaceFinancePaymentMethodsCommand,
   parseReplaceFinancePaymentMethodsResult,
@@ -142,7 +144,7 @@ export async function registerFinancePaymentReadinessRoutes(
       const refused = await refusedRatePaymentChange(
         { ratePaymentCoverage: options.ratePaymentCoverage },
         scope.propertyId,
-        { acceptedMethods: command.selectedMethods },
+        setupPaymentMethodsChange(command.selectedMethods),
         request.log,
       );
       if (refused)
@@ -241,6 +243,22 @@ function validSuccess(
     current.pricingCurrencyRevision === command.expectedPricingCurrencyRevision &&
     snapshot.pricingCurrency.matchesCurrent
   );
+}
+
+/** VAY-2583: setup's payment-methods save as its write leaves the hotel's settings: the selection
+ * plus the extras the hotel already takes (bank transfer, PayPal, pay-at-hotel details), payments
+ * on while any method is left (financePaymentReadinessCommandRepository). */
+export function setupPaymentMethodsChange(
+  selectedMethods: readonly FinancePaymentReadinessMethod[],
+) {
+  return (saved: { paymentsEnabled: boolean; acceptedMethods: readonly string[] }) => {
+    const acceptedMethods =
+      financeStoredMethodsAfterSetupSelection(
+        saved.paymentsEnabled ? [...saved.acceptedMethods] : [],
+        selectedMethods,
+      ) ?? selectedMethods;
+    return { paymentsEnabled: acceptedMethods.length > 0, acceptedMethods };
+  };
 }
 
 function sendCommandError(reply: FastifyReply, error: ReplaceFinancePaymentMethodsError) {
