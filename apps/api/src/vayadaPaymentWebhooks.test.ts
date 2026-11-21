@@ -246,4 +246,15 @@ describe("vayada Payment's Stripe webhook (VAY-2442)", () => {
       "test-mode keys",
     );
   });
+
+  it("prices Stripe's dispute countered fee in euro cents, EUR 20 unless set (VAY-2572)", () => {
+    const fee = (value?: string) =>
+      loadConfig(value === undefined ? {} : { VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR: value })
+        .vayadaPaymentDisputeCounteredFeeMinor;
+    expect([fee(), fee("0"), fee("15.5"), fee("20.00"), fee("100")]).toEqual([
+      2000, 0, 1550, 2000, 10000,
+    ]);
+    for (const value of ["-1", "20,00", "eur 20", "100.01", "1e2", "20.005"])
+      expect(() => fee(value)).toThrow("VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR");
+  });
 });

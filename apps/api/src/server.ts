@@ -547,7 +547,9 @@ const vayadaPaymentWebhookPool =
     : undefined;
 const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
   ? (event: Record<string, unknown>) =>
-      handleVayadaPaymentWebhookEvent(vayadaPaymentWebhookPool, event, app.log)
+      handleVayadaPaymentWebhookEvent(vayadaPaymentWebhookPool, event, app.log, {
+        disputeCounteredFeeMinor: config.vayadaPaymentDisputeCounteredFeeMinor,
+      })
   : undefined;
 // VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account, with
 // the live keys for live hotels (VAYADA_PAYMENT_LIVE_PROPERTY_IDS, or every hotel except
