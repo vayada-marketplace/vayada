@@ -448,6 +448,9 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
     "side_effect_read",
     "write-grade locks",
   ),
+  "POST /api/pms/properties/:propertyId/operating-calendar/refresh": later(
+    "Save calendar again (VAY-2582)",
+  ),
   "GET /api/pms/properties/:propertyId/operating-calendar/revisions/:calendarRevision":
     notForAi("no_caller"),
   "GET /api/pms/properties/:propertyId/payment-settings": later(),

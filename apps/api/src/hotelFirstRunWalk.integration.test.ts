@@ -802,13 +802,13 @@ describe.skipIf(!url)(
         );
         expect(blockerCodes(await h.readiness())).toEqual([]);
 
-        // VAY-2582: the hotel's time zone moves. Its calendar falls behind and the page can't sell...
+        // VAY-2582: the owner confirms a time zone move. Its calendar falls behind and the page can't
+        // sell...
         const payMethods = async () =>
           (await h.ports.financeRead.getPaymentReadiness(scope))?.methods
             .filter((method) => method.selected)
             .map((method) => method.method);
         const paidBefore = await payMethods();
-        const placed = (await h.ports.profiles.getPropertyProfile(scope))!;
         const zone = await api.inject({
           method: "PUT",
           url: `/api/hotel-setup/properties/${h.propertyId}/profile`,
@@ -816,6 +816,7 @@ describe.skipIf(!url)(
           payload: {
             expectedProfileRevision: placed.profileRevision,
             patch: { location: { timezone: "Asia/Kolkata" } },
+            confirmLocationChange: true,
           },
         });
         expect(zone.statusCode, zone.body).toBe(200);
