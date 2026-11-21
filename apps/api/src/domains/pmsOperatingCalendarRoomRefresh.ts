@@ -106,7 +106,11 @@ export async function refreshPmsOperatingCalendarRooms(
   if (current.sourceStatus === "current" && coverage.calendarRevision === calendarRevision) {
     return Object.freeze({ outcome: "current" });
   }
-  let year = firstRunInventoryHorizon(requestedAt, configuration.sourceInputs.propertyTimeZone);
+  const savedYear = firstRunInventoryHorizon(
+    requestedAt,
+    configuration.sourceInputs.propertyTimeZone,
+  );
+  let year = savedYear;
   // Opening dates again after the calendar ended is the owner's choice (auto-open or setup).
   if (coverage.through < year.from) {
     return Object.freeze({ outcome: "not_room_change", reason: "calendar_ended" });
@@ -219,20 +223,24 @@ export async function refreshPmsOperatingCalendarRooms(
     }
   }
 
-  const horizon = {
-    from: year.from,
-    through: coverage.through < year.through ? coverage.through : year.through,
-  };
-  const materialized = await ports.materialization.materializeInventory({
-    organizationId: actor.organizationId,
-    propertyId,
-    configurationSource: createPmsOperatingCalendarSourceRevision(propertyId, calendarRevision),
-    expectedMaterializedRevision: calendarRevision,
-    horizon,
-    // Per attempt, so a failure isn't replayed once its cause is fixed.
-    idempotencyKey: `pms.calendar-room-refresh.inventory.${randomUUID()}`,
-    audit,
-  });
+  const through = coverage.through < year.through ? coverage.through : year.through;
+  const materialize = (from: string) =>
+    ports.materialization.materializeInventory({
+      organizationId: actor.organizationId,
+      propertyId,
+      configurationSource: createPmsOperatingCalendarSourceRevision(propertyId, calendarRevision),
+      expectedMaterializedRevision: calendarRevision,
+      horizon: { from, through },
+      // Per attempt, so a failure isn't replayed once its cause is fixed.
+      idempotencyKey: `pms.calendar-room-refresh.inventory.${randomUUID()}`,
+      audit,
+    });
+  let materialized = await materialize(year.from);
+  // VAY-2582: a time zone moved west starts a date before the old one. A hotel whose nights began
+  // on the old date (set up that day) has none for it, which preparing can't fill in front of
+  // existing nights: its nights start at the old date instead (the new first one opens tomorrow).
+  if (!materialized.ok && year.from < savedYear.from)
+    materialized = await materialize(savedYear.from);
   if (!materialized.ok) {
     return Object.freeze({ outcome: "failed", step: "inventory", error: materialized.error });
   }

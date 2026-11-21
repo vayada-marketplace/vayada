@@ -830,9 +830,10 @@ describe.skipIf(!url)(
           correlationId: null,
         };
         // ...a room change or the hourly repair never takes a new time zone...
-        expect(
-          await refreshPmsOperatingCalendarRooms(h.ports.calendarRefresh, refresher),
-        ).toMatchObject({ outcome: "not_room_change" });
+        expect(await refreshPmsOperatingCalendarRooms(h.ports.calendarRefresh, refresher)).toEqual({
+          outcome: "not_room_change",
+          reason: "property_profile_revision_conflict",
+        });
         // ..."Save calendar again" does, with the hotel's own calendar settings: the page sells again,
         // and how guests pay is untouched (the first run switched on pay at property for Aether).
         expect(

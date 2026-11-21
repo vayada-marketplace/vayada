@@ -60,8 +60,9 @@ export function CalendarAutoOpenEditor() {
       setDraft(current.setting);
       setSuccess(t("settings.autoOpen.calendarSavedAgain"));
     } catch (error) {
+      // 409: the calendar can't follow here (ended, crowded nights, no calendar); otherwise retry.
       setSaveError(
-        error instanceof ApiErrorResponse && error.data.code === "calendar_refresh_needs_review"
+        error instanceof ApiErrorResponse && error.status === 409
           ? t("settings.autoOpen.calendarSaveAgainNeedsReview")
           : t("settings.autoOpen.calendarSaveAgainFailed"),
       );
@@ -79,7 +80,8 @@ export function CalendarAutoOpenEditor() {
       const saved = await updatePmsCalendarAutoOpen(draft);
       setRead(saved);
       setDraft(saved.setting);
-      if (saved.setupError) {
+      // With auto-open off, a calendar behind its rooms or time zone shows its own notice.
+      if (saved.setupError && saved.setting.enabled) {
         setSaveError(
           setupErrorMessage(saved.setupError.code, t) ?? t("settings.autoOpen.savedNotReady"),
         );

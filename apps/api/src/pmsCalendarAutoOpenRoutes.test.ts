@@ -233,11 +233,13 @@ describe("PMS calendar auto-open routes", () => {
     );
     const test = await testApp({}, success(), null, setting(0, false), refreshCalendar);
     app = test.app;
+    // As PMS sends it: a JSON content type with an empty object (an empty JSON body is refused).
     const post = (requestHeaders = headers()) =>
       test.app.inject({
         method: "POST",
         url: `/properties/${propertyId}/operating-calendar/refresh`,
-        headers: requestHeaders,
+        headers: { ...requestHeaders, "content-type": "application/json" },
+        payload: {},
       });
 
     expect(await post()).toMatchObject({ statusCode: 200 });

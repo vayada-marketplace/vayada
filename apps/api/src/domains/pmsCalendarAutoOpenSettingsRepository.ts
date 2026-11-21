@@ -86,7 +86,9 @@ export function createPgPmsCalendarAutoOpenSettingsRepository(config: {
         setting: current,
         propertyTimeZone: row.propertyTimeZone!,
         warnings: parseWarnings(row.warnings),
-        setupError: current.enabled ? await readSetupError(pool, propertyId) : null,
+        setupError: current.enabled
+          ? await readSetupError(pool, propertyId)
+          : calendarBehind(await readSetupError(pool, propertyId)),
       };
     },
     async update(command) {
@@ -242,6 +244,17 @@ async function read(client: Pick<Client, "query">, propertyId: string, lock: boo
       PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION.rollingMonths,
     ],
   );
+}
+
+/**
+ * VAY-2582: with auto-open off, only a saved calendar behind its rooms or time zone is reported, so
+ * PMS Settings › Calendar still offers "Save calendar again"; setup notices wait for auto-open.
+ */
+function calendarBehind(error: PmsCalendarAutoOpenSetupError | null) {
+  return error?.code === "operating_calendar_room_bindings_stale" ||
+    error?.code === "operating_calendar_time_zone_stale"
+    ? error
+    : null;
 }
 
 async function readSetupError(

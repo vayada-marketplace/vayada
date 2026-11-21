@@ -1764,7 +1764,7 @@
   "settings.autoOpen.savingCalendar": "Kalender wird gespeichert …",
   "settings.autoOpen.calendarSavedAgain": "Ihr Kalender ist gespeichert und seine Nächte sind vorbereitet.",
   "settings.autoOpen.calendarSaveAgainFailed": "Ihr Kalender konnte nicht erneut gespeichert werden. Versuchen Sie es gleich noch einmal.",
-  "settings.autoOpen.calendarSaveAgainNeedsReview": "Ihr Kalender kann nicht automatisch erneut gespeichert werden, zum Beispiel weil eine Nacht mehr Buchungen als Zimmer hat. Wenden Sie sich an den Vayada-Support.",
+  "settings.autoOpen.calendarSaveAgainNeedsReview": "Ihr Kalender kann hier nicht erneut gespeichert werden. Wenden Sie sich an den Vayada-Support.",
   "settings.ota.description": "Legen Sie die erwartete Provision je Buchungsquelle fest. Änderungen gelten nur für zukünftige Buchungen; bestehende Finanzdaten werden nie überschrieben.",
   "settings.ota.loading": "Gespeicherte OTA-Provisionen werden geladen…",
   "settings.ota.loadError": "Die gespeicherten Einstellungen konnten nicht geladen werden. Prüfen Sie Ihren Zugriff und versuchen Sie es erneut.",

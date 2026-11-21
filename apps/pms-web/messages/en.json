@@ -1757,7 +1757,7 @@
   "settings.autoOpen.savingCalendar": "Saving calendar…",
   "settings.autoOpen.calendarSavedAgain": "Your calendar is saved and its nights are prepared.",
   "settings.autoOpen.calendarSaveAgainFailed": "Your calendar couldn't be saved again. Try again in a moment.",
-  "settings.autoOpen.calendarSaveAgainNeedsReview": "Your calendar can't be saved again automatically, for example because a night holds more bookings than rooms. Contact Vayada support.",
+  "settings.autoOpen.calendarSaveAgainNeedsReview": "Your calendar can't be saved again here. Contact Vayada support.",
   "settings.ota.description": "Set the commission expected for each booking source. Changes affect future booking economics only; existing financial records are never rewritten.",
   "settings.ota.loading": "Loading persisted OTA commission settings…",
   "settings.ota.loadError": "We couldn’t load the persisted settings. Check your access and retry.",

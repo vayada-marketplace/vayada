@@ -148,6 +148,7 @@ function fake(start: Start = {}) {
     materialization: {
       materializeInventory: async (command: Record<string, unknown>) => {
         calls.push(["materialize", command]);
+        if (Array.isArray(start.materialize)) return start.materialize.shift() ?? { ok: true };
         return start.materialize ?? { ok: true };
       },
     },
@@ -334,6 +335,34 @@ describe("the calendar follows room changes (VAY-2469)", () => {
     });
     // 02:00 UTC on 3 November is still 2 November in Los Angeles: the nights start there.
     expect(steps[2]![1]["horizon"]).toEqual({ from: "2026-11-02", through: "2027-03-31" });
+
+    // A hotel whose nights began on 3 November (set up that day) has none for 2 November: they start
+    // at 3 November then. A move east never retries.
+    const fresh = fake({
+      ...moved,
+      savedTimeZone: "America/Los_Angeles",
+      materialize: [{ ok: false, error: { code: "inventory_invariant_violation" } }],
+    });
+    expect(
+      await refreshPmsOperatingCalendarRooms(fresh.ports, actor, { acceptTimeZone: true }),
+    ).toMatchObject({ outcome: "refreshed" });
+    expect(
+      fresh.calls
+        .filter(([name]) => name === "materialize")
+        .map(([, command]) => command["horizon"]),
+    ).toEqual([
+      { from: "2026-11-02", through: "2027-03-31" },
+      { from: "2026-11-03", through: "2027-03-31" },
+    ]);
+    const east = fake({
+      ...moved,
+      savedTimeZone: "Pacific/Kiritimati",
+      materialize: [{ ok: false, error: { code: "inventory_invariant_violation" } }],
+    });
+    expect(
+      await refreshPmsOperatingCalendarRooms(east.ports, actor, { acceptTimeZone: true }),
+    ).toMatchObject({ outcome: "failed", step: "inventory" });
+    expect(east.calls.filter(([name]) => name === "materialize")).toHaveLength(1);
   });
 
   it("reports a refused preview, save or night preparation without going further", async () => {

@@ -172,6 +172,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open settings concurrency
       ok: false,
       error: { code: "operating_calendar_time_zone_stale" },
     });
+    // With auto-open off, the calendar behind its time zone is still reported (Save calendar again).
+    await expect(firstRepository.update(command(false, "zone-off"))).resolves.toMatchObject({
+      ok: true,
+      setting: { enabled: false },
+    });
+    await expect(firstRepository.findContext(propertyId)).resolves.toMatchObject({
+      setting: { enabled: false },
+      setupError: { code: "operating_calendar_time_zone_stale" },
+    });
   });
 
   it("rereads after the property lock and rejects a stale virtual-default save", async () => {

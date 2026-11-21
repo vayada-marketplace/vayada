@@ -314,9 +314,11 @@ export async function refreshPmsOperatingCalendar(): Promise<{
   outcome: "refreshed" | "current";
 }> {
   const propertyId = await resolveSelectedPmsPropertyId("saving the calendar again");
+  // An empty JSON object: the client always sends a JSON content type, and the API refuses one
+  // without a body.
   return pmsOperationsClient.post<{ outcome: "refreshed" | "current" }>(
     propertyEndpoint(propertyId, "operating-calendar/refresh"),
-    undefined,
+    {},
     pmsOperationsRequestOptions,
   );
 }

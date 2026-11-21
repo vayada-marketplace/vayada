@@ -95,13 +95,14 @@ export async function registerPmsCalendarAutoOpenRoutes(
         { propertyId: scope.propertyId, ...result },
         "Calendar refresh did not save the calendar",
       );
-      if (result.outcome === "no_calendar" || result.outcome === "no_inventory")
-        return reply.status(409).send({ code: "operating_calendar_not_configured" });
       if (result.outcome === "not_room_change")
         return reply
           .status(409)
           .send({ code: "calendar_refresh_needs_review", reason: result.reason });
-      return reply.status(409).send({ code: "calendar_refresh_failed", step: result.step });
+      if (result.outcome === "failed")
+        return reply.status(409).send({ code: "calendar_refresh_failed", step: result.step });
+      // No calendar, or nights never prepared: setup's calendar step comes first.
+      return reply.status(409).send({ code: "operating_calendar_not_configured" });
     });
   }
 
