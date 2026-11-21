@@ -337,6 +337,13 @@ Validation and behavior:
     stores nothing.
   - Saving the verified domain again changes nothing.
   - PUT and DELETE republish a live page when they replace or remove a verified domain.
+  - A check that registers a Cloudflare hostname stores its id on the domain row
+    (`property_domains.cloudflare_hostname_id`, VAY-2580); finding or adopting an existing hostname
+    stores nothing. PUT and DELETE delete the replaced or removed domain's hostname by that id, and
+    only that one: the old booking-api's hostnames share the zone and are never touched. The
+    hostname stays when the same domain is saved again meanwhile. A check whose domain was replaced
+    or removed meanwhile deletes the hostname it just registered. Cloudflare failures are logged
+    (status and codes) and the change stands.
   - `vayada.com` hostnames are refused.
 
 ## Payment Settings Writes
