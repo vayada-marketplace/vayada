@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   channexCutOffClosedDates as closedDates,
+  createChannexPropertyTimeZoneRead,
   readChannexPropertyCutOff as read,
 } from "./channexPropertyCutOff.js";
 
@@ -147,5 +148,31 @@ describe("Channex property cut-off (VAY-2108)", () => {
     it("closes nothing without a cut-off time", () => {
       expect(closedDates(cutOff(null, 3), at("2026-11-18T12:52:00Z"))).toBeNull();
     });
+  });
+});
+
+describe("Channex property time zone for the profile save (VAY-2582)", () => {
+  it("reads the property's time zone with the API key, and fails when Channex can't answer", async () => {
+    const fetch = vi.fn(async (_url: URL, _init: RequestInit) => Response.json(tiga()));
+    const readZone = createChannexPropertyTimeZoneRead({
+      apiBaseUrl: "https://app.channex.io",
+      apiKey: "test-key",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    });
+    expect(await readZone(id)).toBe("Asia/Makassar");
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(String(url)).toBe(`https://app.channex.io/api/v1/properties/${id}`);
+    expect(init).toMatchObject({
+      method: "GET",
+      redirect: "error",
+      headers: { "user-api-key": "test-key" },
+    });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+
+    fetch.mockResolvedValueOnce(new Response("{}", { status: 503 }));
+    await expect(readZone(id)).rejects.toThrow();
+    fetch.mockResolvedValueOnce(Response.json({ data: { type: "property", id, attributes: {} } }));
+    await expect(readZone(id)).rejects.toThrow("channex_cut_off_unavailable");
+    await expect(readZone("not-a-channex-id")).rejects.toThrow();
   });
 });

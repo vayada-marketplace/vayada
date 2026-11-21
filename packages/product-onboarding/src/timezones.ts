@@ -37,8 +37,16 @@ export function defaultTimezoneForCountry(countryCode: string): string {
   return getCountry(code as CountryCode)?.timezones[0] ?? "";
 }
 
+/**
+ * VAY-2582: every IANA time zone in the bundled data, plus UTC. Unlike `availableTimezones`, the list
+ * doesn't depend on the runtime's Intl data, so a server-rendered list matches the browser's.
+ */
+export function ianaTimezones(): string[] {
+  return Array.from(new Set(["Etc/UTC", ...Object.keys(getAllTimezones()), ...TIMEZONE_OPTIONS]));
+}
+
 export function availableTimezones(): string[] {
-  const baseline = ["Etc/UTC", ...Object.keys(getAllTimezones()), ...TIMEZONE_OPTIONS];
+  const baseline = ianaTimezones();
   try {
     return Array.from(new Set([...baseline, ...Intl.supportedValuesOf("timeZone")]));
   } catch {

@@ -79,6 +79,21 @@ export type UpdatePropertyProfileRequest = {
   patch: PropertyProfilePatch;
 };
 
+/**
+ * VAY-2582: why a profile save refused a time zone or country change (a live hotel's change needs a
+ * confirmation; a Channex-connected hotel keeps its Channex property's time zone). Each answer's `detail`
+ * tells the person what happened and what to do.
+ */
+export const PROPERTY_LOCATION_CHANGE_REFUSALS = Object.freeze([
+  "location_change_needs_confirmation",
+  "channex_time_zone_mismatch",
+  "channex_time_zone_unavailable",
+] as const);
+
+export function isPropertyLocationChangeRefusal(code: unknown): boolean {
+  return (PROPERTY_LOCATION_CHANGE_REFUSALS as readonly unknown[]).includes(code);
+}
+
 export type PropertyProfileResponse = {
   propertyId: string;
   profileRevision: number;

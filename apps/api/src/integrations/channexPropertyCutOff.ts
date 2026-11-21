@@ -88,6 +88,31 @@ export async function readChannexPropertyCutOff(
 }
 
 /**
+ * VAY-2582: a Channex property's time zone, for the hotel profile save (one GET, 5 s at most). A hotel
+ * connected to Channex keeps the same time zone as its Channex property, or its sync stops.
+ */
+export function createChannexPropertyTimeZoneRead(config: {
+  apiBaseUrl: string;
+  apiKey: string;
+  fetch?: typeof fetch;
+}) {
+  const request = config.fetch ?? fetch;
+  return async (externalPropertyId: string): Promise<string> => {
+    const property = await readChannexPropertyCutOff(externalPropertyId, async (_method, path) => {
+      const response = await request(new URL(path, config.apiBaseUrl), {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+        headers: { "user-api-key": config.apiKey },
+      });
+      if (!response.ok) throw new Error("channex_time_zone_unavailable");
+      return response.json();
+    });
+    return property.timeZone;
+  };
+}
+
+/**
  * The Channex dates whose availability the cut-off closes at `now`, or null while it closes none.
  * The cut-off belongs to Channex's current date, which starts at 02:00: a 16:30 cut-off closes that
  * date from 16:30 until 02:00 the next morning, and a 00:00 cut-off from midnight until 02:00.

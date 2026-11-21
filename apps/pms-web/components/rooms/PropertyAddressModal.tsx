@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BuildingOffice2Icon, InformationCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import type { PropertyProfileResponse } from "@vayada/domain-hotels";
+import {
+  isPropertyLocationChangeRefusal,
+  type PropertyProfileResponse,
+} from "@vayada/domain-hotels";
 import PropertyAddressFields, {
   type PropertyAddress,
 } from "@vayada/product-onboarding/PropertyAddressFields";
@@ -160,6 +163,15 @@ export default function PropertyAddressModal({
       const status =
         (failure as { status?: number; statusCode?: number })?.status ??
         (failure as { statusCode?: number })?.statusCode;
+      // VAY-2582: a live hotel's country change, or a time zone Channex doesn't use, says why.
+      if (
+        failure instanceof Error &&
+        isPropertyLocationChangeRefusal((failure as { data?: { code?: unknown } }).data?.code)
+      ) {
+        setError(failure.message);
+        setSaving(false);
+        return;
+      }
       setError(
         t(
           status === 409

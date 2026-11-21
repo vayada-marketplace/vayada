@@ -385,4 +385,215 @@ describe.skipIf(!url)("ordinary property profile writer (VAY-2056)", () => {
       await admin.end();
     }
   }, 30_000);
+
+  it("never moves a live hotel's time zone or country without a confirmation, nor away from its Channex property's (VAY-2582)", async () => {
+    const endpoint = new URL(url!);
+    if (
+      !["127.0.0.1", "localhost"].includes(endpoint.hostname) ||
+      !/(^|[_-])test([_-]|$)/i.test(endpoint.pathname.slice(1))
+    )
+      throw new Error("Local test DB required");
+    const admin = new pg.Client({ connectionString: url });
+    await admin.connect();
+    const fixture = await createHotelSetupOrdinaryLoginFixture(admin, url!);
+    const pool = new pg.Pool({ connectionString: fixture.connectionString, max: 1 });
+    const suffix = randomUUID().replaceAll("-", "");
+    const [org, owner, property, channexProperty] = [1, 2, 3, 4].map(() => randomUUID());
+    const scope = { propertyId: property, organizationId: org, actorUserId: owner };
+    const contacts: PropertyProfileContact[] = [
+      { channelType: "email", value: "hello@example.test", purpose: "guest", isPublic: true },
+    ];
+    const dikwella = { countryCode: "LK", city: "Dikwella", timezone: "Asia/Colombo" };
+    const sheffield = {
+      countryCode: "GB",
+      city: "Sheffield",
+      streetAddress: "London Road",
+      postalCode: "S2 4LA",
+      timezone: "Europe/London",
+      latitude: 53.37,
+      longitude: -1.47,
+    };
+    const channexZones: string[] = [];
+    let channexZone: string | Error = "Asia/Colombo";
+    const readChannex = async (id: string) => {
+      channexZones.push(id);
+      if (channexZone instanceof Error) throw channexZone;
+      return channexZone;
+    };
+    let key = 0;
+    const revision = async () =>
+      Number(
+        (
+          await admin.query<{ r: string }>(
+            "SELECT profile_revision AS r FROM hotel_catalog.properties WHERE id=$1",
+            [property],
+          )
+        ).rows[0]!.r,
+      );
+    // The merge sends the revision it read, as clients send the one they loaded.
+    const at = async (
+      location: Partial<PropertyProfile["location"]>,
+      confirm?: boolean,
+      reader: typeof readChannex | null = readChannex,
+    ) => {
+      const expected = await revision();
+      key += 1;
+      return writeOrdinaryHotelSetupPropertyProfile(
+        pool,
+        scope,
+        "request-2582",
+        {
+          idempotencyKey: `vay-2582-${key}`,
+          fingerprint: hash(`vay-2582-${key}`),
+          merge: () => ({
+            expectedProfileRevision: expected,
+            profile: profile("Aether TEST ONLY", contacts, { ...dikwella, ...location }),
+            ...(confirm === undefined ? {} : { confirmLocationChange: confirm }),
+          }),
+        },
+        reader ?? undefined,
+      );
+    };
+    const stored = () =>
+      admin
+        .query(
+          "SELECT country_code,city,street_address,timezone FROM hotel_catalog.property_locations WHERE property_id=$1",
+          [property],
+        )
+        .then((result) => result.rows[0]);
+    const writes = async () => ({
+      revision: await revision(),
+      keys: Number(
+        (
+          await admin.query<{ n: string }>(
+            "SELECT count(*) AS n FROM platform.idempotency_keys WHERE property_id=$1",
+            [property],
+          )
+        ).rows[0]!.n,
+      ),
+    });
+    try {
+      await admin.query(
+        "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Live hotel',$2)",
+        [org, `l${suffix}`],
+      );
+      await admin.query("INSERT INTO identity.users(id,email) VALUES($1,$2)", [
+        owner,
+        `l${suffix}@example.test`,
+      ]);
+      await admin.query(
+        "INSERT INTO identity.organization_memberships(organization_id,user_id,role_key,access_origin,property_access_mode) VALUES($1,$2,'hotel_owner','agency','all')",
+        [org, owner],
+      );
+      await admin.query(
+        "INSERT INTO hotel_catalog.properties(id,public_id,display_name,property_type,creation_organization_id) VALUES($1::uuid,$1::uuid::text,'Aether TEST ONLY','hotel',$2)",
+        [property, org],
+      );
+      await admin.query(
+        "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'hotel_catalog','property',$2,'owner','active')",
+        [org, property],
+      );
+      await admin.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,country_code,city,street_address,postal_code,timezone,address_public,geo_public,map_display_mode) VALUES($1,'LK','Dikwella','Beach Road','81200','Asia/Colombo',FALSE,FALSE,'hidden')",
+        [property],
+      );
+
+      // A hotel in setup moves freely: its address search picks the time zone.
+      expect(await at(sheffield)).toMatchObject({ status: "updated" });
+      expect(await stored()).toMatchObject({ country_code: "GB", timezone: "Europe/London" });
+      expect(await at({})).toMatchObject({ status: "updated" });
+      await admin.query(
+        "UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1",
+        [property],
+      );
+
+      // Live: a new street, postal code and pin keep the time zone and country, and save.
+      expect(
+        await at({
+          streetAddress: "Temple Road 4",
+          postalCode: "81200",
+          latitude: 5.97,
+          longitude: 80.69,
+        }),
+      ).toMatchObject({
+        status: "updated",
+        profile: {
+          profile: { location: { streetAddress: "Temple Road 4", timezone: "Asia/Colombo" } },
+        },
+      });
+
+      // Live: the Sheffield address search (2026-11-21) is refused until confirmed, and writes nothing.
+      const before = await writes();
+      expect(await at(sheffield)).toEqual({
+        status: "location_change_unconfirmed",
+        changes: {
+          timezone: { from: "Asia/Colombo", to: "Europe/London" },
+          countryCode: { from: "LK", to: "GB" },
+        },
+      });
+      expect(await at({ countryCode: "GB" }, false)).toEqual({
+        status: "location_change_unconfirmed",
+        changes: { countryCode: { from: "LK", to: "GB" } },
+      });
+      expect(await writes()).toEqual(before);
+      expect(await stored()).toMatchObject({
+        country_code: "LK",
+        city: "Dikwella",
+        timezone: "Asia/Colombo",
+      });
+      // Confirmed on purpose, it saves; and back again.
+      expect(await at(sheffield, true)).toMatchObject({ status: "updated" });
+      expect(await stored()).toMatchObject({ country_code: "GB", timezone: "Europe/London" });
+      expect(await at({}, true)).toMatchObject({ status: "updated" });
+      expect(channexZones).toEqual([]);
+
+      // Connected to Channex (Asia/Colombo): another time zone is refused, even confirmed.
+      await admin.query(
+        "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected',$2)",
+        [property, channexProperty],
+      );
+      const connected = await writes();
+      expect(await at({ timezone: "Europe/London" }, true)).toEqual({
+        status: "channex_time_zone_mismatch",
+        channexTimeZone: "Asia/Colombo",
+      });
+      expect(channexZones).toEqual([channexProperty]);
+      // Channex not answering, or not configured: nothing is saved.
+      channexZone = new Error("channex down");
+      expect(await at({ timezone: "Europe/London" }, true)).toEqual({
+        status: "channex_time_zone_unavailable",
+      });
+      expect(await at({ timezone: "Europe/London" }, true, null)).toEqual({
+        status: "channex_time_zone_unavailable",
+      });
+      expect(await writes()).toEqual(connected);
+      // A street change on the connected hotel never asks Channex.
+      channexZones.length = 0;
+      expect(await at({ streetAddress: "Temple Road 5" })).toMatchObject({ status: "updated" });
+      expect(channexZones).toEqual([]);
+      // A hotel already off its Channex time zone may move back to it (confirmed, as it is live).
+      channexZone = "Asia/Colombo";
+      await admin.query(
+        "UPDATE hotel_catalog.property_locations SET timezone='Europe/London' WHERE property_id=$1",
+        [property],
+      );
+      expect(await at({ timezone: "Asia/Colombo" }, true)).toMatchObject({ status: "updated" });
+      expect(await stored()).toMatchObject({ timezone: "Asia/Colombo" });
+      // A disconnected Channex property no longer holds the time zone.
+      await admin.query(
+        "UPDATE pms.channel_connections SET connection_status='disconnected' WHERE property_id=$1",
+        [property],
+      );
+      channexZones.length = 0;
+      expect(await at({ timezone: "Asia/Kolkata" }, true)).toMatchObject({ status: "updated" });
+      expect(channexZones).toEqual([]);
+    } finally {
+      await admin
+        .query("DELETE FROM pms.channel_connections WHERE property_id=$1", [property])
+        .catch(() => undefined);
+      await pool.end();
+      await fixture.drop();
+      await admin.end();
+    }
+  }, 30_000);
 });

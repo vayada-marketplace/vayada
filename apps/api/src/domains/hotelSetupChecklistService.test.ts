@@ -16,8 +16,8 @@ const actor = {
 };
 
 /** The first run's light setup-progress read, from the first-run steps that are done. */
-function progress(done: readonly string[]) {
-  return { guestPayment: done.includes("payments") && done.includes("plan") };
+function progress(done: readonly string[], live = false) {
+  return { guestPayment: done.includes("payments") && done.includes("plan"), live };
 }
 
 /** VAY-2451: a hotel that finished the four-step setup with its room, on the placeholder price. */
@@ -36,6 +36,7 @@ function service(
   done: readonly string[],
   goLive: HotelGoLiveFactsRow | null = GO_LIVE,
   onlineCardsOffered = false,
+  live = false,
 ) {
   const store = {
     acknowledge: vi.fn(async () => undefined),
@@ -44,7 +45,7 @@ function service(
   return {
     store,
     checklist: createHotelSetupChecklistService({
-      firstRun: { readSetupProgress: vi.fn(async () => progress(done)) },
+      firstRun: { readSetupProgress: vi.fn(async () => progress(done, live)) },
       goLiveFacts: { read: vi.fn(async () => goLive) },
       store,
       onlineCardsOffered,
@@ -89,6 +90,15 @@ describe("go-live checklist service (VAY-2247 wave 2, VAY-2451)", () => {
       done: 3,
       total: 4,
       next: "payments",
+    });
+  });
+
+  it("never offers Finish setup on a live hotel, whatever its first run saved (VAY-2582)", async () => {
+    // A hotel that went live elsewhere (e.g. moved from the old system) without the first run's payments
+    // and plan: its dashboard sent the owner into setup, whose first run overwrote them (Aether).
+    expect(await service([], GO_LIVE, false, true).checklist.readGoLive(actor)).toMatchObject({
+      phase: "go_live",
+      setup: { done: 4, total: 4, next: null },
     });
   });
 

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   availableTimezones,
   countryForCoordinates,
+  ianaTimezones,
   defaultTimezoneForCountry,
   filterTimezones,
   timezoneForCoordinates,
@@ -27,6 +28,18 @@ describe("property time-zone detection", () => {
       throw new TypeError("unsupported");
     });
     expect(availableTimezones()).toContain("Asia/Kolkata");
+    supportedValues.mockRestore();
+  });
+
+  it("lists every IANA time zone from the bundled data, the same without the runtime's Intl (VAY-2582)", () => {
+    const zones = ianaTimezones();
+    expect(zones).toEqual(expect.arrayContaining(["Asia/Colombo", "Asia/Makassar", "Etc/UTC"]));
+    expect(zones.length).toBeGreaterThan(300);
+    expect(new Set(zones).size).toBe(zones.length);
+    const supportedValues = vi.spyOn(Intl, "supportedValuesOf").mockImplementation(() => {
+      throw new TypeError("unsupported");
+    });
+    expect(ianaTimezones()).toEqual(zones);
     supportedValues.mockRestore();
   });
 

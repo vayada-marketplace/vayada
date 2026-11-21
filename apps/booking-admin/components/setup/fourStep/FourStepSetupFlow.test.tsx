@@ -222,4 +222,23 @@ describe("FourStepSetupFlow (VAY-2451)", () => {
     expect(renderHotelSteps).toHaveBeenCalledWith(PROPERTY);
     renderer.unmount();
   });
+
+  it("never opens steps 1–2 of a live hotel: it leaves for its page (VAY-2582)", async () => {
+    // Aether (2026-11-21): the location step of a live hotel saved a Sheffield address search.
+    for (const initialStep of ["property", "location"] as const) {
+      const onAlreadyFinished = vi.fn();
+      const { value, setup } = props({ propertyId: PROPERTY, initialStep, onAlreadyFinished });
+      setup.getStatus.mockResolvedValue(status([PROPERTY]));
+      (value.firstRun.read as ReturnType<typeof vi.fn>).mockResolvedValue({ live: true });
+      const renderer = await mount(value);
+      expect(onAlreadyFinished).toHaveBeenCalledExactlyOnceWith(PROPERTY);
+      expect(textOf(renderer.root)).not.toContain("Location");
+      renderer.unmount();
+    }
+    const { value, setup } = props({ propertyId: PROPERTY, initialStep: "location" });
+    setup.getStatus.mockResolvedValue(status([PROPERTY]));
+    (value.firstRun.read as ReturnType<typeof vi.fn>).mockResolvedValue({ live: true });
+    (await mount(value)).unmount();
+    expect(value.onSaveAndExit).toHaveBeenCalledExactlyOnceWith(PROPERTY);
+  });
 });

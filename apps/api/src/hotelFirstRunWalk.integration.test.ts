@@ -62,6 +62,7 @@ import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.
 import {
   createOrdinaryHotelSetupActivation,
   createOrdinaryHotelSetupProfileCommand,
+  isHotelLive,
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
@@ -379,6 +380,7 @@ describe.skipIf(!url)(
           returnBaseUrls: { bookingAdmin: "https://admin.booking.example.test" },
         }),
         readiness: publication.routes.readinessProvider,
+        lifecycle: { isLive: (id) => isHotelLive(pool, id) },
       });
 
       // The owner's signed-in session, carrying every resource link setup created for the hotel.
@@ -552,6 +554,7 @@ describe.skipIf(!url)(
         // The go-live list's light read agrees, without the booking readiness (VAY-2247 incident).
         expect(await h.service().readSetupProgress(h.actor)).toEqual({
           guestPayment: true,
+          live: true,
         });
         // It takes no locks either: it answers while a pricing save holds the owner locks.
         let timer: NodeJS.Timeout | undefined;
@@ -569,6 +572,7 @@ describe.skipIf(!url)(
           });
           expect(await Promise.race([h.service().readSetupProgress(h.actor), late])).toEqual({
             guestPayment: true,
+            live: true,
           });
         } finally {
           clearTimeout(timer);
@@ -653,9 +657,9 @@ describe.skipIf(!url)(
           activations: 1,
         });
 
-        // A second run finds everything in place.
+        // A second run finds the hotel live and writes nothing: setup is over for it (VAY-2582).
         const again = await h.service().run(h.actor, request);
-        expect(again).toMatchObject({ ok: true, ran: [] });
+        expect(again).toMatchObject({ ok: false, code: "hotel_already_live", ran: [] });
       } finally {
         await h.close();
       }
@@ -822,9 +826,10 @@ describe.skipIf(!url)(
           );
           expect(lifecycle.rows[0]?.lifecycle_status).toBe("active");
 
-          // A second run leaves the placeholder alone.
+          // A second run leaves the placeholder alone: the hotel is live, so it writes nothing (VAY-2582).
           expect(await h.service().run(h.actor, fourStep)).toMatchObject({
-            ok: true,
+            ok: false,
+            code: "hotel_already_live",
             ran: [],
           });
 
@@ -880,7 +885,7 @@ describe.skipIf(!url)(
             await h.ports.operatingCalendar.getCurrentOperatingCalendarConfiguration(h.propertyId),
           ).toBeNull();
           // Setup is done (how guests pay and the plan); the room is what the go-live list asks for.
-          expect(await h.service().readSetupProgress(h.actor)).toEqual({
+          expect(await h.service().readSetupProgress(h.actor)).toMatchObject({
             guestPayment: true,
           });
           const checklist = await goLive(h);

@@ -1,6 +1,7 @@
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
+import { ApiErrorResponse } from "@/services/api/client";
 import { FourStepHotelDetails, type FourStepHotelDetailsProps } from "./FourStepHotelDetails";
 
 vi.mock("next/image", () => ({
@@ -155,6 +156,25 @@ describe("FourStepHotelDetails (VAY-2451 resume)", () => {
     expect(setup.updatePropertyProfile).not.toHaveBeenCalled();
     expect(value.saveCurrency).not.toHaveBeenCalled();
     expect(value.onDone).toHaveBeenCalledWith("room");
+    renderer.unmount();
+  });
+
+  it("shows why the server refused a time zone change, and stays (VAY-2582)", async () => {
+    const { value, setup } = props();
+    const detail =
+      "This hotel is connected to Channex, which uses the time zone Asia/Colombo. Your hotel's time zone must be the same. Keep Asia/Colombo, or change it in Channex first.";
+    setup.updatePropertyProfile.mockRejectedValueOnce(
+      new ApiErrorResponse(409, { code: "channex_time_zone_mismatch", detail } as never),
+    );
+    const renderer = await mount(value);
+    const phone = renderer.root.find(
+      (node) => node.props.label === "Reception phone" && typeof node.props.onChange === "function",
+    );
+    await act(async () => phone.props.onChange("+94 77 308 7696"));
+    await act(async () => button(renderer, "Continue").props.onClick());
+    expect(textOf(renderer.root)).toContain(detail);
+    expect(textOf(renderer.root)).not.toContain("Someone else changed this property");
+    expect(value.onDone).not.toHaveBeenCalled();
     renderer.unmount();
   });
 });
