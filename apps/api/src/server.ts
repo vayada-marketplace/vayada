@@ -837,6 +837,18 @@ const financeRepository =
         vayadaPaymentStopped: (propertyId: string) =>
           vayadaPaymentManageable(propertyId) && !vayadaPaymentOpen(propertyId),
         vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
+        // VAY-2583: which booking-page rates guests could pay for, with the booking page's own
+        // switches (as its offer catalog has them), so a change can't leave none payable.
+        ratePaymentSwitches: {
+          card:
+            config.replacementPricingAcceptanceEnabled === true &&
+            config.replacementPricingCardAcceptanceEnabled === true &&
+            !!stripeBookingPaymentProvider,
+          deposits: config.replacementPricingDepositAcceptanceEnabled === true,
+          manual: manualPaymentMethods.filter(
+            (method) => method !== "bank_transfer" || !!bankTransferBookings,
+          ),
+        },
       })
     : undefined;
 

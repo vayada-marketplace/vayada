@@ -176,12 +176,7 @@ export type PaymentSettingsReadModel = {
 export type FinanceJsonPolicy = Record<string, string | number | boolean | null>;
 export type FinanceJsonObject = Record<string, FinanceJsonValue>;
 export type FinanceJsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | FinanceJsonValue[]
-  | { [key: string]: FinanceJsonValue };
+  string | number | boolean | null | FinanceJsonValue[] | { [key: string]: FinanceJsonValue };
 
 export type FinanceProviderAccountReadModel = {
   providerAccountId: string | null;
@@ -221,6 +216,21 @@ export type FinancePaymentSettingsResponse = {
   /** VAY-2570: `stopped`: the hotel takes no new vayada Payment charges (the stop list); it can
    * still turn card off and fix its payout account. */
   vayadaPayment?: { available: boolean; feePercent?: number; stopped?: boolean };
+  /** VAY-2583: the hotel's booking-page rates and which of them guests can pay for now; absent
+   * before its first publication. */
+  rateCoverage?: FinanceRatePaymentCoverage;
+};
+
+/** VAY-2583: a booking-page rate sells only by the ways its own terms accept that are ready at
+ * the hotel. `payableWith`: those guests can pay with; empty, the rate isn't bookable. */
+export type FinanceRatePaymentCoverage = {
+  rates: readonly {
+    roomName: string;
+    cancellation: "flexible" | "non_refundable";
+    acceptedMethods: readonly string[];
+    payableWith: readonly string[];
+  }[];
+  payable: number;
 };
 
 export type FinancePaymentSettingsPatchPayload = Partial<
@@ -446,9 +456,7 @@ export type FinanceDispatchPropertyPayoutJob = {
 };
 
 export type FinanceCommandJob =
-  | FinanceProviderAccountRefreshJob
-  | FinanceReconcilePayoutJob
-  | FinanceDispatchPropertyPayoutJob;
+  FinanceProviderAccountRefreshJob | FinanceReconcilePayoutJob | FinanceDispatchPropertyPayoutJob;
 
 export type FinanceCommandMeta = {
   commandId: string;
@@ -1052,6 +1060,12 @@ export type FinancePropertyReadRepository = FinancePropertySettingsReadRepositor
     /** VAY-2570: whether the hotel is on the vayada Payment stop list: it may still save its
      * settings and payout account, but not put card on with vayada Payment. */
     readonly vayadaPaymentStopped?: (propertyId: string) => boolean;
+    /** VAY-2583: the hotel's booking-page rates and which guests could pay for, with its payment
+     * settings now or as `proposed` would leave them. Null: nothing published yet. */
+    readonly ratePaymentCoverage?: (
+      propertyId: string,
+      proposed?: { paymentsEnabled: boolean; acceptedMethods: readonly string[] },
+    ) => Promise<FinanceRatePaymentCoverage | null>;
   };
 
 export function toFinancePaymentSettingsResponse(

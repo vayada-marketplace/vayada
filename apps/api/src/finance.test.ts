@@ -1806,6 +1806,141 @@ describe("finance route contracts", () => {
     }
   });
 
+  it("refuses a payment change that leaves no booking-page rate payable, naming each rate (VAY-2583)", async () => {
+    const save = (key: string, paymentSettings: Record<string, unknown>) => ({
+      commandId: `cmd-vay-2583-${key}`,
+      idempotencyKey: `finance-payment-settings-vay-2583-${key}`,
+      paymentSettings,
+    });
+    const repository = paymentSettingsWriteRepository();
+    const saved = await repository.getPaymentSettings(propertyId);
+    // Aether's shape: card is on and ready, every rate takes only pay at the hotel.
+    let rates: {
+      roomName: string;
+      cancellation: "flexible" | "non_refundable";
+      acceptedMethods: string[];
+    }[] = [
+      { roomName: "Villa One", cancellation: "flexible", acceptedMethods: ["pay_at_property"] },
+      { roomName: "Villa Two", cancellation: "flexible", acceptedMethods: ["pay_at_property"] },
+    ];
+    let failing = false;
+    const proposals: unknown[] = [];
+    const ratePaymentCoverage = async (
+      id: string,
+      proposed?: { paymentsEnabled: boolean; acceptedMethods: readonly string[] },
+    ) => {
+      expect(id).toBe(propertyId);
+      proposals.push(proposed ?? null);
+      if (failing) throw new Error("pricing read failed");
+      const methods = proposed ? proposed.acceptedMethods : ["card", "pay_at_property"];
+      const enabled = proposed ? proposed.paymentsEnabled : true;
+      const list = rates.map((rate) => ({
+        ...rate,
+        payableWith: enabled ? rate.acceptedMethods.filter((m) => methods.includes(m)) : [],
+      }));
+      return { rates: list, payable: list.filter((rate) => rate.payableWith.length > 0).length };
+    };
+    app = buildFinanceApp({
+      repository: {
+        ...repository,
+        getPaymentSettings: async (id: string) =>
+          id === propertyId
+            ? {
+                ...saved!,
+                paymentsEnabled: true,
+                paymentProvider: "stripe",
+                acceptedMethods: ["card", "pay_at_property"],
+              }
+            : null,
+        vayadaPaymentAvailable: () => true,
+        ratePaymentCoverage,
+      },
+      permissions: financeManagePermissions(),
+    });
+    const read = await injectJson<Record<string, unknown>>(app, {
+      method: "GET",
+      url: `/api/finance/properties/${propertyId}/payment-settings`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(read.body).toMatchObject({
+      rateCoverage: {
+        payable: 2,
+        rates: [
+          {
+            roomName: "Villa One",
+            acceptedMethods: ["pay_at_property"],
+            payableWith: ["pay_at_property"],
+          },
+          {
+            roomName: "Villa Two",
+            acceptedMethods: ["pay_at_property"],
+            payableWith: ["pay_at_property"],
+          },
+        ],
+      },
+    });
+    const patch = (key: string, paymentSettings: Record<string, unknown>) =>
+      injectJson<Record<string, unknown>>(app!, {
+        method: "PATCH",
+        url: `/api/finance/properties/${propertyId}/payment-settings`,
+        payload: save(key, paymentSettings),
+        headers: { authorization: "Bearer valid-token" },
+      });
+    // Pay at hotel off with card on, or payments off: no rate payable any more, nothing written.
+    for (const [key, settings] of [
+      ["card-only", { acceptedMethods: ["card"] }],
+      ["disabled", { paymentsEnabled: false }],
+    ] as const) {
+      const refused = await patch(key, settings);
+      expect(refused.statusCode).toBe(409);
+      expect(refused.body).toMatchObject({
+        code: "no_rate_payable",
+        category: "conflict",
+        rates: [
+          {
+            roomName: "Villa One",
+            cancellation: "flexible",
+            acceptedMethods: ["pay_at_property"],
+            payableWith: [],
+          },
+          {
+            roomName: "Villa Two",
+            cancellation: "flexible",
+            acceptedMethods: ["pay_at_property"],
+            payableWith: [],
+          },
+        ],
+      });
+    }
+    expect(repository.writeCount).toBe(0);
+    // Keeping pay at hotel saves, and the answer carries the coverage after the change.
+    const kept = await patch("keep-pay-at-hotel", { acceptedMethods: ["pay_at_property"] });
+    expect(kept.statusCode).toBe(200);
+    expect(kept.body).toMatchObject({ rateCoverage: { payable: 2 } });
+    // A provider change can't count card for the new account: judged without it.
+    proposals.length = 0;
+    expect((await patch("to-vayada", { paymentProvider: "vayada" })).statusCode).toBe(200);
+    expect(proposals).toContainEqual({
+      paymentsEnabled: true,
+      acceptedMethods: ["pay_at_property"],
+    });
+    // A page already without a payable rate can still save (nothing gets worse).
+    rates = rates.map((rate) => ({ ...rate, acceptedMethods: ["bank_transfer"] }));
+    expect((await patch("already-none", { acceptedMethods: ["card"] })).statusCode).toBe(200);
+    // A coverage read that fails never blocks a save; it is only logged.
+    rates = rates.map((rate) => ({ ...rate, acceptedMethods: ["pay_at_property"] }));
+    failing = true;
+    expect((await patch("coverage-down", { acceptedMethods: ["card"] })).statusCode).toBe(200);
+    const unread = await injectJson<Record<string, unknown>>(app, {
+      method: "GET",
+      url: `/api/finance/properties/${propertyId}/payment-settings`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(unread.statusCode).toBe(200);
+    expect(unread.body).not.toHaveProperty("rateCoverage");
+    expect(repository.writeCount).toBe(4);
+  });
+
   it("allows Booking owners to update payment settings through the Booking entitlement", async () => {
     const repository = paymentSettingsWriteRepository();
     app = buildFinanceApp({

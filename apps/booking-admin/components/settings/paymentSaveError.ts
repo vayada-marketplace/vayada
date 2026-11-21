@@ -4,7 +4,9 @@ import { ApiErrorResponse } from "@/services/api/client";
 import {
   FinancePaymentSettingsClientError,
   PaymentSettingsValidationError,
+  ratePaymentCoverageRates,
   type PaymentSettingsField,
+  type RatePaymentCoverageRate,
 } from "@/services/api/financePaymentSettingsClient";
 
 const FIELD_MESSAGES: Record<PaymentSettingsField, string> = {
@@ -26,6 +28,8 @@ export interface PaymentSaveError {
   message: string;
   /** Saving again unchanged may work, so the page offers Try again. */
   retry: boolean;
+  /** VAY-2583: the rates a refused save would have left without a way to pay, for the message. */
+  rates?: RatePaymentCoverageRate[];
 }
 
 /** What Payments says when Save fails (VAY-2185): the field to fix, or what to do next. */
@@ -47,6 +51,14 @@ export function paymentSaveError(error: unknown): PaymentSaveError {
     if (fieldMessage) return { message: fieldMessage, retry: false };
     if (error.code === "property_currency_conflict") {
       return { message: "settings.paymentsSave.currencyChanged", retry: false };
+    }
+    // VAY-2583: guests couldn't pay for any rate after the change; the message names them.
+    if (error.code === "no_rate_payable") {
+      return {
+        message: "settings.paymentsSave.noRatePayable",
+        retry: false,
+        rates: ratePaymentCoverageRates(error.details),
+      };
     }
   }
   const status = statusOf(error);

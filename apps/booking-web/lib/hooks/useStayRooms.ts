@@ -86,6 +86,8 @@ export function useStayRooms({
   // chosen here (VAY-2446): without the catalog the page says so and can load it again.
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [roomsFailed, setRoomsFailed] = useState(false);
+  // VAY-2583: why the catalog lists no room ("no_payment_method": contact the hotel).
+  const [roomsUnavailable, setRoomsUnavailable] = useState<"no_payment_method" | null>(null);
   const [catalogLoad, setCatalogLoad] = useState(0);
   // The hotel's location map (VAY-2126), read live with the catalog; null while its switch is off.
   const [locationMap, setLocationMap] = useState<CatalogLocationMap | null>(null);
@@ -101,6 +103,7 @@ export function useStayRooms({
       .then((value) => {
         if (controller.signal.aborted) return;
         setRooms(value.rooms);
+        setRoomsUnavailable(value.unavailable);
         setLocationMap(value.locationMap);
         setDetailsMap(value.detailsMap);
         setRoomSorting(value.roomSorting);
@@ -113,6 +116,7 @@ export function useStayRooms({
   const reloadCatalog = () => {
     setRooms(null);
     setRoomsFailed(false);
+    setRoomsUnavailable(null);
     setCatalogLoad((value) => value + 1);
   };
   // One room is chosen like before; with two or more the guest chooses room by room, each card
@@ -543,6 +547,7 @@ export function useStayRooms({
     hasAddons,
     rooms,
     roomsFailed,
+    roomsUnavailable,
     reloadCatalog,
     stay,
     roomPrices,

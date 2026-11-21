@@ -12,6 +12,7 @@ import {
   publicOfferPaymentSchedules,
 } from "./replacementPublicOfferMapping.js";
 import type { PricingPaymentSwitches } from "./pricingRatePayability.js";
+import { readRatePaymentCoverage } from "./pricingRatePaymentCoverage.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
 import { isSamePlace } from "@vayada/domain-hotels";
@@ -61,7 +62,8 @@ export function createPublicPricingOfferCatalog(
       try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
         const owner = await lockPublicPricingPublication(client, slug);
-        if (!owner) return null;
+        // Awaited here, so the transaction stays open until it has read what it needs.
+        if (!owner) return await noWayToPay(client, slug, payments);
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
         const cancellations = publicOfferCancellations(owner);
@@ -86,6 +88,14 @@ export function createPublicPricingOfferCatalog(
             offers: room.offers.filter((rate) => !!methods.get(rate.ratePlanId)?.length),
           }))
           .filter((room) => room.offers.length > 0);
+        // VAY-2583: rooms on offer, but guests can pay for none of their rates: the page says so.
+        if (
+          !offered.length &&
+          mapped.some((room) => operating.has(room.roomTypeId) && room.offers.length > 0)
+        ) {
+          const current = await lockPublicPricingAuthority(client, slug);
+          return current && isDeepStrictEqual(current, owner.scope) ? NO_WAY_TO_PAY : null;
+        }
         const content = await readRoomContent(client, propertyId, offered);
         // The location map switch (VAY-2126) is read live. A room's own "Show map in room details" works
         // without it (VAY-2445): while it is off, only those rooms carry their place.
@@ -220,6 +230,30 @@ function roomFacts(row: RoomRow) {
         occupancy: occupancy as { maxGuests: number; maxAdults: number; maxChildren: number },
       }
     : null;
+}
+
+/** VAY-2583: a live booking page whose rates guests can't pay for with any way the hotel takes now
+ * (each rate sells only by the ways its own terms accept that are ready) lists no rooms and says
+ * why, so the page can tell guests to contact the hotel instead of "try again". */
+const NO_WAY_TO_PAY = {
+  version: "public-pricing-offers.v1" as const,
+  rooms: [],
+  unavailable: "no_payment_method" as const,
+};
+
+/** Without a publication to serve: NO_WAY_TO_PAY when the page is live and no published rate can be
+ * paid with the hotel's payment settings now (e.g. card on but not ready, pay at hotel off); null
+ * (not found) otherwise, as before. */
+async function noWayToPay(client: PoolClient, slug: string, payments: PricingPaymentSwitches) {
+  const scope = await lockPublicPricingAuthority(client, slug);
+  if (!scope) return null;
+  const live = await client.query(
+    "SELECT 1 FROM distribution.active_public_booking_revision WHERE property_id=$1",
+    [scope.propertyId],
+  );
+  if (!live.rows.length) return null;
+  const coverage = await readRatePaymentCoverage(client, scope.propertyId, payments);
+  return coverage && coverage.rates.length > 0 && coverage.payable === 0 ? NO_WAY_TO_PAY : null;
 }
 
 /** What the booking page's room cards show besides name and photos (VAY-2190): size in square

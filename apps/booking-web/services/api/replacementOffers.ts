@@ -155,6 +155,9 @@ export async function getReplacementCatalog(
   locationMap: CatalogLocationMap | null;
   detailsMap: CatalogLocationMap | null;
   roomSorting: RoomSorting | null;
+  /** VAY-2583: why no room is listed. "no_payment_method": guests can't pay for any rate with a way
+   * the hotel takes now, so they should contact the hotel; null: no reason given. */
+  unavailable: "no_payment_method" | null;
 }> {
   const raw = await bookingWebPublic.get<unknown>(
     `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
@@ -219,6 +222,8 @@ export async function getReplacementCatalog(
     locationMap: catalogLocationMap(raw.locationMap),
     detailsMap: catalogLocationMap(raw.detailsMap),
     roomSorting: catalogRoomSorting(raw.roomSorting),
+    unavailable:
+      raw.unavailable === "no_payment_method" && !rooms.length ? "no_payment_method" : null,
   };
 }
 

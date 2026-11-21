@@ -953,6 +953,21 @@ function RatePayment({
             );
           })}
         </fieldset>
+        {/* VAY-2583: card is ready at the hotel, but this rate doesn't take it (e.g. pay at the
+            property only): guests can't pay it by card until the rate allows card. */}
+        {!!card?.ready && payment.kind === "full" && !methods.includes("card") && (
+          <div className="space-y-2 rounded-[10px] border border-primary-200 bg-primary-50 px-3 py-2.5">
+            <p className="text-[12px] text-gray-700">{t("pricing.rates.allowCardHint")}</p>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => apply({ kind: "full", acceptedMethods: [...methods, "card"] })}
+              className={ui.secondaryButton}
+            >
+              {t("pricing.rates.allowCard")}
+            </button>
+          </div>
+        )}
         {error && (
           <p role="alert" className={ui.errorText}>
             {error}

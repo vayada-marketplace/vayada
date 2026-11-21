@@ -70,6 +70,7 @@ export default function StayRooms({
     hasAddons,
     rooms,
     roomsFailed,
+    roomsUnavailable,
     reloadCatalog,
     stay,
     roomPrices,
@@ -415,21 +416,65 @@ export default function StayRooms({
           <div className="mb-9">{heading}</div>
           {intro}
           {/* VAY-2446: no room cards (the catalog failed, or no room is bookable right now). */}
-          <div
-            role="alert"
-            data-testid="rooms-unavailable"
-            className="mb-6 flex flex-col gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <p>{t("roomsUnavailable")}</p>
-            <button
-              type="button"
-              onClick={reloadCatalog}
-              className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-white hover:bg-primary-700"
+          {roomsUnavailable === "no_payment_method" ? (
+            <NoWayToPayNotice contact={hotel.contact} />
+          ) : (
+            <div
+              role="alert"
+              data-testid="rooms-unavailable"
+              className="mb-6 flex flex-col gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between"
             >
-              {t("retryPrices")}
-            </button>
-          </div>
+              <p>{t("roomsUnavailable")}</p>
+              <button
+                type="button"
+                onClick={reloadCatalog}
+                className="min-h-[44px] shrink-0 rounded-full bg-primary-600 px-5 font-semibold text-white hover:bg-primary-700"
+              >
+                {t("retryPrices")}
+              </button>
+            </div>
+          )}
         </>
+      )}
+    </div>
+  );
+}
+
+/** VAY-2583: the hotel's booking page lists no room because guests can't pay for any rate with a
+ * way the hotel takes now: nothing to retry, so the guest gets the hotel's own contacts instead. */
+function NoWayToPayNotice({
+  contact,
+}: {
+  contact: { phone?: string | null; email?: string | null; whatsapp?: string | null };
+}) {
+  const t = useTranslations("home");
+  const whatsappDigits = contact.whatsapp?.replace(/\D/g, "");
+  const links = [
+    contact.phone && { href: `tel:${contact.phone.replace(/\s+/g, "")}`, label: contact.phone },
+    contact.email && { href: `mailto:${contact.email}`, label: contact.email },
+    whatsappDigits && { href: `https://wa.me/${whatsappDigits}`, label: t("noWayToPayWhatsapp") },
+  ].filter((link): link is { href: string; label: string } => !!link);
+  return (
+    <div
+      role="status"
+      data-testid="rooms-no-way-to-pay"
+      className="mb-6 space-y-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800"
+    >
+      <p className="font-semibold">{t("noWayToPayTitle")}</p>
+      <p>{t("noWayToPayText")}</p>
+      {links.length > 0 && (
+        <ul className="flex flex-wrap gap-2">
+          {links.map((link) => (
+            <li key={link.href}>
+              <a
+                href={link.href}
+                className="inline-flex min-h-[44px] items-center rounded-full bg-primary-600 px-5 font-semibold text-white hover:bg-primary-700"
+              >
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
