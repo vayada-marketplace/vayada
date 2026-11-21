@@ -362,6 +362,8 @@ import { createPgBookingLocationMapRepository } from "./domains/bookingLocationM
 import { createPgBookingRoomSortingRepository } from "./domains/bookingRoomSorting.js";
 import { createPgPartnerConnectionsRepository } from "./domains/partnerConnections.js";
 import { createPgPartnerPromoCodesRepository } from "./domains/partnerPromoCodes.js";
+import { runPartnerBookingSweep } from "./domains/partnerBookingUpdates.js";
+import { deliverPartnerWebhooks } from "./domains/partnerWebhooks.js";
 import { createPgAccountBookingPagesRepository } from "./domains/accountBookingPages.js";
 import { createPgBookingHostNotificationsRepository } from "./domains/bookingHostNotifications.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
@@ -3747,6 +3749,58 @@ const bookingEmailDeliveryTimer = bookingEmailDelivery
   : undefined;
 bookingEmailDeliveryTimer?.unref();
 if (bookingEmailDelivery) runBookingEmailDelivery();
+
+// VAY-2438: booking updates for connected partner apps. Every minute the sweep compares each booking
+// that used a partner's code with what the app was last sent and queues the next version; the
+// delivery POSTs due events, signed. Both stay off until PARTNER_WEBHOOK_SIGNING_KEY is set.
+const partnerWebhookSigningKey = config.partnerWebhookSigningKey;
+const partnerUpdatesPool =
+  partnerWebhookSigningKey && targetDatabaseUrl
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2 })
+    : undefined;
+let activePartnerSweep: Promise<void> | undefined;
+let activePartnerDelivery: Promise<void> | undefined;
+const runPartnerSweep = () => {
+  if (!config.backgroundWorkersEnabled || !partnerUpdatesPool || activePartnerSweep) return;
+  activePartnerSweep = runPartnerBookingSweep({ pool: partnerUpdatesPool })
+    .then((result) => {
+      if (result.queued > 0)
+        app.log.info({ queued: result.queued }, "Partner booking updates queued");
+      if (result.failed.length > 0)
+        app.log.warn({ failed: result.failed }, "Partner booking updates will be retried");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Partner booking update sweep failed"))
+    .finally(() => {
+      activePartnerSweep = undefined;
+    });
+};
+const runPartnerDelivery = () => {
+  if (!config.backgroundWorkersEnabled || !partnerUpdatesPool || !partnerWebhookSigningKey) return;
+  if (activePartnerDelivery) return;
+  activePartnerDelivery = deliverPartnerWebhooks({
+    pool: partnerUpdatesPool,
+    signingKey: partnerWebhookSigningKey,
+    log: app.log,
+  })
+    .then((result) => {
+      if (result.delivered + result.retrying > 0)
+        app.log.info(
+          { delivered: result.delivered, retrying: result.retrying },
+          "Partner webhooks sent",
+        );
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Partner webhook delivery failed"))
+    .finally(() => {
+      activePartnerDelivery = undefined;
+    });
+};
+const partnerSweepTimer = partnerUpdatesPool ? setInterval(runPartnerSweep, 60_000) : undefined;
+partnerSweepTimer?.unref();
+const partnerDeliveryTimer = partnerUpdatesPool
+  ? setInterval(runPartnerDelivery, 15_000)
+  : undefined;
+partnerDeliveryTimer?.unref();
+
 app.addHook("preClose", async () => {
   await pmsInboxDeliveryWorker?.close();
 });
@@ -3757,6 +3811,11 @@ app.addHook("onClose", async () => {
   clearInterval(pricingCardReconciliationTimer);
   clearTimeout(pricingCardReconciliationStart);
   if (bookingEmailDeliveryTimer) clearInterval(bookingEmailDeliveryTimer);
+  if (partnerSweepTimer) clearInterval(partnerSweepTimer);
+  if (partnerDeliveryTimer) clearInterval(partnerDeliveryTimer);
+  await activePartnerSweep;
+  await activePartnerDelivery;
+  await partnerUpdatesPool?.end();
   await activeBookingLifecycleRun;
   await activeBankTransferReminderRun;
   await activePricingCardRefundRun;

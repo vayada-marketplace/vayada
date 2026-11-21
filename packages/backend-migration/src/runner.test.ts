@@ -1901,6 +1901,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "external_api_usage_events",
         "live_ari_watermarks",
         "partner_authorization_codes",
+        "partner_booking_states",
         "partner_connections",
         "partner_tokens",
         "public_booking_content_revisions",
