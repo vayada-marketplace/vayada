@@ -120,22 +120,38 @@ async function channexPropertyId(client: Client, propertyId: string) {
 
 /**
  * VAY-2582: a Channex-connected hotel's time zone change needs the Channex property's time zone. It is
- * read here, before the transaction, so no lock waits on Channex; the transaction checks it again.
+ * read before the transaction, with no database connection held while Channex answers; the transaction
+ * checks the connection again.
  */
 async function channexTimeZoneForChange(
-  client: Client,
+  pool: Pick<pg.Pool, "connect">,
   propertyId: string,
   command: HotelSetupPropertyProfileCommand,
   read: ChannexPropertyTimeZoneRead | undefined,
 ): Promise<ChannexTimeZone | null> {
-  const externalPropertyId = await channexPropertyId(client, propertyId);
-  if (!externalPropertyId) return null;
-  const current = toSharedPropertyProfile(await profileRow(client, propertyId)).profile;
-  const update = command.merge(current);
-  if ("fields" in update || update.profile.location.timezone === current.location.timezone)
-    return null;
-  const timeZone = read ? await read(externalPropertyId).catch(() => null) : null;
-  return { externalPropertyId, timeZone };
+  const client = await pool.connect();
+  let externalPropertyId: string;
+  try {
+    const connected = await channexPropertyId(client, propertyId);
+    if (!connected) return null;
+    const current = toSharedPropertyProfile(await profileRow(client, propertyId)).profile;
+    const update = command.merge(current);
+    if ("fields" in update || update.profile.location.timezone === current.location.timezone)
+      return null;
+    externalPropertyId = connected;
+  } finally {
+    client.release();
+  }
+  try {
+    if (!read) throw new Error("Channex API is not configured");
+    return { externalPropertyId, timeZone: await read(externalPropertyId) };
+  } catch (error) {
+    console.warn("Channex time zone unavailable; the time zone change is refused.", {
+      propertyId,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+    return { externalPropertyId, timeZone: null };
+  }
 }
 
 /**
@@ -163,8 +179,9 @@ async function locationChangeRefusal(
     // A hotel without a time zone yet gets its first one; that moves nothing.
     if (from.timezone) changes.timezone = { from: from.timezone, to: to.timezone };
   }
-  if (from.countryCode && to.countryCode !== from.countryCode)
-    changes.countryCode = { from: from.countryCode, to: to.countryCode };
+  // A stored code may be lower case (e.g. imported); the save always upper-cases it.
+  if (from.countryCode && to.countryCode.toUpperCase() !== from.countryCode.toUpperCase())
+    changes.countryCode = { from: from.countryCode.toUpperCase(), to: to.countryCode };
   if (confirmed || (!changes.timezone && !changes.countryCode)) return null;
   return (await isHotelLive(client, propertyId))
     ? { status: "location_change_unconfirmed", changes }
@@ -182,14 +199,14 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
   readChannexTimeZone?: ChannexPropertyTimeZoneRead,
 ): Promise<HotelSetupPropertyProfileResult> {
   const keyHash = createHash("sha256").update(command.idempotencyKey).digest("hex");
+  const channex = await channexTimeZoneForChange(
+    pool,
+    scope.propertyId,
+    command,
+    readChannexTimeZone,
+  );
   const client = await pool.connect();
   try {
-    const channex = await channexTimeZoneForChange(
-      client,
-      scope.propertyId,
-      command,
-      readChannexTimeZone,
-    );
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     if (!(await lockHotelSetupOwnerAuthority(client, scope, PROFILE_PERMISSIONS)))
       throw new AuthorizationError();
@@ -424,10 +441,19 @@ export async function activateOrdinaryHotelSetupProperty(
   }
 }
 
-/** VAY-2582: whether the hotel has gone live (setup is over for it; Settings changes it from now on). */
+/**
+ * VAY-2582: whether guests can book the hotel: its booking page is published, or it is connected to
+ * Channex. Setup is over for a live hotel (Settings changes it), and its time zone or country changes
+ * only on purpose. A hotel that is merely active (complete basics) can still be mid-setup.
+ */
 export async function isHotelLive(client: AuthorityClient, propertyId: string) {
   const result = await client.query<{ live: boolean }>(
-    "SELECT lifecycle_status='active' AS live FROM hotel_catalog.properties WHERE id=$1::uuid",
+    `SELECT EXISTS (SELECT 1 FROM distribution.active_public_booking_revision active
+         WHERE active.property_id=$1::uuid)
+       OR EXISTS (SELECT 1 FROM pms.channel_connections connection
+         WHERE connection.property_id=$1::uuid AND connection.provider='channex'
+           AND connection.connection_status<>'disconnected'
+           AND connection.external_property_id IS NOT NULL) AS live`,
     [propertyId],
   );
   return result.rows[0]?.live === true;

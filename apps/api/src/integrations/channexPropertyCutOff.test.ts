@@ -169,10 +169,19 @@ describe("Channex property time zone for the profile save (VAY-2582)", () => {
     });
     expect(init.signal).toBeInstanceOf(AbortSignal);
 
+    // Only the time zone counts: settings that the cut-off reader would refuse don't matter here.
+    fetch.mockResolvedValueOnce(Response.json(tiga({ cut_off_days: 99 })));
+    expect(await readZone(id)).toBe("Asia/Makassar");
     fetch.mockResolvedValueOnce(new Response("{}", { status: 503 }));
-    await expect(readZone(id)).rejects.toThrow();
+    await expect(readZone(id)).rejects.toThrow("channex_property_http_503");
     fetch.mockResolvedValueOnce(Response.json({ data: { type: "property", id, attributes: {} } }));
-    await expect(readZone(id)).rejects.toThrow("channex_cut_off_unavailable");
-    await expect(readZone("not-a-channex-id")).rejects.toThrow();
+    await expect(readZone(id)).rejects.toThrow("channex_property_time_zone_unreadable");
+    fetch.mockResolvedValueOnce(
+      Response.json({ data: { id: "another", attributes: tiga().data.attributes } }),
+    );
+    await expect(readZone(id)).rejects.toThrow("channex_property_time_zone_unreadable");
+    await expect(readZone("not-a-channex-id")).rejects.toThrow("channex_property_id_invalid");
+    // An invalid id never reaches Channex.
+    expect(fetch).toHaveBeenCalledTimes(5);
   });
 });

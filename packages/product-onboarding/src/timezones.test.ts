@@ -36,6 +36,11 @@ describe("property time-zone detection", () => {
     expect(zones).toEqual(expect.arrayContaining(["Asia/Colombo", "Asia/Makassar", "Etc/UTC"]));
     expect(zones.length).toBeGreaterThan(300);
     expect(new Set(zones).size).toBe(zones.length);
+    // Only names the API's time zone check accepts (apps/api sharedHotelSetupStatus TIMEZONE_PATTERN).
+    for (const zone of zones) {
+      expect(zone).toMatch(/^[A-Za-z_]+\/[A-Za-z0-9_+./-]+$/);
+      expect(() => new Intl.DateTimeFormat("en", { timeZone: zone })).not.toThrow();
+    }
     const supportedValues = vi.spyOn(Intl, "supportedValuesOf").mockImplementation(() => {
       throw new TypeError("unsupported");
     });

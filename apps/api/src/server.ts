@@ -2473,6 +2473,9 @@ const app = buildApp({
   }),
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
   preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
+  isHotelLive: hotelSetupOrdinaryPool
+    ? (propertyId: string) => isHotelLive(hotelSetupOrdinaryPool, propertyId)
+    : undefined,
   profileImageMediaRepository: platformMediaRuntime?.profileMediaRepository,
   sharedHotelSetupStatusRepository,
   propertyNearbyRepository: config.auth

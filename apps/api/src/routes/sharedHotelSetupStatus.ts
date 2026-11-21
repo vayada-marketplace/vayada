@@ -1060,7 +1060,7 @@ function locationChangeDetail(changes: PropertyLocationChanges): string {
   return `This changes your live hotel's ${moves.join(" and ").replace(/^its /, "")}.${
     timezone
       ? " Your calendar is recalculated, your booking page pauses until you save the calendar again, and your channel manager must use the same time zone."
-      : ""
+      : " Check that your currency and your channel manager still match the new country."
   } Confirm the change to save it.`;
 }
 
@@ -1577,11 +1577,10 @@ function propertyProfileUpdate(
   };
   const profile = parseCanonicalPropertyProfile(merged, errors);
   if (profile && Object.keys(errors).length === 0 && typeof expectedProfileRevision === "number") {
-    return {
-      expectedProfileRevision,
-      profile,
-      confirmLocationChange: confirmLocationChange === true,
-    };
+    // Only a confirmed change carries the flag, so other saves merge exactly as before.
+    return confirmLocationChange === true
+      ? { expectedProfileRevision, profile, confirmLocationChange: true }
+      : { expectedProfileRevision, profile };
   }
   return { fields: errors };
 }

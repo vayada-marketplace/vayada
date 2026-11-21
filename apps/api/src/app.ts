@@ -329,6 +329,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   >;
   /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  /** VAY-2582: whether guests can book the hotel (published page or Channex); imports keep its location. */
+  isHotelLive?: (propertyId: string) => Promise<boolean>;
   /** VAY-2247 first run (GET/POST /api/hotel-setup/properties/:id/first-run); unset: not mounted. */
   hotelFirstRun?: import("./routes/hotelFirstRun.js").HotelFirstRunRouteOptions["createService"];
   /** VAY-2247 wave 2: the setup checklist; mounted with the first run (it reads the first run's state). */
@@ -697,6 +699,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.preparedImportRepository,
       profiles: options.sharedHotelSetupStatusRepository,
       rooms: options.pmsRoomSetup?.facts,
+      isLive: options.isHotelLive,
     });
   }
   if (options.sharedHotelSetupStatusRepository) {

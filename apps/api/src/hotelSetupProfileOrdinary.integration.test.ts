@@ -498,7 +498,8 @@ describe.skipIf(!url)("ordinary property profile writer (VAY-2056)", () => {
         [property],
       );
 
-      // A hotel in setup moves freely: its address search picks the time zone.
+      // A hotel in setup moves freely: its address search picks the time zone. Being active (its basics
+      // complete) doesn't make it live: guests can't book it yet.
       expect(await at(sheffield)).toMatchObject({ status: "updated" });
       expect(await stored()).toMatchObject({ country_code: "GB", timezone: "Europe/London" });
       expect(await at({})).toMatchObject({ status: "updated" });
@@ -506,8 +507,20 @@ describe.skipIf(!url)("ordinary property profile writer (VAY-2056)", () => {
         "UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1",
         [property],
       );
+      expect(await at(sheffield)).toMatchObject({ status: "updated" });
+      expect(await at({})).toMatchObject({ status: "updated" });
+      expect(channexZones).toEqual([]);
 
-      // Live: a new street, postal code and pin keep the time zone and country, and save.
+      // Live: connected to Channex, whose property uses Asia/Colombo.
+      await admin.query(
+        "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','enable')",
+        [property, channexProperty],
+      );
+      await admin.query(
+        "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected',$2)",
+        [property, channexProperty],
+      );
+      // A new street, postal code and pin keep the time zone and country, save, and never ask Channex.
       expect(
         await at({
           streetAddress: "Temple Road 4",
@@ -521,43 +534,30 @@ describe.skipIf(!url)("ordinary property profile writer (VAY-2056)", () => {
           profile: { location: { streetAddress: "Temple Road 4", timezone: "Asia/Colombo" } },
         },
       });
+      // A country stored in lower case is the same country.
+      await admin.query(
+        "UPDATE hotel_catalog.property_locations SET country_code='lk' WHERE property_id=$1",
+        [property],
+      );
+      expect(await at({ streetAddress: "Temple Road 5" })).toMatchObject({ status: "updated" });
+      expect(channexZones).toEqual([]);
 
-      // Live: the Sheffield address search (2026-11-21) is refused until confirmed, and writes nothing.
-      const before = await writes();
+      // The Sheffield address search (2026-11-21): refused, even confirmed, as Channex keeps Asia/Colombo.
+      const live = await writes();
       expect(await at(sheffield)).toEqual({
-        status: "location_change_unconfirmed",
-        changes: {
-          timezone: { from: "Asia/Colombo", to: "Europe/London" },
-          countryCode: { from: "LK", to: "GB" },
-        },
+        status: "channex_time_zone_mismatch",
+        channexTimeZone: "Asia/Colombo",
       });
+      expect(await at(sheffield, true)).toEqual({
+        status: "channex_time_zone_mismatch",
+        channexTimeZone: "Asia/Colombo",
+      });
+      expect(channexZones).toEqual([channexProperty, channexProperty]);
+      // A country change alone needs a confirmation.
       expect(await at({ countryCode: "GB" }, false)).toEqual({
         status: "location_change_unconfirmed",
         changes: { countryCode: { from: "LK", to: "GB" } },
       });
-      expect(await writes()).toEqual(before);
-      expect(await stored()).toMatchObject({
-        country_code: "LK",
-        city: "Dikwella",
-        timezone: "Asia/Colombo",
-      });
-      // Confirmed on purpose, it saves; and back again.
-      expect(await at(sheffield, true)).toMatchObject({ status: "updated" });
-      expect(await stored()).toMatchObject({ country_code: "GB", timezone: "Europe/London" });
-      expect(await at({}, true)).toMatchObject({ status: "updated" });
-      expect(channexZones).toEqual([]);
-
-      // Connected to Channex (Asia/Colombo): another time zone is refused, even confirmed.
-      await admin.query(
-        "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected',$2)",
-        [property, channexProperty],
-      );
-      const connected = await writes();
-      expect(await at({ timezone: "Europe/London" }, true)).toEqual({
-        status: "channex_time_zone_mismatch",
-        channexTimeZone: "Asia/Colombo",
-      });
-      expect(channexZones).toEqual([channexProperty]);
       // Channex not answering, or not configured: nothing is saved.
       channexZone = new Error("channex down");
       expect(await at({ timezone: "Europe/London" }, true)).toEqual({
@@ -566,31 +566,40 @@ describe.skipIf(!url)("ordinary property profile writer (VAY-2056)", () => {
       expect(await at({ timezone: "Europe/London" }, true, null)).toEqual({
         status: "channex_time_zone_unavailable",
       });
-      expect(await writes()).toEqual(connected);
-      // A street change on the connected hotel never asks Channex.
-      channexZones.length = 0;
-      expect(await at({ streetAddress: "Temple Road 5" })).toMatchObject({ status: "updated" });
-      expect(channexZones).toEqual([]);
-      // A hotel already off its Channex time zone may move back to it (confirmed, as it is live).
+      expect(await writes()).toEqual(live);
+      expect(await stored()).toMatchObject({ city: "Dikwella", timezone: "Asia/Colombo" });
+
+      // Once the Channex property uses Europe/London too, the move still needs a confirmation...
+      channexZone = "Europe/London";
+      expect(await at(sheffield)).toEqual({
+        status: "location_change_unconfirmed",
+        changes: {
+          timezone: { from: "Asia/Colombo", to: "Europe/London" },
+          countryCode: { from: "LK", to: "GB" },
+        },
+      });
+      expect(await writes()).toEqual(live);
+      // ...and saves when confirmed on purpose.
+      expect(await at(sheffield, true)).toMatchObject({ status: "updated" });
+      expect(await stored()).toMatchObject({ country_code: "GB", timezone: "Europe/London" });
+      // A hotel off its Channex time zone may move back to it (confirmed, as it is live).
       channexZone = "Asia/Colombo";
-      await admin.query(
-        "UPDATE hotel_catalog.property_locations SET timezone='Europe/London' WHERE property_id=$1",
-        [property],
-      );
-      expect(await at({ timezone: "Asia/Colombo" }, true)).toMatchObject({ status: "updated" });
-      expect(await stored()).toMatchObject({ timezone: "Asia/Colombo" });
-      // A disconnected Channex property no longer holds the time zone.
+      expect(await at({}, true)).toMatchObject({ status: "updated" });
+      expect(await stored()).toMatchObject({ country_code: "LK", timezone: "Asia/Colombo" });
+
+      // Disconnected from Channex (and no booking page), it is no longer live: it moves freely again.
       await admin.query(
         "UPDATE pms.channel_connections SET connection_status='disconnected' WHERE property_id=$1",
         [property],
       );
       channexZones.length = 0;
-      expect(await at({ timezone: "Asia/Kolkata" }, true)).toMatchObject({ status: "updated" });
+      expect(await at({ timezone: "Asia/Kolkata" })).toMatchObject({ status: "updated" });
       expect(channexZones).toEqual([]);
     } finally {
-      await admin
-        .query("DELETE FROM pms.channel_connections WHERE property_id=$1", [property])
-        .catch(() => undefined);
+      for (const table of ["channel_connections", "channel_binding_claims"])
+        await admin
+          .query(`DELETE FROM pms.${table} WHERE property_id=$1`, [property])
+          .catch(() => undefined);
       await pool.end();
       await fixture.drop();
       await admin.end();

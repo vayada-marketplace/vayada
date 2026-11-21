@@ -145,8 +145,9 @@ export function FourStepSetupFlow(props: FourStepSetupFlowProps) {
         if (!accountDone) return setView({ kind: "about_you" });
         const asked = props.initialStep ?? null;
         if (propertyId && (asked === "property" || asked === "location")) {
-          // VAY-2582: a live hotel is past setup; Settings changes its details, never setup.
-          const live = (await props.firstRun.read(propertyId)).live;
+          // VAY-2582: a live hotel is past setup; Settings changes its details, never setup. An unreadable
+          // state opens the steps as before: the server still refuses a live hotel's location move.
+          const live = (await props.firstRun.read(propertyId).catch(() => null))?.live === true;
           if (!active) return;
           if (live)
             return props.onAlreadyFinished

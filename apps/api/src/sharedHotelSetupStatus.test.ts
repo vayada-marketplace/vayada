@@ -2302,7 +2302,7 @@ describe("shared hotel setup status route", () => {
     expect((await save("country")).body).toMatchObject({
       code: "location_change_needs_confirmation",
       detail:
-        "This changes your live hotel's country from LK to GB. Confirm the change to save it.",
+        "This changes your live hotel's country from LK to GB. Check that your currency and your channel manager still match the new country. Confirm the change to save it.",
     });
     expect(await save("channex", { confirmLocationChange: true })).toMatchObject({
       statusCode: 409,
@@ -2326,9 +2326,7 @@ describe("shared hotel setup status route", () => {
       confirmLocationChange: true,
       profile: { location: { countryCode: "GB", timezone: "Europe/London" } },
     });
-    expect(command.mock.calls[0]![2].merge(existing)).toMatchObject({
-      confirmLocationChange: false,
-    });
+    expect(command.mock.calls[0]![2].merge(existing)).not.toHaveProperty("confirmLocationChange");
     command.mockResolvedValueOnce({
       status: "updated",
       profile: profileResponse(propertyId, minimalHotelInput()),

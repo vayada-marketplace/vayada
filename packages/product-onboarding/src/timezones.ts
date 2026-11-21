@@ -37,12 +37,17 @@ export function defaultTimezoneForCountry(countryCode: string): string {
   return getCountry(code as CountryCode)?.timezones[0] ?? "";
 }
 
+/** The hotel time zones the API accepts: an Area/Location name (its TIMEZONE_PATTERN). */
+const AREA_LOCATION = /^[A-Za-z_]+\/[A-Za-z0-9_+./-]+$/;
+
 /**
- * VAY-2582: every IANA time zone in the bundled data, plus UTC. Unlike `availableTimezones`, the list
- * doesn't depend on the runtime's Intl data, so a server-rendered list matches the browser's.
+ * VAY-2582: every IANA Area/Location time zone in the bundled data, plus UTC. Unlike `availableTimezones`,
+ * the list doesn't depend on the runtime's Intl data, so a server-rendered list matches the browser's.
  */
 export function ianaTimezones(): string[] {
-  return Array.from(new Set(["Etc/UTC", ...Object.keys(getAllTimezones()), ...TIMEZONE_OPTIONS]));
+  return Array.from(
+    new Set(["Etc/UTC", ...Object.keys(getAllTimezones()), ...TIMEZONE_OPTIONS]),
+  ).filter((zone) => AREA_LOCATION.test(zone));
 }
 
 export function availableTimezones(): string[] {
