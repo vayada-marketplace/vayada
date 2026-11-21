@@ -20,6 +20,7 @@ import {
 import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { createStripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 import { stripeAmountDecimal, stripeAmountMinor } from "./stripeMoney.js";
+import { createVayadaPaymentRecordedMode } from "./vayadaPaymentRecordedMode.js";
 import { routeVayadaPaymentStripe } from "./vayadaPaymentStripe.js";
 import { handleVayadaPaymentWebhookEvent } from "./vayadaPaymentWebhookEvents.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
@@ -709,6 +710,121 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         ).rows,
       ).toEqual([{ entry_kind: "charge", livemode: true, payment_id: payment[0].id }]);
     } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps calling a stored payment with the keys of the mode it was made in after its hotel leaves the live list (VAY-2569)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    // Its own small pool, as in production.
+    const modePool = new pg.Pool({ connectionString: url, max: 1 });
+    try {
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const testKeys = {
+        createPaymentIntent: vi.fn(),
+        retrievePaymentIntent: vi.fn(),
+        cancelPaymentIntent: vi.fn(),
+      };
+      const liveKeys = { createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent: vi.fn() };
+      let onLiveList = true;
+      const recordedMode = createVayadaPaymentRecordedMode(modePool);
+      const provider = routeVayadaPaymentStripe(
+        {} as never,
+        { provider: testKeys as never, publishableKey: "pk_test_writer" },
+        {
+          account: { provider: liveKeys as never, publishableKey: "pk_live_writer" },
+          for: (propertyId) => onLiveList && propertyId === fixture.propertyId,
+        },
+        recordedMode,
+      );
+
+      // Charged on the live list: the payment records live mode.
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { open: () => true, feePercent: 6 },
+      });
+      expect(result).toMatchObject({ payment: { publishableKey: "pk_live_writer" } });
+      const payment = (
+        await fixture.observer.query(
+          `SELECT id::text,guest_booking_id::text AS booking,provider_payment_intent_id AS intent
+           FROM finance.payments WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(payment.intent).toBe("pi_writer_test");
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: payment.intent }),
+      ).resolves.toBe(true);
+
+      // The hotel leaves the live list before the guest's payment completes: the stored payment is
+      // still read with the live keys, never the test keys (where it doesn't exist).
+      onLiveList = false;
+      const intent = await createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: (result as { bookingReference: string }).bookingReference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      expect(retrievePaymentIntent).toHaveBeenCalledWith("pi_writer_test", null);
+      expect(testKeys.retrievePaymentIntent).not.toHaveBeenCalled();
+
+      // A refund is found through its command; another hotel, an unknown payment and a payment
+      // with no recorded mode give no mode (the lists decide).
+      await fixture.observer.query(
+        `INSERT INTO finance.card_refund_commands (id,property_id,guest_booking_id,payment_id,
+           idempotency_key,requested_by,amount,amount_minor,currency,provider_account_ref,
+           provider_payment_intent_id,provider_refund_id)
+         VALUES (gen_random_uuid(),$1,$2::uuid,$3::uuid,'vay2569-refund','host',1,100,$4,
+           'vayada:'||$1::text,$5,'re_vay2569')`,
+        [
+          fixture.propertyId,
+          payment.booking,
+          payment.id,
+          fixture.f.current.quote.stay.currency,
+          payment.intent,
+        ],
+      );
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, refundId: "re_vay2569" }),
+      ).resolves.toBe(true);
+      const elsewhere = "25690000-0000-4000-8000-000000000001";
+      await expect(
+        recordedMode({ propertyId: elsewhere, paymentIntentId: payment.intent }),
+      ).resolves.toBeNull();
+      await expect(
+        recordedMode({ propertyId: elsewhere, refundId: "re_vay2569" }),
+      ).resolves.toBeNull();
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: "pi_unknown" }),
+      ).resolves.toBeNull();
+      await fixture.observer.query(
+        `INSERT INTO finance.payments (property_id,source_system,payment_kind,payment_method,status,
+           amount,currency,provider_payment_intent_id,payment_metadata)
+         VALUES ($1,'finance','full','card','paid',1,$2,'pi_before_live_mode',
+           '{"chargeType":"vayada_payment"}')`,
+        [fixture.propertyId, fixture.f.current.quote.stay.currency],
+      );
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: "pi_before_live_mode" }),
+      ).resolves.toBeNull();
+    } finally {
+      await modePool.end();
       await fixture.close();
     }
   });

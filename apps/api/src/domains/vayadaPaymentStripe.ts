@@ -27,18 +27,33 @@ export type VayadaPaymentStripe = {
   publishableKey: string;
 };
 
+/** VAY-2569: the mode a stored vayada Payment was made in (its `payment_metadata.livemode`),
+ * found by its PaymentIntent or by a refund of it. Null when none is recorded (payments from
+ * before live mode) or the payment isn't found. */
+export type VayadaPaymentRecordedMode = (lookup: {
+  propertyId: string;
+  paymentIntentId?: string;
+  refundId?: string;
+}) => Promise<boolean | null>;
+
 /** One provider for every pricing-v2 card path: payments whose account reference is
  * vayada:<property> go to Vayada's own Stripe account, everything else to Stripe Connect as
  * before. Callers keep passing the payment's stored reference, so creating, reading, capturing,
- * cancelling and refunding a vayada Payment charge need no other change. A hotel on the live list
- * (`live.for`) is called only with the live keys, every other hotel only with the test keys. */
+ * cancelling and refunding a vayada Payment charge need no other change.
+ *
+ * Which keys: a new charge follows the hotel lists (`live.for`: live keys for a live hotel, test
+ * keys for the rest). A stored payment (read, capture, cancel, refund) uses the keys of the mode
+ * it was made in (`recordedMode`, VAY-2569), whatever the lists say now, so changing the lists
+ * never strands older payments on the wrong keys; only a payment with no recorded mode still
+ * follows the lists. */
 export function routeVayadaPaymentStripe(
   connect: StripeBookingPaymentProvider,
   vayada: VayadaPaymentStripe | undefined,
   live?: { account?: VayadaPaymentStripe; for(propertyId: string): boolean },
+  recordedMode?: VayadaPaymentRecordedMode,
 ): StripeBookingPaymentProvider {
-  const accountFor = (ref: string) => {
-    const livemode = live?.for(ref.slice("vayada:".length)) === true;
+  const accountFor = (ref: string, recorded: boolean | null = null) => {
+    const livemode = recorded ?? live?.for(ref.slice("vayada:".length)) === true;
     const account = livemode ? live?.account : vayada;
     if (!account)
       throw new Error(
@@ -46,6 +61,17 @@ export function routeVayadaPaymentStripe(
       );
     return { ...account, livemode };
   };
+  // A stored payment's account: the mode it was made in, the lists only when none is recorded.
+  const storedAccountFor = async (
+    ref: string,
+    lookup: { paymentIntentId: string } | { refundId: string },
+  ) =>
+    accountFor(
+      ref,
+      recordedMode
+        ? await recordedMode({ propertyId: ref.slice("vayada:".length), ...lookup })
+        : null,
+    );
   // The stored reference stays on the intent, so identity checks compare like with like. When
   // Stripe's answer doesn't say, the intent carries the mode of the keys it was called with, so a
   // live charge is never recorded as test money (left out of the hotel's live payouts).
@@ -84,14 +110,14 @@ export function routeVayadaPaymentStripe(
     async retrievePaymentIntent(paymentIntentId, ref) {
       if (!isVayadaPaymentAccountRef(ref))
         return connect.retrievePaymentIntent(paymentIntentId, ref);
-      const account = accountFor(ref);
+      const account = await storedAccountFor(ref, { paymentIntentId });
       const intent = await account.provider.retrievePaymentIntent(paymentIntentId, null);
       return tagged(sameMode(intent, account), ref, account);
     },
     async capturePaymentIntent(paymentIntentId, ref, idempotencyKey) {
       if (!isVayadaPaymentAccountRef(ref))
         return connect.capturePaymentIntent(paymentIntentId, ref, idempotencyKey);
-      const account = accountFor(ref);
+      const account = await storedAccountFor(ref, { paymentIntentId });
       return tagged(
         await account.provider.capturePaymentIntent(paymentIntentId, null, idempotencyKey),
         ref,
@@ -101,7 +127,7 @@ export function routeVayadaPaymentStripe(
     async cancelPaymentIntent(paymentIntentId, ref, idempotencyKey) {
       if (!isVayadaPaymentAccountRef(ref))
         return connect.cancelPaymentIntent(paymentIntentId, ref, idempotencyKey);
-      const account = accountFor(ref);
+      const account = await storedAccountFor(ref, { paymentIntentId });
       return tagged(
         await account.provider.cancelPaymentIntent(paymentIntentId, null, idempotencyKey),
         ref,
@@ -110,7 +136,11 @@ export function routeVayadaPaymentStripe(
     },
     async createRefund(input) {
       return isVayadaPaymentAccountRef(input.providerAccountRef)
-        ? accountFor(input.providerAccountRef).provider.createRefund({
+        ? (
+            await storedAccountFor(input.providerAccountRef, {
+              paymentIntentId: input.paymentIntentId,
+            })
+          ).provider.createRefund({
             ...input,
             providerAccountRef: null,
             refundApplicationFee: false,
@@ -119,12 +149,15 @@ export function routeVayadaPaymentStripe(
     },
     async listRefunds(paymentIntentId, ref) {
       return isVayadaPaymentAccountRef(ref)
-        ? accountFor(ref).provider.listRefunds(paymentIntentId, null)
+        ? (await storedAccountFor(ref, { paymentIntentId })).provider.listRefunds(
+            paymentIntentId,
+            null,
+          )
         : connect.listRefunds(paymentIntentId, ref);
     },
     async retrieveRefund(refundId, ref) {
       return isVayadaPaymentAccountRef(ref)
-        ? accountFor(ref).provider.retrieveRefund(refundId, null)
+        ? (await storedAccountFor(ref, { refundId })).provider.retrieveRefund(refundId, null)
         : connect.retrieveRefund(refundId, ref);
     },
   };

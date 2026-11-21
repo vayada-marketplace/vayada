@@ -248,6 +248,111 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
     });
   });
 
+  it("calls a stored payment with the keys of the mode it was made in, whatever the lists say now (VAY-2569)", async () => {
+    const propertyId = "24420000-0000-4000-8000-000000000001";
+    const connect = fakeProvider("connect");
+    const test = fakeProvider("test");
+    const live = fakeProvider("live");
+    let onLiveList = true;
+    // pi_test / re_test: made in test mode; pi_live / re_live: live; pi_old: no mode recorded.
+    const recordedMode = vi.fn(
+      async (lookup: { propertyId: string; paymentIntentId?: string; refundId?: string }) => {
+        const id = lookup.paymentIntentId ?? lookup.refundId;
+        return id?.endsWith("_test") ? false : id?.endsWith("_live") ? true : null;
+      },
+    );
+    const provider = routeVayadaPaymentStripe(
+      connect as never,
+      { provider: test as never, publishableKey: "pk_test_vayada" },
+      {
+        account: { provider: live as never, publishableKey: "pk_live_vayada" },
+        for: () => onLiveList,
+      },
+      recordedMode,
+    );
+    const refund = (paymentIntentId: string) =>
+      provider.createRefund({
+        paymentIntentId,
+        providerAccountRef: ref,
+        amountMinor: 1,
+        refundApplicationFee: true,
+        commandId: "c",
+        propertyId,
+        bookingReference: "VAY-ABC123",
+        idempotencyKey: "k",
+      });
+    const storedCalls = (paymentIntentId: string, refundId: string) => [
+      () => provider.retrievePaymentIntent(paymentIntentId, ref),
+      () => provider.capturePaymentIntent(paymentIntentId, ref, "k"),
+      () => provider.cancelPaymentIntent(paymentIntentId, ref, "k"),
+      () => refund(paymentIntentId),
+      () => provider.listRefunds(paymentIntentId, ref),
+      () => provider.retrieveRefund(refundId, ref),
+    ];
+    const stripeCalls = (fake: ReturnType<typeof fakeProvider>) => [
+      fake.retrievePaymentIntent,
+      fake.capturePaymentIntent,
+      fake.cancelPaymentIntent,
+      fake.createRefund,
+      fake.listRefunds,
+      fake.retrieveRefund,
+    ];
+
+    // The hotel is live now, but this payment was made in test mode: the test keys, all six calls.
+    for (const call of storedCalls("pi_test", "re_test")) await call();
+    for (const fn of stripeCalls(test)) expect(fn).toHaveBeenCalledTimes(1);
+    for (const fn of stripeCalls(live)) expect(fn).not.toHaveBeenCalled();
+    await expect(provider.retrievePaymentIntent("pi_test", ref)).resolves.toMatchObject({
+      livemode: false,
+      publishableKey: "pk_test_vayada",
+    });
+    expect(recordedMode).toHaveBeenCalledWith({ propertyId, paymentIntentId: "pi_test" });
+    expect(recordedMode).toHaveBeenCalledWith({ propertyId, refundId: "re_test" });
+
+    // The hotel is back on the test keys, but this payment took real money: the live keys.
+    onLiveList = false;
+    for (const call of storedCalls("pi_live", "re_live")) await call();
+    for (const fn of stripeCalls(live)) expect(fn).toHaveBeenCalledTimes(1);
+
+    // No mode recorded (before live mode): the lists decide, as before.
+    for (const call of storedCalls("pi_old", "re_old")) await call();
+    for (const fn of stripeCalls(live)) expect(fn).toHaveBeenCalledTimes(1);
+    onLiveList = true;
+    for (const call of storedCalls("pi_old", "re_old")) await call();
+    for (const fn of stripeCalls(live)) expect(fn).toHaveBeenCalledTimes(2);
+
+    // A new charge follows the lists and looks nothing up; Connect payments look nothing up.
+    recordedMode.mockClear();
+    await expect(provider.createPaymentIntent(charge(ref))).resolves.toMatchObject({
+      livemode: true,
+      publishableKey: "pk_live_vayada",
+    });
+    await provider.retrievePaymentIntent("pi_connect", "acct_hotel");
+    await provider.retrieveRefund("re_connect", "acct_hotel");
+    expect(recordedMode).not.toHaveBeenCalled();
+    expect(connect.retrievePaymentIntent).toHaveBeenCalledWith("pi_connect", "acct_hotel");
+
+    // If the lookup fails, nothing is guessed: the call fails before Stripe and is retried.
+    recordedMode.mockRejectedValueOnce(new Error("database unavailable"));
+    const before = test.capturePaymentIntent.mock.calls.length;
+    await expect(provider.capturePaymentIntent("pi_test", ref, "k")).rejects.toThrow(
+      "database unavailable",
+    );
+    expect(test.capturePaymentIntent.mock.calls.length).toBe(before);
+    expect(live.capturePaymentIntent).toHaveBeenCalledTimes(1);
+
+    // A payment recorded live is never sent to the test keys, even without live keys configured.
+    const noLive = routeVayadaPaymentStripe(
+      fakeProvider("connect") as never,
+      { provider: test as never, publishableKey: "pk_test_vayada" },
+      { for: () => false },
+      recordedMode,
+    );
+    await expect(noLive.retrievePaymentIntent("pi_live", ref)).rejects.toThrow(
+      "live-mode Stripe account is not configured",
+    );
+  });
+
   it("reads a stored payment's own account for vayada Payment too, not the platform's", () => {
     // Host decline, the request deadline sweep and the guest's booking lookup call Stripe with it.
     expect(stripeCallAccountRef("vayada_payment", ref)).toBe(ref);

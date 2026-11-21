@@ -235,6 +235,7 @@ import { createFinanceSubscriptionService } from "./domains/financeSubscriptionS
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createStripeFinanceSubscriptionProvider } from "./domains/stripeFinanceSubscriptions.js";
 import { createStripeBookingPaymentProvider } from "./domains/stripeBookingPayments.js";
+import { createVayadaPaymentRecordedMode } from "./domains/vayadaPaymentRecordedMode.js";
 import { routeVayadaPaymentStripe } from "./domains/vayadaPaymentStripe.js";
 import { handleVayadaPaymentWebhookEvent } from "./domains/vayadaPaymentWebhookEvents.js";
 import { createStripeConnectProvider } from "./domains/stripeConnect.js";
@@ -552,7 +553,19 @@ const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
 // VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account, with
 // the live keys for live hotels (VAYADA_PAYMENT_LIVE_PROPERTY_IDS, or every hotel except
 // VAYADA_PAYMENT_TEST_PROPERTY_IDS when it is "*") and the test keys for the rest;
-// every other card payment goes through Stripe Connect as before.
+// every other card payment goes through Stripe Connect as before. VAY-2569: a stored payment
+// keeps the mode it was made in (read from finance.payments on a small pool of its own, so it
+// never waits behind a caller that holds a connection while it calls Stripe).
+const vayadaPaymentModePool =
+  config.stripeSubscriptions.secretKey &&
+  (config.vayadaPaymentStripe || config.vayadaPaymentStripeLive)
+    ? new pg.Pool({
+        connectionString: targetDatabaseUrl,
+        max: 2,
+        connectionTimeoutMillis: 3_000,
+        application_name: "vayada-payment-mode",
+      })
+    : undefined;
 const vayadaPaymentAccount = (keys: ApiConfig["vayadaPaymentStripe"]) =>
   keys
     ? {
@@ -568,6 +581,7 @@ const stripeBookingPaymentProvider = config.stripeSubscriptions.secretKey
         account: vayadaPaymentAccount(config.vayadaPaymentStripeLive),
         for: vayadaPaymentLiveFor(config),
       },
+      vayadaPaymentModePool ? createVayadaPaymentRecordedMode(vayadaPaymentModePool) : undefined,
     )
   : undefined;
 
@@ -2676,6 +2690,7 @@ app.addHook("onClose", async () => {
     bankTransferRepository?.close(),
     payoutDestinationRepository?.close(),
     vayadaPaymentWebhookPool?.end(),
+    vayadaPaymentModePool?.end(),
     vayadaPaymentPayoutRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
