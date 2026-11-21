@@ -386,6 +386,7 @@ export const ROUTE_MANIFEST = [
   "POST /api/booking-web/hotels/:slug/bookings/quotes/:quoteId/accept/payment",
   "POST /api/booking-web/hotels/:slug/promo/validate",
   "POST /api/booking/hotels/:hotelId/addon-items",
+  "POST /api/booking/hotels/:hotelId/custom-domain/check",
   "POST /api/booking/hotels/:hotelId/promo-codes",
   "POST /api/booking/hotels/:hotelId/public-bookability",
   "POST /api/booking/hotels/:hotelId/reservations/:bookingId/change-request/:changeRequestId/accept",

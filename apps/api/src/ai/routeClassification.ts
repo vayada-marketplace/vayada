@@ -111,6 +111,7 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "DELETE /api/booking/hotels/:hotelId/custom-domain": askLater("custom_domain"),
   "GET /api/booking/hotels/:hotelId/custom-domain": askLater("custom_domain"),
   "PUT /api/booking/hotels/:hotelId/custom-domain": askLater("custom_domain"),
+  "POST /api/booking/hotels/:hotelId/custom-domain/check": askLater("custom_domain"),
   "GET /api/booking/hotels/:hotelId/policy-check": notForAi("no_caller"),
   "GET /api/booking/hotels/:hotelId/promo-codes": later(),
   "POST /api/booking/hotels/:hotelId/promo-codes": later(),
@@ -529,9 +530,9 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "GET /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges": later(),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges": later(),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/mark-paid":
-    notForAi("broken", "always answers 409"),
+    notForAi("duplicate", "alias of /paid, which PMS Web calls (VAY-2573)"),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid":
-    notForAi("broken", "always answers 409"),
+    later(),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/waive":
     later(),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/confirmation-email": later(),
