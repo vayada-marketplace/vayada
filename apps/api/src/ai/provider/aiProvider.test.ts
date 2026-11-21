@@ -1,8 +1,16 @@
 import { registerTelemetry } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createAiProvider, enabledAiProvidersFromEnv, type AiRunOptions } from "./aiProvider.js";
-import { TASK_SETTINGS, costMicroUsd, type ModelRoute } from "./catalog.js";
+import {
+  createAiProvider,
+  enabledAiProvidersFromEnv,
+  type AiBudget,
+  type AiReservation,
+  type AiReservationRequest,
+  type AiRunOptions,
+  type AiSettlement,
+} from "./aiProvider.js";
+import { TASK_SETTINGS, costMicroUsd, maxCostMicroUsd, type ModelRoute } from "./catalog.js";
 
 const HAIKU: ModelRoute = {
   provider: "bedrock",
@@ -25,6 +33,23 @@ const INPUT = {
 const CREDENTIALS = async () => ({ accessKeyId: "AKIAFAKEFAKEFAKEFAKE", secretAccessKey: "fake" });
 
 type Call = { url: string; headers: Headers; body: Record<string, unknown> };
+
+/** Stands in for the PostgreSQL budget (ai/usage, tested against a real database there). */
+function fakeBudget(answer: AiReservation | Error = { ok: true, reservationId: "res-1" }) {
+  const reservations: AiReservationRequest[] = [];
+  const settlements: [string, AiSettlement][] = [];
+  const budget: AiBudget = {
+    async reserve(request) {
+      reservations.push(request);
+      if (answer instanceof Error) throw answer;
+      return answer;
+    },
+    async settle(reservationId, settlement) {
+      settlements.push([reservationId, settlement]);
+    },
+  };
+  return { budget, reservations, settlements };
+}
 
 function anthropicReply(text: string, usage: Record<string, number>, stopReason = "end_turn") {
   return new Response(
@@ -77,8 +102,10 @@ describe("createAiProvider", () => {
       }),
     );
     let clock = 1_000;
+    const ledger = fakeBudget();
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: ledger.budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
       now: () => (clock += 250),
@@ -117,12 +144,203 @@ describe("createAiProvider", () => {
       priceTableVersion: "2026-11-20",
       latencyMs: 250,
     });
+    expect(ledger.reservations).toEqual([
+      {
+        task: "inbox_translate",
+        context: OPTIONS.context,
+        route: HAIKU,
+        priceTableVersion: "2026-11-20",
+        // (41 + 34 bytes + 2 x 64) x 220 + 4,096 x 550 nano-dollars: every byte a cache-write token
+        reservedMicroUsd: 2_298,
+        holdMs: 60_000,
+      },
+    ]);
+    expect(ledger.settlements).toEqual([
+      [
+        "res-1",
+        {
+          status: "completed",
+          costMicroUsd: 407,
+          usage: {
+            inputTokens: 1_000,
+            cacheReadTokens: 2_000,
+            cacheWriteTokens: 500,
+            outputTokens: 300,
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("calls no model when the account's AI budget is spent or its calls are already running", async () => {
+    const network = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
+    for (const reason of ["allowance_used_up", "busy"] as const) {
+      const ledger = fakeBudget({ ok: false, reason });
+      const provider = createAiProvider({
+        enabledProviders: ["bedrock"],
+        budget: ledger.budget,
+        fetch: network.fetch,
+        awsCredentials: CREDENTIALS,
+      });
+
+      expect(await provider.run("inbox_draft", INPUT, OPTIONS)).toEqual({ ok: false, reason });
+      expect(ledger.settlements).toEqual([]);
+    }
+    expect(network.calls).toHaveLength(0);
+  });
+
+  it("calls no model when the budget can not be checked, and frees its place", async () => {
+    const network = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
+    const warn = vi.fn();
+    const reserve = vi
+      .fn<AiBudget["reserve"]>()
+      .mockRejectedValueOnce(new Error("connection terminated"))
+      .mockResolvedValue({ ok: true, reservationId: "res-2" });
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      budget: { reserve, settle: async () => undefined },
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      log: { warn },
+      maxConcurrentCalls: 1,
+      callWaitMs: 10,
+    });
+
+    expect(await provider.run("inbox_draft", INPUT, OPTIONS)).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: { name: "Error" } }),
+      "AI budget check failed",
+    );
+    expect(network.calls).toHaveLength(0);
+    // The only place under the provider-call limit is free again.
+    expect(await provider.run("inbox_draft", INPUT, OPTIONS)).toMatchObject({ ok: true });
+  });
+
+  it("keeps the full reservation only when a request may have been billed", async () => {
+    const failing = async (
+      fetch: typeof globalThis.fetch,
+      options = OPTIONS,
+      credentials = CREDENTIALS,
+    ) => {
+      const ledger = fakeBudget();
+      const provider = createAiProvider({
+        enabledProviders: ["bedrock"],
+        budget: ledger.budget,
+        fetch,
+        awsCredentials: credentials,
+      });
+      expect(await provider.run("inbox_translate", INPUT, options)).toEqual({
+        ok: false,
+        reason: "failed",
+      });
+      return {
+        settled: ledger.settlements[0]![1],
+        reserved: ledger.reservations[0]!.reservedMicroUsd,
+      };
+    };
+    const unused = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
+
+    // No AWS credentials: nothing was sent.
+    const noCredentials = await failing(unused.fetch, OPTIONS, async () => {
+      throw new Error("Could not load credentials from any providers");
+    });
+    expect(noCredentials.settled).toEqual({ status: "failed", costMicroUsd: 0 });
+
+    // The person gave up before the call started: nothing was sent.
+    const gaveUp = await failing(unused.fetch, { ...OPTIONS, abortSignal: AbortSignal.abort() });
+    expect(gaveUp.settled).toEqual({ status: "failed", costMicroUsd: 0 });
+    expect(unused.calls).toHaveLength(0);
+
+    // The connection broke after sending, then the retry was throttled: the first may be billed.
+    let attempt = 0;
+    const broken = fakeFetch(() => {
+      attempt += 1;
+      if (attempt === 1)
+        throw new TypeError("fetch failed", { cause: new Error("read ECONNRESET") });
+      return new Response(JSON.stringify({ message: "Too many requests" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after-ms": "1" },
+      });
+    });
+    const brokeAfterSending = await failing(broken.fetch);
+    expect(brokeAfterSending.settled).toEqual({
+      status: "failed",
+      costMicroUsd: brokeAfterSending.reserved,
+    });
+  });
+
+  it("still returns a paid answer whose usage could not be recorded", async () => {
+    const network = fakeFetch(() => anthropicReply("Hello", { input_tokens: 1, output_tokens: 1 }));
+    const warn = vi.fn();
+    const budget: AiBudget = {
+      reserve: async () => ({ ok: true, reservationId: "res-9" }),
+      settle: async () => {
+        throw new Error("connection terminated");
+      },
+    };
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      budget,
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      log: { warn },
+    });
+
+    expect(await provider.run("inbox_translate", INPUT, OPTIONS)).toMatchObject({
+      ok: true,
+      text: "Hello",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ reservationId: "res-9" }),
+      "AI usage could not be recorded",
+    );
+  });
+
+  it("runs at most the provider-call limit at once, across all accounts", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const network = fakeFetch(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const ledger = fakeBudget();
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      budget: ledger.budget,
+      fetch: network.fetch,
+      awsCredentials: CREDENTIALS,
+      maxConcurrentCalls: 1,
+      callWaitMs: 10,
+    });
+    const otherAccount: AiRunOptions = {
+      context: { ...OPTIONS.context, organizationId: "00000000-0000-4000-8000-000000000009" },
+    };
+
+    const first = provider.run("inbox_translate", INPUT, OPTIONS);
+    await vi.waitFor(() => expect(network.calls).toHaveLength(1));
+    expect(await provider.run("inbox_translate", INPUT, otherAccount)).toEqual({
+      ok: false,
+      reason: "busy",
+    });
+    expect(ledger.reservations).toHaveLength(1);
+
+    answer(anthropicReply("Hello", { input_tokens: 1, output_tokens: 1 }));
+    expect(await first).toMatchObject({ ok: true });
+    const third = provider.run("inbox_translate", INPUT, otherAccount);
+    await vi.waitFor(() => expect(network.calls).toHaveLength(2));
+    answer(anthropicReply("Hello", { input_tokens: 1, output_tokens: 1 }));
+    expect(await third).toMatchObject({ ok: true });
   });
 
   it("calls no model while no provider is switched on", async () => {
     const network = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
     const provider = createAiProvider({
       enabledProviders: [],
+      budget: fakeBudget().budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
     });
@@ -139,6 +357,7 @@ describe("createAiProvider", () => {
     const offProvider = { provider: "other", region: "eu", model: "m" } as unknown as ModelRoute;
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: fakeBudget().budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
       tasks: {
@@ -158,6 +377,7 @@ describe("createAiProvider", () => {
     const warn = vi.fn();
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: fakeBudget().budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
       log: { warn },
@@ -199,8 +419,10 @@ describe("createAiProvider", () => {
         ),
     );
     const warn = vi.fn();
+    const ledger = fakeBudget();
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: ledger.budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
       log: { warn },
@@ -210,6 +432,8 @@ describe("createAiProvider", () => {
       ok: false,
       reason: "failed",
     });
+    // The provider turned the request down: nothing billed, the reservation is released.
+    expect(ledger.settlements).toEqual([["res-1", { status: "failed", costMicroUsd: 0 }]]);
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
         task: "inbox_translate",
@@ -229,8 +453,10 @@ describe("createAiProvider", () => {
       anthropicReply("   ", { input_tokens: 100, output_tokens: 1 }),
     ];
     const network = fakeFetch(() => replies.shift()!);
+    const ledger = fakeBudget();
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: ledger.budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
     });
@@ -250,6 +476,13 @@ describe("createAiProvider", () => {
       ok: false,
       reason: "failed",
     });
+    // All three were answered and billed.
+    expect(ledger.settlements.map(([, settlement]) => settlement.costMicroUsd)).toEqual([
+      22, 2_264, 12,
+    ]);
+    expect(ledger.settlements.every(([, settlement]) => settlement.status === "completed")).toBe(
+      true,
+    );
   });
 
   it("logs the provider's status when it keeps throttling", async () => {
@@ -261,8 +494,10 @@ describe("createAiProvider", () => {
         }),
     );
     const warn = vi.fn();
+    const ledger = fakeBudget();
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: ledger.budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
       log: { warn },
@@ -273,6 +508,8 @@ describe("createAiProvider", () => {
       reason: "failed",
     });
     expect(network.calls).toHaveLength(2);
+    // Bedrock turned both attempts down, so nothing was billed.
+    expect(ledger.settlements).toEqual([["res-1", { status: "failed", costMicroUsd: 0 }]]);
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({ error: { name: "AI_RetryError", statusCode: 429 } }),
       "AI provider call failed",
@@ -298,6 +535,7 @@ describe("createAiProvider", () => {
     );
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: fakeBudget().budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
     });
@@ -311,13 +549,15 @@ describe("createAiProvider", () => {
     expect(recorded).not.toContain("is the room free");
   });
 
-  it("gives up after the timeout", async () => {
+  it("gives up after the timeout and keeps the full reservation, since the call may have run", async () => {
+    const ledger = fakeBudget();
     const slowFetch = (async (_input: string | URL | Request, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
       })) as typeof globalThis.fetch;
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
+      budget: ledger.budget,
       fetch: slowFetch,
       awsCredentials: CREDENTIALS,
       timeoutMs: 20,
@@ -327,6 +567,10 @@ describe("createAiProvider", () => {
       ok: false,
       reason: "failed",
     });
+    expect(ledger.reservations[0]!.holdMs).toBe(15_020);
+    expect(ledger.settlements).toEqual([
+      ["res-1", { status: "failed", costMicroUsd: ledger.reservations[0]!.reservedMicroUsd }],
+    ]);
   });
 });
 
@@ -341,6 +585,13 @@ describe("costMicroUsd", () => {
     // 100,001 x 550 + 1,000 x 2,750 nano-dollars, rounded up to whole micro-dollars
     expect(costMicroUsd(HAIKU, usage)).toBe(57_751);
     expect(costMicroUsd(HAIKU, { ...usage, inputTokens: 100_000 })).toBe(11_550);
+  });
+
+  it("prices the most a call can cost, at long-context rates when the prompt could reach them", () => {
+    // 100,000 x 220 + 4,096 x 550 nano-dollars
+    expect(maxCostMicroUsd(HAIKU, 100_000, 4_096)).toBe(24_253);
+    // 100,001 x 1,100 + 4,096 x 2,750 nano-dollars
+    expect(maxCostMicroUsd(HAIKU, 100_001, 4_096)).toBe(121_266);
   });
 
   it("has no price for routes outside the table", () => {
