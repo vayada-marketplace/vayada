@@ -7,7 +7,10 @@ import {
 } from "./pricingCardPaymentCompletion.js";
 import { applyCardRefundMoney } from "./pricingCardRefund.js";
 import { stripeAmountDecimal } from "./stripeMoney.js";
-import { recordVayadaPaymentDispute } from "./vayadaPaymentLedger.js";
+import {
+  recordVayadaPaymentDispute,
+  recordVayadaPaymentDisputeCounteredFee,
+} from "./vayadaPaymentLedger.js";
 
 type StripeEvent = {
   id?: unknown;
@@ -17,6 +20,11 @@ type StripeEvent = {
 };
 type Log = { info(obj: object, msg: string): void; warn(obj: object, msg: string): void };
 export type VayadaPaymentWebhookResult = "handled" | "ignored";
+export type VayadaPaymentWebhookOptions = {
+  /** Stripe's dispute countered fee in Vayada's account currency (euro cents; VAY-2572). 0 or
+   * unset: Vayada bears it. */
+  disputeCounteredFeeMinor?: number;
+};
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -34,10 +42,11 @@ export async function handleVayadaPaymentWebhookEvent(
   pool: Pick<pg.Pool, "connect">,
   event: StripeEvent,
   log: Log,
+  options: VayadaPaymentWebhookOptions = {},
 ): Promise<VayadaPaymentWebhookResult> {
   const client = await pool.connect();
   try {
-    return await handle(client, event, log);
+    return await handle(client, event, log, options);
   } finally {
     client.release();
   }
@@ -47,6 +56,7 @@ async function handle(
   client: pg.PoolClient,
   event: StripeEvent,
   log: Log,
+  options: VayadaPaymentWebhookOptions,
 ): Promise<VayadaPaymentWebhookResult> {
   const type = text(event.type);
   const object = record(event.data?.object);
@@ -132,6 +142,18 @@ async function handle(
         stripeFeeMinor: stripeFeeMinor ?? 0,
         livemode: event.livemode === true,
       });
+      // A lost dispute overturned: Stripe returns its countered fee too (VAY-2572).
+      if (!withdrawn)
+        await recordVayadaPaymentDisputeCounteredFee(client, {
+          propertyId: payment.propertyId,
+          guestBookingId: payment.guestBookingId,
+          paymentId: payment.id,
+          disputeId,
+          phase: "returned",
+          currency: payment.currency,
+          feeMinor: 0,
+          livemode: event.livemode === true,
+        });
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -166,9 +188,74 @@ async function handle(
         ? "vayada Payment: a guest disputed a card payment; answer it in Stripe before its deadline"
         : "vayada Payment: a card dispute closed",
     );
+    if (type === "charge.dispute.closed")
+      await chargeDisputeCounteredFee(client, event, object, payment, log, options);
     return "handled";
   }
   return "ignored";
+}
+
+/** VAY-2572: a dispute that closed lost after Vayada answered it (Stripe counts an answer as an
+ * evidence submission) cost Stripe's dispute countered fee, which Stripe takes from Vayada's account
+ * without a dispute event or an amount. It's booked at the configured price in the stay's currency,
+ * converted at the dispute's own rate (its withdrawal in Vayada's currency against its amount in the
+ * stay's), and taken from the hotel's next payout. A fee that can't be priced is logged for a
+ * person, like an unknown dispute fee. */
+async function chargeDisputeCounteredFee(
+  client: pg.PoolClient,
+  event: StripeEvent,
+  object: Record<string, unknown>,
+  payment: NonNullable<Awaited<ReturnType<typeof findPayment>>>,
+  log: Log,
+  options: VayadaPaymentWebhookOptions,
+) {
+  const feeMinor = options.disputeCounteredFeeMinor ?? 0;
+  const disputeId = text(object["id"]);
+  const answered = (minor(record(object["evidence_details"])["submission_count"]) ?? 0) > 0;
+  if (!disputeId || text(object["status"]) !== "lost" || !answered || feeMinor <= 0) return;
+  const amountMinor = minor(object["amount"]);
+  const withdrawal = (
+    Array.isArray(object["balance_transactions"]) ? object["balance_transactions"] : []
+  )
+    .map(record)
+    .find((bt) => (minor(bt["amount"]) ?? 0) < 0);
+  // The configured fee is in euros, Vayada's account currency.
+  const stayFeeMinor =
+    withdrawal && amountMinor !== null && text(withdrawal["currency"])?.toUpperCase() === "EUR"
+      ? stayCurrencyFee(withdrawal, feeMinor, payment.currency, amountMinor)
+      : null;
+  const ids = { propertyId: payment.propertyId, paymentId: payment.id, disputeId };
+  if (stayFeeMinor === null || stayFeeMinor <= 0) {
+    log.warn(
+      { ...ids, feeMinor, feeCurrency: "EUR" },
+      "vayada Payment: dispute countered fee unknown in the stay's currency; adjust the hotel's balance by hand",
+    );
+    return;
+  }
+  let recorded: Awaited<ReturnType<typeof recordVayadaPaymentDisputeCounteredFee>>;
+  try {
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+    recorded = await recordVayadaPaymentDisputeCounteredFee(client, {
+      propertyId: payment.propertyId,
+      guestBookingId: payment.guestBookingId,
+      paymentId: payment.id,
+      disputeId,
+      phase: "charged",
+      currency: payment.currency,
+      feeMinor: stayFeeMinor,
+      livemode: event.livemode === true,
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  }
+  log.info(
+    { ...ids, feeMinor, feeCurrency: "EUR", stayFeeMinor, recorded },
+    recorded === "not_owed"
+      ? "vayada Payment: dispute countered fee not taken from the hotel (nothing was taken for the dispute); Vayada bears it"
+      : "vayada Payment: dispute countered fee taken from the hotel's next payout",
+  );
 }
 
 /** A refund someone made in Stripe's dashboard on Vayada's own account (VAY-2442): recorded like

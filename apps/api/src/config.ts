@@ -219,6 +219,13 @@ export type ApiConfig = {
   /** VAY-2442: Vayada's vayada Payment fee, in percent of each card payment, on top of the plan's
    * fee and kept on refunds. Default 6 (Flamur, 2026-10-31). */
   vayadaPaymentFeePercent: number;
+  /** VAY-2572: Stripe's "dispute countered fee" in euro cents (VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR,
+   * euros, default 20; 0 turns it off). Stripe charges it on Vayada's EUR account when Vayada answers
+   * a dispute and keeps it when Vayada loses, but sends neither the fee nor its amount with the
+   * dispute, so the price list's amount is used: a dispute that closes lost after Vayada answered it
+   * takes this from the hotel's next payout (in the stay's currency), and gives it back if the loss
+   * is later overturned. */
+  vayadaPaymentDisputeCounteredFeeMinor: number;
   /** Browser origins allowed on the identity privacy routes. */
   identityPrivacyAllowedOrigins: string[];
   /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
@@ -623,6 +630,16 @@ function loadVayadaPaymentStripe(
       `${prefix}SECRET_KEY and ${prefix}PUBLISHABLE_KEY must both be Stripe ${mode}-mode keys`,
     );
   return { secretKey, publishableKey, ...(webhookSecret ? { webhookSecret } : {}) };
+}
+
+function readVayadaPaymentDisputeCounteredFeeMinor(env: NodeJS.ProcessEnv): number {
+  const value = readOptionalEnv(env, "VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR");
+  if (value === undefined) return 2000;
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(value) || Number(value) > 100)
+    throw new Error(
+      "VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR must be an amount in euros from 0 to 100",
+    );
+  return Math.round(Number(value) * 100);
 }
 
 function readVayadaPaymentFeePercent(env: NodeJS.ProcessEnv): number {
@@ -1493,6 +1510,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       loadVayadaPaymentStripe(env, "test") !== undefined,
     ),
     vayadaPaymentFeePercent: readVayadaPaymentFeePercent(env),
+    vayadaPaymentDisputeCounteredFeeMinor: readVayadaPaymentDisputeCounteredFeeMinor(env),
     identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),
     // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
     contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [
