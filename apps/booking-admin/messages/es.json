@@ -717,6 +717,7 @@
   "settings.billing.switchFromNextMonth": "Cambiar a partir del próximo mes",
   "settings.billing.cancelSwitch": "Cancelar cambio",
   "settings.billing.comingSoon": "Xendit y vayada Payments aún no aceptan pagos con tarjeta en línea. Elige Stripe Connect para guardar.",
+  "settings.billing.vayadaStopped": "Los nuevos pagos con tarjeta mediante vayada Payment están en pausa para este hotel. Desactiva la tarjeta para guardar o cambia abajo la cuenta bancaria de pagos.",
   "settings.billing.onlineCard": "Tarjeta de crédito",
   "settings.billing.cardNotReadyTitle": "Los huéspedes aún no pueden pagar con tarjeta.",
   "settings.billing.cardNotReadyNotConnected": "La tarjeta de crédito está activada, pero no hay ninguna cuenta de pago conectada.",

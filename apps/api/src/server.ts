@@ -82,6 +82,7 @@ import {
   replacementPricingManualPaymentMethods,
   stripeSubscriptionRuntimeEnabled,
   vayadaPaymentLiveFor,
+  vayadaPaymentManageableFor,
   vayadaPaymentOpenFor,
 } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
@@ -536,6 +537,8 @@ const bookingDashboardMetricsReadPort =
 
 // VAY-2442: the hotels vayada Payment is on for (the switch, its Stripe keys and the hotel list).
 const vayadaPaymentOpen = vayadaPaymentOpenFor(config);
+// VAY-2570: managing the setup (payment settings, payout account) stays open to a stopped hotel.
+const vayadaPaymentManageable = vayadaPaymentManageableFor(config);
 // VAY-2442: events from vayada Payment's own Stripe account, one endpoint per mode with its own
 // secret; both share this pool.
 const vayadaPaymentWebhookPool =
@@ -804,7 +807,9 @@ const financeRepository =
         stripeConnectProvider,
         afterPaymentChange,
         // A hotel can choose vayada Payment only where it can also save its payout account.
-        vayadaPaymentOpen: payoutDestinationRepository ? vayadaPaymentOpen : undefined,
+        vayadaPaymentOpen: payoutDestinationRepository ? vayadaPaymentManageable : undefined,
+        vayadaPaymentStopped: (propertyId: string) =>
+          vayadaPaymentManageable(propertyId) && !vayadaPaymentOpen(propertyId),
         vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
       })
     : undefined;
@@ -2325,7 +2330,7 @@ const app = buildApp({
   financeRepository,
   financeBankTransfer: bankTransferRepository ? { repository: bankTransferRepository } : undefined,
   financePayoutDestination: payoutDestinationRepository
-    ? { repository: payoutDestinationRepository, open: vayadaPaymentOpen }
+    ? { repository: payoutDestinationRepository, open: vayadaPaymentManageable }
     : undefined,
   vayadaPaymentWebhooks:
     handleVayadaPaymentWebhook && config.vayadaPaymentStripe?.webhookSecret

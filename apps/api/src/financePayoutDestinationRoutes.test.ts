@@ -1,7 +1,12 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import { expect, it, vi } from "vitest";
-import { loadConfig, vayadaPaymentLiveFor, vayadaPaymentOpenFor } from "./config.js";
+import {
+  loadConfig,
+  vayadaPaymentLiveFor,
+  vayadaPaymentManageableFor,
+  vayadaPaymentOpenFor,
+} from "./config.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
 
 const propertyId = "24420000-0000-4000-8000-000000000002";
@@ -34,7 +39,7 @@ const summary = {
 };
 const path = `/api/finance/properties/${propertyId}/payout-destination`;
 
-async function appFor(variant: string) {
+async function appFor(variant: string, open?: (propertyId: string) => boolean) {
   const repository = {
     read: vi.fn(async () => summary),
     execute: vi.fn(async () => ({ status: "applied" as const, summary })),
@@ -78,7 +83,7 @@ async function appFor(variant: string) {
     prefix: "/api",
     repository,
     // "unlisted": an owner whose hotel isn't on VAYADA_PAYMENT_PROPERTY_IDS.
-    open: (id: string) => variant !== "unlisted" && id === propertyId,
+    open: open ?? ((id: string) => variant !== "unlisted" && id === propertyId),
     propertyAccessRepository: {
       findMembershipPropertyScope: async () => ({
         mode: "assigned",
@@ -449,4 +454,84 @@ it("keeps vayada Payment off unless VAYADA_PAYMENT_ENABLED is set", () => {
   expect(() => loadConfig({ VAYADA_PAYMENT_ENABLED: "maybe" })).toThrow(
     "VAYADA_PAYMENT_ENABLED must be true or false",
   );
+});
+
+// VAY-2570: option B's production shape (every hotel live, one test hotel, one stopped hotel).
+const vay2570Keys = {
+  VAYADA_PAYMENT_STRIPE_SECRET_KEY: "sk_test_vay2570",
+  VAYADA_PAYMENT_STRIPE_PUBLISHABLE_KEY: "pk_test_vay2570",
+  VAYADA_PAYMENT_STRIPE_LIVE_SECRET_KEY: "rk_live_vay2570",
+  VAYADA_PAYMENT_STRIPE_LIVE_PUBLISHABLE_KEY: "pk_live_vay2570",
+  VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "whsec_vay2570",
+};
+
+it("lets a stopped hotel manage its vayada Payment setup but take no new charges (VAY-2570)", () => {
+  const stoppedHotel = "25700000-0000-4000-8000-0000000000aa";
+  const testHotel = "25700000-0000-4000-8000-0000000000bb";
+  const keys = vay2570Keys;
+  const everyHotel = {
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_TEST_PROPERTY_IDS: testHotel,
+    VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: stoppedHotel,
+  };
+  const config = loadConfig({ ...keys, ...everyHotel });
+  const manageable = vayadaPaymentManageableFor(config);
+  const open = vayadaPaymentOpenFor(config);
+  // The stopped hotel: its owner can still save payment settings (turn card off) and fix the
+  // payout bank account, but no new card charge starts.
+  expect([manageable(stoppedHotel), manageable(stoppedHotel.toUpperCase())]).toEqual([true, true]);
+  expect([open(stoppedHotel), open(stoppedHotel.toUpperCase())]).toEqual([false, false]);
+  // Every other hotel, live or test, both.
+  expect([manageable(propertyId), open(propertyId)]).toEqual([true, true]);
+  expect([manageable(testHotel), open(testHotel)]).toEqual([true, true]);
+  // Everything else that closes vayada Payment closes managing it too: the switch, the charge
+  // list, and the keys of the hotel's mode (live keys with the live webhook).
+  const listed = {
+    ...keys,
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: testHotel,
+  };
+  expect(
+    vayadaPaymentManageableFor(
+      loadConfig({ ...keys, ...everyHotel, VAYADA_PAYMENT_ENABLED: "false" }),
+    )(stoppedHotel),
+  ).toBe(false);
+  expect(vayadaPaymentManageableFor(loadConfig(listed))(propertyId)).toBe(false);
+  expect(vayadaPaymentManageableFor(loadConfig(listed))(testHotel)).toBe(true);
+  expect(
+    vayadaPaymentManageableFor(
+      loadConfig({ ...keys, ...everyHotel, VAYADA_PAYMENT_STRIPE_LIVE_WEBHOOK_SECRET: "" }),
+    )(stoppedHotel),
+  ).toBe(false);
+});
+
+it("serves a stopped hotel's payout account with the rule server.ts gives the routes (VAY-2570)", async () => {
+  const config = loadConfig({
+    ...vay2570Keys,
+    VAYADA_PAYMENT_ENABLED: "true",
+    VAYADA_PAYMENT_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_LIVE_PROPERTY_IDS: "*",
+    VAYADA_PAYMENT_TEST_PROPERTY_IDS: "25700000-0000-4000-8000-0000000000bb",
+    VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: propertyId,
+  });
+  // With the new-charge rule (before VAY-2570) the owner was locked out; with the manageable rule
+  // the owner reads and replaces the account as usual.
+  for (const [rule, status] of [
+    [vayadaPaymentOpenFor(config), 404],
+    [vayadaPaymentManageableFor(config), 200],
+  ] as const) {
+    const { app, repository, publisher } = await appFor("owner", rule);
+    try {
+      const read = await app.inject({ method: "GET", url: path });
+      const write = await app.inject({ method: "PUT", url: path, payload: body });
+      expect([read.statusCode, write.statusCode]).toEqual([status, status]);
+      expect(repository.execute).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+      expect(publisher.publish).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+      if (status === 200) expect(write.json().destination.maskedAccount).toBe("•••• 6789");
+    } finally {
+      await app.close();
+    }
+  }
 });

@@ -1726,6 +1726,86 @@ describe("finance route contracts", () => {
     }
   });
 
+  it("lets a stopped hotel save its settings, but not with card on through vayada Payment (VAY-2570)", async () => {
+    const save = (key: string, paymentSettings: Record<string, unknown>) => ({
+      commandId: `cmd-vay-2570-${key}`,
+      idempotencyKey: `finance-payment-settings-vay-2570-${key}`,
+      paymentSettings,
+    });
+    const full = (acceptedMethods: string[]) => ({
+      paymentsEnabled: true,
+      paymentProvider: "vayada",
+      acceptedMethods,
+      defaultCurrency: "EUR",
+      supportedCurrencies: ["EUR"],
+      requiresManualReview: false,
+    });
+    for (const stopped of [true, false]) {
+      const repository = paymentSettingsWriteRepository();
+      const saved = await repository.getPaymentSettings(propertyId);
+      app = buildFinanceApp({
+        repository: {
+          ...repository,
+          // Saved: vayada Payment with card on (as before the hotel was stopped).
+          getPaymentSettings: async (id: string) =>
+            id === propertyId
+              ? {
+                  ...saved!,
+                  paymentsEnabled: true,
+                  paymentProvider: "vayada",
+                  acceptedMethods: ["card"],
+                }
+              : null,
+          vayadaPaymentAvailable: () => true,
+          vayadaPaymentStopped: () => stopped,
+          vayadaPaymentFeePercent: 6,
+        },
+        permissions: financeManagePermissions(),
+      });
+      const read = await injectJson<Record<string, unknown>>(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/payment-settings`,
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(read.body).toMatchObject({
+        vayadaPayment: stopped
+          ? { available: true, feePercent: 6, stopped: true }
+          : { available: true, feePercent: 6 },
+      });
+      if (!stopped) expect(read.body.vayadaPayment).not.toHaveProperty("stopped");
+      const patch = (key: string, paymentSettings: Record<string, unknown>) =>
+        injectJson<Record<string, unknown>>(app!, {
+          method: "PATCH",
+          url: `/api/finance/properties/${propertyId}/payment-settings`,
+          payload: save(`${stopped}-${key}`, paymentSettings),
+          headers: { authorization: "Bearer valid-token" },
+        });
+      // Card on with vayada Payment, in full and as a partial patch over the saved vayada setup.
+      for (const [key, settings] of [
+        ["full-card", full(["card"])],
+        ["partial-card", { acceptedMethods: ["card", "pay_at_property"] }],
+        ["partial-enable", { paymentsEnabled: true }],
+      ] as const) {
+        const response = await patch(key, settings);
+        if (stopped) {
+          expect(response.statusCode).toBe(409);
+          expect(response.body).toMatchObject({
+            code: "vayada_payment_stopped",
+            category: "conflict",
+          });
+        } else {
+          expect(response.statusCode).toBe(200);
+        }
+      }
+      // Card off saves for a stopped hotel too (the fast stop), keeping vayada Payment chosen.
+      expect((await patch("card-off", full(["pay_at_property"]))).statusCode).toBe(200);
+      expect((await patch("disabled", { paymentsEnabled: false })).statusCode).toBe(200);
+      expect(repository.writeCount).toBe(stopped ? 2 : 5);
+      await app.close();
+      app = null;
+    }
+  });
+
   it("allows Booking owners to update payment settings through the Booking entitlement", async () => {
     const repository = paymentSettingsWriteRepository();
     app = buildFinanceApp({

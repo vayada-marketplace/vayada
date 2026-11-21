@@ -717,6 +717,7 @@
   "settings.billing.switchFromNextMonth": "Переключить со следующего месяца",
   "settings.billing.cancelSwitch": "Отменить переключение",
   "settings.billing.comingSoon": "Xendit и vayada Payments пока не принимают онлайн-оплату картой. Чтобы сохранить, выберите Stripe Connect.",
+  "settings.billing.vayadaStopped": "Новые платежи картой через vayada Payment для этого отеля приостановлены. Отключите карту, чтобы сохранить, или измените ниже банковский счёт для выплат.",
   "settings.billing.onlineCard": "Банковская карта",
   "settings.billing.cardNotReadyTitle": "Гости пока не могут платить картой.",
   "settings.billing.cardNotReadyNotConnected": "Оплата картой включена, но платёжный аккаунт не подключён.",

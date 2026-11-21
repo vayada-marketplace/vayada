@@ -389,6 +389,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [vayadaPayment, setVayadaPayment] = useState<{
     available: boolean;
     feePercent?: number;
+    stopped?: boolean;
   } | null>(null);
   // VAY-2442: whether the hotel saved a payout account (the panel tells).
   const [vayadaPayoutSaved, setVayadaPayoutSaved] = useState<boolean | null>(null);
@@ -1116,6 +1117,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         (paymentProvider === "vayada" && vayadaPayment?.available !== true))
     ) {
       return refuse("settings.billing.comingSoon");
+    }
+    // VAY-2570: a stopped hotel keeps its vayada Payment setup but can't take card with it; the
+    // server refuses the same, so card has to go off before anything else here saves.
+    if (settings.online_card_payment && paymentProvider === "vayada" && vayadaPayment?.stopped) {
+      return refuse("settings.billing.vayadaStopped");
     }
     const hotelId = readBookingHotelId(settings);
     if (!hotelId) return refuse("admin.selectAHotelBeforeSavingPaymentSettings");

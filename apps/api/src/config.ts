@@ -204,8 +204,10 @@ export type ApiConfig = {
   /** VAY-2442: the hotels whose vayada Payment money is real (VAYADA_PAYMENT_LIVE_PROPERTY_IDS:
    * property UUIDs, or "*" for every hotel except the test hotels below). Their charges, refunds
    * and captures all go to the live keys, never to the test ones. A hotel stays live once it has
-   * taken live money, so its refunds keep working; to stop its new charges, take it off
-   * VAYADA_PAYMENT_PROPERTY_IDS or put it on VAYADA_PAYMENT_STOPPED_PROPERTY_IDS. */
+   * taken live money, so its refunds keep working. To stop its new charges, put it on
+   * VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: the owner can still turn card off and fix the payout
+   * account (VAY-2570). Taking it off VAYADA_PAYMENT_PROPERTY_IDS also stops the charges but locks
+   * the owner out of both. */
   vayadaPaymentLivePropertyIds: readonly string[] | "all";
   /** VAY-2442: Vayada's own test hotels (VAYADA_PAYMENT_TEST_PROPERTY_IDS), which stay on the test
    * keys when the live list is "*". Never on an explicit live list. */
@@ -491,14 +493,12 @@ export function replacementPricingManualPaymentMethods(
   ];
 }
 
-/** VAY-2442: whether a hotel gets vayada Payment: the switch is on, the hotel is on
- * VAYADA_PAYMENT_PROPERTY_IDS (or it is "*") and not on VAYADA_PAYMENT_STOPPED_PROPERTY_IDS, and
- * the Stripe keys of its mode are set (live keys for a live hotel, test keys otherwise). Choosing
- * it, the payout account and new card charges all ask this, so a hotel can't be set up for
- * charges that would fail; refunds, disputes and payouts of money already taken do not. Card
- * readiness doesn't (no Vayada approval since 2026-11-03): a hotel taken off the list keeps
- * showing card until it turns card off, and its card checkouts are refused before any money is
- * taken. */
+/** VAY-2442: whether a hotel takes new vayada Payment card charges: vayadaPaymentManageableFor
+ * (the switch, the hotel on VAYADA_PAYMENT_PROPERTY_IDS or "*", the Stripe keys of its mode) and the
+ * hotel not on VAYADA_PAYMENT_STOPPED_PROPERTY_IDS. New card charges ask this; refunds, disputes and
+ * payouts of money already taken do not. Card readiness doesn't (no Vayada approval since
+ * 2026-11-03): a stopped hotel can't put card on with vayada Payment (VAY-2570), and its checkouts
+ * are refused before any money is taken. */
 export function vayadaPaymentOpenFor(
   config: Pick<
     ApiConfig,
@@ -511,13 +511,31 @@ export function vayadaPaymentOpenFor(
     | "vayadaPaymentStripeLive"
   >,
 ): (propertyId: string) => boolean {
-  const ids = config.vayadaPaymentPropertyIds;
   const stopped = config.vayadaPaymentStoppedPropertyIds;
+  const manageable = vayadaPaymentManageableFor(config);
+  return (propertyId) => manageable(propertyId) && !stopped.includes(propertyId.toLowerCase());
+}
+
+/** VAY-2570: whether a hotel may manage its vayada Payment setup (choose it in its payment settings,
+ * save those settings, read and replace its payout bank account): vayadaPaymentOpenFor without the
+ * stop list. A stopped hotel keeps this, so its owner can still turn card off and fix the bank
+ * account its live money is paid out to; its new card charges stay refused (vayadaPaymentOpenFor). */
+export function vayadaPaymentManageableFor(
+  config: Pick<
+    ApiConfig,
+    | "vayadaPaymentEnabled"
+    | "vayadaPaymentPropertyIds"
+    | "vayadaPaymentStripe"
+    | "vayadaPaymentLivePropertyIds"
+    | "vayadaPaymentTestPropertyIds"
+    | "vayadaPaymentStripeLive"
+  >,
+): (propertyId: string) => boolean {
+  const ids = config.vayadaPaymentPropertyIds;
   const live = vayadaPaymentLiveFor(config);
   return (propertyId) =>
     config.vayadaPaymentEnabled &&
     (ids === "all" || ids.includes(propertyId.toLowerCase())) &&
-    !stopped.includes(propertyId.toLowerCase()) &&
     // A live hotel never falls back to the test keys, nor a test hotel to the live ones. Real money
     // also needs the live webhook: without it disputes and dashboard refunds never reach the
     // hotel's balance, and Vayada would pay out money it no longer has.
