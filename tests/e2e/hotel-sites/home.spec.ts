@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // VAY-2422: the hotel website template, with Animals Ahangama's homepage.
-const BOOKING_URL = "https://test-only-animals-ahangama.next-booking.vayada.com";
+const BOOKING_URL = "https://animals-ahangama.next-booking.vayada.com";
 // hero.<hash>.jpg at 640px wide, quality 75, as AVIF (apps/hotel-sites/components/photo-files.mjs).
 // Next's hashes can hold dots and tildes.
 const PHOTO_FILE = /^\/_next\/static\/media\/[^/]+\.\d+w\.q75\.avif$/;

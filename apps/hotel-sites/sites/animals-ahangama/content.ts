@@ -10,9 +10,9 @@ export const animalsAhangama: HotelSite = {
   url: "https://animals-ahangama.site.vayada.com",
   // Kept from search engines until the go-live call (VAY-2465).
   indexable: false,
-  // The hotel's live booking page. Its address still carries the "test-only" slug from the owner
-  // tests (VAY-2058); the old address keeps redirecting after a rename.
-  bookingUrl: "https://test-only-animals-ahangama.next-booking.vayada.com",
+  // The hotel's live booking page, renamed from test-only-animals-ahangama (VAY-2465); the old
+  // address redirects here.
+  bookingUrl: "https://animals-ahangama.next-booking.vayada.com",
   fontClassName: brandFont.variable,
   colors: {
     background: "#FFFFFF",
