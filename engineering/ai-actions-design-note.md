@@ -71,10 +71,30 @@ table ([§4.4](#44-action-policy-table)) disagree, the table wins.
 
 ## 2. The action registry
 
-The registry lives next to the routes in `apps/api` (`src/ai/actions`). It is curated and
-job-shaped: about 10 read actions at the MCP launch and about 30 actions after the first change
-batch, not one tool per route. Composite actions hide multi-step flows; for example one price
-action runs the four pricing-v2 steps (prepare, draft, charges, publish).
+The registry lives next to the routes in `apps/api` (`src/ai/actions`).
+
+**Decision of 2026-11-20 (full parity):** the AI can do everything a user can do in the website,
+with exactly that user's rights, so actions are **generated from next-api's own routes**, not
+hand-picked (this replaces "about 10 read actions at launch, about 30 after the first change
+batch"):
+
+- **Route list:** `src/ai/routeManifest.generated.ts` is captured from the real app (every route
+  module switched on, every route recorded by Fastify's `onRoute` hook) and checked in. CI fails
+  when a route is added, renamed or removed without regenerating it, and a static scan of the
+  route files cross-checks that the capture missed nothing.
+- **Sorting:** `src/ai/routeClassification.ts` sorts every route that is not an action's exactly
+  once: `never` ([§6](#6-the-never-list)), `ask_first_later` (rare setup tasks, decided one by one
+  when their screen becomes an action), `not_for_ai` (machine traffic, public guest pages, partner
+  apps, broken, dead or duplicate routes, reads with side effects, deny-listed reads, owner-session
+  gates) or `later` (a hotel route that is not an action yet; VAY-2567 ranks the order). CI fails on
+  an unsorted route and reports how many hotel routes are actions.
+- **One action per route** (`defineRouteAction`): the route, its method and its path parameters
+  come from the route list; a person writes the description, the output allow-list, the permission,
+  the tier or group and the surfaces, and is named as the reviewer. Composite actions hide
+  multi-step flows (for example the four pricing-v2 steps) and call base actions, never routes
+  directly.
+- **Generated safety tests** run every action through its real route on fake storage
+  (`src/ai/actions/actionSafety.test.ts`); an action without a fixture fails CI.
 
 ### 2.1 Fields
 
@@ -93,6 +113,7 @@ action runs the four pricing-v2 steps (prepare, draft, charges, publish).
 | `permission`     | The key the route **really** checks, so the action is never shown to a role the route refuses.                                                                              |
 | `authoritySites` | Changes only: the in-transaction and SQL-side checks the route hits ([§5.4](#54-write-delegation-through-authority-sites)).                                                 |
 | `surfaces`       | `mcp`, `in_app` or both. Concierge calls its domain services directly; the registry wraps the same services as actions (e.g. availability, [§3.2](#32-projections)).        |
+| `reviewedBy`     | Who reviewed the description, the output allow-list and the group (plan v3.7 `source`; the route itself is the action's `route`).                                           |
 | `idempotency`    | How a retry is made safe.                                                                                                                                                   |
 
 ### 2.2 Registration rules
@@ -102,11 +123,13 @@ An action cannot be registered when:
 - it is `do` without an `undo` that covers every effect in `effects`;
 - it changes something and has no `idempotency`, no `businessKey` or no preconditions;
 - it calls a route outside its `routeCalls`, or a read calls a non-`GET` route;
-- any `routeCalls` entry is a never-listed route (inventory
-  [F](ai-actions-authority-inventory.md#f-never-list-routes) says which), a deny-listed read
-  ([§3.2](#32-projections)), or behind a gate in inventory sections
-  [A](ai-actions-authority-inventory.md#a-owner-session-gates) to
-  [D](ai-actions-authority-inventory.md#d-sql-side-owner-checks);
+- its route is sorted in `src/ai/routeClassification.ts` at all (never, ask first later, not for
+  AI, or still `later`): the registry throws at module load, so the app does not start;
+- (since 2026-11-20) `ownerOnly` routes and role-key owner gates are no longer refused as a class:
+  an action may use one only through the route's own owner check, so only an owner's delegation
+  passes; routes behind an owner-session gate (inventory
+  [A](ai-actions-authority-inventory.md#a-owner-session-gates)) are sorted `not_for_ai` until
+  VAY-2567 decides each;
 - it changes something and an `authoritySites` entry does not take the delegation yet
   ([§5.4](#54-write-delegation-through-authority-sites));
 - the route has no frontend caller today, until it is hardened and tested (e.g. the refund route).
@@ -116,8 +139,8 @@ and promo create, guest profile edit and merge, and a required key on change/ext
 
 ### 2.3 Contract tests
 
-- Never-list: no action reaches an `ownerOnly` route, an owner-session gate, a role-key owner gate,
-  `identity.staff.manage`, `platform.*` routes or `platform.*` audit, job and event rows.
+- Never-list: no action's route is sorted `never`; one real route per never area is pinned in the
+  classification test; the auth hook accepts only registered actions' routes.
 - Method allow-list enforced; MCP and in-app list identical schemas for the same action.
 - Cross-tenant denial for every action: other organization, other property, assigned-only member.
 - Output fixtures fail on any unknown key.
@@ -609,31 +632,46 @@ paid still check the broad `pms.operations.manage`; the AI layer does not paper 
 
 ## 6. The never-list
 
-A hard rule (D5): no action exists for these, for any role, on any surface.
+A hard rule (D5): no action exists for these, for any role, on any surface. **Flamur's list of
+2026-11-20** (it replaces the longer list this section had before):
 
-- billing and plan; payout destination; the guest bank-transfer account
-- Stripe and Xendit onboarding, dashboard and portal links; payout dispatch
-- payment-settings changes and payment windows
-- staff invites, roles, member removal, account-admin transfer
-- property deletion and account deletion
-- custom domain
-- Channex connect, disconnect and iframe session
-- Feature Hub module activation
-- platform and admin routes
-- GDPR export and delete
-- auth and AI-connection management
+- bank accounts and payouts (payout destination, the guest bank-transfer account, Stripe and Xendit
+  provider accounts and links, payout dispatch, payout reconciliation)
+- team members and permissions (staff invites, roles, member removal, account-admin transfer,
+  joining an account)
+- deleting a property
+- login and security settings
+- accepting legal terms (agreements, consent, the mandatory-charges statement)
+- billing and plan
 - bulk exports
-- guest ID document data
-- shortening data retention
-- the Google Maps link resolver
-- reading `platform.*` audit, job and event rows (their tables carry `CHECK (ai_visible = FALSE)`,
-  e.g. [`0010_platform_jobs_events_audit.sql:754`](../packages/backend-migration/migrations/0010_platform_jobs_events_audit.sql#L754))
+- privacy (GDPR) export and delete
+- guest ID documents
+- login and AI-connection management
+- partner-app approvals
+- platform and vayada staff routes, including reading `platform.*` audit, job and event rows
+  (their tables carry `CHECK (ai_visible = FALSE)`, e.g.
+  [`0010_platform_jobs_events_audit.sql:754`](../packages/backend-migration/migrations/0010_platform_jobs_events_audit.sql#L754))
+
+**Ask first later** (no action now; each becomes Ask first when its screen becomes an action,
+decided one by one): custom domain, Channex connect and disconnect (and the Airbnb import), product
+tracks and Feature Hub modules, payment settings and windows, data retention. A guest review on
+Airbnb written by the AI is Ask first, never Just do it.
+
+**Outside AI apps (MCP)** get no guest names, contact details or money until the owner turns them
+on (VAY-2529), even though the user's rights are the ceiling: `defineRouteAction` refuses an MCP
+action whose allow-list keeps a field named like one.
+
+The Google Maps link resolver and media imports (the server fetches a URL the caller gives) are
+`not_for_ai`.
 
 Owner-only and in-app-only, later and on demand: no-show reports, folio finalise and delete, guest
 merge, currency change. Card refunds and refunding cancellations are **not** on the list: they are
 Ask first (VAY-2560) for the roles that may refund today.
 
-The routes behind each item are in inventory [F](ai-actions-authority-inventory.md#f-never-list-routes).
+The routes behind each item are listed in `apps/api/src/ai/neverList.ts`, a file of its own: the
+registry checks it directly, no classification entry can override it, and a test keeps a floor on
+its size, so taking a route off it is a visible decision. Inventory
+[F](ai-actions-authority-inventory.md#f-never-list-routes) has the evidence for each.
 
 ## 7. Audit and attribution
 
