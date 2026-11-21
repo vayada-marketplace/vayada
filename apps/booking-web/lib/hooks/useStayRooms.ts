@@ -103,7 +103,7 @@ export function useStayRooms({
       .then((value) => {
         if (controller.signal.aborted) return;
         setRooms(value.rooms);
-        setRoomsUnavailable(value.unavailable);
+        setRoomsUnavailable(value.unavailable ?? null);
         setLocationMap(value.locationMap);
         setDetailsMap(value.detailsMap);
         setRoomSorting(value.roomSorting);

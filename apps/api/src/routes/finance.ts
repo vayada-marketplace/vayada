@@ -110,7 +110,10 @@ import {
   sameFinancePaymentMethods,
   type FinancePaymentSettingsBinding,
 } from "../domains/financePaymentSettingsBinding.js";
-import { createRatePaymentCoverage } from "../domains/pricingRatePaymentCoverage.js";
+import {
+  createRatePaymentCoverage,
+  refusedRatePaymentChange,
+} from "../domains/pricingRatePaymentCoverage.js";
 import type { PricingPaymentSwitches } from "../domains/pricingRatePayability.js";
 import { createFinanceOnlineCardExecutionEvidenceRepository } from "./financeOnlineCardExecutionEvidenceRepository.js";
 import { registerFinancePlatformOnlineCardExecutionEvidenceRoutes } from "./financePlatformOnlineCardExecutionEvidenceRoutes.js";
@@ -480,7 +483,6 @@ export async function registerFinanceRoutes(
       const rateCoverage = await readRatePaymentCoverage(
         options.repository,
         propertyId,
-        undefined,
         request.log,
       );
       return {
@@ -555,10 +557,10 @@ export async function registerFinanceRoutes(
         }
       }
 
-      // VAY-2583: a change that would leave none of the hotel's booking-page rates payable is
-      // refused, naming each rate and the ways its terms accept: its booking page would list no
-      // rooms. Only a change that takes the last way to pay away; a page already without one can
-      // still save. A provider change can't count card yet (the new account isn't checked).
+      // VAY-2583: a change that takes the last way to pay away from a live booking page is refused,
+      // naming each rate and the ways its terms accept: the page would list no rooms. Turning a
+      // method on is never refused (a card not ready yet must stay switchable on to set it up). A
+      // provider change can't count card yet (the new account isn't checked).
       if (
         options.repository.ratePaymentCoverage &&
         (parsed.payload.acceptedMethods !== undefined ||
@@ -569,30 +571,27 @@ export async function registerFinanceRoutes(
         const providerChanges =
           parsed.payload.paymentProvider !== undefined &&
           parsed.payload.paymentProvider !== saved?.paymentProvider;
-        const proposed = {
-          paymentsEnabled: parsed.payload.paymentsEnabled ?? saved?.paymentsEnabled ?? false,
-          acceptedMethods: (parsed.payload.acceptedMethods ?? saved?.acceptedMethods ?? []).filter(
-            (method) => !providerChanges || method !== "card",
-          ),
-        };
-        const [before, after] = await Promise.all([
-          readRatePaymentCoverage(options.repository, propertyId, undefined, request.log),
-          readRatePaymentCoverage(options.repository, propertyId, proposed, request.log),
-        ]);
-        if (before && after && before.payable > 0 && after.payable === 0) {
+        const refused = await refusedRatePaymentChange(
+          options.repository,
+          propertyId,
+          {
+            paymentsEnabled: parsed.payload.paymentsEnabled ?? saved?.paymentsEnabled ?? false,
+            acceptedMethods: (
+              parsed.payload.acceptedMethods ??
+              saved?.acceptedMethods ??
+              []
+            ).filter((method) => !providerChanges || method !== "card"),
+          },
+          request.log,
+        );
+        if (refused) {
           reply.code(409);
           return {
             statusCode: 409,
             code: "no_rate_payable",
             category: "conflict",
-            message:
-              "After this change guests couldn't pay for any of your rates, so your booking page would show no rooms. Keep a way to pay that your rates take, or allow it on your rates first.",
-            rates: after.rates.map(({ roomName, cancellation, acceptedMethods }) => ({
-              roomName,
-              cancellation,
-              acceptedMethods,
-              payableWith: [],
-            })),
+            message: NO_RATE_PAYABLE_MESSAGE,
+            rates: publicRatePaymentCoverage(refused).rates,
           } satisfies FinanceCommandError;
         }
       }
@@ -609,7 +608,6 @@ export async function registerFinanceRoutes(
       const rateCoverage = await readRatePaymentCoverage(
         options.repository,
         propertyId,
-        undefined,
         request.log,
       );
       return {
@@ -1343,7 +1341,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
     ...(config.ratePaymentSwitches &&
       pool.connect && {
         ratePaymentCoverage: createRatePaymentCoverage(
-          pool as Pick<pg.Pool, "connect">,
+          pool as unknown as Pick<pg.Pool, "connect">,
           config.ratePaymentSwitches,
         ),
       }),
@@ -2694,7 +2692,8 @@ async function createStripeProviderAccountInClient(
   }
 
   let loserCompensation:
-    { kind: "compensated" } | { kind: "durably_owned"; account: StripeProviderAccountOwnershipRow };
+    | { kind: "compensated" }
+    | { kind: "durably_owned"; account: StripeProviderAccountOwnershipRow };
   try {
     loserCompensation = await compensateStripeProviderAccountIfUnowned(
       client,
@@ -6087,7 +6086,8 @@ function currencyArray(value: unknown): string[] | null {
 }
 
 type FinanceJsonPolicyBodyResult =
-  { ok: true; value: FinanceJsonPolicy } | { ok: false; error: FinanceValidationError };
+  | { ok: true; value: FinanceJsonPolicy }
+  | { ok: false; error: FinanceValidationError };
 
 function jsonPolicyBody(value: unknown, name: string): FinanceJsonPolicyBodyResult {
   const record = plainRecord(value);
@@ -6812,17 +6812,37 @@ function invalidQuery(
 }
 
 /** VAY-2442: whether a hotel can choose vayada Payment, and its fee then. */
-/** VAY-2583: the hotel's booking-page rate coverage, or null when it has none yet or it couldn't be
- * read: a read failure never stops a payment-settings read or save, it is only logged. */
+const NO_RATE_PAYABLE_MESSAGE =
+  "After this change guests couldn't pay for any of your rates, so your booking page would show no rooms. Keep a way to pay that your rates take, or allow it on your rates first.";
+
+/** VAY-2583: what a hotel sees of its rate coverage: each rate with the ways its terms accept and
+ * those guests can pay with, and how many rates are payable. */
+function publicRatePaymentCoverage(
+  coverage: FinanceRatePaymentCoverage,
+): FinanceRatePaymentCoverage {
+  return {
+    payable: coverage.payable,
+    rates: coverage.rates.map(({ roomName, cancellation, acceptedMethods, payableWith }) => ({
+      roomName,
+      cancellation,
+      acceptedMethods,
+      payableWith,
+    })),
+  };
+}
+
+/** VAY-2583: the live booking page's rate coverage, or null when it has none (not live, nothing
+ * published) or it couldn't be read: a read failure never stops a payment-settings read or save,
+ * it is only logged. */
 async function readRatePaymentCoverage(
   repository: Pick<FinancePropertyReadRepository, "ratePaymentCoverage">,
   propertyId: string,
-  proposed: { paymentsEnabled: boolean; acceptedMethods: readonly string[] } | undefined,
   log: { error(obj: object, msg: string): void },
 ): Promise<FinanceRatePaymentCoverage | null> {
   if (!repository.ratePaymentCoverage) return null;
   try {
-    return await repository.ratePaymentCoverage(propertyId, proposed);
+    const coverage = await repository.ratePaymentCoverage(propertyId);
+    return coverage && publicRatePaymentCoverage(coverage);
   } catch (error) {
     log.error({ err: error, propertyId }, "rate payment coverage read failed");
     return null;

@@ -56,14 +56,17 @@ export function createPublicPricingOfferCatalog(
     deposits: true,
     manual: ["bank_transfer", "paypal"],
   };
-  return {
-    async read(slug: string) {
+  /** `explain` (VAY-2583, the booking page's own catalog only): when guests can pay for no rate,
+   * answer the no-way-to-pay reason instead of null, so the page tells them to contact the hotel.
+   * Other readers (room cards' prices, agency pages) keep null. */
+  const catalog = {
+    async read(slug: string, explain = false) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
         const owner = await lockPublicPricingPublication(client, slug);
         // Awaited here, so the transaction stays open until it has read what it needs.
-        if (!owner) return await noWayToPay(client, slug, payments);
+        if (!owner) return explain ? await noWayToPay(client, slug, payments) : null;
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
         const cancellations = publicOfferCancellations(owner);
@@ -90,11 +93,12 @@ export function createPublicPricingOfferCatalog(
           .filter((room) => room.offers.length > 0);
         // VAY-2583: rooms on offer, but guests can pay for none of their rates: the page says so.
         if (
+          explain &&
           !offered.length &&
           mapped.some((room) => operating.has(room.roomTypeId) && room.offers.length > 0)
         ) {
           const current = await lockPublicPricingAuthority(client, slug);
-          return current && isDeepStrictEqual(current, owner.scope) ? NO_WAY_TO_PAY : null;
+          return current && isDeepStrictEqual(current, owner.scope) ? noWayToPayAnswer() : null;
         }
         const content = await readRoomContent(client, propertyId, offered);
         // The location map switch (VAY-2126) is read live. A room's own "Show map in room details" works
@@ -167,6 +171,15 @@ export function createPublicPricingOfferCatalog(
       }
     },
   };
+  return {
+    async read(slug: string) {
+      const value = await catalog.read(slug);
+      return value && "unavailable" in value ? null : value;
+    },
+    /** VAY-2583: the booking page's own read: the no-way-to-pay reason when guests can pay for no
+     * rate. */
+    readForGuests: (slug: string) => catalog.read(slug, true),
+  };
 }
 
 /** The rooms' saved content, in the order the Calendar and Rooms & Rates list room types. */
@@ -234,26 +247,30 @@ function roomFacts(row: RoomRow) {
 
 /** VAY-2583: a live booking page whose rates guests can't pay for with any way the hotel takes now
  * (each rate sells only by the ways its own terms accept that are ready) lists no rooms and says
- * why, so the page can tell guests to contact the hotel instead of "try again". */
-const NO_WAY_TO_PAY = {
+ * why, so the page can tell guests to contact the hotel instead of "try again". A new object each
+ * time: callers may change what they get. */
+const noWayToPayAnswer = () => ({
   version: "public-pricing-offers.v1" as const,
-  rooms: [],
+  rooms: [] as never[],
   unavailable: "no_payment_method" as const,
-};
+});
 
-/** Without a publication to serve: NO_WAY_TO_PAY when the page is live and no published rate can be
- * paid with the hotel's payment settings now (e.g. card on but not ready, pay at hotel off); null
- * (not found) otherwise, as before. */
+/** Without a publication to serve: the answer above when the page is live and no published rate
+ * can be paid with the hotel's payment settings now for a payment reason (card on but not ready,
+ * pay at hotel off, payments off); null (not found) otherwise, as before, also when Finance is
+ * out for another reason (currency, settings). */
 async function noWayToPay(client: PoolClient, slug: string, payments: PricingPaymentSwitches) {
   const scope = await lockPublicPricingAuthority(client, slug);
   if (!scope) return null;
-  const live = await client.query(
-    "SELECT 1 FROM distribution.active_public_booking_revision WHERE property_id=$1",
-    [scope.propertyId],
-  );
-  if (!live.rows.length) return null;
   const coverage = await readRatePaymentCoverage(client, scope.propertyId, payments);
-  return coverage && coverage.rates.length > 0 && coverage.payable === 0 ? NO_WAY_TO_PAY : null;
+  return coverage &&
+    coverage.rates.length > 0 &&
+    coverage.payable === 0 &&
+    (coverage.financeReason === null ||
+      coverage.financeReason === "method_unavailable" ||
+      coverage.financeReason === "payments_disabled")
+    ? noWayToPayAnswer()
+    : null;
 }
 
 /** What the booking page's room cards show besides name and photos (VAY-2190): size in square

@@ -10,12 +10,14 @@ import {
   type ReplaceFinancePaymentMethodsError,
   type ReplaceFinancePaymentMethodsCommand,
   type ReplaceFinancePaymentMethodsResponse,
+  type FinancePropertyReadRepository,
 } from "@vayada/domain-finance";
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
 import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
+import { refusedRatePaymentChange } from "../domains/pricingRatePaymentCoverage.js";
 import { enforceRoutePolicy } from "./policy.js";
 import { livePublicPageRefresh, refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
@@ -34,6 +36,8 @@ export type FinancePaymentReadinessRoutesOptions = {
   bookingPublicationRefresh?: BookingPublicationRefreshPort;
   /** Present only while bank-transfer and PayPal acceptance is on (VAY-2139). */
   manualPayments?: FinanceManualPaymentMethodsReadPort;
+  /** VAY-2583: which live booking-page rates guests could pay for, so a change can't leave none. */
+  ratePaymentCoverage?: FinancePropertyReadRepository["ratePaymentCoverage"];
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -133,6 +137,26 @@ export async function registerFinancePaymentReadinessRoutes(
         },
       });
       if (!command) return invalidRequest(reply);
+      // VAY-2583: as Payments' own save, a change that takes the last way to pay away from a live
+      // booking page is refused, naming each rate and the ways its terms accept.
+      const refused = await refusedRatePaymentChange(
+        { ratePaymentCoverage: options.ratePaymentCoverage },
+        scope.propertyId,
+        { acceptedMethods: command.selectedMethods },
+        request.log,
+      );
+      if (refused)
+        return reply.status(409).send({
+          code: "no_rate_payable",
+          message:
+            "After this change guests couldn't pay for any of your rates, so your booking page would show no rooms.",
+          rates: refused.rates.map(({ roomName, cancellation, acceptedMethods }) => ({
+            roomName,
+            cancellation,
+            acceptedMethods,
+            payableWith: [],
+          })),
+        });
 
       let value: unknown;
       try {

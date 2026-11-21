@@ -284,7 +284,8 @@ const DEFAULT_SETTINGS: PropertySettings = {
 };
 
 type TargetSettingsUpdate =
-  { ok: true; data: PropertySettingsUpdate } | { ok: false; message: string };
+  | { ok: true; data: PropertySettingsUpdate }
+  | { ok: false; message: string };
 
 function buildTargetSettingsUpdate(
   section: Section,
@@ -821,7 +822,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   // VAY-2583: no rate guests can pay for (the page lists no rooms), or card on but on no rate.
   const rateNote = rateCoverageNote(
     rateCoverage,
-    !!settings.online_card_payment,
+    // As saved: the coverage is the saved settings', and so is the card banner.
+    !!paymentBaseline?.onlineCard,
     cardNotReadyReason !== null,
   );
 
@@ -1195,54 +1197,80 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     let part: PaymentsPart = "bank";
     try {
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
-      const destination = bankChanged
-        ? await saveBankTransferDestination(
-            {
-              get: (path) => apiClient.get(path, omitHotelContext),
-              put: (path, body) => apiClient.put(path, body, omitHotelContext),
-            },
-            {
-              propertyId: propertyLink.propertyId,
-              enabled: settings.bank_transfer ?? false,
-              saved: bankDestination,
-              attempt: bankSaveAttempt.current,
-              details: bankDetails,
-            },
-          )
-        : bankDestination;
-      if (destination !== bankDestination && current()) {
-        saved.push("bank");
-        setBankDestination(destination ?? null);
-        setSettings((previous) => ({
-          ...previous,
-          payout_account_holder: "",
-          payout_account_number: "",
-          payout_iban: "",
-          payout_bank_name: "",
-          payout_swift: "",
-        }));
-      }
-
-      part = "methods";
-      if (paymentMethodsChanged) {
+      const saveBank = async () => {
+        part = "bank";
+        const destination = bankChanged
+          ? await saveBankTransferDestination(
+              {
+                get: (path) => apiClient.get(path, omitHotelContext),
+                put: (path, body) => apiClient.put(path, body, omitHotelContext),
+              },
+              {
+                propertyId: propertyLink.propertyId,
+                enabled: settings.bank_transfer ?? false,
+                saved: bankDestination,
+                attempt: bankSaveAttempt.current,
+                details: bankDetails,
+              },
+            )
+          : bankDestination;
+        if (destination !== bankDestination && current()) {
+          saved.push("bank");
+          setBankDestination(destination ?? null);
+          setSettings((previous) => ({
+            ...previous,
+            payout_account_holder: "",
+            payout_account_number: "",
+            payout_iban: "",
+            payout_bank_name: "",
+            payout_swift: "",
+          }));
+        }
+      };
+      /** False when a reload meanwhile made this save's result stale. */
+      const saveMethods = async () => {
+        part = "methods";
+        if (!paymentMethodsChanged) return true;
         const save = (keepPlainPayAtHotel: boolean) =>
           updateFinancePaymentSettings({
             propertyId: propertyLink.propertyId,
             body: settingsBody(keepPlainPayAtHotel),
           });
         let keptPlain = keepPlain;
+        let response: FinancePaymentSettingsResponse;
         try {
-          await save(keptPlain);
+          response = await save(keptPlain);
         } catch (error) {
           // An old row setup never saved needs the choice spelled out: send the Cash + Card shown.
           if (!keptPlain || !needsExplicitPayAtHotelChoice(error)) throw error;
           keptPlain = false;
-          await save(false);
+          response = await save(false);
         }
         saved.push("methods");
-        if (!current()) return null;
+        if (!current()) return false;
         setPaymentBaseline(paymentsForm);
         setPlainPayAtHotel(keptPlain);
+        // VAY-2583: the rates as the saved settings leave them.
+        setRateCoverage(
+          response.rateCoverage
+            ? {
+                ...response.rateCoverage,
+                rates: ratePaymentCoverageRates(response.rateCoverage.rates),
+              }
+            : null,
+        );
+        return true;
+      };
+      // VAY-2583: bank transfer switched off saves the ways to pay first, so Finance judges the
+      // change while the bank details still count; removed first, the page could already list no
+      // rooms before the check runs.
+      const turningBankOff = paymentBaseline.bankTransfer && !(settings.bank_transfer ?? false);
+      if (turningBankOff) {
+        if (!(await saveMethods())) return null;
+        await saveBank();
+      } else {
+        await saveBank();
+        if (!(await saveMethods())) return null;
       }
 
       part = "windows";

@@ -2096,6 +2096,8 @@ const app = buildApp({
   financePaymentSetup: {
     ...financePaymentSetupRuntime.routes,
     manualPayments: financeManualPaymentReadiness,
+    // VAY-2583: the same rate coverage as Payments' own save.
+    ratePaymentCoverage: financeRepository?.ratePaymentCoverage,
   },
   publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {

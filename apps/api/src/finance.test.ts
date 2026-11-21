@@ -1815,6 +1815,7 @@ describe("finance route contracts", () => {
     const repository = paymentSettingsWriteRepository();
     const saved = await repository.getPaymentSettings(propertyId);
     // Aether's shape: card is on and ready, every rate takes only pay at the hotel.
+    let hotelMethods = ["card", "pay_at_property"];
     let rates: {
       roomName: string;
       cancellation: "flexible" | "non_refundable";
@@ -1827,18 +1828,23 @@ describe("finance route contracts", () => {
     const proposals: unknown[] = [];
     const ratePaymentCoverage = async (
       id: string,
-      proposed?: { paymentsEnabled: boolean; acceptedMethods: readonly string[] },
+      proposed?: { paymentsEnabled?: boolean; acceptedMethods: readonly string[] },
     ) => {
       expect(id).toBe(propertyId);
       proposals.push(proposed ?? null);
       if (failing) throw new Error("pricing read failed");
-      const methods = proposed ? proposed.acceptedMethods : ["card", "pay_at_property"];
-      const enabled = proposed ? proposed.paymentsEnabled : true;
+      const methods = proposed ? proposed.acceptedMethods : hotelMethods;
+      const enabled = proposed?.paymentsEnabled ?? true;
       const list = rates.map((rate) => ({
         ...rate,
         payableWith: enabled ? rate.acceptedMethods.filter((m) => methods.includes(m)) : [],
       }));
-      return { rates: list, payable: list.filter((rate) => rate.payableWith.length > 0).length };
+      return {
+        rates: list,
+        payable: list.filter((rate) => rate.payableWith.length > 0).length,
+        settings: { paymentsEnabled: true, acceptedMethods: hotelMethods },
+        financeReason: null,
+      };
     };
     app = buildFinanceApp({
       repository: {
@@ -1849,7 +1855,7 @@ describe("finance route contracts", () => {
                 ...saved!,
                 paymentsEnabled: true,
                 paymentProvider: "stripe",
-                acceptedMethods: ["card", "pay_at_property"],
+                acceptedMethods: hotelMethods as NonNullable<typeof saved>["acceptedMethods"],
               }
             : null,
         vayadaPaymentAvailable: () => true,
@@ -1879,6 +1885,9 @@ describe("finance route contracts", () => {
         ],
       },
     });
+    // What the hotel sees: the rates and the count, not the internals.
+    expect(read.body.rateCoverage).not.toHaveProperty("settings");
+    expect(read.body.rateCoverage).not.toHaveProperty("financeReason");
     const patch = (key: string, paymentSettings: Record<string, unknown>) =>
       injectJson<Record<string, unknown>>(app!, {
         method: "PATCH",
@@ -1924,8 +1933,17 @@ describe("finance route contracts", () => {
       paymentsEnabled: true,
       acceptedMethods: ["pay_at_property"],
     });
-    // A page already without a payable rate can still save (nothing gets worse).
+    // Turning a way to pay on is never refused: a bank-transfer hotel switching card on to set up
+    // Stripe (card not ready yet) saves, though its page may list nothing until card is ready.
+    hotelMethods = ["bank_transfer"];
     rates = rates.map((rate) => ({ ...rate, acceptedMethods: ["bank_transfer"] }));
+    proposals.length = 0;
+    expect(
+      (await patch("card-on", { acceptedMethods: ["bank_transfer", "card"] })).statusCode,
+    ).toBe(200);
+    expect(proposals.filter((proposal) => proposal !== null)).toEqual([]);
+    // A page already without a payable rate can still save (nothing gets worse).
+    hotelMethods = ["card", "pay_at_property"];
     expect((await patch("already-none", { acceptedMethods: ["card"] })).statusCode).toBe(200);
     // A coverage read that fails never blocks a save; it is only logged.
     rates = rates.map((rate) => ({ ...rate, acceptedMethods: ["pay_at_property"] }));
@@ -1938,7 +1956,7 @@ describe("finance route contracts", () => {
     });
     expect(unread.statusCode).toBe(200);
     expect(unread.body).not.toHaveProperty("rateCoverage");
-    expect(repository.writeCount).toBe(4);
+    expect(repository.writeCount).toBe(5);
   });
 
   it("allows Booking owners to update payment settings through the Booking entitlement", async () => {

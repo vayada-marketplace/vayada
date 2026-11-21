@@ -22,10 +22,46 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
   afterAll(() => pool.end());
   const coverage = createRatePaymentCoverage(pool, switches);
 
-  async function hotel(...args: Parameters<typeof paymentRepublishFixture> extends [unknown, ...infer R] ? R : never) {
+  async function hotel(
+    ...args: Parameters<typeof paymentRepublishFixture> extends [unknown, ...infer R] ? R : never
+  ) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
     const f = await paymentRepublishFixture(pool, ...args);
+    /** The hotel's booking page goes live (its first publication). */
+    const goLive = async () => {
+      const revisionId = randomUUID();
+      await pool.query(
+        `INSERT INTO distribution.public_booking_content_revisions (
+           id, property_id, revision_number, readiness_contract_version,
+           source_manifest, source_manifest_hash, readiness_hash,
+           readiness_product, readiness_status, public_content, built_by_user_id
+         ) VALUES (
+           $1::uuid, $2::uuid, 1, 'onboarding-product-readiness.v1', $3::jsonb, $4, $5,
+           'booking', 'ready', jsonb_build_object('profile', jsonb_build_object('hotel',
+             jsonb_build_object('slug', $6::text))), $7::uuid
+         )`,
+        [
+          revisionId,
+          f.propertyId,
+          JSON.stringify({
+            contractVersion: "onboarding-source-manifest.v1",
+            propertyId: f.propertyId,
+            sources: [{ owner: "hotel_catalog", entityId: f.propertyId, revision: "1" }],
+          }),
+          `sha256:${"1".repeat(64)}`,
+          `sha256:${"2".repeat(64)}`,
+          `coverage-${f.propertyId}`,
+          f.actorUserId,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO distribution.active_public_booking_revision
+           (property_id, content_revision_id, activated_by_user_id)
+         VALUES ($1::uuid, $2::uuid, $3::uuid)`,
+        [f.propertyId, revisionId, f.actorUserId],
+      );
+    };
     /** The rates the booking page lists now, each with its ways to pay (null: nothing served). */
     const offered = async () => {
       const owner = await f.served();
@@ -38,7 +74,7 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
         ]),
       );
     };
-    return { ...f, offered };
+    return { ...f, offered, goLive };
   }
   const bankDetails = (propertyId: string) =>
     pool.query(
@@ -49,7 +85,10 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
 
   it("sells with card only when card is ready and the rate takes card", async () => {
     const h = await hotel(["card"], true);
-    await (await h.save(0))();
+    await (
+      await h.save(0)
+    )();
+    await h.goLive();
     expect(await h.offered()).toEqual({ flex: ["card"] });
     expect(await coverage(h.propertyId)).toMatchObject({
       payable: 1,
@@ -72,14 +111,20 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
     };
     const only = await hotel(["bank_transfer"], false, [transfer]);
     await bankDetails(only.propertyId);
-    await (await only.save(0))();
+    await (
+      await only.save(0)
+    )();
+    await only.goLive();
     // The Flexible rate takes only pay at the hotel (off here); the transfer rate sells.
     expect(await only.offered()).toEqual({ flex: [], transfer: ["bank_transfer"] });
     expect(await coverage(only.propertyId)).toMatchObject({ payable: 1 });
 
     const both = await hotel(["card", "bank_transfer"], true, [transfer]);
     await bankDetails(both.propertyId);
-    await (await both.save(0))();
+    await (
+      await both.save(0)
+    )();
+    await both.goLive();
     expect(await both.offered()).toEqual({ flex: ["card"], transfer: ["bank_transfer"] });
     expect(await coverage(both.propertyId)).toMatchObject({ payable: 2 });
   });
@@ -95,11 +140,14 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
         '{"detailsSubmitted":true,"cardPaymentsStatus":"active"}')`,
       [accountId, h.propertyId, `acct_synthetic_${accountId}`],
     );
-    await pool.query("UPDATE finance.payment_settings SET provider_account_id=$2 WHERE property_id=$1", [
-      h.propertyId,
-      accountId,
-    ]);
-    await (await h.save(0))();
+    await pool.query(
+      "UPDATE finance.payment_settings SET provider_account_id=$2 WHERE property_id=$1",
+      [h.propertyId, accountId],
+    );
+    await (
+      await h.save(0)
+    )();
+    await h.goLive();
     expect(await h.offered()).toEqual({ flex: ["pay_at_property"] });
     const rate = {
       offerId: "flex",
@@ -117,7 +165,10 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
     ).toEqual({ payable: 0, rates: [expect.objectContaining({ ...rate, payableWith: [] })] });
     // Payments off: nothing either; keeping pay at hotel: still bookable.
     expect(
-      await coverage(h.propertyId, { paymentsEnabled: false, acceptedMethods: ["card", "pay_at_property"] }),
+      await coverage(h.propertyId, {
+        paymentsEnabled: false,
+        acceptedMethods: ["card", "pay_at_property"],
+      }),
     ).toMatchObject({ payable: 0 });
     expect(
       await coverage(h.propertyId, { paymentsEnabled: true, acceptedMethods: ["pay_at_property"] }),
@@ -133,8 +184,15 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
     ).toEqual({ payments_enabled: true, accepted_methods: ["card", "pay_at_property"] });
   });
 
-  it("has nothing to say before the first publication", async () => {
+  it("has nothing to say before the first publication or while the page isn't live", async () => {
     const h = await hotel(["card"], true);
     expect(await coverage(h.propertyId)).toBeNull();
+    // Prices published, booking page not live yet (setup): no booking page to keep bookable.
+    await (
+      await h.save(0)
+    )();
+    expect(await coverage(h.propertyId)).toBeNull();
+    await h.goLive();
+    expect(await coverage(h.propertyId)).toMatchObject({ payable: 1 });
   });
 });

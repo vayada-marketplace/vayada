@@ -2091,7 +2091,8 @@ export function createTargetBookingWebCheckoutAdapter(
     async getPricingOffers(slug) {
       let offers;
       try {
-        offers = await pricingOffers.read(slug);
+        // VAY-2583: with the reason when guests can pay for no rate (contact the hotel).
+        offers = await pricingOffers.readForGuests(slug);
       } catch (error) {
         throw Object.assign(
           new Error("Pricing offers temporarily unavailable.", { cause: error }),

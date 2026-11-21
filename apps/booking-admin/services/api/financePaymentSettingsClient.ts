@@ -6,7 +6,11 @@ import type { PaymentMethodBookingWindows } from "@vayada/domain-booking";
 import { ApiErrorResponse, apiClient, omitHotelContext, type ApiClient } from "./client";
 
 export type FinanceRoutePaymentProvider =
-  "stripe" | "xendit" | "vayada" | "manual" | "bank_transfer";
+  | "stripe"
+  | "xendit"
+  | "vayada"
+  | "manual"
+  | "bank_transfer";
 
 export type FinanceRoutePaymentMethod =
   | "card"

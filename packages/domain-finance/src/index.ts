@@ -176,7 +176,12 @@ export type PaymentSettingsReadModel = {
 export type FinanceJsonPolicy = Record<string, string | number | boolean | null>;
 export type FinanceJsonObject = Record<string, FinanceJsonValue>;
 export type FinanceJsonValue =
-  string | number | boolean | null | FinanceJsonValue[] | { [key: string]: FinanceJsonValue };
+  | string
+  | number
+  | boolean
+  | null
+  | FinanceJsonValue[]
+  | { [key: string]: FinanceJsonValue };
 
 export type FinanceProviderAccountReadModel = {
   providerAccountId: string | null;
@@ -231,6 +236,13 @@ export type FinanceRatePaymentCoverage = {
     payableWith: readonly string[];
   }[];
   payable: number;
+};
+
+/** VAY-2583: the coverage as read for a hotel, with its saved payment settings and why Finance has
+ * no way to pay at all (null: it has some). */
+export type FinanceRatePaymentCoverageRead = FinanceRatePaymentCoverage & {
+  settings: { paymentsEnabled: boolean; acceptedMethods: readonly string[] };
+  financeReason: string | null;
 };
 
 export type FinancePaymentSettingsPatchPayload = Partial<
@@ -456,7 +468,9 @@ export type FinanceDispatchPropertyPayoutJob = {
 };
 
 export type FinanceCommandJob =
-  FinanceProviderAccountRefreshJob | FinanceReconcilePayoutJob | FinanceDispatchPropertyPayoutJob;
+  | FinanceProviderAccountRefreshJob
+  | FinanceReconcilePayoutJob
+  | FinanceDispatchPropertyPayoutJob;
 
 export type FinanceCommandMeta = {
   commandId: string;
@@ -1060,12 +1074,12 @@ export type FinancePropertyReadRepository = FinancePropertySettingsReadRepositor
     /** VAY-2570: whether the hotel is on the vayada Payment stop list: it may still save its
      * settings and payout account, but not put card on with vayada Payment. */
     readonly vayadaPaymentStopped?: (propertyId: string) => boolean;
-    /** VAY-2583: the hotel's booking-page rates and which guests could pay for, with its payment
-     * settings now or as `proposed` would leave them. Null: nothing published yet. */
+    /** VAY-2583: a live booking page's rates and which guests could pay for, with the payment
+     * settings now or as `proposed` would leave them. Null: not live or nothing published. */
     readonly ratePaymentCoverage?: (
       propertyId: string,
-      proposed?: { paymentsEnabled: boolean; acceptedMethods: readonly string[] },
-    ) => Promise<FinanceRatePaymentCoverage | null>;
+      proposed?: { paymentsEnabled?: boolean; acceptedMethods: readonly string[] },
+    ) => Promise<FinanceRatePaymentCoverageRead | null>;
   };
 
 export function toFinancePaymentSettingsResponse(

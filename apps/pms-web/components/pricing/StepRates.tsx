@@ -954,14 +954,25 @@ function RatePayment({
           })}
         </fieldset>
         {/* VAY-2583: card is ready at the hotel, but this rate doesn't take it (e.g. pay at the
-            property only): guests can't pay it by card until the rate allows card. */}
+            property only): guests can't pay it by card until the rate allows card. A non-refundable
+            stay is paid in advance, so its old pay at property makes way for card (VAY-2280). */}
         {!!card?.ready && payment.kind === "full" && !methods.includes("card") && (
           <div className="space-y-2 rounded-[10px] border border-primary-200 bg-primary-50 px-3 py-2.5">
             <p className="text-[12px] text-gray-700">{t("pricing.rates.allowCardHint")}</p>
             <button
               type="button"
               disabled={disabled}
-              onClick={() => apply({ kind: "full", acceptedMethods: [...methods, "card"] })}
+              onClick={() =>
+                apply({
+                  kind: "full",
+                  acceptedMethods: [
+                    ...(rate === "non_refundable"
+                      ? methods.filter((method) => method !== "pay_at_property")
+                      : methods),
+                    "card",
+                  ],
+                })
+              }
               className={ui.secondaryButton}
             >
               {t("pricing.rates.allowCard")}

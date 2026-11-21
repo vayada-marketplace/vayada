@@ -363,6 +363,15 @@ it("offers to allow card on a rate that doesn't take it once card is ready at th
     deposits: { ready: false },
   });
   expect(allowButtons()).toHaveLength(0);
+  // An old non-refundable rate paid at the property: card takes its place (a non-refundable stay
+  // is paid in advance, and the server refuses pay at property on it).
+  mount(room(), terms(["pay_at_property", "card"], ["pay_at_property"]), [], ready);
+  const nonRefundable = card("Non-refundable rate").findAll(
+    (node) => node.type === "button" && textOf(node) === "Allow card on this rate",
+  );
+  expect(nonRefundable).toHaveLength(1);
+  act(() => nonRefundable[0]!.props.onClick());
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.acceptedMethods).toEqual(["card"]);
 });
 
 it("names a deposit a rate already has (VAY-2205 keeps new ones for later)", () => {
