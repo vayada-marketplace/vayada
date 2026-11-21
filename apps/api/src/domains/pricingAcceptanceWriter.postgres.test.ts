@@ -1422,6 +1422,11 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         amount_received: amountMinor,
         currency: "usd",
       });
+      // Every closed dispute logs once for a person anyway; count only the unpriced fees.
+      const unknownFees = () =>
+        log.warn.mock.calls.filter(([, message]) =>
+          String(message).includes("countered fee unknown"),
+        );
       const answeredLost = (id: string, bt?: Record<string, unknown>) => ({
         id,
         amount: amountMinor,
@@ -1437,7 +1442,10 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         "charge.dispute.closed",
         answeredLost("dp_gbp", { currency: "gbp", amount: -amountMinor, fee: 2000 }),
       );
-      expect(log.warn).toHaveBeenCalledTimes(2);
+      expect(unknownFees().map(([ids]) => (ids as { disputeId: string }).disputeId)).toEqual([
+        "dp_none",
+        "dp_gbp",
+      ]);
       expect(log.warn).toHaveBeenCalledWith(
         expect.objectContaining({ disputeId: "dp_gbp", feeMinor: 2000, feeCurrency: "EUR" }),
         "vayada Payment: dispute countered fee unknown in the stay's currency; adjust the hotel's balance by hand",
@@ -1448,7 +1456,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         answeredLost("dp_off", { currency: "eur", amount: -amountMinor, fee: 2000 }),
         0,
       );
-      expect(log.warn).toHaveBeenCalledTimes(2);
+      expect(unknownFees()).toHaveLength(2);
 
       // Refunded in full before the dispute: the dispute took nothing, so neither does its fee.
       await expect(
