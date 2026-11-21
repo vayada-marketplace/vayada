@@ -1669,6 +1669,7 @@ jobs:
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_inbox_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/ai/actionLog/aiActivity.integration.test.ts \
             src/domains/channexOfferPreviewReader.integration.test.ts \
             src/domains/pmsInboxAssistance.integration.test.ts \
             src/domains/pmsInboxMarkReadCommand.integration.test.ts \

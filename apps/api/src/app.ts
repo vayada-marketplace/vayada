@@ -91,6 +91,8 @@ import type {
 } from "./routes/bookingSettings.js";
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
+import { registerAiActivityRoutes } from "./routes/aiActivity.js";
+import type { AiActivityStore } from "./ai/actionLog/aiActivity.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
 import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import type { BookingCustomDomainVerifier } from "./domains/bookingCustomDomainVerification.js";
@@ -441,6 +443,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingCustomDomainRepository?: BookingCustomDomainRepository;
   bookingCustomDomainVerifier?: BookingCustomDomainVerifier;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
+  /** VAY-2508: the AI action log behind GET /api/ai/activity. */
+  aiActivityStore?: AiActivityStore;
   hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   /** Approved public profile images for the auth session (platform media). */
@@ -619,6 +623,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
   }
   app.register(registerRouteGroups, { prefix: "/api" });
+  if (options.aiActivityStore) {
+    app.register(registerAiActivityRoutes, { prefix: "/api/ai", store: options.aiActivityStore });
+  }
   if (options.publicHotelProfileRepository) {
     app.register(registerAiHotelRoutes, {
       prefix: "/api/ai",
