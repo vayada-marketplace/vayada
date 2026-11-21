@@ -62,6 +62,7 @@ import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.
 import {
   createOrdinaryHotelSetupActivation,
   createOrdinaryHotelSetupProfileCommand,
+  isHotelLive,
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
@@ -379,6 +380,7 @@ describe.skipIf(!url)(
           returnBaseUrls: { bookingAdmin: "https://admin.booking.example.test" },
         }),
         readiness: publication.routes.readinessProvider,
+        lifecycle: { isLive: (id) => isHotelLive(pool, id) },
       });
 
       // The owner's signed-in session, carrying every resource link setup created for the hotel.
@@ -552,6 +554,7 @@ describe.skipIf(!url)(
         // The go-live list's light read agrees, without the booking readiness (VAY-2247 incident).
         expect(await h.service().readSetupProgress(h.actor)).toEqual({
           guestPayment: true,
+          live: false,
         });
         // It takes no locks either: it answers while a pricing save holds the owner locks.
         let timer: NodeJS.Timeout | undefined;
@@ -569,6 +572,7 @@ describe.skipIf(!url)(
           });
           expect(await Promise.race([h.service().readSetupProgress(h.actor), late])).toEqual({
             guestPayment: true,
+            live: false,
           });
         } finally {
           clearTimeout(timer);
@@ -653,7 +657,7 @@ describe.skipIf(!url)(
           activations: 1,
         });
 
-        // A second run finds everything in place.
+        // A second run finds everything in place (active, but not live yet: no page, no Channex).
         const again = await h.service().run(h.actor, request);
         expect(again).toMatchObject({ ok: true, ran: [] });
       } finally {
@@ -741,6 +745,49 @@ describe.skipIf(!url)(
             expect(await page()).toMatchObject({ hotel: { location: { city: "Ahangama" } } }),
           { timeout: 20_000, interval: 250 },
         );
+        // VAY-2582: the street and city kept the time zone, so the calendar and the page stay valid.
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+        // The published hotel is live: the first run writes nothing to it, and the dashboard's go-live
+        // list never offers Finish setup...
+        expect(await h.service().readSetupProgress(h.actor)).toEqual({
+          guestPayment: true,
+          live: true,
+        });
+        expect(await h.service().run(h.actor, request)).toMatchObject({
+          ok: false,
+          code: "hotel_already_live",
+          ran: [],
+        });
+        // ...and its time zone and country move only when confirmed (Aether, 2026-11-21).
+        const placed = (await h.ports.profiles.getPropertyProfile(scope))!;
+        const moved = await api.inject({
+          method: "PUT",
+          url: `/api/hotel-setup/properties/${h.propertyId}/profile`,
+          headers: { "idempotency-key": `move-${h.propertyId}` },
+          payload: {
+            expectedProfileRevision: placed.profileRevision,
+            patch: {
+              location: {
+                city: "Sheffield",
+                streetAddress: "London Road",
+                countryCode: "GB",
+                timezone: "Europe/London",
+              },
+            },
+          },
+        });
+        expect(moved.statusCode, moved.body).toBe(409);
+        expect(moved.json()).toMatchObject({
+          code: "location_change_needs_confirmation",
+          changes: {
+            timezone: { from: placed.profile.location.timezone, to: "Europe/London" },
+            countryCode: { from: placed.profile.location.countryCode, to: "GB" },
+          },
+        });
+        expect((await h.ports.profiles.getPropertyProfile(scope))?.profileRevision).toBe(
+          placed.profileRevision,
+        );
+        expect(blockerCodes(await h.readiness())).toEqual([]);
 
         // Two saves a moment apart (General saves the profile, then the settings): the second
         // refresh meets the first one's publication, waits for it and still lands.
@@ -882,6 +929,7 @@ describe.skipIf(!url)(
           // Setup is done (how guests pay and the plan); the room is what the go-live list asks for.
           expect(await h.service().readSetupProgress(h.actor)).toEqual({
             guestPayment: true,
+            live: false,
           });
           const checklist = await goLive(h);
           expect(checklist).toMatchObject({

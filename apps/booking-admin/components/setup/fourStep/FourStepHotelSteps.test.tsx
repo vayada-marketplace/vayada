@@ -12,9 +12,10 @@ vi.mock("next/image", () => ({
 const PROPERTY = "3f2c4d5e-6a7b-4c8d-9e0f-112233445566";
 const ROOM_TYPE = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f70819203";
 
-const firstRunState = (done: readonly string[]) => ({
+const firstRunState = (done: readonly string[], live = false) => ({
   contractVersion: "hotel-first-run.v1" as const,
   propertyId: PROPERTY,
+  live,
   steps: ["currency", "rooms", "payments", "pricing", "calendar", "guest_rules", "plan"].map(
     (id) => ({ id, state: done.includes(id) ? "done" : "todo" }),
   ),
@@ -466,6 +467,29 @@ describe("FourStepHotelSteps (VAY-2451)", () => {
     expect(value.onFinished).not.toHaveBeenCalled();
     await click(renderer, "Finish setup");
     expect(value.onFinished).toHaveBeenCalledOnce();
+    renderer.unmount();
+  });
+
+  it("leaves a live hotel at once, whatever its first run saved, and never runs it (VAY-2582)", async () => {
+    // Aether (2026-11-21): live, but moved from the old system without the first run's payments and plan.
+    for (const initialStep of [null, "room", "payments"] as const) {
+      const live = props({ initialStep });
+      live.firstRun.read.mockResolvedValue(firstRunState(["currency"], true));
+      const renderer = await mount(live.value);
+      expect(live.value.onSaveAndExit).toHaveBeenCalledOnce();
+      expect(live.firstRun.run).not.toHaveBeenCalled();
+      expect(live.rooms.saveRoom).not.toHaveBeenCalled();
+      renderer.unmount();
+    }
+  });
+
+  it("finishes when the hotel went live meanwhile (a retry after the run that made it live)", async () => {
+    const { value, firstRun } = props({ initialStep: "payments" });
+    firstRun.run.mockRejectedValueOnce(new HotelFirstRunError("hotel_already_live", null, null));
+    const renderer = await mount(value);
+    await click(renderer, "Finish setup");
+    expect(value.onFinished).toHaveBeenCalledOnce();
+    expect(textOf(renderer.root)).not.toContain("We couldn't finish setup");
     renderer.unmount();
   });
 });

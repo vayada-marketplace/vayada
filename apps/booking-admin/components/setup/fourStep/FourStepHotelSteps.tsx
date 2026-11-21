@@ -129,6 +129,10 @@ const finishError = (error: unknown) =>
     ? "Setup is still finishing from a moment ago. Try again in a few seconds."
     : "We couldn't finish setup. Everything is saved; try again in a moment.";
 
+/** The hotel went live already (a retry after the run that made it live): setup is finished. */
+const alreadyLive = (error: unknown) =>
+  error instanceof HotelFirstRunError && error.code === "hotel_already_live";
+
 /**
  * VAY-2451 steps 3 and 4 for a hotel that exists: the first room type (optional; made under the first run's
  * draft id through the PMS room commands, as Rooms & Rates makes rooms) and how guests pay, whose
@@ -191,8 +195,9 @@ export function FourStepHotelSteps({
           const started = roomFromQuickSetup(storage, propertyId);
           if (started) setRoom(started);
         }
-        // Old links (?step=payments from "Fix in setup") must not run a finished first run again.
-        if (finishedSetup(state)) return (onAlreadyFinished ?? onSaveAndExit)();
+        // Old links (?step=payments from "Fix in setup") must not run a finished first run again, and a
+        // live hotel is past setup (VAY-2582): Settings changes it, never the first run's defaults.
+        if (state.live || finishedSetup(state)) return (onAlreadyFinished ?? onSaveAndExit)();
         // A hotel an older setup made without its address or contacts finishes them first.
         const details = onEditHotel
           ? hotelDetailsStepToFinish(setupDraftFromProfile(profile.profile, code))
@@ -487,6 +492,7 @@ export function FourStepHotelSteps({
       await firstRun.run(propertyId, { guestPayment: "pay_at_property" });
       onFinished();
     } catch (caught) {
+      if (alreadyLive(caught)) return onFinished();
       setError(finishError(caught));
       setBusy(false);
     }

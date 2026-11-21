@@ -50,6 +50,12 @@ describe("hotel first-run client (VAY-2247)", () => {
     );
   });
 
+  it("reads whether the hotel is live, and an API from before VAY-2582 as not live", () => {
+    expect(parseHotelFirstRunState({ ...state(), live: true }, PROPERTY)?.live).toBe(true);
+    expect(parseHotelFirstRunState(state(), PROPERTY)?.live).toBe(false);
+    expect(parseHotelFirstRunState({ ...state(), live: "yes" }, PROPERTY)?.live).toBe(false);
+  });
+
   it("refuses a state for another property or with steps out of order", () => {
     expect(parseHotelFirstRunState(state(), PROPERTY)).not.toBeNull();
     expect(parseHotelFirstRunState({ ...state(), propertyId: "other" }, PROPERTY)).toBeNull();

@@ -925,14 +925,22 @@ export function registerSharedHotelSetupLaunchSettings(
 export type HotelSetupPropertyProfileCommand = {
   idempotencyKey: string;
   fingerprint: string;
-  merge(existing: PropertyProfile): ReturnType<typeof propertyProfileUpdate>;
+  merge(existing: PropertyProfile): PropertyProfileUpdateResult;
+};
+/** VAY-2582: what a live hotel's time zone or country change moves, from the saved value to the new one. */
+export type PropertyLocationChanges = {
+  timezone?: { from: string; to: string };
+  countryCode?: { from: string; to: string };
 };
 export type HotelSetupPropertyProfileResult =
   | { status: "updated" | "replayed"; profile: SharedPropertyProfile }
   | { status: "conflict"; currentRevision: number }
   | { status: "idempotency_conflict" }
   | { status: "private_contact_conflict" }
-  | { status: "invalid"; fields: Record<string, string[]> };
+  | { status: "invalid"; fields: Record<string, string[]> }
+  | { status: "location_change_unconfirmed"; changes: PropertyLocationChanges }
+  | { status: "channex_time_zone_mismatch"; channexTimeZone: string }
+  | { status: "channex_time_zone_unavailable" };
 
 export type HotelSetupPropertyProfileUpdate = (
   context: ReturnType<typeof enforceRoutePolicy>,
@@ -1021,8 +1029,40 @@ export function hotelSetupPropertyProfileUpdateHandler(
         detail:
           "This contact is already saved privately or managed elsewhere for this hotel. Use a different contact.",
       });
+    if (result.status === "location_change_unconfirmed")
+      return reply.status(409).send({
+        code: "location_change_needs_confirmation",
+        detail: locationChangeDetail(result.changes),
+        changes: result.changes,
+      });
+    if (result.status === "channex_time_zone_mismatch")
+      return reply.status(409).send({
+        code: "channex_time_zone_mismatch",
+        detail: `This hotel is connected to Channex, which uses the time zone ${result.channexTimeZone}. Your hotel's time zone must be the same. Keep ${result.channexTimeZone}, or change it in Channex first.`,
+        channexTimeZone: result.channexTimeZone,
+      });
+    if (result.status === "channex_time_zone_unavailable")
+      return reply.status(503).send({
+        code: "channex_time_zone_unavailable",
+        detail:
+          "We couldn't check your channel manager's time zone, so nothing was saved. Try again in a minute.",
+      });
     return result.profile;
   };
+}
+
+/** VAY-2582: names what the change does, so the person can confirm it on purpose. */
+function locationChangeDetail(changes: PropertyLocationChanges): string {
+  const { timezone, countryCode } = changes;
+  const moves = [
+    timezone ? `its time zone from ${timezone.from} to ${timezone.to}` : null,
+    countryCode ? `its country from ${countryCode.from} to ${countryCode.to}` : null,
+  ].filter(Boolean);
+  return `This changes your live hotel's ${moves.join(" and ").replace(/^its /, "")}.${
+    timezone
+      ? " Your calendar is recalculated, your booking page pauses until you save the calendar again, and your channel manager must use the same time zone."
+      : " Check that your currency and your channel manager still match the new country."
+  } Confirm the change to save it.`;
 }
 
 function canonicalJson(value: unknown): string {
@@ -1456,18 +1496,33 @@ function parsePropertyProfileUpdate(
   return "fields" in update ? sendInvalidProfile(reply, update.fields) : update;
 }
 
+export type PropertyProfileUpdateResult =
+  | {
+      expectedProfileRevision: number;
+      profile: PropertyProfile;
+      /** VAY-2582: the person confirmed a live hotel's time zone or country change. */
+      confirmLocationChange?: boolean;
+    }
+  | { fields: Record<string, string[]> };
+
 function propertyProfileUpdate(
   body: SharedPropertyProfileBody,
   existing: PropertyProfile,
-):
-  | { expectedProfileRevision: number; profile: PropertyProfile }
-  | { fields: Record<string, string[]> } {
+): PropertyProfileUpdateResult {
   const errors: Record<string, string[]> = {};
   if (!isObjectRecord(body)) {
     addFieldError(errors, "request", "request must be an object.");
     return { fields: errors };
   }
-  validateKnownKeys(body, ["expectedProfileRevision", "patch"], "request", errors);
+  validateKnownKeys(
+    body,
+    ["expectedProfileRevision", "patch", "confirmLocationChange"],
+    "request",
+    errors,
+  );
+  const confirmLocationChange = body["confirmLocationChange"];
+  if (confirmLocationChange !== undefined && typeof confirmLocationChange !== "boolean")
+    addFieldError(errors, "confirmLocationChange", "confirmLocationChange must be a boolean.");
   const expectedProfileRevision = body["expectedProfileRevision"];
   if (
     !Number.isSafeInteger(expectedProfileRevision) ||
@@ -1525,7 +1580,10 @@ function propertyProfileUpdate(
   };
   const profile = parseCanonicalPropertyProfile(merged, errors);
   if (profile && Object.keys(errors).length === 0 && typeof expectedProfileRevision === "number") {
-    return { expectedProfileRevision, profile };
+    // Only a confirmed change carries the flag, so other saves merge exactly as before.
+    return confirmLocationChange === true
+      ? { expectedProfileRevision, profile, confirmLocationChange: true }
+      : { expectedProfileRevision, profile };
   }
   return { fields: errors };
 }

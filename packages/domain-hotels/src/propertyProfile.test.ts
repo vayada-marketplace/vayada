@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPropertyLocationChangeRefusal,
   parseCreatePropertyProfileRequest,
   parsePropertyProfileResponse,
   parseUpdatePropertyProfileRequest,
@@ -207,5 +208,18 @@ describe("canonical property profile wire contract", () => {
         patch: { location: { addressPublic: true } },
       }),
     ).toBeNull();
+  });
+});
+
+describe("location change refusals (VAY-2582)", () => {
+  it("names the profile save's time zone and country refusals, and nothing else", () => {
+    for (const code of [
+      "location_change_needs_confirmation",
+      "channex_time_zone_mismatch",
+      "channex_time_zone_unavailable",
+    ])
+      expect(isPropertyLocationChangeRefusal(code)).toBe(true);
+    for (const code of ["profile_revision_conflict", "private_contact_conflict", undefined, null])
+      expect(isPropertyLocationChangeRefusal(code)).toBe(false);
   });
 });

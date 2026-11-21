@@ -2303,6 +2303,93 @@ describe("shared hotel setup status route", () => {
     app = owner();
   });
 
+  it("explains a refused time zone or country change and passes the confirmation on (VAY-2582)", async () => {
+    const command = vi
+      .fn<import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate>()
+      .mockResolvedValueOnce({
+        status: "location_change_unconfirmed",
+        changes: {
+          timezone: { from: "Asia/Colombo", to: "Europe/London" },
+          countryCode: { from: "LK", to: "GB" },
+        },
+      })
+      .mockResolvedValueOnce({
+        status: "location_change_unconfirmed",
+        changes: { countryCode: { from: "LK", to: "GB" } },
+      })
+      .mockResolvedValueOnce({
+        status: "channex_time_zone_mismatch",
+        channexTimeZone: "Asia/Colombo",
+      })
+      .mockResolvedValueOnce({ status: "channex_time_zone_unavailable" });
+    const server = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage", "booking.settings.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      profileCommand: command,
+    });
+    app = server;
+    const save = (key: string, extra: Record<string, unknown> = {}) =>
+      injectJson(server, {
+        method: "PUT",
+        url: `/api/hotel-setup/properties/${propertyId}/profile`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": key },
+        payload: {
+          expectedProfileRevision: 1,
+          patch: { location: { countryCode: "GB", timezone: "Europe/London" } },
+          ...extra,
+        },
+      });
+
+    const unconfirmed = await save("move");
+    expect(unconfirmed.statusCode).toBe(409);
+    expect(unconfirmed.body).toEqual({
+      code: "location_change_needs_confirmation",
+      detail:
+        "This changes your live hotel's time zone from Asia/Colombo to Europe/London and its country from LK to GB. Your calendar is recalculated, your booking page pauses until you save the calendar again, and your channel manager must use the same time zone. Confirm the change to save it.",
+      changes: {
+        timezone: { from: "Asia/Colombo", to: "Europe/London" },
+        countryCode: { from: "LK", to: "GB" },
+      },
+    });
+    expect((await save("country")).body).toMatchObject({
+      code: "location_change_needs_confirmation",
+      detail:
+        "This changes your live hotel's country from LK to GB. Check that your currency and your channel manager still match the new country. Confirm the change to save it.",
+    });
+    expect(await save("channex", { confirmLocationChange: true })).toMatchObject({
+      statusCode: 409,
+      body: {
+        code: "channex_time_zone_mismatch",
+        detail:
+          "This hotel is connected to Channex, which uses the time zone Asia/Colombo. Your hotel's time zone must be the same. Keep Asia/Colombo, or change it in Channex first.",
+        channexTimeZone: "Asia/Colombo",
+      },
+    });
+    expect(await save("channex-down", { confirmLocationChange: true })).toMatchObject({
+      statusCode: 503,
+      body: { code: "channex_time_zone_unavailable" },
+    });
+
+    // The confirmation reaches the writer through the merge; anything but a boolean is refused there.
+    const merge = command.mock.calls[2]![2].merge;
+    const existing = profileResponse(propertyId, minimalHotelInput()).profile;
+    expect(merge(existing)).toMatchObject({
+      expectedProfileRevision: 1,
+      confirmLocationChange: true,
+      profile: { location: { countryCode: "GB", timezone: "Europe/London" } },
+    });
+    expect(command.mock.calls[0]![2].merge(existing)).not.toHaveProperty("confirmLocationChange");
+    command.mockResolvedValueOnce({
+      status: "updated",
+      profile: profileResponse(propertyId, minimalHotelInput()),
+    });
+    await save("bad-flag", { confirmLocationChange: "yes" });
+    expect(command.mock.calls[4]![2].merge(existing)).toEqual({
+      fields: { confirmLocationChange: ["confirmLocationChange must be a boolean."] },
+    });
+  });
+
   it("republishes a live page as the hotel user after a hotel-detail save (VAY-2344)", async () => {
     // Production serves setup publications: the target-mode refresher is never built there.
     const publicPageRefresh = vi.fn(async (_propertyId: string) => undefined);

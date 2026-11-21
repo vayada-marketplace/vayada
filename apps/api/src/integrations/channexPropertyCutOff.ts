@@ -88,6 +88,41 @@ export async function readChannexPropertyCutOff(
 }
 
 /**
+ * VAY-2582: a Channex property's time zone, for the hotel profile save (one GET, 5 s at most). A hotel
+ * connected to Channex keeps the same time zone as its Channex property, or its sync stops. Only the time
+ * zone is read, so nothing else about the property can refuse a save.
+ */
+export function createChannexPropertyTimeZoneRead(config: {
+  apiBaseUrl: string;
+  apiKey: string;
+  fetch?: typeof fetch;
+}) {
+  const request = config.fetch ?? fetch;
+  return async (externalPropertyId: string): Promise<string> => {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(externalPropertyId))
+      throw new Error("channex_property_id_invalid");
+    const response = await request(
+      new URL(`/api/v1/properties/${externalPropertyId}`, config.apiBaseUrl),
+      {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+        headers: { "user-api-key": config.apiKey },
+      },
+    );
+    if (!response.ok) throw new Error(`channex_property_http_${response.status}`);
+    const body: unknown = await response.json();
+    const data = pricingObject(body) ? body.data : null;
+    const attributes =
+      pricingObject(data) && data.id === externalPropertyId ? data.attributes : null;
+    const timeZone = pricingObject(attributes) ? attributes.timezone : null;
+    if (typeof timeZone !== "string" || !localClock(timeZone, new Date(0)))
+      throw new Error("channex_property_time_zone_unreadable");
+    return timeZone;
+  };
+}
+
+/**
  * The Channex dates whose availability the cut-off closes at `now`, or null while it closes none.
  * The cut-off belongs to Channex's current date, which starts at 02:00: a 16:30 cut-off closes that
  * date from 16:30 until 02:00 the next morning, and a 00:00 cut-off from midnight until 02:00.

@@ -51,6 +51,7 @@ export type HotelFirstRunPorts = HotelFirstRunSetupPorts &
     facts: {
       read(actor: HotelFirstRunActor): Promise<HotelFirstRunWriteFacts>;
       readSetupProgress(actor: HotelFirstRunActor): Promise<HotelFirstRunSetupProgress>;
+      isLive(actor: HotelFirstRunActor): Promise<boolean>;
     };
     /** Runs `work` while holding the property's first-run lock, or returns "busy" when another run holds it. */
     lock: { withPropertyLock<T>(propertyId: string, work: () => Promise<T>): Promise<T | "busy"> };
@@ -113,6 +114,17 @@ async function runSteps(
   actor: HotelFirstRunActor,
 ): Promise<HotelFirstRunResult> {
   const ran: HotelFirstRunStepId[] = [];
+  // VAY-2582: a live hotel is past setup. Its payments, prices, calendar, rules and plan are changed in
+  // Settings; the first run's defaults would overwrite them (Aether, 2026-11-21).
+  if (await ports.facts.isLive(actor)) {
+    return Object.freeze({
+      ok: false,
+      code: "hotel_already_live",
+      step: null,
+      state: hotelFirstRunState(await ports.facts.read(actor)),
+      ran,
+    });
+  }
   const steps: ReadonlyArray<
     [HotelFirstRunStepId, (facts: HotelFirstRunWriteFacts) => ReturnType<typeof runFirstRunPlan>]
   > = [

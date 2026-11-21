@@ -70,6 +70,7 @@ import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js"
 import {
   createOrdinaryHotelSetupActivation,
   createOrdinaryHotelSetupProfileCommand,
+  isHotelLive,
 } from "./platform/hotelSetupProfileWriter.js";
 import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
@@ -284,6 +285,7 @@ import {
   createChannexManagementProvider,
 } from "./integrations/channexManagement.js";
 import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
+import { createChannexPropertyTimeZoneRead } from "./integrations/channexPropertyCutOff.js";
 import { resolveChannexManagementDatabaseRouting } from "./channexManagementDatabaseRouting.js";
 import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
@@ -1267,7 +1269,16 @@ const hotelSetupOrdinaryOptions = hotelSetupOrdinaryPool
         pool: hotelSetupOrdinaryPool,
         hotelSetupOwnerCreation: true,
       }),
-      hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(hotelSetupOrdinaryPool),
+      // VAY-2582: a Channex-connected hotel's time zone change is checked against its Channex property.
+      hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(
+        hotelSetupOrdinaryPool,
+        config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
+          ? createChannexPropertyTimeZoneRead({
+              apiBaseUrl: config.channexManagement.apiBaseUrl,
+              apiKey: config.channexManagement.apiKey,
+            })
+          : undefined,
+      ),
       hotelSetupLaunchSettingsCommand:
         createOrdinaryHotelSetupLaunchSettingsCommand(hotelSetupOrdinaryPool),
       hotelSetupFeatureHubCommands:
@@ -1927,6 +1938,7 @@ const hotelFirstRun = (() => {
     design: bookingDesignRepository,
     plans: financeSubscriptionService,
     readiness,
+    lifecycle: { isLive: (propertyId) => isHotelLive(hotelSetupOrdinaryPool, propertyId) },
   });
 })();
 // VAY-2247 wave 2: the setup checklist both dashboards show, with the first run (it reads its state).
@@ -2485,6 +2497,9 @@ const app = buildApp({
   }),
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
   preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
+  isHotelLive: hotelSetupOrdinaryPool
+    ? (propertyId: string) => isHotelLive(hotelSetupOrdinaryPool, propertyId)
+    : undefined,
   profileImageMediaRepository: platformMediaRuntime?.profileMediaRepository,
   sharedHotelSetupStatusRepository,
   propertyNearbyRepository: config.auth

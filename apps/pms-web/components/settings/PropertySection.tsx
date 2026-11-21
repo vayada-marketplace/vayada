@@ -1,13 +1,16 @@
 "use client";
 
+import { ianaTimezones } from "@vayada/product-onboarding";
 import { SettingsSection, SettingsCard, FormRow } from "@vayada/settings-ui";
-import { TIMEZONE_OPTIONS } from "./constants";
 import {
   canSavePmsPropertyDetails,
   type PmsPropertyProfileLoadStatus,
 } from "@/lib/settings/propertyDetails";
 import { useTranslation } from "@/lib/i18n";
 import { formatTimezoneLabel } from "@/lib/timezoneLabel";
+
+/** VAY-2582: every IANA time zone a hotel can have, e.g. Asia/Colombo (the same on the server and in the browser). */
+const TIMEZONE_CHOICES = ianaTimezones().sort();
 
 const inputClass =
   "w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white";
@@ -92,10 +95,10 @@ export function PropertySection({
               <option value="" disabled>
                 {t("settings.property.selectTimezone")}
               </option>
-              {timezone && !TIMEZONE_OPTIONS.includes(timezone) && (
+              {timezone && !TIMEZONE_CHOICES.includes(timezone) && (
                 <option value={timezone}>{formatTimezoneLabel(timezone)}</option>
               )}
-              {TIMEZONE_OPTIONS.map((tz) => (
+              {TIMEZONE_CHOICES.map((tz) => (
                 <option key={tz} value={tz}>
                   {formatTimezoneLabel(tz)}
                 </option>
