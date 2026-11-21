@@ -24,6 +24,7 @@ export const ROUTE_MANIFEST = [
   "DELETE /api/pms/properties/:propertyId/room-types/:roomTypeId/physical-units/:roomUnitId",
   "DELETE /api/pms/setup/properties/:propertyId/room-types/:roomTypeId",
   "DELETE /partner/v1/promo-codes/:promoCodeId",
+  "GET /api/ai/activity",
   "GET /api/ai/health",
   "GET /api/ai/hotels/:slug",
   "GET /api/booking-web/agency-pages/:slug",

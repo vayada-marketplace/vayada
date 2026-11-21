@@ -62,13 +62,14 @@ describe("AI route classification (VAY-2507)", () => {
   it("only ever grows the never list (shortening it needs Flamur's decision)", () => {
     // Raise these floors when routes are added to the never list; lowering them is a decision.
     expect(Object.keys(NEVER_ROUTES).length).toBeGreaterThanOrEqual(52);
-    expect(NEVER_RULES.length).toBeGreaterThanOrEqual(4);
-    expect(ROUTE_MANIFEST.filter((route) => neverArea(route)).length).toBeGreaterThanOrEqual(119);
+    expect(NEVER_RULES.length).toBeGreaterThanOrEqual(5);
+    expect(ROUTE_MANIFEST.filter((route) => neverArea(route)).length).toBeGreaterThanOrEqual(121);
   });
 
   // Flamur's never list (2026-11-20): one real route per area, so a renamed or reclassified route
   // in an area fails here.
-  const NEVER: Record<Exclude<NeverArea, "ai_connections">, string[]> = {
+  const NEVER: Record<NeverArea, string[]> = {
+    ai_connections: ["GET /api/ai/activity"],
     bank_accounts_and_payouts: [
       "PUT /api/finance/properties/:propertyId/payout-destination",
       "GET /api/finance/properties/:propertyId/payout-destination",

@@ -30,6 +30,9 @@ export const NEVER_RULES: readonly { match: RegExp; area: NeverArea }[] = Object
   },
   { match: /^(?!OPTIONS)[A-Z]+ \/api\/identity\/staff\//, area: "team_members_and_permissions" },
   { match: /^(?!OPTIONS)[A-Z]+ \/api\/identity\/gdpr\//, area: "privacy_export_and_delete" },
+  // The AI's own management: activity log (VAY-2508), connections, budgets. Only the public hotel
+  // profile and the health check under /api/ai are something else.
+  { match: /^(?!OPTIONS)[A-Z]+ \/api\/ai\/(?!hotels\/|health$)/, area: "ai_connections" },
 ]);
 
 /** Never routes outside those areas, one entry each. */
