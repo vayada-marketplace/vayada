@@ -266,11 +266,12 @@ create a Booking-only custom-domain store.
 
 Target routes:
 
-| Method   | Path                                         | Behavior                                                             |
-| -------- | -------------------------------------------- | -------------------------------------------------------------------- |
-| `GET`    | `/api/booking/hotels/:hotelId/custom-domain` | Return current admin verification state.                             |
-| `PUT`    | `/api/booking/hotels/:hotelId/custom-domain` | Connect or replace the requested domain and return DNS instructions. |
-| `DELETE` | `/api/booking/hotels/:hotelId/custom-domain` | Disconnect the custom domain from the hotel.                         |
+| Method   | Path                                               | Behavior                                                                    |
+| -------- | -------------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET`    | `/api/booking/hotels/:hotelId/custom-domain`       | Return current admin verification state.                                    |
+| `PUT`    | `/api/booking/hotels/:hotelId/custom-domain`       | Connect or replace the requested domain and return DNS instructions.        |
+| `DELETE` | `/api/booking/hotels/:hotelId/custom-domain`       | Disconnect the custom domain from the hotel.                                |
+| `POST`   | `/api/booking/hotels/:hotelId/custom-domain/check` | Check DNS and the Cloudflare certificate now; store the outcome (VAY-2568). |
 
 ```ts
 type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
@@ -280,6 +281,7 @@ type BookingCustomDomainDnsRecord = {
   name: string;
   value: string;
   status: "pending" | "verified" | "failed";
+  host?: string; // name as typed in the hotel's DNS panel ("booking"), after a check
 };
 
 type BookingAdminCustomDomainResponse = {
@@ -291,6 +293,17 @@ type BookingAdminCustomDomainResponse = {
   sslStatus: "not_configured" | "pending" | "active" | "failed";
   dnsRecords: BookingCustomDomainDnsRecord[];
   verificationErrors: string[];
+  // Why the last check did not verify the domain; null on GET/PUT and once verified.
+  verificationIssue: {
+    code:
+      | "dns_record_missing"
+      | "dns_record_wrong_target"
+      | "certificate_pending"
+      | "routing_pending"
+      | "hostname_rejected"
+      | "check_unavailable";
+    foundTarget: string | null;
+  } | null;
   checkedAt: string | null;
   updatedAt: string | null;
 };
@@ -310,6 +323,21 @@ Validation and behavior:
   model through platform/domain verification, hotel catalog, and distribution
   projections.
 - `DELETE` disconnects the domain and returns `204`.
+- `POST …/check` (VAY-2568) checks a domain that is not verified yet:
+  - A hostname already active in Cloudflare for SaaS (zone vayada.com, `CLOUDFLARE_API_TOKEN` +
+    `CLOUDFLARE_ZONE_ID`) is verified only for the property that `BOOKING_CUSTOM_DOMAIN_ROUTES` names
+    for it. That list is platform's `next_booking_custom_domains`, the domains the ALB sends to the
+    new booking frontend. Any other property gets `routing_pending`.
+  - Verifying makes the domain canonical, re-projects the public profile and republishes a live page.
+  - Otherwise the hotel's CNAME decides: missing or wrong → `failed` with the reason. If it is right,
+    the hostname is registered in Cloudflare (as the old booking-api did) and stays `pending` while
+    the certificate is issued. Validation that timed out, expired or lost the CNAME is restarted.
+  - A verified domain is never re-checked.
+  - Without Cloudflare settings, or when DNS/Cloudflare fail, it answers `check_unavailable` and
+    stores nothing.
+  - Saving the verified domain again changes nothing.
+  - PUT and DELETE republish a live page when they replace or remove a verified domain.
+  - `vayada.com` hostnames are refused.
 
 ## Payment Settings Writes
 

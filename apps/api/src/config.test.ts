@@ -1301,6 +1301,27 @@ describe("api config", () => {
     ).toBe("booking.localhost");
   });
 
+  it("loads the custom-domain Cloudflare settings only as a pair (VAY-2568)", () => {
+    expect(loadConfig({}).bookingCustomDomainCloudflare).toBeUndefined();
+    expect(
+      loadConfig({ CLOUDFLARE_API_TOKEN: " token ", CLOUDFLARE_ZONE_ID: "zone" })
+        .bookingCustomDomainCloudflare,
+    ).toEqual({ apiToken: "token", zoneId: "zone" });
+    expect(
+      loadConfig({ CLOUDFLARE_API_TOKEN: "token" }).bookingCustomDomainCloudflare,
+    ).toBeUndefined();
+  });
+
+  it("reads the custom domains routed to the new booking frontend with their properties", () => {
+    expect(loadConfig({}).bookingCustomDomainRoutes).toEqual(new Map());
+    expect(
+      loadConfig({
+        BOOKING_CUSTOM_DOMAIN_ROUTES:
+          " WWW.Booking.Hotel.example =AAAA0000-0000-4000-8000-000000000001,bad,x=y=z,",
+      }).bookingCustomDomainRoutes,
+    ).toEqual(new Map([["www.booking.hotel.example", "aaaa0000-0000-4000-8000-000000000001"]]));
+  });
+
   it("keeps platform media serving inactive by default", () => {
     expect(loadConfig({}).platformMediaServing).toBeUndefined();
   });

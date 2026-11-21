@@ -181,10 +181,12 @@ export interface BookingAdminCustomDomainFixture {
   dnsRecords: Array<{
     type: "CNAME" | "TXT";
     name: string;
+    host?: string;
     value: string;
     status: "pending" | "verified" | "failed";
   }>;
   verificationErrors: string[];
+  verificationIssue: { code: string; foundTarget: string | null } | null;
   checkedAt: string | null;
   updatedAt: string | null;
 }
@@ -378,6 +380,7 @@ export const defaultCustomDomain: BookingAdminCustomDomainFixture = {
   sslStatus: "not_configured",
   dnsRecords: [],
   verificationErrors: [],
+  verificationIssue: null,
   checkedAt: null,
   updatedAt: null,
 };

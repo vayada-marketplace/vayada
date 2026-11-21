@@ -93,6 +93,7 @@ import type { BookingPublicationRefreshPort } from "./domains/bookingPublication
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
 import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
+import type { BookingCustomDomainVerifier } from "./domains/bookingCustomDomainVerification.js";
 import { registerBookingRoutes, type BookingRoutesOptions } from "./routes/booking.js";
 import type { BookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
 import type { BookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
@@ -437,6 +438,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort;
   bookingPublicationRefresh?: BookingPublicationRefreshPort;
   bookingCustomDomainRepository?: BookingCustomDomainRepository;
+  bookingCustomDomainVerifier?: BookingCustomDomainVerifier;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
@@ -853,6 +855,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     publicPageRefresh: options.publicPageRefresh,
     inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     customDomainRepository: options.bookingCustomDomainRepository,
+    customDomainVerifier: options.bookingCustomDomainVerifier,
     changeRequestRepository: options.bookingChangeRequestRepository,
   });
   if (options.bookingGuestChoices)

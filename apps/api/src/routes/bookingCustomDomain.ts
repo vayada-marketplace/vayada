@@ -4,6 +4,12 @@ import { bookingCustomDomainLockKey } from "@vayada/domain-booking";
 import pg from "pg";
 import type { QueryResult, QueryResultRow } from "pg";
 
+import {
+  BOOKING_CUSTOM_DOMAIN_CNAME_TARGET,
+  type BookingCustomDomainCheckResult,
+  type BookingCustomDomainVerifier,
+} from "../domains/bookingCustomDomainVerification.js";
+import { projectPropertyPublicProfile } from "../platform/propertyPublicProfileProjection.js";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 export type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
@@ -14,6 +20,8 @@ export type BookingCustomDomainDnsRecord = {
   name: string;
   value: string;
   status: "pending" | "verified" | "failed";
+  /** The name as typed in the hotel's DNS panel ("booking"), known after a check. */
+  host?: string;
 };
 
 export type BookingCustomDomainState = {
@@ -34,6 +42,8 @@ export type BookingCustomDomainResponse = {
   sslStatus: BookingCustomDomainSslStatus;
   dnsRecords: BookingCustomDomainDnsRecord[];
   verificationErrors: string[];
+  /** Why the domain is not verified yet, from the last check (VAY-2568); null otherwise. */
+  verificationIssue: BookingCustomDomainCheckResult["issue"];
   checkedAt: string | null;
   updatedAt: string | null;
 };
@@ -47,7 +57,21 @@ export type BookingCustomDomainRepository = {
   findByPropertyId(propertyId: string): Promise<BookingCustomDomainState | null>;
   upsertForPropertyId(propertyId: string, domain: string): Promise<BookingCustomDomainState | null>;
   deleteForPropertyId(propertyId: string): Promise<boolean>;
+  /** Stores a check's outcome for the property's current hostname; null when it changed since. */
+  recordCheckResult(
+    propertyId: string,
+    domain: string,
+    status: BookingCustomDomainCheckResult["status"],
+  ): Promise<BookingCustomDomainState | null>;
+  /** Re-projects the public profile read model, which carries the verified domain. */
+  projectPublicProfile(propertyId: string): Promise<void>;
   close?(): Promise<void>;
+};
+
+export type BookingCustomDomainRouteOptions = {
+  verifier?: BookingCustomDomainVerifier;
+  /** Republishes a live booking page, so its custom domain follows the verified one. */
+  refreshPublicPage?: (propertyId: string, request: FastifyRequest) => Promise<void>;
 };
 
 export type BookingCustomDomainPool = {
@@ -258,6 +282,34 @@ export function createTargetBookingCustomDomainRepository(config: {
 
       return Boolean(result.rows[0]);
     },
+    async recordCheckResult(propertyId, domain, status) {
+      const result = await pool.query<TargetCustomDomainRow>(
+        `WITH safety_lock AS MATERIALIZED (
+           SELECT pg_advisory_xact_lock(hashtextextended($4,0))
+         )
+         UPDATE hotel_catalog.property_domains
+            SET verification_status = $3::text,
+                canonical_when_verified = ($3::text = 'verified'),
+                verified_at = CASE WHEN $3::text = 'verified' THEN now() END,
+                updated_at = now()
+          WHERE property_id = $1::uuid
+            AND hostname = $2
+            AND verification_status <> 'disabled'
+            AND EXISTS (SELECT 1 FROM safety_lock)
+         RETURNING
+           property_id::text AS "propertyId",
+           hostname AS "domain",
+           verification_status AS "verificationStatus",
+           verified_at AS "verifiedAt",
+           updated_at AS "updatedAt"`,
+        [propertyId, domain, status, bookingCustomDomainLockKey(propertyId)],
+      );
+      const row = result.rows[0];
+      return row ? toState(propertyId, row) : null;
+    },
+    async projectPublicProfile(propertyId) {
+      await projectPropertyPublicProfile(pool, { propertyId });
+    },
     async close() {
       if (ownsPool) {
         await pool.end();
@@ -270,8 +322,21 @@ export async function registerBookingCustomDomainRoutes(
   app: FastifyInstance,
   repository: BookingCustomDomainRepository,
   propertyAccessRepository: PropertyAccessRepository,
+  options: BookingCustomDomainRouteOptions = {},
 ): Promise<void> {
   const authorizedPropertyIds = new WeakMap<FastifyRequest, string>();
+  // A live page shows the verified domain (and booking-web redirects to it), so every change of
+  // the verified domain republishes it. Fire and forget, like settings saves; failures are logged.
+  const refreshPublicPage = (propertyId: string, request: FastifyRequest) => {
+    options
+      .refreshPublicPage?.(propertyId, request)
+      .catch((error: unknown) =>
+        request.log.warn(
+          { err: error, propertyId },
+          "Booking page refresh after a custom-domain change failed",
+        ),
+      );
+  };
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
     const { hotelId } = request.params as BookingHotelParams;
     const propertyId = await enforceBookingCustomDomainAccess(
@@ -341,6 +406,12 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
+      // Saving the verified domain again keeps it verified (and on the live page) as it is.
+      const previous = await repository.findByPropertyId(propertyId).catch(() => null);
+      if (previous?.domain === parsed.value.domain && previous.verificationStatus === "verified") {
+        return toBookingCustomDomainResponse({ ...previous, hotelId });
+      }
+
       let state: BookingCustomDomainState | null;
       try {
         state = await repository.upsertForPropertyId(propertyId, parsed.value.domain);
@@ -372,7 +443,121 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
+      // The verified domain was replaced: the live page must stop using it. When unsure, refresh.
+      if (!previous || previous.verificationStatus === "verified") {
+        refreshPublicPage(propertyId, request);
+      }
       return toBookingCustomDomainResponse({ ...state, hotelId });
+    },
+  );
+
+  app.post<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/custom-domain/check",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const { hotelId } = request.params;
+      const propertyId = authorizedPropertyIds.get(request)!;
+
+      let state: BookingCustomDomainState | null;
+      try {
+        state = await repository.findByPropertyId(propertyId);
+      } catch {
+        return sendBookingCustomDomainError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking custom-domain status is unavailable.",
+        });
+      }
+      if (!state) {
+        return sendBookingCustomDomainError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "read_model",
+          message: "Booking custom-domain target not found.",
+        });
+      }
+
+      // A verified domain stays verified; there is nothing to check without one.
+      const status = toContractStatus(state);
+      if ((status !== "pending" && status !== "failed") || !state.domain) {
+        return toBookingCustomDomainResponse({ ...state, hotelId });
+      }
+
+      const domain = state.domain;
+      let result: BookingCustomDomainCheckResult;
+      try {
+        if (!options.verifier) throw new Error("Custom-domain verification is not configured.");
+        result = await options.verifier.check(domain, propertyId);
+      } catch (error) {
+        request.log.warn({ err: error, propertyId, domain }, "Booking custom-domain check failed");
+        result = {
+          status: status === "failed" ? "failed" : "pending",
+          issue: { code: "check_unavailable", foundTarget: null },
+          recordHost: null,
+          errors: ["The domain could not be checked right now. Try again in a few minutes."],
+        };
+      }
+
+      if (result.issue?.code === "routing_pending") {
+        // Vayada's turn: platform's next_booking_custom_domains needs "<domain>" for this property.
+        request.log.warn(
+          { propertyId, domain },
+          "Custom domain is ready in Cloudflare but not routed to the new booking frontend",
+        );
+      }
+
+      if (
+        result.issue?.code !== "check_unavailable" &&
+        result.status !== state.verificationStatus
+      ) {
+        let recorded: BookingCustomDomainState | null;
+        try {
+          recorded = await repository.recordCheckResult(propertyId, domain, result.status);
+        } catch {
+          return sendBookingCustomDomainError(reply, {
+            statusCode: 500,
+            code: "write_model_unavailable",
+            category: "write_model",
+            message: "Booking custom-domain check could not be saved.",
+          });
+        }
+        // The hotel replaced or removed the domain meanwhile: answer with what is stored now.
+        if (!recorded) {
+          const current = await repository.findByPropertyId(propertyId).catch(() => null);
+          if (current) return toBookingCustomDomainResponse({ ...current, hotelId });
+          return sendBookingCustomDomainError(reply, {
+            statusCode: 404,
+            code: "not_found",
+            category: "read_model",
+            message: "Booking custom-domain target not found.",
+          });
+        }
+        state = recorded;
+        // After the reply, best effort: the read model (PUT/DELETE clear it), then the live page.
+        if (recorded.verificationStatus === "verified") {
+          void repository
+            .projectPublicProfile(propertyId)
+            .catch((error: unknown) =>
+              request.log.warn(
+                { err: error, propertyId },
+                "Public profile projection after a custom-domain check failed",
+              ),
+            )
+            .then(() => refreshPublicPage(propertyId, request));
+        }
+      }
+
+      const response = toBookingCustomDomainResponse({ ...state, hotelId });
+      return {
+        ...response,
+        dnsRecords: response.dnsRecords.map((record) =>
+          result.recordHost ? { ...record, host: result.recordHost } : record,
+        ),
+        verificationErrors: result.errors.length > 0 ? result.errors : response.verificationErrors,
+        verificationIssue: result.issue,
+        checkedAt: new Date().toISOString(),
+      } satisfies BookingCustomDomainResponse;
     },
   );
 
@@ -383,6 +568,7 @@ export async function registerBookingCustomDomainRoutes(
       const { hotelId } = request.params;
       const propertyId = authorizedPropertyIds.get(request)!;
 
+      const previous = await repository.findByPropertyId(propertyId).catch(() => null);
       let deleted: boolean;
       try {
         deleted = await repository.deleteForPropertyId(propertyId);
@@ -404,6 +590,9 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
+      if (!previous || previous.verificationStatus === "verified") {
+        refreshPublicPage(propertyId, request);
+      }
       return reply.code(204).send();
     },
   );
@@ -587,7 +776,9 @@ function parseUpsertBookingCustomDomainBody(
   } else {
     const normalizedDomain = normalizeDomain(domain);
     if (!normalizedDomain) {
-      details.push("domain must be a hostname, not a URL, path, wildcard, localhost, or IP.");
+      details.push(
+        "domain must be a hostname, not a URL, path, wildcard, localhost, IP, or vayada.com address.",
+      );
     }
   }
 
@@ -616,13 +807,14 @@ function toBookingCustomDomainResponse(
           {
             type: "CNAME",
             name: domain,
-            value: "custom.booking.vayada.com",
+            value: BOOKING_CUSTOM_DOMAIN_CNAME_TARGET,
             status: status === "verified" ? "verified" : status === "failed" ? "failed" : "pending",
           },
         ]
       : [],
     verificationErrors:
       status === "failed" ? ["Domain verification failed. Check DNS records."] : [],
+    verificationIssue: null,
     checkedAt,
     updatedAt,
   };
@@ -666,6 +858,9 @@ function normalizeDomain(value: string): string | null {
     domain.startsWith("*.") ||
     domain === "localhost" ||
     domain.endsWith(".localhost") ||
+    // Vayada's own addresses (a hotel's *.next-booking.vayada.com page included) are not custom.
+    domain === "vayada.com" ||
+    domain.endsWith(".vayada.com") ||
     /^[\d.]+$/.test(domain)
   ) {
     return null;

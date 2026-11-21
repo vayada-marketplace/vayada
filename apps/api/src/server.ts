@@ -341,6 +341,11 @@ import { createPgHotelAccountAgreementsRepository } from "./domains/hotelAccount
 import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
+  createBookingCustomDomainVerifier,
+  createCloudflareCustomHostnames,
+  createCustomDomainDns,
+} from "./domains/bookingCustomDomainVerification.js";
+import {
   createTargetFinancePropertySettingsRepository,
   createTargetFinancePublicHotelPropertyResolver,
   createXenditBankValidator,
@@ -500,6 +505,13 @@ const routePmsInventoryPublicOfferProjector = pmsInventoryPublicOfferProjector
 const bookingCustomDomainRepository = createTargetBookingCustomDomainRepository({
   connectionString: targetDatabaseUrl,
 });
+const bookingCustomDomainVerifier = config.bookingCustomDomainCloudflare
+  ? createBookingCustomDomainVerifier({
+      cloudflare: createCloudflareCustomHostnames(config.bookingCustomDomainCloudflare),
+      dns: createCustomDomainDns(),
+      routes: config.bookingCustomDomainRoutes,
+    })
+  : undefined;
 
 const bookingAddonItemsRepository = createPgTargetBookingAddonItemsRepository({
   connectionString: targetDatabaseUrl,
@@ -2438,6 +2450,7 @@ const app = buildApp({
       ? { refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime) }
       : undefined,
   bookingCustomDomainRepository,
+  bookingCustomDomainVerifier,
   hotelAccountInviteCodeRepository: createPgHotelAccountInviteCodeRepository({
     connectionString: targetDatabaseUrl,
   }),

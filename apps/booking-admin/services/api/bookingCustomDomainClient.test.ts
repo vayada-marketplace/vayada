@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BookingCustomDomainClientError,
   buildBookingCustomDomainEndpoint,
+  checkBookingCustomDomain,
   deleteBookingCustomDomain,
   getBookingCustomDomain,
   upsertBookingCustomDomain,
@@ -10,7 +11,7 @@ import {
 } from "./bookingCustomDomainClient";
 import { ApiErrorResponse, type ApiClient } from "./client";
 
-type CustomDomainClient = Pick<ApiClient, "get" | "put" | "delete">;
+type CustomDomainClient = Pick<ApiClient, "get" | "put" | "delete" | "post">;
 
 const response: BookingCustomDomainResponse = {
   hotelId: "booking_hotel_alpenrose",
@@ -28,6 +29,7 @@ const response: BookingCustomDomainResponse = {
     },
   ],
   verificationErrors: [],
+  verificationIssue: null,
   checkedAt: "2026-06-22T10:00:00.000Z",
   updatedAt: "2026-06-22T10:00:00.000Z",
 };
@@ -86,6 +88,23 @@ describe("booking custom-domain client", () => {
     ]);
   });
 
+  it("posts a check of the domain to the check route (VAY-2568)", async () => {
+    const calls: Array<{ endpoint: string; body?: unknown }> = [];
+    const client = createClient({
+      post: async <T>(endpoint: string, body?: unknown) => {
+        calls.push({ endpoint, body });
+        return response as T;
+      },
+    });
+
+    await expect(
+      checkBookingCustomDomain({ hotelId: "booking_hotel_alpenrose" }, client),
+    ).resolves.toEqual(response);
+    expect(calls).toEqual([
+      { endpoint: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain/check", body: {} },
+    ]);
+  });
+
   it("maps contract errors to the typed client error", async () => {
     const client = createClient({
       put: async () => {
@@ -128,6 +147,7 @@ function createClient(overrides: Partial<CustomDomainClient>): CustomDomainClien
     get: overrides.get ?? fail,
     put: overrides.put ?? fail,
     delete: overrides.delete ?? fail,
+    post: overrides.post ?? fail,
   } as CustomDomainClient;
 }
 
