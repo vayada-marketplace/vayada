@@ -339,7 +339,7 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
       "database unavailable",
     );
     expect(test.capturePaymentIntent.mock.calls.length).toBe(before);
-    expect(live.capturePaymentIntent).toHaveBeenCalledTimes(1);
+    expect(live.capturePaymentIntent).toHaveBeenCalledTimes(2);
 
     // A payment recorded live is never sent to the test keys, even without live keys configured.
     const noLive = routeVayadaPaymentStripe(

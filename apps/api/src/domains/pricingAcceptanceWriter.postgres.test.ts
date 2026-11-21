@@ -790,13 +790,14 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         `INSERT INTO finance.card_refund_commands (id,property_id,guest_booking_id,payment_id,
            idempotency_key,requested_by,amount,amount_minor,currency,provider_account_ref,
            provider_payment_intent_id,provider_refund_id)
-         VALUES (gen_random_uuid(),$1,$2::uuid,$3::uuid,'vay2569-refund','host',1,100,$4,
-           'vayada:'||$1::text,$5,'re_vay2569')`,
+         VALUES (gen_random_uuid(),$1,$2::uuid,$3::uuid,'vay2569-refund','host',1,100,$4,$5,$6,
+           're_vay2569')`,
         [
           fixture.propertyId,
           payment.booking,
           payment.id,
           fixture.f.current.quote.stay.currency,
+          `vayada:${fixture.propertyId}`,
           payment.intent,
         ],
       );
