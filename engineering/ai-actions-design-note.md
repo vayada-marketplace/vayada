@@ -220,10 +220,17 @@ owner's opt-in.
 
 Four facts every read action must handle:
 
-- **Property scope.** Some reads check only the organization's property links, not the member's
-  assigned properties: Channex ([`pmsChannexManagement.ts:473-491`](../apps/api/src/routes/pmsChannexManagement.ts#L473)),
-  operating calendar, pricing source, flexible rate plan and the booking-settings check. The action
-  checks the member's scope itself before calling them.
+- **Property scope.** Every route that checks a property link also checks the member's assigned
+  properties (VAY-2574). The shared link check, `hasActiveLinkedResource`
+  ([`backend-authorization/src/index.ts`](../packages/backend-authorization/src/index.ts)), refuses
+  a property outside a limited member's scope. That covers routes that check only the
+  organization's links, such as Channex
+  ([`pmsChannexManagement.ts:473-491`](../apps/api/src/routes/pmsChannexManagement.ts#L473)), the
+  operating calendar, pricing source, flexible rate plan and booking settings. Two routes that
+  read the links directly (shared setup, property deletion) call `isPropertyInMemberScope`. A
+  limited member is refused a legacy alias id (a legacy booking hotel id, or a `pms_hotel`), even for
+  an assigned property, because the request carries no alias-to-property map. Booking Admin sends
+  property ids only. The delegated context still narrows its links as well (§5.2).
 - **Locks.** Every pricing-v2 read and every public stay-price read takes the inventory lock and
   `identity.organizations ... FOR UPDATE`
   ([`replacementPricingAuthorization.ts:58-63`](../apps/api/src/domains/replacementPricingAuthorization.ts#L58)),

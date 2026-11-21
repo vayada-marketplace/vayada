@@ -5314,11 +5314,28 @@ describe("vayada-api", () => {
         accessOrigin: "agency",
         assignedPropertyIds: [pmsPropertyId],
       },
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async resolveCanonicalPropertyId(hotelId) {
+          return hotelId === pmsPropertyId || hotelId === "booking_hotel_alpenrose"
+            ? pmsPropertyId
+            : null;
+        },
+      },
     });
+
+    // VAY-2574: a member limited to some properties uses the property id; a legacy alias of the
+    // booking hotel is refused, as the request carries no alias-to-property map.
+    const alias = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(alias.statusCode).toBe(403);
 
     const response = await injectJson(app, {
       method: "GET",
-      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      url: `/api/booking/hotels/${pmsPropertyId}/custom-domain`,
       headers: {
         authorization: "Bearer valid-token",
       },
@@ -5326,7 +5343,7 @@ describe("vayada-api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
-      hotelId: "booking_hotel_alpenrose",
+      hotelId: pmsPropertyId,
       propertyId: "f6853000-0000-0000-0000-000000000001",
       configured: true,
       domain: "book.alpenrose.example",

@@ -303,9 +303,12 @@ describe("runDelegatedRead (VAY-2506)", () => {
   });
 
   it("closes the hotel-group-only check of org-wide routes for the AI (VAY-2567 1a)", async () => {
-    // The website: the promo route checks only that the hotel belongs to the group, so a manager
-    // assigned to P1 reads P2's promo codes today.
+    // The website: since VAY-2574 the shared link check also checks the member's assigned
+    // properties, so a manager assigned to P1 no longer reads P2's promo codes (it answered 200).
     expect((await bearer("member-a", `/api/booking/hotels/${P2}/promo-codes`)).statusCode).toBe(
+      403,
+    );
+    expect((await bearer("member-a", `/api/booking/hotels/${P1}/promo-codes`)).statusCode).toBe(
       200,
     );
     // The AI acting for the same person: the narrowed context makes the same route refuse.

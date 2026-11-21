@@ -4,6 +4,7 @@ import { UnauthorizedError, type PermissionKey } from "@vayada/backend-auth";
 import {
   AuthorizationError,
   hasPermission,
+  isPropertyInMemberScope,
   resolveEffectivePropertyAccess,
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
@@ -1128,7 +1129,9 @@ function resolveSharedSetupAccess(
             resource.product === "hotel_catalog" &&
             resource.resourceType === "property" &&
             (resource.relationship === "owner" || resource.relationship === "operator") &&
-            isUuid(resource.resourceId),
+            isUuid(resource.resourceId) &&
+            // VAY-2574: a member limited to some properties reaches only those.
+            isPropertyInMemberScope(context, resource.resourceId),
         )
         .map((resource) => resource.resourceId),
     );

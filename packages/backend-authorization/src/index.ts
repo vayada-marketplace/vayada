@@ -541,10 +541,48 @@ export function hasPermission(context: RequestContext, permission: PermissionKey
   return context.membership.permissions.includes(permission);
 }
 
+/**
+ * Resources that belong to one property. Their id is the canonical property id, except
+ * `pms_hotel`, whose id is a legacy hotel id: a member limited to some properties never matches one.
+ */
+const PROPERTY_SCOPED_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set([
+  "property",
+  "booking_hotel",
+  "pms_hotel",
+  "pms_property",
+]);
+
+/**
+ * True when this member may use the property (VAY-2574). Members with every property may use
+ * any. Members limited to some properties may use only those, and any other mode fails closed.
+ * A context without a property scope (platform accounts) is unchanged here;
+ * `requirePropertyAccess` reads that scope from storage itself.
+ */
+export function isPropertyInMemberScope(
+  context: Pick<RequestContext, "membership">,
+  propertyId: string,
+): boolean {
+  const access = context.membership.propertyAccess;
+  if (!access || access.mode === "all") return true;
+  return (
+    Array.isArray(access.assignedPropertyIds) && access.assignedPropertyIds.includes(propertyId)
+  );
+}
+
+/**
+ * The account has this resource, and the member may use it: a property's resources pass only for
+ * a property in the member's scope (VAY-2574), so every route that checks a link checks both.
+ */
 export function hasActiveLinkedResource(
   context: RequestContext,
   requirement: ResourceRequirement,
 ): boolean {
+  if (
+    PROPERTY_SCOPED_RESOURCE_TYPES.has(requirement.resourceType) &&
+    !isPropertyInMemberScope(context, requirement.resourceId)
+  ) {
+    return false;
+  }
   return context.linkedResources.some(
     (resource) =>
       resource.status === "active" &&
