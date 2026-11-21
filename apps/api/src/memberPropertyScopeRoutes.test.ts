@@ -85,6 +85,7 @@ const identity: IdentityRepository = {
 const keys: PermissionKey[] = [
   "booking.settings.manage",
   "booking.promos.read",
+  "booking.promos.manage",
   "booking.addons.read",
   "pms.operations.read",
 ];
@@ -146,6 +147,9 @@ const storage = {
     async listPromoCodesByHotelId(hotelId: string) {
       return record(hotelId, []);
     },
+    async createPromoCodeByHotelId(hotelId: string) {
+      return record(hotelId, null);
+    },
   },
   bookingAddonItemsRepository: {
     async listAddonItemsByHotelId(hotelId: string) {
@@ -175,6 +179,20 @@ const storage = {
     impactPreviewPort: {},
     timeZoneRegistry: {},
   },
+  pmsRoomSetup: {
+    facts: {
+      factsReadPort: {
+        async listRoomTypeFacts(propertyId: string) {
+          return record(propertyId, []);
+        },
+      },
+      commandPort: {},
+      bindingReadPort: {},
+      unitReadPort: {},
+      capacityReadPort: {},
+    },
+    physicalUnits: {},
+  },
 } as unknown as Partial<NonNullable<Parameters<typeof buildApp>[0]>>;
 
 const areas = [
@@ -185,6 +203,7 @@ const areas = [
   ["reviews", (id: string) => `/api/pms/properties/${id}/reviews`],
   ["Channex alerts", (id: string) => `/api/pms/properties/${id}/channex/alerts`],
   ["operating calendar", (id: string) => `/api/pms/properties/${id}/operating-calendar`],
+  ["room setup", (id: string) => `/api/pms/setup/properties/${id}/room-types`],
 ] as const;
 
 let app: ReturnType<typeof buildApp>;
@@ -226,6 +245,21 @@ describe("member property scope on group-checked routes (VAY-2574)", () => {
       expect(own.statusCode).toBeLessThan(500);
     },
   );
+
+  it("refuses a write for P2 before it reaches storage (promo code create)", async () => {
+    const create = (id: string) =>
+      app.inject({
+        method: "POST",
+        url: `/api/booking/hotels/${id}/promo-codes`,
+        headers: { authorization: "Bearer manager" },
+        payload: {},
+      });
+
+    expect((await create(P2)).statusCode).toBe(403);
+    expect(reads).toEqual([]);
+    // P1 passes the access check and stops at body validation.
+    expect((await create(P1)).statusCode).toBe(422);
+  });
 
   it.each(areas)("%s: the owner with every property keeps both", async (_area, url) => {
     for (const id of [P1, P2]) {

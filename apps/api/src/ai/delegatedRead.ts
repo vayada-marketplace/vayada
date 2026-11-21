@@ -1,9 +1,9 @@
 // Runs one existing next-api GET route as the signed-in user, for an AI action (VAY-2506).
 //
 // The route's own permission, entitlement and property checks decide, exactly as for the website.
-// Before that, this runner refuses any property the member may not use: about 21 route files only
-// check that a property belongs to the hotel group (VAY-2567 rank 1a), and the delegated context
-// is already narrowed to the member's properties, so this check fails early and plainly.
+// Before that, this runner refuses any property the member may not use, so the refusal is early
+// and plain. The routes refuse it too: the shared link check checks the member's assigned
+// properties (VAY-2574), and the delegated context is narrowed to the member's properties.
 import {
   delegatedPropertyIds,
   DelegationRefusedError,

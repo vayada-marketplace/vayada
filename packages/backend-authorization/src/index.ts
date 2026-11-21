@@ -554,7 +554,7 @@ const PROPERTY_SCOPED_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set([
 
 /**
  * True when this member may use the property (VAY-2574). Members with every property may use
- * any. Members limited to some properties may use only those, and any other mode fails closed.
+ * any. Members limited to some properties may use only those; any other mode is treated as limited.
  * A context without a property scope (platform accounts) is unchanged here;
  * `requirePropertyAccess` reads that scope from storage itself.
  */

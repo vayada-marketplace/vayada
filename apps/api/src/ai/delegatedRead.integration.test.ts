@@ -250,13 +250,20 @@ describe.skipIf(!url)("AI reads as the user on real PostgreSQL (VAY-2506)", () =
   });
 
   it("makes a hotel-group-only route refuse unassigned properties for the AI (VAY-2567 1a)", async () => {
-    // The website: the promo list checks only the hotel group's link to the property.
+    // The website: since VAY-2574 the promo list also checks the member's assigned properties
+    // (it answered 200 for P2 before).
     const website = await app.inject({
       method: "GET",
       url: `/api/booking/hotels/${p2}/promo-codes`,
       headers: { authorization: "Bearer member-a" },
     });
-    expect(website.statusCode).toBe(200);
+    expect(website.statusCode).toBe(403);
+    const websiteOwn = await app.inject({
+      method: "GET",
+      url: `/api/booking/hotels/${p1}/promo-codes`,
+      headers: { authorization: "Bearer member-a" },
+    });
+    expect(websiteOwn.statusCode).toBe(200);
     const context = await as(orgA);
     const ai = await injectAsDelegate(app, {
       context,
