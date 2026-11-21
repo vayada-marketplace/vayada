@@ -184,7 +184,15 @@ function buildAuthenticatedApp(
       propertyAccessRepository: agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole() {
-          return options.permissions ?? ["pms.operations.read", "pms.operations.manage"];
+          // An owner holds the broad keys and the staff keys; reviews use the inbox keys (VAY-2575).
+          return (
+            options.permissions ?? [
+              "pms.operations.read",
+              "pms.operations.manage",
+              "pms.inbox.read",
+              "pms.inbox.reply",
+            ]
+          );
         },
       },
       entitlementRepository: {

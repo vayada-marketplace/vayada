@@ -968,6 +968,10 @@ export function createTargetPmsOperationsCommandRepository(
           if (charge.status === "waived" || charge.status === "void") {
             return checkoutChargeInvalidTransition(charge.status, "waived");
           }
+          // VAY-2575: undoing a paid charge stays with the owner key.
+          if (charge.status === "paid" && command.allowWaivePaid !== true) {
+            return checkoutChargeInvalidTransition(charge.status, "waived");
+          }
           return updateCheckoutChargeStatus(client, command, "waived", acceptedAt);
         },
       });
@@ -4154,7 +4158,9 @@ function checkoutChargeCommandFingerprint(
     | PmsCheckoutChargeMarkPaidCommand
     | PmsCheckoutChargeWaiveCommand,
 ): unknown {
+  // VAY-2575: who may waive a paid charge is not part of what the request asked for.
   const { audit: _audit, ...fingerprint } = command;
+  if ("allowWaivePaid" in fingerprint) delete fingerprint.allowWaivePaid;
   return fingerprint;
 }
 

@@ -82,6 +82,23 @@ const dailyWork: (Route & { key: PermissionKey })[] = [
   { method: "DELETE", url: `${reservation}/notes/${itemId}`, key: "pms.reservation.update" },
   { method: "GET", url: `${reservation}/checkout-charges`, key: "pms.reservation.read" },
   { method: "POST", url: `${reservation}/checkout-charges`, key: "pms.reservation.update" },
+  // VAY-2575: recording a payment at the desk uses the desk key.
+  { method: "POST", url: `${reservation}/mark-paid`, key: "pms.reservation.update" },
+  {
+    method: "POST",
+    url: `${reservation}/checkout-charges/${itemId}/paid`,
+    key: "pms.reservation.update",
+  },
+  {
+    method: "POST",
+    url: `${reservation}/checkout-charges/${itemId}/mark-paid`,
+    key: "pms.reservation.update",
+  },
+  {
+    method: "POST",
+    url: `${reservation}/checkout-charges/${itemId}/waive`,
+    key: "pms.reservation.update",
+  },
   {
     method: "GET",
     url: `/properties/${propertyId}/check-in-checklist`,
@@ -113,13 +130,10 @@ const dailyWork: (Route & { key: PermissionKey })[] = [
     key: "pms.settings.manage",
   },
 ];
-// Money and setup stay with the account admin: no staff key opens them.
+// Refunds, price corrections and setup stay with the account admin: no staff key opens them.
 const ownerOnly: Route[] = [
-  { method: "POST", url: `${reservation}/mark-paid` },
   { method: "POST", url: `${reservation}/refund` },
   { method: "POST", url: `${reservation}/correct-prices` },
-  { method: "POST", url: `${reservation}/checkout-charges/${itemId}/waive` },
-  { method: "POST", url: `${reservation}/checkout-charges/${itemId}/mark-paid` },
   { method: "PUT", url: `/properties/${propertyId}/check-in-checklist` },
   { method: "PUT", url: `/properties/${propertyId}/check-out-inspection` },
   { method: "PATCH", url: `/properties/${propertyId}/rooms/reorder` },
@@ -194,6 +208,32 @@ describe("PMS daily work for staff roles (VAY-2498)", () => {
       expect(state.calls).toEqual([]);
     },
   );
+
+  it("lets only the owner key waive a charge that is already paid (VAY-2575)", async () => {
+    const allowed: unknown[] = [];
+    for (const actor of [frontDesk, agencyManager, owner]) {
+      app = await testApp(
+        actor,
+        { calls: [] },
+        {},
+        {
+          async waiveCheckoutCharge(command: { allowWaivePaid?: boolean }) {
+            allowed.push(command.allowWaivePaid);
+            return { ok: false, statusCode: 400, code: "invalid_status_transition", message: "" };
+          },
+        },
+      );
+      await app.inject({
+        method: "POST",
+        url: `${reservation}/checkout-charges/${itemId}/waive`,
+        headers: { authorization: "Bearer valid", "content-type": "application/json" },
+        payload: JSON.stringify({ commandId: "cmd-waive", idempotencyKey: "cmd-waive" }),
+      });
+      await app.close();
+      app = undefined;
+    }
+    expect(allowed).toEqual([false, false, true]);
+  });
 
   it.each(ownerOnly)("$method $url stays with the account admin", async (route) => {
     const allStaffKeys: Actor = {
@@ -291,6 +331,7 @@ async function testApp(
   actor: Actor,
   state: { calls: string[]; contactReads?: boolean[] },
   scope: { assignedPropertyIds?: string[] } = {},
+  commandOverrides: Record<string, unknown> = {},
 ) {
   const app = Fastify({ logger: false });
   app.decorateRequest("authContext", null);
@@ -343,6 +384,7 @@ async function testApp(
   await app.register(registerPmsOperationsRoutes, {
     repository: recordingStub<PmsOperationsReadRepository>(state.calls),
     commandRepository: recordingStub<PmsOperationsCommandRepository>(state.calls, {
+      ...commandOverrides,
       async executeOperationalStatusCommand(command: { commandId: string }) {
         return {
           ok: true,

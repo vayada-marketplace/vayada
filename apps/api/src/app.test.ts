@@ -17479,8 +17479,10 @@ describe("vayada-api", () => {
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
       pmsOperationsCommandRepository: commandRepository,
-      permissions: ["pms.operations.manage"],
+      // VAY-2575: the desk key, on a property the member may use.
+      permissions: ["pms.reservation.update"],
       linkedPmsPropertyId: "f3000000-0000-0000-0000-000000000686",
+      additionalPmsPropertyId: "f3000000-0000-0000-0000-000000000686",
       entitlements: [
         {
           product: "pms",

@@ -14,13 +14,11 @@ it("hides navigation sections without a live read permission", () => {
   ).toEqual(["/calendar", "/rooms", "/settings"]);
 });
 
-it("matches Reviews visibility to its server read policy", () => {
-  expect(visiblePmsNavigation(["pms.operations.read"]).map((item) => item.href)).toContain(
-    "/reviews",
-  );
-  expect(visiblePmsNavigation(["pms.reservation.read"]).map((item) => item.href)).not.toContain(
-    "/reviews",
-  );
+it("matches Reviews visibility to its server read policy (the inbox key since VAY-2575)", () => {
+  expect(visiblePmsNavigation(["pms.inbox.read"]).map((item) => item.href)).toContain("/reviews");
+  for (const permission of ["pms.operations.read", "pms.reservation.read"] as const) {
+    expect(visiblePmsNavigation([permission]).map((item) => item.href)).not.toContain("/reviews");
+  }
 });
 
 it("shows Financials only after the property access check succeeds", () => {
