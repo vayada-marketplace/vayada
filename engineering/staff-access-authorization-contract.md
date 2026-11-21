@@ -104,14 +104,17 @@ what its members can do:
 | Create, change or release room blocks                                                                                                                                                                                                                                        | `pms.calendar.manage`                                        |
 | The calendar's room-move history                                                                                                                                                                                                                                             | `pms.calendar.read`                                          |
 | Calendar settings (room assignment)                                                                                                                                                                                                                                          | `pms.settings.read` to view, `pms.settings.manage` to change |
+| Record a payment at the desk: mark a booking paid, mark a checkout charge paid, waive an open checkout charge (VAY-2575)                                                                                                                                                     | `pms.reservation.update`                                     |
+| Read reviews, review details, guest reviews and reply status (VAY-2575)                                                                                                                                                                                                      | `pms.inbox.read`                                             |
+| Reply to a review, submit a guest review (VAY-2575)                                                                                                                                                                                                                          | `pms.inbox.reply`                                            |
 
 These routes check the member's own property access, like every other staff
 route, and answers to members without `pms.guest_contact.read` hide guest email
 and phone.
 
 Money and setup keep the owner-only keys `pms.operations.manage` and
-`pms.finance.manage`: marking a booking or checkout charge paid, waiving a
-charge, refunds, price corrections, a paid manual booking, a cancel that keeps
+`pms.finance.manage`: waiving a checkout charge that is already paid (it undoes
+money taken), refunds, price corrections, a paid manual booking, a cancel that keeps
 charges, room types, rooms and room status (VAY-2557), prices, the operating
 calendar and auto-open, check-in and check-out template edits, the channel manager
 (including the no-show report to Booking.com) and the property profile.

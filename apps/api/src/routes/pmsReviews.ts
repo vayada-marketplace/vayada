@@ -1,6 +1,6 @@
 import pg from "pg";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { RequestContext } from "@vayada/backend-auth";
+import { requireAuthContext, type RequestContext } from "@vayada/backend-auth";
 import type { PropertyAccessRepository } from "@vayada/backend-authorization";
 import type { ReviewReplyCommands, ReviewReplyStatus } from "../domains/pmsReviewReplies.js";
 import type { GuestReviewCommands } from "../domains/pmsGuestReviews.js";
@@ -215,7 +215,10 @@ async function enforceReviewPolicy(
   permission: "pms.inbox.read" | "pms.inbox.reply",
   repository: PropertyAccessRepository | undefined,
 ): Promise<RequestContext> {
-  if (!repository) throw new Error("PMS review property access repository is unavailable");
+  if (!repository) {
+    requireAuthContext(request);
+    throw new Error("PMS review property access repository is unavailable");
+  }
   return enforcePmsPropertyRoutePolicy(
     request,
     { propertyId, permission, allowedRelationships: ["owner", "operator", "front_desk"] },

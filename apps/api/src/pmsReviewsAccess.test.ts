@@ -76,13 +76,28 @@ describe("PMS reviews for front desk (VAY-2575)", () => {
   });
 
   it.each(routes)("$method $url: the owner may", async (route) => {
-    app = await testApp(owner, []);
-    expectAllowed(await send(app, route));
+    const calls: string[] = [];
+    app = await testApp(owner, calls);
+    expectAllowed(await send(app, route), route, calls);
   });
 
   it.each(routes)("$method $url: front desk may", async (route) => {
-    app = await testApp(frontDesk, []);
-    expectAllowed(await send(app, route));
+    const calls: string[] = [];
+    app = await testApp(frontDesk, calls);
+    expectAllowed(await send(app, route), route, calls);
+  });
+
+  it("lets a reader with only pms.inbox.read see reviews but not answer them", async () => {
+    const reader: Actor = { roleKey: "hotel_custom", permissions: ["pms.inbox.read"] };
+    for (const route of routes) {
+      const calls: string[] = [];
+      app = await testApp(reader, calls);
+      const response = await send(app, route);
+      if (route.key === "pms.inbox.read") expectAllowed(response, route, calls);
+      else expect([route.url, response.statusCode]).toEqual([route.url, 403]);
+      await app.close();
+      app = undefined;
+    }
   });
 
   it.each(routes)("$method $url: front desk without $key is refused", async (route) => {
@@ -110,9 +125,16 @@ describe("PMS reviews for front desk (VAY-2575)", () => {
   );
 });
 
-/** Past every access check: whatever the stubbed repository answers, it isn't 401 or 403. */
-function expectAllowed(response: { statusCode: number; body: string }) {
+/** Past every access check and handled: no 401, 403 or 5xx, and storage was reached (or the body
+ * was refused, for the empty guest-review draft). */
+function expectAllowed(
+  response: { statusCode: number; body: string },
+  route: Route,
+  calls: string[],
+) {
+  expect(response.statusCode, response.body).toBeLessThan(500);
   expect([401, 403], response.body).not.toContain(response.statusCode);
+  if (response.statusCode !== 400) expect(calls.length, route.url).toBeGreaterThan(0);
 }
 
 function send(target: Awaited<ReturnType<typeof testApp>>, route: Route) {

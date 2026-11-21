@@ -360,11 +360,12 @@ VAY-783 implements the P2c checkout charge operational subset in `apps/api`.
 uses the PMS operations read policy; `POST /checkout-charges`,
 `POST /checkout-charges/:chargeId/mark-paid`, and
 `POST /checkout-charges/:chargeId/waive` persist only
-`pms.booking_checkout_charges` operational state plus PMS audit events. Since
-VAY-2575, marking a charge paid or waived, like marking the booking paid
-(`POST .../mark-paid`), needs `pms.reservation.update`, the desk key front desk
-holds for check-in and check-out, on the member's own properties. Before, these
-needed the owner-only `pms.operations.manage`. `POST /checkout-charges/:chargeId/paid` is the path PMS Web calls (one
+`pms.booking_checkout_charges` operational state plus PMS audit events. Creating
+a charge (VAY-2498) and, since VAY-2575, marking a charge paid or waived, like
+marking the booking paid (`POST .../mark-paid`), need `pms.reservation.update`,
+the desk key front desk holds for check-in and check-out, on the member's own
+properties. Waiving a charge that is already paid still needs the owner-only
+`pms.operations.manage`; otherwise it answers 400 `invalid_status_transition`. `POST /checkout-charges/:chargeId/paid` is the path PMS Web calls (one
 idempotency key per charge since VAY-2573); `/mark-paid` is an alias for the
 same operational mark-paid command. The check-out command is still VAY-784
 and is not implemented by this slice.

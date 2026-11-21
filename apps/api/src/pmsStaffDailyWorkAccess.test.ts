@@ -209,6 +209,32 @@ describe("PMS daily work for staff roles (VAY-2498)", () => {
     },
   );
 
+  it("lets only the owner key waive a charge that is already paid (VAY-2575)", async () => {
+    const allowed: unknown[] = [];
+    for (const actor of [frontDesk, agencyManager, owner]) {
+      app = await testApp(
+        actor,
+        { calls: [] },
+        {},
+        {
+          async waiveCheckoutCharge(command: { allowWaivePaid?: boolean }) {
+            allowed.push(command.allowWaivePaid);
+            return { ok: false, statusCode: 400, code: "invalid_status_transition", message: "" };
+          },
+        },
+      );
+      await app.inject({
+        method: "POST",
+        url: `${reservation}/checkout-charges/${itemId}/waive`,
+        headers: { authorization: "Bearer valid", "content-type": "application/json" },
+        payload: JSON.stringify({ commandId: "cmd-waive", idempotencyKey: "cmd-waive" }),
+      });
+      await app.close();
+      app = undefined;
+    }
+    expect(allowed).toEqual([false, false, true]);
+  });
+
   it.each(ownerOnly)("$method $url stays with the account admin", async (route) => {
     const allStaffKeys: Actor = {
       roleKey: "hotel_manager",
@@ -305,6 +331,7 @@ async function testApp(
   actor: Actor,
   state: { calls: string[]; contactReads?: boolean[] },
   scope: { assignedPropertyIds?: string[] } = {},
+  commandOverrides: Record<string, unknown> = {},
 ) {
   const app = Fastify({ logger: false });
   app.decorateRequest("authContext", null);
@@ -357,6 +384,7 @@ async function testApp(
   await app.register(registerPmsOperationsRoutes, {
     repository: recordingStub<PmsOperationsReadRepository>(state.calls),
     commandRepository: recordingStub<PmsOperationsCommandRepository>(state.calls, {
+      ...commandOverrides,
       async executeOperationalStatusCommand(command: { commandId: string }) {
         return {
           ok: true,

@@ -619,6 +619,11 @@ export type PmsCheckoutChargeMarkPaidCommand = {
 
 export type PmsCheckoutChargeWaiveCommand = PmsCheckoutChargeMarkPaidCommand & {
   reason?: string;
+  /**
+   * VAY-2575: only holders of the owner key may waive a charge that is already paid, which undoes
+   * money taken like a refund. Front desk waives open charges only. Not part of the retry fingerprint.
+   */
+  allowWaivePaid?: boolean;
 };
 
 export type PmsAssignmentCommandResponse = {
@@ -3785,12 +3790,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId, chargeId } = request.params;
-        if (!(await recordsDeskPayment(request, reply, propertyId))) return reply;
+        const context = await recordsDeskPayment(request, reply, propertyId);
+        if (!context) return reply;
 
         const command = toCheckoutChargeWaiveCommand(propertyId, guestBookingId, chargeId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
 
-        const result = await commandRepository.waiveCheckoutCharge(command.value);
+        const result = await commandRepository.waiveCheckoutCharge({
+          ...command.value,
+          allowWaivePaid: hasPermission(context, "pms.operations.manage"),
+        });
         if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
 
         return {
