@@ -298,9 +298,20 @@ describe("vayada Payment's Stripe routing (VAY-2442)", () => {
       fake.retrieveRefund,
     ];
 
-    // The hotel is live now, but this payment was made in test mode: the test keys, all six calls.
+    // The hotel is test now and the payment was made in test mode: the test keys, all six calls.
+    onLiveList = false;
     for (const call of storedCalls("pi_test", "re_test")) await call();
     for (const fn of stripeCalls(test)) expect(fn).toHaveBeenCalledTimes(1);
+    // The hotel has gone live since: the test payment's reads, cancel and refunds still use the
+    // test keys, but its hold is never captured (a confirmed stay for no money).
+    onLiveList = true;
+    await expect(provider.capturePaymentIntent("pi_test", ref, "k")).rejects.toThrow(
+      "a test-mode hold can't be captured for a hotel that is live now",
+    );
+    for (const [index, call] of storedCalls("pi_test", "re_test").entries())
+      if (index !== 1) await call();
+    for (const fn of stripeCalls(test))
+      expect(fn).toHaveBeenCalledTimes(fn === test.capturePaymentIntent ? 1 : 2);
     for (const fn of stripeCalls(live)) expect(fn).not.toHaveBeenCalled();
     await expect(provider.retrievePaymentIntent("pi_test", ref)).resolves.toMatchObject({
       livemode: false,

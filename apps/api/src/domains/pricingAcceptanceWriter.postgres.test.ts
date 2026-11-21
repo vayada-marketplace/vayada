@@ -824,6 +824,17 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       await expect(
         recordedMode({ propertyId: fixture.propertyId, paymentIntentId: "pi_before_live_mode" }),
       ).resolves.toBeNull();
+      // A payment made in test mode reads as test (a JSON false, not just "not live").
+      await fixture.observer.query(
+        `INSERT INTO finance.payments (property_id,source_system,payment_kind,payment_method,status,
+           amount,currency,provider_payment_intent_id,payment_metadata)
+         VALUES ($1,'finance','full','card','paid',1,$2,'pi_made_in_test',
+           '{"chargeType":"vayada_payment","livemode":false}')`,
+        [fixture.propertyId, fixture.f.current.quote.stay.currency],
+      );
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: "pi_made_in_test" }),
+      ).resolves.toBe(false);
     } finally {
       await modePool.end();
       await fixture.close();

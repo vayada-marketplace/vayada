@@ -85,8 +85,9 @@ export function routeVayadaPaymentStripe(
     publishableKey: account.publishableKey,
     livemode: typeof intent.livemode === "boolean" ? intent.livemode : account.livemode,
   });
-  // Before a guest can pay (and on every read), Stripe's own livemode must match the hotel's, so
-  // test money is never taken as real, nor the reverse. Checked only where nothing has moved yet.
+  // Stripe's own livemode must match the keys' mode: for a new charge that is the hotel's mode now
+  // (test money is never taken as real, nor the reverse), for a stored payment the mode it was made
+  // in. Checked only where nothing has moved yet.
   const sameMode = (intent: StripeBookingPaymentIntent, account: ReturnType<typeof accountFor>) => {
     if (typeof intent.livemode === "boolean" && intent.livemode !== account.livemode)
       throw new Error("vayada Payment: Stripe's mode does not match the hotel's.");
@@ -118,6 +119,14 @@ export function routeVayadaPaymentStripe(
       if (!isVayadaPaymentAccountRef(ref))
         return connect.capturePaymentIntent(paymentIntentId, ref, idempotencyKey);
       const account = await storedAccountFor(ref, { paymentIntentId });
+      // A test-mode hold never confirms a booking at a hotel that takes real money now (it went
+      // live after the guest's card was held): that would be a confirmed stay for no money. The hold
+      // can still be cancelled (in its own mode); a live hold at a hotel now on test keys is real
+      // money and is captured.
+      if (!account.livemode && live?.for(ref.slice("vayada:".length)) === true)
+        throw new Error(
+          "vayada Payment: a test-mode hold can't be captured for a hotel that is live now.",
+        );
       return tagged(
         await account.provider.capturePaymentIntent(paymentIntentId, null, idempotencyKey),
         ref,

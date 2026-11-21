@@ -198,15 +198,17 @@ export type ApiConfig = {
   /** VAY-2442: the Stripe account vayada Payment charges guests on, separate from the Connect
    * platform: its test-mode keys (VAYADA_PAYMENT_STRIPE_*), for every hotel not on the live list. */
   vayadaPaymentStripe?: { secretKey: string; publishableKey: string; webhookSecret?: string };
-  /** VAY-2442: the same account's live-mode keys (VAYADA_PAYMENT_STRIPE_LIVE_*), real money, only
-   * for the hotels on vayadaPaymentLivePropertyIds. */
+  /** VAY-2442: the same account's live-mode keys (VAYADA_PAYMENT_STRIPE_LIVE_*), real money: new
+   * charges of the hotels on vayadaPaymentLivePropertyIds, and every payment made in live mode
+   * (VAY-2569). */
   vayadaPaymentStripeLive?: { secretKey: string; publishableKey: string; webhookSecret?: string };
   /** VAY-2442: the hotels whose new vayada Payment charges are real money
    * (VAYADA_PAYMENT_LIVE_PROPERTY_IDS: property UUIDs, or "*" for every hotel except the test
    * hotels below). Their new charges go to the live keys, never to the test ones. A payment already
-   * made keeps the keys of the mode it was made in for its reads, captures, cancels and refunds
-   * (VAY-2569), so this list can change without stranding older payments. A hotel that has taken
-   * live money takes no test charge again (its checkout is refused). To stop its new charges, put it on
+   * made keeps the keys of the mode it was made in for its reads, cancels and refunds (VAY-2569), so
+   * this list can change without stranding older payments; a test hold is never captured once its
+   * hotel is live. A hotel that has taken live money takes no test charge again: left off this list,
+   * its card checkouts are refused, so keep it here while it sells. To stop its new charges, put it on
    * VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: the owner can still turn card off and fix the payout
    * account (VAY-2570). Taking it off VAYADA_PAYMENT_PROPERTY_IDS also stops the charges but locks
    * the owner out of both. */
@@ -564,8 +566,8 @@ export function vayadaPaymentLiveFor(
  * apart: a test hotel is never on an explicit live list; with the live keys set the charge list
  * "*" needs the live list "*" (or a real hotel missing from the live list would take test-mode
  * charges: a confirmed booking for no money); and with the test keys set the live list "*" needs
- * the test hotels named (or a lost test list would send their stored test payments, and every
- * capture, cancel and refund of them, to the live keys). */
+ * the test hotels named (or a lost test list would make Vayada's own test hotels take live
+ * charges; their stored test payments keep the test keys either way, VAY-2569). */
 function loadVayadaPaymentLists(
   env: NodeJS.ProcessEnv,
   liveKeysSet: boolean,

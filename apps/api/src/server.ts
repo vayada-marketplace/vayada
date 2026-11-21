@@ -554,8 +554,9 @@ const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
 // the live keys for live hotels (VAYADA_PAYMENT_LIVE_PROPERTY_IDS, or every hotel except
 // VAYADA_PAYMENT_TEST_PROPERTY_IDS when it is "*") and the test keys for the rest;
 // every other card payment goes through Stripe Connect as before. VAY-2569: a stored payment
-// keeps the mode it was made in (read from finance.payments on a small pool of its own, so it
-// never waits behind a caller that holds a connection while it calls Stripe).
+// keeps the mode it was made in, read from finance.payments on a pool of its own (its own
+// application_name, so production's pool runtime doesn't share it with a caller that holds a
+// connection while it calls Stripe).
 const vayadaPaymentModePool =
   config.stripeSubscriptions.secretKey &&
   (config.vayadaPaymentStripe || config.vayadaPaymentStripeLive)
