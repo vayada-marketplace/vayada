@@ -2644,6 +2644,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(platformTableRows.map((row) => row.table_name)).toEqual([
+        "ai_tool_calls",
         "channex_adoption_approval_records",
         "channex_adoption_approval_revocations",
         "channex_adoption_manifest_consumptions",
