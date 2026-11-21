@@ -1133,6 +1133,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsReviewRoutes, {
       prefix: "/api/pms",
       repository: options.pmsReviewRepository,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.pmsChannexManagement) {

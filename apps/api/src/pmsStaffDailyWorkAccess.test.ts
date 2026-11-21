@@ -82,6 +82,23 @@ const dailyWork: (Route & { key: PermissionKey })[] = [
   { method: "DELETE", url: `${reservation}/notes/${itemId}`, key: "pms.reservation.update" },
   { method: "GET", url: `${reservation}/checkout-charges`, key: "pms.reservation.read" },
   { method: "POST", url: `${reservation}/checkout-charges`, key: "pms.reservation.update" },
+  // VAY-2575: recording a payment at the desk uses the desk key.
+  { method: "POST", url: `${reservation}/mark-paid`, key: "pms.reservation.update" },
+  {
+    method: "POST",
+    url: `${reservation}/checkout-charges/${itemId}/paid`,
+    key: "pms.reservation.update",
+  },
+  {
+    method: "POST",
+    url: `${reservation}/checkout-charges/${itemId}/mark-paid`,
+    key: "pms.reservation.update",
+  },
+  {
+    method: "POST",
+    url: `${reservation}/checkout-charges/${itemId}/waive`,
+    key: "pms.reservation.update",
+  },
   {
     method: "GET",
     url: `/properties/${propertyId}/check-in-checklist`,
@@ -113,13 +130,10 @@ const dailyWork: (Route & { key: PermissionKey })[] = [
     key: "pms.settings.manage",
   },
 ];
-// Money and setup stay with the account admin: no staff key opens them.
+// Refunds, price corrections and setup stay with the account admin: no staff key opens them.
 const ownerOnly: Route[] = [
-  { method: "POST", url: `${reservation}/mark-paid` },
   { method: "POST", url: `${reservation}/refund` },
   { method: "POST", url: `${reservation}/correct-prices` },
-  { method: "POST", url: `${reservation}/checkout-charges/${itemId}/waive` },
-  { method: "POST", url: `${reservation}/checkout-charges/${itemId}/mark-paid` },
   { method: "PUT", url: `/properties/${propertyId}/check-in-checklist` },
   { method: "PUT", url: `/properties/${propertyId}/check-out-inspection` },
   { method: "PATCH", url: `/properties/${propertyId}/rooms/reorder` },

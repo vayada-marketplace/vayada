@@ -3401,6 +3401,21 @@ export async function registerPmsOperationsRoutes(
     );
   }
 
+  /**
+   * VAY-2575: recording a payment at the desk (booking mark-paid, desk charge paid or waived) needs
+   * `pms.reservation.update`, the key front desk holds for check-in and check-out, on the member's
+   * own properties. Owners hold it too.
+   */
+  function recordsDeskPayment(request: FastifyRequest, reply: FastifyReply, propertyId: string) {
+    return enforcePmsPropertyAccessPolicy(
+      request,
+      reply,
+      propertyId,
+      "pms.reservation.update",
+      options.propertyAccessRepository,
+    );
+  }
+
   async function handleCheckoutChargeMarkPaid(
     request: FastifyRequest<{
       Params: PmsCheckoutChargeParams;
@@ -3417,7 +3432,8 @@ export async function registerPmsOperationsRoutes(
       });
     }
     const { propertyId, guestBookingId, chargeId } = request.params;
-    if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+    // VAY-2575: the desk key front desk holds for check-in and check-out, on the member's properties.
+    if (!(await recordsDeskPayment(request, reply, propertyId))) return reply;
 
     const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
     if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
@@ -3769,7 +3785,7 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId, chargeId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (!(await recordsDeskPayment(request, reply, propertyId))) return reply;
 
         const command = toCheckoutChargeWaiveCommand(propertyId, guestBookingId, chargeId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
@@ -4244,7 +4260,7 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (!(await recordsDeskPayment(request, reply, propertyId))) return reply;
         const command = toBookingLifecycleCommand(
           propertyId,
           guestBookingId,
