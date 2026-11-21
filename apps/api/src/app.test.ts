@@ -17301,7 +17301,9 @@ describe("vayada-api", () => {
 
   it("freezes PMS checkout-charge mark-paid when the F1a finance bridge is disabled", async () => {
     const freezeRequest = checkoutChargeMarkPaidFreezeCase.request!;
+    const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
+      pmsOperationsCommandRepository: commandRepository,
       permissions: ["pms.operations.manage"],
       linkedPmsPropertyId: "f3000000-0000-0000-0000-000000000686",
       entitlements: [
@@ -17328,6 +17330,8 @@ describe("vayada-api", () => {
       code: checkoutChargeMarkPaidFreezeCase.expected.errorCode,
       category: "conflict",
     });
+    expect(commandRepository.checkoutChargeMarkPaids).toEqual([]);
+    expect(commandRepository.auditEvents).toEqual([]);
   });
 
   it("lists, creates, marks paid, and waives PMS checkout charges as operational state only", async () => {
@@ -17431,6 +17435,46 @@ describe("vayada-api", () => {
       "checkout_charge_waived:f6855700-0000-0000-0000-000000000002",
     ]);
     expect(commandRepository.outboxEnqueues).toEqual([]);
+  });
+
+  it("marks a desk charge paid through the website's /paid path without the rehearsal freeze option (VAY-2573)", async () => {
+    const chargeCase = pmsCheckoutChargeCases["checkout-charge-create-mark-paid-waive"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: PMS_OWNER_PERMISSIONS,
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const created = await injectJson(app, {
+      method: "POST",
+      url: chargeCase.request.path,
+      payload: chargeCase.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const { chargeId } = (created.body as PmsCheckoutChargeCommandResponse).charge;
+    const paid = await injectJson(app, {
+      method: "POST",
+      url: `${chargeCase.request.path}/${chargeId}/paid`,
+      payload: {
+        commandId: "cmd-checkout-charge-paid-vay2573",
+        idempotencyKey: "pms-checkout-charge-paid-vay2573",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(paid.statusCode).toBe(200);
+    expect((paid.body as PmsCheckoutChargeCommandResponse).charge).toMatchObject({
+      chargeId,
+      status: "paid",
+    });
+    expect(commandRepository.checkoutChargeMarkPaids).toEqual([
+      expect.objectContaining({
+        chargeId,
+        commandId: "cmd-checkout-charge-paid-vay2573",
+        idempotencyKey: "pms-checkout-charge-paid-vay2573",
+      }),
+    ]);
   });
 
   it("checks out PMS reservations with inspection results, pending flags, charge snapshots, and no finance side effects", async () => {

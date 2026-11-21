@@ -538,6 +538,20 @@ checkout charges, but `mark-paid` must either enqueue the Finance bridge event
 or be disabled by rehearsal configuration. PMS operations must not implement
 provider settlement itself.
 
+**Production today (VAY-2573, 2026-11-20).** The bridge (steps 1-5) is not built.
+The rehearsal freeze in step 7 is off unless a setup turns it on explicitly
+(`pmsCheckoutChargeMarkPaidFreezeEnabled: true`). Production never set it, so the
+old default of "on" refused every desk charge marked paid at check-in and
+check-out, and staff could only "waive" charges guests had paid. PMS `mark-paid`
+now records the operational state: status `paid`, `settled_at`, an idempotency
+row and a `product_audit_events` row, with no Finance write and no provider
+call. Finance has never read desk charges (pending, paid or waived), so Finance
+numbers are unchanged. Building the bridge remains open; it also needs a
+decision on commission for desk charges, how they appear in revenue, and whether
+to backfill charges marked paid before it exists. A check-out with a paid charge
+still writes the `finance_settlement_handoff_required` flag into the check-out
+record's `pending_flags`; nothing reads or clears it yet.
+
 ## Legacy Scheduler Dispositions
 
 The F1 scheduler rows extend the freeze matrix in

@@ -297,11 +297,16 @@ describe("PMS operations command repository", () => {
       checkoutChargeWaiveCommand({ chargeId: create.charge.chargeId }),
     );
     const replay = await repository.createCheckoutCharge(checkoutChargeCreateCommand());
+    // VAY-2573: a front desk retry of "paid" returns the first answer, even after a later waive.
+    const paidReplay = await repository.markCheckoutChargePaid(
+      checkoutChargeMarkPaidCommand({ chargeId: create.charge.chargeId }),
+    );
 
     expect(listed).toHaveLength(1);
     expect(paid.ok).toBe(true);
     expect(waived.ok).toBe(true);
     expect(replay).toEqual({ ...create, replayed: true });
+    expect(paidReplay).toEqual({ ...paid, replayed: true });
     if (!paid.ok || !waived.ok) {
       throw new Error("checkout charge state command unexpectedly failed");
     }
