@@ -1336,6 +1336,11 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       await expect(
         event("charge.dispute.closed", dispute("dp_d", half, answeredLost, withdrawal)),
       ).rejects.toThrow("closed before its withdrawal was recorded");
+      // Stripe retries it, but the withdrawal may never come: a person is told too.
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ disputeId: "dp_d" }),
+        expect.stringContaining("closed lost before its withdrawal was recorded"),
+      );
 
       // The loss is overturned: the money comes back and so does the countered fee (Stripe kept
       // its dispute fee here). Sent twice, booked once.
@@ -1380,84 +1385,100 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       ]);
       expect(log.warn).not.toHaveBeenCalledWith(
         expect.anything(),
-        expect.stringContaining("fee unknown"),
+        expect.stringContaining("unknown in the stay's currency"),
       );
     } finally {
       await fixture.close();
     }
   });
 
-  it("leaves the countered fee to a person when it can't be priced, and to Vayada after a full refund (VAY-2572)", async () => {
-    const { fixture, createPaymentIntent, retrievePaymentIntent } = await cardFixture(
-      undefined,
-      "USD",
-    );
+  it("leaves an owed countered fee it can't price to a person, and rejects malformed fee lines (VAY-2572)", async () => {
+    const card = await cardFixture(undefined, "USD");
+    const { fixture } = card;
     try {
-      await fixture.observer.query(
-        `UPDATE finance.payment_provider_accounts
-         SET provider='vayada', provider_account_id='vayada:'||property_id::text
-         WHERE property_id=$1`,
-        [fixture.propertyId],
-      );
-      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
-      const provider = routeVayadaPaymentStripe({} as never, {
-        provider: { createPaymentIntent, retrievePaymentIntent } as never,
-        publishableKey: "pk_test_writer",
-      });
-      await writePricingAcceptance(fixture.pool, fixture.input, {
-        provider,
-        vayada: { open: () => true, feePercent: 6 },
-      });
-      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
-      const log = { info: vi.fn(), warn: vi.fn() };
-      const event = (type: string, object: Record<string, unknown>, feeMinor = 2000) =>
-        handleVayadaPaymentWebhookEvent(
-          fixture.pool,
-          { id: `evt_${type}_${String(object.id)}`, type, livemode: false, data: { object } },
-          log,
-          { disputeCounteredFeeMinor: feeMinor },
-        );
-      await event("payment_intent.succeeded", {
-        id: "pi_writer_test",
-        amount_received: amountMinor,
-        currency: "usd",
-      });
-      // Every closed dispute logs once for a person anyway; count only the unpriced fees.
-      const unknownFees = () =>
-        log.warn.mock.calls.filter(([, message]) =>
-          String(message).includes("countered fee unknown"),
-        );
-      const answeredLost = (id: string, bt?: Record<string, unknown>) => ({
+      const { event, log, amountMinor } = await settledVayadaPayment(card);
+      // Three disputes, a third of the payment each, all withdrawn (so the hotel owes their fees).
+      const third = Math.floor(amountMinor / 3);
+      const dispute = (
+        id: string,
+        extra: Record<string, unknown>,
+        bt?: Record<string, unknown>,
+      ) => ({
         id,
-        amount: amountMinor,
+        amount: third,
         currency: "usd",
         payment_intent: "pi_writer_test",
-        status: "lost",
-        evidence_details: { submission_count: 1 },
         balance_transactions: bt ? [bt] : [],
+        ...extra,
       });
-      // No withdrawal in the event, or one not in euros (the configured fee's currency).
-      await event("charge.dispute.closed", answeredLost("dp_none"));
+      const eur = { currency: "eur", exchange_rate: null, amount: -2 * third, fee: 2000 };
+      for (const id of ["dp_none", "dp_gbp", "dp_off"])
+        await event("charge.dispute.funds_withdrawn", dispute(id, {}, eur));
+      const answeredLost = { status: "lost", evidence_details: { submission_count: 1 } };
+      const unpriced = () =>
+        log.warn.mock.calls
+          .filter(([, message]) => String(message).includes("owed but unknown"))
+          .map(([ids]) => (ids as { disputeId: string }).disputeId);
+      // No withdrawal in the closed event, or one not in euros: owed, so a person takes it.
+      await event("charge.dispute.closed", dispute("dp_none", answeredLost));
       await event(
         "charge.dispute.closed",
-        answeredLost("dp_gbp", { currency: "gbp", amount: -amountMinor, fee: 2000 }),
+        dispute("dp_gbp", answeredLost, { ...eur, currency: "gbp" }),
       );
-      expect(unknownFees().map(([ids]) => (ids as { disputeId: string }).disputeId)).toEqual([
-        "dp_none",
-        "dp_gbp",
-      ]);
-      expect(log.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ disputeId: "dp_gbp", feeMinor: 2000, feeCurrency: "EUR" }),
-        "vayada Payment: dispute countered fee unknown in the stay's currency; adjust the hotel's balance by hand",
-      );
+      expect(unpriced()).toEqual(["dp_none", "dp_gbp"]);
       // Turned off: nothing at all.
-      await event(
-        "charge.dispute.closed",
-        answeredLost("dp_off", { currency: "eur", amount: -amountMinor, fee: 2000 }),
-        0,
-      );
-      expect(unknownFees()).toHaveLength(2);
+      await event("charge.dispute.closed", dispute("dp_off", answeredLost, eur), 0);
+      expect(unpriced()).toHaveLength(2);
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT count(*)::int AS n FROM finance.hotel_payout_ledger
+             WHERE property_id=$1 AND entry_kind IN ('dispute_fee','dispute_fee_returned')`,
+            [fixture.propertyId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
 
+      // The ledger refuses fee lines of the wrong shape (migration 0549).
+      const payment = (
+        await fixture.observer.query(
+          `SELECT id::text,guest_booking_id::text AS booking FROM finance.payments
+           WHERE provider_payment_intent_id='pi_writer_test'`,
+        )
+      ).rows[0];
+      for (const [kind, gross, fee, withPayment] of [
+        ["dispute_fee", 0, 0, true],
+        ["dispute_fee", 0, -100, true],
+        ["dispute_fee_returned", 0, 100, true],
+        ["dispute_fee", -1, 100, true],
+        ["dispute_fee", 0, 100, false],
+      ] as const)
+        await expect(
+          fixture.observer.query(
+            `INSERT INTO finance.hotel_payout_ledger (property_id,entry_kind,currency,gross_minor,
+               fee_minor,net_minor,guest_booking_id,payment_id,livemode,source_key,occurred_at)
+             VALUES ($1,$2,'USD',$3,$4,$3::bigint-$4::bigint,$5::uuid,$6::uuid,false,$7,now())`,
+            [
+              fixture.propertyId,
+              kind,
+              gross,
+              fee,
+              withPayment ? payment.booking : null,
+              withPayment ? payment.id : null,
+              `bad:${kind}:${gross}:${fee}:${withPayment}`,
+            ],
+          ),
+        ).rejects.toThrow("hotel_payout_ledger_dispute_fee_shape");
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("leaves the countered fee to Vayada after a full refund (VAY-2572)", async () => {
+    const card = await cardFixture(undefined, "USD");
+    const { fixture } = card;
+    try {
+      const { event, log, amountMinor } = await settledVayadaPayment(card);
       // Refunded in full before the dispute: the dispute took nothing, so neither does its fee.
       await expect(
         event("refund.created", {
@@ -1470,8 +1491,17 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         }),
       ).resolves.toBe("handled");
       const eur = { currency: "eur", exchange_rate: null, amount: -amountMinor, fee: 2000 };
-      await event("charge.dispute.funds_withdrawn", { ...answeredLost("dp_refunded", eur) });
-      await event("charge.dispute.closed", answeredLost("dp_refunded", eur));
+      const disputed = {
+        id: "dp_refunded",
+        amount: amountMinor,
+        currency: "usd",
+        payment_intent: "pi_writer_test",
+        status: "lost",
+        evidence_details: { submission_count: 1 },
+        balance_transactions: [eur],
+      };
+      await event("charge.dispute.funds_withdrawn", disputed);
+      await event("charge.dispute.closed", disputed);
       expect(
         (
           await fixture.observer.query(
@@ -1483,12 +1513,51 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       ).toEqual([]);
       expect(log.info).toHaveBeenCalledWith(
         expect.objectContaining({ disputeId: "dp_refunded", recorded: "not_owed" }),
-        expect.stringContaining("Vayada bears it"),
+        expect.stringContaining("not taken from the hotel"),
       );
     } finally {
       await fixture.close();
     }
   });
+
+  /** VAY-2572: a vayada Payment hotel whose card payment (pi_writer_test) Stripe settled, with its
+   * webhook handler (the countered fee priced at EUR 20 unless given). */
+  async function settledVayadaPayment({
+    fixture,
+    createPaymentIntent,
+    retrievePaymentIntent,
+  }: Awaited<ReturnType<typeof cardFixture>>) {
+    await fixture.observer.query(
+      `UPDATE finance.payment_provider_accounts
+       SET provider='vayada', provider_account_id='vayada:'||property_id::text
+       WHERE property_id=$1`,
+      [fixture.propertyId],
+    );
+    Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+    const provider = routeVayadaPaymentStripe({} as never, {
+      provider: { createPaymentIntent, retrievePaymentIntent } as never,
+      publishableKey: "pk_test_writer",
+    });
+    await writePricingAcceptance(fixture.pool, fixture.input, {
+      provider,
+      vayada: { open: () => true, feePercent: 6 },
+    });
+    const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+    const log = { info: vi.fn(), warn: vi.fn() };
+    const event = (type: string, object: Record<string, unknown>, feeMinor = 2000) =>
+      handleVayadaPaymentWebhookEvent(
+        fixture.pool,
+        { id: `evt_${type}_${String(object.id)}`, type, livemode: false, data: { object } },
+        log,
+        { disputeCounteredFeeMinor: feeMinor },
+      );
+    await event("payment_intent.succeeded", {
+      id: "pi_writer_test",
+      amount_received: amountMinor,
+      currency: "usd",
+    });
+    return { event, log, amountMinor };
+  }
 
   it("takes a deposit by card and leaves the rest to pay at the property, with deposits on (VAY-2205)", async () => {
     const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =

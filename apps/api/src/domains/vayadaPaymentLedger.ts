@@ -174,12 +174,13 @@ export async function recordVayadaPaymentDisputeCounteredFee(
     disputeId: string;
     phase: "charged" | "returned";
     currency: string;
-    /** The fee in the stay's currency (used when charged). */
-    feeMinor: number;
+    /** The fee in the stay's currency (used when charged); null when it couldn't be priced, so the
+     * caller learns whether the hotel owes it ("unpriced") before asking a person to take it. */
+    feeMinor: number | null;
     livemode: boolean;
   },
-): Promise<"recorded" | "already_recorded" | "not_owed"> {
-  if (!Number.isSafeInteger(input.feeMinor) || input.feeMinor < 0)
+): Promise<"recorded" | "already_recorded" | "not_owed" | "unpriced"> {
+  if (input.feeMinor !== null && (!Number.isSafeInteger(input.feeMinor) || input.feeMinor < 0))
     throw new Error("vayada Payment dispute fee is invalid for the payout ledger.");
   const state = await paymentExposure(client, input);
   if (!state) return "not_owed";
@@ -203,6 +204,7 @@ export async function recordVayadaPaymentDisputeCounteredFee(
       state.sourceKeys.has(`dispute:${input.disputeId}:reinstated`)
     )
       return "not_owed";
+    if (input.feeMinor === null) return "unpriced";
     fee = BigInt(input.feeMinor);
   } else {
     const booked = await client.query<{ fee: string }>(
