@@ -333,6 +333,12 @@ const REFERENCES = [
   // 0544 (VAY-2436): who approved or disconnected a partner app clears with the user.
   "identity.users <- distribution.partner_connections(approved_by_user_id) n",
   "identity.users <- distribution.partner_connections(revoked_by_user_id) n",
+  // 0550 (VAY-2504): an account's AI budget and usage records go with the account; the person
+  // behind a call or a budget change clears with the user.
+  "identity.organizations <- platform.ai_budgets(organization_id) c",
+  "identity.organizations <- platform.ai_usage_ledger(organization_id) c",
+  "identity.users <- platform.ai_budgets(updated_by_user_id) n",
+  "identity.users <- platform.ai_usage_ledger(user_id) n",
   // 0540 (VAY-2457): the agency page's header image clears with its media.
   "platform.media_objects <- booking.account_booking_pages(header_image_media_object_id) n",
   "platform.media_objects <- booking.booking_settings(header_logo_media_object_id) n",

@@ -122,3 +122,21 @@ export function costMicroUsd(route: ModelRoute, usage: TokenUsage): number | nul
     usage.outputTokens * rates.output;
   return Math.ceil(nanoUsd / 1_000);
 }
+
+/**
+ * The most a call can cost: every input token billed at the highest input rate (a cache write)
+ * plus the full output limit; the long-prompt rates apply when the input could pass their
+ * threshold. Null when the route has no price.
+ */
+export function maxCostMicroUsd(
+  route: ModelRoute,
+  maxInputTokens: number,
+  maxOutputTokens: number,
+): number | null {
+  return costMicroUsd(route, {
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: maxInputTokens,
+    outputTokens: maxOutputTokens,
+  });
+}

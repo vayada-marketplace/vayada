@@ -1,7 +1,7 @@
 /**
  * The one way vayada calls an AI model (VAY-2504, plan 3.11, design note §8.3). Every AI feature
  * (Inbox buttons, the in-app assistant, Concierge, the model test) goes through `run`, so the
- * model per job, the EU-only rule, prices, and later the budget and limits live in one place.
+ * model per job, the EU-only rule, prices, the budget and the limits live in one place.
  * Only this folder imports the AI SDK (see importBoundary.test.ts); Mastra joins with the
  * in-app assistant (VAY-2518).
  */
@@ -9,12 +9,15 @@ import { createAmazonBedrockAnthropic } from "@ai-sdk/amazon-bedrock/anthropic";
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
 import { generateText, type LanguageModel, type LanguageModelUsage } from "ai";
 
+import { createCallLimit } from "./callLimit.js";
+
 import {
   AI_PROVIDERS,
   CUSTOMER_DATA_ROUTES,
   PRICE_TABLE_VERSION,
   TASK_SETTINGS,
   costMicroUsd,
+  maxCostMicroUsd,
   routeKey,
   type AiProviderName,
   type AiTask,
@@ -63,8 +66,40 @@ export type AiRunResult =
   | ({ ok: true; text: string } & AiCallRecord)
   /** The model answered, but refused or ran out of output tokens: no usable text, still billed. */
   | ({ ok: false; reason: "refused" | "truncated" } & AiCallRecord)
-  /** "unavailable": no model was called. "failed": the call errored, timed out or came back empty. */
-  | { ok: false; reason: "unavailable" | "failed" };
+  /**
+   * No model was called. "unavailable": switched off, not allowed, unpriced, or the budget could
+   * not be checked. "allowance_used_up": the account's monthly AI budget is spent. "busy": the
+   * account already has its calls running, or the provider-call limit stayed full.
+   */
+  | { ok: false; reason: "unavailable" | "allowance_used_up" | "busy" }
+  /** The call errored, timed out or came back empty. */
+  | { ok: false; reason: "failed" };
+
+/** Reserved before a call, against the account's monthly AI budget (ai/usage). */
+export type AiReservationRequest = {
+  task: AiTask;
+  context: AiCallContext;
+  route: ModelRoute;
+  priceTableVersion: string;
+  /** The most the call can cost; it counts against the budget until the call is settled. */
+  reservedMicroUsd: number;
+  /** How long an unsettled reservation counts as a running call (the task may have died). */
+  holdMs: number;
+};
+
+export type AiReservation =
+  | { ok: true; reservationId: string }
+  | { ok: false; reason: "allowance_used_up" | "busy" };
+
+export type AiSettlement =
+  | { status: "completed"; costMicroUsd: number; usage: TokenUsage }
+  /** No answer: cost 0 when no request was billable, else the reserved amount. */
+  | { status: "failed"; costMicroUsd: number };
+
+export type AiBudget = {
+  reserve(request: AiReservationRequest): Promise<AiReservation>;
+  settle(reservationId: string, settlement: AiSettlement): Promise<void>;
+};
 
 export type AiProvider = {
   run(task: AiTask, input: AiRunInput, options: AiRunOptions): Promise<AiRunResult>;
@@ -76,6 +111,12 @@ type AwsCredentials = { accessKeyId: string; secretAccessKey: string; sessionTok
 export type AiProviderConfig = {
   /** Providers switched on. Empty means no model is ever called. */
   enabledProviders: readonly AiProviderName[];
+  /** Every call is reserved against the account's monthly AI budget and recorded. */
+  budget: AiBudget;
+  /** Model calls running at once in this process, across all hotels and AI features. */
+  maxConcurrentCalls?: number;
+  /** How long a call waits for a free place under that limit before it is "busy". */
+  callWaitMs?: number;
   log?: Log;
   /** Tests replace the network, the AWS credentials and the job settings. */
   fetch?: typeof globalThis.fetch;
@@ -85,8 +126,14 @@ export type AiProviderConfig = {
   now?: () => number;
 };
 
-/** Below the load balancer's 60 s idle timeout (research 09 §10). */
+/** With the wait for a free place, below the load balancer's 60 s idle timeout (research 09 §10). */
 const DEFAULT_TIMEOUT_MS = 45_000;
+const DEFAULT_MAX_CONCURRENT_CALLS = 8;
+const DEFAULT_CALL_WAIT_MS = 5_000;
+/** A reservation stops counting as running this long after the call's own timeout. */
+const HOLD_MARGIN_MS = 15_000;
+/** Tokens the request format adds around the text, per message and once (generous). */
+const FORMAT_TOKENS = 64;
 
 /** Reads `AI_PROVIDERS_ENABLED`, a comma-separated list such as "bedrock". Unset means off. */
 export function enabledAiProvidersFromEnv(env: NodeJS.ProcessEnv): AiProviderName[] {
@@ -105,25 +152,42 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
   const allowed = new Set(CUSTOMER_DATA_ROUTES.map(routeKey));
   const tasks = config.tasks ?? TASK_SETTINGS;
   const now = config.now ?? Date.now;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const callLimit = createCallLimit(
+    config.maxConcurrentCalls ?? DEFAULT_MAX_CONCURRENT_CALLS,
+    config.callWaitMs ?? DEFAULT_CALL_WAIT_MS,
+  );
   const credentials = config.awsCredentials ?? defaultProvider();
-  const bedrockByRegion = new Map<string, ReturnType<typeof createAmazonBedrockAnthropic>>();
+  const baseFetch = config.fetch ?? globalThis.fetch;
 
-  function languageModel(route: ModelRoute): LanguageModel {
-    let bedrock = bedrockByRegion.get(route.region);
-    if (!bedrock) {
-      bedrock = createAmazonBedrockAnthropic({
-        region: route.region,
-        // An explicit address and an empty API key make the SDK ignore AWS_ENDPOINT_URL* and
-        // AWS_BEARER_TOKEN_BEDROCK, which would otherwise move calls out of the EU or off the
-        // task role's signed requests (research 09c a).
-        baseURL: `https://bedrock-runtime.${route.region}.amazonaws.com`,
-        apiKey: "",
-        credentialProvider: credentials,
-        ...(config.fetch ? { fetch: config.fetch } : {}),
-      });
-      bedrockByRegion.set(route.region, bedrock);
-    }
-    return bedrock(route.model);
+  /**
+   * A client per call, so its network layer can note whether Bedrock may bill the call: once a
+   * request was sent and not turned down with an error status (Bedrock bills none of those).
+   */
+  function languageModel(route: ModelRoute, trace: { maybeBilled: boolean }): LanguageModel {
+    const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      // As fetch itself does: an abandoned call sends nothing.
+      if (init?.signal?.aborted) throw init.signal.reason;
+      try {
+        const response = await baseFetch(url, init);
+        if (response.status < 400) trace.maybeBilled = true;
+        return response;
+      } catch (error) {
+        // The connection may have broken after Bedrock took the request.
+        trace.maybeBilled = true;
+        throw error;
+      }
+    }) as typeof globalThis.fetch;
+    return createAmazonBedrockAnthropic({
+      region: route.region,
+      // An explicit address and an empty API key make the SDK ignore AWS_ENDPOINT_URL* and
+      // AWS_BEARER_TOKEN_BEDROCK, which would otherwise move calls out of the EU or off the
+      // task role's signed requests (research 09c a).
+      baseURL: `https://bedrock-runtime.${route.region}.amazonaws.com`,
+      apiKey: "",
+      credentialProvider: credentials,
+      fetch,
+    })(route.model);
   }
 
   return {
@@ -142,56 +206,133 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
         config.log?.warn(fields, "AI route is not cleared for customer data");
         return { ok: false, reason: "unavailable" };
       }
-      if (costMicroUsd(route, emptyUsage()) === null) {
+      const reservedMicroUsd = maxCostMicroUsd(
+        route,
+        inputTokenBound(input),
+        setting.maxOutputTokens,
+      );
+      if (reservedMicroUsd === null) {
         config.log?.warn(fields, "AI route has no price");
         return { ok: false, reason: "unavailable" };
       }
 
-      const started = now();
-      const timeout = AbortSignal.timeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      const release = await callLimit.acquire();
+      if (!release) {
+        config.log?.warn(fields, "AI provider-call limit is full");
+        return { ok: false, reason: "busy" };
+      }
       try {
-        const result = await generateText({
-          model: languageModel(route),
-          instructions: input.instructions,
-          messages: input.messages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
-          maxOutputTokens: setting.maxOutputTokens,
-          maxRetries: 1,
-          abortSignal: options.abortSignal
-            ? AbortSignal.any([options.abortSignal, timeout])
-            : timeout,
-          providerOptions: { anthropic: { effort: setting.effort } },
-          // Guest data must never reach traces.
-          telemetry: { recordInputs: false, recordOutputs: false, functionId: `ai.${task}` },
-        });
-        const usage = tokenUsage(result.totalUsage);
-        const record: AiCallRecord = {
-          route: { ...route },
-          usage,
-          costMicroUsd: costMicroUsd(route, usage) ?? 0,
-          priceTableVersion: PRICE_TABLE_VERSION,
-          latencyMs: now() - started,
-        };
-        // A refusal or a cut-off answer must never pass as a usable one.
-        if (result.finishReason === "content-filter")
-          return { ok: false, reason: "refused", ...record };
-        if (result.finishReason === "length") return { ok: false, reason: "truncated", ...record };
-        if (result.finishReason !== "stop" || !result.text.trim()) {
-          config.log?.warn(
-            { ...fields, finishReason: result.finishReason },
-            "AI answer was not usable",
-          );
-          return { ok: false, reason: "failed" };
+        let reservation: AiReservation;
+        try {
+          reservation = await config.budget.reserve({
+            task,
+            context: options.context,
+            route,
+            priceTableVersion: PRICE_TABLE_VERSION,
+            reservedMicroUsd,
+            holdMs: timeoutMs + HOLD_MARGIN_MS,
+          });
+        } catch (error) {
+          config.log?.warn({ ...fields, error: errorSummary(error) }, "AI budget check failed");
+          return { ok: false, reason: "unavailable" };
         }
-        return { ok: true, text: result.text, ...record };
-      } catch (error) {
-        config.log?.warn({ ...fields, error: errorSummary(error) }, "AI provider call failed");
-        return { ok: false, reason: "failed" };
+        if (!reservation.ok) return { ok: false, reason: reservation.reason };
+
+        const { result, settlement } = await call(task, route, setting, input, options, fields);
+        const settleAs =
+          settlement ?? ({ status: "failed", costMicroUsd: reservedMicroUsd } as const);
+        try {
+          await config.budget.settle(reservation.reservationId, settleAs);
+        } catch (error) {
+          // The reservation keeps counting at its full amount, so the budget still holds.
+          config.log?.warn(
+            { ...fields, reservationId: reservation.reservationId, error: errorSummary(error) },
+            "AI usage could not be recorded",
+          );
+        }
+        return result;
+      } finally {
+        release();
       }
     },
   };
+
+  /**
+   * One model call. The settlement is null when a request may have been billed but no answer
+   * says what it cost (a timeout, a broken connection): the full reservation is then kept.
+   */
+  async function call(
+    task: AiTask,
+    route: ModelRoute,
+    setting: TaskSetting,
+    input: AiRunInput,
+    options: AiRunOptions,
+    fields: object,
+  ): Promise<{ result: AiRunResult; settlement: AiSettlement | null }> {
+    const started = now();
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const trace = { maybeBilled: false };
+    try {
+      const result = await generateText({
+        model: languageModel(route, trace),
+        instructions: input.instructions,
+        messages: input.messages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+        maxOutputTokens: setting.maxOutputTokens,
+        maxRetries: 1,
+        abortSignal: options.abortSignal
+          ? AbortSignal.any([options.abortSignal, timeout])
+          : timeout,
+        providerOptions: { anthropic: { effort: setting.effort } },
+        // Guest data must never reach traces.
+        telemetry: { recordInputs: false, recordOutputs: false, functionId: `ai.${task}` },
+      });
+      const usage = tokenUsage(result.totalUsage);
+      const record: AiCallRecord = {
+        route: { ...route },
+        usage,
+        costMicroUsd: costMicroUsd(route, usage) ?? 0,
+        priceTableVersion: PRICE_TABLE_VERSION,
+        latencyMs: now() - started,
+      };
+      const settlement: AiSettlement = {
+        status: "completed",
+        costMicroUsd: record.costMicroUsd,
+        usage,
+      };
+      // A refusal or a cut-off answer must never pass as a usable one.
+      if (result.finishReason === "content-filter")
+        return { result: { ok: false, reason: "refused", ...record }, settlement };
+      if (result.finishReason === "length")
+        return { result: { ok: false, reason: "truncated", ...record }, settlement };
+      if (result.finishReason !== "stop" || !result.text.trim()) {
+        config.log?.warn(
+          { ...fields, finishReason: result.finishReason },
+          "AI answer was not usable",
+        );
+        return { result: { ok: false, reason: "failed" }, settlement };
+      }
+      return { result: { ok: true, text: result.text, ...record }, settlement };
+    } catch (error) {
+      config.log?.warn({ ...fields, error: errorSummary(error) }, "AI provider call failed");
+      return {
+        result: { ok: false, reason: "failed" },
+        settlement: trace.maybeBilled ? null : { status: "failed", costMicroUsd: 0 },
+      };
+    }
+  }
+}
+
+/**
+ * At most one token per UTF-8 byte (a token always covers at least one byte), plus the request
+ * format. Far above the real count for most text, so the reservation is never too small.
+ */
+function inputTokenBound(input: AiRunInput): number {
+  let bytes = Buffer.byteLength(input.instructions);
+  for (const message of input.messages) bytes += Buffer.byteLength(message.content);
+  return bytes + FORMAT_TOKENS * (input.messages.length + 1);
 }
 
 /** The AI SDK counts cached tokens inside `inputTokens`; we keep the three kinds apart. */
@@ -202,10 +343,6 @@ function tokenUsage(usage: LanguageModelUsage): TokenUsage {
     usage.inputTokenDetails.noCacheTokens ??
     Math.max(0, (usage.inputTokens ?? 0) - cacheReadTokens - cacheWriteTokens);
   return { inputTokens, cacheReadTokens, cacheWriteTokens, outputTokens: usage.outputTokens ?? 0 };
-}
-
-function emptyUsage(): TokenUsage {
-  return { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
 }
 
 /**
